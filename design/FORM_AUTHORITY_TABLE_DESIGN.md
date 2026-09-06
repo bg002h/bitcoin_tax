@@ -116,8 +116,9 @@ pub fn bundled_years() -> &'static [i32];                          // replaces S
 ```
 
 Every `Map::for_year` becomes one line — `map_text(Stem::F6251, y).ok_or(UnsupportedYear(y))?` — then
-parse into the struct the header's `line_set` names, through an exhaustive `match` (an unknown
-`line_set` cannot compile). The 18 + 17 hand arms and `SUPPORTED_YEARS` cease to exist; `error.rs`'s
+parse into the struct the header's `line_set` names — or `Unwired`, which returns
+`UnsupportedYear(year)` (§10 step 3) — through an exhaustive `match` (an unknown `line_set` cannot
+compile). The 18 + 17 hand arms and `SUPPORTED_YEARS` cease to exist; `error.rs`'s
 "supported years" sentence is built from `bundled_years()`.
 
 **What the build script must never do:** decide anything. It binds files; every judgment is in a
@@ -189,7 +190,7 @@ reversal presented as synthesis, and is withdrawn.
 
 map ⊆ PDF fields (exists) · census ∪ map == PDF (exists; register) · `template_sha256` == file == an
 `is_authority()` manifest entry · `geometry.pdf_sha256 == template_sha256` · doc comment ⊆ that line's
-extract text (17/17 on f8959) · `for_year(y)` Ok ⇔ file on disk (tautological under §5; kept as
+extract text (17/17 on f8959) · `for_year(y)` Ok ⇔ file on disk **and** its `line_set` wired (kept as
 witness) · `forms_expected` == present ∪ absent-with-reason · every `Stem` has an arm in
 `fill_full_return`'s exhaustive `PrintedForms` destructure (`packet.rs:60-83`, "★ NO `..`", exists).
 
@@ -206,7 +207,7 @@ witness) · `forms_expected` == present ∪ absent-with-reason · every `Stem` h
 | `TY2025_RETURN_DUE`, `TRANSITION_DATE` | `YEAR.toml` `return_due` |
 | `selected_year: 2025` × 2 | derived from `YearReadiness` |
 | 16 attachment-sequence literals | the header field, checked against the extract (the 1040 has none) |
-| `cite_check.rs::FORMS` (`FormAuthority { form, year, instructions, instr_pages, extract_stem }`, one row) | `instructions` / `instr_pages` header fields. ★ Its `extract_stem` points at a SECOND extract root, `crates/btctax-core/src/tax/fixtures/` (`schedule_1a_2025_form.txt`, `schedule_1a_2025_instructions.txt`), which §4's derive-by-convention rule cannot express. Decision (corrected, fold review r2 G3): the two fixtures are a SECOND EXTRACTION of files already under the convention — `f1040s1a--2025.txt` (11,153 B vs the fixture's 11,443 B) and pages 101–110 of `i1040gi--2025.txt` (the fixture is a 52,672 B slice; the booklet extract is 616,274 B). **Nothing moves**: a `mv` would clobber the booklet extract every other i1040gi-hosted schedule's gate reads, and pointing `tables.rs:1351,1365` at `design/` would make two escaping `include_str!`s — §5's publishing trap. The fixtures are regenerated at test time from the booklet extract using the header's `instr_pages`, then deleted; until then the header carries `extract_override = "…"` and the ratchet below keeps its row (fold review F2) |
+| `cite_check.rs::FORMS` (`FormAuthority { form, year, instructions, instr_pages, extract_stem }`, one row) | `instructions` / `instr_pages` header fields. ★ Its `extract_stem` points at a SECOND extract root, `crates/btctax-core/src/tax/fixtures/` (`schedule_1a_2025_form.txt`, `schedule_1a_2025_instructions.txt`), which §4's derive-by-convention rule cannot express. Decision (corrected, fold review r2 G3): the two fixtures are a SECOND EXTRACTION of files already under the convention — `f1040s1a--2025.txt` (11,153 B vs the fixture's 11,443 B) and pages 101–110 of `i1040gi--2025.txt` (the fixture is a 52,672 B slice; the booklet extract is 616,274 B). **Nothing moves**: a `mv` would clobber the booklet extract every other i1040gi-hosted schedule's gate reads, and pointing `tables.rs:1351,1365` at `design/` would make two escaping `include_str!`s — §5's publishing trap. The instructions fixture is regenerated at test time from the booklet extract using the header's `instr_pages`; the form fixture is replaced by `f1040s1a--2025.txt` **once a test asserts every `FORMS` quotation still resolves against it** (the two extractions differ by 290 B). Both are then deleted; until then the header carries `extract_override = "…"` and the ratchet below keeps its row (fold review F2) |
 | `cite_check.rs::AUTHORITY_NOT_YET_ARCHIVED` (shrink-only, `(form, years)`, 36 of 37 pairs excused today) | This is a DIFFERENT "archived" from the manifest join: it means "no `FormAuthority` row + extract for cite-check", and it retires as map headers gain `instructions`/extract coverage. The MANIFEST join (`template_sha256`) is the other notion and reds today on exactly **6 of 37** templates — all five TY2017 and `forms/2024/f8283.pdf` (measured by sha256 join, fold review F7) — so the header gets `authority = "not-yet-archived: <reason>"` for those six, and the join kill treats that field as the excuse. Two of the six ride on the open TY2017 decision |
 | `BundledFullReturnTables` 2024-only | **untouched** — it is the compute gate; `YEAR.toml` `status` declares, it decides |
 
@@ -222,8 +223,8 @@ witness) · `forms_expected` == present ∪ absent-with-reason · every `Stem` h
    field → parse refusal; `template_sha256` ≠ file; the manifest join — **expected red on exactly 6
    rows** (five TY2017 + `forms/2024/f8283.pdf`) until their `authority = "not-yet-archived: …"`
    header is written, which is the excuse slot (F7); `attachment_sequence` ≠ the extract's
-   "Attachment Sequence No." (tolerating the 1040, F8). The fifth kill — `line_set` naming no schema →
-   compile error — needs §5's match and is planted at step 3 (F6). **Red on any disagreement is the
+   "Attachment Sequence No." (tolerating the 1040, F8). The fifth kill — `line_set` naming neither a schema nor
+   `Unwired` → compile error — needs §5's match and is planted at step 3 (F6). **Red on any disagreement is the
    deliverable.**
 2. **`build.rs` beside the old arms**, with a test that `template`/`map_text` agree byte-for-byte with
    every existing `include_*` const, and the `cargo package --list` gate.
