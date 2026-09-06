@@ -1,14 +1,13 @@
 # SPEC — Form 4868 (extension) and Form 1040-V (payment voucher) fillers (FR-49 / strategy review S8)
 
-**Status: DRAFT r3 (2026-09-06), for review to 0C/0I before build.** r1 review (2C/8I/13M/3N,
-`design/agent-reports/2026-09-06-spec-4868-1040v-review.md`) and r2 review (0C/2I/7M/1N,
-`…-review-r2.md`; ledgers 17/17 and 10/10) folded. r3 settles the label reader honestly: the 4868 is the
-corpus's first TWO-COLUMN form and the reader mis-joins its Part I today (`f1_4` → "5", the two SSN
-boxes → "9"), so T5 teaches it columns with that kill; the 1040-V's four numbered labels are cell
-CAPTIONS, not line labels, so its cells are bound by name and the map is a recorded grid (N-I1, N-I2);
-the seven Minors and the Nit are folded. Owning phase: NOW — the physical rehearsal (S1, an owner
-decision) and the first filed year (TY2026, due 2027-04-15) both walk the extension and the payment
-envelope; today btctax can print neither.
+**Status: DRAFT r4 (2026-09-06), for review to 0C/0I before build.** Reviews r1 (2C/8I/13M/3N),
+r2 (0C/2I/7M/1N) and r3 (0C/2I/6M/2N, `design/agent-reports/2026-09-06-spec-4868-1040v-review-r3.md`;
+ledgers 17/17, 10/10, 10/10) folded. r4 takes the label reader out of the plan entirely: the 4868's
+Part I identity cells are captions (they never form a label column) and are bound by NAME with the
+printed numbers in their doc comments; the grid case is decided BEFORE the join so a declared grid is
+neither witnessed nor counted unwitnessed (N3-I1, N3-I2); the six Minors and two Nits are folded.
+Owning phase: NOW — the physical rehearsal (S1, an owner decision) and the first filed year (TY2026,
+due 2027-04-15) both walk the extension and the payment envelope; today btctax can print neither.
 
 ## Why this exists
 
@@ -73,9 +72,14 @@ own instructions document and is archived; the IRS publishes no `i4868`/`i1040v`
 "f4868/2025"` etc., **no** `attachment_sequence`) plus its bindings as **top-level keys** (like every
 committed map; a `[bindings]` table would be a parse refusal under `deny_unknown_fields`) and its
 `[census]` (every one of the 17 / 15 boxes mapped or `no` with the reason in the table). **Naming:**
-the 4868's nine numbered lines are bound as `line1`…`line9` in the form's numbering (the address cells
-by name), so the line→label witness holds all nine — which the reader cannot do today (N-I1, T5); the
-1040-V's four numbered boxes are bound by NAME (`box1_ssn`, `box2_spouse_ssn`, `box3_amount`,
+the 4868's Part II lines 4–8 are bound as `line4`…`line8` in the form's numbering (the reader
+witnesses them today: `f1_11` → "4" … `c1_1` → "8"); line 9 is a `[census]` `never` entry, not a key;
+its Part I cells — lines 1–3, the address — are CAPTIONS (the labels `1`, `2`, `3` never form a label
+column: `candidate_columns` needs ≥ 3 tokens in one x2 bucket, and Part I offers `1`/`2` at one x and
+`3` alone at another — r3 N3-I1) and are bound by NAME (`name`, `address`, `city`, `state`, `zip`,
+`ssn`, `spouse_ssn`) with the printed line number in each doc comment, so a mis-join cannot occur and
+the transcription rule is kept where it lives (the doc comment says "L1 — Your name(s)"). The 1040-V's
+four numbered boxes are likewise bound by NAME (`box1_ssn`, `box2_spouse_ssn`, `box3_amount`,
 `box4_first_name`, the rest by name), because its labels are cell CAPTIONS printed ~21pt above and, for
 box 3, 130pt left of their fields — not line labels beside them (N-I2) — and the map is listed in
 `GRID_MAPS` for both years with that measured reason. **The fourth row gate** the new rows meet, beside
@@ -107,8 +111,9 @@ to your return."* Refusals, in order:
   states for `export-irs-pdf`, and a form money is attached to may not be the exception.
   `promote_export_gate` is **not** required for the 4868: a promoted tranche does lower line 24 and so
   lines 4/6, but the §1.6662-4(f) disclosure obligation attaches to the RETURN Form 8275 is filed with,
-  not to the extension application; the 1040-V rides the packet path, which runs the gate first
-  (`admin.rs:621`), so it inherits it (decision, not gap).
+  not to the extension application; the 1040-V rides the packet path, whose first statement is the gate
+  (`export_full_return`, `admin.rs:975`; the slice path's own is `:621`), so it inherits it (decision,
+  not gap).
 Warning: the clock (`BTCTAX_NOW`) is past the year's due date — `YearRecord::for_year(y).return_due`
 (TY2017's is 2018-04-17, so no month/day is hardcoded), **replaced by June 15 of the following year, shifted by §7503 like any other due
 date, when `--out-of-country` is passed** (NOT `return_due + 2 months`: TY2017's April date was itself
@@ -148,11 +153,11 @@ port runbook as two more rows. Nothing here is year-specific except the archived
 
 | the filer… | outcome | class |
 |---|---|---|
-| runs `extension` on a year with no stored return inputs | refusal, the export's own "not computable" message | refusal |
+| runs `extension` on a year with no stored return inputs | refusal — `no return_inputs stored for {year}` (`admin.rs:990`) | refusal |
 | runs it after April 15 (or June 15 with line 8) | warning, form still written | warning |
-| omits `--pay` | line 7 = the recorded payment if any, else line 6 | default |
+| omits `--pay` | line 7 = the PRINTED Schedule 3 line 10 if > 0, else line 6 | default |
 | pays less than line 6 | allowed; the form's own instruction covers it | not our concern |
-| records the payment first, then prints | the recorded amount is the default; no refusal | default |
+| records the payment first, then prints | the printed Schedule 3 line 10 is the default; no refusal | default |
 | runs it twice | a second identical PDF (a reprint after mailing is legitimate) | not our concern |
 | files, pays, then exports without recording `extension_payment` | Schedule 3 line 10 blank, line 37 too high by the payment; the closing note is the only guard | documentation only (over-payment self-corrects; never understates) |
 | passes `--out` pointing at the packet directory | refusal (manifest.txt present) | refusal |
@@ -173,43 +178,48 @@ port runbook as two more rows. Nothing here is year-specific except the archived
   row-gate edits of R1 with their widened predicates. Kills: the census accounts for 17 + 15 boxes per
   year; a dropped `[census]` entry reds; a row with an `attachment_sequence` whose extract prints none
   reds; `instr_pages` holds every row that declares pages.
-- **T2 — `Form4868Map` + `fill_form_4868(&PrintedReturn, choices)`.** The printed return carries the
-  header (`PrintedReturn.header`), the filing status (`pr.filing_status == FilingStatus::Mfj` — it is
-  NOT on `ReturnHeader`), `Form1040Lines` and `Option<Schedule3Lines>`, exactly as `fill_full_return`
-  takes it (`packet.rs:100`); passing the header twice would let the two diverge. Lines 4–7 as the
+- **T2 — `Form4868Map` + `fill_form_4868(&PrintedReturn, year, choices)`.** The printed return carries
+  the header (`PrintedReturn.header`, `crates/btctax-core/src/tax/packet.rs:472`), the filing status
+  (`pr.filing_status == FilingStatus::Mfj` — it is NOT on `ReturnHeader`), `Form1040Lines` and
+  `Option<Schedule3Lines>`; the YEAR is a separate argument, exactly as `fill_full_return(pr, year)`
+  takes it (`crates/btctax-forms/src/packet.rs:100`) — `PrintedReturn` carries no year, and the year
+  selects the map, template and line set; passing the header twice would let the two diverge. Lines 4–7 as the
   table says (line 5 = line 33 − `Schedule3Lines.line10`, 0 when `sch_3` is `None`; I-2).
   Kills: L5 > L4 → line 6 prints `0`; line 4 zero prints `0`; line 5 zero prints blank; default line 7
-  = line 6, or the recorded payment when > 0; `--pay` negative or with cents → refuse; an excess-SS
+  = line 6, or the printed Schedule 3 line 10 when > 0; `--pay` negative or with cents → refuse; an excess-SS
   credit with no extension payment ⇒ line 5 = line 33, and with both ⇒ line 5 excludes only the
   extension payment; MFS ⇒ line 3 blank; MFJ ⇒ line 3 filled; the fiscal-year header blank; `c1_2`
   never set.
 - **T3 — the command.** `btctax extension` with R2's refusals, the pseudo gate + watermark, and the
-  warning from `return_due` (+2 months with line 8; clock seam `BTCTAX_NOW`). Kills: uncomputable year
+  warning from `return_due` — replaced by June 15 of the following year shifted by §7503 when line 8
+  is checked (clock seam `BTCTAX_NOW`). Kills: uncomputable year
   → the export's message, no bytes; `--out` with a manifest.txt → refusal; pseudo + no attest → refusal,
   zero bytes; pseudo + attest → watermarked; a TY2017-shaped record never prints `04-15`; an
-  out-of-country run on May 1 prints no warning; a TY2024 end-to-end KAT prints a real 4868 (with the
+  out-of-country run on May 1 prints no warning; a TY2017-shaped record with `--out-of-country` warns
+  against **2018-06-15** (not 04-17 + 2 months = 06-17); a TY2024 end-to-end KAT prints a real 4868 (with the
   due-date warning, since 2025-04-15 has passed).
 - **T4 — `Form1040VMap` + the export hook.** Kills: line 37 > 0 + `--pay-by-check` → `f1040v.pdf` beside
   the packet, amount = line 37, the footer block present and separate from the stapling list; no flag
   → no file, the note; line 37 = 0 → no file; MFS ⇒ box 2 and `f1_7`/`f1_8` blank; `--pay` > line 37 or
   negative → refuse; slice year → refusal naming the reason; pseudo gate + watermark; no test or
   code path passes either stem to `stapled`; a TY2024 end-to-end KAT.
-- **T5 — the label reader: the two-column form (N-I1) and the caption form (N-I2).** Measured today:
-  `xtask label-boxes f4868--2025` joins Part I's boxes to Part II's labels — `f1_4` → "5", `f1_5` → "6",
-  `f1_6` → "8", `f1_9` → "9", `f1_10` → "9" — because `witness_text` keeps exactly ONE label column
-  and Part II's margin wins it 7 labels to 3; `f1040v--2025` → *"no numbered label column found"*, and
-  the in-row predicate replayed over its fixture joins 0 of 15 boxes (the captions sit above the cells,
-  outside the ±2pt / 12pt window). So: (i) the reader keeps EVERY scored label column and resolves a
-  box against the column whose x-range contains the box's left edge, falling back to the in-row rule
-  — kill on `f4868--2025`: `f1_4` → "1", `f1_9` → "2", `f1_10` → "3", and lines 4–9 unchanged; the
-  37 committed maps' joins must not move (261/215, 0 wrong); (ii) the 1040-V is NOT taught to the
-  reader: its cells are named keys, `("2024", "f1040v", …)` and `("2025", "f1040v", …)` are `GRID_MAPS`
-  entries with the caption reason, and `numbered_line_keys` sees 0 keys, so `map_reach_problem` is the
-  recorded blank. Ratchets: NEITHER moves — 2024's `max_unwitnessed: 1` (spent on `f8283`) and 2025's
-  `0` both stay, because the 4868 is witnessed once (i) lands and the 1040-V is a grid, not an
-  unwitnessed map. Floors: the 4868 contributes its nine numbered lines per year — expected
-  261 → 270 (2024) and 215 → 224 (2025), CONFIRMED by the T5 run and written into the ratchet comments
-  with this cause; the spurious `9a` heading on the 4868 gets a recorded reason.
+- **T5 — the label reader is NOT changed; the grid case is decided BEFORE the join (r3 N3-I1/N3-I2).**
+  Measured today: `xtask label-boxes f4868--2025` joins Part I's boxes to Part II's labels (`f1_4` →
+  "5", `f1_9`/`f1_10` → "9") because Part I's labels never form a candidate column; the multi-column
+  mechanism r3 commissioned cannot reach them and, replayed over the corpus, mislabels 12 Schedule B
+  bindings (r3 N3-I1). So the 4868 map binds Part I by NAME (R1) and the reader stays as it is; the
+  4868 contributes `line4`…`line8` (5 numbered keys) per year. `f1040v--2025` makes `label_join` refuse
+  (*"no numbered label column found"*), and the walk pushes `unwitnessed` on that `Err` BEFORE
+  `GRID_MAPS` is consulted (`every_mapped_line_lands_on_its_own_printed_label`), so a committed
+  voucher map would move both `max_unwitnessed` ratchets (2024's 1, spent on f8283; 2025's 0). T5
+  reorders the walk: `numbered_line_keys` is counted first; when it is 0 AND `GRID_MAPS` names
+  `(year, form)`, the map goes to a third printed bucket — *"grid — {reason}"* — and the join is skipped,
+  neither witnessed nor unwitnessed; every undeclared keyless map still meets `map_reach_problem`'s
+  `(false, 0, …)` red, and a keyless map NOT in `GRID_MAPS` whose form has no label column is the kill
+  (it must still red). **Neither `max_unwitnessed` moves** — raising one is the option that makes
+  "unreadable" and "declared grid" indistinguishable. Floors: `+N per year, measured by the T5 run and
+  pasted into the ratchet comment with this cause` (expected 5 per year — lines 4–8 — but written only
+  after the run); the spurious `9a` heading on the 4868 gets a recorded reason.
 - **T6 — the surfaces.** `report` names the extension and voucher paths; `YearReadiness::sentence`
   unchanged; the help text names both `--pay` flags with their different ceilings and defaults.
 
