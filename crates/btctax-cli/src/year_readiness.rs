@@ -413,6 +413,24 @@ mod tests {
         ));
     }
 
+    /// ★ build review r2 NEW-3 — `report`'s prior-year regime join (`regime_or_refuse(year - 1)`)
+    /// is unreachable-as-Err only because every year that HAS full-return tables also has a
+    /// YEAR.toml record. Pin that, so the `?` cannot start refusing a year the tables serve.
+    #[test]
+    fn every_year_with_full_return_tables_is_a_bundled_year() {
+        let t = BundledFullReturnTables::load();
+        let served: Vec<i32> = (2000..=2100)
+            .filter(|&y| t.full_return_for(y).is_some())
+            .collect();
+        assert!(!served.is_empty(), "the tables serve at least one year");
+        for y in served {
+            assert!(
+                bundled_years().contains(&y),
+                "TY{y} has full-return tables but no forms/{y}/YEAR.toml record"
+            );
+        }
+    }
+
     /// ★ spec 1099-DA T0 — the box-revision constant and the record cannot drift: proceeds reporting
     /// begins exactly with the digital-asset box revision, for every bundled year.
     #[test]

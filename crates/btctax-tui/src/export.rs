@@ -174,6 +174,11 @@ pub fn do_export(
     // via the crate-root re-export (no `cmd::` token — KAT-E10).
     btctax_cli::promote_export_gate(&snap.state, &snap.events, Some(year))?;
 
+    // spec 1099-DA — the TUI holds no return inputs, so a live year refuses (naming the exit) rather
+    // than printing an unrouted box; the year's regime is joined from its record. Before the mkdir,
+    // so a refused export leaves no directory behind (build review r2 NEW-1).
+    let regime = btctax_cli::year_readiness::regime_or_refuse(year)?;
+
     // EXCLUSIVE create — must precede write_form_csvs [R0-I1].
     // Fails with AlreadyExists on a pre-existing dir; nothing is written.
     fsperms::mkdir_owner_only_exclusive(&state.out_dir).map_err(btctax_cli::CliError::Store)?;
@@ -197,9 +202,6 @@ pub fn do_export(
         None => None, // no profile → no SE figure → no schedule_se.csv
     };
 
-    // spec 1099-DA — the TUI holds no return inputs, so a live year refuses (naming the exit) rather
-    // than printing an unrouted box; the year's regime is joined from its record
-    let regime = btctax_cli::year_readiness::regime_or_refuse(year)?;
     btctax_cli::render::write_form_csvs(
         &state.out_dir,
         &snap.state,

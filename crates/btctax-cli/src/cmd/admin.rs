@@ -1453,6 +1453,12 @@ mod slice_broker_tests {
             msg.contains("income import") && msg.contains("No forms were written"),
             "{msg}"
         );
+        // build review r2 NEW-2 — the readiness note is WIRED in, not merely correct on its own
+        let note = crate::year_readiness::import_note(2026).expect("TY2026 has no parameters yet");
+        assert!(
+            msg.contains(&note),
+            "the slice refusal carries import_note(2026):\n{msg}\n--- note ---\n{note}"
+        );
         assert!(
             slice_broker_refusal(2025, InformationReturnRegime::PROCEEDS_ONLY, &[row(true)])
                 .is_none(),
