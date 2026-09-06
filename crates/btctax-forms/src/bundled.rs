@@ -145,8 +145,9 @@ pub fn years_sentence() -> String {
 /// bundled revision**, and only when that file's own row says `versioning = { periodic = … }`. An
 /// annual form never aliases: `None`.
 ///
-/// Returns the bytes and the year directory they came from, so the caller can license the alias by
-/// hash (`Form8275Map::alias_is_licensed_by`) and restamp the map's `year`.
+/// Returns the bytes and the year directory they came from — THAT pairing is the alias's licence
+/// (the caller reads the same year's map and restamps its `year`; a fixed-constant hash compare on
+/// top of it was tautological — steps-2/3 review Q1).
 pub fn periodic_template(stem: Stem, year: i32) -> Option<(&'static [u8], i32)> {
     if let Some(own) = template(stem, year) {
         return Some((own, year));

@@ -16,10 +16,10 @@ pub enum FormsError {
     )]
     UnsupportedYear(i32),
 
-    /// The year's map is bundled and listed, but its `line_set` revision has no struct that parses it
-    /// yet (design r2 §10 step 3 → step 5). Distinct from `UnsupportedYear`: the file is THERE; the
-    /// transcription is not.
-    #[error("{stem} for tax year {year} is bundled but not wired: its line-set revision {line_set:?} has no transcription struct yet")]
+    /// The year's map is bundled and listed, but its `line_set` revision has not been VERIFIED
+    /// against a struct yet (design r2 §10 step 3 → step 5; most would parse — see `line_set.rs`).
+    /// Distinct from `UnsupportedYear`: the file is THERE; the verification is not.
+    #[error("{stem} for tax year {year} is bundled but not wired: its line-set revision {line_set:?} has not been verified against a transcription struct yet (design r2 §10 step 5)")]
     UnwiredLineSet {
         stem: &'static str,
         year: i32,

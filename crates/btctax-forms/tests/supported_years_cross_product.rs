@@ -11,7 +11,7 @@
 //! - a year could be BUNDLED on disk and never listed (its assets compile in, unreachable).
 //!
 //! **What TY2017 turned out to be.** Measured by this file: TY2017 is genuinely wired — five forms,
-//! five maps, five `include_bytes!`, `for_year(2017)` arms in all five map types — so a TY2017 fill
+//! five maps, bound by `build.rs` and served by `Schema` arms in all five map types — so a TY2017 fill
 //! really does emit a filled IRS PDF. What it has **none** of is the authority chain every other
 //! shipped year has: **0** provenance notes, **0** `MANIFEST.json` entries, **0** committed extracts,
 //! **0** geometry fixtures and **0** `[census]` sections. Nothing hash-pins the five bundled PDFs to
@@ -136,15 +136,23 @@ const KNOWN_GAPS: &[(i32, &str, &[&str])] = &[
 /// own on disk, yet `Map::for_year` returns `Ok`.
 ///
 /// ★ Form 8275 is revision-versioned, not tax-year-versioned, so this aliasing is deliberate and
-/// documented (`map.rs::Form8275Map::for_year`). It is pinned here anyway, because the alias guard is
-/// a **year list** — `| 2026` is a one-token edit — and an alias that nobody records is
-/// indistinguishable from a year silently borrowing a neighbouring year's geometry, which is the
-/// exact failure `Form6251Map`'s doc comment exists to describe.
+/// documented (`map.rs::Form8275Map::for_year`). Since design r2 step 3 the alias is
+/// `bundled::periodic_template`: a BUNDLED year with no file of its own is served by the newest
+/// bundled revision whose own row says `versioning = { periodic = … }` — no year list anywhere, so
+/// `| 2026` is not an edit that exists. It is pinned here anyway, because an alias that nobody
+/// records is indistinguishable from a year silently borrowing a neighbouring year's geometry,
+/// which is the exact failure `Form6251Map`'s doc comment exists to describe — and because a NEW
+/// bundled year with no 8275 of its own will appear here, loudly, the day it is added.
 const KNOWN_ALIASES: &[(i32, &str)] = &[(2017, "f8275"), (2025, "f8275")];
 
-/// Bundled year directories that `SUPPORTED_YEARS` does not list. **Empty today**, and that is load
-/// bearing: committing `forms/2026/` makes this file red until the year is either listed as supported
-/// or recorded here as prepared-but-not-shipped. A year must not arrive quietly.
+/// Bundled year directories that `SUPPORTED_YEARS` does not list. **Empty today** — and, since
+/// design r2 step 3, empty BY CONSTRUCTION: `SUPPORTED_YEARS` is `bundled::BUNDLED_YEARS`, derived
+/// by `build.rs` from the same `forms/<year>/` glob this file walks, so a bundled-but-unlisted year
+/// cannot exist and this ratchet cannot fire (steps-2/3 review Q5). What makes a new year loud now:
+/// `build.rs` refuses a year directory without `YEAR.toml`; `bundled::tests::
+/// bundled_years_are_the_year_directories` pins the year list to the directories; and
+/// `tests/year_record.rs` holds the new year's declaration to its glob. Kept as the record of the
+/// old rule and as the place a deliberately-unshipped year would be named.
 const BUNDLED_BUT_NOT_SUPPORTED: &[i32] = &[];
 
 /// How many forms each supported year bundles. Pinned so that **deleting** an asset is as loud as
@@ -311,6 +319,14 @@ enum CellState {
 fn measure() -> BTreeMap<(i32, String), CellState> {
     let notes = note_index();
     let manifest = manifest_text();
+    // Liveness (steps-2/3 review Q6): the `wired` reader consults the generated bindings; a build
+    // that bound nothing would measure every cell unwired and this file would report a defect that
+    // is really a blind instrument. The old reader asserted `include_bytes!` appeared in src/.
+    assert!(
+        btctax_forms::bundled::BUNDLED.len() >= 37,
+        "the generated bindings hold {} pairs — the reader has gone blind",
+        btctax_forms::bundled::BUNDLED.len()
+    );
     let mut matrix = BTreeMap::new();
 
     for &year in SUPPORTED_YEARS {

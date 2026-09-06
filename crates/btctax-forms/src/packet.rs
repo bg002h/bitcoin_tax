@@ -288,12 +288,20 @@ pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<FiledPacket, Fo
     //   order — so a renumbered form (8283: 155 → 36 on Rev. 12-2025) was pushed in its OLD place.
     //   Derive it: stable-sort by the printed sequence number, the 1040 (no number) first. For TY2024
     //   this is a no-op (the push order was already ascending), so no golden moves.
-    sort_by_attachment_sequence(&mut out);
+    // ★ The ONLY way to build a packet is the constructor that sorts (steps-2/3 review Q2): removing
+    //   the sort is now a compile error, not an untested omission — "prefer designs in which an
+    //   omission does not compile" (CLAUDE.md).
+    Ok(FiledPacket::stapled(out, statements))
+}
 
-    Ok(FiledPacket {
-        forms: out,
-        statements,
-    })
+impl FiledPacket {
+    /// The one constructor: forms go in in ANY order and come out in stapling order (stable sort by
+    /// the printed attachment sequence, the 1040 first). `fill_full_return` cannot return an
+    /// unsorted packet because it cannot name the fields.
+    pub fn stapled(mut forms: Vec<NamedForm>, statements: Vec<NamedStatement>) -> Self {
+        sort_by_attachment_sequence(&mut forms);
+        Self { forms, statements }
+    }
 }
 
 /// The IRS attachment-sequence ORDER key: the numeric part, then the letter suffix — so `"01" <
@@ -375,6 +383,20 @@ mod sequence_order_tests {
                 keys.len()
             );
         }
+    }
+
+    /// The constructor is the sort: a descending Vec comes out ascending, through the ONLY way a
+    /// `FiledPacket` can be built.
+    #[test]
+    fn the_only_packet_constructor_staples_in_sequence_order() {
+        let forms = vec![
+            nf("f8283", attachment_sequence("f8283", 2025)),
+            nf("f6251", attachment_sequence("f6251", 2025)),
+            nf("f1040", None),
+        ];
+        let p = FiledPacket::stapled(forms, Vec::new());
+        let names: Vec<&str> = p.forms.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, ["f1040", "f6251", "f8283"]);
     }
 
     /// The TY2025 8283 lands between 6251 (32) and 8995 (55) — the position half of FR-55.

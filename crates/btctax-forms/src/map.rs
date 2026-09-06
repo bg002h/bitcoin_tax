@@ -79,7 +79,8 @@ pub struct AmountCols {
 /// revised on their own calendar and stamped with a revision date rather than a year (`Form 8275
 /// (Rev. 10-2024)`, `Form 8283 (Rev. 12-2025)`) — and a tax year may legitimately ship a PRIOR
 /// revision. Recording which is which is what lets a later year alias a periodic template **by
-/// hash** (`Form8275Map::alias_is_licensed_by`) and never by a year list.
+/// hash** — `bundled::periodic_template` pairs the bytes with the year whose row says `periodic` —
+/// and never by a year list.
 ///
 /// TOML: `versioning = "annual"` or `versioning = { periodic = "Rev. 10-2024" }`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -1375,18 +1376,28 @@ impl Form8275Map {
     /// which is what keeps a promoted 2025 (or 2017) disposal's Form 8275 export from being refused for
     /// want of a "2025 map" that would not structurally differ from this one.
     ///
-    /// ★ It holds no year literal of its own. The year question is asked of the asset registry
-    /// ([`Self::bundled_pdf`]) and the revision question of the bytes it returns
-    /// ([`Self::alias_is_licensed_by`]) — so the two answers cannot drift apart, and neither can be
-    /// widened from inside this file.
-    /// Periodic (design r2 §4 `versioning`): a year with no `forms/<year>/f8275.*` of its own is
-    /// served by the newest bundled revision — `bundled::periodic_template` finds it and its year,
-    /// the alias is licensed BY HASH, and the map is that year's map with `year` restamped.
+    /// ★ It holds no year literal of its own. Periodic (design r2 §4 `versioning`): a BUNDLED year
+    /// with no `forms/<year>/f8275.*` of its own is served by the newest bundled revision —
+    /// `bundled::periodic_template` returns the bytes TOGETHER WITH the year whose row said
+    /// `periodic`, and the map read here is that year's, restamped. That pairing is the licence; a
+    /// year that bundles its own 8275 gets its own file and map (steps-2/3 review Q1).
+    /// [`Self::alias_is_licensed_by`] remains as the documented statement of the hash rule (and its
+    /// sp4 plants) but is no longer on this path — as called it could only ever compare the bytes
+    /// with themselves.
     pub fn for_year(year: i32) -> Result<Self, FormsError> {
         let (bundled, from_year) =
             crate::bundled::periodic_template(crate::bundled::Stem::F8275, year)
                 .ok_or(FormsError::UnsupportedYear(year))?;
-        Self::alias_is_licensed_by(year, bundled)?;
+        // ★ The invariant that licenses the alias is enforced INSIDE `periodic_template`: it hands
+        //   back the bytes together with the year whose row said `periodic`, and the map read below
+        //   is that same year's. A hash compare against a fixed 2024 constant here was tautological
+        //   as called AND wrong for a year that bundles its own newer 8275 (steps-2/3 review Q1);
+        //   the assertion below states the pairing, it is not a guard against a calendar.
+        debug_assert_eq!(
+            Some(bundled),
+            crate::bundled::template(crate::bundled::Stem::F8275, from_year),
+            "periodic_template must pair the bytes with the year whose map is read"
+        );
         let text = crate::bundled::map_text(crate::bundled::Stem::F8275, from_year)
             .ok_or(FormsError::UnsupportedYear(year))?;
         let mut m = Self::parse(text).map_err(|e| {

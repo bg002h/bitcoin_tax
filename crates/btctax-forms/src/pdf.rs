@@ -106,7 +106,7 @@ pub fn f8283_pdf(year: i32) -> Result<&'static [u8], FormsError> {
 /// Form 8275 rather than being permanently refused for want of a "2025 revision" that does not exist.
 pub fn f8275_pdf(year: i32) -> Result<&'static [u8], FormsError> {
     // Periodic (Rev. 10-2024): a year with no file of its own is served by the newest bundled
-    // revision, licensed by hash in `Form8275Map::alias_is_licensed_by` — never by a year list.
+    // revision — the newest bundled file whose own row says `periodic` — never by a year list.
     crate::bundled::periodic_template(crate::bundled::Stem::F8275, year)
         .map(|(bytes, _)| bytes)
         .ok_or(FormsError::UnsupportedYear(year))

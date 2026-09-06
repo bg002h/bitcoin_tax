@@ -78,15 +78,18 @@ use time::macros::format_description;
 /// is where the honest per-year state is written down. Read it before adding a year: three of the
 /// facts it pins are counter-intuitive.
 ///
-/// - **TY2017 is fillable and unevidenced.** Five forms, five maps, five `for_year(2017)` arms — and
+/// - **TY2017 is fillable and unevidenced.** Five forms, five maps, five `Schema` arms — and
 ///   **zero** provenance notes, `MANIFEST.json` entries, committed extracts, geometry fixtures and
-///   `[census]` sections. Nothing hash-pins those five bundled PDFs to an irs.gov document.
-/// - **TY2025 is listed and 10 of its 15 committed forms are unreachable** — asset and map committed,
-///   never `include_bytes!`'d, `for_year(2025)` refusing. The inverse of the usual defect: a
+///   `[census]` sections. Nothing hash-pins those five bundled PDFs to an irs.gov document (the rows
+///   say so: `authority = "not-yet-archived: …"`).
+/// - **TY2025 is listed and 10 of its 15 committed forms are unreachable** — asset and map bound by
+///   `build.rs` like every other file, and `for_year(2025)` refusing as `UnwiredLineSet` until their
+///   line-set revisions are verified (design r2 §10 step 5). The inverse of the usual defect: a
 ///   *prepared* year refused.
-/// - **Adding a year here is not the last edit.** The list is one of four year-sets that govern four
-///   entry points (`BundledTaxTables`, this constant, the maps on disk, `full_return_for`), and the
-///   only one whose refusal message repeats it in prose.
+/// - **This constant is DERIVED** (since design r2 step 3): its value is the glob of `forms/<year>/`,
+///   so adding a year here is not an edit at all. The four year-sets that used to drift
+///   (`BundledTaxTables`, this constant, the maps on disk, `full_return_for`) are now compared by
+///   `btctax_cli::year_readiness::YearReadiness` against each year's `YEAR.toml` declaration.
 pub const SUPPORTED_YEARS: &[i32] = bundled::BUNDLED_YEARS; // ★ DERIVED from the glob by build.rs (design r2 §10 step 3) — the name stays for its ~20 readers, the hand-list is gone
 
 /// Format a date as **MM/DD/YYYY** — Form 8949's native date format for columns (b)/(c).
@@ -192,6 +195,12 @@ pub fn fill_form_8959(
     header: &btctax_core::tax::packet::ReturnHeader,
     year: i32,
 ) -> Result<Option<Vec<u8>>, FormsError> {
+    // ★ Ask the FORM whether it is required before asking the build for its map (steps-2/3 review
+    //   Q2): a return that owes no Additional Medicare Tax must not refuse because the year's 8959
+    //   map is not wired yet — the map is only needed to PRINT a form that exists.
+    if !lines.must_file() {
+        return Ok(None);
+    }
     let map = Form8959Map::for_year(year)?;
     form8959::fill_form_8959_with_map(lines, header, &map)
 }

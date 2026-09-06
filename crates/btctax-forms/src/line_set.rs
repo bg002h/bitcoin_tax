@@ -7,8 +7,15 @@
 //! in a row is a **parse refusal** ([`LineSet::parse`] → `None`, held by `tests/map_rows.rs`), and
 //! [`schema`] is the ONE match from a revision to the struct that parses it — **exhaustive**, so a
 //! revision added without an arm does not compile, with an explicit [`Schema::Unwired`] arm for the
-//! ten TY2025 maps that no struct parses yet (step 5 wires them: each is a deletion from that arm,
-//! and forgetting one still cannot compile).
+//! ten TY2025 maps whose revision has not been VERIFIED against a struct yet (step 5 wires them:
+//! each is a deletion from that arm, and forgetting one still cannot compile).
+//!
+//! ★ "Unwired" means unverified, not unparseable (steps-2/3 review Q3). Measured 2026-09-05 on the
+//! ten: **eight** (`f1040s2`, `f1040s3`, `f1040sa`, `f1040sb`, `f1040sc`, `f8959`, `f8960`,
+//! `f8995`) are key-for-key identical in shape to their 2024 maps and WOULD parse into the 2024
+//! struct; `f6251/2025` would not (line 1 split into 1a/1b — a rebuild, a new struct); `f1040s1a`
+//! has no struct at all. The door is closed because the label/extract join has not been run for
+//! those revisions, which is step 5's criterion — `parse()` succeeding is not it.
 //!
 //! Many-to-one by design: several revisions may parse into one struct (`Form1040Map` absorbs
 //! 2017/2024/2025 with `Option` lines today).
@@ -63,29 +70,29 @@ pub enum LineSet {
     ScheduleSe_2024,
     /// `"f1040/2025"`.
     F1040_2025,
-    /// `"f1040s1a/2025"` — UNWIRED: no struct parses it until design r2 §10 step 5.
+    /// `"f1040s1a/2025"` — UNWIRED: not yet verified against a struct (design r2 §10 step 5).
     F1040s1a_2025,
-    /// `"f1040s2/2025"` — UNWIRED: no struct parses it until design r2 §10 step 5.
+    /// `"f1040s2/2025"` — UNWIRED: not yet verified against a struct (design r2 §10 step 5).
     F1040s2_2025,
-    /// `"f1040s3/2025"` — UNWIRED: no struct parses it until design r2 §10 step 5.
+    /// `"f1040s3/2025"` — UNWIRED: not yet verified against a struct (design r2 §10 step 5).
     F1040s3_2025,
-    /// `"f1040sa/2025"` — UNWIRED: no struct parses it until design r2 §10 step 5.
+    /// `"f1040sa/2025"` — UNWIRED: not yet verified against a struct (design r2 §10 step 5).
     F1040sa_2025,
-    /// `"f1040sb/2025"` — UNWIRED: no struct parses it until design r2 §10 step 5.
+    /// `"f1040sb/2025"` — UNWIRED: not yet verified against a struct (design r2 §10 step 5).
     F1040sb_2025,
-    /// `"f1040sc/2025"` — UNWIRED: no struct parses it until design r2 §10 step 5.
+    /// `"f1040sc/2025"` — UNWIRED: not yet verified against a struct (design r2 §10 step 5).
     F1040sc_2025,
-    /// `"f6251/2025"` — UNWIRED: no struct parses it until design r2 §10 step 5.
+    /// `"f6251/2025"` — UNWIRED: not yet verified against a struct (design r2 §10 step 5).
     F6251_2025,
     /// `"f8283/2025"`.
     F8283_2025,
     /// `"f8949/2025"`.
     F8949_2025,
-    /// `"f8959/2025"` — UNWIRED: no struct parses it until design r2 §10 step 5.
+    /// `"f8959/2025"` — UNWIRED: not yet verified against a struct (design r2 §10 step 5).
     F8959_2025,
-    /// `"f8960/2025"` — UNWIRED: no struct parses it until design r2 §10 step 5.
+    /// `"f8960/2025"` — UNWIRED: not yet verified against a struct (design r2 §10 step 5).
     F8960_2025,
-    /// `"f8995/2025"` — UNWIRED: no struct parses it until design r2 §10 step 5.
+    /// `"f8995/2025"` — UNWIRED: not yet verified against a struct (design r2 §10 step 5).
     F8995_2025,
     /// `"schedule_d/2025"`.
     ScheduleD_2025,
@@ -260,7 +267,8 @@ pub enum Schema {
     ScheduleDMap,
     /// Parses into [`crate::map::ScheduleSeMap`].
     ScheduleSeMap,
-    /// No struct parses this revision yet (design r2 §10 step 3 → step 5). `for_year` returns
+    /// This revision has not been verified against a struct yet (design r2 §10 step 3 → step 5) —
+    /// eight of the ten would parse today; see the module doc. `for_year` returns
     /// [`crate::FormsError::UnwiredLineSet`] for it — the map is bundled, listed, and refused.
     Unwired,
 }
