@@ -1,4 +1,5 @@
 # TY2026 port work list — computed, not estimated
+<!-- tags: 2025 2026-DRAFT -->
 
 Generated 2026-09-05 by `xtask form-delta <2025-final> <2026-draft>`; **regenerated 2026-09-06**
 after the x-aware label join changed the reader behind the "lines that moved" column (fold review

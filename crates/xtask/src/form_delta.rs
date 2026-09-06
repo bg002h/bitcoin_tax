@@ -707,8 +707,11 @@ mod tests {
         );
         // ★ the NO FINAL half of the claim (port-status r2 N1), both directions: a true claim on a
         //   stem with no final on disk is excused; a NO FINAL claim is FALSE once a `--2026` PDF exists
-        let (_, excused, wrong) = check_work_list(
+        // (NO FINAL is a claim about a FINAL tag — under the document's draft tag it is the wrong word)
+        let (_, excused, wrong) = check_work_list_with(
             "| `zzz-not-a-form` | yes | **NO PRIOR SIDE** | **NO FINAL** — synthetic | — |\n",
+            "2025",
+            "2026",
         );
         assert!(
             wrong.is_empty() && excused == ["zzz-not-a-form"],
@@ -719,8 +722,10 @@ mod tests {
                 && super::pdf_for("f8995a--2026").is_none(),
             "the plant below assumes f8995a has a draft and no final"
         );
-        let (_, excused, wrong) = check_work_list(
+        let (_, excused, wrong) = check_work_list_with(
             "| `f8995a` | yes | **NO PRIOR SIDE** | **NO FINAL** — planted | — |\n",
+            "2025",
+            "2026",
         );
         assert!(
             wrong.is_empty() && excused == ["f8995a"],
@@ -735,6 +740,37 @@ mod tests {
             1,
             "NO DRAFT is FALSE for f8995a (the draft is archived): {wrong:?}"
         );
+        // ★ NO FINAL load-bearing (r3 N4): the prior side is PRESENT (no NO PRIOR SIDE claim), the new
+        //   side claims NO FINAL under a final tag, and no `f6251--2026` PDF exists — only the NO FINAL
+        //   recognition can excuse this row; the same row under the DRAFT tag names the wrong word
+        assert!(
+            super::pdf_for("f6251--2026").is_none(),
+            "the plant assumes no TY2026 final for f6251"
+        );
+        let (_, excused, wrong) = check_work_list_with(
+            "| `f6251` | yes | `f6251--2025` | **NO FINAL** — planted | — |\n",
+            "2025",
+            "2026",
+        );
+        assert!(
+            wrong.is_empty() && excused == ["f6251"],
+            "NO FINAL alone must excuse this row: {wrong:?}"
+        );
+        let (_, _, wrong) = check_work_list_with(
+            "| `f6251` | yes | `f6251--2025` | **NO FINAL** — planted | — |\n",
+            "2025",
+            "2026-DRAFT",
+        );
+        assert_eq!(
+            wrong.len(),
+            1,
+            "NO FINAL under a draft tag names the wrong word: {wrong:?}"
+        );
+        // and the tags line is read from the document itself
+        assert_eq!(
+            work_list_tags("<!-- tags: 2025 2026 -->\n| `f6251` | 62 | 0 | 0 | 0 | port |\n"),
+            Some(("2025".into(), "2026".into()))
+        );
         // the control tests the PREDICATE on a stem that can never be archived (r3 R5) — the
         // inventory coupling belongs to the_committed_work_list_matches_form_delta_at_head
         let (_, excused, wrong) = check_work_list(
@@ -747,7 +783,33 @@ mod tests {
     }
 
     /// `(compared, excused, wrong)` over every table row of a work-list document.
+    /// The tags a work-list document was generated with, declared on its own `<!-- tags: <prior> <new> -->`
+    /// line (port-status r3 N5): the checker computes every pair with THESE, so a document regenerated
+    /// after the finals (`2025 2026`) validates against the finals, not the drafts.
+    fn work_list_tags(doc: &str) -> Option<(String, String)> {
+        let l = doc
+            .lines()
+            .find(|l| l.trim_start().starts_with("<!-- tags:"))?;
+        let inner = l
+            .trim()
+            .trim_start_matches("<!-- tags:")
+            .trim_end_matches("-->")
+            .trim();
+        let mut it = inner.split_whitespace();
+        Some((it.next()?.to_string(), it.next()?.to_string()))
+    }
+
     fn check_work_list(doc: &str) -> (Vec<String>, Vec<String>, Vec<String>) {
+        let (prior_tag, new_tag) =
+            work_list_tags(doc).unwrap_or_else(|| ("2025".to_string(), "2026-DRAFT".to_string()));
+        check_work_list_with(doc, &prior_tag, &new_tag)
+    }
+
+    fn check_work_list_with(
+        doc: &str,
+        prior_tag: &str,
+        new_tag: &str,
+    ) -> (Vec<String>, Vec<String>, Vec<String>) {
         let root = crate::form_geometry::repo_root();
         // ★ The claim is about the ARCHIVE (the PDF), and `compute` enters this arm on a missing PDF —
         //   so the check reads the PDF too (r3 R3), never the geometry fixture, a different artifact.
@@ -760,7 +822,10 @@ mod tests {
             let Some((form, cells, prior_cell, ty2026_cell)) = parse_work_list_row(l) else {
                 continue;
             };
-            let pair = super::compute(&format!("{form}--2025"), &format!("{form}--2026-DRAFT"));
+            let pair = super::compute(
+                &format!("{form}--{prior_tag}"),
+                &format!("{form}--{new_tag}"),
+            );
             match (cells, pair) {
                 (Some((common, added, removed, moved)), Ok(d)) => {
                     compared.push(form.clone());
@@ -807,17 +872,20 @@ mod tests {
                     // the claim names WHICH new side is missing: NO FINAL is about `<form>--2026`,
                     // NO DRAFT about `<form>--2026-DRAFT` (port-status r2 N1 caught the draft being
                     // checked for both)
-                    let new_stem = if ty2026_cell.contains("NO FINAL") {
-                        format!("{form}--2026")
-                    } else {
-                        format!("{form}--2026-DRAFT")
-                    };
-                    let draft = archived(&new_stem);
-                    let prior = archived(&format!("{form}--2025"));
+
                     let claims_no_prior = prior_cell.contains("NO PRIOR SIDE");
                     let claims_no_new =
                         ty2026_cell.contains("NO DRAFT") || ty2026_cell.contains("NO FINAL");
+                    // the new side is the document's own tag (r3 N5); the claim must NAME it right:
+                    // NO DRAFT on a draft tag, NO FINAL on a final tag — a mismatch is a wrong row
+                    let tag_is_draft = new_tag.contains("DRAFT");
+                    let claim_word_matches_tag = !claims_no_new
+                        || (tag_is_draft && ty2026_cell.contains("NO DRAFT"))
+                        || (!tag_is_draft && ty2026_cell.contains("NO FINAL"));
+                    let draft = archived(&format!("{form}--{new_tag}"));
+                    let prior = archived(&format!("{form}--{prior_tag}"));
                     let ok = (claims_no_prior || claims_no_new)
+                        && claim_word_matches_tag
                         && (!claims_no_prior || !prior)
                         && (!claims_no_new || !draft);
                     if ok {
