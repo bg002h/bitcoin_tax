@@ -1,0 +1,15 @@
+https://www.irs.gov/pub/irs-prior/f4868--2024.pdf
+
+# f4868--2024.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  8d1a031a5543b70e0f017ed7bfd17f6ea91ab4f36ef2276bcdd09965e4160d4a
+# bytes   531664
+#
+# Fetch:    curl -sL -o f4868--2024.pdf https://www.irs.gov/pub/irs-prior/f4868--2024.pdf
+# Verify:   sha256sum f4868--2024.pdf   # must equal the sha256 above
+#
+# Archived 2026-09-06 for the FR-49 build (spec SPEC_form_4868_1040v.md T1): the TY2024 revision of
+# Form 4868 (extension, 17 AcroForm fields), so the filler has a row and a KAT on the validated reference year (TY2024) beside
+# TY2025's. FINAL revision from irs-prior, not a draft. Field inventory diffed against the 2025 PDF
+# with `xtask dump-fields`: same count and rects; the 4868's Part I subform is spelled
+# `Part1_ReadOrder` here (2025: `PartI_ReadOrder`) and its page-3 confirmation cell sits in `Col3`
+# (2025: `Col4`); the 1040-V's 15 fields are identical.

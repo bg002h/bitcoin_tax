@@ -1,0 +1,15 @@
+https://www.irs.gov/pub/irs-prior/f1040v--2024.pdf
+
+# f1040v--2024.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  84fcdaf1f8bf95aa3dfcfa2dad8e91ff55da1aa586bd7bb539c34c1961b255ee
+# bytes   97292
+#
+# Fetch:    curl -sL -o f1040v--2024.pdf https://www.irs.gov/pub/irs-prior/f1040v--2024.pdf
+# Verify:   sha256sum f1040v--2024.pdf   # must equal the sha256 above
+#
+# Archived 2026-09-06 for the FR-49 build (spec SPEC_form_4868_1040v.md T1): the TY2024 revision of
+# Form 1040-V (payment voucher, 15 fields), so the filler has a row and a KAT on the validated reference year (TY2024) beside
+# TY2025's. FINAL revision from irs-prior, not a draft. Field inventory diffed against the 2025 PDF
+# with `xtask dump-fields`: same count and rects; the 4868's Part I subform is spelled
+# `Part1_ReadOrder` here (2025: `PartI_ReadOrder`) and its page-3 confirmation cell sits in `Col3`
+# (2025: `Col4`); the 1040-V's 15 fields are identical.

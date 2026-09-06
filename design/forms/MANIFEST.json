@@ -90,6 +90,24 @@
     "extract": "design/forms/extract/f1040sse--2024.txt"
   },
   {
+    "path": "design/forms/2024/f1040v--2024.pdf",
+    "kind": "form",
+    "storage": "note",
+    "sha256": "84fcdaf1f8bf95aa3dfcfa2dad8e91ff55da1aa586bd7bb539c34c1961b255ee",
+    "bytes": 97292,
+    "url": "https://www.irs.gov/pub/irs-prior/f1040v--2024.pdf",
+    "extract": "design/forms/extract/f1040v--2024.txt"
+  },
+  {
+    "path": "design/forms/2024/f4868--2024.pdf",
+    "kind": "form",
+    "storage": "note",
+    "sha256": "8d1a031a5543b70e0f017ed7bfd17f6ea91ab4f36ef2276bcdd09965e4160d4a",
+    "bytes": 531664,
+    "url": "https://www.irs.gov/pub/irs-prior/f4868--2024.pdf",
+    "extract": "design/forms/extract/f4868--2024.txt"
+  },
+  {
     "path": "design/forms/2024/f6251--2024.pdf",
     "kind": "form",
     "storage": "note",
