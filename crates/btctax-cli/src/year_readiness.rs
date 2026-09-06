@@ -222,6 +222,25 @@ pub fn regime_or_refuse(
         .ok_or_else(|| crate::CliError::FormFill(btctax_forms::FormsError::UnsupportedYear(year)))
 }
 
+/// [`regime_for`], with the ONE case a missing record decides on its own: a year BEFORE the
+/// digital-asset box revision (`DIGITAL_ASSET_8949_FIRST_YEAR`) had no Form 1099-DA at all, so its
+/// regime is `NONE` whether or not a record exists — the same fact the constant encodes, and what
+/// lets `export-snapshot` write a filed-tranche TY2020's CSVs. A later year with no record is the
+/// typed `UnsupportedYear` refusal: its regime is unknown and a CSV box must not guess it.
+pub fn regime_or_pre_regime(
+    year: i32,
+) -> Result<btctax_core::InformationReturnRegime, crate::CliError> {
+    match regime_for(year) {
+        Some(r) => Ok(r),
+        None if year < btctax_core::DIGITAL_ASSET_8949_FIRST_YEAR => {
+            Ok(btctax_core::InformationReturnRegime::NONE)
+        }
+        None => Err(crate::CliError::FormFill(
+            btctax_forms::FormsError::UnsupportedYear(year),
+        )),
+    }
+}
+
 pub fn default_year() -> i32 {
     *bundled_years()
         .iter()
@@ -371,6 +390,27 @@ mod tests {
             regime_for(2023).is_none(),
             "a year with no record has no regime — refuse, never assume"
         );
+    }
+
+    /// A year before the box revision resolves to NONE without a record; a later one without a record
+    /// is the typed refusal; a recorded year is its record.
+    #[test]
+    fn the_pre_regime_resolver_guesses_nothing_after_the_box_revision() {
+        use btctax_core::InformationReturnRegime;
+        assert_eq!(
+            regime_or_pre_regime(2020).unwrap(),
+            InformationReturnRegime::NONE
+        );
+        assert_eq!(
+            regime_or_pre_regime(2025).unwrap(),
+            InformationReturnRegime::PROCEEDS_ONLY
+        );
+        assert!(matches!(
+            regime_or_pre_regime(2027),
+            Err(crate::CliError::FormFill(
+                btctax_forms::FormsError::UnsupportedYear(2027)
+            ))
+        ));
     }
 
     /// ★ spec 1099-DA T0 — the box-revision constant and the record cannot drift: proceeds reporting

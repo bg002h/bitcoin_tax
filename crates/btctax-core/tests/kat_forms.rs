@@ -259,9 +259,9 @@ fn rows_carry_the_cohort_by_mechanism() {
         vec![bought_2026, transferred_in, bought_2025, reward, tacked],
     )]);
     let rows = form_8949(&st, 2026);
-    let by_lot: Vec<(u64, Cohort, TaxDate)> = rows
+    let by_lot: Vec<(String, Cohort, TaxDate)> = rows
         .iter()
-        .map(|r| (0, r.cohort, r.date_acquired))
+        .map(|r| (r.description.clone(), r.cohort, r.date_acquired))
         .collect();
     let cohorts: Vec<Cohort> = rows.iter().map(|r| r.cohort).collect();
     assert_eq!(

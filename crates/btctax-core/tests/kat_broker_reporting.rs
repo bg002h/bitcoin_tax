@@ -440,3 +440,80 @@ fn one_provider_two_cohorts_two_boxes_and_self_custody_by_mechanism() {
     assert_eq!(rows.iter().map(|r| r.box_).collect::<Vec<_>>(), before);
     assert_eq!(before, [Form8949Box::I, Form8949Box::L, Form8949Box::L]);
 }
+
+// ── the WIRINGS (build review I-2): the gates are gates only if their placement is watched ─────────
+
+/// `screen_absolute` runs the broker screen — FIRST — on a live year: an unanswered key refuses
+/// through the real full-return path, not only through `screen_broker_reporting` called directly.
+#[test]
+fn screen_absolute_runs_the_broker_screen_on_a_live_year() {
+    // ★ TY2025 with the LIVE regime handed in as the VALUE: the wiring is what is under test, and the
+    //   assembly refuses TY2026 outright today (Form 6251's 2026 Part I is untranscribed by design).
+    use btctax_core::tax::return_1040::{assemble_absolute, screen_absolute};
+    use btctax_core::tax::testonly::{ty2024_params, ty2024_table};
+    let st = owner_like(2025);
+    let ri = ReturnInputs {
+        tax_year: 2025,
+        ..Default::default()
+    };
+    let ar = assemble_absolute(&ri, &st, &ty2024_params(), &ty2024_table(), 2025);
+    let r =
+        screen_absolute(&ri, &ar, &ty2024_params(), &st, 2025, LIVE).expect("the wiring refuses");
+    assert!(
+        matches!(r.reason, RefuseReason::BrokerReportingUnanswered { .. }),
+        "the broker screen is the first screen: {:?}",
+        r.reason
+    );
+    // and NOT live: the same inputs pass this screen (whatever the other screens say, it is not this one)
+    let r = screen_absolute(
+        &ri,
+        &ar,
+        &ty2024_params(),
+        &st,
+        2026,
+        InformationReturnRegime::NONE,
+    );
+    assert!(!matches!(
+        r.map(|r| r.reason),
+        Some(RefuseReason::BrokerReportingUnanswered { .. })
+    ));
+}
+
+/// The printed packet ROUTES the boxes from the answers on a live year: the printed Form 8949's rows
+/// carry G/J/K, not the map's I/L — through `assemble_printed_forms`, the function the packet uses.
+#[test]
+fn the_printed_packet_routes_the_boxes_on_a_live_year() {
+    use btctax_core::tax::packet::assemble_printed_forms;
+    use btctax_core::tax::return_1040::assemble_absolute;
+    use btctax_core::tax::testonly::{ty2024_params, ty2024_table};
+    use std::collections::BTreeMap;
+    let st = owner_like(2025);
+    let mut ri = answers(&[
+        ("coinbase", Cohort::Covered, BrokerReported::BasisMatches),
+        ("coinbase", Cohort::Noncovered, BrokerReported::ProceedsOnly),
+    ]);
+    ri.tax_year = 2025;
+    let ar = assemble_absolute(&ri, &st, &ty2024_params(), &ty2024_table(), 2025);
+    let printed = assemble_printed_forms(
+        &ri,
+        &st,
+        &BTreeMap::new(),
+        &ar,
+        &ty2024_table(),
+        2025,
+        &[],
+        LIVE,
+    );
+    let f = printed.f8949.expect("a year with disposals prints an 8949");
+    let boxes: Vec<Form8949Box> = f
+        .short_term
+        .iter()
+        .chain(f.long_term.iter())
+        .map(|r| r.box_)
+        .collect();
+    assert_eq!(
+        boxes,
+        [Form8949Box::G, Form8949Box::K, Form8949Box::L],
+        "covered/basis → G; noncovered/proceeds → K; self-custody → L"
+    );
+}

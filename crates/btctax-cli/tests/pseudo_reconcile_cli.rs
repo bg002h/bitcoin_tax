@@ -101,7 +101,7 @@ fn pseudo_marker_on_screen_but_absent_from_every_export_file() {
     // then the marker must never appear in a file.
     let dir = tempfile::tempdir().unwrap();
     let empty_details: BTreeMap<EventId, btctax_core::DonationDetails> = BTreeMap::new();
-    render::write_csv_exports(dir.path(), &st, Some(2025), None, &empty_details).unwrap();
+    render::write_csv_exports(dir.path(), &st, Some(2025), None, &empty_details, None).unwrap();
 
     let mut checked = 0usize;
     for entry in std::fs::read_dir(dir.path()).unwrap() {

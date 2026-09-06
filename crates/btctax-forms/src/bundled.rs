@@ -258,7 +258,7 @@ mod tests {
         assert_eq!(
             bundled_years(),
             &[2017, 2024, 2025, 2026],
-            "three years on disk today"
+            "four years on disk today (2026 is a record-only preparing year)"
         );
     }
 

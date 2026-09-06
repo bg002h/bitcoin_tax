@@ -753,7 +753,19 @@ pub fn write_csv_exports(
     tax_year: Option<i32>,
     se_result: Option<&SeTaxResult>,
     donation_details: &BTreeMap<EventId, DonationDetails>,
+    broker: Option<(
+        btctax_core::InformationReturnRegime,
+        Option<&btctax_core::BrokerReporting>,
+    )>,
 ) -> Result<(), crate::CliError> {
+    // ★ spec 1099-DA (build review I-3) — the Form 8949 CSV's `box` column is an emitted box too:
+    //   on a LIVE year it is routed from the stored answers, or the export refuses BEFORE any byte
+    //   (a half-written directory beside a refusal is the shape the PDF arms already guard against).
+    let rows_8949 = match (tax_year, broker) {
+        (Some(y), Some((regime, answers))) => Some(routed_8949_rows(state, y, regime, answers)?),
+        (Some(y), None) => Some(form_8949(state, y)),
+        (None, _) => None,
+    };
     fsperms::mkdir_owner_only(out_dir)?;
 
     let mut w = Writer::from_writer(fsperms::open_owner_only(&out_dir.join("lots.csv"))?);
@@ -897,7 +909,7 @@ pub fn write_csv_exports(
     // P2-B: per-tax-year Form 8949 + Schedule D filing artifacts (year-scoped; omitted when None).
     // P2-C: per-tax-year Form 8283 donation artifact rides the same year-scoped block.
     if let Some(year) = tax_year {
-        write_form8949_csv(out_dir, state, year)?;
+        write_form8949_csv(out_dir, rows_8949.as_deref().unwrap_or(&[]), year)?;
         write_schedule_d_csv(out_dir, state, year)?;
         write_form8283_csv(out_dir, state, year, donation_details)?;
         write_basis_methodology_txt(out_dir, state, year)?; // P7 / D-4 (mandatory when a tranche is filed)
@@ -935,9 +947,13 @@ pub fn write_form_csvs(
     year: i32,
     se_result: Option<&SeTaxResult>,
     donation_details: &BTreeMap<EventId, DonationDetails>,
+    regime: btctax_core::InformationReturnRegime,
+    answers: Option<&btctax_core::BrokerReporting>,
 ) -> Result<(), crate::CliError> {
+    // gated + routed BEFORE any byte (spec 1099-DA, build review I-3)
+    let rows_8949 = routed_8949_rows(state, year, regime, answers)?;
     fsperms::mkdir_owner_only(out_dir)?;
-    write_form8949_csv(out_dir, state, year)?;
+    write_form8949_csv(out_dir, &rows_8949, year)?;
     write_schedule_d_csv(out_dir, state, year)?;
     write_form8283_csv(out_dir, state, year, donation_details)?;
     write_basis_methodology_txt(out_dir, state, year)?; // P7 / D-4 (mandatory when a tranche is filed)
@@ -1184,11 +1200,37 @@ fn write_form8283_csv(
 
 /// P2-B Task 2: write `form8949.csv` — one row per `DisposalLeg` disposed in `year`. Stable
 /// snake_case columns; exact `Decimal`/`i64` string values (NFR5). 0o600 via `open_owner_only`.
-fn write_form8949_csv(
-    out_dir: &Path,
+/// ★ spec 1099-DA — the year's Form 8949 rows with their boxes ROUTED from the filer's Form 1099-DA
+/// answers when the question is live; a live year with no stored answers is the crypto-slice
+/// refusal (S10) — the CSV is a slice surface too. Not live: the rows as built (I/L, or C/F before).
+pub fn routed_8949_rows(
     state: &LedgerState,
     year: i32,
+    regime: btctax_core::InformationReturnRegime,
+    answers: Option<&btctax_core::BrokerReporting>,
+) -> Result<Vec<btctax_core::Form8949Row>, crate::CliError> {
+    let mut rows = form_8949(state, year);
+    if !btctax_core::broker_question_is_live(&rows, regime) {
+        return Ok(rows);
+    }
+    let Some(answers) = answers else {
+        return Err(crate::cmd::admin::slice_broker_refusal(year, regime, &rows)
+            .expect("live ⇒ the slice refusal"));
+    };
+    btctax_core::route_8949_boxes(&mut rows, regime, answers).map_err(|e| {
+        crate::CliError::Usage(format!(
+            "TY{year} Form 8949: the Form 1099-DA answers on the return inputs do not settle every row ({e:?}) — answer them (`income import`, the `[broker_reporting.<provider>]` table) or run the full return, whose screen names the exit; no form8949.csv was written"
+        ))
+    })?;
+    Ok(rows)
+}
+
+fn write_form8949_csv(
+    out_dir: &Path,
+    rows: &[btctax_core::Form8949Row],
+    year: i32,
 ) -> Result<(), crate::CliError> {
+    let _ = year;
     let mut w = Writer::from_writer(fsperms::open_owner_only(&out_dir.join("form8949.csv"))?);
     w.write_record([
         "part",
@@ -1205,7 +1247,7 @@ fn write_form8949_csv(
         "wallet",
         "disposition_kind",
     ])?;
-    for r in form_8949(state, year) {
+    for r in rows.iter().cloned() {
         w.write_record([
             form8949_part_tag(r.part).to_string(),
             form8949_box_tag(r.box_).to_string(),
@@ -3835,7 +3877,7 @@ mod schedule_se_tests {
         let out = dir.path().join("export");
         let st = LedgerState::default();
         let r = golden1();
-        write_csv_exports(&out, &st, Some(2025), Some(&r), &BTreeMap::new()).unwrap();
+        write_csv_exports(&out, &st, Some(2025), Some(&r), &BTreeMap::new(), None).unwrap();
 
         let path = out.join("schedule_se.csv");
         assert!(path.exists(), "schedule_se.csv must be written");
@@ -3873,7 +3915,7 @@ mod schedule_se_tests {
         let dir = tempfile::tempdir().unwrap();
         let out = dir.path().join("export");
         let st = LedgerState::default();
-        write_csv_exports(&out, &st, Some(2025), None, &BTreeMap::new()).unwrap();
+        write_csv_exports(&out, &st, Some(2025), None, &BTreeMap::new(), None).unwrap();
         assert!(!out.join("schedule_se.csv").exists());
     }
 }
@@ -3970,7 +4012,7 @@ mod form8283_csv_tests {
         );
         // event2 intentionally NOT inserted — exercises the empty-column path.
 
-        write_csv_exports(&out, &st, Some(2025), None, &dmap).unwrap();
+        write_csv_exports(&out, &st, Some(2025), None, &dmap, None).unwrap();
 
         let path = out.join("form8283.csv");
         assert!(path.exists(), "form8283.csv must exist");

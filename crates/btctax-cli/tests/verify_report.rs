@@ -971,6 +971,7 @@ csv-send-b,2026-04-01 12:00:00 UTC,Send,BTC,0.05000000,USD,62000.00,,,,,,bc1qgif
         None,
         None,
         &std::collections::BTreeMap::new(),
+        None,
     )
     .unwrap();
 

@@ -4145,3 +4145,38 @@ fn passthrough_round_trips_serde() {
         "the variant tag is serialized (pre-feature binaries reject it loudly)"
     );
 }
+
+/// spec 1099-DA T2 (build review M-1) — through the REAL fold: a lot bought on the exchange in 2026
+/// and sold out in 2026 is `Covered`; the same purchase in 2025 is `Noncovered`. The sold-out lot has
+/// left `state.lots`, so only the date the fold carried on the leg can say which.
+#[test]
+fn a_lot_bought_on_the_venue_in_2026_and_sold_out_is_covered_through_the_fold() {
+    use btctax_core::forms::{form_8949, Cohort};
+    for (bought, want) in [
+        (datetime!(2026-02-01 00:00:00 UTC), Cohort::Covered),
+        (datetime!(2025-12-31 00:00:00 UTC), Cohort::Noncovered),
+    ] {
+        let buy = ev(
+            "BUY-C",
+            bought,
+            EventPayload::Acquire(Acquire {
+                sat: 100_000,
+                usd_cost: dec!(900.00),
+                fee_usd: dec!(0),
+                basis_source: BasisSource::ExchangeProvided,
+            }),
+        );
+        let st = project(
+            &[buy, sell(datetime!(2026-06-01 00:00:00 UTC), dec!(1200.00))],
+            &StaticPrices::default(),
+            &ProjectionConfig::default(),
+        );
+        assert!(
+            st.lots.iter().all(|l| l.remaining_sat == 0),
+            "the lot is sold out"
+        );
+        let rows = form_8949(&st, 2026);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].cohort, want, "bought {bought}");
+    }
+}

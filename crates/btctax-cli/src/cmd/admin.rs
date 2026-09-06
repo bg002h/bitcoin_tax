@@ -202,12 +202,21 @@ pub fn export_snapshot(
     // arrives as `CliError::Store(StoreError::Io)`, a mid-write `flush`/`writeln` as `CliError::Io`;
     // `cli_io_with_path` enriches BOTH. A `csv::Error` (serialization, not a path problem) passes
     // through.
+    // spec 1099-DA — the year's regime and the stored answers (if any) route the 8949 CSV's boxes
+    let broker = match tax_year {
+        Some(y) => Some((
+            crate::year_readiness::regime_or_pre_regime(y)?,
+            crate::return_inputs::get(session.conn(), y)?.map(|ri| ri.broker_reporting),
+        )),
+        None => None,
+    };
     write_csv_exports(
         out_dir,
         &state,
         tax_year,
         se_result.as_ref(),
         &donation_details,
+        broker.as_ref().map(|(r, a)| (*r, a.as_ref())),
     )
     .map_err(|e| crate::cli_io_with_path(e, out_dir, crate::EXPORT_OUT_HINT))?;
     // BG-D8: emit the Form 8275 disclosure by its OWN name alongside the year-scoped packet (mirrors the
@@ -1369,7 +1378,7 @@ mod tests {
 /// planted red in every direction (B1): `Some` iff the question is LIVE for these rows (the year's
 /// regime reports basis AND ≥ 1 row was disposed on an exchange). The answers are not consulted —
 /// they live on `ReturnInputs`, which this arm has by construction not got.
-pub(crate) fn slice_broker_refusal(
+pub fn slice_broker_refusal(
     tax_year: i32,
     regime: btctax_core::InformationReturnRegime,
     rows: &[btctax_core::Form8949Row],
@@ -1381,11 +1390,15 @@ pub(crate) fn slice_broker_refusal(
         .iter()
         .filter(|r| btctax_core::broker_key(r).is_some())
         .count();
+    // build review M-2: the exit is the FULL return, which may itself not be fillable yet — say so
+    let readiness = crate::year_readiness::import_note(tax_year)
+        .map(|n| format!(" ({n})"))
+        .unwrap_or_default();
     Some(CliError::Usage(format!(
         "TY{tax_year} Form 8949 needs the Form 1099-DA answers for its {n} exchange row(s), and those \
          live on the return inputs — `income import` (the `[broker_reporting.<provider>]` table) or \
-         the TUI input form, then export the FULL return; the crypto-slice packet is closed on a \
-         year whose brokers report basis. No forms were written."
+         the TUI input form, then export the FULL return{readiness}; the crypto-slice packet is closed \
+         on a year whose brokers report basis. No forms were written."
     )))
 }
 

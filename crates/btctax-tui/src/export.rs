@@ -197,12 +197,17 @@ pub fn do_export(
         None => None, // no profile → no SE figure → no schedule_se.csv
     };
 
+    // spec 1099-DA — the TUI holds no return inputs, so a live year refuses (naming the exit) rather
+    // than printing an unrouted box; the year's regime is joined from its record
+    let regime = btctax_cli::year_readiness::regime_or_refuse(year)?;
     btctax_cli::render::write_form_csvs(
         &state.out_dir,
         &snap.state,
         year,
         se_result.as_ref(),
         &snap.donation_details,
+        regime,
+        None,
     )?;
 
     // BG-D8 (Task 17): co-emit the Form 8275 disclosure by its OWN name, exactly as the CLI CSV export

@@ -680,23 +680,24 @@ pub fn report_tax_year(
                         // authority — fall back rather than quoting a number off a refused return.
                         //
                         // ★ BOTH screens, not just the absolute one (phase-2 review, fold Minor).
+                        // spec 1099-DA (build review M-3): the prior year's regime refuses TYPED when its record is
+                        // missing — never a silently dropped carryforward
+                        let regime_prev = crate::year_readiness::regime_or_refuse(year - 1)?;
                         //   Checking only `screen_absolute` let an INPUT-refused prior year still
                         //   supply "the authority" — e.g. an over-limit mortgage, whose overstated
                         //   line 8a understates taxable income and therefore OVERSTATES the
                         //   worksheet carryforward. That violated this fold's own stated rule.
                         (btctax_core::tax::return_refuse::screen_inputs(&ri_prev, table, params)
                             .is_none()
-                            && crate::year_readiness::regime_for(year - 1).is_some_and(|rg| {
-                                btctax_core::screen_absolute(
-                                    &ri_prev,
-                                    &ar_prev,
-                                    params,
-                                    &state,
-                                    year - 1,
-                                    rg,
-                                )
-                                .is_none()
-                            }))
+                            && btctax_core::screen_absolute(
+                                &ri_prev,
+                                &ar_prev,
+                                params,
+                                &state,
+                                year - 1,
+                                regime_prev,
+                            )
+                            .is_none())
                         .then_some(ar_prev.capital_loss_carryforward_out)
                     }
                     _ => None,

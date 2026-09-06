@@ -88,7 +88,16 @@ fn basis_methodology_txt_is_written_when_a_tranche_is_filed() {
     let st = project(&evs, &prices(), &cfg());
     let dir = tempfile::tempdir().unwrap();
     let empty: BTreeMap<EventId, btctax_core::DonationDetails> = BTreeMap::new();
-    write_form_csvs(dir.path(), &st, 2026, None, &empty).unwrap();
+    write_form_csvs(
+        dir.path(),
+        &st,
+        2026,
+        None,
+        &empty,
+        btctax_core::InformationReturnRegime::PROCEEDS_ONLY,
+        None,
+    )
+    .unwrap();
 
     let path = dir.path().join("basis_methodology.txt");
     assert!(
@@ -135,7 +144,16 @@ fn basis_methodology_txt_absent_for_a_fully_documented_year() {
     let st = project(&evs, &prices(), &cfg());
     let dir = tempfile::tempdir().unwrap();
     let empty: BTreeMap<EventId, btctax_core::DonationDetails> = BTreeMap::new();
-    write_form_csvs(dir.path(), &st, 2026, None, &empty).unwrap();
+    write_form_csvs(
+        dir.path(),
+        &st,
+        2026,
+        None,
+        &empty,
+        btctax_core::InformationReturnRegime::PROCEEDS_ONLY,
+        None,
+    )
+    .unwrap();
 
     assert!(
         !dir.path().join("basis_methodology.txt").exists(),

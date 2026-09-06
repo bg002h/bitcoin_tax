@@ -1716,3 +1716,45 @@ fn the_manifest_names_the_qualified_appraisal_over_500k_and_stays_quiet_below_it
          $500,000':\n{man2}"
     );
 }
+
+/// spec 1099-DA (build review I-2): the crypto-slice arm REFUSES on a LIVE year through the real
+/// command — a TY2026 vault with one exchange disposition and no stored return inputs — before any
+/// byte: the out directory does not exist afterwards, and the message names the exit.
+fn live_2026_events() -> Vec<LedgerEvent> {
+    vec![
+        ev(
+            "buy-2026",
+            datetime!(2026-02-01 12:00 UTC),
+            EventPayload::Acquire(Acquire {
+                sat: 1_000_000,
+                usd_cost: dec!(900),
+                fee_usd: dec!(0),
+                basis_source: BasisSource::ExchangeProvided,
+            }),
+        ),
+        ev(
+            "sell-2026",
+            datetime!(2026-06-15 12:00 UTC),
+            EventPayload::Dispose(Dispose {
+                sat: 1_000_000,
+                usd_proceeds: dec!(1200),
+                fee_usd: dec!(0),
+                kind: DisposeKind::Sell,
+            }),
+        ),
+    ]
+}
+
+#[test]
+fn a_live_year_refuses_the_crypto_slice_before_any_byte() {
+    let (_dir, vault) = make_vault(&live_2026_events());
+    let out = tempfile::tempdir().unwrap();
+    let out_dir = out.path().join("slice-2026");
+    let err = cmd::admin::export_irs_pdf(&vault, &pp(), &out_dir, 2026, &[], None).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("Form 1099-DA answers") && msg.contains("income import"),
+        "the slice refusal names the exit: {msg}"
+    );
+    assert!(!out_dir.exists(), "a refusal writes NO bytes");
+}
