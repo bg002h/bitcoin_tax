@@ -653,3 +653,42 @@ pub fn seed_j6_full(
     crate::cmd::tax::import_return_inputs(&vault, pp, 2024, &toml, false).unwrap();
     vault
 }
+
+// ── spec 1099-DA R6 — the export seam the kills need ──────────────────────────────────────────────
+
+/// `export-irs-pdf` with the year's Form 1099-DA **regime** injected instead of joined from its
+/// `YEAR.toml` record — everything else is the production path
+/// (`cmd::admin::export_irs_pdf_from_session_with_regime`, one `Session::open`, one projection).
+///
+/// ★★★ **Why a seam exists at all.** R6's arms are only observable where a year has BOTH a live
+/// (basis-reporting) regime AND bundled form templates, and no bundled year has both: TY2026's
+/// record is live and it bundles zero templates, so nothing about a printed slice is observable
+/// there (R6 N-5); TY2025 bundles fifteen templates under a `proceeds`-only regime. The kills
+/// therefore run on **TY2025's templates with the LIVE regime injected** — the pattern
+/// `crates/btctax-core/tests/kat_broker_reporting.rs` uses throughout, where the regime is already a
+/// parameter. This is the ONE fact the export read from a bundled file rather than from an argument.
+#[allow(clippy::too_many_arguments)]
+pub fn export_irs_pdf_with_regime(
+    vault_path: &std::path::Path,
+    pp: &btctax_store::Passphrase,
+    out_dir: &std::path::Path,
+    tax_year: i32,
+    forms: &[crate::cli::FormArg],
+    attest: Option<&str>,
+    voucher: crate::cmd::admin::VoucherChoice,
+    regime: btctax_core::InformationReturnRegime,
+) -> Result<crate::cmd::admin::IrsPdfReport, crate::CliError> {
+    let session = crate::Session::open(vault_path, pp)?;
+    let (events, state, _cfg) = session.load_events_and_project()?;
+    crate::cmd::admin::export_irs_pdf_from_session_with_regime(
+        &session,
+        &state,
+        &events,
+        out_dir,
+        tax_year,
+        forms,
+        attest,
+        voucher,
+        Some(regime),
+    )
+}

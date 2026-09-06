@@ -174,10 +174,20 @@ pub fn do_export(
     // via the crate-root re-export (no `cmd::` token — KAT-E10).
     btctax_cli::promote_export_gate(&snap.state, &snap.events, Some(year))?;
 
-    // spec 1099-DA — the TUI holds no return inputs, so a live year refuses (naming the exit) rather
-    // than printing an unrouted box; the year's regime is joined from its record. Before the mkdir,
-    // so a refused export leaves no directory behind (build review r2 NEW-1).
+    // spec 1099-DA — the year's regime is joined from its record; a live year with no answer
+    // refuses (naming the exit) rather than printing an unrouted box.
     let regime = btctax_cli::year_readiness::regime_or_refuse(year)?;
+    // ★★★ spec 1099-DA R6 (I-2) — the ANSWERS the viewer holds (`Snapshot.broker_answers`, resolved
+    //     at unlock through the T9 accessor: a draft shadows the committed row) are what this export
+    //     files from. The TUI is CSV-only and has no full-return arm, so this is its whole 1099-DA
+    //     story.
+    //
+    //     ★ The screen + route run HERE, BEFORE `mkdir_owner_only_exclusive`, so a refusal leaves NO
+    //       directory behind. `write_form_csvs` routes again from the same inputs (it is pure over
+    //       `state`/`regime`/`answers`), but by then the directory exists — and a refused export that
+    //       leaves an empty directory is exactly what the exclusive create exists to prevent.
+    let answers = snap.broker_answers.get(&year);
+    btctax_cli::render::routed_8949_rows(&snap.state, year, regime, answers)?;
 
     // EXCLUSIVE create — must precede write_form_csvs [R0-I1].
     // Fails with AlreadyExists on a pre-existing dir; nothing is written.
@@ -209,7 +219,7 @@ pub fn do_export(
         se_result.as_ref(),
         &snap.donation_details,
         regime,
-        None,
+        answers,
     )?;
 
     // BG-D8 (Task 17): co-emit the Form 8275 disclosure by its OWN name, exactly as the CLI CSV export
@@ -265,6 +275,115 @@ mod tests {
             prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
             broker_answers: Default::default(),
         }
+    }
+
+    /// ★★★ spec 1099-DA R6 (I-2/I-15) — **the TUI export's two states, on a LIVE year.**
+    ///
+    /// The TUI is CSV-only and has no full-return arm, so its whole 1099-DA story is: the answers
+    /// the `Snapshot` carries (resolved at unlock through the T9 accessor) route the Form 8949 box.
+    ///
+    /// 1. **No answer** → the export REFUSES and leaves **no directory**. The screen + route run
+    ///    before `mkdir_owner_only_exclusive`; before R6 they ran inside `write_form_csvs`, after
+    ///    the exclusive create, so a refused export left an empty directory that a same-second
+    ///    retry would then fail on with `AlreadyExists`.
+    /// 2. **`basis_matches`** → `form8949.csv` carries box **G**, not the pre-route I.
+    ///
+    /// TY2026 is the year here on purpose: its record is LIVE and the TUI writes only CSVs, so no
+    /// bundled template is needed and no regime has to be injected.
+    #[test]
+    fn the_tui_export_screens_and_routes_from_the_snapshots_answers() {
+        use btctax_core::event::{Acquire, Dispose, DisposeKind, EventPayload, LedgerEvent};
+        use btctax_core::forms::{BrokerReported, BrokerReporting, CohortAnswers};
+        use btctax_core::identity::WalletId;
+        use btctax_core::price::StaticPrices;
+        use btctax_core::project::{project, ProjectionConfig};
+        use time::macros::offset;
+
+        let w = WalletId::Exchange {
+            provider: "cb".into(),
+            account: "default".into(),
+        };
+        let ev = |tag: &str, ts, payload| LedgerEvent {
+            id: make_event_id(tag),
+            utc_timestamp: ts,
+            original_tz: offset!(+00:00),
+            wallet: Some(w.clone()),
+            payload,
+        };
+        let evs = vec![
+            ev(
+                "buy",
+                datetime!(2026-02-01 12:00 UTC),
+                EventPayload::Acquire(Acquire {
+                    sat: 1_000_000,
+                    usd_cost: Decimal::new(900, 0),
+                    fee_usd: Decimal::ZERO,
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            ),
+            ev(
+                "sell",
+                datetime!(2026-06-15 12:00 UTC),
+                EventPayload::Dispose(Dispose {
+                    sat: 1_000_000,
+                    usd_proceeds: Decimal::new(1200, 0),
+                    fee_usd: Decimal::ZERO,
+                    kind: DisposeKind::Sell,
+                }),
+            ),
+        ];
+        let state = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
+        let export_now = datetime!(2027-02-01 12:00 UTC);
+
+        // ── 1. no answers → refuse, and NO directory is left behind. ──
+        let tmp = tempfile::tempdir().unwrap();
+        let out_dir = tmp.path().join("tui-2026");
+        let snap = make_snapshot(state.clone(), BTreeMap::new());
+        let modal = ExportConfirmState {
+            year: 2026,
+            out_dir: out_dir.clone(),
+            files: compute_files(&snap, 2026),
+            export_now,
+            attest: None,
+        };
+        let err = do_export(&snap, &modal)
+            .expect_err("a live year with no Form 1099-DA answer must refuse")
+            .to_string();
+        assert!(err.contains("Form 1099-DA answers"), "{err}");
+        assert!(
+            !out_dir.exists(),
+            "★ the refusal leaves NO directory — the screen runs before the exclusive create"
+        );
+
+        // ── 2. `basis_matches` on the snapshot's answers → box G in the CSV. ──
+        let mut answers = BrokerReporting::default();
+        answers.0.insert(
+            "cb".into(),
+            // ★ the lot is bought INTO the exchange on 2026-02-01, on/after
+            //   `COVERED_ACQUISITION_START` — so its key is the COVERED cohort.
+            CohortAnswers {
+                covered: Some(BrokerReported::BasisMatches),
+                noncovered: None,
+            },
+        );
+        let mut snap2 = make_snapshot(state, BTreeMap::new());
+        snap2.broker_answers.insert(2026, answers);
+        let out2 = tmp.path().join("tui-2026-answered");
+        let modal2 = ExportConfirmState {
+            year: 2026,
+            out_dir: out2.clone(),
+            files: compute_files(&snap2, 2026),
+            export_now,
+            attest: None,
+        };
+        do_export(&snap2, &modal2).expect("an answered live year exports");
+        let csv = std::fs::read_to_string(out2.join("form8949.csv")).unwrap();
+        let row = csv.lines().nth(1).expect("one Form 8949 row");
+        assert_eq!(
+            row.split(',').nth(1),
+            Some("G"),
+            "the TUI export files the box the ANSWER chooses, not the pre-route I: {row}"
+        );
     }
 
     /// P7 / D-4: `compute_files` lists `basis_methodology.txt` as a required artifact iff a tranche is

@@ -714,6 +714,7 @@ fn pseudo_report_tax_year_carries_banner_and_total_suffix_synthetic_channel() {
         &report.outcome,
         report.advisory.as_deref(),
         report.pseudo_contributed,
+        false,
     );
     assert!(
         rendered.contains("pseudo-reconciled (deliberately-synthetic) entries"),

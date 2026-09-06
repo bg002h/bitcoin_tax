@@ -155,6 +155,7 @@ fn run() -> Result<ExitCode, CliError> {
                     dual_report,
                     pseudo_contributed,
                     broker_answers,
+                    slice_prints_from_answers,
                 } = cmd::tax::report_tax_year(vault, &pp, y, ptg_raw)?;
                 // ★ FR-48 / design r2 §6: the year's readiness, rendered on the number-bearing
                 //   surface — declared status, forms bound, TaxTable and full-return params.
@@ -172,7 +173,8 @@ fn run() -> Result<ExitCode, CliError> {
                         y,
                         &outcome,
                         advisory.as_deref(),
-                        pseudo_contributed
+                        pseudo_contributed,
+                        slice_prints_from_answers,
                     )
                 );
                 print!("{}", render::render_schedule_d(y, &sched_d, &outcome));
@@ -857,6 +859,13 @@ fn run() -> Result<ExitCode, CliError> {
             .flatten()
             .map(|p| p.display().to_string())
             .collect();
+            // ★ spec 1099-DA R6 (M-14) — the §6.3 stale-draft note, BEFORE the file list: the draft
+            //   the filer was editing could not be read by this build, so these forms were filed
+            //   from the committed row. Saying it after the list would let them read the filenames
+            //   as the answers they had just typed.
+            if let Some(note) = &report.stale_draft_note {
+                eprintln!("note: {note}");
+            }
             // UX-P1-4: only the crypto-SLICE path fills these six; on the FULL-RETURN path they are all
             // None, so this header would print with an empty list before the authoritative "Full-return
             // packet —" block below. Print it only when there is a slice list to show.
@@ -871,6 +880,12 @@ fn run() -> Result<ExitCode, CliError> {
                     },
                     written.join("\n  ")
                 );
+            }
+            // ★ spec 1099-DA R6 (M-6) — WHAT THIS PACKET IS, printed AFTER the file list: an
+            //   ATTACHMENT SET filed from the stored Form 1099-DA answers, not a return. Only arm
+            //   (2) sets it.
+            if let Some(note) = &report.slice_attachment_note {
+                eprintln!("note: {note}");
             }
             // ★ NO-AUTHORISATION NOTICE. Printed on EVERY form export, unconditionally — this is
             // the one moment the user is holding fillable IRS forms this tool produced, and it is

@@ -11,13 +11,13 @@ use btctax_core::persistence::ImportReport;
 use btctax_core::tax::form8275::Section1gPosition;
 use btctax_core::DonationDetails;
 use btctax_core::{
-    conservation_report, disposal_compliance, form_8283, form_8949, schedule_d,
-    year_donation_deduction, BasisSource, Blocker, BlockerKind, ComplianceStatus,
-    ConservationReport, DisposalCompliance, DisposalLeg, DisposeKind, EventId, EventPayload,
-    Form8283HowAcquired, Form8283Section, Form8949Box, Form8949Part, GiftZone, HarvestReport,
-    HarvestStatus, HarvestTarget, InboundClass, IncomeKind, LedgerEvent, LedgerState, LotMethod,
-    LtcgBracket, OutflowClass, RemovalKind, RemovalLeg, ScheduleDTotals, SeTaxResult, SellReport,
-    SellStatus, Severity, TaxDate, Term, WalletId,
+    conservation_report, disposal_compliance, form_8283, form_8949, year_donation_deduction,
+    BasisSource, Blocker, BlockerKind, ComplianceStatus, ConservationReport, DisposalCompliance,
+    DisposalLeg, DisposeKind, EventId, EventPayload, Form8283HowAcquired, Form8283Section,
+    Form8949Box, Form8949Part, GiftZone, HarvestReport, HarvestStatus, HarvestTarget, InboundClass,
+    IncomeKind, LedgerEvent, LedgerState, LotMethod, LtcgBracket, OutflowClass, RemovalKind,
+    RemovalLeg, ScheduleDTotals, SeTaxResult, SellReport, SellStatus, Severity, TaxDate, Term,
+    WalletId,
 };
 use btctax_store::fsperms;
 use csv::Writer;
@@ -910,7 +910,7 @@ pub fn write_csv_exports(
     // P2-C: per-tax-year Form 8283 donation artifact rides the same year-scoped block.
     if let Some(year) = tax_year {
         write_form8949_csv(out_dir, rows_8949.as_deref().unwrap_or(&[]), year)?;
-        write_schedule_d_csv(out_dir, state, year)?;
+        write_schedule_d_csv(out_dir, rows_8949.as_deref().unwrap_or(&[]), year)?;
         write_form8283_csv(out_dir, state, year, donation_details)?;
         write_basis_methodology_txt(out_dir, state, year)?; // P7 / D-4 (mandatory when a tranche is filed)
                                                             // P2-D / Chunk B: standalone Schedule SE §1401 figure — written only when there IS SE tax
@@ -954,7 +954,7 @@ pub fn write_form_csvs(
     let rows_8949 = routed_8949_rows(state, year, regime, answers)?;
     fsperms::mkdir_owner_only(out_dir)?;
     write_form8949_csv(out_dir, &rows_8949, year)?;
-    write_schedule_d_csv(out_dir, state, year)?;
+    write_schedule_d_csv(out_dir, &rows_8949, year)?;
     write_form8283_csv(out_dir, state, year, donation_details)?;
     write_basis_methodology_txt(out_dir, state, year)?; // P7 / D-4 (mandatory when a tranche is filed)
     if let Some(se) = se_result {
@@ -1271,19 +1271,29 @@ fn write_form8949_csv(
     Ok(())
 }
 
-/// P2-B Task 3: write `schedule_d.csv` — the two RAW pre-netting part totals (Part I ST, Part II LT)
-/// for `year`. §1222/§1211/§1212 netting + carryforward is applied by engine B, not here (D3).
+/// P2-B Task 3: write `schedule_d.csv` — the RAW pre-netting totals for `year`. §1222/§1211/§1212
+/// netting + carryforward is applied by engine B, not here (D3).
+///
+/// ★★★ spec 1099-DA T8 — **one row per (part, BOX) group, with a `box` column**, aggregated from the
+/// same ROUTED `Form8949Row`s the PDFs were filled from, so the CSV and the PDF carry the SAME
+/// partition. Before T8 this wrote two rows — one per part — which on a G+I year said the whole
+/// Part I total belonged to one box, and the PDF said otherwise.
+///
+/// The part total is the SUM of that part's rows and is deliberately NOT a row of its own: a file
+/// mixing group rows with a total row double-counts under any naive `SUM()`, the same hazard
+/// `removals.csv`'s per-leg `claimed_deduction` column documents.
 fn write_schedule_d_csv(
     out_dir: &Path,
-    state: &LedgerState,
+    rows: &[btctax_core::Form8949Row],
     year: i32,
 ) -> Result<(), crate::CliError> {
+    let _ = year;
     let mut w = Writer::from_writer(fsperms::open_owner_only(&out_dir.join("schedule_d.csv"))?);
-    w.write_record(["part", "proceeds", "cost_basis", "gain"])?;
-    let totals = schedule_d(state, year);
-    for (part, p) in [("ST", &totals.st), ("LT", &totals.lt)] {
+    w.write_record(["part", "box", "proceeds", "cost_basis", "gain"])?;
+    for (box_, p) in btctax_core::schedule_d_by_box(rows) {
         w.write_record([
-            part.to_string(),
+            form8949_part_tag(part_of_box(box_)).to_string(),
+            form8949_box_tag(box_).to_string(),
             p.proceeds.to_string(),
             p.cost_basis.to_string(),
             p.gain.to_string(),
@@ -1291,6 +1301,16 @@ fn write_schedule_d_csv(
     }
     w.flush()?;
     Ok(())
+}
+
+/// The Form 8949 PART a box belongs to — A/B/C/G/H/I are Part I, D/E/F/J/K/L Part II (spec 1099-DA
+/// T8: the box determines the part, which is why `schedule_d_by_box` keys on the box alone).
+fn part_of_box(b: btctax_core::Form8949Box) -> btctax_core::Form8949Part {
+    use btctax_core::Form8949Box as B;
+    match b {
+        B::C | B::G | B::H | B::I => btctax_core::Form8949Part::ShortTerm,
+        B::F | B::J | B::K | B::L => btctax_core::Form8949Part::LongTerm,
+    }
 }
 
 /// UX-P4-1: the pseudo-disclosure channel for a tax-year figure — which, if any, deliberately-synthetic
@@ -1359,6 +1379,7 @@ pub fn render_tax_outcome(
     out: &btctax_core::TaxOutcome,
     advisory: Option<&str>,
     pseudo: PseudoDisclosure,
+    slice_prints_from_answers: bool,
 ) -> String {
     use btctax_core::TaxOutcome::*;
     let mut s = String::new();
@@ -1366,7 +1387,19 @@ pub fn render_tax_outcome(
     let _ = writeln!(s, "Federal tax attributable to crypto — tax year {year}");
     match out {
         NotComputable(b) => {
-            let _ = writeln!(s, "  NOT COMPUTABLE [{:?}]: {}", b.kind, b.detail);
+            // ★ spec 1099-DA R6 (M-15) — a year with Form 1099-DA answers stored and no bundled
+            //   full-return parameters is NOT dead: the crypto slice files from those answers. The
+            //   caller computes the flag (it needs the vault and the bundled tables); this renderer
+            //   only says so, on the line that would otherwise read as "nothing can be filed here".
+            let slice = if slice_prints_from_answers {
+                format!(
+                    " — `export-irs-pdf --tax-year {year}` still prints the crypto slice from these \
+                     answers"
+                )
+            } else {
+                String::new()
+            };
+            let _ = writeln!(s, "  NOT COMPUTABLE [{:?}]: {}{slice}", b.kind, b.detail);
         }
         Computed(r) => {
             let _ = writeln!(

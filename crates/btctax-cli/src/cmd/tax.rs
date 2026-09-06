@@ -448,6 +448,11 @@ pub struct TaxYearReport {
     /// live (a basis regime and ≥1 keyed row) or an unread answer is stored; printed after the
     /// readiness line, before the figures, so the filer sees what is asked before what was computed.
     pub broker_answers: Option<String>,
+    /// ★ spec 1099-DA R6 (M-15) — `export-irs-pdf --tax-year {year}` still prints the crypto slice
+    /// from the stored Form 1099-DA answers: the T9 accessor returned answers AND the year's
+    /// full-return parameters are not bundled. Passed to `render_tax_outcome`, which appends the
+    /// clause to the NOT-COMPUTABLE line so a filer is not told the year is dead.
+    pub slice_prints_from_answers: bool,
 }
 
 /// Task 9 (B.5) + Task 10 (M4) + P2-D Task 2 + Chunk-1 D2 + Chunk-3a: load events + project once,
@@ -461,6 +466,22 @@ pub struct TaxYearReport {
 ///
 /// `prior_taxable_gifts`: cumulative prior-year TAXABLE gifts (post-annual-exclusion Form 709
 /// amounts), not gross gifts. Default $0 (caller passes $0 when the flag is not provided).
+/// ★ spec 1099-DA R6 (M-15) — does `export-irs-pdf --tax-year {year}` print the crypto slice from
+/// answers this vault already holds? Both halves: the T9 accessor returned a working return with a
+/// NON-EMPTY `broker_reporting`, AND the year's full-return parameters are not bundled. The second
+/// half matters — with parameters bundled the export files the FULL return, and telling the filer
+/// about a slice would name an artifact they will not get.
+fn stored_answers_reach_the_slice(
+    s: &Session,
+    year: i32,
+    fr: &dyn btctax_core::tax::tables::FullReturnTables,
+) -> Result<bool, CliError> {
+    if fr.full_return_for(year).is_some() {
+        return Ok(false);
+    }
+    Ok(crate::input_form_store::broker_answers(s.conn(), year)?.is_some_and(|b| !b.0.is_empty()))
+}
+
 pub fn report_tax_year(
     vault: &Path,
     pp: &Passphrase,
@@ -525,14 +546,23 @@ pub fn report_tax_year(
         // ★ r3 I-2 — the ROWS go in (the census is derived inside), so the block can ENUMERATE each
         //   key's rows with their column (e) — the per-row figure `basis_matches` swears to.
         let rows = btctax_core::form_8949(&state, year);
-        let stored = crate::return_inputs::get(s.conn(), year)?;
+        // ★ spec 1099-DA T9 — the ONE resolution (§6.1: a draft shadows the committed row; a parked
+        //   draft carries none). On a params-less year the TUI draft is the primary authoring
+        //   surface, so `return_inputs::get` here would have shown the filer an EMPTY answers block
+        //   for the answers `export-irs-pdf` is about to file from.
+        let stored = crate::input_form_store::broker_answers(s.conn(), year)?;
         crate::render::render_broker_answers(
             year,
             crate::year_readiness::regime_for(year),
             &rows,
-            stored.as_ref().map(|ri| &ri.broker_reporting),
+            stored.as_ref(),
         )
     };
+    // ★ spec 1099-DA R6 (M-15) — state (2): answers are stored for a year whose full-return
+    //   parameters are NOT bundled, so `export-irs-pdf` prints the crypto slice from them. The
+    //   NOT-COMPUTABLE line says so, and BOTH halves are computed here rather than in the renderer
+    //   (which sees neither the vault nor the bundled tables).
+    let slice_prints_from_answers = stored_answers_reach_the_slice(&s, year, &fr_tables)?;
     let dual_report: Option<String> = if provenance == crate::resolve::Provenance::ReturnInputs {
         match (
             crate::return_inputs::get(s.conn(), year)?,
@@ -778,6 +808,7 @@ pub fn report_tax_year(
         dual_report,
         pseudo_contributed,
         broker_answers,
+        slice_prints_from_answers,
     })
 }
 

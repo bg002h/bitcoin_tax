@@ -210,7 +210,10 @@ fn export_writes_year_scoped_form8949_and_schedule_d() {
     assert_eq!(row.get(8), Some(""), "adjustment_code blank");
     assert_eq!(row.get(9), Some("0"), "adjustment_amount zero");
 
-    // schedule_d.csv: header + two part rows (ST, LT).
+    // ★ spec 1099-DA T8 — schedule_d.csv is now ONE ROW PER (part, BOX), with a `box` column, so
+    //   the CSV and the filled PDF carry the same partition. This fixture has a single ST leg in
+    //   Box I and nothing long-term, so there is exactly ONE row — not the two all-part rows the
+    //   pre-T8 writer emitted (an LT row of zeros here asserted a Part II that does not exist).
     let mut sr = Reader::from_reader(File::open(&schedd).unwrap());
     let sheaders: Vec<String> = sr
         .headers()
@@ -218,11 +221,26 @@ fn export_writes_year_scoped_form8949_and_schedule_d() {
         .iter()
         .map(|s| s.to_string())
         .collect();
-    assert_eq!(sheaders, vec!["part", "proceeds", "cost_basis", "gain"]);
+    assert_eq!(
+        sheaders,
+        vec!["part", "box", "proceeds", "cost_basis", "gain"]
+    );
     let srecs: Vec<_> = sr.records().collect::<Result<Vec<_>, _>>().unwrap();
-    assert_eq!(srecs.len(), 2, "Schedule D has two part rows (ST, LT)");
+    assert_eq!(
+        srecs.len(),
+        1,
+        "one Box I short-term group → one Schedule D row"
+    );
     assert_eq!(srecs[0].get(0), Some("ST"));
-    assert_eq!(srecs[1].get(0), Some("LT"));
+    assert_eq!(
+        srecs[0].get(1),
+        Some("I"),
+        "the CSV names the BOX its total belongs to — the same box the 8949 row carries"
+    );
+    // …and it equals the Form 8949 row's own figures (one leg ⇒ the group IS the row).
+    assert_eq!(srecs[0].get(2), row.get(6), "proceeds");
+    assert_eq!(srecs[0].get(3), row.get(7), "cost_basis");
+    assert_eq!(srecs[0].get(4), row.get(10), "gain");
 }
 
 /// (P2-A Minor fix KAT) Multi-leg donation: removals.csv must show `claimed_deduction` on the

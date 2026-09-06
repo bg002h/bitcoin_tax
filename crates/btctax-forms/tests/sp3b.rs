@@ -335,7 +335,12 @@ fn ty2017_schedule_d_has_no_qof() {
         "2017 predates QOF"
     );
     assert_eq!(m.table_token, "TablePartI");
-    let bytes = btctax_forms::fill_schedule_d(&totals_for(&mixed_rows()), 2017).unwrap();
+    let bytes = btctax_forms::fill_schedule_d(
+        &totals_for(&mixed_rows()),
+        &btctax_core::schedule_d_by_box(&mixed_rows()),
+        2017,
+    )
+    .unwrap();
     let (doc, fields) = fields_of(&bytes);
     // Line 3 (Box C total) d/h + line 7 + line 15 + line 16 land.
     assert_eq!(
@@ -522,7 +527,12 @@ fn ty2017_no_unmapped_filled_all_forms() {
         f8949_2017_field_names().into_iter().collect(),
     );
     check(
-        &btctax_forms::fill_schedule_d(&totals_for(&mixed_rows()), 2017).unwrap(),
+        &btctax_forms::fill_schedule_d(
+            &totals_for(&mixed_rows()),
+            &btctax_core::schedule_d_by_box(&mixed_rows()),
+            2017,
+        )
+        .unwrap(),
         schedule_d_2017_field_names().into_iter().collect(),
     );
     let se = ScheduleSeMap::ty2017();
@@ -600,7 +610,12 @@ fn fault_injected_2017_8949_column_swap_is_red() {
 fn fault_injected_2017_schedule_d_column_swap_is_red() {
     let mut m = ScheduleDMap::ty2017();
     std::mem::swap(&mut m.line3.proceeds_d, &mut m.line3.gain_h); // (d) ↔ (h)
-    let err = fill_schedule_d_totals(&totals_for(&mixed_rows()), &m).unwrap_err();
+    let err = fill_schedule_d_totals(
+        &totals_for(&mixed_rows()),
+        &btctax_core::schedule_d_by_box(&mixed_rows()),
+        &m,
+    )
+    .unwrap_err();
     assert!(matches!(err, FormsError::Geometry(_)), "got {err:?}");
 }
 
@@ -692,7 +707,12 @@ fn ty2017_forms_are_byte_deterministic() {
         "8949 changed"
     );
 
-    let sd = btctax_forms::fill_schedule_d(&totals_for(&mixed_rows()), 2017).unwrap();
+    let sd = btctax_forms::fill_schedule_d(
+        &totals_for(&mixed_rows()),
+        &btctax_core::schedule_d_by_box(&mixed_rows()),
+        2017,
+    )
+    .unwrap();
     assert_eq!(
         hex(&Sha256::digest(&sd)),
         GOLDEN_2017_SCHED_D,

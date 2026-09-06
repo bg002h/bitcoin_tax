@@ -174,6 +174,7 @@ pub fn uncomputable_sentence(year: i32) -> String {
     format!(
         "tax year {year} has full-return inputs, but full-return computation is not available for it \
          in this build — {}. The inputs are KEPT and will compute when the year's package is bundled. \
+         `export-irs-pdf --tax-year {year}` still prints the crypto slice from the stored answers. \
          To fall back to a raw `tax-profile` for {year} instead, run `income clear --year {year}` \
          (this DISCARDS the stored inputs, including any computed carryover on them).",
         r.sentence()
@@ -190,8 +191,10 @@ pub fn import_note(year: i32) -> Option<String> {
         return None;
     }
     Some(format!(
-        "note: {} — these inputs are stored now; `report --tax-year {year}` will refuse (keeping them) \
-         until full-return parameters for {year} are bundled.",
+        "note: {} — these inputs are stored now; `report --tax-year {year}` computes the crypto delta \
+         on a stored `tax-profile` and reports the full return as NOT COMPUTABLE (keeping the inputs) \
+         until full-return parameters for {year} are bundled. `export-irs-pdf --tax-year {year}` still \
+         prints the crypto slice from the stored answers.",
         r.sentence()
     ))
 }
@@ -250,6 +253,55 @@ pub fn regime_or_pre_regime(
     }
 }
 
+/// ★ spec 1099-DA R6 (M-5/M-7) — the EXPORT-TIME price-coverage check: does the bundled daily-close
+/// dataset actually reach the end of the year being filed?
+///
+/// [`YearReadiness::problems`] asks the same question, but it is a STATIC readiness report and it
+/// asks it only of a year declared `filable`. This is the gate: it runs in BOTH `export-irs-pdf`
+/// arms before any byte, on whatever year the filer named, because a packet whose prices stop in
+/// June is a return computed from a partial year — a wrong number on a signed form, not a
+/// readiness nuance. The readiness surfaces (`sentence()`, the unlock screen, `year_record` tests)
+/// gain NOTHING from this: no new `problems()` row, no new sentence clause.
+///
+/// A year with no bundled record has no `prices_through` to compare, so there is nothing to say —
+/// the export's own year gates (`regime_or_refuse`, `SUPPORTED_YEARS`) answer that year.
+pub fn price_coverage_or_refuse(year: i32) -> Result<(), crate::CliError> {
+    let r = YearReadiness::bundled(year);
+    match price_coverage_problem(
+        year,
+        r.declared.as_ref().map(|d| d.prices_through),
+        r.prices_max_date,
+    ) {
+        Some(msg) => Err(crate::CliError::Usage(msg)),
+        None => Ok(()),
+    }
+}
+
+/// The pure half of [`price_coverage_or_refuse`] — `Some(sentence)` when the dataset stops before
+/// the year's declared `prices_through`. Split out so the kill can plant a short dataset without a
+/// bundled year that has one.
+pub(crate) fn price_coverage_problem(
+    year: i32,
+    prices_through: Option<btctax_core::conventions::TaxDate>,
+    prices_max_date: Option<btctax_core::conventions::TaxDate>,
+) -> Option<String> {
+    let through = prices_through?;
+    let tail = "No forms were written. Update the bundled daily-close dataset (`scripts/` — the \
+                price updater appends closes) and re-export.";
+    match prices_max_date {
+        Some(max) if max >= through => None,
+        Some(max) => Some(format!(
+            "cannot export TY{year}: the bundled price dataset ends {max}, before TY{year}'s \
+             prices_through {through} — every figure on the packet would be computed from a PARTIAL \
+             year. {tail}"
+        )),
+        None => Some(format!(
+            "cannot export TY{year}: this build carries an EMPTY price dataset, so no disposition in \
+             {year} can be valued. {tail}"
+        )),
+    }
+}
+
 pub fn default_year() -> i32 {
     *bundled_years()
         .iter()
@@ -261,6 +313,71 @@ pub fn default_year() -> i32 {
 mod tests {
     use super::*;
     use btctax_adapters::tax_tables::{BundledFullReturnTables, BundledTaxTables};
+
+    /// ★★★ spec 1099-DA R6 (M-5/M-7) KILL — the EXPORT-TIME price-coverage gate.
+    ///
+    /// Two halves, and both are the test. The pure half plants a dataset that stops mid-year, which
+    /// no bundled year has; the live half calls the real gate on real years — TY2024 and TY2025 pass
+    /// (the bundled dataset reaches into 2026), TY2026 does NOT, because its `prices_through` is
+    /// 2026-12-31 and the dataset stops before it. Without the passing half a gate that refused
+    /// every year would satisfy the refusal.
+    #[test]
+    fn the_export_time_price_gate_refuses_a_dataset_that_stops_short() {
+        use time::macros::date;
+        // planted: the dataset ends in June, the year runs to December.
+        let msg = price_coverage_problem(
+            2026,
+            Some(date!(2026 - 12 - 31)),
+            Some(date!(2026 - 06 - 03)),
+        )
+        .expect("a short dataset must refuse");
+        assert!(
+            msg.contains("ends 2026-06-03")
+                && msg.contains("prices_through 2026-12-31")
+                && msg.contains("PARTIAL"),
+            "the refusal names both dates and the harm: {msg}"
+        );
+        // an EMPTY dataset is its own sentence
+        assert!(
+            price_coverage_problem(2026, Some(date!(2026 - 12 - 31)), None)
+                .is_some_and(|m| m.contains("EMPTY price dataset"))
+        );
+        // covered → silent; a year with no record has no `prices_through` to compare → silent
+        assert!(price_coverage_problem(
+            2024,
+            Some(date!(2024 - 12 - 31)),
+            Some(date!(2026 - 06 - 03))
+        )
+        .is_none());
+        assert!(price_coverage_problem(2099, None, Some(date!(2026 - 06 - 03))).is_none());
+
+        // …and the LIVE gate, on the real record + the real bundled dataset.
+        price_coverage_or_refuse(2024).expect("TY2024's prices are complete in this build");
+        price_coverage_or_refuse(2025).expect("TY2025's prices are complete in this build");
+        assert!(
+            price_coverage_or_refuse(2026).is_err(),
+            "TY2026 runs past the bundled dataset — an export of it may not print"
+        );
+    }
+
+    /// ★ …and the READINESS SURFACES gain nothing from it (R6: `problems`, `sentence`, the unlock
+    /// screen and the `year_record` tests are UNCHANGED). TY2025's dataset is complete, so this
+    /// pins the shape rather than the value: no `problems()` row mentions the export-time gate.
+    #[test]
+    fn the_price_gate_adds_no_readiness_problem() {
+        for year in btctax_forms::bundled::bundled_years() {
+            let r = YearReadiness::bundled(*year);
+            assert!(
+                !r.problems().iter().any(|p| p.contains("PARTIAL year")),
+                "TY{year}: the export-time gate must not leak into the readiness report"
+            );
+            assert!(
+                !r.sentence().contains("PARTIAL"),
+                "TY{year}: {}",
+                r.sentence()
+            );
+        }
+    }
 
     /// ★ THE KILL: every bundled year's declaration agrees with what the build carries. A year
     /// declared `filable` without params, or with a price dataset that stops short, reds here.

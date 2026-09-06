@@ -82,7 +82,12 @@ fn output_has_no_xfa() {
         !pdf_has_xfa(&doc).unwrap(),
         "the /XFA layer must be removed"
     );
-    let sd = btctax_forms::fill_schedule_d(&totals_for(&mixed_rows()), 2025).unwrap();
+    let sd = btctax_forms::fill_schedule_d(
+        &totals_for(&mixed_rows()),
+        &btctax_core::schedule_d_by_box(&mixed_rows()),
+        2025,
+    )
+    .unwrap();
     assert!(!pdf_has_xfa(&load(&sd).unwrap()).unwrap());
 }
 
@@ -280,7 +285,8 @@ fn schedule_d_fills_3_7_10_15_16_and_qof() {
             gain: rust_decimal_macros::dec!(40000),
         },
     };
-    let bytes = btctax_forms::fill_schedule_d(&totals, 2025).unwrap();
+    let bytes =
+        btctax_forms::fill_schedule_d(&totals, &not_reported_by_box(&totals), 2025).unwrap();
     let doc = load(&bytes).unwrap();
     let idx = index(&collect_fields(&doc).unwrap());
     let v = |fqn: &str| text_value(&doc, idx[fqn].id);
@@ -408,7 +414,8 @@ fn schedule_d_line17_is_derived_on_every_revision() {
             .unwrap_or_else(|| panic!("the {year} Schedule D map must carry line 17"));
         for (label, st, lt, expected) in &cases {
             let totals = ScheduleDTotals { st: *st, lt: *lt };
-            let bytes = btctax_forms::fill_schedule_d(&totals, year).unwrap();
+            let bytes = btctax_forms::fill_schedule_d(&totals, &not_reported_by_box(&totals), year)
+                .unwrap();
             let doc = load(&bytes).unwrap();
             let idx = index(&collect_fields(&doc).unwrap());
             let yes = checkbox_on(&doc, idx[pair.yes.field.as_str()].id);
@@ -461,6 +468,7 @@ fn schedule_d_line17_is_derived_on_every_revision() {
 #[test]
 fn a_swapped_yes_no_map_fails_closed_instead_of_rendering_a_blank_box() {
     let totals = totals_for(&mixed_rows()); // both gains ⇒ line 17 is answered
+    let by_box = btctax_core::schedule_d_by_box(&mixed_rows());
     for year in [2017, 2024, 2025] {
         let mut map = ScheduleDMap::for_year(year).unwrap();
         let pair = map.line17.as_mut().unwrap();
@@ -468,7 +476,7 @@ fn a_swapped_yes_no_map_fails_closed_instead_of_rendering_a_blank_box() {
         // written to the widget that can only render "No" — and vice versa.
         std::mem::swap(&mut pair.yes.field, &mut pair.no.field);
         // `expect_err` would print the whole PDF on failure; name the outcome instead.
-        let msg = match fill_schedule_d_totals(&totals, &map) {
+        let msg = match fill_schedule_d_totals(&totals, &by_box, &map) {
             Ok(_) => panic!(
                 "{year}: a swapped Yes/No map FILLED. It writes an on-state the widget cannot \
                  render, so line 17 comes out BLANK on the filed form while reading back as checked."
@@ -485,7 +493,7 @@ fn a_swapped_yes_no_map_fails_closed_instead_of_rendering_a_blank_box() {
     // everything would also pass the assertions above.
     for year in [2017, 2024, 2025] {
         let map = ScheduleDMap::for_year(year).unwrap();
-        fill_schedule_d_totals(&totals, &map)
+        fill_schedule_d_totals(&totals, &by_box, &map)
             .unwrap_or_else(|e| panic!("{year}: the correct map must still fill — {e}"));
     }
 }
@@ -497,7 +505,12 @@ fn a_swapped_yes_no_map_fails_closed_instead_of_rendering_a_blank_box() {
 fn schedule_d_crypto_slice_leaves_lines_18_through_22_blank() {
     let totals = totals_for(&mixed_rows()); // both gains — the branch that reaches line 18
     for year in [2017, 2024, 2025] {
-        let bytes = btctax_forms::fill_schedule_d(&totals, year).unwrap();
+        let bytes = btctax_forms::fill_schedule_d(
+            &totals,
+            &btctax_core::schedule_d_by_box(&mixed_rows()),
+            year,
+        )
+        .unwrap();
         let doc = load(&bytes).unwrap();
         let fields = collect_fields(&doc).unwrap();
         let map = ScheduleDMap::for_year(year).unwrap();
@@ -529,38 +542,215 @@ fn schedule_d_crypto_slice_leaves_lines_18_through_22_blank() {
     }
 }
 
-#[test]
-fn schedule_d_totals_match_form8949_and_csv() {
-    // The Form 8949 per-part totals, the Schedule D line 3/10 amounts, and the CSV values are all the
-    // exact `Decimal::to_string()` of the same summed legs — so they must be byte-identical.
-    let rows = mixed_rows();
-    let totals = totals_for(&rows);
+/// Every text value of a merged Form 8949 whose fully-qualified name ends in `suffix` — one per
+/// COPY, because `overflow::merge_copies` uniquifies each copy by renaming only the root component.
+fn values_ending(pdf: &[u8], suffix: &str) -> Vec<String> {
+    let doc = load(pdf).unwrap();
+    let fields = collect_fields(&doc).unwrap();
+    fields
+        .iter()
+        .filter(|f| f.fqn.ends_with(suffix))
+        .filter_map(|f| text_value(&doc, f.id))
+        .collect()
+}
 
-    // Schedule D line 3 = ST total; line 10 = LT total.
-    let sd = btctax_forms::fill_schedule_d(&totals, 2025).unwrap();
+/// A short-term **G + I** mix plus one long-term **L** row: two Part I box groups, so Form 8949
+/// prints one page-set per box and Schedule D must carry each on its OWN line (spec 1099-DA T8).
+fn g_and_i_rows() -> Vec<btctax_core::Form8949Row> {
+    let mut rows = vec![
+        row(
+            Form8949Part::ShortTerm,
+            "0.53000000 BTC",
+            rust_decimal_macros::dec!(30000.50),
+            rust_decimal_macros::dec!(25000),
+            true,
+        ),
+        row(
+            Form8949Part::ShortTerm,
+            "0.10000000 BTC",
+            rust_decimal_macros::dec!(6000),
+            rust_decimal_macros::dec!(5500),
+            false,
+        ),
+        row(
+            Form8949Part::LongTerm,
+            "1.00000000 BTC",
+            rust_decimal_macros::dec!(60000),
+            rust_decimal_macros::dec!(20000),
+            false,
+        ),
+    ];
+    // The exchange row answered `basis_matches` routes to G; the self-custody row keeps I.
+    rows[0].box_ = btctax_core::Form8949Box::G;
+    rows
+}
+
+/// ★ spec 1099-DA T8 — the PDF-vs-8949 half, PER BOX GROUP. (Renamed from
+/// `schedule_d_totals_match_form8949_and_csv`, which never opened a CSV: the third artifact was a
+/// `Decimal::to_string()` of the same in-memory total, so the "and csv" in its name asserted
+/// nothing. The real three-artifact cross-check lives in `btctax-cli`, where the CSV is written —
+/// spec 1099-DA T8, I-9/I-13.)
+///
+/// Each Schedule D box line's column (d) must equal that box's Form 8949 page-set total, and the
+/// part total must equal the sum of the groups.
+#[test]
+fn schedule_d_box_lines_match_the_form8949_page_set_totals() {
+    let rows = g_and_i_rows();
+    let totals = totals_for(&rows);
+    let by_box = btctax_core::schedule_d_by_box(&rows);
+
+    let sd = btctax_forms::fill_schedule_d(&totals, &by_box, 2025).unwrap();
     let sdoc = load(&sd).unwrap();
     let sidx = index(&collect_fields(&sdoc).unwrap());
-    let sd_line3_proceeds = text_value(
-        &sdoc,
-        sidx["topmostSubform[0].Page1[0].Table_PartI[0].Row3[0].f1_15[0]"].id,
+    let cell = |fqn: &str| text_value(&sdoc, sidx[fqn].id);
+    let map = ScheduleDMap::ty2025();
+
+    // ── Schedule D: 1b = the G group, 3 = the I group, 10 = the L group. Read OFF THE MAP. ──
+    let g = by_box[&btctax_core::Form8949Box::G];
+    let i = by_box[&btctax_core::Form8949Box::I];
+    let l = by_box[&btctax_core::Form8949Box::L];
+    assert_eq!(
+        cell(&map.line1b.as_ref().unwrap().proceeds_d).as_deref(),
+        Some(g.proceeds.to_string().as_str()),
+        "line 1b (d) = the Box G page-set's proceeds"
+    );
+    assert_eq!(
+        cell(&map.line3.proceeds_d).as_deref(),
+        Some(i.proceeds.to_string().as_str()),
+        "line 3 (d) = the Box I page-set's proceeds"
+    );
+    assert_eq!(
+        cell(&map.line10.proceeds_d).as_deref(),
+        Some(l.proceeds.to_string().as_str()),
+        "line 10 (d) = the Box L page-set's proceeds"
     );
 
-    // Form 8949 Part I totals row (f1_91 = proceeds).
+    // ── …and each equals the total the 8949 PAGE-SET for that box prints. ──
     let f8949 = btctax_forms::fill_form_8949(&rows, 2025).unwrap();
-    let fdoc = load(&f8949).unwrap();
-    let fidx = index(&collect_fields(&fdoc).unwrap());
-    let f8949_st_proceeds = text_value(&fdoc, fidx["topmostSubform[0].Page1[0].f1_91[0]"].id);
+    let mut part_i_totals = values_ending(&f8949, "Page1[0].f1_91[0]");
+    part_i_totals.sort();
+    let mut want = vec![g.proceeds.to_string(), i.proceeds.to_string()];
+    want.sort();
+    assert_eq!(
+        part_i_totals, want,
+        "one Part I page-set per box, each totalling its OWN rows"
+    );
 
-    // The "CSV" value is the identical Decimal Display of the same total.
-    let csv_st_proceeds = totals.st.proceeds.to_string();
-
-    assert_eq!(sd_line3_proceeds.as_deref(), Some(csv_st_proceeds.as_str()));
-    assert_eq!(f8949_st_proceeds.as_deref(), Some(csv_st_proceeds.as_str()));
-    // And the ST total equals the sum of the ST rows (no drift between the two projections).
+    // ── The part total cross-foots: 1b(d) + 3(d) = the Part I total. ──
+    assert_eq!(
+        g.proceeds + i.proceeds,
+        totals.st.proceeds,
+        "the box groups partition Part I"
+    );
     assert_eq!(
         totals.st.proceeds,
         sum_part(&rows, Form8949Part::ShortTerm).proceeds
     );
+}
+
+/// ★ spec 1099-DA T8 KILL — a live-regime `basis_matches` slice: the G total lands on line **1b**
+/// and line **3 is BLANK**. Before T8 the whole Part I total went to line 3 whatever box the rows
+/// carried, which put a broker-reported total under the schedule's *"Box C or Box I"* heading — a
+/// filed page asserting the transactions were NOT reported to the IRS when they were.
+#[test]
+fn a_basis_matches_slice_puts_the_g_total_on_line_1b_and_leaves_line_3_blank() {
+    let mut rows = g_and_i_rows();
+    rows.remove(1); // drop the self-custody I row: Part I is G-only
+    let totals = totals_for(&rows);
+    let by_box = btctax_core::schedule_d_by_box(&rows);
+    let sd = btctax_forms::fill_schedule_d(&totals, &by_box, 2025).unwrap();
+    let doc = load(&sd).unwrap();
+    let idx = index(&collect_fields(&doc).unwrap());
+    let map = ScheduleDMap::ty2025();
+    let l1b = map.line1b.as_ref().unwrap();
+    assert_eq!(
+        text_value(&doc, idx[l1b.proceeds_d.as_str()].id).as_deref(),
+        Some(totals.st.proceeds.to_string().as_str()),
+        "the G total belongs on line 1b (\"Box A or Box G checked\")"
+    );
+    assert_eq!(
+        text_value(&doc, idx[map.line3.proceeds_d.as_str()].id),
+        None,
+        "line 3 is \"Box C or Box I\" — with no I rows it must be BLANK, not zero"
+    );
+    assert_eq!(
+        text_value(&doc, idx[map.line3.gain_h.as_str()].id),
+        None,
+        "…in every column"
+    );
+    // The Form 8949 behind it carries a G page-set.
+    let f8949 = btctax_forms::fill_form_8949(&rows, 2025).unwrap();
+    let fdoc = load(&f8949).unwrap();
+    let fidx = index(&collect_fields(&fdoc).unwrap());
+    let part_i = Form8949Map::ty2025();
+    let st = part_i.parts.iter().find(|p| p.term == "short").unwrap();
+    let g_cell = st.boxes.get("G").expect("the 2025 map binds Box G");
+    assert!(
+        checkbox_on(&fdoc, fidx[g_cell.field.as_str()].id).is_some(),
+        "the page-set behind line 1b is boxed G"
+    );
+}
+
+/// ★ spec 1099-DA T8 KILL — a **TY2024** slice still puts its whole Part I total on line 3 and
+/// leaves 1b blank. The pre-2025 revisions have no digital-asset boxes at all (every row is C/F),
+/// and line 3 reads *"Box C checked"* there (I-6).
+#[test]
+fn a_pre_2025_slice_keeps_the_whole_part_i_total_on_line_3() {
+    let rows = mixed_rows(); // I/L fixtures — line 3 is "Box C **or Box I**" on every revision
+    let totals = totals_for(&rows);
+    let by_box = btctax_core::schedule_d_by_box(&rows);
+    let sd = btctax_forms::fill_schedule_d(&totals, &by_box, 2024).unwrap();
+    let doc = load(&sd).unwrap();
+    let idx = index(&collect_fields(&doc).unwrap());
+    let map = ScheduleDMap::ty2024();
+    assert_eq!(
+        text_value(&doc, idx[map.line3.proceeds_d.as_str()].id).as_deref(),
+        Some(totals.st.proceeds.to_string().as_str()),
+        "the WHOLE Part I total on line 3"
+    );
+    assert_eq!(
+        text_value(
+            &doc,
+            idx[map.line1b.as_ref().unwrap().proceeds_d.as_str()].id
+        ),
+        None,
+        "line 1b is BLANK on a slice with no Box G rows"
+    );
+}
+
+/// ★★★ spec 1099-DA T8 KILL (B1) — an UNBOUND per-box row with rows to print REFUSES; the same map
+/// with no rows for that box FILLS CLEAN.
+///
+/// Both halves are the test. Without the second, a filler that refused everything would pass the
+/// first; without the first, a filler that silently dropped the G total off the page would pass the
+/// second — and a dropped total is invisible on the filed page, which is the whole class this
+/// guards (`CLAUDE.md`'s provenance table, row 2).
+#[test]
+fn an_unbound_box_row_with_rows_to_print_refuses_and_without_them_fills() {
+    let mut map = ScheduleDMap::ty2025();
+    map.line1b = None; // the plant: this revision no longer binds line 1b
+
+    let g_rows = g_and_i_rows();
+    let err = fill_schedule_d_totals(
+        &totals_for(&g_rows),
+        &btctax_core::schedule_d_by_box(&g_rows),
+        &map,
+    )
+    .expect_err("a routed G group with no line-1b cells must REFUSE, never drop the total");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("line1b") && msg.contains("Box A/G"),
+        "the refusal names the unbound row and the box whose total needs it: {msg}"
+    );
+
+    // …and the SAME map fills clean when no G rows exist.
+    let plain = mixed_rows();
+    fill_schedule_d_totals(
+        &totals_for(&plain),
+        &btctax_core::schedule_d_by_box(&plain),
+        &map,
+    )
+    .expect("no Box G rows ⇒ line 1b is simply blank, and the fill proceeds");
 }
 
 #[test]
@@ -569,7 +759,12 @@ fn schedule_d_line3_10_accept_i_l() {
     // totals flow onto exactly these lines. Confirm both are populated from an I/L (digital-asset)
     // fill with no error (the geometric read-back accepts them).
     let totals = totals_for(&mixed_rows());
-    let bytes = btctax_forms::fill_schedule_d(&totals, 2025).unwrap();
+    let bytes = btctax_forms::fill_schedule_d(
+        &totals,
+        &btctax_core::schedule_d_by_box(&mixed_rows()),
+        2025,
+    )
+    .unwrap();
     let doc = load(&bytes).unwrap();
     let idx = index(&collect_fields(&doc).unwrap());
     assert!(text_value(

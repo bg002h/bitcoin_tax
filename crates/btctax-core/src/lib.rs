@@ -25,10 +25,10 @@ pub use donation::DonationDetails;
 pub use event::*;
 pub use forms::{
     broker_key, broker_question_is_live, cohort_of, form_8283, form_8949, route_8949_boxes,
-    schedule_d, year_donation_deduction, BrokerReported, BrokerReporting, BrokerRouteError, Cohort,
-    CohortAnswers, Form8283HowAcquired, Form8283Row, Form8283Section, Form8949Box, Form8949Part,
-    Form8949Row, InformationReturnRegime, ScheduleDPart, ScheduleDTotals,
-    COVERED_ACQUISITION_START, DIGITAL_ASSET_8949_FIRST_YEAR,
+    schedule_d, schedule_d_by_box, year_donation_deduction, BrokerReported, BrokerReporting,
+    BrokerRouteError, Cohort, CohortAnswers, Form8283HowAcquired, Form8283Row, Form8283Section,
+    Form8949Box, Form8949Part, Form8949Row, InformationReturnRegime, ScheduleDPart,
+    ScheduleDTotals, COVERED_ACQUISITION_START, DIGITAL_ASSET_8949_FIRST_YEAR,
 };
 pub use identity::{EventId, Fingerprint, LotId, Source, SourceRef, WalletId};
 pub use optimize::{

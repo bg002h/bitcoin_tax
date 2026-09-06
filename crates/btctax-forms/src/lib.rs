@@ -178,10 +178,20 @@ pub fn stamp_partial_worksheet_watermark(pdf_bytes: &[u8]) -> Result<Vec<u8>, Fo
     watermark::stamp_partial_worksheet(pdf_bytes)
 }
 
-/// Fill **Schedule D** for `year` from the part totals and return the PDF bytes.
-pub fn fill_schedule_d(totals: &ScheduleDTotals, year: i32) -> Result<Vec<u8>, FormsError> {
+/// Fill **Schedule D** for `year` from the part totals + the ROUTED rows' per-box totals, and
+/// return the PDF bytes.
+///
+/// ★ spec 1099-DA T8 — `by_box` is `btctax_core::schedule_d_by_box` over the SAME rows
+/// [`fill_form_8949`] printed, so each box's page-set total and its Schedule D line come from one
+/// aggregation. A box group with no rows writes nothing; one with rows whose map row is unbound
+/// REFUSES rather than dropping the total.
+pub fn fill_schedule_d(
+    totals: &ScheduleDTotals,
+    by_box: &std::collections::BTreeMap<btctax_core::Form8949Box, btctax_core::ScheduleDPart>,
+    year: i32,
+) -> Result<Vec<u8>, FormsError> {
     let map = ScheduleDMap::for_year(year)?;
-    schedule_d::fill_schedule_d_totals(totals, &map)
+    schedule_d::fill_schedule_d_totals(totals, by_box, &map)
 }
 
 /// Fill **Schedule SE** (Form 1040) for `year` from the computed §1401 `SeTaxResult`, the filer's

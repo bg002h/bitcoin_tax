@@ -140,6 +140,15 @@ pub fn totals_for(rows: &[Form8949Row]) -> ScheduleDTotals {
     }
 }
 
+/// ★ spec 1099-DA T8 — the per-BOX Schedule D totals for a hand-built [`ScheduleDTotals`] that has
+/// no rows behind it: the whole Part I on the short-term NOT-REPORTED box and Part II on the
+/// long-term one. Schedule D line 3 reads *"Box C **or Box I**"* and line 10 *"Box F **or Box L**"*
+/// on every revision this crate fills, so this lands both totals on exactly the two lines the
+/// pre-T8 fill wrote — which is what makes these KATs' goldens comparable across the change.
+pub fn not_reported_by_box(totals: &ScheduleDTotals) -> BTreeMap<Form8949Box, ScheduleDPart> {
+    BTreeMap::from([(Form8949Box::I, totals.st), (Form8949Box::L, totals.lt)])
+}
+
 // ══════════════════ the golden packet — ONE builder, shared by every consumer ═════════════════════
 //
 // Both `golden_packet.rs` (the P7 round-trip) and `oracle_sweep_readback.rs` (T4) fill the SAME twelve

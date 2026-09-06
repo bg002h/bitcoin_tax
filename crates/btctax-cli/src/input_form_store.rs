@@ -103,6 +103,20 @@ pub fn draft_exists(conn: &Connection, year: i32) -> Result<bool, CliError> {
     }
 }
 
+/// ★ spec 1099-DA T9 — every year the DRAFT table holds a row for. `Session::broker_reporting_answers`
+/// unions this with `return_inputs::years` so a year whose answers live ONLY in the draft (the
+/// primary authoring path on a params-less year) is not invisible to every read-only surface.
+pub fn draft_years(conn: &Connection) -> Result<Vec<i32>, CliError> {
+    init_draft_table(conn)?;
+    let mut st = conn.prepare("SELECT year FROM return_inputs_draft ORDER BY year")?;
+    let rows = st.query_map([], |r| r.get::<_, i32>(0))?;
+    let mut out = Vec::new();
+    for y in rows {
+        out.push(y?);
+    }
+    Ok(out)
+}
+
 pub(crate) fn parked_flag(conn: &Connection, year: i32) -> Result<Option<bool>, CliError> {
     init_draft_table(conn)?;
     match conn.query_row(
@@ -207,6 +221,52 @@ pub fn load(conn: &Connection, year: i32) -> Result<(Loaded, Option<StaleNote>),
         }
     }
     Ok((committed_or_fresh(conn, year)?, None))
+}
+
+/// ★★★ spec 1099-DA T9 — **the year's WORKING return, for a reader that must not create a row.**
+///
+/// A thin wrapper over [`load`]: the §6.1 precedence every other reader uses, **a draft shadows the
+/// committed row**, the §6.3 stale split unchanged (a stale WIP draft is discarded and the caller
+/// gets the [`StaleNote`] to surface; a stale PARKED draft refuses with
+/// [`CliError::StaleParkedDraft`] before the caller writes a byte).
+///
+/// Two things it does that `load` does not, and they are the whole point:
+///
+/// - **A PARKED draft carries NO live return.** `parked = 1` marks a return the filer switched back
+///   to a raw tax-profile — testimony they WITHDREW. Filing from it would file withdrawn testimony,
+///   so the accessor answers `None` and the caller falls to its no-answers arm.
+/// - **It never creates anything.** No row is written and `ReturnInputs::default()` is never
+///   persisted: the default carries `filing_status: Single`, testimony the filer never gave, which
+///   `classify()`'s own exemption reason ("no default to launder") forbids. `resolve.rs` is
+///   untouched by this file, so a draft still cannot shadow a stored `tax_profile`.
+pub fn working_return(
+    conn: &Connection,
+    year: i32,
+) -> Result<(Option<ReturnInputs>, Option<StaleNote>), CliError> {
+    let (loaded, note) = load(conn, year)?;
+    let ri = match loaded {
+        // A parked draft is a WITHDRAWN return — not the working one (see above).
+        Loaded::Draft { parked: true, .. } => None,
+        Loaded::Draft { ri, parked: false } => Some(ri),
+        Loaded::Committed(ri) => Some(ri),
+        Loaded::Fresh => None,
+    };
+    Ok((ri, note))
+}
+
+/// ★ spec 1099-DA T9 — the **Form 1099-DA answers** projection of [`working_return`]: the ONE
+/// resolution every reader of `broker_reporting` goes through, so the viewer's Box column, the TUI
+/// export, `btctax export --csv` and the CLI export can never show or file two different answer
+/// sets. `None` when no working return exists (or it is parked).
+///
+/// The one deliberate exception is the FULL return (`export-irs-pdf` arm (1)), which files from the
+/// COMMITTED row by design — committing is possible on a params-bundled year, and nobody re-points
+/// that arm here.
+pub fn broker_answers(
+    conn: &Connection,
+    year: i32,
+) -> Result<Option<btctax_core::BrokerReporting>, CliError> {
+    Ok(working_return(conn, year)?.0.map(|ri| ri.broker_reporting))
 }
 
 /// The no-draft tail of [`load`]: the committed `return_inputs` row (if any) else `Fresh`.

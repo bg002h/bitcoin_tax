@@ -184,8 +184,13 @@ fn pseudo_mode_injects_placeholder_profile_clearing_tax_profile_missing() {
         render::PseudoDisclosure::Placeholder,
         "pseudo-on + count==0 + no stored profile is the Placeholder channel"
     );
-    let rendered =
-        render::render_tax_outcome(2025, &out_on, advisory.as_deref(), pseudo_contributed);
+    let rendered = render::render_tax_outcome(
+        2025,
+        &out_on,
+        advisory.as_deref(),
+        pseudo_contributed,
+        false,
+    );
     assert!(
         rendered.contains("estimated on a synthetic $0 placeholder profile"),
         "the placeholder-variant banner must lead the render:\n{rendered}"
@@ -218,6 +223,7 @@ fn report_tax_year_renders_golden() {
         &outcome,
         advisory.as_deref(),
         render::PseudoDisclosure::None,
+        false,
     );
 
     assert!(
@@ -344,7 +350,8 @@ fn report_tax_year_renders_schedule_se_for_business_mining() {
     } else {
         panic!("computable (blocker resolved by classify)");
     }
-    let it = render::render_tax_outcome(2025, &outcome, None, render::PseudoDisclosure::None);
+    let it =
+        render::render_tax_outcome(2025, &outcome, None, render::PseudoDisclosure::None, false);
     assert!(
         !it.contains("14129.55"),
         "SE tax must NOT appear in the income-tax report total (standalone, D5):\n{it}"
@@ -525,6 +532,7 @@ fn report_tax_year_footer_discloses_1211_loss_and_interest_nii_included() {
         &outcome,
         advisory.as_deref(),
         render::PseudoDisclosure::None,
+        false,
     );
 
     // B-M1 negatives (wrong-direction language must be absent):
@@ -579,6 +587,7 @@ fn report_tax_year_components_reconcile_to_total() {
         &outcome,
         advisory.as_deref(),
         render::PseudoDisclosure::None,
+        false,
     );
 
     // B-F1: all dollar figures are now fmt_money-formatted to exactly 2dp; assert the 2dp forms.
@@ -630,6 +639,7 @@ fn report_tax_year_without_profile_says_not_computable() {
         &outcome,
         advisory.as_deref(),
         render::PseudoDisclosure::None,
+        false,
     );
 
     assert!(
@@ -793,6 +803,7 @@ fn report_tax_year_with_hard_blocker_says_not_computable() {
         &outcome,
         advisory.as_deref(),
         render::PseudoDisclosure::None,
+        false,
     );
 
     assert!(
@@ -918,6 +929,7 @@ st-sell,2026-06-15 12:00:00 UTC,Sell,BTC,1.00000000,USD,40000.00,40000.00,40000.
         &outcome,
         advisory.as_deref(),
         render::PseudoDisclosure::None,
+        false,
     );
 
     // Advisory must contain the mismatch message.
@@ -1806,6 +1818,7 @@ fn the_report_never_shows_two_unlabelled_carryforward_out_figures() {
             &outcome,
             advisory.as_deref(),
             pseudo_contributed,
+            false,
         );
         out.push_str(&dual_report.expect("a ReturnInputs year renders the dual report"));
         out

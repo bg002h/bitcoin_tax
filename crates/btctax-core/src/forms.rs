@@ -484,6 +484,28 @@ pub struct ScheduleDTotals {
     pub lt: ScheduleDPart,
 }
 
+/// ★ spec 1099-DA R6/T8 — the Schedule D totals **per Form 8949 BOX**, aggregated from the ROUTED
+/// rows (never re-derived from `state`, so the printed page-set and the schedule cannot disagree).
+///
+/// The key is the BOX ALONE, because the box determines the part — A/B/C/G/H/I are Part I and
+/// D/E/F/J/K/L are Part II ([`Form8949Part`] carries no `Ord`, and would be redundant here). Summed
+/// over the same `proceeds`/`cost_basis`/`gain` cells [`schedule_d`] sums, so
+/// `Σ schedule_d_by_box(rows)` over a part's boxes equals that part's [`ScheduleDPart`] exactly.
+///
+/// The caller maps each box to the line the FORM's own text gives it (1b = A|G, 2 = B|H, 3 = C|I,
+/// 8b = D|J, 9 = E|K, 10 = F|L) — the same pairing `printed::schedule_d_lines` encodes for the full
+/// return, so a filer's slice and their full return cannot put one total on two different lines.
+pub fn schedule_d_by_box(rows: &[Form8949Row]) -> BTreeMap<Form8949Box, ScheduleDPart> {
+    let mut out: BTreeMap<Form8949Box, ScheduleDPart> = BTreeMap::new();
+    for r in rows {
+        let p = out.entry(r.box_).or_default();
+        p.proceeds += r.proceeds;
+        p.cost_basis += r.cost_basis;
+        p.gain += r.gain;
+    }
+    out
+}
+
 /// Aggregate the year's disposal legs into Schedule D part totals (Part I ST + Part II LT), summing
 /// proceeds/basis/gain within each character. Pure over `state.disposals`; year-scoped by
 /// `Disposal.disposed_at.year() == year`. An empty year yields all-zero totals.

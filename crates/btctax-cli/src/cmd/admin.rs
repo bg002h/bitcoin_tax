@@ -203,10 +203,13 @@ pub fn export_snapshot(
     // `cli_io_with_path` enriches BOTH. A `csv::Error` (serialization, not a path problem) passes
     // through.
     // spec 1099-DA — the year's regime and the stored answers (if any) route the 8949 CSV's boxes
+    // ★ spec 1099-DA T9 — the answers come from the ONE resolution every surface reads (a draft
+    //   shadows the committed row; a parked draft carries none), never `return_inputs::get`: the CSV
+    //   a filer hands a preparer must show the same boxes the PDF export files.
     let broker = match tax_year {
         Some(y) => Some((
             crate::year_readiness::regime_or_pre_regime(y)?,
-            crate::return_inputs::get(session.conn(), y)?.map(|ri| ri.broker_reporting),
+            crate::input_form_store::broker_answers(session.conn(), y)?,
         )),
         None => None,
     };
@@ -308,6 +311,14 @@ pub struct VoucherChoice {
 /// each one drives.
 #[derive(Debug, Clone)]
 pub struct IrsPdfReport {
+    /// ★ spec 1099-DA R6 (M-6) — the CRYPTO-SLICE-FILED-FROM-ANSWERS note, printed AFTER the file
+    /// list. `Some` only on arm (2): the year's answers are stored, its full-return parameters are
+    /// not bundled, and what was written is an ATTACHMENT SET rather than a return.
+    pub slice_attachment_note: Option<String>,
+    /// ★ spec 1099-DA R6 (M-14) — the §6.3 [`crate::input_form_store::StaleNote`], rendered the way
+    /// `scrub` renders it, for printing BEFORE the file list: a schema-stale WIP draft was skipped,
+    /// so the answers filed came from the committed row (or none). `None` on every other path.
+    pub stale_draft_note: Option<String>,
     pub f8949_path: Option<PathBuf>,
     pub schedule_d_path: Option<PathBuf>,
     pub tax_year: i32,
@@ -649,6 +660,33 @@ pub(crate) fn export_irs_pdf_from_session(
     attest: Option<&str>,
     voucher: VoucherChoice,
 ) -> Result<IrsPdfReport, CliError> {
+    export_irs_pdf_from_session_with_regime(
+        session, state, events, out_dir, tax_year, forms, attest, voucher, None,
+    )
+}
+
+/// [`export_irs_pdf_from_session`] with the year's Form 1099-DA **regime** supplied by the caller
+/// instead of joined from its `YEAR.toml` record.
+///
+/// ★★★ **A TEST SEAM, and the only one this build needs (spec 1099-DA R6, kills).** The R6 arms are
+/// observable only where a year has BOTH a live (basis-reporting) regime AND bundled form
+/// templates, and no bundled year has both: TY2026's record is live and it bundles zero templates
+/// (nothing about a printed slice is observable there, N-5), while TY2025 has fifteen templates and
+/// a `proceeds`-only regime. Every other injection point on this path — the answers, the ledger,
+/// the vault — is already a parameter; the regime was the one fact the export read from a bundled
+/// file, so this hands it in. `None` is production: the record decides, exactly as before.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn export_irs_pdf_from_session_with_regime(
+    session: &Session,
+    state: &btctax_core::state::LedgerState,
+    events: &[LedgerEvent],
+    out_dir: &Path,
+    tax_year: i32,
+    forms: &[FormArg],
+    attest: Option<&str>,
+    voucher: VoucherChoice,
+    regime_override: Option<btctax_core::InformationReturnRegime>,
+) -> Result<IrsPdfReport, CliError> {
     // ★★★ (seam review I-2) The MIRROR of `extension`'s refusal (4), and the direction that happens
     // FIRST in time: April's `btctax extension` writes `f4868.pdf`, October's `export-irs-pdf` reuses
     // the same `--out`, and the whole packet lands AROUND the extension application — no refusal, no
@@ -679,7 +717,23 @@ pub(crate) fn export_irs_pdf_from_session(
     // every attachment the forms cite, so the reason for the refusal is gone. Deleting it downgrades a
     // type-level impossibility to a branch, which is why the branch is HERE, alone, and pinned by KATs
     // in BOTH directions.
-    if crate::return_inputs::exists(session.conn(), tax_year)? {
+    // ★★★ spec 1099-DA R6 — THE DISPATCH IS THREE-WAY, and its predicate is a FUNCTION CALL, never a
+    //     declared status: `full_return_for(year).is_none()` is what "the year cannot compute a full
+    //     return" means, and `YEAR.toml`'s `status` is a declaration that can disagree with the build.
+    //
+    //     1. inputs stored AND the parameters bundled → the full-return packet (unchanged).
+    //     2. the ANSWERS stored AND the parameters NOT bundled → the CRYPTO SLICE, filed from those
+    //        answers. Reached by NOT returning early above.
+    //     3. otherwise → the slice as it has always been: a live year with an exchange disposition
+    //        refuses before any byte and names the exit. A year whose parameters ARE bundled but has
+    //        no committed row is arm (3) too, and its refusal names COMMITTING, not answering.
+    let params_bundled = {
+        use btctax_core::tax::tables::FullReturnTables;
+        btctax_adapters::BundledFullReturnTables::load()
+            .full_return_for(tax_year)
+            .is_some()
+    };
+    if params_bundled && crate::return_inputs::exists(session.conn(), tax_year)? {
         // The full-return pipeline runs the BG-D8 gate itself (checked first there too).
         let mut report =
             export_full_return(session, state, events, out_dir, tax_year, attest, voucher)?;
@@ -693,52 +747,22 @@ pub(crate) fn export_irs_pdf_from_session(
         return Ok(report);
     }
 
-    // ★★★ (I-7) `--pay-by-check` on a year with NO full-return inputs must REFUSE, naming the reason.
-    // The crypto slice computes no Form 1040 at all, so there is no line 37 for box 3 to carry — and a
-    // voucher whose amount btctax invented would tell the Service the filer is paying a figure no
-    // return supports. Writing the slice silently and skipping the voucher the filer asked for is the
-    // one answer a tax tool may not give.
-    if voucher.pay_by_check {
-        return Err(CliError::Usage(format!(
-            "there is no Form 1040 line 37 for {tax_year} — Form 1040-V accompanies a full return; \
-             see `income import`"
-        )));
-    }
+    // ★★★ spec 1099-DA T9 — the year's WORKING return, resolved ONCE and read by EVERY arm-(2) gate
+    //     below, so no two gates can see a different return than the one the answers came from.
+    //     Called only AFTER arm (1) is ruled out (N-7). It creates no row: a draft shadows the
+    //     committed row (§6.1), a stale WIP draft is discarded with a note, a stale PARKED draft
+    //     REFUSES here, and a current parked draft carries no live answers at all.
+    let (working, stale_note) = crate::input_form_store::working_return(session.conn(), tax_year)?;
+    // Arm (2)'s predicate: the answers are stored AND the year's parameters are not bundled.
+    let answers_stored = working
+        .as_ref()
+        .is_some_and(|ri| !ri.broker_reporting.0.is_empty());
+    let files_from_answers = answers_stored && !params_bundled;
 
-    // ★★★ `--forms full-return` on a year with NO full-return inputs must REFUSE, loudly. `wants()` is
-    // `selected.is_empty() || selected.contains(f)`, so this selection matches no crypto-slice form and
-    // would otherwise write an EMPTY export directory and exit 0 — a filer would reasonably read that
-    // as "there was nothing to file". Silence is the one answer a tax tool may not give here.
-    if forms.contains(&FormArg::FullReturn) {
-        return Err(CliError::Usage(format!(
-            "--forms full-return asks for the complete return packet, but tax year {tax_year} has no \
-             full-return inputs. Author them first with `btctax income import --year {tax_year} \
-             --file <inputs.toml>`, or drop --forms to export the crypto slice."
-        )));
-    }
-
+    // ── The gates, IN ORDER, before any byte (spec 1099-DA R6 I-5). ──────────────────────────────
     // BG-D8 completeness gate (crypto-slice path) — a promoted-basis leg without its complete Form 8275
     // is a HARD refusal, checked FIRST (before the pseudo watermark check and any byte written).
     promote_export_gate(state, events, Some(tax_year))?;
-
-    // Attestation gate — no fictional tax form leaves the machine unguarded, and a refusal
-    // writes no bytes. (A fully-real ledger ignores `attest`.)
-    let watermarked = state.pseudo_active();
-    if watermarked {
-        require_attestation(attest)?;
-    }
-
-    // Reuse the projection's capital-gains data verbatim (no recompute).
-    let rows = btctax_core::form_8949(state, tax_year);
-    // ★ spec 1099-DA R1 / ROADMAP §0a S10 — the crypto slice is CLOSED on a LIVE year: the Form
-    //   1099-DA answers live on the return inputs, and this arm runs only when none is stored, so a
-    //   live year refuses BEFORE any byte and names the exit. TY2025 (proceeds only) and a live year
-    //   with no exchange disposition fill as before.
-    let regime = crate::year_readiness::regime_or_refuse(tax_year)?;
-    if let Some(e) = slice_broker_refusal(tax_year, regime, &rows) {
-        return Err(e);
-    }
-    let totals = btctax_core::schedule_d(state, tax_year);
 
     // Form 8275 (Disclosure Statement) — Task 16: `Some` iff a promoted-basis disposal leg files in
     // `tax_year` (the same `disclosure_8275` scoping `promote_export_gate` above already used to confirm
@@ -749,6 +773,134 @@ pub(crate) fn export_irs_pdf_from_session(
     //   export (`export_full_return`) is where it belongs, and it passes it.
     let printed_8275 = btctax_core::tax::form8275::disclosure_8275(events, state, tax_year, None)
         .map(|d| btctax_core::tax::printed::printed_8275(&d));
+    let details = session.donation_details()?;
+    let rows_8283 = btctax_core::form_8283(state, tax_year, &details);
+
+    // ★★★ spec 1099-DA R6 (I-1/I-7) — THE FORM-LEVEL GATE. On arm (2) a partially ported year must
+    //     write NOTHING: every map the SELECTED forms can reach has to resolve first, and the
+    //     refusal names the FIRST missing stem. (`SUPPORTED_YEARS` is a YEAR-level answer — "does
+    //     any form of this year fill" — and is a different question, checked below.)
+    if files_from_answers {
+        slice_map_gate(
+            tax_year,
+            forms,
+            !rows_8283.is_empty(),
+            !se_net_income(state, tax_year).is_zero(),
+            printed_8275.is_some(),
+        )?;
+    }
+
+    // Attestation gate — no fictional tax form leaves the machine unguarded, and a refusal
+    // writes no bytes. (A fully-real ledger ignores `attest`.)
+    let watermarked = state.pseudo_active();
+    if watermarked {
+        require_attestation(attest)?;
+    }
+
+    // Reuse the projection's capital-gains data verbatim (no recompute).
+    let mut rows = btctax_core::form_8949(state, tax_year);
+    let regime = match regime_override {
+        Some(r) => r,
+        None => crate::year_readiness::regime_or_refuse(tax_year)?,
+    };
+    if files_from_answers {
+        // ★ ARM (2). The boxes are ROUTED from the stored answers through EXACTLY the screen and the
+        //   router the full return uses — one screen, one router, so a filer's slice and their full
+        //   return can never carry different boxes.
+        let ri = working.as_ref().expect("answers ⇒ a working return");
+        if let Some(r) =
+            btctax_core::tax::return_refuse::screen_broker_reporting(ri, state, tax_year, regime)
+        {
+            // ★ The SLICE's own sentence, carrying the SAME reason and detail. It must never say
+            //   "the return is not computable" — on this arm that is false: the slice computes, and
+            //   what is missing is one Form 1099-DA answer.
+            return Err(CliError::Usage(format!(
+                "TY{tax_year}: the crypto slice cannot choose a Form 8949 box [{:?}]: {} No forms were written.",
+                r.reason, r.detail
+            )));
+        }
+        // ★ The Form 8283 restriction row, in its SLICE form. A declared restriction reduces or
+        //   denies the §170 deduction (Reg §1.170A-7) and btctax values every donation at full fair
+        //   market value, so the 8283 it would print overstates the gift. The full return refuses
+        //   the whole year for this (`DonationRestrictionsUnresolved`); the slice has no Schedule A
+        //   to condition on, so the predicate is the one the slice can see — the year EMITS an 8283.
+        if ri.donations_had_restrictions == Some(true) && !rows_8283.is_empty() {
+            return Err(CliError::Usage(format!(
+                "TY{tax_year}: you declared that at least one donated property had a restriction or a \
+                 retained right (Form 8283 line 5a, 5b or 5c). Under Reg §1.170A-7 that REDUCES or \
+                 DENIES the §170 deduction, and btctax values every donation at full fair market \
+                 value — so the Form 8283 it would print for {tax_year} overstates the gift. It \
+                 cannot tell which gift is affected: complete Form 8283 for the restricted donation \
+                 by hand, with the reduced amount. No forms were written."
+            )));
+        }
+        btctax_core::route_8949_boxes(&mut rows, regime, &ri.broker_reporting).map_err(|e| {
+            CliError::Usage(format!(
+                "TY{tax_year}: the stored Form 1099-DA answers do not settle every Form 8949 row ({e}). No forms were written."
+            ))
+        })?;
+    } else {
+        // ★ ARM (3) — spec 1099-DA R1 / R6: no answers are stored, so a LIVE year refuses BEFORE any
+        //   byte and names the exit its own state actually has. TY2025 (proceeds only) and a live
+        //   year with no exchange disposition fill as before.
+        if let Some(e) = slice_broker_refusal(tax_year, regime, &rows) {
+            return Err(e);
+        }
+    }
+
+    // ★ spec 1099-DA R6 (M-5/M-7) — the EXPORT-TIME price-coverage check, on BOTH arms, before any
+    //   byte: a packet whose price dataset stops mid-year is a return computed from a partial year.
+    crate::year_readiness::price_coverage_or_refuse(tax_year)?;
+
+    // ★★★ (I-7) `--pay-by-check` on a year with no full return must REFUSE, naming the reason. The
+    // crypto slice computes no Form 1040 at all, so there is no line 37 for box 3 to carry — and a
+    // voucher whose amount btctax invented would tell the Service the filer is paying a figure no
+    // return supports. Writing the slice silently and skipping the voucher the filer asked for is the
+    // one answer a tax tool may not give.
+    // ★ spec 1099-DA R6 (M-10) — RE-WORDED when the year's parameters are not bundled: telling a
+    //   filer who has already authored their inputs to "see `income import`" names a step they have
+    //   done, and hides the real reason (this build carries no full return for the year).
+    if voucher.pay_by_check {
+        return Err(if params_bundled {
+            CliError::Usage(format!(
+                "there is no Form 1040 line 37 for {tax_year} — Form 1040-V accompanies a full return; \
+                 see `income import`"
+            ))
+        } else {
+            CliError::Usage(format!(
+                "there is no Form 1040 line 37 for {tax_year} — Form 1040-V accompanies a full return, \
+                 and the TY{tax_year} full-return parameters are not bundled in this build, so btctax \
+                 computes no Form 1040 for the year at all. Authoring inputs will not change that; the \
+                 full return follows when the year's package is bundled. No forms were written."
+            ))
+        });
+    }
+
+    // ★★★ `--forms full-return` on a year with no full return must REFUSE, loudly. `wants()` is
+    // `selected.is_empty() || selected.contains(f)`, so this selection matches no crypto-slice form and
+    // would otherwise write an EMPTY export directory and exit 0 — a filer would reasonably read that
+    // as "there was nothing to file". Silence is the one answer a tax tool may not give here.
+    if forms.contains(&FormArg::FullReturn) {
+        return Err(if params_bundled {
+            CliError::Usage(format!(
+                "--forms full-return asks for the complete return packet, but tax year {tax_year} has no \
+                 full-return inputs. Author them first with `btctax income import --year {tax_year} \
+                 --file <inputs.toml>`, or drop --forms to export the crypto slice."
+            ))
+        } else {
+            CliError::Usage(format!(
+                "--forms full-return asks for the complete return packet, but the TY{tax_year} \
+                 full-return parameters are not bundled in this build — btctax computes no Form 1040 \
+                 for {tax_year} at all, whatever inputs are stored. Drop --forms to export the crypto \
+                 slice (Form 8949, Schedule D, …), which your own Form 1040 carries; the full return \
+                 follows when the year's package is bundled."
+            ))
+        });
+    }
+
+    let totals = btctax_core::schedule_d(state, tax_year);
+    let by_box = btctax_core::schedule_d_by_box(&rows);
+
     // Task 16 / ADD-2 (mirrors `export_full_return`'s pre-check below): v1 does not paginate Form 8275 —
     // refuse HERE, before `mkdir_out`, so an overflowing year (> 6 promoted disposal legs) names the year
     // + a concrete remedy and writes ZERO bytes, instead of a bare `FormsError::Overflow` display after
@@ -830,7 +982,7 @@ pub(crate) fn export_irs_pdf_from_session(
         None
     };
     let schedule_d_path = if wants(forms, FormArg::ScheduleD) {
-        let bytes = stamp(btctax_forms::fill_schedule_d(&totals, tax_year)?)?;
+        let bytes = stamp(btctax_forms::fill_schedule_d(&totals, &by_box, tax_year)?)?;
         let path = out_dir.join("schedule_d.pdf");
         write_bytes_owner_only(&path, &bytes)?;
         Some(path)
@@ -889,8 +1041,9 @@ pub(crate) fn export_irs_pdf_from_session(
     let mut form_8283_needs_review = false;
     let mut form_8283_section_b = None;
     if wants(forms, FormArg::Form8283) {
-        let details = session.donation_details()?;
-        let rows_8283 = btctax_core::form_8283(state, tax_year, &details);
+        // ★ spec 1099-DA R6 — the SAME `rows_8283` the arm-(2) gates read above (one derivation, so
+        //   the restriction refusal and the printed form can never disagree about whether the year
+        //   emits an 8283).
         if let Some(bytes) = btctax_forms::fill_form_8283(&rows_8283, tax_year)? {
             form_8283_needs_review = rows_8283.iter().any(|r| r.needs_review);
             form_8283_section_b = rows_8283
@@ -967,6 +1120,29 @@ pub(crate) fn export_irs_pdf_from_session(
         .filter(|b| b.kind.severity() == Severity::Hard)
         .count();
     Ok(IrsPdfReport {
+        // ★ spec 1099-DA R6 (M-6) — what this packet IS, said once, on the arm that files from the
+        //   stored answers. `form_1040_capgains.pdf` renders as a Form 1040 and is a WORKSHEET; the
+        //   set as a whole is an attachment to the filer's OWN 1040, not a return.
+        slice_attachment_note: files_from_answers.then(|| {
+            format!(
+                "TY{tax_year}: full-return parameters are not bundled in this build — this is the \
+                 crypto slice, an ATTACHMENT SET (Form 8949, Schedule D, …) with the boxes routed \
+                 from your Form 1099-DA answers; your own Form 1040 carries it, and \
+                 `form_1040_capgains.pdf` is a worksheet, not a return. The full return follows when \
+                 the year's package is bundled."
+            )
+        }),
+        // ★ spec 1099-DA R6 (M-14) — reworded, not `Display`ed verbatim: this path never calls
+        //   `session.save()`, so nothing was persistently discarded; the load-bearing half is that
+        //   the draft the filer was editing was SKIPPED and is not what filed.
+        stale_draft_note: stale_note.map(|n| {
+            format!(
+                "your {}-schema draft for {} could not be read by this build (expected v{}), so it \
+                 was skipped and the last COMMITTED return is what these forms were filed from. \
+                 Nothing was deleted.",
+                n.found, n.year, n.expected
+            )
+        }),
         // The crypto slice computes no full return, so there are no full-return advisories — and no
         // Schedule A, hence no §170(d)(1) carryover either.
         advisories: Vec::new(),
@@ -983,11 +1159,24 @@ pub(crate) fn export_irs_pdf_from_session(
         //   either. The full-return path already says so outright (the "was IGNORED" clause in
         //   `write_payment_voucher`); this arm never reaches that function, so the same filer slip
         //   was silent on a crypto-slice year. Same class, same answer: a note, never a refusal.
+        // ★ spec 1099-DA R6 (M-10, the same class as the two refusals above) — the REASON clause
+        //   follows `params_bundled` too. On arm (2) the filer HAS authored inputs, so "has no
+        //   full-return inputs … see `income import`" names a step they have done and hides the
+        //   real one (this build carries no full return for the year).
         form_1040v_note: voucher.pay.map(|p| {
+            let why = if params_bundled {
+                format!(
+                    "{tax_year} has no full-return inputs, so there is no Form 1040 line 37 for box 3 \
+                     to carry (see `income import`)"
+                )
+            } else {
+                format!(
+                    "the TY{tax_year} full-return parameters are not bundled in this build, so there \
+                     is no Form 1040 line 37 for box 3 to carry"
+                )
+            };
             format!(
-                "--pay ${p} was IGNORED: it sets Form 1040-V box 3, and no voucher was written — \
-                 {tax_year} has no full-return inputs, so there is no Form 1040 line 37 for box 3 to \
-                 carry (see `income import`)."
+                "--pay ${p} was IGNORED: it sets Form 1040-V box 3, and no voucher was written — {why}."
             )
         }),
         full_return_paths: Vec::new(),
@@ -1291,6 +1480,12 @@ fn export_full_return(
     // byte written): a promoted-basis leg without its complete Form 8275 is a HARD refusal.
     promote_export_gate(state, events, Some(tax_year))?;
 
+    // ★ spec 1099-DA R6 (M-5/M-7) — the export-time price-coverage check runs on BOTH arms, before
+    //   any byte. `YearReadiness::problems` asks the same question but only of a `filable` year and
+    //   only as a static report; a packet computed from a price dataset that stops mid-year is a
+    //   wrong number on a form the filer signs.
+    crate::year_readiness::price_coverage_or_refuse(tax_year)?;
+
     let tables = BundledTaxTables::load();
     let fr_tables = BundledFullReturnTables::load();
     let ScreenedReturn {
@@ -1582,6 +1777,10 @@ fn export_full_return(
         .filter(|b| b.kind.severity() == Severity::Hard)
         .count();
     Ok(IrsPdfReport {
+        // The FULL return is a return, not an attachment set, and it files from the COMMITTED row
+        // (spec 1099-DA R6's one deliberate exception) — so neither slice note applies here.
+        slice_attachment_note: None,
+        stale_draft_note: None,
         advisories,
         // ★ P6 — the §170(d)(1) carryover rides out to the caller, which prints it beside the other
         // §170 notes. Taken from the SAME `assemble_absolute` result the packet was printed from, so
@@ -2006,6 +2205,88 @@ mod tests {
 /// planted red in every direction (B1): `Some` iff the question is LIVE for these rows (the year's
 /// regime reports basis AND ≥ 1 row was disposed on an exchange). The answers are not consulted —
 /// they live on `ReturnInputs`, which this arm has by construction not got.
+/// ★★★ spec 1099-DA R6 (I-1/I-7) — **THE FORM-LEVEL GATE for the crypto slice's answer-filed arm.**
+///
+/// A year is ported form by form. `SUPPORTED_YEARS` answers a YEAR-level question — *does any form
+/// of this year fill?* — and a year that answers yes can still be missing the map for a form THIS
+/// export will write. Without this gate the missing map surfaces mid-write, after `out_dir` and
+/// `basis_methodology.txt` are already on disk: a directory a filer could mail with the disclosure
+/// in it and the form it discloses absent.
+///
+/// `--forms` narrows the set through [`wants`], and the three conditional forms are demanded only
+/// when this year's DATA will reach them. The refusal names the FIRST missing stem, in the order
+/// the packet writes them.
+fn slice_map_gate(
+    tax_year: i32,
+    forms: &[FormArg],
+    needs_8283: bool,
+    needs_se: bool,
+    needs_8275: bool,
+) -> Result<(), CliError> {
+    let mut probes: Vec<(&'static str, Result<(), btctax_forms::FormsError>)> = Vec::new();
+    if wants(forms, FormArg::F8949) {
+        probes.push((
+            "f8949",
+            btctax_forms::Form8949Map::for_year(tax_year).map(|_| ()),
+        ));
+    }
+    if wants(forms, FormArg::ScheduleD) {
+        probes.push((
+            "schedule_d",
+            btctax_forms::ScheduleDMap::for_year(tax_year).map(|_| ()),
+        ));
+    }
+    if wants(forms, FormArg::Form1040) {
+        probes.push((
+            "f1040",
+            btctax_forms::Form1040Map::for_year(tax_year).map(|_| ()),
+        ));
+    }
+    if needs_8283 && wants(forms, FormArg::Form8283) {
+        probes.push((
+            "f8283",
+            btctax_forms::Form8283Map::for_year(tax_year).map(|_| ()),
+        ));
+    }
+    if needs_se && wants(forms, FormArg::ScheduleSe) {
+        probes.push((
+            "schedule_se",
+            btctax_forms::ScheduleSeMap::for_year(tax_year).map(|_| ()),
+        ));
+    }
+    if needs_8275 {
+        // NOT behind `wants`: the Form 8275 disclosure rides the packet unconditionally whenever a
+        // promoted disposal leg files (BG-D8 / whole-branch tax M-1).
+        probes.push((
+            "f8275",
+            btctax_forms::Form8275Map::for_year(tax_year).map(|_| ()),
+        ));
+    }
+    first_unresolved_map(tax_year, &probes)
+}
+
+/// The pure half of [`slice_map_gate`]: the FIRST probe whose map did not resolve, as the refusal a
+/// filer reads. Split out so a kill can plant a partially ported year — a probe list with one map
+/// bound and the next missing — which no BUNDLED year is.
+fn first_unresolved_map(
+    tax_year: i32,
+    probes: &[(&str, Result<(), btctax_forms::FormsError>)],
+) -> Result<(), CliError> {
+    let Some((stem, err)) = probes
+        .iter()
+        .find_map(|(stem, r)| r.as_ref().err().map(|e| (*stem, e)))
+    else {
+        return Ok(());
+    };
+    Err(CliError::Usage(format!(
+        "cannot export TY{tax_year}: this build has no usable `{stem}` map for the year ({err}), and \
+         the crypto slice would write that form. A PARTIALLY ported year must write nothing rather \
+         than a packet missing one of its forms — a filer collating the directory could not tell \
+         which. No forms were written; use `--forms` to select only the forms this build can fill, \
+         or wait for the year's package."
+    )))
+}
+
 pub fn slice_broker_refusal(
     tax_year: i32,
     regime: btctax_core::InformationReturnRegime,
@@ -2018,15 +2299,32 @@ pub fn slice_broker_refusal(
         .iter()
         .filter(|r| btctax_core::broker_key(r).is_some())
         .count();
-    // build review M-2: the exit is the FULL return, which may itself not be fillable yet — say so
-    let readiness = crate::year_readiness::import_note(tax_year)
-        .map(|n| format!(" ({n})"))
-        .unwrap_or_default();
+    // ★★★ spec 1099-DA R6 (M-13) — THE EXIT SENTENCE NAMES THE EXIT **THIS STATE ACTUALLY HAS**, and
+    //     the two states are told apart by one fact: are the year's full-return parameters bundled?
+    //
+    //     - bundled → a committed return CAN compute, so the exit is COMMITTING one (the fourth
+    //       dispatch cell: answers held in the TUI draft, parameters bundled, no committed row —
+    //       telling that filer to "answer" names a step they have already done).
+    //     - not bundled → no full return exists for the year at any input, and since R6 the SLICE
+    //       itself fills from the answers. "Then export the full return" would name an exit the
+    //       build does not have.
+    let params_bundled = {
+        use btctax_core::tax::tables::FullReturnTables;
+        btctax_adapters::BundledFullReturnTables::load()
+            .full_return_for(tax_year)
+            .is_some()
+    };
+    let exit = if params_bundled {
+        "commit the return in the TUI input form (the commit succeeds once the year's parameters \
+         are bundled), then export the full return"
+    } else {
+        "answer them in the TUI input form (the Form 1099-DA block lists your venues) or via \
+         `income import` (the `[broker_reporting.<provider>]` table), then export again — the \
+         crypto slice fills from the answers; a full return is not required"
+    };
     Some(CliError::Usage(format!(
         "TY{tax_year} Form 8949 needs the Form 1099-DA answers for its {n} exchange row(s), and those \
-         live on the return inputs — `income import` (the `[broker_reporting.<provider>]` table) or \
-         the TUI input form, then export the FULL return{readiness}; the crypto-slice packet is closed \
-         on a year whose brokers report basis. No forms were written."
+         live on the return inputs — {exit}. No forms were written."
     )))
 }
 
@@ -2066,6 +2364,44 @@ mod slice_broker_tests {
         }
     }
 
+    /// ★★★ spec 1099-DA R6 (I-1/I-7) KILL — **the partially ported year.** No BUNDLED year is one
+    /// (2017/2024/2025 each carry every map their slice can reach), so the fixture is a probe list:
+    /// one map bound, the next missing. The gate names the FIRST missing stem in packet order, and
+    /// a fully bound list passes — without which a gate that refused everything would look right.
+    #[test]
+    fn the_form_level_gate_names_the_first_missing_stem() {
+        let missing = || Err(btctax_forms::FormsError::UnsupportedYear(2099));
+        // Nothing bound at all → the first probe, `f8949`.
+        let e = first_unresolved_map(2099, &[("f8949", missing()), ("schedule_d", missing())])
+            .expect_err("a year with no f8949 map must refuse")
+            .to_string();
+        assert!(
+            e.contains("no usable `f8949` map") && e.contains("No forms were written"),
+            "{e}"
+        );
+
+        // The f8949 map ALONE → still refused, and now it names `schedule_d`.
+        let e2 = first_unresolved_map(2099, &[("f8949", Ok(())), ("schedule_d", missing())])
+            .expect_err("one bound map is not a ported year")
+            .to_string();
+        assert!(e2.contains("no usable `schedule_d` map"), "{e2}");
+
+        // …and a fully bound list passes.
+        first_unresolved_map(2099, &[("f8949", Ok(())), ("schedule_d", Ok(()))])
+            .expect("every map resolves ⇒ the gate is silent");
+    }
+
+    /// ★ …and the LIVE gate agrees with the build: every bundled year the slice can fill passes it
+    /// with the full form set selected, so the probe fixture above is not testing a rule the real
+    /// call site never satisfies.
+    #[test]
+    fn every_bundled_slice_year_passes_the_form_level_gate() {
+        for year in btctax_forms::SUPPORTED_YEARS {
+            slice_map_gate(*year, &[], true, true, true)
+                .unwrap_or_else(|e| panic!("TY{year} must pass its own form-level gate: {e}"));
+        }
+    }
+
     /// ★ the three directions the spec names: a live year refuses before any byte and names the
     /// exit; TY2025 (proceeds only) fills; a live year with only self-custody rows fills (S10).
     #[test]
@@ -2081,11 +2417,36 @@ mod slice_broker_tests {
             msg.contains("income import") && msg.contains("No forms were written"),
             "{msg}"
         );
-        // build review r2 NEW-2 — the readiness note is WIRED in, not merely correct on its own
-        let note = crate::year_readiness::import_note(2026).expect("TY2026 has no parameters yet");
+        // ★★★ spec 1099-DA R6 (M-13) — THE EXIT SENTENCE NAMES THE EXIT THIS STATE HAS, and the two
+        //     states differ by ONE fact: are the year's full-return parameters bundled?
+        //
+        //     TY2026's are not, so the exit is ANSWERING and re-exporting — the slice itself fills
+        //     from the answers. (Before R6 this sentence said "then export the FULL return" and
+        //     carried `import_note`, which named an exit this build does not have: no input makes
+        //     TY2026 compute a full return. The readiness parenthetical went with it.)
         assert!(
-            msg.contains(&note),
-            "the slice refusal carries import_note(2026):\n{msg}\n--- note ---\n{note}"
+            msg.contains("then export again")
+                && msg.contains("a full return is not required")
+                && !msg.contains("export the full return"),
+            "a params-LESS year's exit is the slice itself:\n{msg}"
+        );
+        assert!(
+            !msg.contains("these inputs are stored now"),
+            "…and the `import_note` parenthetical, which described the full-return exit, is gone:\n{msg}"
+        );
+        // TY2024's parameters ARE bundled, so the exit that state has is COMMITTING a return — the
+        // fourth dispatch cell (answers in the draft, parameters bundled, no committed row).
+        let bundled = slice_broker_refusal(
+            2024,
+            InformationReturnRegime::PROCEEDS_AND_BASIS,
+            &[row(true)],
+        )
+        .expect("live: refuse")
+        .to_string();
+        assert!(
+            bundled.contains("commit the return in the TUI input form")
+                && bundled.contains("then export the full return"),
+            "a params-bundled year's exit is committing, not answering:\n{bundled}"
         );
         assert!(
             slice_broker_refusal(2025, InformationReturnRegime::PROCEEDS_ONLY, &[row(true)])

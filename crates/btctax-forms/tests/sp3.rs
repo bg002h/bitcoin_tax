@@ -205,7 +205,8 @@ fn ty2024_schedule_d_fills_lines_and_line16_f2_01() {
             gain: dec!(40000),
         },
     };
-    let bytes = btctax_forms::fill_schedule_d(&totals, 2024).unwrap();
+    let bytes =
+        btctax_forms::fill_schedule_d(&totals, &not_reported_by_box(&totals), 2024).unwrap();
     let (doc, fields) = fields_of(&bytes);
     let v = |fqn: &str| tv(&doc, &fields, fqn);
     // Line 3 (ST total) d/h.
@@ -500,7 +501,12 @@ fn ty2024_forms_are_byte_deterministic() {
         "8949 changed"
     );
 
-    let sd = btctax_forms::fill_schedule_d(&totals_for(&mixed_rows()), 2024).unwrap();
+    let sd = btctax_forms::fill_schedule_d(
+        &totals_for(&mixed_rows()),
+        &btctax_core::schedule_d_by_box(&mixed_rows()),
+        2024,
+    )
+    .unwrap();
     assert_eq!(
         hex(&Sha256::digest(&sd)),
         GOLDEN_2024_SCHED_D,

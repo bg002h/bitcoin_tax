@@ -591,12 +591,24 @@ impl Session {
     /// availability rule as [`Self::resolve_all_screened`]'s per-year `Uncomputable`. The
     /// consequence of an absent entry is honest — the routing then cannot settle the year's keys and
     /// the tab prints `—` with its caption, never a guessed box.
+    /// ★★★ spec 1099-DA T9 — the years enumerated are the UNION of the committed rows and the DRAFT
+    /// table, and each is resolved through `input_form_store::working_return` (§6.1: a draft shadows
+    /// the committed row; a parked draft carries no live answers). Reading `return_inputs::get`
+    /// here would have shown the viewer, the TUI export and `export --csv` a DIFFERENT answer set
+    /// from the one the CLI export files — and on a params-less year the draft is the primary
+    /// authoring surface, so the committed row is usually the one that does not exist.
     pub fn broker_reporting_answers(
         &self,
     ) -> Result<BTreeMap<i32, btctax_core::BrokerReporting>, CliError> {
         let mut out = BTreeMap::new();
-        for year in return_inputs::years(self.conn())? {
-            if let Ok(Some(ri)) = return_inputs::get(self.conn(), year) {
+        let mut years: std::collections::BTreeSet<i32> =
+            return_inputs::years(self.conn())?.into_iter().collect();
+        years.extend(crate::input_form_store::draft_years(self.conn())?);
+        for year in years {
+            // A corrupt or unreadable blob for ONE year is SKIPPED rather than propagated — the same
+            // fail-closed availability rule as `resolve_all_screened`. The consequence is honest:
+            // the routing then cannot settle the year's keys and the tab prints `—`.
+            if let Ok((Some(ri), _)) = crate::input_form_store::working_return(self.conn(), year) {
                 out.insert(year, ri.broker_reporting);
             }
         }
