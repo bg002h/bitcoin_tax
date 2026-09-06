@@ -47,6 +47,24 @@ _Last updated: **2026-09-04**. Written at a deliberate pause; safe to exit. **Re
 > 7. The Fable reminder in `ROADMAP_STATUS.md` §5 and the memory file: DISCHARGED — the switch
 >    happened and the review ran.
 >
+> ## ★★★ STATE AT de1fa8a3 (2026-09-05, latest) — FR-47 landed; fold C landed; re-review r3 RUNNING
+>
+> - **FR-47 DONE — `8b36aba0`**: `pub fn ty2026_full_return()` in `tax_tables.rs`, every cell from a
+>   held source (Rev. Proc. 2025-32 §2.02/§2.10/§2.14/§2.26/§2.29; Pub. L. 119-21 §70102/§70105/
+>   §70107(c)/§70120; Notice 2025-67 — fetched with Notice 2023-75 by
+>   `legal/_scripts/fetch_retirement_limit_notices.sh`; manifest 133). KAT-pinned incl. the 0.50
+>   identity across three statuses. **Deliberately NOT in `by_year`** — the gate's reasons 2 and 3
+>   still hold; the gate test's message now says so. Open cell (D8): the MFS kicker start/cap as the
+>   2026 instructions will print them — AFTER FINALS.
+> - **Fold C — `de1fa8a3`** (of the fold-A re-review, `ccdc53eb`, ledger `55ad7621`): §4 now DEFINES
+>   `authority`/`extract_override` and the kills' exceptions; step 3 gets the `Unwired` arm; the §9
+>   fixture "move" retracted; 15 not ~13; G5/G6. **A third re-review is RUNNING** → report at
+>   `design/agent-reports/2026-09-05-fable-plan-review.r2-fold-review-r3.md`. Persist, ledger, fold;
+>   at 0C/0I **design r2 §10 step 1 begins** (header fields on 37 maps; the `deny_unknown_fields`
+>   structs gain `irs_stem`, `versioning`, `template_sha256`, `authority?`, `extract_override?`,
+>   `instructions`, `instr_pages?`, `line_set`, `attachment_sequence?`; the two-way test through
+>   `irs_stem`; the four self-contained kills, each planted red first).
+>
 > ## ★★★ STATE AT 61bfae16 (2026-09-05, latest) — what landed after the two reviews
 >
 > - **Fold A** of the r2 fold review: `18027b03` (ledger `c0eb7f32`, 12/12 hold). Design r2 §4/§9/§10
