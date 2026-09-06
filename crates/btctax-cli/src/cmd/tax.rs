@@ -1231,6 +1231,57 @@ mod tests {
     }
 
     /// Malformed TOML is a typed `Usage` error, never a panic.
+    /// ★ spec 1099-DA T1/T6 — the TOML shape of the Form 1099-DA answers (a transparent newtype, so
+    /// the path is `[broker_reporting.<provider>]`), and a misspelt slot is the unknown-key refusal
+    /// naming the exact path — never a silently dropped answer.
+    #[test]
+    fn broker_reporting_toml_shape_parses_and_a_misspelt_slot_is_named() {
+        use btctax_core::forms::{BrokerReported, Cohort};
+        let text = r#"
+            filing_status = "Single"
+
+            [broker_reporting.coinbase]
+            covered = "basis_matches"
+
+            [broker_reporting.gemini]
+            noncovered = "proceeds_only"
+        "#;
+        let ri = parse_return_inputs_toml(text).unwrap();
+        assert_eq!(
+            ri.broker_reporting.answer("coinbase", Cohort::Covered),
+            Some(BrokerReported::BasisMatches)
+        );
+        assert_eq!(
+            ri.broker_reporting.answer("coinbase", Cohort::Noncovered),
+            None
+        );
+        assert_eq!(
+            ri.broker_reporting.answer("gemini", Cohort::Noncovered),
+            Some(BrokerReported::ProceedsOnly)
+        );
+        let bad = r#"
+            filing_status = "Single"
+
+            [broker_reporting.coinbase]
+            covred = "basis_matches"
+        "#;
+        let err = parse_return_inputs_toml(bad).unwrap_err().to_string();
+        assert!(
+            err.contains("broker_reporting.coinbase.covred"),
+            "the unknown-key refusal must name the exact path: {err}"
+        );
+        let unknown_answer = r#"
+            filing_status = "Single"
+
+            [broker_reporting.coinbase]
+            covered = "reported"
+        "#;
+        assert!(
+            parse_return_inputs_toml(unknown_answer).is_err(),
+            "an unknown answer word is refused"
+        );
+    }
+
     #[test]
     fn bad_toml_is_typed_error() {
         assert!(matches!(

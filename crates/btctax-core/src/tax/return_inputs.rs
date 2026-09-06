@@ -968,6 +968,15 @@ pub struct ReturnInputs {
     pub schedule_1a: Schedule1aInputs,
     #[serde(default)]
     pub payments: Payments,
+    /// ★ Form 1099-DA — what each exchange REPORTED about this year's dispositions, per (provider,
+    /// cohort), read off the physical forms by the filer (spec 1099-DA R1). Absent = unanswered:
+    /// answered-ness lives in the key set, never in a sentinel value. `#[serde(default)]` so an older
+    /// vault or TOML without the block deserialises as "nothing answered" (the screen then refuses on a
+    /// live year, never assumes). NOT a `FORM_QUESTIONS` entry — the registry is boolean and singular
+    /// and `testonly::answer_all_live_declarations` must never touch this (there is no neutral answer
+    /// to "what did your broker report").
+    #[serde(default)]
+    pub broker_reporting: crate::forms::BrokerReporting,
     #[serde(default)]
     pub capital_loss_carryforward_in: Carryforward,
     /// ★★ §G-20a — provenance for [`Self::capital_loss_carryforward_in`], as a SIBLING scalar.
@@ -1358,6 +1367,7 @@ impl Default for ReturnInputs {
             // TY2025+ only; an empty surface claims nothing, which is the correct default.
             schedule_1a: Schedule1aInputs::default(),
             payments: Payments::default(),
+            broker_reporting: crate::forms::BrokerReporting::default(),
             capital_loss_carryforward_in: Carryforward::default(),
             capital_loss_carryforward_in_provenance: CarryProvenance::default(),
             carryover_includes_spouses_joint_loss: None,

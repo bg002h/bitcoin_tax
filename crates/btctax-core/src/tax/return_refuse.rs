@@ -45,6 +45,26 @@ pub enum RefuseReason {
     /// large. Raised only for a year that actually files a **Section B** 8283 — see
     /// `screen_absolute`, which has the ledger AND the computed itemize election.
     DonationRestrictionsUnresolved,
+    /// ★ spec 1099-DA R1 — a live year (basis regime AND ≥ 1 exchange disposition) has rows under a
+    /// (provider, cohort) key the filer has not answered. The tool never chooses a Form 8949 box for a
+    /// broker-reported row on its own (port report §6 rule 18).
+    BrokerReportingUnanswered {
+        provider: String,
+        cohort: crate::forms::Cohort,
+        year: i32,
+    },
+    /// spec 1099-DA R2 — the filer answered `Mixed`: the 1099-DAs for these rows disagree among
+    /// themselves, so no single box is true of the set. The per-lot import is the exit.
+    BrokerReportingMixed {
+        provider: String,
+        cohort: crate::forms::Cohort,
+    },
+    /// spec 1099-DA R2 — the filer answered `BasisDiffers`: the row needs the broker's basis in
+    /// column (e) and the correction in (g), which only a per-lot 1099-DA import can supply.
+    BrokerBasisDiffers {
+        provider: String,
+        cohort: crate::forms::Cohort,
+    },
     /// ★★★ **§170(f)(8)** — the contemporaneous-written-acknowledgment question is unresolved on a
     /// return that CLAIMS a charitable deduction and has at least one single contribution of $250 or
     /// more: either unanswered, or answered **No**.
@@ -459,6 +479,8 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         b_1099,
         schedule_c,
         schedule_a,
+        // spec 1099-DA — testimony about the broker's forms, not a money field
+        broker_reporting: _,
         itemize_election: _,
         mfs_spouse_itemizes: _,
         sch1,

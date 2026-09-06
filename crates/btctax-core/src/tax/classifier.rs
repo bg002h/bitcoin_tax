@@ -65,6 +65,11 @@ pub enum Class {
 pub struct Census {
     pub declarations: Vec<QuestionId>,
     pub exemptions: Vec<(Class, &'static str)>,
+    /// ★ spec 1099-DA R1 — the Form 1099-DA answers the filer GAVE, per (provider, cohort): their own
+    /// class, neither a registry declaration (no neutral exists) nor an exemption. Unanswered keys are
+    /// not visible here — the classifier has no ledger; the screen (`screen_absolute`) counts them
+    /// against the year's rows and refuses.
+    pub broker_answers: Vec<(String, crate::forms::Cohort, crate::forms::BrokerReported)>,
 }
 
 impl Census {
@@ -102,6 +107,7 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         sch1,
         schedule_1a,
         payments,
+        broker_reporting,
         capital_loss_carryforward_in,
         capital_loss_carryforward_in_provenance,
         charitable_carryover_in_provenance,
@@ -256,6 +262,7 @@ pub fn classify(ri: &ReturnInputs) -> Census {
     }
     classify_schedule1(&mut c, sch1);
     classify_payments(&mut c, payments);
+    classify_broker_reporting(&mut c, broker_reporting);
     classify_carryforward(&mut c, capital_loss_carryforward_in);
     for item in charitable_carryover_in {
         classify_charitable_carry(&mut c, item);
@@ -782,6 +789,26 @@ fn classify_payments(_c: &mut Census, p: &Payments) {
         extension_payment: _,
         other_withholding: _,
     } = p;
+}
+
+/// ★ spec 1099-DA R1 — every answer the filer gave, recorded as testimony (provider, cohort, what the
+/// form showed). Destructured with no `..` so a new slot on `CohortAnswers` is a compile error here.
+fn classify_broker_reporting(c: &mut Census, br: &crate::forms::BrokerReporting) {
+    use crate::forms::{Cohort, CohortAnswers};
+    for (provider, answers) in &br.0 {
+        let CohortAnswers {
+            covered,
+            noncovered,
+        } = answers;
+        if let Some(a) = covered {
+            c.broker_answers
+                .push((provider.clone(), Cohort::Covered, *a));
+        }
+        if let Some(a) = noncovered {
+            c.broker_answers
+                .push((provider.clone(), Cohort::Noncovered, *a));
+        }
+    }
 }
 
 fn classify_carryforward(_c: &mut Census, cf: &Carryforward) {

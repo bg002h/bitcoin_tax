@@ -598,6 +598,8 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
         //    plate. Scrubbed below. The eligibility bools and money carry no identity.
         schedule_1a,
         schedule_a: _, // money only
+        // spec 1099-DA — provider tags (`Source::tag()`) and enum answers; no identity
+        broker_reporting: _,
         itemize_election: _,
         mfs_spouse_itemizes: _,
         sch1: _, // money only

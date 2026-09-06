@@ -339,6 +339,7 @@ pub fn maximal_sentinel() -> ReturnInputs {
             ira_deduction_claimed: dec!(0),
             hsa_activity: Some(false),
         },
+        broker_reporting: Default::default(), // nothing answered (spec 1099-DA T1)
         payments: Payments {
             estimated_tax_payments: dec!(1),
             extension_payment: dec!(2),

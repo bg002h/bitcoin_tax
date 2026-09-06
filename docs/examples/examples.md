@@ -668,6 +668,7 @@ $ btctax --vault v.pgp income show --year 2024
     "extension_payment": "500",
     "other_withholding": "0"
   },
+  "broker_reporting": {},
   "capital_loss_carryforward_in": {
     "short": "0",
     "long": "0"

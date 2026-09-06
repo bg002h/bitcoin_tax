@@ -61,6 +61,18 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
             vec![decl(QuestionId::ExcludedCanceledDebt)]
         }
         R::IncomeExclusionUnanswered => vec![decl(QuestionId::HasIncomeExclusion)],
+        // ★ spec 1099-DA — the per-(provider, cohort) answers. Until T6 lands the input form's
+        //   broker-reporting block there is NO form field for them: the refusal's own text names the
+        //   exit (`income import`'s `[broker_reporting.<provider>]` table). T6 re-points these three
+        //   at that block; this arm is what makes that a compile-time obligation, not a memory.
+        R::BrokerReportingUnanswered { .. }
+        | R::BrokerReportingMixed { .. }
+        | R::BrokerBasisDiffers { .. } => vec![Anchor::NotInForm {
+            note: "spec 1099-DA: the per-(provider, cohort) Form 1099-DA answers live in `income import`'s \
+                   `[broker_reporting.<provider>]` table (covered / noncovered = not_reported | \
+                   proceeds_only | basis_matches | basis_differs | mixed) until T6 adds the input-form \
+                   block; Mixed and BasisDiffers name the per-lot 1099-DA import as the exit",
+        }],
         // §G-22/B11 — both legs point at the one declaration that decides them.
         R::OtherIncomeUnanswered | R::OtherIncomeOutOfScope => {
             vec![decl(QuestionId::OtherOutOfScopeIncome)]
