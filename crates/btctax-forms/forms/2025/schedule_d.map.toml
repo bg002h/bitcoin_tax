@@ -9,6 +9,13 @@ instructions        = "i1040sd"
 line_set            = "schedule_d/2025"
 attachment_sequence = "12"
 
+# ★ spec 1099-DA T4 — the per-box total rows (dump-fields 2025): 1b = "Totals … with Box A or Box G
+#   checked" (Row1b), 2 = "… Box B or Box H" (Row2), 8b = "… Box D or Box J" (Row8b), 9 = "… Box E or Box
+#   K" (Row9); four cells each (d, e, g, h), the same shape as rows 3 and 10.
+line1b = { proceeds_d = "topmostSubform[0].Page1[0].Table_PartI[0].Row1b[0].f1_7[0]", cost_e = "topmostSubform[0].Page1[0].Table_PartI[0].Row1b[0].f1_8[0]", adj_g = "topmostSubform[0].Page1[0].Table_PartI[0].Row1b[0].f1_9[0]", gain_h = "topmostSubform[0].Page1[0].Table_PartI[0].Row1b[0].f1_10[0]" }
+line2 = { proceeds_d = "topmostSubform[0].Page1[0].Table_PartI[0].Row2[0].f1_11[0]", cost_e = "topmostSubform[0].Page1[0].Table_PartI[0].Row2[0].f1_12[0]", adj_g = "topmostSubform[0].Page1[0].Table_PartI[0].Row2[0].f1_13[0]", gain_h = "topmostSubform[0].Page1[0].Table_PartI[0].Row2[0].f1_14[0]" }
+line8b = { proceeds_d = "topmostSubform[0].Page1[0].Table_PartII[0].Row8b[0].f1_27[0]", cost_e = "topmostSubform[0].Page1[0].Table_PartII[0].Row8b[0].f1_28[0]", adj_g = "topmostSubform[0].Page1[0].Table_PartII[0].Row8b[0].f1_29[0]", gain_h = "topmostSubform[0].Page1[0].Table_PartII[0].Row8b[0].f1_30[0]" }
+line9 = { proceeds_d = "topmostSubform[0].Page1[0].Table_PartII[0].Row9[0].f1_31[0]", cost_e = "topmostSubform[0].Page1[0].Table_PartII[0].Row9[0].f1_32[0]", adj_g = "topmostSubform[0].Page1[0].Table_PartII[0].Row9[0].f1_33[0]", gain_h = "topmostSubform[0].Page1[0].Table_PartII[0].Row9[0].f1_34[0]" }
 line3 = { proceeds_d = "topmostSubform[0].Page1[0].Table_PartI[0].Row3[0].f1_15[0]", cost_e = "topmostSubform[0].Page1[0].Table_PartI[0].Row3[0].f1_16[0]", adj_g = "topmostSubform[0].Page1[0].Table_PartI[0].Row3[0].f1_17[0]", gain_h = "topmostSubform[0].Page1[0].Table_PartI[0].Row3[0].f1_18[0]" }
 line7_h = "topmostSubform[0].Page1[0].f1_22[0]"
 line10 = { proceeds_d = "topmostSubform[0].Page1[0].Table_PartII[0].Row10[0].f1_35[0]", cost_e = "topmostSubform[0].Page1[0].Table_PartII[0].Row10[0].f1_36[0]", adj_g = "topmostSubform[0].Page1[0].Table_PartII[0].Row10[0].f1_37[0]", gain_h = "topmostSubform[0].Page1[0].Table_PartII[0].Row10[0].f1_38[0]" }

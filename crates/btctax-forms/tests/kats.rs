@@ -43,6 +43,13 @@ fn schedule_d_map_field_names() -> Vec<String> {
     };
     let mut names = a(&m.line3);
     names.extend(a(&m.line10));
+    // spec 1099-DA T4 — the per-box rows, read OFF THE MAP
+    for c in [&m.line1b, &m.line2, &m.line8b, &m.line9]
+        .into_iter()
+        .flatten()
+    {
+        names.extend(a(c));
+    }
     names.push(m.line7_h.clone());
     names.push(m.line15_h.clone());
     names.push(m.line16_h.clone());

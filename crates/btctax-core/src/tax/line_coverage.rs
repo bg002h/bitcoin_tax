@@ -2062,6 +2062,12 @@ pub fn cover_scheduledlines(l: &crate::tax::printed::ScheduleDLines) -> Coverage
         line1a_d,
         line1a_e,
         line1a_h,
+        line1b_d,
+        line1b_e,
+        line1b_h,
+        line2_d,
+        line2_e,
+        line2_h,
         line3_d,
         line3_e,
         line3_h,
@@ -2070,6 +2076,12 @@ pub fn cover_scheduledlines(l: &crate::tax::printed::ScheduleDLines) -> Coverage
         line8a_d,
         line8a_e,
         line8a_h,
+        line8b_d,
+        line8b_e,
+        line8b_h,
+        line9_d,
+        line9_e,
+        line9_h,
         line10_d,
         line10_e,
         line10_h,
@@ -2091,6 +2103,103 @@ pub fn cover_scheduledlines(l: &crate::tax::printed::ScheduleDLines) -> Coverage
     c.line(*line8a_d, f, "8a(d)", "line8a_d", Production::Collected, "Totals for all long-term transactions reported on Form 1099-B for which basis was reported to the IRS and for which you have no adjustments (see instructions). However, if you choose to report all these transactions on Form 8949, leave this line blank and go to line 8b");
     c.line(*line8a_e, f, "8a(e)", "line8a_e", Production::Collected, "Totals for all long-term transactions reported on Form 1099-B for which basis was reported to the IRS and for which you have no adjustments (see instructions). However, if you choose to report all these transactions on Form 8949, leave this line blank and go to line 8b");
     c.line(*line8a_h, f, "8a(h)", "line8a_h", Production::Combine, "Totals for all long-term transactions reported on Form 1099-B for which basis was reported to the IRS and for which you have no adjustments (see instructions). However, if you choose to report all these transactions on Form 8949, leave this line blank and go to line 8b");
+    // ★ spec 1099-DA T4 — the per-box rows (the 2025 revision adds "or Box G/H/D/E" on the same lines)
+    c.line(
+        *line1b_d,
+        f,
+        "1b(d)",
+        "line1b_d",
+        Production::Carry,
+        "Totals for all transactions reported on Form(s) 8949 with Box A checked",
+    );
+    c.line(
+        *line1b_e,
+        f,
+        "1b(e)",
+        "line1b_e",
+        Production::Carry,
+        "Totals for all transactions reported on Form(s) 8949 with Box A checked",
+    );
+    c.line(
+        *line1b_h,
+        f,
+        "1b(h)",
+        "line1b_h",
+        Production::Carry,
+        "Totals for all transactions reported on Form(s) 8949 with Box A checked",
+    );
+    c.line(
+        *line2_d,
+        f,
+        "2(d)",
+        "line2_d",
+        Production::Carry,
+        "Totals for all transactions reported on Form(s) 8949 with Box B checked",
+    );
+    c.line(
+        *line2_e,
+        f,
+        "2(e)",
+        "line2_e",
+        Production::Carry,
+        "Totals for all transactions reported on Form(s) 8949 with Box B checked",
+    );
+    c.line(
+        *line2_h,
+        f,
+        "2(h)",
+        "line2_h",
+        Production::Carry,
+        "Totals for all transactions reported on Form(s) 8949 with Box B checked",
+    );
+    c.line(
+        *line8b_d,
+        f,
+        "8b(d)",
+        "line8b_d",
+        Production::Carry,
+        "Totals for all transactions reported on Form(s) 8949 with Box D checked",
+    );
+    c.line(
+        *line8b_e,
+        f,
+        "8b(e)",
+        "line8b_e",
+        Production::Carry,
+        "Totals for all transactions reported on Form(s) 8949 with Box D checked",
+    );
+    c.line(
+        *line8b_h,
+        f,
+        "8b(h)",
+        "line8b_h",
+        Production::Carry,
+        "Totals for all transactions reported on Form(s) 8949 with Box D checked",
+    );
+    c.line(
+        *line9_d,
+        f,
+        "9(d)",
+        "line9_d",
+        Production::Carry,
+        "Totals for all transactions reported on Form(s) 8949 with Box E checked",
+    );
+    c.line(
+        *line9_e,
+        f,
+        "9(e)",
+        "line9_e",
+        Production::Carry,
+        "Totals for all transactions reported on Form(s) 8949 with Box E checked",
+    );
+    c.line(
+        *line9_h,
+        f,
+        "9(h)",
+        "line9_h",
+        Production::Carry,
+        "Totals for all transactions reported on Form(s) 8949 with Box E checked",
+    );
     c.line(
         *line3_d,
         f,
@@ -2186,11 +2295,23 @@ fn zero_scheduledlines() -> crate::tax::printed::ScheduleDLines {
         line8a_d: Usd::ZERO,
         line8a_e: Usd::ZERO,
         line8a_h: Usd::ZERO,
+        line1b_d: Usd::ZERO,
+        line1b_e: Usd::ZERO,
+        line1b_h: Usd::ZERO,
+        line2_d: Usd::ZERO,
+        line2_e: Usd::ZERO,
+        line2_h: Usd::ZERO,
         line3_d: Usd::ZERO,
         line3_e: Usd::ZERO,
         line3_h: Usd::ZERO,
         line6: Usd::ZERO,
         line7: Usd::ZERO,
+        line8b_d: Usd::ZERO,
+        line8b_e: Usd::ZERO,
+        line8b_h: Usd::ZERO,
+        line9_d: Usd::ZERO,
+        line9_e: Usd::ZERO,
+        line9_h: Usd::ZERO,
         line10_d: Usd::ZERO,
         line10_e: Usd::ZERO,
         line10_h: Usd::ZERO,

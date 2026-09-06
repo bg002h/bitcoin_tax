@@ -1529,6 +1529,13 @@ pub struct ScheduleDMap {
     /// §G-28/B4 — line 8a, the long-term counterpart. Same `Option` treatment as [`Self::line1a`].
     #[serde(default)]
     pub line8a: Option<AmountColsNoAdjustment>,
+    /// ★ spec 1099-DA T4 — the per-box total rows: 1b (A or G), 2 (B or H), 8b (D or J), 9 (E or K).
+    /// `Option` because a revision may leave a row unbound; the filler REFUSES to print a non-zero
+    /// total into an unbound row (`need`), never drops it.
+    pub line1b: Option<AmountCols>,
+    pub line2: Option<AmountCols>,
+    pub line8b: Option<AmountCols>,
+    pub line9: Option<AmountCols>,
     pub line3: AmountCols,
     /// Line 7 — net short-term gain/loss (column h).
     pub line7_h: String,

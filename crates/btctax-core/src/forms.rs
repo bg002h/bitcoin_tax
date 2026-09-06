@@ -39,7 +39,7 @@ pub enum Form8949Part {
 /// 1099-B / 1099-DA signal (D4), and asserting a broker form was issued / basis reported would fabricate an
 /// unsubstantiated box. The `box_needs_review` flag surfaces exchange dispositions that MAY carry a broker
 /// form, to be reclassified on the actual return (G/H or J/K from 2025).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Form8949Box {
     /// Box **C** — short-term, not reported on a 1099-B (pre-TY2025 digital-asset default).
     C,

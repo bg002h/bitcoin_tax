@@ -19,6 +19,13 @@ attachment_sequence = "12"
 # value. `_RO` marks it read-only anyway — the form's own JavaScript owns it.
 line1a = { proceeds_d = "topmostSubform[0].Page1[0].Table_PartI[0].Row1a[0].f1_03[0]", cost_e = "topmostSubform[0].Page1[0].Table_PartI[0].Row1a[0].f1_04[0]", gain_h = "topmostSubform[0].Page1[0].Table_PartI[0].Row1a[0].f1_06[0]" }
 line8a = { proceeds_d = "topmostSubform[0].Page1[0].Table_PartII[0].Row8a[0].f1_23[0]", cost_e = "topmostSubform[0].Page1[0].Table_PartII[0].Row8a[0].f1_24[0]", gain_h = "topmostSubform[0].Page1[0].Table_PartII[0].Row8a[0].f1_26[0]" }
+# ★ spec 1099-DA T4 — the per-box total rows (dump-fields 2024): 1b = "Totals … with Box A or Box G
+#   checked" (Row1b), 2 = "… Box B or Box H" (Row2), 8b = "… Box D or Box J" (Row8b), 9 = "… Box E or Box
+#   K" (Row9); four cells each (d, e, g, h), the same shape as rows 3 and 10.
+line1b = { proceeds_d = "topmostSubform[0].Page1[0].Table_PartI[0].Row1b[0].f1_07[0]", cost_e = "topmostSubform[0].Page1[0].Table_PartI[0].Row1b[0].f1_08[0]", adj_g = "topmostSubform[0].Page1[0].Table_PartI[0].Row1b[0].f1_09[0]", gain_h = "topmostSubform[0].Page1[0].Table_PartI[0].Row1b[0].f1_10[0]" }
+line2 = { proceeds_d = "topmostSubform[0].Page1[0].Table_PartI[0].Row2[0].f1_11[0]", cost_e = "topmostSubform[0].Page1[0].Table_PartI[0].Row2[0].f1_12[0]", adj_g = "topmostSubform[0].Page1[0].Table_PartI[0].Row2[0].f1_13[0]", gain_h = "topmostSubform[0].Page1[0].Table_PartI[0].Row2[0].f1_14[0]" }
+line8b = { proceeds_d = "topmostSubform[0].Page1[0].Table_PartII[0].Row8b[0].f1_27[0]", cost_e = "topmostSubform[0].Page1[0].Table_PartII[0].Row8b[0].f1_28[0]", adj_g = "topmostSubform[0].Page1[0].Table_PartII[0].Row8b[0].f1_29[0]", gain_h = "topmostSubform[0].Page1[0].Table_PartII[0].Row8b[0].f1_30[0]" }
+line9 = { proceeds_d = "topmostSubform[0].Page1[0].Table_PartII[0].Row9[0].f1_31[0]", cost_e = "topmostSubform[0].Page1[0].Table_PartII[0].Row9[0].f1_32[0]", adj_g = "topmostSubform[0].Page1[0].Table_PartII[0].Row9[0].f1_33[0]", gain_h = "topmostSubform[0].Page1[0].Table_PartII[0].Row9[0].f1_34[0]" }
 line3 = { proceeds_d = "topmostSubform[0].Page1[0].Table_PartI[0].Row3[0].f1_15[0]", cost_e = "topmostSubform[0].Page1[0].Table_PartI[0].Row3[0].f1_16[0]", adj_g = "topmostSubform[0].Page1[0].Table_PartI[0].Row3[0].f1_17[0]", gain_h = "topmostSubform[0].Page1[0].Table_PartI[0].Row3[0].f1_18[0]" }
 line7_h = "topmostSubform[0].Page1[0].f1_22[0]"
 line10 = { proceeds_d = "topmostSubform[0].Page1[0].Table_PartII[0].Row10[0].f1_35[0]", cost_e = "topmostSubform[0].Page1[0].Table_PartII[0].Row10[0].f1_36[0]", adj_g = "topmostSubform[0].Page1[0].Table_PartII[0].Row10[0].f1_37[0]", gain_h = "topmostSubform[0].Page1[0].Table_PartII[0].Row10[0].f1_38[0]" }
@@ -94,23 +101,7 @@ ssn  = "topmostSubform[0].Page1[0].f1_02[0]"
 # "basis reported, no adjustments" shortcut). btctax always lists every disposition, so 1a is unused
 # by construction, not merely unpopulated.
 "topmostSubform[0].Page1[0].Table_PartI[0].Row1a[0].f1_05_RO[0]" = { line = "1a(g)", rule = "unmodeled", reason = "§G-28/B4 — line 1a IS now filled, but column (g) never is: \"no adjustments\" is a CONDITION of using line 1a at all, so a filer needing one is refused (Form1099BNeedsForm8949) rather than filed here. `_RO` besides — the form's own JavaScript owns the cell." }
-"topmostSubform[0].Page1[0].Table_PartI[0].Row1b[0].f1_07[0]"    = { line = "1b(d)", rule = "unmodeled", reason = "Box A (reported on 8949) aggregate, proceeds — btctax never assigns Box A." }
-"topmostSubform[0].Page1[0].Table_PartI[0].Row1b[0].f1_08[0]"    = { line = "1b(e)", rule = "unmodeled", reason = "Box A aggregate, cost basis — same." }
-"topmostSubform[0].Page1[0].Table_PartI[0].Row1b[0].f1_09[0]"    = { line = "1b(g)", rule = "unmodeled", reason = "Box A aggregate, adjustments — same." }
-"topmostSubform[0].Page1[0].Table_PartI[0].Row1b[0].f1_10[0]"    = { line = "1b(h)", rule = "unmodeled", reason = "Box A aggregate, gain/loss — same." }
-"topmostSubform[0].Page1[0].Table_PartI[0].Row2[0].f1_11[0]"     = { line = "2(d)",  rule = "unmodeled", reason = "Box B (1099-B issued, basis NOT reported) aggregate, proceeds — btctax never assigns Box B." }
-"topmostSubform[0].Page1[0].Table_PartI[0].Row2[0].f1_12[0]"     = { line = "2(e)",  rule = "unmodeled", reason = "Box B aggregate, cost basis — same." }
-"topmostSubform[0].Page1[0].Table_PartI[0].Row2[0].f1_13[0]"     = { line = "2(g)",  rule = "unmodeled", reason = "Box B aggregate, adjustments — same." }
-"topmostSubform[0].Page1[0].Table_PartI[0].Row2[0].f1_14[0]"     = { line = "2(h)",  rule = "unmodeled", reason = "Box B aggregate, gain/loss — same." }
 "topmostSubform[0].Page1[0].Table_PartII[0].Row8a[0].f1_25_RO[0]" = { line = "8a(g)", rule = "unmodeled", reason = "§G-28/B4 — same as line 1a(g): the cell can never carry a value, because needing an adjustment is exactly what disqualifies a transaction from line 8a." }
-"topmostSubform[0].Page1[0].Table_PartII[0].Row8b[0].f1_27[0]"    = { line = "8b(d)", rule = "unmodeled", reason = "Box D (reported on 8949) aggregate, proceeds — same." }
-"topmostSubform[0].Page1[0].Table_PartII[0].Row8b[0].f1_28[0]"    = { line = "8b(e)", rule = "unmodeled", reason = "Box D aggregate, cost basis — same." }
-"topmostSubform[0].Page1[0].Table_PartII[0].Row8b[0].f1_29[0]"    = { line = "8b(g)", rule = "unmodeled", reason = "Box D aggregate, adjustments — same." }
-"topmostSubform[0].Page1[0].Table_PartII[0].Row8b[0].f1_30[0]"    = { line = "8b(h)", rule = "unmodeled", reason = "Box D aggregate, gain/loss — same." }
-"topmostSubform[0].Page1[0].Table_PartII[0].Row9[0].f1_31[0]"     = { line = "9(d)",  rule = "unmodeled", reason = "Box E (1099-B issued, basis NOT reported) aggregate, proceeds — btctax never assigns Box E." }
-"topmostSubform[0].Page1[0].Table_PartII[0].Row9[0].f1_32[0]"     = { line = "9(e)",  rule = "unmodeled", reason = "Box E aggregate, cost basis — same." }
-"topmostSubform[0].Page1[0].Table_PartII[0].Row9[0].f1_33[0]"     = { line = "9(g)",  rule = "unmodeled", reason = "Box E aggregate, adjustments — same." }
-"topmostSubform[0].Page1[0].Table_PartII[0].Row9[0].f1_34[0]"     = { line = "9(h)",  rule = "unmodeled", reason = "Box E aggregate, gain/loss — same." }
 
 # ── Lines 4/5 and 11/12 — capital gains from other forms and pass-through entities ───────────────
 # btctax's only disposition source is the BTC ledger. It models no installment sales (6252), casualties

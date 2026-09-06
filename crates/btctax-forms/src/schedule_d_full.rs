@@ -26,7 +26,7 @@
 
 use crate::cells::{push_identity, push_money, push_money_opt};
 use crate::error::FormsError;
-use crate::map::{MoneyCell, ScheduleDMap};
+use crate::map::{AmountCols, MoneyCell, ScheduleDMap};
 use crate::pdf;
 use crate::verify::{verify_flat, FlatPlacement};
 use btctax_core::tax::packet::ReturnHeader;
@@ -125,9 +125,32 @@ pub fn fill_schedule_d_full_with_map(
 
     // ★ A `Vec`, not a fixed array: lines 1a and 8a are present only when the year's map carries them,
     //   and an absent cell must produce NO WRITE rather than a write to an empty field name.
+    // ★ spec 1099-DA T4 — the per-box rows print only when a page-set of that box was filed (their
+    //   d/e are then non-zero); an unbound row with a non-zero total REFUSES via `need`.
+    let box_row = |cells: &Option<AmountCols>,
+                   name: &str,
+                   d: Usd,
+                   e: Usd|
+     -> Result<Option<AmountCols>, FormsError> {
+        if d == Usd::ZERO && e == Usd::ZERO {
+            return Ok(None);
+        }
+        Ok(Some(need(cells, name, y)?.clone()))
+    };
+    let c1b = box_row(&map.line1b, "line1b", lines.line1b_d, lines.line1b_e)?;
+    let c2 = box_row(&map.line2, "line2", lines.line2_d, lines.line2_e)?;
+    let c8b = box_row(&map.line8b, "line8b", lines.line8b_d, lines.line8b_e)?;
+    let c9 = box_row(&map.line9, "line9", lines.line9_d, lines.line9_e)?;
+
     let mut p1_amounts: Vec<(MoneyCell, Usd)> = Vec::new();
     if let Some(c) = c1a {
         p1_amounts.push((MoneyCell::Single(c.gain_h.clone()), lines.line1a_h));
+    }
+    if let Some(c) = &c1b {
+        p1_amounts.push((MoneyCell::Single(c.gain_h.clone()), lines.line1b_h));
+    }
+    if let Some(c) = &c2 {
+        p1_amounts.push((MoneyCell::Single(c.gain_h.clone()), lines.line2_h));
     }
     p1_amounts.extend([
         (MoneyCell::Single(map.line3.gain_h.clone()), lines.line3_h),
@@ -136,6 +159,12 @@ pub fn fill_schedule_d_full_with_map(
     ]);
     if let Some(c) = c8a {
         p1_amounts.push((MoneyCell::Single(c.gain_h.clone()), lines.line8a_h));
+    }
+    if let Some(c) = &c8b {
+        p1_amounts.push((MoneyCell::Single(c.gain_h.clone()), lines.line8b_h));
+    }
+    if let Some(c) = &c9 {
+        p1_amounts.push((MoneyCell::Single(c.gain_h.clone()), lines.line9_h));
     }
     p1_amounts.extend([
         (MoneyCell::Single(map.line10.gain_h.clone()), lines.line10_h),
@@ -159,9 +188,21 @@ pub fn fill_schedule_d_full_with_map(
     if let Some(c) = c1a {
         p1_d.push((&c.proceeds_d, lines.line1a_d));
     }
+    if let Some(c) = &c1b {
+        p1_d.push((&c.proceeds_d, lines.line1b_d));
+    }
+    if let Some(c) = &c2 {
+        p1_d.push((&c.proceeds_d, lines.line2_d));
+    }
     p1_d.push((&map.line3.proceeds_d, lines.line3_d));
     if let Some(c) = c8a {
         p1_d.push((&c.proceeds_d, lines.line8a_d));
+    }
+    if let Some(c) = &c8b {
+        p1_d.push((&c.proceeds_d, lines.line8b_d));
+    }
+    if let Some(c) = &c9 {
+        p1_d.push((&c.proceeds_d, lines.line9_d));
     }
     p1_d.push((&map.line10.proceeds_d, lines.line10_d));
     for (ord, (fqn, value)) in p1_d.iter().enumerate() {
@@ -178,9 +219,21 @@ pub fn fill_schedule_d_full_with_map(
     if let Some(c) = c1a {
         p1_e.push((&c.cost_e, lines.line1a_e));
     }
+    if let Some(c) = &c1b {
+        p1_e.push((&c.cost_e, lines.line1b_e));
+    }
+    if let Some(c) = &c2 {
+        p1_e.push((&c.cost_e, lines.line2_e));
+    }
     p1_e.push((&map.line3.cost_e, lines.line3_e));
     if let Some(c) = c8a {
         p1_e.push((&c.cost_e, lines.line8a_e));
+    }
+    if let Some(c) = &c8b {
+        p1_e.push((&c.cost_e, lines.line8b_e));
+    }
+    if let Some(c) = &c9 {
+        p1_e.push((&c.cost_e, lines.line9_e));
     }
     p1_e.push((&map.line10.cost_e, lines.line10_e));
     for (ord, (fqn, value)) in p1_e.iter().enumerate() {

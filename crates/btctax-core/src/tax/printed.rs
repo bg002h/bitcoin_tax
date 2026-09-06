@@ -72,6 +72,11 @@ pub struct Printed8949 {
     pub long_term: Vec<Printed8949Row>,
     pub st_totals: Printed8949Totals,
     pub lt_totals: Printed8949Totals,
+    /// ★ spec 1099-DA T4 — the PRINTED totals per Form 8949 BOX, the figures Schedule D's per-box
+    /// lines cite (1b/2/3 = G/H/I short-term; 8b/9/10 = J/K/L long-term; C/F fold into 3/10 on the
+    /// pre-2025 revision). Σ over the rows of that box, over the PRINTED cells.
+    pub st_by_box: std::collections::BTreeMap<crate::forms::Form8949Box, Printed8949Totals>,
+    pub lt_by_box: std::collections::BTreeMap<crate::forms::Form8949Box, Printed8949Totals>,
     /// **C1** — how many of the rows this 8949 was printed from are exchange dispositions that MAY
     /// carry broker reporting (`box_needs_review`). Carried HERE, derived from the same rows the
     /// packet printed, so the full-return export's [I5] advisory reads the figure the return
@@ -101,6 +106,21 @@ pub fn form_8949_printed(rows: &[crate::forms::Form8949Row]) -> Option<Printed89
             box_: r.box_,
         }
     };
+    fn by_box(
+        rows: &[Printed8949Row],
+        total: &dyn Fn(&[Printed8949Row]) -> Printed8949Totals,
+    ) -> std::collections::BTreeMap<crate::forms::Form8949Box, Printed8949Totals> {
+        let mut out = std::collections::BTreeMap::new();
+        let mut boxes: Vec<crate::forms::Form8949Box> = rows.iter().map(|r| r.box_).collect();
+        boxes.sort();
+        boxes.dedup();
+        for b in boxes {
+            let of_box: Vec<Printed8949Row> =
+                rows.iter().filter(|r| r.box_ == b).cloned().collect();
+            out.insert(b, total(&of_box));
+        }
+        out
+    }
     let total = |rs: &[Printed8949Row]| Printed8949Totals {
         proceeds_d: rs.iter().map(|r| r.proceeds_d).sum(),
         cost_e: rs.iter().map(|r| r.cost_e).sum(),
@@ -119,6 +139,9 @@ pub fn form_8949_printed(rows: &[crate::forms::Form8949Row]) -> Option<Printed89
         .collect();
 
     Some(Printed8949 {
+        st_by_box: by_box(&short_term, &total),
+        lt_by_box: by_box(&long_term, &total),
+
         st_totals: total(&short_term),
         lt_totals: total(&long_term),
         short_term,
@@ -943,7 +966,19 @@ pub struct ScheduleDLines {
     pub line1a_d: Usd,
     pub line1a_e: Usd,
     pub line1a_h: Usd,
-    /// L3 (d) — short-term proceeds (Form 8949 Box C or **Box I**).
+    /// **L1b (d)/(e)/(h)** — *"Totals for all transactions reported on Form(s) 8949 with Box A or
+    /// Box G checked"* (2025; "with Box A checked" on 2024): the broker-reported-WITH-basis short-term
+    /// box (spec 1099-DA T4). Zero unless a G page-set was filed.
+    pub line1b_d: Usd,
+    pub line1b_e: Usd,
+    pub line1b_h: Usd,
+    /// **L2 (d)/(e)/(h)** — *"Totals for all transactions reported on Form(s) 8949 with Box B or Box
+    /// H checked"*: reported WITHOUT basis, short-term.
+    pub line2_d: Usd,
+    pub line2_e: Usd,
+    pub line2_h: Usd,
+    /// L3 (d) — short-term proceeds (Form 8949 Box C or **Box I** — the NOT-reported box only, since
+    /// spec 1099-DA T4; a G or H page-set lands on 1b/2).
     pub line3_d: Usd,
     /// L3 (e) — short-term cost basis.
     pub line3_e: Usd,
@@ -957,7 +992,17 @@ pub struct ScheduleDLines {
     pub line8a_d: Usd,
     pub line8a_e: Usd,
     pub line8a_h: Usd,
-    /// L10 (d) — long-term proceeds (Form 8949 Box F or **Box L**).
+    /// **L8b (d)/(e)/(h)** — *"Totals for all transactions reported on Form(s) 8949 with Box D or
+    /// Box J checked"*: reported WITH basis, long-term (spec 1099-DA T4).
+    pub line8b_d: Usd,
+    pub line8b_e: Usd,
+    pub line8b_h: Usd,
+    /// **L9 (d)/(e)/(h)** — *"Totals for all transactions reported on Form(s) 8949 with Box E or Box
+    /// K checked"*: reported WITHOUT basis, long-term.
+    pub line9_d: Usd,
+    pub line9_e: Usd,
+    pub line9_h: Usd,
+    /// L10 (d) — long-term proceeds (Form 8949 Box F or **Box L** — the NOT-reported box only).
     pub line10_d: Usd,
     /// L10 (e) — long-term cost basis.
     pub line10_e: Usd,
@@ -1050,8 +1095,32 @@ pub fn schedule_d_lines(ar: &AbsoluteReturn, f8949: Option<&Printed8949>) -> Sch
     // revision) (ARCH-P6.3a D3). Re-rounding the exact aggregate here would put Schedule D a dollar
     // away from the 8949 stapled behind it: Σ round(row) ≠ round(Σ row). Zero when no 8949 is attached
     // (a carryover/distribution-only Schedule D has no transactions to total).
-    let st = f8949.map(|f| f.st_totals).unwrap_or_default();
-    let lt = f8949.map(|f| f.lt_totals).unwrap_or_default();
+    // ★ spec 1099-DA T4 — per BOX: 1b = G, 2 = H, 3 = the not-reported box (I, or C before 2025);
+    //   8b = J, 9 = K, 10 = the not-reported box (L, or F). A box with no page-set totals zero.
+    use crate::forms::Form8949Box as B;
+    let of = |m: Option<&std::collections::BTreeMap<B, Printed8949Totals>>, boxes: &[B]| {
+        let mut t = Printed8949Totals::default();
+        if let Some(m) = m {
+            for b in boxes {
+                if let Some(x) = m.get(b) {
+                    t.proceeds_d += x.proceeds_d;
+                    t.cost_e += x.cost_e;
+                    t.gain_h += x.gain_h;
+                }
+            }
+        }
+        t
+    };
+    let st_g = of(f8949.map(|f| &f.st_by_box), &[B::G]);
+    let st_h = of(f8949.map(|f| &f.st_by_box), &[B::H]);
+    let st = of(f8949.map(|f| &f.st_by_box), &[B::I, B::C]);
+    let lt_j = of(f8949.map(|f| &f.lt_by_box), &[B::J]);
+    let lt_k = of(f8949.map(|f| &f.lt_by_box), &[B::K]);
+    let lt = of(f8949.map(|f| &f.lt_by_box), &[B::L, B::F]);
+    let (line1b_d, line1b_e, line1b_h) = (st_g.proceeds_d, st_g.cost_e, st_g.gain_h);
+    let (line2_d, line2_e, line2_h) = (st_h.proceeds_d, st_h.cost_e, st_h.gain_h);
+    let (line8b_d, line8b_e, line8b_h) = (lt_j.proceeds_d, lt_j.cost_e, lt_j.gain_h);
+    let (line9_d, line9_e, line9_h) = (lt_k.proceeds_d, lt_k.cost_e, lt_k.gain_h);
 
     // §G-28/B4 — line 1a, the 1099-B totals that need no Form 8949.
     let line1a_d = round_dollar(p.st_1099b_proceeds_1ad);
@@ -1065,7 +1134,7 @@ pub fn schedule_d_lines(ar: &AbsoluteReturn, f8949: Option<&Printed8949>) -> Sch
     let line3_h = st.gain_h;
     let line6 = round_dollar(p.st_carryover_6); // magnitude (paren box)
                                                 // ★ "Combine lines 1a through 6 in column (h)" — an addition chain over the PRINTED cells.
-    let line7 = line1a_h + line3_h - line6;
+    let line7 = line1a_h + line1b_h + line2_h + line3_h - line6;
 
     let line8a_d = round_dollar(p.lt_1099b_proceeds_8ad);
     let line8a_e = round_dollar(p.lt_1099b_cost_8ae);
@@ -1076,7 +1145,7 @@ pub fn schedule_d_lines(ar: &AbsoluteReturn, f8949: Option<&Printed8949>) -> Sch
     let line13 = round_dollar(p.cap_gain_distr_13);
     let line14 = round_dollar(p.lt_carryover_14); // magnitude (paren box)
                                                   // ★ "Combine lines 8a through 14 in column (h)" — again over the PRINTED cells.
-    let line15 = line8a_h + line10_h + line13 - line14;
+    let line15 = line8a_h + line8b_h + line9_h + line10_h + line13 - line14;
 
     let line16 = line7 + line15; // ★ combines the PRINTED lines
     let has_qd = round_dollar(p.qualified_dividends) > Usd::ZERO;
@@ -1106,6 +1175,12 @@ pub fn schedule_d_lines(ar: &AbsoluteReturn, f8949: Option<&Printed8949>) -> Sch
         line1a_d,
         line1a_e,
         line1a_h,
+        line1b_d,
+        line1b_e,
+        line1b_h,
+        line2_d,
+        line2_e,
+        line2_h,
         line3_d,
         line3_e,
         line3_h,
@@ -1114,6 +1189,12 @@ pub fn schedule_d_lines(ar: &AbsoluteReturn, f8949: Option<&Printed8949>) -> Sch
         line8a_d,
         line8a_e,
         line8a_h,
+        line8b_d,
+        line8b_e,
+        line8b_h,
+        line9_d,
+        line9_e,
+        line9_h,
         line10_d,
         line10_e,
         line10_h,
@@ -2743,6 +2824,24 @@ mod tests {
                 cost_e: round_dollar(p.st_cost_3e),
                 gain_h: round_dollar(p.st_gain_3h),
             },
+            // ★ spec 1099-DA T4 — lines 3/10 read the NOT-REPORTED box's totals (I/L), so the
+            //   fixture's totals are recorded under those boxes, as a routed pre-1099-DA return's are
+            st_by_box: std::collections::BTreeMap::from([(
+                crate::forms::Form8949Box::I,
+                Printed8949Totals {
+                    proceeds_d: round_dollar(p.st_proceeds_3d),
+                    cost_e: round_dollar(p.st_cost_3e),
+                    gain_h: round_dollar(p.st_gain_3h),
+                },
+            )]),
+            lt_by_box: std::collections::BTreeMap::from([(
+                crate::forms::Form8949Box::L,
+                Printed8949Totals {
+                    proceeds_d: round_dollar(p.lt_proceeds_10d),
+                    cost_e: round_dollar(p.lt_cost_10e),
+                    gain_h: round_dollar(p.lt_gain_10h),
+                },
+            )]),
             lt_totals: Printed8949Totals {
                 proceeds_d: round_dollar(p.lt_proceeds_10d),
                 cost_e: round_dollar(p.lt_cost_10e),

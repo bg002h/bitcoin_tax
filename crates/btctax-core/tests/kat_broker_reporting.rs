@@ -517,3 +517,76 @@ fn the_printed_packet_routes_the_boxes_on_a_live_year() {
         "covered/basis → G; noncovered/proceeds → K; self-custody → L"
     );
 }
+
+// ── T4: Schedule D's per-box lines ────────────────────────────────────────────────────────────────
+
+/// The G page-set's totals land on line 1b, NOT line 3; the K set on line 9; the self-custody L row
+/// on line 10; and lines 7 and 15 combine the per-box lines as the form says ("Combine lines 1a
+/// through 6" / "8a through 14").
+#[test]
+fn the_g_total_lands_on_line_1b_not_3() {
+    use btctax_core::tax::packet::assemble_printed_forms;
+    use btctax_core::tax::return_1040::assemble_absolute;
+    use btctax_core::tax::testonly::{ty2024_params, ty2024_table};
+    use std::collections::BTreeMap;
+    let st = owner_like(2025);
+    let mut ri = answers(&[
+        ("coinbase", Cohort::Covered, BrokerReported::BasisMatches),
+        ("coinbase", Cohort::Noncovered, BrokerReported::ProceedsOnly),
+    ]);
+    ri.tax_year = 2025;
+    let ar = assemble_absolute(&ri, &st, &ty2024_params(), &ty2024_table(), 2025);
+    let printed = assemble_printed_forms(
+        &ri,
+        &st,
+        &BTreeMap::new(),
+        &ar,
+        &ty2024_table(),
+        2025,
+        &[],
+        LIVE,
+    );
+    let d = printed.sch_d;
+    // every fixture leg: proceeds 1000, basis 400, gain 600
+    assert_eq!(
+        (d.line1b_d, d.line1b_e, d.line1b_h),
+        (dec!(1000), dec!(400), dec!(600)),
+        "G → 1b"
+    );
+    assert_eq!(
+        (d.line2_d, d.line2_e, d.line2_h),
+        (dec!(0), dec!(0), dec!(0)),
+        "no H set"
+    );
+    assert_eq!(
+        (d.line3_d, d.line3_e, d.line3_h),
+        (dec!(0), dec!(0), dec!(0)),
+        "no I set: line 3 is empty"
+    );
+    assert_eq!((d.line8b_d, d.line8b_h), (dec!(0), dec!(0)), "no J set");
+    assert_eq!(
+        (d.line9_d, d.line9_e, d.line9_h),
+        (dec!(1000), dec!(400), dec!(600)),
+        "K → 9"
+    );
+    assert_eq!(
+        (d.line10_d, d.line10_e, d.line10_h),
+        (dec!(1000), dec!(400), dec!(600)),
+        "self-custody L → 10"
+    );
+    assert_eq!(
+        d.line7,
+        d.line1a_h + d.line1b_h + d.line2_h + d.line3_h - d.line6,
+        "line 7 combines 1a–6"
+    );
+    assert_eq!(
+        d.line15,
+        d.line8a_h + d.line8b_h + d.line9_h + d.line10_h + d.line13 - d.line14,
+        "line 15 combines 8a–14"
+    );
+    // the per-box totals on the printed 8949 agree with the lines they feed
+    let f = printed.f8949.unwrap();
+    assert_eq!(f.st_by_box[&Form8949Box::G].proceeds_d, d.line1b_d);
+    assert_eq!(f.lt_by_box[&Form8949Box::K].proceeds_d, d.line9_d);
+    assert_eq!(f.lt_by_box[&Form8949Box::L].proceeds_d, d.line10_d);
+}
