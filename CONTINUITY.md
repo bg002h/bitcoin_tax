@@ -16,6 +16,25 @@ _Last updated: **2026-09-04**. Written at a deliberate pause; safe to exit. **Re
 > 1040 line 13b, and has a per-part two-oracle census. P2 went from **5 to 15** of 17 TY2025 bundled
 > form artifacts. P3 is untouched — the TY2025 fail-closed gate stays until `FullReturnParams` land.
 >
+> ## ★★★ TARGET CHANGED 2026-09-05 — TY2026 IS THE FIRST FILED YEAR; TY2025 IS PAUSED
+>
+> Owner ruling. The reasoning: the plan's own calendar had already concluded TY2025 by 2026-10-15 is
+> unreachable while **TY2026 in the 2027 season** is the first return btctax could file ON TIME, and
+> the owner's TY2025 return was completed outside this project — so a late TY2025 filing buys
+> nothing. **TY2027 timing is explicitly acceptable.**
+>
+> ★★ And the sharper framing, in the owner's words: *"what we need most is the scaffolding … the year
+> to year transition for every form we intend to support, not necessarily a completed 2025."* So the
+> deliverable is **year-transition MACHINERY** — every year-dependent thing a lookup that REFUSES an
+> unprepared year, never a hardcode with a fallback.
+>
+> ★ Almost no TY2025 work is wasted: the Schedule 1-A compute, the input surface, the refusals, the
+> emitter and every instrument are TY2026 requirements too. What pauses is the TY2025-SPECIFIC form
+> assets and the TY2025 fail-closed gate.
+>
+> Progress toward it: `design/TY2026_WORK_LIST.md` (computed per-form deltas), `xtask form-delta`
+> (the handoff is a diff), 16 archived TY2026 drafts with geometry, and the draft/final discriminator.
+
 > ## ★★★ NEXT YEAR: `design/TY2026_PORT_REPORT.md`
 > A six-lens recon fan-out (reports: `design/agent-reports/2026-09-05-ty2026-port-*.md`) answered what
 > it takes to carry this work to TY2026. **27 wrong-number risks, 3 Critical**, each classified
