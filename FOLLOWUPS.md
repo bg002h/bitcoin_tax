@@ -6184,9 +6184,15 @@ build, each with an owning phase.
   threshold slot (201,775 vs 201,750); (c) ★ **the oracle-sweep goldens** (`crates/btctax-core/tests/
   goldens/full_return_goldens.json`, `oracle_2_version: 6.7.2`) carry taxcalc's understated AMT for
   standard-deduction households — regenerate DELIBERATELY under 6.8.2 (port report §6 rule 13, never
-  to make a red green), which needs `OTS_DIR` for the oracle-1 half; unset in this session, so not
-  done here. **Owning phase: the pre-season oracle refresh (AFTER OTS 2026 for TY2026; any time for
-  the TY2024 goldens).**
+  to make a red green), which needs `OTS_DIR` for the oracle-1 half. ✅ **DONE 2026-09-06 for the TY2024 goldens**
+  (`22a4c0c4`; `OTS_DIR=~/OpenTaxSolver2024_22.07_linux64`, taxcalc 6.8.2; 106/106 admitted). The
+  diff was inspected BEFORE installing — three fields moved, each with a cause: `oracle_2_version`
+  6.7.2 → 6.8.2; one household's `why` prose the generator had corrected ($264,000 → $228,000) with
+  no regen; `single_loss_year_taxable_income_at_the_floor`'s OTS `amt` from "not witnessed" to 0.0,
+  because the `cash_gift > 0` guard (`05943f4f`, 2026-08-22, "a blind OTS guard") landed after the
+  goldens were last generated that same day. ★ No taxcalc AMT figure moved: the corpus is admitted
+  AMT-FREE (D-2), so #3108 never reached it. 40/40 golden readers green. **Owning phase for TY2026:
+  the pre-season oracle refresh (AFTER OTS 2026).**
 - **FR-48 — `YearReadiness` + the three LIVE refusal-surface defects** (port report §2.5, D7):
   `income import --year 2026` commits a write and then `report` exits 2 prescribing `income clear`,
   which deletes the filer's W-2s; `selected_year: 2025` literal in two TUIs; `export-snapshot`
