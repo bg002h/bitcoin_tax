@@ -14,6 +14,7 @@ use crate::seam::{
     Field, FieldId, FieldKind, FieldValue, SecretView, Section, SectionId, SectionKind, SetError,
 };
 use btctax_core::conventions::Usd;
+use btctax_core::forms::{BrokerReported, Cohort};
 use btctax_core::tax::questions::{FORM_QUESTIONS, SKIPPABLE_QUESTIONS};
 use btctax_core::tax::return_inputs::{
     Box12Entry, CharitableClass, CharitableGift, Dependent, ItemizeElection, Person,
@@ -1536,5 +1537,220 @@ mod tests {
             (m_entry.live)(&ri),
             "mortgage live comes from the registry gate"
         );
+    }
+}
+
+// ── spec 1099-DA T6. BrokerReporting (Repeating) — `ri.broker_reporting.0: BTreeMap<provider, CohortAnswers>`,
+//    row i = the i-th provider in key order; two Enum slots per row. ──────────────────────────────────────
+
+/// The Enum tokens: `Unanswered` is the ABSENT slot (`None`), the five others are `BrokerReported`'s
+/// variants by their Debug names. Choosing `Unanswered` clears the slot, which is the un-answer path.
+const BROKER_CHOICES: &[&str] = &[
+    "Unanswered",
+    "NotReported",
+    "ProceedsOnly",
+    "BasisMatches",
+    "BasisDiffers",
+    "Mixed",
+];
+
+fn broker_choice(v: Option<BrokerReported>) -> FieldValue {
+    FieldValue::Choice(
+        match v {
+            None => "Unanswered",
+            Some(BrokerReported::NotReported) => "NotReported",
+            Some(BrokerReported::ProceedsOnly) => "ProceedsOnly",
+            Some(BrokerReported::BasisMatches) => "BasisMatches",
+            Some(BrokerReported::BasisDiffers) => "BasisDiffers",
+            Some(BrokerReported::Mixed) => "Mixed",
+        }
+        .to_string(),
+    )
+}
+
+fn broker_parse(v: FieldValue) -> Result<Option<BrokerReported>, SetError> {
+    let FieldValue::Choice(c) = v else {
+        return Err(SetError::WrongKind);
+    };
+    Ok(match c.as_str() {
+        "Unanswered" => None,
+        "NotReported" => Some(BrokerReported::NotReported),
+        "ProceedsOnly" => Some(BrokerReported::ProceedsOnly),
+        "BasisMatches" => Some(BrokerReported::BasisMatches),
+        "BasisDiffers" => Some(BrokerReported::BasisDiffers),
+        "Mixed" => Some(BrokerReported::Mixed),
+        _ => return Err(SetError::WrongKind),
+    })
+}
+
+fn broker_get(
+    ri: &btctax_core::tax::return_inputs::ReturnInputs,
+    a: &crate::seam::RowAddr,
+    cohort: Cohort,
+) -> Option<FieldValue> {
+    ri.broker_reporting
+        .0
+        .values()
+        .nth(a.0[0])
+        .map(|c| broker_choice(c.get(cohort)))
+}
+
+fn broker_set(
+    ri: &mut btctax_core::tax::return_inputs::ReturnInputs,
+    a: &crate::seam::RowAddr,
+    cohort: Cohort,
+    v: FieldValue,
+) -> Result<(), SetError> {
+    let answer = broker_parse(v)?;
+    let slot = ri
+        .broker_reporting
+        .0
+        .values_mut()
+        .nth(a.0[0])
+        .ok_or(SetError::NoSuchRow)?;
+    match cohort {
+        Cohort::Covered => slot.covered = answer,
+        Cohort::Noncovered => slot.noncovered = answer,
+    }
+    Ok(())
+}
+
+const BROKER_FIELDS: &[Field] = &[
+    Field {
+        id: FieldId::BrokerCovered,
+        clear: None,
+        label: "Covered lots — bought on this venue on/after 2026-01-01",
+        help: "Look at the Form 1099-DA(s) this venue issued for the rows under this key. None lists \
+               them → NotReported (box I/L). All listed with box 2 NOT checked → ProceedsOnly (box \
+               H/K). All listed with box 2 checked and box 1g equal to column (e) on each → \
+               BasisMatches (box G/J). Any box 1g differs → BasisDiffers (the return REFUSES: it \
+               needs the broker's figure in (e) and the correction in (g), a per-lot import). The \
+               forms do not all say the same thing → Mixed (REFUSES). Unanswered refuses the return.",
+        kind: FieldKind::Enum(BROKER_CHOICES),
+        live: |_| true,
+        get: |ri, a| broker_get(ri, a, Cohort::Covered),
+        set: |ri, a, v| broker_set(ri, a, Cohort::Covered, v),
+    },
+    Field {
+        id: FieldId::BrokerNoncovered,
+        clear: None,
+        label: "Noncovered lots — everything else this venue sold for you",
+        help: "Same five answers, for the rows this venue sold that arrived by transfer, were bought \
+               before 2026, or were credited as rewards. A broker reports these with box 2 unchecked \
+               (proceeds only) or not at all. Leave Unanswered when the row list shows 0 rows: an \
+               answer no row reads refuses as unread.",
+        kind: FieldKind::Enum(BROKER_CHOICES),
+        live: |_| true,
+        get: |ri, a| broker_get(ri, a, Cohort::Noncovered),
+        set: |ri, a, v| broker_set(ri, a, Cohort::Noncovered, v),
+    },
+];
+
+pub(crate) const BROKER_REPORTING: Section = Section {
+    id: SectionId::BrokerReporting,
+    title: "Form 1099-DA answers",
+    kind: SectionKind::Repeating {
+        len: |ri, _| ri.broker_reporting.0.len(),
+        // ★ Rows are the ledger's exchange keys, seeded by the renderer at open — a row typed by hand
+        //   would be an answer no Form 8949 row reads, which the return refuses as unread. So `add`
+        //   REPORTS (I-4) rather than inventing a provider name.
+        add: |_, _| Err(SetError::Immutable),
+        remove: |ri, a| {
+            let key = ri.broker_reporting.0.keys().nth(a.0[0]).cloned();
+            match key {
+                Some(k) => {
+                    ri.broker_reporting.0.remove(&k);
+                    Ok(())
+                }
+                None => Err(SetError::NoSuchRow),
+            }
+        },
+    },
+    fields: BROKER_FIELDS,
+};
+
+#[cfg(test)]
+mod broker_block_tests {
+    use super::*;
+    use crate::seam::RowAddr;
+    use btctax_core::forms::CohortAnswers;
+    use btctax_core::tax::return_inputs::ReturnInputs;
+
+    fn two_providers() -> ReturnInputs {
+        let mut ri = ReturnInputs::default();
+        ri.broker_reporting.0.insert(
+            "coinbase".into(),
+            CohortAnswers {
+                covered: Some(BrokerReported::BasisMatches),
+                noncovered: None,
+            },
+        );
+        ri.broker_reporting
+            .0
+            .insert("gemini".into(), CohortAnswers::default());
+        ri
+    }
+
+    /// spec 1099-DA T6 — each slot reads and writes exactly its (provider, cohort); `Unanswered`
+    /// clears the slot (the un-answer path); `add` refuses (rows are the ledger's keys); `remove`
+    /// deletes the provider; a bad row or token is a clean error.
+    #[test]
+    fn the_block_reads_writes_clears_and_refuses_hand_rows() {
+        let mut ri = two_providers();
+        let (covered, noncovered) = (&BROKER_FIELDS[0], &BROKER_FIELDS[1]);
+        let r0 = RowAddr(vec![0]);
+        let r1 = RowAddr(vec![1]);
+        assert_eq!(
+            (covered.get)(&ri, &r0),
+            Some(FieldValue::Choice("BasisMatches".into()))
+        );
+        assert_eq!(
+            (noncovered.get)(&ri, &r0),
+            Some(FieldValue::Choice("Unanswered".into()))
+        );
+        (noncovered.set)(&mut ri, &r1, FieldValue::Choice("ProceedsOnly".into())).unwrap();
+        assert_eq!(
+            ri.broker_reporting.answer("gemini", Cohort::Noncovered),
+            Some(BrokerReported::ProceedsOnly)
+        );
+        assert_eq!(
+            ri.broker_reporting.answer("coinbase", Cohort::Noncovered),
+            None,
+            "the other row is untouched"
+        );
+        (covered.set)(&mut ri, &r0, FieldValue::Choice("Unanswered".into())).unwrap();
+        assert_eq!(
+            ri.broker_reporting.answer("coinbase", Cohort::Covered),
+            None,
+            "cleared"
+        );
+        assert_eq!(
+            (covered.set)(
+                &mut ri,
+                &RowAddr(vec![7]),
+                FieldValue::Choice("Mixed".into())
+            ),
+            Err(SetError::NoSuchRow)
+        );
+        assert_eq!(
+            (covered.set)(&mut ri, &r0, FieldValue::Choice("Whatever".into())),
+            Err(SetError::WrongKind)
+        );
+        assert_eq!(
+            (covered.set)(&mut ri, &r0, FieldValue::Text("Mixed".into())),
+            Err(SetError::WrongKind)
+        );
+        let SectionKind::Repeating { len, add, remove } = BROKER_REPORTING.kind else {
+            panic!("repeating")
+        };
+        assert_eq!(len(&ri, &RowAddr::default()), 2);
+        assert_eq!(add(&mut ri, &RowAddr::default()), Err(SetError::Immutable));
+        remove(&mut ri, &r0).unwrap();
+        assert_eq!(len(&ri, &RowAddr::default()), 1);
+        assert!(
+            ri.broker_reporting.0.contains_key("gemini")
+                && !ri.broker_reporting.0.contains_key("coinbase")
+        );
+        assert_eq!(remove(&mut ri, &RowAddr(vec![5])), Err(SetError::NoSuchRow));
     }
 }

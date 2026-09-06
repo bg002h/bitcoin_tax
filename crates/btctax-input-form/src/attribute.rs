@@ -61,19 +61,16 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
             vec![decl(QuestionId::ExcludedCanceledDebt)]
         }
         R::IncomeExclusionUnanswered => vec![decl(QuestionId::HasIncomeExclusion)],
-        // ★ spec 1099-DA — the per-(provider, cohort) answers. Until T6 lands the input form's
-        //   broker-reporting block there is NO form field for them: the refusal's own text names the
-        //   exit (`income import`'s `[broker_reporting.<provider>]` table). T6 re-points these three
-        //   at that block; this arm is what makes that a compile-time obligation, not a memory.
-        R::BrokerReportingUnanswered { .. }
-        | R::BrokerReportingMixed { .. }
-        | R::BrokerBasisDiffers { .. }
-        | R::BrokerAnswerUnread { .. } => vec![Anchor::NotInForm {
-            note: "spec 1099-DA: the per-(provider, cohort) Form 1099-DA answers live in `income import`'s \
-                   `[broker_reporting.<provider>]` table (covered / noncovered = not_reported | \
-                   proceeds_only | basis_matches | basis_differs | mixed) until T6 adds the input-form \
-                   block; Mixed and BasisDiffers name the per-lot 1099-DA import as the exit",
-        }],
+        // ★ spec 1099-DA T6 — the per-(provider, cohort) answers live in the `BrokerReporting` block,
+        //   one row per provider, one field per cohort: every broker refusal points at the slot of
+        //   its cohort (the row is the provider named in the refusal's own text).
+        R::BrokerReportingUnanswered { cohort, .. }
+        | R::BrokerReportingMixed { cohort, .. }
+        | R::BrokerBasisDiffers { cohort, .. }
+        | R::BrokerAnswerUnread { cohort, .. } => vec![Anchor::Field(match cohort {
+            btctax_core::forms::Cohort::Covered => FieldId::BrokerCovered,
+            btctax_core::forms::Cohort::Noncovered => FieldId::BrokerNoncovered,
+        })],
         // §G-22/B11 — both legs point at the one declaration that decides them.
         R::OtherIncomeUnanswered | R::OtherIncomeOutOfScope => {
             vec![decl(QuestionId::OtherOutOfScopeIncome)]
@@ -289,6 +286,44 @@ mod tests {
                 Field(FieldId::DeclForeignAccounts),
                 Field(FieldId::DeclForeignTrust),
             ],
+        );
+    }
+
+    /// spec 1099-DA T6 — the four broker refusals anchor at the block's slot for THEIR cohort,
+    /// never `NotInForm` any more.
+    #[test]
+    fn broker_refusals_anchor_the_block_by_cohort() {
+        use btctax_core::forms::Cohort;
+        let p = || "coinbase".to_string();
+        assert_eq!(
+            attribute(&RefuseReason::BrokerReportingUnanswered {
+                provider: p(),
+                cohort: Cohort::Covered,
+                year: 2026
+            }),
+            vec![Field(FieldId::BrokerCovered)]
+        );
+        assert_eq!(
+            attribute(&RefuseReason::BrokerReportingMixed {
+                provider: p(),
+                cohort: Cohort::Noncovered
+            }),
+            vec![Field(FieldId::BrokerNoncovered)]
+        );
+        assert_eq!(
+            attribute(&RefuseReason::BrokerBasisDiffers {
+                provider: p(),
+                cohort: Cohort::Covered
+            }),
+            vec![Field(FieldId::BrokerCovered)]
+        );
+        assert_eq!(
+            attribute(&RefuseReason::BrokerAnswerUnread {
+                provider: p(),
+                cohort: Cohort::Noncovered,
+                year: 2026
+            }),
+            vec![Field(FieldId::BrokerNoncovered)]
         );
     }
 

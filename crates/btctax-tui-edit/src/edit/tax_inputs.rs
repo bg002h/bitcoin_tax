@@ -313,6 +313,16 @@ pub fn add_row(form: &mut TaxInputsFormState) -> bool {
     let Some((section, _)) = selected_repeating(form) else {
         return false;
     };
+    // ★ spec 1099-DA T6 — the broker block's rows are the ledger's exchange keys; say so instead of
+    //   surfacing the seam's `Immutable` as a clear-field message.
+    if section == SectionId::BrokerReporting {
+        form.error = Some(
+            "rows here are the venues your Form 8949 rows were sold on (seeded from the ledger); a \
+             venue not listed has no 1099-DA key — record it as exchange:PROVIDER:ACCOUNT in the ledger"
+                .to_string(),
+        );
+        return false;
+    }
     let ok = apply_edit(
         form,
         Edit::AddRow {

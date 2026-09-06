@@ -214,6 +214,10 @@ pub struct TaxInputsFormState {
     /// `fn(form)` (the profile-form template), and while the flow is open it is the sole store writer under
     /// the exclusive vault lock, so the cache is always consistent with disk after each handler.
     pub active_source_label: &'static str,
+    /// ★ spec 1099-DA T6 — per provider, how many of the year's Form 8949 rows fall under each
+    /// cohort (covered, noncovered), read from the LEDGER at open. The seam cannot see the ledger,
+    /// so this is what lets the row list ENUMERATE each key's rows before the answer is taken.
+    pub broker_census: std::collections::BTreeMap<String, (usize, usize)>,
     /// ★ Task 5: a staged `RemoveRow` awaiting the payload-confirm ("remove W-2 #2?"). `Some` while the
     /// confirm modal is open — Enter applies it, Esc clears it. It carries the VALIDATED row address (never
     /// a raw cursor), so a later cursor move cannot re-target the delete.
@@ -311,7 +315,105 @@ impl TaxInputsFormState {
             descent: None,
             modal: None,
             refused_section: None,
+            broker_census: Default::default(),
         }
+    }
+}
+
+/// ★ spec 1099-DA T6 — the ledger's (provider, cohort) census folded per provider as
+/// `(covered rows, noncovered rows)`, the shape the row list prints.
+pub fn broker_census_by_provider(
+    census: &std::collections::BTreeMap<(String, btctax_core::forms::Cohort), usize>,
+) -> std::collections::BTreeMap<String, (usize, usize)> {
+    use btctax_core::forms::Cohort;
+    let mut out: std::collections::BTreeMap<String, (usize, usize)> = Default::default();
+    for ((p, c), n) in census {
+        let e = out.entry(p.clone()).or_insert((0, 0));
+        match c {
+            Cohort::Covered => e.0 += n,
+            Cohort::Noncovered => e.1 += n,
+        }
+    }
+    out
+}
+
+/// ★ spec 1099-DA T6 — seed the working return's `broker_reporting` map with one row per provider the
+/// ledger's rows carry, on a year whose regime reports BASIS. Existing rows and answers are kept;
+/// nothing is seeded on a year that does not ask (the section then stays hidden unless an answer is
+/// stored, which `report` shows as unread). Returns the number of rows added.
+pub fn seed_broker_rows(
+    ri: &mut btctax_core::tax::return_inputs::ReturnInputs,
+    by_provider: &std::collections::BTreeMap<String, (usize, usize)>,
+    regime: Option<btctax_core::InformationReturnRegime>,
+) -> usize {
+    if !regime.is_some_and(|r| r.basis) {
+        return 0;
+    }
+    let mut added = 0;
+    for provider in by_provider.keys() {
+        if !ri.broker_reporting.0.contains_key(provider) {
+            ri.broker_reporting
+                .0
+                .insert(provider.clone(), Default::default());
+            added += 1;
+        }
+    }
+    added
+}
+
+#[cfg(test)]
+mod broker_seed_tests {
+    use super::{broker_census_by_provider, seed_broker_rows};
+    use btctax_core::forms::{BrokerReported, Cohort, CohortAnswers};
+    use btctax_core::tax::return_inputs::ReturnInputs;
+    use btctax_core::InformationReturnRegime as R;
+    use std::collections::BTreeMap;
+
+    fn census() -> BTreeMap<(String, Cohort), usize> {
+        [
+            (("coinbase".to_string(), Cohort::Covered), 3usize),
+            (("coinbase".to_string(), Cohort::Noncovered), 1),
+            (("gemini".to_string(), Cohort::Noncovered), 2),
+        ]
+        .into_iter()
+        .collect()
+    }
+
+    /// The rows are the ledger's keys: seeded on a basis year, untouched where an answer exists,
+    /// never seeded on a proceeds-only year or a year with no record.
+    #[test]
+    fn rows_are_seeded_from_the_ledger_on_a_basis_year_only() {
+        let by = broker_census_by_provider(&census());
+        assert_eq!(by["coinbase"], (3, 1));
+        assert_eq!(by["gemini"], (0, 2));
+        let mut ri = ReturnInputs::default();
+        ri.broker_reporting.0.insert(
+            "coinbase".into(),
+            CohortAnswers {
+                covered: Some(BrokerReported::BasisMatches),
+                noncovered: None,
+            },
+        );
+        assert_eq!(
+            seed_broker_rows(&mut ri, &by, Some(R::PROCEEDS_AND_BASIS)),
+            1
+        );
+        assert_eq!(ri.broker_reporting.0.len(), 2);
+        assert_eq!(
+            ri.broker_reporting.answer("coinbase", Cohort::Covered),
+            Some(BrokerReported::BasisMatches),
+            "an existing answer survives the seed"
+        );
+        assert!(ri.broker_reporting.0.contains_key("gemini"));
+        assert_eq!(
+            seed_broker_rows(&mut ri, &by, Some(R::PROCEEDS_AND_BASIS)),
+            0,
+            "idempotent"
+        );
+        let mut fresh = ReturnInputs::default();
+        assert_eq!(seed_broker_rows(&mut fresh, &by, Some(R::PROCEEDS_ONLY)), 0);
+        assert_eq!(seed_broker_rows(&mut fresh, &by, None), 0);
+        assert!(fresh.broker_reporting.0.is_empty());
     }
 }
 
@@ -385,6 +487,9 @@ fn section_is_live(
         //   that cannot apply is the section-level twin of asking a spouse-less return a spouse
         //   question. Its fields are gated the same way, so this only removes the empty heading.
         SectionId::QbiLimitation => ri.schedule_c.is_some(),
+        // ★ spec 1099-DA T6 — shown once the opener has seeded the ledger's exchange keys (a basis
+        //   year with ≥1 keyed row) or an answer is stored; an empty map is a year with nothing to ask.
+        SectionId::BrokerReporting => !ri.broker_reporting.0.is_empty(),
         _ => true,
     }
 }

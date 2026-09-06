@@ -814,7 +814,20 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
         edit::persist::form_active_source(app.session.as_ref().unwrap(), year)
             .map(|a| crate::edit::form::active_source_label(&a))
             .unwrap_or("(none)");
-    let form = match loaded {
+    // ★ spec 1099-DA T6 — the ledger's exchange keys and their row counts, read ONCE at open from the
+    //   snapshot; the row list enumerates them beside each answer. `None` snapshot → nothing to seed.
+    let broker_census = app
+        .snapshot
+        .as_ref()
+        .map(|snap| {
+            let rows = btctax_core::form_8949(&snap.state, year);
+            crate::edit::form::broker_census_by_provider(&btctax_core::forms::broker_key_census(
+                &rows,
+            ))
+        })
+        .unwrap_or_default();
+    let regime = btctax_cli::year_readiness::regime_for(year);
+    let mut form = match loaded {
         Ok((btctax_cli::input_form_store::Loaded::Fresh, stale_note)) => TaxInputsFormState {
             year,
             working: None,
@@ -833,6 +846,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
             descent: None,
             modal: None,
             refused_section: None,
+            broker_census: broker_census.clone(),
         },
         Ok((btctax_cli::input_form_store::Loaded::Committed(ri), stale_note)) => {
             TaxInputsFormState {
@@ -853,6 +867,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 descent: None,
                 modal: None,
                 refused_section: None,
+                broker_census: broker_census.clone(),
             }
         }
         Ok((btctax_cli::input_form_store::Loaded::Draft { ri, parked }, stale_note)) => {
@@ -874,6 +889,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 descent: None,
                 modal: None,
                 refused_section: None,
+                broker_census: broker_census.clone(),
             }
         }
         Err(e @ btctax_cli::CliError::StaleParkedDraft { .. }) => {
@@ -898,6 +914,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 descent: None,
                 modal: None,
                 refused_section: None,
+                broker_census: broker_census.clone(),
             }
         }
         Err(e) => {
@@ -905,6 +922,11 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
             return;
         }
     };
+    // ★ spec 1099-DA T6 — seed one row per provider the ledger lists, on a basis year only. The seed
+    //   is a VIEW of the ledger (re-derived on every open), so it does not dirty the draft by itself.
+    if let Some(ri) = form.working.as_mut() {
+        crate::edit::form::seed_broker_rows(ri, &form.broker_census, regime);
+    }
     app.tax_inputs_form = Some(form);
 }
 

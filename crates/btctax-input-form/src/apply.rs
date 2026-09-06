@@ -129,7 +129,10 @@ fn apply_to(ri: &mut ReturnInputs, e: Edit) -> Result<(), ApplyError> {
 /// new `SectionId` is a compile error here.
 fn row_depth(id: SectionId) -> usize {
     match id {
-        SectionId::Dependents | SectionId::W2s | SectionId::ScheduleACharitable => 1,
+        SectionId::Dependents
+        | SectionId::W2s
+        | SectionId::ScheduleACharitable
+        | SectionId::BrokerReporting => 1,
         SectionId::W2Box12 => 2,
         SectionId::ReturnOptions
         | SectionId::Taxpayer

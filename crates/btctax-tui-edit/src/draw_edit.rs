@@ -2408,18 +2408,29 @@ fn field_pane_lines(
             if n == 0 {
                 lines.push(Line::from(Span::styled("  (no rows yet)", dark)));
             }
+            let is_broker = section.id == SectionId::BrokerReporting;
             for i in 0..n {
                 let is_focus = i == field_focus;
                 let marker = if is_focus { '>' } else { ' ' };
                 let style = if is_focus { focus } else { Style::default() };
+                let preview = if is_broker {
+                    broker_row_preview(form, ri, i)
+                } else {
+                    row_preview(section, ri, i)
+                };
                 lines.push(Line::from(Span::styled(
-                    format!("{marker} #{}{}", i + 1, row_preview(section, ri, i)),
+                    format!("{marker} #{}{}", i + 1, preview),
                     style,
                 )));
             }
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
-                "  [a] add  [d] remove  [Enter] edit row",
+                if is_broker {
+                    // spec 1099-DA T6 — rows are the ledger's exchange keys; none is added by hand
+                    "  [d] remove  [Enter] answer   (rows = the venues your Form 8949 rows were sold on)"
+                } else {
+                    "  [a] add  [d] remove  [Enter] edit row"
+                },
                 dark,
             )));
             push_error(&mut lines, error);
@@ -2427,8 +2438,13 @@ fn field_pane_lines(
         }
         // Inside a row: header + the row's fields (read/written at `addr`) + the nested drill entry + a back hint.
         if let Some(row) = addr.0.last() {
+            let preview = if section.id == SectionId::BrokerReporting {
+                broker_row_preview(form, ri, *row)
+            } else {
+                String::new()
+            };
             lines.push(Line::from(Span::styled(
-                format!("  {} #{}", section.title, row + 1),
+                format!("  {} #{}{}", section.title, row + 1, preview),
                 dark,
             )));
         }
@@ -2574,6 +2590,21 @@ fn push_field_lines(
 /// A one-line preview for a repeating row: the section's first field rendered at `[i]` (e.g. a W-2's owner,
 /// a dependent's name), or empty when it has no informative value. Depth-1 groups only (the nested
 /// box-12/charitable groups are never top-level rows).
+/// ★ spec 1099-DA T6 — a `BrokerReporting` row's preview names the PROVIDER (the map's i-th key) and
+/// ENUMERATES the ledger's rows under each cohort, so the filer sees what a slot answers for before
+/// answering it; a provider with no ledger rows says so (its answers would be unread).
+fn broker_row_preview(form: &TaxInputsFormState, ri: &ReturnInputs, i: usize) -> String {
+    let Some(provider) = btctax_input_form::broker_row_provider(ri, i) else {
+        return String::new();
+    };
+    match form.broker_census.get(&provider) {
+        Some((c, n)) => format!("  — {provider}   covered: {c} row(s) · noncovered: {n} row(s)"),
+        None => {
+            format!("  — {provider}   (no Form 8949 row this year — answers here would be unread)")
+        }
+    }
+}
+
 fn row_preview(section: &'static Section, ri: &ReturnInputs, i: usize) -> String {
     let addr = RowAddr(vec![i]);
     let Some(f) = section.fields.first() else {

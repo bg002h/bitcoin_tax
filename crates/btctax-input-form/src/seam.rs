@@ -28,6 +28,11 @@ pub enum SectionId {
     /// ★ §G-28/B1b — the §199A(b)(2) limitation amounts. NOT carryforwards: they are facts about the
     ///   business THIS year, and above the §199A(e)(2) threshold they cap the deduction.
     QbiLimitation,
+    /// ★ spec 1099-DA T6 — the Form 1099-DA answers, one row per exchange PROVIDER the year's Form
+    ///   8949 rows carry, two slots per row (covered / noncovered). Rows are SEEDED from the ledger's
+    ///   keys by the renderer (the seam cannot see the ledger), never added by hand: an answer for a
+    ///   key no row reads refuses as unread.
+    BrokerReporting,
     Declarations,
     IncomeExclusions,
     Skippables,
@@ -178,6 +183,11 @@ pub enum FieldId {
     // deduction, so omitting either UNDERSTATES tax. They were import-only until 2026-07-31.
     QbiReitPtpCarryforwardIn,
     QbiCarryforwardIn,
+    // ★ spec 1099-DA T6 — the two slots of a `BrokerReporting` row (`broker_reporting.<provider>`).
+    /// The answer for the provider's COVERED lots (bought on the venue on/after 2026-01-01).
+    BrokerCovered,
+    /// The answer for the provider's NONCOVERED lots (everything else the venue sold for the filer).
+    BrokerNoncovered,
 }
 
 /// The value shape of a field.

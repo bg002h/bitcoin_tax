@@ -126,6 +126,15 @@ fn maximal_fixture() -> ReturnInputs {
         expenses: dec!(1),
         ..Default::default()
     });
+    // ★ spec 1099-DA T6 — one provider with BOTH slots answered, so the map has leaves to police
+    //   (`skip_serializing_if` drops an unanswered slot, and an empty map has no leaf at all).
+    ri.broker_reporting.0.insert(
+        "coinbase".to_string(),
+        btctax_core::forms::CohortAnswers {
+            covered: Some(btctax_core::forms::BrokerReported::NotReported),
+            noncovered: Some(btctax_core::forms::BrokerReported::NotReported),
+        },
+    );
     ri
 }
 
@@ -151,6 +160,8 @@ fn sentinel(f: &Field) -> FieldValue {
                 //   is the one whose meaning is *"answered, and not yes or no"* — the distinction the
                 //   whole three-valued type exists for.
                 FieldId::Form8615Condition4ParentAlive => "CannotKnow",
+                // spec 1099-DA T6 — the fixture's slots are NotReported
+                FieldId::BrokerCovered | FieldId::BrokerNoncovered => "BasisMatches",
                 other => panic!("no Enum sentinel for {other:?} — add a distinct real choice"),
             };
             FieldValue::Choice(choice.to_string())
@@ -215,7 +226,10 @@ fn fixture_for(field: &Field, base: &ReturnInputs) -> ReturnInputs {
 fn addr_for(id: SectionId) -> RowAddr {
     match id {
         SectionId::W2Box12 => RowAddr(vec![0, 0]),
-        SectionId::Dependents | SectionId::W2s | SectionId::ScheduleACharitable => RowAddr(vec![0]),
+        SectionId::Dependents
+        | SectionId::W2s
+        | SectionId::ScheduleACharitable
+        | SectionId::BrokerReporting => RowAddr(vec![0]),
         _ => RowAddr::default(),
     }
 }
@@ -461,13 +475,14 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     // change happened to keep the sets balanced.
     let field_count: usize = form_spec().iter().map(|s| s.fields.len()).sum();
     assert_eq!(
-        field_count, 96,
-        "expected 96 Fields (one per §5.8 in-scope leaf) — 93 + FR-29's Form 8615 trio"
+        field_count, 98,
+        "expected 98 Fields (one per §5.8 in-scope leaf) — 93 + FR-29's Form 8615 trio + spec \
+         1099-DA T6's two broker-reporting slots"
     );
     assert_eq!(
         covered.len(),
-        96,
-        "expected 96 distinctly-covered in-scope leaves — 93 + FR-29's Form 8615 trio"
+        98,
+        "expected 98 distinctly-covered in-scope leaves — 93 + FR-29's Form 8615 trio + spec 1099-DA T6's two broker-reporting slots"
     );
 
     // ── 5. ★ I-6: PIN the observed FieldId → leaf-path map against a literal (kills TRANSPOSITION). ──
@@ -699,6 +714,12 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
     (
         FieldId::DeclAmtDepreciationSame,
         "amt_depreciation_same_as_regular",
+    ),
+    // spec 1099-DA T6 — the two slots of the fixture's one provider row
+    (FieldId::BrokerCovered, "broker_reporting.coinbase.covered"),
+    (
+        FieldId::BrokerNoncovered,
+        "broker_reporting.coinbase.noncovered",
     ),
     (FieldId::ForeignCountryNames, "foreign_country_names"),
     (FieldId::BlindTaxpayer, "header.taxpayer.blind"),

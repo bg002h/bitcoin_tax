@@ -30,11 +30,22 @@ pub fn form_spec() -> &'static [Section] {
         sections::PAYMENTS,
         sections::CARRYFORWARDS,
         sections::QBI_LIMITATION,
+        sections::BROKER_REPORTING,
         registries::DECLARATIONS,
         registries::INCOME_EXCLUSIONS,
         registries::SKIPPABLES,
     ];
     SECTIONS
+}
+
+/// ★ spec 1099-DA T6 — the PROVIDER a `BrokerReporting` row stands for (the map's i-th key). The
+/// renderer names rows through this rather than reading the map (§9A/§13: it never names a
+/// `ReturnInputs` field); the seam owns the row ↔ key correspondence in one place.
+pub fn broker_row_provider(
+    ri: &btctax_core::tax::return_inputs::ReturnInputs,
+    i: usize,
+) -> Option<String> {
+    ri.broker_reporting.0.keys().nth(i).cloned()
 }
 
 /// Test helper (shared with Task 5): the section with this id, panicking if absent.
