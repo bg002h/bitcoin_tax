@@ -183,7 +183,16 @@ fn html_unescape(s: &str) -> String {
 /// committed JSON is what tests read, so neither CI nor a fresh clone needs `pdftotext` or network.
 pub fn extract(stem: &str) -> Result<(), String> {
     let root = repo_root();
-    let year = stem.rsplit("--").next().unwrap_or("2025");
+    // ★★ A DRAFT stem is `<form>--<year>-DRAFT`, and the year directory is the YEAR, not
+    //    `2026-DRAFT`. The `-DRAFT` marker stays in the FILENAME on purpose — it is one of the
+    //    three signals `authority_manifest::Entry::is_draft` reads, and R20 is precisely that a
+    //    draft under a clean stem is indistinguishable from a final. So the suffix is stripped when
+    //    resolving the DIRECTORY and kept everywhere else.
+    let year = stem
+        .rsplit("--")
+        .next()
+        .unwrap_or("2025")
+        .trim_end_matches("-DRAFT");
     let pdf = root.join(format!("design/forms/{year}/{stem}.pdf"));
     if !pdf.is_file() {
         return Err(format!(

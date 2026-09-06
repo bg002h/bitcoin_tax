@@ -23,6 +23,7 @@ mod cite_check;
 mod docs;
 mod dump_fields;
 mod examples;
+mod form_delta;
 mod form_geometry;
 mod harness_check;
 mod label_reader;
@@ -122,6 +123,19 @@ fn main() {
                 }
             } else if let Err(e) = authority_manifest::run() {
                 eprintln!("xtask authority-manifest: {e}");
+                std::process::exit(1);
+            }
+        }
+        Some("form-delta") => {
+            let (Some(a), Some(b)) = (args.get(1), args.get(2)) else {
+                eprintln!(
+                    "usage: cargo run -p xtask -- form-delta <old-stem> <new-stem>\n\
+                     e.g. form-delta f6251--2025 f6251--2026-DRAFT"
+                );
+                std::process::exit(2);
+            };
+            if let Err(e) = form_delta::run(a, b) {
+                eprintln!("xtask form-delta: {e}");
                 std::process::exit(1);
             }
         }

@@ -906,7 +906,6 @@ mod tests {
 /// everything below it down, with **zero renames**. TY2024's `line11`, the AMT itself, then prints
 /// in the TY2025 form's **line-10 box**. A wrong number on signed testimony, and the exists-check is
 /// structurally blind to it, because a rename is not what happened.
-#[cfg(test)]
 pub fn label_join(stem: &str) -> Result<std::collections::BTreeMap<String, String>, String> {
     let g = crate::form_geometry::load(&crate::form_geometry::repo_root(), stem)?;
     let labels = witness_text(&g)?;
@@ -1056,9 +1055,10 @@ mod map_label_join_tests {
         }
 
         assert!(
-            checked >= 67,
-            "only {checked} line->label joins checked (measured floor: 67); the walk is not \
-             reaching the maps, or geometry fixtures have been deleted"
+            checked >= 151,
+            "only {checked} line->label joins checked (measured floor: 151); the walk is not \
+             reaching the maps, or geometry fixtures have been deleted. This floor is a RATCHET — \
+             raise it when coverage grows, never lower it to make a red go away."
         );
         assert!(
             wrong.is_empty(),
@@ -1111,4 +1111,9 @@ mod map_label_join_tests {
              existence check passes on this exact input, with 0 of 61 field names absent."
         );
     }
+}
+
+/// The same join, for `form_delta`. A thin alias so the doc above stays the single explanation.
+pub fn label_join_public(stem: &str) -> Result<std::collections::BTreeMap<String, String>, String> {
+    label_join(stem)
 }
