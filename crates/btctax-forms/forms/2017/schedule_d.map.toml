@@ -6,6 +6,15 @@
 # 2019, so the 2017 Schedule D has NO QOF question — the map omits qof_yes/qof_no.
 form = "schedule_d"
 year = 2017
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f1040sd"
+versioning          = "annual"
+template_sha256     = "2829aef13b236d38b1258fb6d180ce7c9f496f44878896b7e9caf23b134a3d36"
+authority           = "not-yet-archived: no design/forms/2017/ archive exists — TY2017 ships five templates with no authority behind them (owner decision open: strategy review S9)"
+instructions        = "i1040sd"
+line_set            = "schedule_d/2017"
+attachment_sequence = "12"
 table_token = "TablePartI"
 
 # Line 3 — Part I total (Box C): d,e,g,h.

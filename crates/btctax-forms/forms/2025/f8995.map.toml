@@ -48,6 +48,14 @@ row1_qbi      = "topmostSubform[0].Page1[0].Table[0].Row1i[0].f1_05[0]"  # (c) t
 #     model does not have. Each of the 12 cells is named individually in [census] below.
 form = "f8995"
 year = 2025
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f8995"
+versioning          = "annual"
+template_sha256     = "55380ad230303e1586ce97f0f224265b8337ad18c9204f0fb7325e95a76b5cde"
+instructions        = "i8995"
+line_set            = "f8995/2025"
+attachment_sequence = "55"
 
 # ── Part I — Trade, Business, or Aggregation Information ─────────────────────────────────────────
 line2  = "topmostSubform[0].Page1[0].Line2_ReadOrder[0].f1_18[0]"  # "Total qualified business income or (loss). Combine lines 1i through 1v, column (c)"

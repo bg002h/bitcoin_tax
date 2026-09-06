@@ -7,6 +7,14 @@
 # are deliberately UNMAPPED — see `Form8275Row`'s doc comment for why.
 form = "f8275"
 year = 2024
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f8275"
+versioning          = { periodic = "Rev. 10-2024" }
+template_sha256     = "9b4b82e3d0dd4eceac81eec700573481be91cfafc4d7f7e9796fd4dcec5fa164"
+instructions        = "i8275"
+line_set            = "f8275/2024"
+attachment_sequence = "92"
 part_ii_narrative = "topmostSubform[0].Page1[0].p1-t80[0]"
 # Part II lines 2-6 — MAPPED BUT DELIBERATELY NOT WRITTEN. The PDF's static page content prints the
 # numerals "1 ".."6 " beside p1-t80..p1-t85, and they correspond to Part I's rows, so a single combined

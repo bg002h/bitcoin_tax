@@ -42,6 +42,14 @@
 # line 24 = line 22.
 form = "f8959"
 year = 2025
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f8959"
+versioning          = "annual"
+template_sha256     = "13e64004948331d2b708c80b1b664bf69675028edd0b84f2de6e3ca9afaa996d"
+instructions        = "i8959"
+line_set            = "f8959/2025"
+attachment_sequence = "71"
 
 # ── Part I — Additional Medicare Tax on Medicare Wages ──────────────────────────────────────────
 # L1 — "Medicare wages and tips from Form W-2, box 5. If you have more than one Form W-2, enter the

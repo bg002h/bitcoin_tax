@@ -27,6 +27,10 @@ thiserror = "1"
 [dev-dependencies]
 # Golden byte-determinism KAT: pin the fill output's content hash (no committed binary blob).
 sha2 = "0.10"
+# tests/map_rows.rs — the year-package ROW checks: the manifest join reads MANIFEST.json, the
+# planted-defect kills build tempdir copies of one (year, stem).
+serde_json = "1"
+tempfile = "3"
 # Synthetic Form8949Row / ScheduleDTotals fixtures (KAT convention, no real files).
 rust_decimal_macros = "1.36"
 time = { version = "0.3", features = ["macros"] }

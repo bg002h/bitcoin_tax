@@ -6,6 +6,14 @@
 # Part II line 14 constant = Page2 f2_1 [575,696,576,708] (1-pt wide).
 form = "schedule_se"
 year = 2025
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f1040sse"
+versioning          = "annual"
+template_sha256     = "05bc2b3e1dfca65d8c6fc6d652af4fa3736e953c6575d6e9f82590484677d347"
+instructions        = "i1040sse"
+line_set            = "schedule_se/2025"
+attachment_sequence = "17"
 
 # Part I — the filled §1401 chain. line 2 (net_se), 3(=2), 4a(base), 4c(=4a), 6(=4c),
 # 8a (W-2 SS wages, MID col), 8d(=8a), 9(= line 7 176,100 − 8d), 10(ss), 11(medicare),

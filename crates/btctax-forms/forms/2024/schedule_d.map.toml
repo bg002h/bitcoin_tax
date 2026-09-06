@@ -4,6 +4,14 @@
 # Field names match TY2025 EXCEPT line 16 (2024 = f2_01, not 2025's f2_1) — verified at extraction.
 form = "schedule_d"
 year = 2024
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f1040sd"
+versioning          = "annual"
+template_sha256     = "5a006b1a9a17c19af294a3da0971528276598e6a54ac4ca1670656d71476b6f5"
+instructions        = "i1040sd"
+line_set            = "schedule_d/2024"
+attachment_sequence = "12"
 
 # §G-28/B4 — the 1099-B totals the form lets a filer report WITHOUT a Form 8949. Column (g)
 # (adjustments) stays CENSUSED, not mapped: "no adjustments" is a CONDITION of using these lines at

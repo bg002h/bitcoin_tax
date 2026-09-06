@@ -133,6 +133,97 @@ pub struct AmountCols {
     pub gain_h: String,
 }
 
+/// How a form's PDF relates to the tax year it is bundled for (design r2 §4 `versioning`).
+///
+/// Most IRS forms are **annual**: `f6251--2025.pdf` is the TY2025 document. A few are **periodic** —
+/// revised on their own calendar and stamped with a revision date rather than a year (`Form 8275
+/// (Rev. 10-2024)`, `Form 8283 (Rev. 12-2025)`) — and a tax year may legitimately ship a PRIOR
+/// revision. Recording which is which is what lets a later year alias a periodic template **by
+/// hash** (`Form8275Map::alias_is_licensed_by`) and never by a year list.
+///
+/// TOML: `versioning = "annual"` or `versioning = { periodic = "Rev. 10-2024" }`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+pub enum Versioning {
+    /// `versioning = "annual"` — the PDF is this tax year's own document.
+    Annual(AnnualTag),
+    /// `versioning = { periodic = "Rev. MM-YYYY" }` — the PDF is a revision-dated document.
+    Periodic {
+        /// The revision as printed on the form, e.g. `"Rev. 10-2024"`.
+        periodic: String,
+    },
+}
+
+/// The only string `Versioning::Annual` accepts. A separate enum so that a typo (`"anual"`) is a
+/// parse refusal rather than a silently-accepted free string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AnnualTag {
+    /// `"annual"`.
+    Annual,
+}
+
+/// ★ **The ROW of the year-package table — design r2 §4.** Every `forms/<year>/<stem>.map.toml`
+/// carries these keys at its top level, and **the row SET is the glob**: a map file IS a row, there
+/// is no central list to forget one from. This struct is the schema-agnostic projection of those keys
+/// (it does NOT `deny_unknown_fields`, because the same document carries the line bindings); the
+/// per-form `*Map` structs carry the identical fields with `deny_unknown_fields` ON, so a map that
+/// omits a required key is a **parse refusal** on the path that fills the form.
+///
+/// Why two readers and not one: `serde(flatten)` does not compose with `deny_unknown_fields`, and the
+/// build script (§5) must read rows without knowing which struct parses the bindings. The test
+/// `every_committed_map_has_a_row_that_parses` holds the two views to the same keys.
+///
+/// Derived by convention, **never stored** here: the form extract
+/// `design/forms/extract/<irs_stem>--<year>.txt`, the instructions extract
+/// `<instructions>--<year>.txt`, the geometry `design/forms/geometry/<irs_stem>--<year>.json`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct MapRow {
+    /// Crate stem — the `.map.toml` / `.pdf` basename (`"f6251"`, `"schedule_d"`).
+    pub form: String,
+    /// Tax year — the directory the map lives in.
+    pub year: i32,
+    /// IRS basename. Differs from `form` only for `schedule_d` → `f1040sd` and `schedule_se` →
+    /// `f1040sse`; `cite_check::STEM_ALIASES` retires into this field.
+    pub irs_stem: String,
+    /// Annual or periodic — see [`Versioning`].
+    pub versioning: Versioning,
+    /// sha256 of the bundled PDF beside this map. Joined BY CONTENT to `design/forms/MANIFEST.json`,
+    /// whose entry must be an authority (`is_authority()`), never a draft.
+    pub template_sha256: String,
+    /// OPTIONAL. The ONLY excuse the manifest join accepts: `"not-yet-archived: <reason>"`. Six rows
+    /// today (all five TY2017 templates + `forms/2024/f8283.pdf`); the count may only shrink.
+    #[serde(default)]
+    pub authority: Option<String>,
+    /// OPTIONAL. Only while a second extract root exists (`f1040s1a/2025` reads
+    /// `crates/btctax-core/src/tax/fixtures/`); see design r2 §9.
+    #[serde(default)]
+    pub extract_override: Option<String>,
+    /// Instructions stem: `fNNNN` → `iNNNN`, with the IRS's own aliases (`f1040sa` → `i1040sca`;
+    /// Form 1040 and Schedules 1/1-A/2/3 → `i1040gi`).
+    pub instructions: String,
+    /// OPTIONAL. `[first, last]` page range inside an `i1040gi`-hosted booklet, recorded once by a
+    /// human (runbook step 5).
+    #[serde(default)]
+    pub instr_pages: Option<[u32; 2]>,
+    /// The LINE-SET REVISION this map is a transcription of, `"<stem>/<year>"` by default. A
+    /// constants-only year may share a revision; a renumber gets a new one. Several revisions may
+    /// resolve to one struct today (design r2 §4, §7); the `line_set → struct` match is many-to-one.
+    pub line_set: String,
+    /// OPTIONAL. The form's printed "Attachment Sequence No." (`"32"`, `"12A"`). ABSENT on the 1040
+    /// itself, which carries no sequence number.
+    #[serde(default)]
+    pub attachment_sequence: Option<String>,
+}
+
+impl MapRow {
+    /// Read the row keys off a map file's text. Unknown keys (the line bindings) are ignored here —
+    /// the per-form struct is what refuses them.
+    pub fn read(toml_src: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(toml_src)
+    }
+}
+
 /// **Form 6251** (Alternative Minimum Tax—Individuals), TY2024 — §G-6.
 ///
 /// 41 of the form's 59 numbered money boxes. Lines 2c-2t are Part I add-backs core does not model and
@@ -149,6 +240,29 @@ pub struct Form6251Map {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    // ── design r2 §4 — the ROW. The same keys as [`MapRow`]; required ones REFUSE when missing. ──
+    /// IRS basename (`"f1040sd"` for `schedule_d`). See [`MapRow::irs_stem`].
+    pub irs_stem: String,
+    /// Annual or periodic. See [`MapRow::versioning`].
+    pub versioning: Versioning,
+    /// sha256 of the bundled PDF. See [`MapRow::template_sha256`].
+    pub template_sha256: String,
+    /// OPTIONAL — the manifest-join excuse. See [`MapRow::authority`].
+    #[serde(default)]
+    pub authority: Option<String>,
+    /// OPTIONAL — a second extract root. See [`MapRow::extract_override`].
+    #[serde(default)]
+    pub extract_override: Option<String>,
+    /// Instructions stem. See [`MapRow::instructions`].
+    pub instructions: String,
+    /// OPTIONAL — page range in an `i1040gi` booklet. See [`MapRow::instr_pages`].
+    #[serde(default)]
+    pub instr_pages: Option<[u32; 2]>,
+    /// The line-set revision. See [`MapRow::line_set`].
+    pub line_set: String,
+    /// OPTIONAL — absent on the 1040. See [`MapRow::attachment_sequence`].
+    #[serde(default)]
+    pub attachment_sequence: Option<String>,
     /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
     /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
@@ -240,6 +354,16 @@ impl Form6251Map {
         let Self {
             form: _,
             year: _,
+            // the ROW (design r2 §4) — provenance, never a money cell
+            irs_stem: _,
+            versioning: _,
+            template_sha256: _,
+            authority: _,
+            extract_override: _,
+            instructions: _,
+            instr_pages: _,
+            line_set: _,
+            attachment_sequence: _,
             census: _,   // provenance for the fields we do NOT fill; never a money cell
             identity: _, // not money
             line1: _,
@@ -377,6 +501,29 @@ pub struct Form8949Map {
     pub form: String,
     /// Tax year (e.g. 2025).
     pub year: i32,
+    // ── design r2 §4 — the ROW. The same keys as [`MapRow`]; required ones REFUSE when missing. ──
+    /// IRS basename (`"f1040sd"` for `schedule_d`). See [`MapRow::irs_stem`].
+    pub irs_stem: String,
+    /// Annual or periodic. See [`MapRow::versioning`].
+    pub versioning: Versioning,
+    /// sha256 of the bundled PDF. See [`MapRow::template_sha256`].
+    pub template_sha256: String,
+    /// OPTIONAL — the manifest-join excuse. See [`MapRow::authority`].
+    #[serde(default)]
+    pub authority: Option<String>,
+    /// OPTIONAL — a second extract root. See [`MapRow::extract_override`].
+    #[serde(default)]
+    pub extract_override: Option<String>,
+    /// Instructions stem. See [`MapRow::instructions`].
+    pub instructions: String,
+    /// OPTIONAL — page range in an `i1040gi` booklet. See [`MapRow::instr_pages`].
+    #[serde(default)]
+    pub instr_pages: Option<[u32; 2]>,
+    /// The line-set revision. See [`MapRow::line_set`].
+    pub line_set: String,
+    /// OPTIONAL — absent on the 1040. See [`MapRow::attachment_sequence`].
+    #[serde(default)]
+    pub attachment_sequence: Option<String>,
     /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
     /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
@@ -576,6 +723,29 @@ pub struct Form1040Map {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    // ── design r2 §4 — the ROW. The same keys as [`MapRow`]; required ones REFUSE when missing. ──
+    /// IRS basename (`"f1040sd"` for `schedule_d`). See [`MapRow::irs_stem`].
+    pub irs_stem: String,
+    /// Annual or periodic. See [`MapRow::versioning`].
+    pub versioning: Versioning,
+    /// sha256 of the bundled PDF. See [`MapRow::template_sha256`].
+    pub template_sha256: String,
+    /// OPTIONAL — the manifest-join excuse. See [`MapRow::authority`].
+    #[serde(default)]
+    pub authority: Option<String>,
+    /// OPTIONAL — a second extract root. See [`MapRow::extract_override`].
+    #[serde(default)]
+    pub extract_override: Option<String>,
+    /// Instructions stem. See [`MapRow::instructions`].
+    pub instructions: String,
+    /// OPTIONAL — page range in an `i1040gi` booklet. See [`MapRow::instr_pages`].
+    #[serde(default)]
+    pub instr_pages: Option<[u32; 2]>,
+    /// The line-set revision. See [`MapRow::line_set`].
+    pub line_set: String,
+    /// OPTIONAL — absent on the 1040. See [`MapRow::attachment_sequence`].
+    #[serde(default)]
+    pub attachment_sequence: Option<String>,
     /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
     /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
@@ -884,6 +1054,29 @@ pub struct Form8283Map {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    // ── design r2 §4 — the ROW. The same keys as [`MapRow`]; required ones REFUSE when missing. ──
+    /// IRS basename (`"f1040sd"` for `schedule_d`). See [`MapRow::irs_stem`].
+    pub irs_stem: String,
+    /// Annual or periodic. See [`MapRow::versioning`].
+    pub versioning: Versioning,
+    /// sha256 of the bundled PDF. See [`MapRow::template_sha256`].
+    pub template_sha256: String,
+    /// OPTIONAL — the manifest-join excuse. See [`MapRow::authority`].
+    #[serde(default)]
+    pub authority: Option<String>,
+    /// OPTIONAL — a second extract root. See [`MapRow::extract_override`].
+    #[serde(default)]
+    pub extract_override: Option<String>,
+    /// Instructions stem. See [`MapRow::instructions`].
+    pub instructions: String,
+    /// OPTIONAL — page range in an `i1040gi` booklet. See [`MapRow::instr_pages`].
+    #[serde(default)]
+    pub instr_pages: Option<[u32; 2]>,
+    /// The line-set revision. See [`MapRow::line_set`].
+    pub line_set: String,
+    /// OPTIONAL — absent on the 1040. See [`MapRow::attachment_sequence`].
+    #[serde(default)]
+    pub attachment_sequence: Option<String>,
     /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
     /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
@@ -1025,6 +1218,29 @@ pub struct Form8275Map {
     /// Tax year this map instance is stamped for (re-stamped by `for_year`; the field SET is identical
     /// across every supported year — see the module doc).
     pub year: i32,
+    // ── design r2 §4 — the ROW. The same keys as [`MapRow`]; required ones REFUSE when missing. ──
+    /// IRS basename (`"f1040sd"` for `schedule_d`). See [`MapRow::irs_stem`].
+    pub irs_stem: String,
+    /// Annual or periodic. See [`MapRow::versioning`].
+    pub versioning: Versioning,
+    /// sha256 of the bundled PDF. See [`MapRow::template_sha256`].
+    pub template_sha256: String,
+    /// OPTIONAL — the manifest-join excuse. See [`MapRow::authority`].
+    #[serde(default)]
+    pub authority: Option<String>,
+    /// OPTIONAL — a second extract root. See [`MapRow::extract_override`].
+    #[serde(default)]
+    pub extract_override: Option<String>,
+    /// Instructions stem. See [`MapRow::instructions`].
+    pub instructions: String,
+    /// OPTIONAL — page range in an `i1040gi` booklet. See [`MapRow::instr_pages`].
+    #[serde(default)]
+    pub instr_pages: Option<[u32; 2]>,
+    /// The line-set revision. See [`MapRow::line_set`].
+    pub line_set: String,
+    /// OPTIONAL — absent on the 1040. See [`MapRow::attachment_sequence`].
+    #[serde(default)]
+    pub attachment_sequence: Option<String>,
     /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
     /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
@@ -1167,6 +1383,29 @@ pub struct ScheduleDMap {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    // ── design r2 §4 — the ROW. The same keys as [`MapRow`]; required ones REFUSE when missing. ──
+    /// IRS basename (`"f1040sd"` for `schedule_d`). See [`MapRow::irs_stem`].
+    pub irs_stem: String,
+    /// Annual or periodic. See [`MapRow::versioning`].
+    pub versioning: Versioning,
+    /// sha256 of the bundled PDF. See [`MapRow::template_sha256`].
+    pub template_sha256: String,
+    /// OPTIONAL — the manifest-join excuse. See [`MapRow::authority`].
+    #[serde(default)]
+    pub authority: Option<String>,
+    /// OPTIONAL — a second extract root. See [`MapRow::extract_override`].
+    #[serde(default)]
+    pub extract_override: Option<String>,
+    /// Instructions stem. See [`MapRow::instructions`].
+    pub instructions: String,
+    /// OPTIONAL — page range in an `i1040gi` booklet. See [`MapRow::instr_pages`].
+    #[serde(default)]
+    pub instr_pages: Option<[u32; 2]>,
+    /// The line-set revision. See [`MapRow::line_set`].
+    pub line_set: String,
+    /// OPTIONAL — absent on the 1040. See [`MapRow::attachment_sequence`].
+    #[serde(default)]
+    pub attachment_sequence: Option<String>,
     /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
     /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
@@ -1287,6 +1526,29 @@ pub struct Form8959Map {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    // ── design r2 §4 — the ROW. The same keys as [`MapRow`]; required ones REFUSE when missing. ──
+    /// IRS basename (`"f1040sd"` for `schedule_d`). See [`MapRow::irs_stem`].
+    pub irs_stem: String,
+    /// Annual or periodic. See [`MapRow::versioning`].
+    pub versioning: Versioning,
+    /// sha256 of the bundled PDF. See [`MapRow::template_sha256`].
+    pub template_sha256: String,
+    /// OPTIONAL — the manifest-join excuse. See [`MapRow::authority`].
+    #[serde(default)]
+    pub authority: Option<String>,
+    /// OPTIONAL — a second extract root. See [`MapRow::extract_override`].
+    #[serde(default)]
+    pub extract_override: Option<String>,
+    /// Instructions stem. See [`MapRow::instructions`].
+    pub instructions: String,
+    /// OPTIONAL — page range in an `i1040gi` booklet. See [`MapRow::instr_pages`].
+    #[serde(default)]
+    pub instr_pages: Option<[u32; 2]>,
+    /// The line-set revision. See [`MapRow::line_set`].
+    pub line_set: String,
+    /// OPTIONAL — absent on the 1040. See [`MapRow::attachment_sequence`].
+    #[serde(default)]
+    pub attachment_sequence: Option<String>,
     /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
     /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
@@ -1388,6 +1650,29 @@ pub struct Form8960Map {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    // ── design r2 §4 — the ROW. The same keys as [`MapRow`]; required ones REFUSE when missing. ──
+    /// IRS basename (`"f1040sd"` for `schedule_d`). See [`MapRow::irs_stem`].
+    pub irs_stem: String,
+    /// Annual or periodic. See [`MapRow::versioning`].
+    pub versioning: Versioning,
+    /// sha256 of the bundled PDF. See [`MapRow::template_sha256`].
+    pub template_sha256: String,
+    /// OPTIONAL — the manifest-join excuse. See [`MapRow::authority`].
+    #[serde(default)]
+    pub authority: Option<String>,
+    /// OPTIONAL — a second extract root. See [`MapRow::extract_override`].
+    #[serde(default)]
+    pub extract_override: Option<String>,
+    /// Instructions stem. See [`MapRow::instructions`].
+    pub instructions: String,
+    /// OPTIONAL — page range in an `i1040gi` booklet. See [`MapRow::instr_pages`].
+    #[serde(default)]
+    pub instr_pages: Option<[u32; 2]>,
+    /// The line-set revision. See [`MapRow::line_set`].
+    pub line_set: String,
+    /// OPTIONAL — absent on the 1040. See [`MapRow::attachment_sequence`].
+    #[serde(default)]
+    pub attachment_sequence: Option<String>,
     /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
     /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
@@ -1486,6 +1771,29 @@ pub struct Form8995AMap {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    // ── design r2 §4 — the ROW. The same keys as [`MapRow`]; required ones REFUSE when missing. ──
+    /// IRS basename (`"f1040sd"` for `schedule_d`). See [`MapRow::irs_stem`].
+    pub irs_stem: String,
+    /// Annual or periodic. See [`MapRow::versioning`].
+    pub versioning: Versioning,
+    /// sha256 of the bundled PDF. See [`MapRow::template_sha256`].
+    pub template_sha256: String,
+    /// OPTIONAL — the manifest-join excuse. See [`MapRow::authority`].
+    #[serde(default)]
+    pub authority: Option<String>,
+    /// OPTIONAL — a second extract root. See [`MapRow::extract_override`].
+    #[serde(default)]
+    pub extract_override: Option<String>,
+    /// Instructions stem. See [`MapRow::instructions`].
+    pub instructions: String,
+    /// OPTIONAL — page range in an `i1040gi` booklet. See [`MapRow::instr_pages`].
+    #[serde(default)]
+    pub instr_pages: Option<[u32; 2]>,
+    /// The line-set revision. See [`MapRow::line_set`].
+    pub line_set: String,
+    /// OPTIONAL — absent on the 1040. See [`MapRow::attachment_sequence`].
+    #[serde(default)]
+    pub attachment_sequence: Option<String>,
     /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
     /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
@@ -1609,6 +1917,29 @@ pub struct Form8995Map {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    // ── design r2 §4 — the ROW. The same keys as [`MapRow`]; required ones REFUSE when missing. ──
+    /// IRS basename (`"f1040sd"` for `schedule_d`). See [`MapRow::irs_stem`].
+    pub irs_stem: String,
+    /// Annual or periodic. See [`MapRow::versioning`].
+    pub versioning: Versioning,
+    /// sha256 of the bundled PDF. See [`MapRow::template_sha256`].
+    pub template_sha256: String,
+    /// OPTIONAL — the manifest-join excuse. See [`MapRow::authority`].
+    #[serde(default)]
+    pub authority: Option<String>,
+    /// OPTIONAL — a second extract root. See [`MapRow::extract_override`].
+    #[serde(default)]
+    pub extract_override: Option<String>,
+    /// Instructions stem. See [`MapRow::instructions`].
+    pub instructions: String,
+    /// OPTIONAL — page range in an `i1040gi` booklet. See [`MapRow::instr_pages`].
+    #[serde(default)]
+    pub instr_pages: Option<[u32; 2]>,
+    /// The line-set revision. See [`MapRow::line_set`].
+    pub line_set: String,
+    /// OPTIONAL — absent on the 1040. See [`MapRow::attachment_sequence`].
+    #[serde(default)]
+    pub attachment_sequence: Option<String>,
     /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
     /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
@@ -1711,6 +2042,29 @@ pub struct Schedule2Map {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    // ── design r2 §4 — the ROW. The same keys as [`MapRow`]; required ones REFUSE when missing. ──
+    /// IRS basename (`"f1040sd"` for `schedule_d`). See [`MapRow::irs_stem`].
+    pub irs_stem: String,
+    /// Annual or periodic. See [`MapRow::versioning`].
+    pub versioning: Versioning,
+    /// sha256 of the bundled PDF. See [`MapRow::template_sha256`].
+    pub template_sha256: String,
+    /// OPTIONAL — the manifest-join excuse. See [`MapRow::authority`].
+    #[serde(default)]
+    pub authority: Option<String>,
+    /// OPTIONAL — a second extract root. See [`MapRow::extract_override`].
+    #[serde(default)]
+    pub extract_override: Option<String>,
+    /// Instructions stem. See [`MapRow::instructions`].
+    pub instructions: String,
+    /// OPTIONAL — page range in an `i1040gi` booklet. See [`MapRow::instr_pages`].
+    #[serde(default)]
+    pub instr_pages: Option<[u32; 2]>,
+    /// The line-set revision. See [`MapRow::line_set`].
+    pub line_set: String,
+    /// OPTIONAL — absent on the 1040. See [`MapRow::attachment_sequence`].
+    #[serde(default)]
+    pub attachment_sequence: Option<String>,
     /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
     /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
@@ -1776,6 +2130,29 @@ pub struct Schedule3Map {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    // ── design r2 §4 — the ROW. The same keys as [`MapRow`]; required ones REFUSE when missing. ──
+    /// IRS basename (`"f1040sd"` for `schedule_d`). See [`MapRow::irs_stem`].
+    pub irs_stem: String,
+    /// Annual or periodic. See [`MapRow::versioning`].
+    pub versioning: Versioning,
+    /// sha256 of the bundled PDF. See [`MapRow::template_sha256`].
+    pub template_sha256: String,
+    /// OPTIONAL — the manifest-join excuse. See [`MapRow::authority`].
+    #[serde(default)]
+    pub authority: Option<String>,
+    /// OPTIONAL — a second extract root. See [`MapRow::extract_override`].
+    #[serde(default)]
+    pub extract_override: Option<String>,
+    /// Instructions stem. See [`MapRow::instructions`].
+    pub instructions: String,
+    /// OPTIONAL — page range in an `i1040gi` booklet. See [`MapRow::instr_pages`].
+    #[serde(default)]
+    pub instr_pages: Option<[u32; 2]>,
+    /// The line-set revision. See [`MapRow::line_set`].
+    pub line_set: String,
+    /// OPTIONAL — absent on the 1040. See [`MapRow::attachment_sequence`].
+    #[serde(default)]
+    pub attachment_sequence: Option<String>,
     /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
     /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
@@ -1841,6 +2218,29 @@ pub struct ScheduleAMap {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    // ── design r2 §4 — the ROW. The same keys as [`MapRow`]; required ones REFUSE when missing. ──
+    /// IRS basename (`"f1040sd"` for `schedule_d`). See [`MapRow::irs_stem`].
+    pub irs_stem: String,
+    /// Annual or periodic. See [`MapRow::versioning`].
+    pub versioning: Versioning,
+    /// sha256 of the bundled PDF. See [`MapRow::template_sha256`].
+    pub template_sha256: String,
+    /// OPTIONAL — the manifest-join excuse. See [`MapRow::authority`].
+    #[serde(default)]
+    pub authority: Option<String>,
+    /// OPTIONAL — a second extract root. See [`MapRow::extract_override`].
+    #[serde(default)]
+    pub extract_override: Option<String>,
+    /// Instructions stem. See [`MapRow::instructions`].
+    pub instructions: String,
+    /// OPTIONAL — page range in an `i1040gi` booklet. See [`MapRow::instr_pages`].
+    #[serde(default)]
+    pub instr_pages: Option<[u32; 2]>,
+    /// The line-set revision. See [`MapRow::line_set`].
+    pub line_set: String,
+    /// OPTIONAL — absent on the 1040. See [`MapRow::attachment_sequence`].
+    #[serde(default)]
+    pub attachment_sequence: Option<String>,
     /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
     /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
@@ -1955,6 +2355,29 @@ pub struct Schedule1Map {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    // ── design r2 §4 — the ROW. The same keys as [`MapRow`]; required ones REFUSE when missing. ──
+    /// IRS basename (`"f1040sd"` for `schedule_d`). See [`MapRow::irs_stem`].
+    pub irs_stem: String,
+    /// Annual or periodic. See [`MapRow::versioning`].
+    pub versioning: Versioning,
+    /// sha256 of the bundled PDF. See [`MapRow::template_sha256`].
+    pub template_sha256: String,
+    /// OPTIONAL — the manifest-join excuse. See [`MapRow::authority`].
+    #[serde(default)]
+    pub authority: Option<String>,
+    /// OPTIONAL — a second extract root. See [`MapRow::extract_override`].
+    #[serde(default)]
+    pub extract_override: Option<String>,
+    /// Instructions stem. See [`MapRow::instructions`].
+    pub instructions: String,
+    /// OPTIONAL — page range in an `i1040gi` booklet. See [`MapRow::instr_pages`].
+    #[serde(default)]
+    pub instr_pages: Option<[u32; 2]>,
+    /// The line-set revision. See [`MapRow::line_set`].
+    pub line_set: String,
+    /// OPTIONAL — absent on the 1040. See [`MapRow::attachment_sequence`].
+    #[serde(default)]
+    pub attachment_sequence: Option<String>,
     /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
     /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
@@ -2034,6 +2457,29 @@ pub struct ScheduleCMap {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    // ── design r2 §4 — the ROW. The same keys as [`MapRow`]; required ones REFUSE when missing. ──
+    /// IRS basename (`"f1040sd"` for `schedule_d`). See [`MapRow::irs_stem`].
+    pub irs_stem: String,
+    /// Annual or periodic. See [`MapRow::versioning`].
+    pub versioning: Versioning,
+    /// sha256 of the bundled PDF. See [`MapRow::template_sha256`].
+    pub template_sha256: String,
+    /// OPTIONAL — the manifest-join excuse. See [`MapRow::authority`].
+    #[serde(default)]
+    pub authority: Option<String>,
+    /// OPTIONAL — a second extract root. See [`MapRow::extract_override`].
+    #[serde(default)]
+    pub extract_override: Option<String>,
+    /// Instructions stem. See [`MapRow::instructions`].
+    pub instructions: String,
+    /// OPTIONAL — page range in an `i1040gi` booklet. See [`MapRow::instr_pages`].
+    #[serde(default)]
+    pub instr_pages: Option<[u32; 2]>,
+    /// The line-set revision. See [`MapRow::line_set`].
+    pub line_set: String,
+    /// OPTIONAL — absent on the 1040. See [`MapRow::attachment_sequence`].
+    #[serde(default)]
+    pub attachment_sequence: Option<String>,
     /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
     /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
@@ -2144,6 +2590,29 @@ pub struct ScheduleBMap {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    // ── design r2 §4 — the ROW. The same keys as [`MapRow`]; required ones REFUSE when missing. ──
+    /// IRS basename (`"f1040sd"` for `schedule_d`). See [`MapRow::irs_stem`].
+    pub irs_stem: String,
+    /// Annual or periodic. See [`MapRow::versioning`].
+    pub versioning: Versioning,
+    /// sha256 of the bundled PDF. See [`MapRow::template_sha256`].
+    pub template_sha256: String,
+    /// OPTIONAL — the manifest-join excuse. See [`MapRow::authority`].
+    #[serde(default)]
+    pub authority: Option<String>,
+    /// OPTIONAL — a second extract root. See [`MapRow::extract_override`].
+    #[serde(default)]
+    pub extract_override: Option<String>,
+    /// Instructions stem. See [`MapRow::instructions`].
+    pub instructions: String,
+    /// OPTIONAL — page range in an `i1040gi` booklet. See [`MapRow::instr_pages`].
+    #[serde(default)]
+    pub instr_pages: Option<[u32; 2]>,
+    /// The line-set revision. See [`MapRow::line_set`].
+    pub line_set: String,
+    /// OPTIONAL — absent on the 1040. See [`MapRow::attachment_sequence`].
+    #[serde(default)]
+    pub attachment_sequence: Option<String>,
     /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
     /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
@@ -2200,6 +2669,29 @@ pub struct ScheduleSeMap {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    // ── design r2 §4 — the ROW. The same keys as [`MapRow`]; required ones REFUSE when missing. ──
+    /// IRS basename (`"f1040sd"` for `schedule_d`). See [`MapRow::irs_stem`].
+    pub irs_stem: String,
+    /// Annual or periodic. See [`MapRow::versioning`].
+    pub versioning: Versioning,
+    /// sha256 of the bundled PDF. See [`MapRow::template_sha256`].
+    pub template_sha256: String,
+    /// OPTIONAL — the manifest-join excuse. See [`MapRow::authority`].
+    #[serde(default)]
+    pub authority: Option<String>,
+    /// OPTIONAL — a second extract root. See [`MapRow::extract_override`].
+    #[serde(default)]
+    pub extract_override: Option<String>,
+    /// Instructions stem. See [`MapRow::instructions`].
+    pub instructions: String,
+    /// OPTIONAL — page range in an `i1040gi` booklet. See [`MapRow::instr_pages`].
+    #[serde(default)]
+    pub instr_pages: Option<[u32; 2]>,
+    /// The line-set revision. See [`MapRow::line_set`].
+    pub line_set: String,
+    /// OPTIONAL — absent on the 1040. See [`MapRow::attachment_sequence`].
+    #[serde(default)]
+    pub attachment_sequence: Option<String>,
     /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
     /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.

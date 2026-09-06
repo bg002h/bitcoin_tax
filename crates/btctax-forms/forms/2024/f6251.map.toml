@@ -31,6 +31,14 @@
 
 form = "f6251"
 year = 2024
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f6251"
+versioning          = "annual"
+template_sha256     = "7fea4e4298121b6e6889f4cba3dd8209aeaab0185ddd29b6c14188ab9ab2719a"
+instructions        = "i6251"
+line_set            = "f6251/2024"
+attachment_sequence = "32"
 
 # ── Part I — Alternative Minimum Taxable Income ─────────────────────────────────────────────────
 # 1 "Enter the amount from Form 1040 or 1040-SR, line 15, if more than zero. If Form 1040 or 1040-SR, line 15, is zero, subtract line 14 of Form 1040 or 1040-SR from line 11 of Form 1040 or 1040-SR and enter the result here. (If less than zero, enter as a negative amount.)"

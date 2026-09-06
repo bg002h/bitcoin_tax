@@ -29,6 +29,14 @@
 #   line 5a sales-tax checkbox (c1_1), line 8 checkbox (c1_2), line 18 checkbox (c1_3)
 form = "f1040sa"
 year = 2024
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f1040sa"
+versioning          = "annual"
+template_sha256     = "4bfff9a524c6db9421527f77dc375978a3204c583e60e60fbd8f9d37bd58492a"
+instructions        = "i1040sca"
+line_set            = "f1040sa/2024"
+attachment_sequence = "07"
 
 # ── The three declaration/election checkboxes. Elections core honoured in the ARITHMETIC the filed form
 #    never showed (P6.3a Q7); the line-8 box is the P9 §2.7 mixed-use-mortgage DECLARATION. c1_1 is the

@@ -10,6 +10,14 @@
 # (Schedule D active with line 16 ≥ 0); an income-only 2017 year yields no line-13 value ⇒ skipped.
 form = "f1040"
 year = 2017
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f1040"
+versioning          = "annual"
+template_sha256     = "99c2016fee2fbd76ff2ae10d0bcb09c6116ae6012166202ddf83cd230ba6e3d8"
+authority           = "not-yet-archived: no design/forms/2017/ archive exists — TY2017 ships five templates with no authority behind them (owner decision open: strategy review S9)"
+instructions        = "i1040gi"
+line_set            = "f1040/2017"
 da_present = false
 
 line7a = { dollars_field = "topmostSubform[0].Page1[0].f1-_51[0]", cents_field = "topmostSubform[0].Page1[0].f1_52[0]" }

@@ -33,6 +33,7 @@ mod form8995a;
 mod map;
 mod overflow;
 mod packet;
+pub use packet::attachment_sequence;
 mod pdf;
 mod schedule23;
 mod schedule_a;
@@ -51,9 +52,9 @@ pub use error::FormsError;
 pub use form1040::{Form1040Fill, Form1040Inputs};
 pub use form8275::PartIiCapacity;
 pub use map::{
-    Form1040Map, Form8275Map, Form8283Map, Form8949Map, Form8959Map, Form8960Map, Form8995Map,
-    Schedule1Map, Schedule2Map, Schedule3Map, ScheduleAMap, ScheduleBMap, ScheduleCMap,
-    ScheduleDMap, ScheduleSeMap,
+    AnnualTag, Form1040Map, Form8275Map, Form8283Map, Form8949Map, Form8959Map, Form8960Map,
+    Form8995Map, MapRow, Schedule1Map, Schedule2Map, Schedule3Map, ScheduleAMap, ScheduleBMap,
+    ScheduleCMap, ScheduleDMap, ScheduleSeMap, Versioning,
 };
 pub use schedule_se::SE_FLOOR;
 pub use wrap::PartIiOverflow;

@@ -8,6 +8,14 @@
 # Part V donee acknowledgment/receipt-date/unrelated-use/authorized-sig).
 form = "f8283"
 year = 2025
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f8283"
+versioning          = { periodic = "Rev. 12-2025" }
+template_sha256     = "389ab1b7c01b542724092f82a55dd43ab00792770b5254a87c4cd4082d8d4c69"
+instructions        = "i8283"
+line_set            = "f8283/2025"
+attachment_sequence = "36"
 
 # ── Section A — Donated Property of $5,000 or Less. Column x-clusters (hand-pinned):
 #   donee(a) [58,230] c0 | desc(c) [404,576] c1 | date_contrib(d) [58,122] c2 | date_acq(e) [123,186] c3

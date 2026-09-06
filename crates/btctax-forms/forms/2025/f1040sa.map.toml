@@ -88,6 +88,14 @@
 #   line 16 (amount f1_29 + description f1_28)   other itemized deductions
 form = "f1040sa"
 year = 2025
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f1040sa"
+versioning          = "annual"
+template_sha256     = "c14acf3478f4c33f27ac6e8ecd9f94b6fb25b16745b341728bd27847d2ef56bb"
+instructions        = "i1040sca"
+line_set            = "f1040sa/2025"
+attachment_sequence = "07"
 
 # ── The three declaration/election checkboxes. Each on-state is "1", read from dump-fields; none is
 #    a Yes/No pair. c1_1 (y=560) is line 5a's "check this box" and is the only one NOT nested in a

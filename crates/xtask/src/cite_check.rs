@@ -1270,3 +1270,89 @@ mod tests {
         );
     }
 }
+
+/// ★★ Design r2 §10 step 1 — **the row set IS the emitting surface, both ways.** `emitted_form_years()`
+/// derives `(IRS basename, year)` from the glob of bundled templates; each map's ROW carries
+/// `irs_stem`. The two are joined through `irs_stem` — NOT the crate stem — because this function
+/// keys on the IRS basename and `schedule_d`/`schedule_se` would otherwise red on six non-defects
+/// (fold review F4). And `irs_stem` must equal `irs_basename(stem)` on every row, which is what lets
+/// `STEM_ALIASES` retire into the header (design r2 §9).
+#[cfg(test)]
+mod map_row_tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    fn rows() -> Vec<(String, i32, btctax_forms::MapRow)> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("btctax-forms/forms");
+        let mut out = Vec::new();
+        for y in std::fs::read_dir(&root).unwrap().flatten() {
+            if !y.path().is_dir() {
+                continue;
+            }
+            let year: i32 = y.file_name().to_string_lossy().parse().unwrap();
+            for m in std::fs::read_dir(y.path()).unwrap().flatten() {
+                let p = m.path();
+                let name = p.file_name().unwrap().to_string_lossy().to_string();
+                let Some(stem) = name.strip_suffix(".map.toml") else {
+                    continue;
+                };
+                let row = btctax_forms::MapRow::read(&std::fs::read_to_string(&p).unwrap())
+                    .unwrap_or_else(|e| panic!("{year}/{stem}: {e}"));
+                out.push((stem.to_string(), year, row));
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn the_row_set_equals_the_emitting_surface_both_ways_through_irs_stem() {
+        let from_rows: BTreeSet<FormYear> = rows()
+            .iter()
+            .map(|(_, y, r)| (r.irs_stem.clone(), *y))
+            .collect();
+        let emitted = emitted_form_years().expect("the emitting surface derives");
+        let only_rows: Vec<_> = from_rows.difference(&emitted).collect();
+        let only_emitted: Vec<_> = emitted.difference(&from_rows).collect();
+        assert!(
+            only_rows.is_empty() && only_emitted.is_empty(),
+            "row set ≠ emitting surface — rows without a template: {only_rows:?}; templates \
+             without a row: {only_emitted:?}"
+        );
+        assert_eq!(
+            from_rows.len(),
+            37,
+            "37 rows on disk today; a new year adds files, not a list"
+        );
+    }
+
+    #[test]
+    fn every_rows_irs_stem_is_what_irs_basename_would_derive() {
+        for (stem, year, row) in rows() {
+            assert_eq!(
+                row.irs_stem,
+                irs_basename(&stem).unwrap(),
+                "{year}/{stem}: the header's irs_stem and STEM_ALIASES disagree"
+            );
+        }
+    }
+
+    /// B1 — the two-way check observed red: a row whose `irs_stem` names a template that does not
+    /// exist is reported in the rows-only direction.
+    #[test]
+    fn a_row_pointing_at_no_template_is_caught() {
+        let mut from_rows: BTreeSet<FormYear> = rows()
+            .iter()
+            .map(|(_, y, r)| (r.irs_stem.clone(), *y))
+            .collect();
+        from_rows.insert(("f9999".to_string(), 2024));
+        let emitted = emitted_form_years().unwrap();
+        assert_eq!(
+            from_rows.difference(&emitted).count(),
+            1,
+            "the planted row must be the one and only rows-only difference"
+        );
+    }
+}

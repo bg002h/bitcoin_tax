@@ -92,6 +92,14 @@
 # ────────────────────────────────────────────────────────────────────────────────────────────────
 form = "f1040s2"
 year = 2025
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f1040s2"
+versioning          = "annual"
+template_sha256     = "64d867b683334cfc533993e37ccb0d143449ec29428a78206be2e4de333941e8"
+instructions        = "i1040gi"
+line_set            = "f1040s2/2025"
+attachment_sequence = "02"
 
 # 2 "Alternative minimum tax. Attach Form 6251" — the AMT, from Form 6251's own printed line 11.
 #   ★ NOT "$0 by construction". The TY2024 map carried that claim as a census reason and it was

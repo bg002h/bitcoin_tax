@@ -40,6 +40,14 @@
 
 form = "f8995a"
 year = 2024
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f8995a"
+versioning          = "annual"
+template_sha256     = "2a6177ce524a89e16ec9ac961c7ed92ce9ff38bd569846f6d564852b4b969979"
+instructions        = "i8995a"
+line_set            = "f8995a/2024"
+attachment_sequence = "55A"
 
 # ── Part IV — Determine Your Qualified Business Income Deduction ─────────────────────────────────
 # 27 "Total qualified business income component from all qualified trades, businesses, or

@@ -6,6 +6,14 @@
 # [575,384,576,396] (1-pt wide); Part II line 14 constant = Page2 f2_1 [575,696,576,708] (1-pt wide).
 form = "schedule_se"
 year = 2024
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f1040sse"
+versioning          = "annual"
+template_sha256     = "ac8ba97e554b67275d0e888d709e0ecadc9b45634c52cd934fa9bdcfd15179b0"
+instructions        = "i1040sse"
+line_set            = "schedule_se/2024"
+attachment_sequence = "17"
 
 line2  = "topmostSubform[0].Page1[0].f1_5[0]"
 line3  = "topmostSubform[0].Page1[0].f1_6[0]"

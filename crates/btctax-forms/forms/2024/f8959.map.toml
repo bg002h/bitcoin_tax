@@ -16,6 +16,14 @@
 # Their absence is exactly why line 4 = line 1, line 18 = 7 + 13, and line 24 = line 22.
 form = "f8959"
 year = 2024
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f8959"
+versioning          = "annual"
+template_sha256     = "b8375fc44add4ea928d7d5b14e840ef66420cda1f6a41e37d58cc13284c8f00d"
+instructions        = "i8959"
+line_set            = "f8959/2024"
+attachment_sequence = "71"
 
 # ── Part I — Additional Medicare Tax on Medicare Wages ──────────────────────────────────────────
 line1  = "topmostSubform[0].Page1[0].f1_3[0]"   # "Medicare wages and tips from Form W-2, box 5"

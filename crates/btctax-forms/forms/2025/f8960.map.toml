@@ -61,6 +61,14 @@
 # allocated; mapped ≠ populated. FR-39 tracks line 11's half of that pair.
 form = "f8960"
 year = 2025
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f8960"
+versioning          = "annual"
+template_sha256     = "9b323b7166b5845a776f781b8c82eef94ccd998354e88fc33a1051c3b3789731"
+instructions        = "i8960"
+line_set            = "f8960/2025"
+attachment_sequence = "72"
 
 # ── Part I — Investment Income ──────────────────────────────────────────────────────────────────
 line1  = "topmostSubform[0].Page1[0].f1_3[0]"    # "Taxable interest (see instructions)"

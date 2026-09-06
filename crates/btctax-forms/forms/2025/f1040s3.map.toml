@@ -82,6 +82,14 @@
 #   lines 9, 12, 13a-13z — net premium tax credit, fuels credit, etc.
 form = "f1040s3"
 year = 2025
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f1040s3"
+versioning          = "annual"
+template_sha256     = "008cfd3fe3ebd0860452069b90fd0a3d53dda6dd8a5d870278370aa899a63f82"
+instructions        = "i1040gi"
+line_set            = "f1040s3/2025"
+attachment_sequence = "03"
 
 # ── Part I — Nonrefundable Credits ──────────────────────────────────────────────────────────────
 line1  = "topmostSubform[0].Page1[0].f1_03[0]"   # L1 — "Foreign tax credit. Attach Form 1116 if required"

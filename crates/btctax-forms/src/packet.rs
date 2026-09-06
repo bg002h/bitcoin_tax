@@ -55,6 +55,46 @@ pub struct FiledPacket {
     pub statements: Vec<NamedStatement>,
 }
 
+/// ★ The form's printed **"Attachment Sequence No."** — the stapling order, and the packet's filename
+/// prefix (`admin.rs`: *"the prefix IS the stapling order"*). One function, keyed by `(stem, year)`,
+/// because the number is a property of the REVISION the year ships, not of the form: Form 8283 was
+/// **155** on Rev. 12-2014 / Rev. 12-2023 (TY2017, TY2024) and is **36** on Rev. 12-2025 (TY2025).
+/// Until 2026-09-05 this was sixteen per-form literals with `"155"` for every year, so the TY2025
+/// packet stapled Form 8283 last instead of between Form 6251 (32) and Form 8995 (55) — found by
+/// building the year-package row's `attachment_sequence` kill (design r2 §4) before a single row had
+/// been typed.
+///
+/// `None` is the 1040 itself, which carries no sequence number. Every value here is held to the map
+/// row's `attachment_sequence` — which is read off the archived extract, never typed — by
+/// `tests/map_rows.rs::packet_sequences_agree_with_every_map_row`; a literal that drifts from the form
+/// reds there. (Design r2 §9 retires these literals into the row; this function is the one place
+/// they live until then.)
+pub fn attachment_sequence(stem: &str, year: i32) -> Option<&'static str> {
+    match stem {
+        "f1040" => None,
+        "f1040s1" => Some("01"),
+        "f1040s1a" => Some("1A"),
+        "f1040s2" => Some("02"),
+        "f1040s3" => Some("03"),
+        "f1040sa" => Some("07"),
+        "f1040sb" => Some("08"),
+        "f1040sc" => Some("09"),
+        "schedule_d" => Some("12"),
+        "f8949" => Some("12A"),
+        "schedule_se" => Some("17"),
+        "f6251" => Some("32"),
+        "f8995" => Some("55"),
+        "f8995a" => Some("55A"),
+        "f8959" => Some("71"),
+        "f8960" => Some("72"),
+        "f8275" => Some("92"),
+        // Rev. 12-2025 renumbered Form 8283 from 155 to 36; TY2017 (Rev. 12-2014) and TY2024
+        // (Rev. 12-2023) print 155.
+        "f8283" => Some(if year >= 2025 { "36" } else { "155" }),
+        _ => None,
+    }
+}
+
 pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<FiledPacket, FormsError> {
     // ★ NO `..` — adding a member to `PrintedForms` without filling it here is a compile error.
     let PrintedReturn {
@@ -94,7 +134,7 @@ pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<FiledPacket, Fo
     // The 1040 itself — no sequence number; it IS the return.
     push(
         "f1040",
-        None,
+        attachment_sequence("f1040", year),
         crate::fill_form_1040_full(f1040, header, *filing_status, year)?,
     );
 
@@ -102,42 +142,42 @@ pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<FiledPacket, Fo
     if let Some(l) = sch_1 {
         push(
             "f1040s1",
-            Some("01"),
+            attachment_sequence("f1040s1", year),
             crate::fill_schedule_1(l, header, year)?,
         );
     }
     if let Some(l) = sch_2 {
         push(
             "f1040s2",
-            Some("02"),
+            attachment_sequence("f1040s2", year),
             crate::fill_schedule_2(l, header, year)?,
         );
     }
     if let Some(l) = sch_3 {
         push(
             "f1040s3",
-            Some("03"),
+            attachment_sequence("f1040s3", year),
             crate::fill_schedule_3(l, header, year)?,
         );
     }
     if let Some(l) = sch_a {
         push(
             "f1040sa",
-            Some("07"),
+            attachment_sequence("f1040sa", year),
             crate::fill_schedule_a(l, header, year)?,
         );
     }
     if let Some(l) = sch_b {
         push(
             "f1040sb",
-            Some("08"),
+            attachment_sequence("f1040sb", year),
             crate::fill_schedule_b(l, header, year)?,
         );
     }
     if let Some(l) = sch_c {
         push(
             "f1040sc",
-            Some("09"),
+            attachment_sequence("f1040sc", year),
             crate::fill_schedule_c(l, header, year)?,
         );
     }
@@ -148,13 +188,13 @@ pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<FiledPacket, Fo
     if sch_d.must_file() {
         push(
             "schedule_d",
-            Some("12"),
+            attachment_sequence("schedule_d", year),
             crate::fill_schedule_d_full(sch_d, header, year)?,
         );
         if let Some(p) = f8949 {
             push(
                 "f8949",
-                Some("12A"),
+                attachment_sequence("f8949", year),
                 crate::fill_8949_full(p, header, year)?,
             );
         }
@@ -162,7 +202,7 @@ pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<FiledPacket, Fo
     if let Some(l) = sch_se {
         push(
             "schedule_se",
-            Some("17"),
+            attachment_sequence("schedule_se", year),
             crate::fill_schedule_se_full(l, header, year)?,
         );
     }
@@ -172,7 +212,7 @@ pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<FiledPacket, Fo
     if let Some(amt) = f6251 {
         push(
             "f6251",
-            Some("32"),
+            attachment_sequence("f6251", year),
             crate::form6251::fill_form_6251_with_map(
                 amt,
                 header,
@@ -183,7 +223,11 @@ pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<FiledPacket, Fo
         );
     }
     if let Some(l) = f8995 {
-        push("f8995", Some("55"), crate::fill_form_8995(l, header, year)?);
+        push(
+            "f8995",
+            attachment_sequence("f8995", year),
+            crate::fill_form_8995(l, header, year)?,
+        );
     }
     // ★★★ §G-28/B1a — Form 8995-A, filed INSTEAD of the simplified 8995 above the §199A(e)(2)
     //     threshold. Core guarantees exactly one of the two is `Some`; filing both would claim the
@@ -192,7 +236,7 @@ pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<FiledPacket, Fo
     if let Some(p4) = f8995a {
         push(
             "f8995a",
-            Some("55A"),
+            attachment_sequence("f8995a", year),
             crate::form8995a::fill_form_8995a_with_map(
                 &p4.part_iv,
                 p4.parts_i_to_iii.as_ref(),
@@ -204,10 +248,14 @@ pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<FiledPacket, Fo
     // Form 8959's filing decision is a CORE fact (`must_file`), not the filler's — the chain is built
     // either way because Schedule 2 and the 1040 read its printed lines.
     if let Some(bytes) = crate::fill_form_8959(f8959, header, year)? {
-        push("f8959", Some("71"), bytes);
+        push("f8959", attachment_sequence("f8959", year), bytes);
     }
     if let Some(l) = f8960 {
-        push("f8960", Some("72"), crate::fill_form_8960(l, header, year)?);
+        push(
+            "f8960",
+            attachment_sequence("f8960", year),
+            crate::fill_form_8960(l, header, year)?,
+        );
     }
     // Form 8275 (Task 16) — Attachment Sequence No. 92. `Ok(None)` only when `printed.part_i` is
     // empty, which cannot happen here (`f8275` is `Some` only when core's `disclosure_8275` found a
@@ -215,12 +263,12 @@ pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<FiledPacket, Fo
     // mirroring the same belt-and-suspenders pattern `fill_form_8959` uses above.
     if let Some(p) = f8275 {
         if let Some(bytes) = crate::fill_form_8275(p, header, year)? {
-            push("f8275", Some("92"), bytes);
+            push("f8275", attachment_sequence("f8275", year), bytes);
         }
     }
     if let Some(rows) = f8283 {
         if let Some(bytes) = crate::fill_form_8283_full(rows, header, year)? {
-            push("f8283", Some("155"), bytes);
+            push("f8283", attachment_sequence("f8283", year), bytes);
         }
     }
 

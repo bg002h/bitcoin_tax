@@ -28,6 +28,14 @@
 # line 8 − line 11), so a reader re-adding the column must find them.
 form = "f8960"
 year = 2024
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f8960"
+versioning          = "annual"
+template_sha256     = "fca6fa8dc422ac066741f2b5ec3f8a7dea093766e405c0e261dd597c419edfb3"
+instructions        = "i8960"
+line_set            = "f8960/2024"
+attachment_sequence = "72"
 
 # ── Part I — Investment Income ──────────────────────────────────────────────────────────────────
 line1  = "topmostSubform[0].Page1[0].f1_3[0]"    # "Taxable interest (see instructions)"

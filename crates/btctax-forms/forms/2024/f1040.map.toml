@@ -7,6 +7,13 @@
 # Yes = c1_5[0] (LEFT, on-state /1); No = c1_5[1] (on-state /2).
 form = "f1040"
 year = 2024
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f1040"
+versioning          = "annual"
+template_sha256     = "0a7a54354283044cb41373c6faabfa50955d44bdf91b4b76fa1ca2bf13f6d718"
+instructions        = "i1040gi"
+line_set            = "f1040/2024"
 
 # The capital-gain amount cell (line 7 for 2024). The struct field is named `line7a` for cross-year
 # uniformity; the value here is 2024's line-7 field.

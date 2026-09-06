@@ -8,6 +8,15 @@
 # (127,200/00) and line 14 (5,200/00) — listed in prefilled_exempt so they don't read as stray writes.
 form = "schedule_se"
 year = 2017
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f1040sse"
+versioning          = "annual"
+template_sha256     = "aefe3565f69e47ccea2beaca0822a0c3cbd3b83bc9c48f326c4c54369fe24180"
+authority           = "not-yet-archived: no design/forms/2017/ archive exists — TY2017 ships five templates with no authority behind them (owner decision open: strategy review S9)"
+instructions        = "i1040sse"
+line_set            = "schedule_se/2017"
+attachment_sequence = "17"
 
 line2  = { dollars_field = "topmostSubform[0].Page2[0].f2_7[0]",  cents_field = "topmostSubform[0].Page2[0].f2_8[0]" }
 line3  = { dollars_field = "topmostSubform[0].Page2[0].f2_9[0]",  cents_field = "topmostSubform[0].Page2[0].f2_10[0]" }

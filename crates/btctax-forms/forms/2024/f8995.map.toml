@@ -39,6 +39,14 @@ row1_qbi      = "topmostSubform[0].Page1[0].Table[0].Ln1A_Row1[0].f1_5[0]"  # (c
 #     input model does not have.
 form = "f8995"
 year = 2024
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f8995"
+versioning          = "annual"
+template_sha256     = "08f4c0332be3262fda77744c3cc1e32b03cd7a5f3ab52b748991efb273cdd822"
+instructions        = "i8995"
+line_set            = "f8995/2024"
+attachment_sequence = "55"
 
 # ── Part I — Trade, Business, or Aggregation Information (table blank in v1) ─────────────────────
 line2  = "topmostSubform[0].Page1[0].ReadOrderSubForm[0].f1_18[0]"  # "Total qualified business income or (loss). Combine lines 1i through 1v, column (c)"

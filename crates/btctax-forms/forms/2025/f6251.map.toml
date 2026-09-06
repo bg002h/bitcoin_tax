@@ -65,6 +65,14 @@
 
 form = "f6251"
 year = 2025
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f6251"
+versioning          = "annual"
+template_sha256     = "6995bfd29c6fe1b80fdc396c9c4796c7cef58a966070db0346721eae815fea3f"
+instructions        = "i6251"
+line_set            = "f6251/2025"
+attachment_sequence = "32"
 
 # ── Part I — Alternative Minimum Taxable Income ─────────────────────────────────────────────────
 # 1a "Subtract Schedule 1-A (Form 1040), line 37, from Form 1040, 1040-SR, or 1040-NR, line 14"

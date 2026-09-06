@@ -8,6 +8,15 @@
 # field on this revision (identity = the handwritten signature), so appraiser_name is omitted.
 form = "f8283"
 year = 2017
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f8283"
+versioning          = { periodic = "Rev. 12-2014" }
+template_sha256     = "33d8696027afe2b9a272e3a948ca973c9463eb281f07f25f54dddee077ab4f75"
+authority           = "not-yet-archived: no design/forms/2017/ archive exists — TY2017 ships five templates with no authority behind them (owner decision open: strategy review S9)"
+instructions        = "i8283"
+line_set            = "f8283/2017"
+attachment_sequence = "155"
 
 # ── Section A — Donated Property of $5,000 or Less (Part I, lines 1A-1E). (a) donee + (c) desc
 #   live under Table1; (d)-(i) under Pt1Tabble2. cost(g)/fmv(h) are dollars+cents pairs.

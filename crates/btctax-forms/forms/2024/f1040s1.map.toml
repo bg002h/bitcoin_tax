@@ -27,6 +27,14 @@
 #   Part II: 11-14, 16, 17, 19a-19c, 20, 22 (reserved), 23, 24a-24z, 25
 form = "f1040s1"
 year = 2024
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f1040s1"
+versioning          = "annual"
+template_sha256     = "2fe9bc204a82a037a50b21c6eda9949e266eafa423e604f312bc177fc721b552"
+instructions        = "i1040gi"
+line_set            = "f1040s1/2024"
+attachment_sequence = "01"
 
 # ── Part I — Additional Income (page 1) ─────────────────────────────────────────────────────────
 line1  = "form1[0].Page1[0].f1_04[0]"   # "Taxable refunds, credits, or offsets of state and local income taxes"  AMOUNT

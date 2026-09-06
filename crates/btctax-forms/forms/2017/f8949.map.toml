@@ -1,5 +1,14 @@
 form = "f8949"
 year = 2017
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f8949"
+versioning          = "annual"
+template_sha256     = "6140371bc0d93b8841e24209580a8608704271e9c6489adc2fde572032cb9fc3"
+authority           = "not-yet-archived: no design/forms/2017/ archive exists — TY2017 ships five templates with no authority behind them (owner decision open: strategy review S9)"
+instructions        = "i8949"
+line_set            = "f8949/2017"
+attachment_sequence = "12A"
 rows_per_page = 14
 # 2017 (pre-1099-DA) revision, field-identical grid to 2024: Bitcoin is a "transaction not reported on a 1099-B" →
 # Box C (short-term) / Box F (long-term), the third checkbox, on-state /3 (c1_1[2]/c2_1[2]).

@@ -63,6 +63,14 @@
 #   Part IV           vehicle information
 form = "f1040sc"
 year = 2025
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f1040sc"
+versioning          = "annual"
+template_sha256     = "ddf401dbe060467d39f90ad2abf645df1de31512821a150dc68a3882bbf19716"
+instructions        = "i1040sc"
+line_set            = "f1040sc/2025"
+attachment_sequence = "09"
 
 # ── Lines A / B / F (P6.3a Q7) — captured expressly for these cells.
 #    Line F's group is (1) Cash / (2) Accrual / (3) Other, left→right at y=601; v1 captures only the

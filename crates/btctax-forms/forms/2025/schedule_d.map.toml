@@ -1,5 +1,13 @@
 form = "schedule_d"
 year = 2025
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f1040sd"
+versioning          = "annual"
+template_sha256     = "90564c8b7e49280363612639b804d113ebedb516c2e87c70649f29c844da1d2e"
+instructions        = "i1040sd"
+line_set            = "schedule_d/2025"
+attachment_sequence = "12"
 
 line3 = { proceeds_d = "topmostSubform[0].Page1[0].Table_PartI[0].Row3[0].f1_15[0]", cost_e = "topmostSubform[0].Page1[0].Table_PartI[0].Row3[0].f1_16[0]", adj_g = "topmostSubform[0].Page1[0].Table_PartI[0].Row3[0].f1_17[0]", gain_h = "topmostSubform[0].Page1[0].Table_PartI[0].Row3[0].f1_18[0]" }
 line7_h = "topmostSubform[0].Page1[0].f1_22[0]"

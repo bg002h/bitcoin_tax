@@ -38,6 +38,14 @@
 
 form = "f1040sb"
 year = 2024
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f1040sb"
+versioning          = "annual"
+template_sha256     = "03b72c78d75082ddd51901ca8a39e0ca2e982fdec2567b2dfb2fe4180f6aa93a"
+instructions        = "i1040sb"
+line_set            = "f1040sb/2024"
+attachment_sequence = "08"
 
 # ── L7b (P6.3a Q7) — the foreign-country list. It IS a captured input; the code comment claiming
 #    otherwise was false. Printed only when 7a is "Yes" — a country beside a "No" contradicts the answer.

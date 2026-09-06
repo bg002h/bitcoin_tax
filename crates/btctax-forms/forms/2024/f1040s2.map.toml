@@ -27,6 +27,14 @@
 # Part II: lines 5-10, 13-16, 17a-17z, 18, 19, 20 are all unmodeled/unrepresentable in v1.
 form = "f1040s2"
 year = 2024
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f1040s2"
+versioning          = "annual"
+template_sha256     = "2efb90815ed0b92c0a30d23517258382c4087334c76fa07ac033ca70e883420e"
+instructions        = "i1040gi"
+line_set            = "f1040s2/2024"
+attachment_sequence = "02"
 
 # §G-6 — "Alternative minimum tax. Attach Form 6251", from Form 6251's own printed line 11.
 #   ★ Was CENSUSED as "$0 by construction, because a return needing Form 6251 is refused" —

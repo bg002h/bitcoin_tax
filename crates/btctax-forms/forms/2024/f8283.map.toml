@@ -11,6 +11,15 @@
 # declaration/signature.
 form = "f8283"
 year = 2024
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-05 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f8283"
+versioning          = { periodic = "Rev. 12-2023" }
+template_sha256     = "e94015ab2ca0c34e751deddbc65566af0a556cc8c55a3c96057f9406f88cbbb4"
+authority           = "not-yet-archived: f8283--2024 (Rev. 12-2023) has no design/forms/2024/ note or manifest entry; only the extract exists"
+instructions        = "i8283"
+line_set            = "f8283/2024"
+attachment_sequence = "155"
 
 # ── Section A — Donated Property of $5,000 or Less. Column x-clusters (hand-pinned, same as 2025):
 #   donee(a) [58,230] c0 | desc(c) [404,576] c1 | date_contrib(d) [58,122] c2 | date_acq(e) [123,186] c3
