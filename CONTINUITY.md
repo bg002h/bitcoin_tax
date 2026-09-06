@@ -6,6 +6,26 @@ _Last updated: **2026-09-06**. Written at a deliberate pause; safe to exit. **Re
 
 # ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
 
+> ## ★★★ RESUME 2026-09-06 (night 5) — FR-62 CLOSED (R6 green) and the S9 drop LANDED (FR-61 closes on its sonnet pin verification, in flight). Read this block first.
+>
+> When the verification returns: copy, persist; if clean → close FR-61 in FOLLOWUPS + this block,
+> refresh the progress page. Then NOTHING autonomous is queued: the NOW bucket holds only the owner's
+> items (S5 09-15 real-data run needs the 2026 exports; S8 print rehearsal; T7 Notice 2026-20 order;
+> decisions S1/S2/S6/S7; the push — origin is ~230 commits behind). Candidate autonomous work if the
+> owner wants more: FR-63 (TUI commit modal clause), the cite-check fixtures for the 4868/1040-V
+> pairs, the §7503 DC-holiday calendar, a named kill for the full return's Section-B unanswered row,
+> the orphaned `slice_broker_refusal` doc block.
+
+> ## ★★★ RESUME 2026-09-06 (night 4) — R6 GREEN and FR-62 CLOSED (re-verified 8/8, 0C/0I); the S9 drop (FR-61) is IN FLIGHT with one opus agent in the main tree. Read this block first.
+>
+> Pending commits once the S9 agent returns (do NOT commit while its edits are half-done): (1)
+> persist `…build-1099da-R6-review-r2.md` (copied in, untracked) in its own commit; (2) the FR-62
+> closure edits already in FOLLOWUPS / roadmap / this file; then machine-check the S9 report
+> (`…build-S9-drop-ty2017-implementation.md`: every pinned number old → new, the re-pointed KATs, the
+> kept TaxTable), commit the drop through the gate, sonnet-verify its pins in a worktree, close FR-61,
+> refresh the progress page. Then the NOW bucket is exhausted except the owner's items (S5 09-15
+> real-data run, S8 print rehearsal, T7, decisions S1/S2/S6/S7, the push).
+
 > ## ★★★ RESUME 2026-09-06 (night 3) — the R6 build's seam review (`c3a22a29`, 1C/2I/4M/1N; ledger `7eecd22c`) is FOLDED (`d81eea8c`, 3185 tests); its sonnet re-verification is IN FLIGHT (worktree). Read this block first.
 >
 > When it returns: copy from the worktree, persist; if 0C/0I → CLOSE FR-62 in FOLLOWUPS + roadmap §0a

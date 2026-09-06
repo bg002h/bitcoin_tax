@@ -6191,8 +6191,10 @@ build, each with an owning phase.
   5 / 310; `AUTHORITY_NOT_YET_ARCHIVED`, `GRID_MAPS`, `YEAR_FLOORS`, the cross-product and row-count pins,
   `LineSet::ALL` 41 → 36). The TY2017 `TaxTable` is KEPT (the ruling's own option) so `report --tax-year
   2017` still computes; the TY2017 end-to-end KATs in `export_irs_pdf.rs` / `promote_cli.rs` re-point
-  to a bundled year, and the 4868 date kills plant their own TY2017-shaped record. **Owning phase:
-  NOW.** Brief: `design/agent-reports/BRIEF-build-S9-drop-ty2017.md`.
+  to a bundled year, and the 4868 date kills plant their own TY2017-shaped record. **DONE 2026-09-06**
+  (the commit after `f9a4679e`; 3168 tests; report `…build-S9-drop-ty2017-implementation.md`, 22 pins
+  moved with cause). Cost recorded: three cross-revision B1 measurements kept as history. Sonnet pin
+  verification next; **FR-61 closes on it.**
 - **FR-62 — S10 REVERSED: the crypto slice files a live year from the stored answers (owner,
   2026-09-06: "we will need to have option to file 2026 tax year with crypto sales").** Spec 1099-DA
   **R6** (this commit): the export dispatch becomes three-way — inputs + params → full return; inputs +
@@ -6206,8 +6208,9 @@ build, each with an owning phase.
   seen red; report `…build-1099da-R6-implementation.md`). Its seam review (`c3a22a29`, 1C/2I/4M/1N — the
   dispatch widening let a committed row with EMPTY answers on a params-less year skip the Form 8283
   restriction gate) is FOLDED `d81eea8c` (3185 tests; the gate on both arms with a 2×2 kill; the slice
-  promise conditioned on templates + answers; the pre-2025 Schedule D kill on C/F boxes). Sonnet
-  re-verification in flight; FR-62 closes at 0C/0I. Residue → FR-63, and two observations from the fold
+  promise conditioned on templates + answers; the pre-2025 Schedule D kill on C/F boxes), re-verified
+  **8/8 RESOLVED, 0C/0I/0M/0N** (`…build-1099da-R6-review-r2.md`). **FR-62 is CLOSED** (2026-09-06, 3185
+  tests): `export-irs-pdf` on a params-less year files the crypto slice from the stored answers. Residue → FR-63, and two observations from the fold
   (ownerless): `admin.rs`'s `slice_broker_refusal` doc block is orphaned four functions above its `fn`
   (pre-existing); the full return's Section-B unanswered-restriction row has only incidental coverage —
   give it a named kill. Note for the
