@@ -6,6 +6,52 @@ _Last updated: **2026-09-04**. Written at a deliberate pause; safe to exit. **Re
 
 # ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
 
+> ## ★★★ RESUME 2026-09-05 (late) — the Fable plan review is being FOLDED. Read this block first.
+>
+> The owner switched the session to Fable and asked for a Fable review of the long-term plan the
+> recon fan-out produced. It is persisted verbatim at
+> `design/agent-reports/2026-09-05-fable-plan-review.md` (**1C/8I/4M**, commit `3f279d64`), and
+> every checkable claim in it was machine-checked by the controller BEFORE folding — the ledger is
+> `design/agent-reports/2026-09-05-fable-plan-review.VERIFICATION.md` (`f74d605f`: 30 claims,
+> 27 HOLD, 2 NOT LOCATED, 1 PARTIAL). Nothing in the review was taken on its word.
+>
+> **Fold 1 — DONE, `118b070b`.** C1: the full-return export hardcoded `broker_reported_rows: 0`,
+> so the [I5] broker-reporting advisory never fired on the one path that hands the filer a packet
+> to sign. Fixed with ONE predicate (`btctax_core::forms::possibly_broker_reported`) carried on
+> `Printed8949`; the kill was the characterization test that had pinned `0` on the same fixture
+> the slice arm counts `1` on — observed red (rc=100) with the literal planted back. The examples
+> golden gained exactly one line (the advisory on J6), inspected before regenerating.
+>
+> **Fold 2 — IN FLIGHT (documents).** In this order, one commit, gate in the message:
+> 1. `design/FORM_AUTHORITY_TABLE_DESIGN.md` rewritten to the review's shape, which my draft's §5
+>    had argued against and which the ledger shows is compatible: the ROW is the `.map.toml`
+>    HEADER (judgments `versioning`/`line_set`/`instructions` written by the human there), the row
+>    SET is the glob, the binding is a `build.rs` (mechanical only), the year record is
+>    `forms/<year>/YEAR.toml`, `forms-provisional/` is never globbed. `Revision`→`versioning`,
+>    `MapFamily`→`line_set`, the Rust `const FORMS` retires.
+> 2. I4: `TY2026_PORT_REPORT.md` §6 rule 1 re-aimed — "never encode a figure whose ONLY source is a
+>    draft", NOT "never encode TY2026 until finals". `tax_tables.rs` gate doc reason 1 is stale
+>    (Rev. Proc. 2025-32 §2.10 is in the tree); reasons 2 and 3 keep the gate. `AmtParams` TY2026
+>    becomes a NOW item.
+> 3. I5: `ROADMAP_STATUS.md` §3 repartitioned NOW / AFTER FINALS / AFTER OTS-2026, critical path
+>    stated, Form 4868 + 1040-V as the default plan (M2's stale TY2025 line goes with it).
+> 4. I6/I7/I8: step 24 re-pointed at P3 + `Coverage::quoting`; build-order item 1b
+>    (`YearReadiness` + `income import` refusal + TUI default year); the work list gets
+>    `NO PRIOR SIDE`/`NO DRAFT` cells for `f1040s1` and `f8283` and §5d's "moot" is withdrawn.
+> 5. I2: the `CLAUDE.md` transcription clause amended — *fields are named for the line WITHIN a
+>    transcription struct; cross-year quantities are semantic* — so the next reviewer does not red
+>    the build for the old sentence.
+> 6. `FOLLOWUPS.md` entries with owning phases for what is NOT built in this fold: the 1099-DA
+>    year-record slot + filer `broker_reported` answer (C1 residue), `AmtParams` TY2026 (NOW),
+>    Form 4868/1040-V (P4), `YearReadiness` (build-order 1b), `forms port-status` (I8), M1, M3, M4.
+> 7. The Fable reminder in `ROADMAP_STATUS.md` §5 and the memory file: DISCHARGED — the switch
+>    happened and the review ran.
+>
+> Then the build starts at the design's sequencing step 1 (the glob-derived row set + header
+> parse + two-way test, nothing consuming it yet). The owner's open decision is unchanged: whether
+> TY2017 ships at all.
+
+
 > ## ★★★ THE LIVE ROADMAP TRACKER IS `design/ROADMAP_STATUS.md`
 > **Read that first.** It is the progress ledger for `design/LONG_RANGE_PLAN_filing.md` and is updated
 > on every task that closes — P1's T1–T7, P2's per-form artifacts, and what still blocks P3. This
