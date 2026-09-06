@@ -50,6 +50,7 @@
 //! `cargo run -p xtask -- extract-schedule-1a`, so this runs with no `pdftotext` at test time and the
 //! PDF hash in each fixture header pins provenance.
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -416,6 +417,47 @@ fn schedule_1a_docs() -> (Vec<PathBuf>, Vec<PathBuf>) {
     )
 }
 
+/// The design corpus is filed one directory per tax year, `design/ty<YYYY>`. Return them, newest last.
+fn design_year_dirs() -> Result<Vec<(i32, PathBuf)>, String> {
+    let root = repo_root().join("design");
+    let mut out = Vec::new();
+    for entry in fs::read_dir(&root).map_err(|e| format!("cannot read {}: {e}", root.display()))? {
+        let entry = entry.map_err(|e| format!("cannot read {}: {e}", root.display()))?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let Some(year) = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .and_then(|n| n.strip_prefix("ty"))
+            .and_then(|n| n.parse::<i32>().ok())
+        else {
+            continue;
+        };
+        out.push((year, path));
+    }
+    out.sort();
+    Ok(out)
+}
+
+/// Tax years whose design corpus exists on disk but which **no checked document comes from**.
+///
+/// ★★ The other half of the year-transition failure, and the one the coverage ratchet cannot see:
+/// [`schedule_1a_docs`] names two TY2025 documents and two TY2025 extracts by hand. Standing up
+/// `design/ty2026/` therefore adds a corpus that `cite-check` silently does not read — it would go on
+/// printing *"51 quotations, all verbatim"* about last year's documents. Skipping is not passing, so a
+/// year with no checked document is reported by name rather than quietly not counted.
+///
+/// Pure in its inputs, so the planted case can be exercised without creating a directory.
+fn unchecked_design_years(docs: &[PathBuf], year_dirs: &[(i32, PathBuf)]) -> Vec<i32> {
+    year_dirs
+        .iter()
+        .filter(|(_, dir)| !docs.iter().any(|d| d.starts_with(dir)))
+        .map(|(year, _)| *year)
+        .collect()
+}
+
 /// `cargo run -p xtask -- cite-check` — the same check the test runs, as a command, so it can be run
 /// while editing a design document instead of only at test time.
 pub fn run() -> Result<(), String> {
@@ -459,22 +501,54 @@ pub fn run() -> Result<(), String> {
     }
     println!("cite-check: OK — {checked} quotations, all verbatim.");
 
-    // ★ Report AUTHORITY COVERAGE every run, not only in a test. btctax emits ~16 forms and had the
-    // defining PDF archived for 4 — a gap that was completely invisible because nothing ever counted it.
-    // Every form follows the same pattern and every one has an identically-numbered IRS instructions
-    // document, so an unarchived form is a form whose transcription NOTHING can check.
-    let archived: Vec<&str> = FORMS
-        .iter()
-        .filter(|f| !f.extract_stem.is_empty())
-        .map(|f| f.form)
-        .collect();
+    // ★ A tax year whose design corpus nothing reads is an instrument that has fallen off the year.
+    let unchecked = unchecked_design_years(&docs, &design_year_dirs()?);
+    if !unchecked.is_empty() {
+        return Err(format!(
+            "design/ty{:?} exist(s) but NO document from them is checked — `schedule_1a_docs()` still \
+             names TY2025 documents and TY2025 extracts by hand, so cite-check is reporting success \
+             about last year's corpus. Point it at the new year's documents and extracts.",
+            unchecked
+        ));
+    }
+
+    // ★ Report AUTHORITY COVERAGE every run, not only in a test — and report it as `(form, YEAR)`
+    // pairs, because a prior-year archive is not coverage for a current-year revision.
+    let emitted = emitted_form_years()?;
+    let (archived, broken) = archived_form_years();
+    if !broken.is_empty() {
+        return Err(format!(
+            "{} registry row(s) claim an extracted authority that is NOT on disk — coverage they \
+             cannot back:\n  {}",
+            broken.len(),
+            broken.join("\n  ")
+        ));
+    }
+    let excused = excused_form_years();
+    let verdict = adjudicate_coverage(&emitted, &archived, &excused);
     println!(
-        "cite-check: authority archived + extracted for {}/{} emitted forms ({}); {} awaiting archive",
-        archived.len(),
-        EMITTED_FORMS.len(),
-        archived.join(", "),
-        AUTHORITY_NOT_YET_ARCHIVED.len()
+        "cite-check: authority archived + extracted for {}/{} emitted (form, year) pairs [{}]; \
+         {} excused, {} unaccounted",
+        archived.intersection(&emitted).count(),
+        emitted.len(),
+        render(&archived.iter().cloned().collect::<Vec<_>>()),
+        excused.len(),
+        verdict.unaccounted.len()
     );
+    // ★ The command FAILS on the same conditions the test does. A reporting-only coverage line is an
+    //   instrument that cannot fail, and this repo's dominant defect is exactly that shape.
+    if !verdict.unaccounted.is_empty()
+        || !verdict.stale_excuses.is_empty()
+        || !verdict.phantom_excuses.is_empty()
+    {
+        return Err(format!(
+            "authority coverage is not accounted for — unaccounted: [{}]; stale excuses: [{}]; \
+             phantom excuses: [{}]. See `authority_coverage_may_only_improve`.",
+            render(&verdict.unaccounted),
+            render(&verdict.stale_excuses),
+            render(&verdict.phantom_excuses)
+        ));
+    }
     Ok(())
 }
 
@@ -671,32 +745,247 @@ pub const FORMS: &[FormAuthority] = &[FormAuthority {
     extract_stem: "schedule_1a_2025",
 }];
 
-/// Every form btctax **emits**, by IRS basename — derived from `btctax-forms`' modules.
+// ── The emitting surface: (form, YEAR), derived — never a hand-list ───────────────────────────────
+
+/// One authority obligation: an IRS form basename and the **tax year of the revision we print**.
 ///
-/// ★ This is the left-hand side of the coverage question the registry answers: we emit these, so we owe
-/// an archived authority for each.
-pub const EMITTED_FORMS: &[&str] = &[
-    "f1040", "f1040s1a", "f1040sa", "f1040sb", "f1040sc", "f1040sd", "f1040sse", "f1040s2",
-    "f1040s3", "f6251", "f8949", "f8275", "f8283", "f8959", "f8960", "f8995",
+/// ★★ **The year is half the key, and dropping it is how an instrument reports success while checking
+/// the wrong document.** A form's lines are renumbered, added and deleted between revisions — the
+/// TY2026 Schedule 1-A draft keeps 10 of the TY2025 revision's 219 AcroForm field names — so an archive of the
+/// TY2025 booklet says nothing whatever about a TY2026 transcription. This ratchet used to collect
+/// `archived` as a set of form basenames with `FormAuthority::year` discarded, so the one archived row
+/// (`f1040s1a`, 2025) would have discharged the TY2026 obligation for the same form, and `cite-check`
+/// would have gone on verifying a TY2026 spec against the TY2025 extract while printing coverage.
+pub type FormYear = (String, i32);
+
+/// Where btctax keeps the fillable blanks it embeds — one directory per tax year.
+const TEMPLATE_ROOT: &str = "crates/btctax-forms/forms";
+
+/// Template stems that are **not** already the IRS basename, and what each one means.
+///
+/// ★ Deliberately tiny and deliberately TOTAL. Every other stem must already be an IRS basename
+/// (`f` followed by a digit); anything else is an **error**, never a skip. A stem this table cannot
+/// translate would drop a form out of the obligation set silently, which is the exact class of failure
+/// this module exists to prevent.
+const STEM_ALIASES: &[(&str, &str)] = &[("schedule_d", "f1040sd"), ("schedule_se", "f1040sse")];
+
+/// Translate a template stem into the IRS basename that names its authority PDF
+/// (`design/forms/<year>/<basename>--<year>.pdf`).
+pub fn irs_basename(stem: &str) -> Result<&str, String> {
+    if let Some((_, irs)) = STEM_ALIASES.iter().find(|(s, _)| *s == stem) {
+        return Ok(irs);
+    }
+    let mut c = stem.chars();
+    if c.next() == Some('f') && c.next().is_some_and(|d| d.is_ascii_digit()) {
+        return Ok(stem);
+    }
+    Err(format!(
+        "template stem {stem:?} is neither an IRS basename (`fNNNN…`) nor listed in STEM_ALIASES. \
+         Refusing to guess: an untranslated stem silently leaves that form out of the authority \
+         obligation set, which is a form whose transcription nothing checks."
+    ))
+}
+
+/// **Every `(form, year)` btctax can put on paper — read off the filesystem, never enumerated by hand.**
+///
+/// The emitting surface is `crates/btctax-forms/forms/<year>/<stem>.pdf` plus its `<stem>.map.toml`:
+/// an embedded blank and a field map together **are** a transcription of that revision's grid, so each
+/// pair is a form-year whose primary source we owe. Deriving it here is what makes the year transition
+/// fail **closed** — dropping a TY2026 template directory into the tree creates a new obligation per
+/// form and reds the ratchet until each is archived or consciously excused.
+///
+/// ★ Measured 2026-09-05, and the reason this is a function and not a `const`: the hand-written
+/// `EMITTED_FORMS` it replaces listed **16** form basenames. The real surface is **18 stems / 37
+/// (form, year) pairs**. The hand-list omitted `f1040s1` and `f8995a` outright — both of which
+/// `btctax-forms/src/packet.rs` pushes into the filed packet — so the ratchet passed on those two
+/// forms by finding nothing to check.
+pub fn emitted_form_years() -> Result<BTreeSet<FormYear>, String> {
+    let root = repo_root().join(TEMPLATE_ROOT);
+    let mut dirs: Vec<PathBuf> = fs::read_dir(&root)
+        .map_err(|e| format!("cannot read {}: {e}", root.display()))?
+        .map(|e| {
+            e.map(|e| e.path())
+                .map_err(|e| format!("{}: {e}", root.display()))
+        })
+        .collect::<Result<_, _>>()?;
+    dirs.sort();
+
+    let mut out: BTreeSet<FormYear> = BTreeSet::new();
+    let mut year_dirs = 0usize;
+    for dir in dirs {
+        if !dir.is_dir() {
+            continue;
+        }
+        let Some(year) = dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .and_then(|n| n.parse::<i32>().ok())
+        else {
+            continue;
+        };
+        year_dirs += 1;
+
+        let mut pdfs: BTreeSet<String> = BTreeSet::new();
+        let mut maps: BTreeSet<String> = BTreeSet::new();
+        for entry in
+            fs::read_dir(&dir).map_err(|e| format!("cannot read {}: {e}", dir.display()))?
+        {
+            let entry = entry.map_err(|e| format!("cannot read {}: {e}", dir.display()))?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            // `.map.toml` FIRST — otherwise nothing, but a stem ending in `.map` would be invented.
+            if let Some(stem) = name.strip_suffix(".map.toml") {
+                maps.insert(stem.to_string());
+            } else if let Some(stem) = name.strip_suffix(".pdf") {
+                pdfs.insert(stem.to_string());
+            }
+        }
+        // ★ A blank with no map, or a map with no blank, is a half-transcription. Fail rather than
+        //   pick one side: which side we picked would decide, silently, whether an obligation exists.
+        let lonely: Vec<&String> = pdfs.symmetric_difference(&maps).collect();
+        if !lonely.is_empty() {
+            return Err(format!(
+                "{}: {lonely:?} has a blank without a field map or a map without a blank — the \
+                 emitting surface is ambiguous there, so the authority obligation cannot be derived",
+                dir.display()
+            ));
+        }
+        for stem in &pdfs {
+            out.insert((irs_basename(stem)?.to_string(), year));
+        }
+    }
+
+    // ★★ Guard the guard. A derivation that finds nothing would make every check below pass by
+    //    finding nothing — the dominant defect shape in this repo. The 1040 itself is pushed
+    //    unconditionally by `packet.rs` for every supported year, so its absence means the walk broke,
+    //    not that the product changed.
+    if year_dirs == 0 || out.is_empty() || !out.iter().any(|(f, _)| f == "f1040") {
+        return Err(format!(
+            "the emitting surface came back as {} pair(s) across {year_dirs} year directory(ies) under \
+             {} and does not contain f1040 — the derivation is broken, and a broken derivation makes \
+             the authority ratchet pass vacuously",
+            out.len(),
+            root.display()
+        ));
+    }
+    Ok(out)
+}
+
+/// ★★ **THE RATCHET'S EXCUSE LIST, keyed on `(form, YEAR)`.** Every pair here is a form-year btctax can
+/// print while holding no archived, extracted primary source, so its transcription is unverifiable by
+/// `cite-check` and by the derive-the-decision-from-the-line tests. **The list may only SHRINK.**
+///
+/// ★ There is deliberately **no wildcard and no "all supported years" sentinel.** A sentinel would
+/// re-open the exact hole this file just closed: adding TY2026 templates would be silently pre-excused
+/// instead of reddening the ratchet. Every year is typed out, so a new tax year is a conscious edit.
+///
+/// ★ Years are the ones with a template on disk, not a range — e.g. `f8275` and `f8995a` are TY2024
+/// only, `f1040s1a` is TY2025 only (and is the one pair that IS archived, so it does not appear here).
+pub const AUTHORITY_NOT_YET_ARCHIVED: &[(&str, &[i32])] = &[
+    ("f1040", &[2017, 2024, 2025]),
+    ("f1040s1", &[2024]),
+    ("f1040s2", &[2024, 2025]),
+    ("f1040s3", &[2024, 2025]),
+    ("f1040sa", &[2024, 2025]),
+    ("f1040sb", &[2024, 2025]),
+    ("f1040sc", &[2024, 2025]),
+    ("f1040sd", &[2017, 2024, 2025]),
+    ("f1040sse", &[2017, 2024, 2025]),
+    ("f6251", &[2024, 2025]),
+    ("f8275", &[2024]),
+    ("f8283", &[2017, 2024, 2025]),
+    ("f8949", &[2017, 2024, 2025]),
+    ("f8959", &[2024, 2025]),
+    ("f8960", &[2024, 2025]),
+    ("f8995", &[2024, 2025]),
+    ("f8995a", &[2024]),
 ];
 
-/// ★★ **THE RATCHET.** btctax emits 16 forms and has the authority archived for a handful. That gap is
-/// real and is not closed by this commit — but it must never GROW, and it must never be invisible.
+/// The excuse list as `(form, year)` pairs.
+pub fn excused_form_years() -> BTreeSet<FormYear> {
+    AUTHORITY_NOT_YET_ARCHIVED
+        .iter()
+        .flat_map(|(form, years)| years.iter().map(move |y| ((*form).to_string(), *y)))
+        .collect()
+}
+
+/// The `(form, year)` pairs [`FORMS`] actually holds an extracted authority for, and the rows whose
+/// claim does not survive contact with the disk.
 ///
-/// Every form listed here is one we emit while holding no archived, extracted primary source, so its
-/// transcription is unverifiable by `cite-check` and by the derive-the-decision-from-the-line tests. The
-/// list may only SHRINK. Adding a form to `EMITTED_FORMS` without either archiving its authority or
-/// consciously extending this list is a compile-free, silent regression — so the test below makes it a
-/// test failure instead.
-pub const AUTHORITY_NOT_YET_ARCHIVED: &[&str] = &[
-    "f1040", "f1040sa", "f1040sb", "f1040sc", "f1040sd", "f1040sse", "f1040s2", "f1040s3", "f6251",
-    "f8949", "f8275", "f8283", "f8959", "f8960", "f8995",
-];
+/// ★ **Skipping is not passing.** A registry row is coverage only if the committed extract it names is
+/// really there; a row pointing at a fixture that has been renamed or deleted is returned in the second
+/// element so it can FAIL by name, never quietly stop counting.
+pub fn archived_form_years() -> (BTreeSet<FormYear>, Vec<String>) {
+    let root = repo_root();
+    let fixture = |stem: &str, suffix: &str| {
+        root.join(format!(
+            "crates/btctax-core/src/tax/fixtures/{stem}_{suffix}.txt"
+        ))
+    };
+    let mut ok = BTreeSet::new();
+    let mut broken = Vec::new();
+    for f in FORMS {
+        if f.extract_stem.is_empty() {
+            continue;
+        }
+        let mut missing: Vec<String> = Vec::new();
+        let form_txt = fixture(f.extract_stem, "form");
+        if !form_txt.exists() {
+            missing.push(form_txt.display().to_string());
+        }
+        if !f.instructions.is_empty() {
+            let instr_txt = fixture(f.extract_stem, "instructions");
+            if !instr_txt.exists() {
+                missing.push(instr_txt.display().to_string());
+            }
+        }
+        if missing.is_empty() {
+            ok.insert((f.form.to_string(), f.year));
+        } else {
+            broken.push(format!("{}--{}: {}", f.form, f.year, missing.join(", ")));
+        }
+    }
+    (ok, broken)
+}
+
+/// The three ways authority coverage can be wrong.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct CoverageVerdict {
+    /// Archived AND excused — a stale excuse, which is how a closed gap silently reopens.
+    pub stale_excuses: Vec<FormYear>,
+    /// Emitted, not archived, not excused — a form-year whose transcription nothing can check.
+    pub unaccounted: Vec<FormYear>,
+    /// Excused but not emitted — the excuse list rotting into a wishlist.
+    pub phantom_excuses: Vec<FormYear>,
+}
+
+/// Adjudicate coverage. **Pure**, taking all three sets as arguments, so the ratchet's own logic can be
+/// exercised against *planted* inputs — a year-mismatched archive, a stale excuse — instead of only
+/// against whatever the repository happens to contain today.
+pub fn adjudicate_coverage(
+    emitted: &BTreeSet<FormYear>,
+    archived: &BTreeSet<FormYear>,
+    excused: &BTreeSet<FormYear>,
+) -> CoverageVerdict {
+    let accounted: BTreeSet<FormYear> = archived.union(excused).cloned().collect();
+    CoverageVerdict {
+        stale_excuses: archived.intersection(excused).cloned().collect(),
+        unaccounted: emitted.difference(&accounted).cloned().collect(),
+        phantom_excuses: excused.difference(emitted).cloned().collect(),
+    }
+}
+
+/// Render a `(form, year)` list the way the archive names it on disk: `f6251--2025`.
+fn render(pairs: &[FormYear]) -> String {
+    pairs
+        .iter()
+        .map(|(f, y)| format!("{f}--{y}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeSet;
 
     /// ★★ **THE POINT OF THIS FILE.** Every quotation in the Schedule 1-A spec and plan is verbatim
     /// from the archived form or instructions. This is the mechanical answer to the "§X disagrees with
@@ -744,54 +1033,212 @@ mod tests {
         );
     }
 
-    /// ★★ **THE AUTHORITY RATCHET.** Every form btctax emits either has an archived, extracted primary
-    /// source in [`FORMS`] or is explicitly listed in [`AUTHORITY_NOT_YET_ARCHIVED`]. The list may only
-    /// shrink.
+    /// ★★ **THE AUTHORITY RATCHET, keyed on `(form, YEAR)`.** Every form-year btctax can print either
+    /// has an archived, extracted primary source in [`FORMS`] or is explicitly listed in
+    /// [`AUTHORITY_NOT_YET_ARCHIVED`]. The list may only shrink.
     ///
-    /// Without this, adding a form emitter is a silent regression: nothing compels anyone to archive the
-    /// PDF that defines it, so the transcription becomes unverifiable and every downstream conformance
-    /// test — the `cite-check` quotations, the derive-the-direction-from-the-line assertions, the label
-    /// census — simply has nothing to check against and passes by finding nothing.
+    /// Without this, adding a form emitter — or a new tax year's templates — is a silent regression:
+    /// nothing compels anyone to archive the PDF that defines it, so the transcription becomes
+    /// unverifiable and every downstream conformance test (the `cite-check` quotations, the
+    /// derive-the-direction-from-the-line assertions, the label census) has nothing to check against
+    /// and passes by finding nothing.
+    ///
+    /// ★ Both sides are DERIVED: the obligation set is read off the template directories, and the
+    /// archived set off the registry plus the fixtures on disk. Nothing here is a hand-list except the
+    /// excuses, and an excuse is an admission that is supposed to be typed by a human.
     #[test]
     fn authority_coverage_may_only_improve() {
-        let archived: BTreeSet<&str> = FORMS
-            .iter()
-            .filter(|f| !f.extract_stem.is_empty())
-            .map(|f| f.form)
-            .collect();
-        let excused: BTreeSet<&str> = AUTHORITY_NOT_YET_ARCHIVED.iter().copied().collect();
-
-        // 1. Nothing may be BOTH archived and excused — that is a stale excuse, and a stale excuse list
-        //    is how a closed gap silently reopens for the next form.
-        let both: Vec<&&str> = archived.intersection(&excused).collect();
+        let emitted = emitted_form_years().expect("the emitting surface must be derivable");
+        let (archived, broken) = archived_form_years();
         assert!(
-            both.is_empty(),
-            "{both:?} now HAS an archived authority — remove it from AUTHORITY_NOT_YET_ARCHIVED so the \
-             ratchet actually tightens"
+            broken.is_empty(),
+            "{} registry row(s) claim an extracted authority that is NOT on disk, so they are \
+             counted as coverage they cannot back:\n  {}",
+            broken.len(),
+            broken.join("\n  ")
+        );
+        let excused = excused_form_years();
+        let verdict = adjudicate_coverage(&emitted, &archived, &excused);
+
+        // 1. Nothing may be BOTH archived and excused — a stale excuse is how a closed gap silently
+        //    reopens for the next form.
+        assert!(
+            verdict.stale_excuses.is_empty(),
+            "[{}] now HAS an archived authority for that YEAR — remove the year from \
+             AUTHORITY_NOT_YET_ARCHIVED so the ratchet actually tightens",
+            render(&verdict.stale_excuses)
         );
 
-        // 2. Every emitted form is accounted for: archived, or consciously excused.
-        let unaccounted: Vec<&&str> = EMITTED_FORMS
-            .iter()
-            .filter(|f| !archived.contains(**f) && !excused.contains(**f))
-            .collect();
+        // 2. Every emitted (form, year) is accounted for: archived, or consciously excused.
         assert!(
-            unaccounted.is_empty(),
-            "btctax emits {unaccounted:?} with no archived primary source and no explicit excuse. Every \
-             form we support follows one pattern and every one has an identically-numbered IRS \
-             instructions document — archive the pair and extract it (`xtask extract-schedule-1a` is the \
-             model), or add it to AUTHORITY_NOT_YET_ARCHIVED with intent. Silence here means a form whose \
-             transcription NOTHING can check."
+            verdict.unaccounted.is_empty(),
+            "btctax can print [{}] with no archived primary source for THAT YEAR and no explicit \
+             excuse. Every form follows one pattern and every one has an identically-numbered IRS \
+             instructions document — archive the pair and extract it (`xtask extract-schedule-1a` is \
+             the model), or add the year to AUTHORITY_NOT_YET_ARCHIVED with intent. Silence here \
+             means a form-year whose transcription NOTHING can check.",
+            render(&verdict.unaccounted)
         );
 
-        // 3. Every excuse names a form we actually emit — otherwise the list rots into a wishlist.
-        let phantom: Vec<&&str> = AUTHORITY_NOT_YET_ARCHIVED
-            .iter()
-            .filter(|f| !EMITTED_FORMS.contains(f))
-            .collect();
+        // 3. Every excuse names a form-year we can actually print — otherwise the list rots into a
+        //    wishlist, and a year that has been retired keeps pretending to be an open admission.
         assert!(
-            phantom.is_empty(),
-            "{phantom:?} are excused but not emitted"
+            verdict.phantom_excuses.is_empty(),
+            "[{}] are excused but have no template on disk for that year",
+            render(&verdict.phantom_excuses)
+        );
+    }
+
+    /// ★★ **THE PLANTED DEFECT THIS FILE WAS FIXED FOR: a prior-year archive is not coverage.**
+    ///
+    /// The ratchet used to collect `archived` as a `BTreeSet<&str>` of `f.form`, throwing
+    /// [`FormAuthority::year`] away. With one registry row — `f1040s1a`, TY2025 — that made the TY2026
+    /// obligation for the same form look discharged, and `cite-check` would have gone on verifying a
+    /// TY2026 document against the TY2025 extract while printing coverage. The TY2026 draft of that
+    /// very form keeps 10 of its 219 TY2025 AcroForm field names, so "same form, different year" is not a detail.
+    ///
+    /// **This test reds if the year is dropped from the key again**, in either direction: the mismatch
+    /// case must be reported, and the matching case must not be — so it cannot be satisfied by a
+    /// comparison that simply rejects everything.
+    #[test]
+    fn a_prior_year_archive_does_not_discharge_a_new_year_obligation() {
+        let pair = |f: &str, y: i32| (f.to_string(), y);
+        let emitted: BTreeSet<FormYear> = [pair("f1040s1a", 2026)].into_iter().collect();
+        let none: BTreeSet<FormYear> = BTreeSet::new();
+
+        // PLANT: the archive is the TY2025 revision; the obligation is the TY2026 one.
+        let stale: BTreeSet<FormYear> = [pair("f1040s1a", 2025)].into_iter().collect();
+        let verdict = adjudicate_coverage(&emitted, &stale, &none);
+        assert_eq!(
+            verdict.unaccounted,
+            vec![pair("f1040s1a", 2026)],
+            "a TY2025 archive discharged a TY2026 obligation — the coverage key has lost the YEAR, \
+             which is how cite-check ends up verifying a document against the wrong booklet"
+        );
+
+        // CONTROL: the SAME year IS coverage. Without this half, a key that matched nothing at all
+        // would pass the assertion above.
+        let right: BTreeSet<FormYear> = [pair("f1040s1a", 2026)].into_iter().collect();
+        assert_eq!(
+            adjudicate_coverage(&emitted, &right, &none),
+            CoverageVerdict::default(),
+            "an archive of the SAME form-year must discharge the obligation"
+        );
+
+        // And a prior-year EXCUSE is likewise not an excuse for a later year.
+        let stale_excuse: BTreeSet<FormYear> = [pair("f1040s1a", 2025)].into_iter().collect();
+        let verdict = adjudicate_coverage(&emitted, &none, &stale_excuse);
+        assert_eq!(verdict.unaccounted, vec![pair("f1040s1a", 2026)]);
+        assert_eq!(
+            verdict.phantom_excuses,
+            vec![pair("f1040s1a", 2025)],
+            "an excuse for a year we no longer print must be reported, not silently carried"
+        );
+    }
+
+    /// ★★ **R16 — the hand-list omitted forms btctax really prints.** `EMITTED_FORMS` listed 16 form
+    /// basenames; the emitting surface is 18 stems / 37 `(form, year)` pairs. `f8995a` and `f1040s1`
+    /// were both absent, and `packet.rs` pushes both into the filed packet — so the ratchet passed on
+    /// them by finding nothing, and no instrument checked either transcription.
+    ///
+    /// The fix is by construction, not by adding two strings: the surface is now READ, so the same
+    /// omission cannot be made again. This test reds if the derivation stops seeing them.
+    #[test]
+    fn the_emitting_surface_is_derived_and_carries_the_year() {
+        let emitted = emitted_form_years().expect("the emitting surface must be derivable");
+        let forms: BTreeSet<&str> = emitted.iter().map(|(f, _)| f.as_str()).collect();
+
+        for missed in ["f8995a", "f1040s1"] {
+            assert!(
+                forms.contains(missed),
+                "{missed} is pushed by btctax-forms/src/packet.rs but is not in the derived emitting \
+                 surface — the derivation has stopped seeing a form we print, which is exactly the \
+                 R16 defect the hand-list had"
+            );
+        }
+
+        // ★ Measured, not assumed: Form 8615 is NOT the same shape as 8995-A. btctax never emits it —
+        //   there is no f8615 template and no map — because the §1(g) case is REFUSED and disclosed on
+        //   Form 8275 instead (`btctax-core/src/tax/form8275.rs`, "Form 8615 not filed"). Its absence
+        //   from the obligation set is correct. If btctax ever does print it, this assertion reds and
+        //   the fix is to archive f8615/i8615 for that year, not to delete the line.
+        assert!(
+            !forms.contains("f8615"),
+            "btctax now embeds a Form 8615 template — archive f8615--<year> and i8615--<year> and \
+             remove this assertion"
+        );
+
+        // Aliases are translated, not skipped: the packet stems `schedule_d`/`schedule_se` are the IRS
+        // basenames `f1040sd`/`f1040sse` on the authority side.
+        for irs in ["f1040sd", "f1040sse"] {
+            assert!(
+                forms.contains(irs),
+                "{irs} must reach the obligation set under its IRS name"
+            );
+        }
+        assert!(
+            !forms.iter().any(|f| f.starts_with("schedule_")),
+            "a raw template stem leaked into the obligation set — it would never match an archived \
+             authority filename and would look like a permanent gap"
+        );
+
+        // ★ An untranslatable stem must ERROR, never be quietly dropped.
+        assert!(irs_basename("dependents_statement").is_err());
+        assert_eq!(irs_basename("f8995a"), Ok("f8995a"));
+        assert_eq!(irs_basename("schedule_d"), Ok("f1040sd"));
+    }
+
+    /// ★ The year dimension has to agree with the crate that decides which years btctax will fill.
+    /// A template directory with no [`btctax_forms::SUPPORTED_YEARS`] entry is dead weight nothing can
+    /// print; a supported year with no template directory is a year the emitter will fail on at
+    /// runtime — and, worse here, a year that creates NO authority obligation at all, so the ratchet
+    /// would report full coverage for a year it has never looked at.
+    #[test]
+    fn the_template_years_are_exactly_the_supported_years() {
+        let emitted = emitted_form_years().expect("the emitting surface must be derivable");
+        let template_years: BTreeSet<i32> = emitted.iter().map(|(_, y)| *y).collect();
+        let supported: BTreeSet<i32> = btctax_forms::SUPPORTED_YEARS.iter().copied().collect();
+        assert_eq!(
+            template_years, supported,
+            "the tax years with embedded templates and btctax_forms::SUPPORTED_YEARS have drifted. \
+             Adding a year to SUPPORTED_YEARS without its templates leaves that year with zero \
+             authority obligations, so this ratchet reports success for a year it never examined."
+        );
+    }
+
+    /// ★★ **A new tax year's design corpus must not be silently unread.** The quotation pass is
+    /// pointed at a hand-named pair of TY2025 documents and a hand-named pair of TY2025 extracts, so
+    /// creating `design/ty2026/` adds a corpus `cite-check` does not look at — and it would keep
+    /// printing "all verbatim" about the previous year while the retargeted spec drifted freely.
+    ///
+    /// This reds the moment a year directory exists with no document in the checked set.
+    #[test]
+    fn every_design_year_on_disk_has_a_document_in_the_checked_set() {
+        let (docs, _) = schedule_1a_docs();
+        let dirs = design_year_dirs().expect("design/ is readable");
+        assert!(
+            !dirs.is_empty(),
+            "no design/ty<YYYY> directory found — the walk is broken, and a broken walk makes this \
+             check pass by finding nothing"
+        );
+        assert!(
+            unchecked_design_years(&docs, &dirs).is_empty(),
+            "design year(s) {:?} have a corpus on disk that cite-check never reads: it still names \
+             TY2025 documents and TY2025 extracts by hand in `schedule_1a_docs()`",
+            unchecked_design_years(&docs, &dirs)
+        );
+
+        // ★ PLANTED: a year directory with no checked document must be REPORTED, not skipped. Without
+        //   this half the assertion above is satisfied by any list, including an empty one.
+        let root = repo_root();
+        let planted = vec![
+            (2025, root.join("design/ty2025")),
+            (2026, root.join("design/ty2026")),
+        ];
+        assert_eq!(
+            unchecked_design_years(&docs, &planted),
+            vec![2026],
+            "a design year with no checked document must be named"
         );
     }
 

@@ -170,7 +170,7 @@ fn br(lower: Usd, rate: Usd) -> OrdinaryBracket {
     OrdinaryBracket { lower, rate }
 }
 
-/// TY2017 — **pre-TCJA** — Rev. Proc. 2016-55 §2.01 (rate tables) + §2.03 (Maximum Capital Gains
+/// TY2017 — **pre-TCJA** — Rev. Proc. 2016-55 §3.01 (rate tables). ★ There is NO capital-gains
 /// Rate), with the SSA §230 Social Security wage base ($127,200, SSA 2016-10-18).
 ///
 /// 2017 is the last full pre-TCJA year: **seven** ordinary brackets at the historic
@@ -185,7 +185,7 @@ fn br(lower: Usd, rate: Usd) -> OrdinaryBracket {
 fn ty2017() -> TaxTable {
     let mut ordinary = BTreeMap::new();
 
-    // §2.01 Table 3 — Single (§1(c) rate schedule).
+    // §3.01 Table 3 — Single (§1(c) rate schedule).
     ordinary.insert(
         FilingStatus::Single,
         OrdinarySchedule {
@@ -201,7 +201,7 @@ fn ty2017() -> TaxTable {
         },
     );
 
-    // §2.01 Table 1 — Married Filing Jointly / Qualifying Surviving Spouse (§1(a) rate schedule).
+    // §3.01 Table 1 — Married Filing Jointly / Qualifying Surviving Spouse (§1(a) rate schedule).
     ordinary.insert(
         FilingStatus::Mfj,
         OrdinarySchedule {
@@ -217,7 +217,7 @@ fn ty2017() -> TaxTable {
         },
     );
 
-    // §2.01 Table 2 — Head of Household (§1(b) rate schedule).
+    // §3.01 Table 2 — Head of Household (§1(b) rate schedule).
     ordinary.insert(
         FilingStatus::HoH,
         OrdinarySchedule {
@@ -233,7 +233,7 @@ fn ty2017() -> TaxTable {
         },
     );
 
-    // §2.01 Table 4 — Married Filing Separately (§1(d) rate schedule).
+    // §3.01 Table 4 — Married Filing Separately (§1(d) rate schedule).
     ordinary.insert(
         FilingStatus::Mfs,
         OrdinarySchedule {
@@ -249,7 +249,18 @@ fn ty2017() -> TaxTable {
         },
     );
 
-    // §2.03 — §1(h) LTCG breakpoints (0% through top of the 15% ordinary bracket; 20% from the 39.6%
+    // ★★★ **NOT from a section of the procedure — Rev. Proc. 2016-55 HAS NO CAPITAL-GAINS SECTION.**
+    //     Verified: the string "capital gain" appears ZERO times in the whole document. Pre-TCJA
+    //     §1(h) breakpoints were not separately indexed; they are DEFINED BY STATUTE against the
+    //     ordinary brackets, which is why the procedure prints none. The figures below are therefore
+    //     derived from §3.01's ordinary tables per §1(h), not transcribed from a table.
+    //
+    //     ★ The old comment here cited "§2.03 — Maximum Capital Gains Rate", a section that does not
+    //       exist in this procedure. That is worse than a missing citation: a verifier who follows it
+    //       finds nothing, and the natural recovery is to reach for ANOTHER YEAR's §2.03 — a
+    //       wrong-year paste in the very artifact meant to prevent one. (TY2024/TY2025 do have a
+    //       §2.03; the numbering was carried over.)
+    //     §1(h) LTCG breakpoints (0% through top of the 15% ordinary bracket; 20% from the 39.6%
     // ordinary threshold). max_zero = top of the 0% band; max_fifteen = top of the 15% band.
     let mut ltcg = BTreeMap::new();
     ltcg.insert(
@@ -283,17 +294,18 @@ fn ty2017() -> TaxTable {
 
     TaxTable {
         year: 2017,
-        source: "Rev. Proc. 2016-55 §2.01/§2.03 (TY2017, pre-TCJA 10/15/25/28/33/35/39.6%); \
+        source: "Rev. Proc. 2016-55 §3.01 rate tables (TY2017, pre-TCJA 10/15/25/28/33/35/39.6%); \
+                 §1(h) breakpoints DERIVED (the procedure has no capital-gains section); \
                  SSA 2016-10-18 (ss_wage_base $127,200)",
         ordinary,
         ltcg,
-        // §2503(b) gift annual exclusion per donee — Rev. Proc. 2016-55 §2.35(1) (TY2017 = $14,000).
+        // §2503(b) gift annual exclusion per donee — Rev. Proc. 2016-55 §3.37 (TY2017 = $14,000).
         gift_annual_exclusion: dec!(14000),
         // §230 SSA (42 U.S.C. §430) Social Security wage base — SSA announced 2016-10-18
         // (TY2017 = $127,200, up from TY2016 $118,500).
         ss_wage_base: dec!(127200),
         // §2010(c)(3) basic exclusion amount (unified credit / lifetime gift+estate exclusion) —
-        // Rev. Proc. 2016-55 §2.41 (TY2017 = $5,490,000).
+        // Rev. Proc. 2016-55 §3.35 "Unified Credit Against Estate Tax" (TY2017 = $5,490,000).
         gift_lifetime_exclusion: dec!(5_490_000),
     }
 }

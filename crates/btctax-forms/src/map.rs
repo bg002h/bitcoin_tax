@@ -22,11 +22,40 @@ use serde::Deserialize;
 /// hyphenated, 9 ⇒ bare digits — the schedules and the 1040 genuinely differ). See
 /// [`crate::cells::push_identity`].
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct IdentityCells {
     /// "Name(s) shown on return" — or, on Schedule C, "Name of proprietor".
     pub name: String,
     /// The SSN cell.
     pub ssn: String,
+}
+
+/// One `[census]` entry: an AcroForm field this build does **not** fill, and the recorded reason.
+///
+/// ★ Why this is MODELLED rather than ignored. Every map struct here carries
+/// `#[serde(deny_unknown_fields)]`, because without it a committed map's **renamed** line is dropped
+/// in silence. Measured on `forms/2025/f6251.map.toml`, which carries the TY2025 line-1 split: its
+/// `line1a` and `line1b` were discarded by `Form6251Map` without a word, and only the *absence* of
+/// `line1` was loud — so a vanished line failed closed and a RENAMED line half-vanished.
+/// A silently-dropped map key is a cell nothing fills and nothing reports, which is the wrong-number
+/// path this crate exists to close. 27 of the 37 committed maps carry a `[census]` table, so closing
+/// the key set means giving the census a field: the alternative — a blanket "unknown keys are fine" —
+/// is the hole itself.
+///
+/// The census's own **content** gate is `tests/field_census.rs`, which text-scans the file (so it sees
+/// every FQN, mapped or censused, whatever the struct models). This type closes the KEY set; that test
+/// judges the decisions. Measured at the time of writing: 793 entries across 27 files, every one of
+/// them exactly `{ line, rule, reason }`, all strings.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CensusDecision {
+    /// The form's own label for the field ("1a", "I.3(a)", "Box A") — the printed line, not the FQN.
+    pub line: String,
+    /// The decision vocabulary (`unmodeled` / `artifact` / `gap` / …). Defined per-map in the
+    /// `[census]` preamble and adjudicated by `tests/field_census.rs`, not by this type.
+    pub rule: String,
+    /// Why the field is left blank, in the words of whoever decided it.
+    pub reason: String,
 }
 
 /// The TY2025 Form 8949 map (embedded at compile time).
@@ -92,6 +121,7 @@ pub const F1040_MAP_2017: &str = include_str!("../forms/2017/f1040.map.toml");
 /// The 4 monetary "amount" columns of a Form 8949 / Schedule D totals row: (d) proceeds, (e) cost,
 /// (g) adjustment, (h) gain. Column (f) — the code column — has no total (a spacer), so it is absent.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AmountCols {
     /// Column (d) — proceeds.
     pub proceeds_d: String,
@@ -113,11 +143,17 @@ pub struct AmountCols {
 /// are NOT a uniform offset, and the three inset widgets landing exactly on the three parenthesised
 /// lines 2b/2f/2s is what pins it.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Form6251Map {
     /// `"f6251"`.
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
+    /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
+    /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
+    #[serde(default)]
+    pub census: std::collections::BTreeMap<String, CensusDecision>,
     pub line1: MoneyCell,
     pub line2a: MoneyCell,
     pub line2b: MoneyCell,
@@ -204,6 +240,7 @@ impl Form6251Map {
         let Self {
             form: _,
             year: _,
+            census: _,   // provenance for the fields we do NOT fill; never a money cell
             identity: _, // not money
             line1: _,
             line2a: _,
@@ -302,6 +339,7 @@ impl Form6251Map {
 /// than a cell someone remembered not to fill. (The widget exists on the PDF and stays censused; it is
 /// `_RO`, owned by the form's own JavaScript.)
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AmountColsNoAdjustment {
     /// Column (d) — proceeds.
     pub proceeds_d: String,
@@ -313,6 +351,7 @@ pub struct AmountColsNoAdjustment {
 
 /// One Form 8949 part (Part I short-term on page 0, Part II long-term on page 1).
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PartMap {
     /// `"short"` (Part I) or `"long"` (Part II).
     pub term: String,
@@ -332,11 +371,17 @@ pub struct PartMap {
 
 /// The full Form 8949 field map for one tax year.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Form8949Map {
     /// `"f8949"`.
     pub form: String,
     /// Tax year (e.g. 2025).
     pub year: i32,
+    /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
+    /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
+    /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
+    #[serde(default)]
+    pub census: std::collections::BTreeMap<String, CensusDecision>,
     /// "Name(s) shown on return" + SSN — on **both pages** (the 8949 is a two-page detail attachment, and
     /// each page carries the header). `Option`: the crypto slice never writes it, and the 2017/2025 maps
     /// have no verified FQNs. The FULL-return filler refuses on `None` — an unnamed 8949 is not filable
@@ -395,6 +440,7 @@ impl Form8949Map {
 /// A checkbox choice (field + on-state) — used for the Schedule D QOF Yes/No answer and the Form 1040
 /// Digital-Asset Yes/No question.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CheckChoice {
     /// The checkbox field name.
     pub field: String,
@@ -408,6 +454,7 @@ pub struct CheckChoice {
 /// but geometry-exempt write). Because both fields descend from the same AcroForm root, `merge_copies`
 /// (which renames only the root `/T`) rewrites BOTH names as a unit — so overflow is safe.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MoneyPair {
     /// The whole-dollars field (the one the geometry oracle checks — column-x + row/descent).
     pub dollars_field: String,
@@ -450,6 +497,7 @@ fn default_da_present() -> bool {
 /// while every schedule's SSN cell is `/MaxLen 11` and takes the hyphenated form. `push_identity`
 /// reads each cell's capacity rather than assuming either.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Form1040HeaderCells {
     pub taxpayer_first: String,
     pub taxpayer_last: String,
@@ -507,6 +555,7 @@ pub struct Form1040HeaderCells {
 /// One row of the 1040's dependents table. The name is a SINGLE cell spanning the printed
 /// "(1) First name / Last name" columns — the form has one widget there, not two.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DependentRowCells {
     pub name: String,
     pub ssn: String,
@@ -521,11 +570,17 @@ pub struct DependentRowCells {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Form1040Map {
     /// `"f1040"`.
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
+    /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
+    /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
+    #[serde(default)]
+    pub census: std::collections::BTreeMap<String, CensusDecision>,
     /// The full-return identity BLOCK (P6.2). The 1040's header is not two cells like a schedule's: it
     /// is names + SSNs + address + the §63(f) aged/blind checkboxes + the dependents table. `Option`
     /// because this map is SHARED with the crypto slice, whose 2017/2025 editions have no verified
@@ -676,6 +731,7 @@ pub struct Form1040Map {
 /// standard deduction, every bracket, and every threshold on the return. The on-states are distinct
 /// and independently corroborate the mapping, so the filler asserts both.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FilingStatusBoxes {
     /// Single — on-state `1`.
     pub single: CheckChoice,
@@ -723,6 +779,7 @@ impl Form1040Map {
 
 /// One Form 8283 **Section A** row (Donated Property of $5,000 or Less): the 8 filled columns.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Section8283ARow {
     /// (a) Name and address of the donee organization.
     pub donee: String,
@@ -744,6 +801,7 @@ pub struct Section8283ARow {
 
 /// Form 8283 Section A (page 1, Line 1) — up to 4 rows A–D.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Section8283A {
     /// The 4 rows A–D.
     pub rows: Vec<Section8283ARow>,
@@ -751,6 +809,7 @@ pub struct Section8283A {
 
 /// One Form 8283 **Section B Part I** row (Over $5,000): the filled columns.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Section8283BRow {
     /// (a) Description of donated property.
     pub desc: String,
@@ -788,6 +847,7 @@ pub struct Section8283BRow {
 /// Form 8283 Section B (page 1/2, over-$5,000 property + page 2 identity) — up to 3 rows (2024/2025)
 /// or 4 rows (2017 Rev. 12-2014, `Line5A`–`Line5D`).
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Section8283B {
     /// The property-type checkbox MUST be checked for BTC: **"k Digital assets"** (on-state `/11`) on
     /// the Rev. 12-2023/2025 forms; the Rev. 12-2014 form has no digital-asset box, so 2017 uses
@@ -818,11 +878,17 @@ pub struct Section8283B {
 
 /// The Form 8283 (Rev. 12-2025) field map for one tax year.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Form8283Map {
     /// `"f8283"`.
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
+    /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
+    /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
+    #[serde(default)]
+    pub census: std::collections::BTreeMap<String, CensusDecision>,
     /// The FILER's identity — "Name(s) shown on your income tax return" + identifying number. `Option`
     /// because the crypto slice never writes it (its 8283 rides beside a return btctax did not produce)
     /// and the 2017/2025 maps have no verified FQNs; the FULL-return filler refuses on `None`.
@@ -937,6 +1003,7 @@ impl Form8283Map {
 /// absent**: there is no citation to disclose, and Form 8949 has no discrete numbered "line" (it is a
 /// per-transaction, lettered-COLUMN schedule) — nothing correct could be written to either.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Form8275Row {
     /// (b) "Item or Group of Items" — the position's form-location descriptor (`Part1Item.line`).
     pub item: String,
@@ -951,12 +1018,18 @@ pub struct Form8275Row {
 /// The Form 8275 (Disclosure Statement, Rev. 10-2024) field map. **One revision, aliased to every
 /// `SUPPORTED_YEAR`** — see [`F8275_MAP_2024`].
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Form8275Map {
     /// `"f8275"`.
     pub form: String,
     /// Tax year this map instance is stamped for (re-stamped by `for_year`; the field SET is identical
     /// across every supported year — see the module doc).
     pub year: i32,
+    /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
+    /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
+    /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
+    #[serde(default)]
+    pub census: std::collections::BTreeMap<String, CensusDecision>,
     /// The FILER's identity — "Name(s) shown on return" + "Identifying number shown on return". The map
     /// always DECLARES these cells (unlike Form 8283, whose 2017 revision structurally lacks an identity
     /// block), but Task 16's crypto-slice fill (`fill_form_8275_slice`) leaves them unwritten — mirroring
@@ -997,20 +1070,60 @@ impl Form8275Map {
         Self::parse(F8275_MAP_2024).expect("bundled f8275 map parses")
     }
 
-    /// The map for a supported tax year. ★ Form 8275 is REVISION-versioned, not tax-year-versioned:
-    /// the ONE bundled Rev. 10-2024 map/asset is aliased to EVERY `SUPPORTED_YEAR` (2017/2024/2025) —
-    /// only the `year` tag is re-stamped to the caller's requested year. This is what keeps a promoted
-    /// 2025 (or 2017) disposal's Form 8275 export from being permanently refused for want of a
-    /// "2025 map" that would never structurally differ from this one.
-    pub fn for_year(year: i32) -> Result<Self, FormsError> {
-        match year {
-            2017 | 2024 | 2025 => {
-                let mut m = Self::ty2024();
-                m.year = year;
-                Ok(m)
-            }
-            _ => Err(FormsError::UnsupportedYear(year)),
+    /// The bundled Form 8275 asset for `year` — the ONE authority for "does this build ship a Form
+    /// 8275 for that year", and the thing [`Self::for_year`]'s alias is licensed by.
+    ///
+    /// Exposed as an associated function so a test can ask the same question the alias asks, and so
+    /// nothing outside `pdf.rs` has to keep a second list of Form 8275 years.
+    pub fn bundled_pdf(year: i32) -> Result<&'static [u8], FormsError> {
+        crate::pdf::f8275_pdf(year)
+    }
+
+    /// ★★★ The PRECONDITION the Form 8275 alias rests on, written as a CHECK instead of a year list.
+    ///
+    /// Form 8275 is REVISION-versioned, not tax-year-versioned, so this one transcribed map is reused
+    /// for every year that bundles the same revision. That is legitimate **only while it is true**, and
+    /// the thing that makes it true is the ASSET, not the calendar: this map's FQNs were transcribed
+    /// from `forms/2024/f8275.pdf` (Rev. 10-2024), so it may be stamped for `year` exactly when that
+    /// year's bundled Form 8275 is that same document, byte for byte.
+    ///
+    /// The old spelling was `2017 | 2024 | 2025 => alias`, which asserted nothing a reader could check
+    /// and made `| 2026` a one-token edit — an edit that would hand a Rev. 12-2026 form a Rev. 10-2024
+    /// field map, whose free-text cells would land in whatever boxes those names now denote. Here the
+    /// same edit is not available: a year is aliased because its bundled bytes ARE this revision, and a
+    /// year that ever bundles a different one is refused at the point of substitution.
+    ///
+    /// `bundled` is a parameter rather than a lookup so the refusal can be OBSERVED: no IRS revision is
+    /// needed to plant the defect this exists to catch (see `sp4.rs`,
+    /// `alias_refuses_a_year_whose_bundled_8275_is_a_different_document`).
+    pub fn alias_is_licensed_by(year: i32, bundled: &[u8]) -> Result<(), FormsError> {
+        if bundled == crate::pdf::F8275_PDF_2024 {
+            return Ok(());
         }
+        Err(FormsError::Structure(format!(
+            "TY{year} bundles a Form 8275 that is NOT the Rev. 10-2024 document \
+             `forms/2024/f8275.map.toml` was transcribed from ({} bytes vs {}), so that map may not \
+             be aliased to TY{year}: transcribe `forms/{year}/f8275.map.toml` against the revision \
+             this build actually ships for TY{year}",
+            bundled.len(),
+            crate::pdf::F8275_PDF_2024.len(),
+        )))
+    }
+
+    /// The map for a supported tax year — the ONE bundled Rev. 10-2024 map re-stamped with `year`,
+    /// which is what keeps a promoted 2025 (or 2017) disposal's Form 8275 export from being refused for
+    /// want of a "2025 map" that would not structurally differ from this one.
+    ///
+    /// ★ It holds no year literal of its own. The year question is asked of the asset registry
+    /// ([`Self::bundled_pdf`]) and the revision question of the bytes it returns
+    /// ([`Self::alias_is_licensed_by`]) — so the two answers cannot drift apart, and neither can be
+    /// widened from inside this file.
+    pub fn for_year(year: i32) -> Result<Self, FormsError> {
+        let bundled = Self::bundled_pdf(year)?;
+        Self::alias_is_licensed_by(year, bundled)?;
+        let mut m = Self::ty2024();
+        m.year = year;
+        Ok(m)
     }
 
     /// Every field name the map targets (for the `map_YYYY_matches_bundled_pdf_fieldset` guard).
@@ -1048,11 +1161,17 @@ impl Form8275Map {
 
 /// The Schedule D field map for one tax year.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ScheduleDMap {
     /// `"schedule_d"`.
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
+    /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
+    /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
+    #[serde(default)]
+    pub census: std::collections::BTreeMap<String, CensusDecision>,
     /// The name + SSN header cells (P6.2). `Option` because this map is SHARED with the crypto-slice
     /// path, whose 2017/2025 editions have no verified identity FQNs and no `ReturnInputs` to source an
     /// identity from. The FULL-return filler refuses on `None` — it may not emit an unnamed form.
@@ -1162,11 +1281,17 @@ impl ScheduleDMap {
 /// line 23 (RRTA) are unmodeled and are deliberately absent — they stay blank on the filed form,
 /// which is why line 4 = line 1, line 18 = 7 + 13, and line 24 = line 22.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Form8959Map {
     /// `"f8959"`.
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
+    /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
+    /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
+    #[serde(default)]
+    pub census: std::collections::BTreeMap<String, CensusDecision>,
     /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
     /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
     pub identity: IdentityCells,
@@ -1257,11 +1382,17 @@ impl Form8959Map {
 /// expenses (9a–9c, 10) and the whole estates-and-trusts branch (18a–21) are unmodeled and stay
 /// BLANK. The derived totals 9d and 11 ARE filled at zero — the form's arithmetic adds them.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Form8960Map {
     /// `"f8960"`.
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
+    /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
+    /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
+    #[serde(default)]
+    pub census: std::collections::BTreeMap<String, CensusDecision>,
     /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
     /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
     pub identity: IdentityCells,
@@ -1349,11 +1480,17 @@ impl Form8960Map {
 /// Form 8995-A (§G-28/B1a) — **Part IV only**. See `forms/2024/f8995a.map.toml` for the scope note
 /// and for how the field assignment was corroborated rather than assumed.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Form8995AMap {
     /// `"f8995a"`.
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
+    /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
+    /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
+    #[serde(default)]
+    pub census: std::collections::BTreeMap<String, CensusDecision>,
     /// Name + SSN. REQUIRED — a schedule that does not name its taxpayer is not filable.
     pub identity: IdentityCells,
     /// Part IV lines 27-40, in the form's own numbering. See `forms/2024/f8995a.map.toml` for how the
@@ -1389,6 +1526,7 @@ pub struct Form8995AMap {
 
 /// Form 8995-A Part I, row A — the five columns the form prints left to right.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Form8995APartIRowACells {
     /// 1(a) "Trade, business, or aggregation name".
     pub name: String,
@@ -1404,6 +1542,7 @@ pub struct Form8995APartIRowACells {
 
 /// Form 8995-A Part II, column A — lines 2-16.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Form8995APartIiCells {
     pub line2: MoneyCell,
     pub line3: MoneyCell,
@@ -1428,6 +1567,7 @@ pub struct Form8995APartIiCells {
 
 /// Form 8995-A Part III — lines 17-26.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Form8995APartIiiCells {
     pub line17: MoneyCell,
     pub line18: MoneyCell,
@@ -1463,11 +1603,17 @@ impl Form8995AMap {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Form8995Map {
     /// `"f8995"`.
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
+    /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
+    /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
+    #[serde(default)]
+    pub census: std::collections::BTreeMap<String, CensusDecision>,
     /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
     /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
     pub identity: IdentityCells,
@@ -1559,11 +1705,17 @@ impl Form8995Map {
 /// worksheet is no longer on any production path.) Only the three Part II taxes v1 computes are
 /// mapped. **Line 21 is on PAGE 2.**
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Schedule2Map {
     /// `"f1040s2"`.
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
+    /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
+    /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
+    #[serde(default)]
+    pub census: std::collections::BTreeMap<String, CensusDecision>,
     /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
     /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
     pub identity: IdentityCells,
@@ -1618,11 +1770,17 @@ impl Schedule2Map {
 /// Only the foreign tax credit (L1) and the §6413(c) excess-Social-Security credit (L11) are mapped.
 /// Every other Part I credit is a §3.4 conservative omission and stays BLANK.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Schedule3Map {
     /// `"f1040s3"`.
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
+    /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
+    /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
+    #[serde(default)]
+    pub census: std::collections::BTreeMap<String, CensusDecision>,
     /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
     /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
     pub identity: IdentityCells,
@@ -1677,11 +1835,17 @@ impl Schedule3Map {
 /// interest), 15 (casualty), 16 (other). **Line 8d is a ReadOnly "Reserved for future use" widget** —
 /// live, and it consumes a suffix number. Never write it.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ScheduleAMap {
     /// `"f1040sa"`.
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
+    /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
+    /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
+    #[serde(default)]
+    pub census: std::collections::BTreeMap<String, CensusDecision>,
     /// L5a's §164(b)(5) sales-tax election checkbox — the election core already honours in the
     /// arithmetic, which the filed form never showed (ARCH-P6.3a Q7 item 3).
     pub check_5a_sales_tax: CheckChoice,
@@ -1785,11 +1949,17 @@ impl ScheduleAMap {
 /// written. Non-money fields (a date on 2b, an SSN comb on 19b, a date on 19c) sit inside the money
 /// x-band — writing a dollar amount into one prints garbage.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Schedule1Map {
     /// `"f1040s1"`.
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
+    /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
+    /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
+    #[serde(default)]
+    pub census: std::collections::BTreeMap<String, CensusDecision>,
     /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
     /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
     pub identity: IdentityCells,
@@ -1858,11 +2028,17 @@ impl Schedule1Map {
 /// line 28 is printed. Line 30 (home office) and the line-32 at-risk checkboxes are unmapped too — a
 /// Schedule C loss refuses upstream, so line 31 is always ≥ 0.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ScheduleCMap {
     /// `"f1040sc"`.
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
+    /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
+    /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
+    #[serde(default)]
+    pub census: std::collections::BTreeMap<String, CensusDecision>,
     /// Line A — "Principal business or profession".
     pub line_a_business: String,
     /// Line B — the NAICS code (a 6-character comb).
@@ -1933,6 +2109,7 @@ impl ScheduleCMap {
 
 /// One listed-payer row on Schedule B: the payer-name text cell + the amount cell.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ScheduleBRowMap {
     /// The payer-name field (a wide text cell in the PAYER column).
     pub payer: String,
@@ -1943,6 +2120,7 @@ pub struct ScheduleBRowMap {
 /// A Yes/No checkbox pair (Schedule B Part III). Both boxes share the same on-states (`"1"`/`"2"`) and
 /// the same x geometry across every pair on the form, so only the field NAME distinguishes them.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct YesNoPair {
     /// The "Yes" box.
     pub yes: CheckChoice,
@@ -1960,11 +2138,17 @@ pub struct YesNoPair {
 /// full in the TOML rather than interpolated. **Part I has 14 rows, Part II has 15**; the asymmetry
 /// is real.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ScheduleBMap {
     /// `"f1040sb"`.
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
+    /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
+    /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
+    #[serde(default)]
+    pub census: std::collections::BTreeMap<String, CensusDecision>,
     /// L7b — the foreign-country list. It IS a captured input; the claim that v1 had none was false
     /// (ARCH-P6.3a Q7 item 7).
     pub line7b_countries: String,
@@ -2010,11 +2194,17 @@ impl ScheduleBMap {
 
 /// The Schedule SE (Form 1040) field map for one tax year — the filled §1401 line chain.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ScheduleSeMap {
     /// `"schedule_se"`.
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
+    /// fill, mapped to the [`CensusDecision`] that leaves it blank. Declared, not tolerated: see
+    /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
+    #[serde(default)]
+    pub census: std::collections::BTreeMap<String, CensusDecision>,
     /// The identity header — "Name of person **with self-employment income**" + THAT person's SSN, i.e.
     /// the PROPRIETOR, not the return's joint name line. `Option` because this map is shared with the
     /// crypto slice (whose 2017/2025 editions have no verified identity FQNs and write no identity at

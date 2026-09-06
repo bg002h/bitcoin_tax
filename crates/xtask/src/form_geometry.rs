@@ -64,6 +64,15 @@ pub struct Geometry {
     pub form: String,
     /// sha256 of the PDF this was read from. ★ A changed hash means the IRS REVISED the form —
     /// review it, never regenerate silently.
+    ///
+    /// ★★★ **Enforced by [`pdf_sha_tests::every_committed_geometry_fixture_matches_the_manifest`],
+    /// and until 2026-09-05 it was enforced by nothing.** This field was written at generation time
+    /// and compared to `design/forms/MANIFEST.json` by no test, no command and no hook — the
+    /// guarantee above was a sentence in a doc comment. Drafts make that concrete rather than
+    /// theoretical: the IRS replaces a draft IN PLACE under the same URL, so a revision leaves the
+    /// filename, the `.pdf.txt` note and this fixture all looking exactly as they did, and the only
+    /// witness that the observation is still an observation *of the manifest's document* is this
+    /// hash being read by something.
     pub pdf_sha256: String,
     pub pages: Vec<Page>,
     pub words: Vec<Word>,
@@ -95,6 +104,27 @@ pub fn repo_root() -> PathBuf {
 
 pub fn geometry_path(root: &Path, stem: &str) -> PathBuf {
     root.join(format!("design/forms/geometry/{stem}.json"))
+}
+
+/// The REPO-RELATIVE path of the PDF a fixture stem was read from — and therefore the key its
+/// `MANIFEST.json` entry is filed under: `f6251--2026-DRAFT` →
+/// `design/forms/2026/f6251--2026-DRAFT.pdf`.
+///
+/// ★★ **A DRAFT stem is `<form>--<year>-DRAFT`, and the year DIRECTORY is the YEAR, not
+/// `2026-DRAFT`.** The `-DRAFT` marker stays in the FILENAME on purpose — it is one of the three
+/// signals [`crate::authority_manifest::Entry::is_draft`] reads, and R20 is precisely that a draft
+/// under a clean stem is indistinguishable from a final. So the suffix is stripped when resolving
+/// the DIRECTORY and kept everywhere else.
+///
+/// ★ **One rule, one place.** The year comes from [`crate::label_reader::stem_year`], the same
+/// function `label-proof` resolves its PDF with, so a fixture, its PDF and its manifest entry cannot
+/// be resolved three different ways. Until 2026-09-05 `extract` carried its own copy ending in
+/// `.unwrap_or("2025")` — a fallback that could never fire (`rsplit` always yields at least one
+/// item, so `"f1040".rsplit("--").next()` is `Some("f1040")`) while reading as a deliberate
+/// fallback-to-2025 policy. That is `TY2026_PORT_REPORT.md` #4, and this was its second site.
+pub fn pdf_rel_for_stem(stem: &str) -> Result<String, String> {
+    let year = crate::label_reader::stem_year(stem)?;
+    Ok(format!("design/forms/{year}/{stem}.pdf"))
 }
 
 pub fn load(root: &Path, stem: &str) -> Result<Geometry, String> {
@@ -183,17 +213,7 @@ fn html_unescape(s: &str) -> String {
 /// committed JSON is what tests read, so neither CI nor a fresh clone needs `pdftotext` or network.
 pub fn extract(stem: &str) -> Result<(), String> {
     let root = repo_root();
-    // ★★ A DRAFT stem is `<form>--<year>-DRAFT`, and the year directory is the YEAR, not
-    //    `2026-DRAFT`. The `-DRAFT` marker stays in the FILENAME on purpose — it is one of the
-    //    three signals `authority_manifest::Entry::is_draft` reads, and R20 is precisely that a
-    //    draft under a clean stem is indistinguishable from a final. So the suffix is stripped when
-    //    resolving the DIRECTORY and kept everywhere else.
-    let year = stem
-        .rsplit("--")
-        .next()
-        .unwrap_or("2025")
-        .trim_end_matches("-DRAFT");
-    let pdf = root.join(format!("design/forms/{year}/{stem}.pdf"));
+    let pdf = root.join(pdf_rel_for_stem(stem)?);
     if !pdf.is_file() {
         return Err(format!(
             "{} not present. It is gitignored; re-fetch it from the URL in {}.txt",
@@ -457,6 +477,370 @@ mod cover_sheet_tests {
             "these fixtures still carry the draft cover sheet as page 1, so their box pages (from \
              the FQN) and word pages (physical) are off by one and every label join on them is \
              wrong — regenerate with `xtask extract-geometry <stem>`: {offenders:?}"
+        );
+    }
+}
+
+// ────────────── the fixture is an observation OF the manifest's document ──────────────
+
+#[cfg(test)]
+mod pdf_sha_tests {
+    //! ★★★ **[`Geometry::pdf_sha256`] is a pin, and a pin nobody reads is a decoration.**
+    //!
+    //! Every committed fixture claims, in its own header, the sha256 of the PDF it was read from.
+    //! `MANIFEST.json` independently claims the sha256 of that same PDF (as a `note` — the binaries
+    //! are gitignored, so the manifest entry is all CI has). Nothing compared the two, so a fixture
+    //! could go on describing a document the repo no longer points at, and every witness reading it
+    //! — the label census, `label-proof`, the Schedule 1-A conformance KAT — would keep passing
+    //! against last year's geometry.
+    //!
+    //! ★ Why it bites hardest on drafts: `f1040s1a--2026-DRAFT` and friends are *replaced in place*
+    //! at the same URL, and the TY2026 Schedule 1-A draft was revised as recently as 2026-09-04. A
+    //! re-fetch updates the manifest note; the fixture is regenerated only if someone remembers.
+    //! This test is the "someone remembers".
+    //!
+    //! ★★ **No hand-list anywhere.** The fixture set is the `*.json` files under
+    //! `design/forms/geometry/`; the expected hash is the manifest entry filed under the fixture's
+    //! own PDF path, resolved by [`super::pdf_rel_for_stem`] — the single rule `extract` uses to
+    //! WRITE the fixture. A fixture whose PDF has no manifest entry is a FINDING reported by name,
+    //! never a skip.
+
+    use super::*;
+    use crate::authority_manifest::Entry;
+
+    /// One reason a committed fixture is not a trustworthy observation of the manifest's document.
+    #[derive(Debug, PartialEq, Eq)]
+    enum Finding {
+        /// The filename is not `<form>--<year>[-DRAFT]`, so no PDF path can be derived from it.
+        UnusableStem { stem: String, why: String },
+        /// The fixture's own `form` field disagrees with its filename — the two identities used to
+        /// look it up are not the same identity.
+        NameDisagrees { stem: String, recorded: String },
+        /// No manifest entry covers the PDF this fixture claims to observe.
+        NoManifestEntry { stem: String, pdf: String },
+        /// Several manifest entries claim the same path, so "the" expected hash is not defined.
+        Ambiguous {
+            stem: String,
+            pdf: String,
+            shas: Vec<String>,
+        },
+        /// The pin and the manifest disagree: the form was revised, or the fixture was hand-edited.
+        Drifted {
+            stem: String,
+            pdf: String,
+            fixture: String,
+            manifest: String,
+        },
+    }
+
+    impl Finding {
+        fn describe(&self) -> String {
+            match self {
+                Finding::UnusableStem { stem, why } => {
+                    format!("{stem}: cannot resolve the PDF it observes — {why}")
+                }
+                Finding::NameDisagrees { stem, recorded } => format!(
+                    "{stem}: the fixture's own `form` field says `{recorded}` — the filename and \
+                     the recorded identity are not the same document"
+                ),
+                Finding::NoManifestEntry { stem, pdf } => format!(
+                    "{stem}: no MANIFEST.json entry for `{pdf}` — this fixture observes a document \
+                     the repo does not track, so nothing can say whether it is current"
+                ),
+                Finding::Ambiguous { stem, pdf, shas } => format!(
+                    "{stem}: {} manifest entries claim `{pdf}` ({shas:?}) — the expected hash is \
+                     not defined",
+                    shas.len()
+                ),
+                Finding::Drifted {
+                    stem,
+                    pdf,
+                    fixture,
+                    manifest,
+                } => format!(
+                    "{stem}: pdf_sha256 {fixture} but MANIFEST.json says {manifest} for `{pdf}` — \
+                     the IRS REVISED the form (drafts are replaced in place) or the fixture was \
+                     edited. REVIEW the revision against the ledger; do not regenerate silently."
+                ),
+            }
+        }
+    }
+
+    /// The whole check, over ONE fixture, as a pure function of the manifest and the fixture — so
+    /// the planted-defect tests below can hand it a defect that must never exist on disk.
+    fn findings_for(entries: &[Entry], stem: &str, g: &Geometry) -> Vec<Finding> {
+        let mut out = Vec::new();
+        if g.form != stem {
+            out.push(Finding::NameDisagrees {
+                stem: stem.to_string(),
+                recorded: g.form.clone(),
+            });
+        }
+        let pdf = match pdf_rel_for_stem(stem) {
+            Ok(p) => p,
+            Err(why) => {
+                out.push(Finding::UnusableStem {
+                    stem: stem.to_string(),
+                    why,
+                });
+                return out;
+            }
+        };
+        let hits: Vec<&Entry> = entries.iter().filter(|e| e.path == pdf).collect();
+        match hits.as_slice() {
+            [] => out.push(Finding::NoManifestEntry {
+                stem: stem.to_string(),
+                pdf,
+            }),
+            [e] => {
+                if e.sha256 != g.pdf_sha256 {
+                    out.push(Finding::Drifted {
+                        stem: stem.to_string(),
+                        pdf,
+                        fixture: g.pdf_sha256.clone(),
+                        manifest: e.sha256.clone(),
+                    });
+                }
+            }
+            many => out.push(Finding::Ambiguous {
+                stem: stem.to_string(),
+                pdf,
+                shas: many.iter().map(|e| e.sha256.clone()).collect(),
+            }),
+        }
+        out
+    }
+
+    /// ★★★ **THE GUARANTEE: every committed geometry fixture's `pdf_sha256` equals the
+    /// `MANIFEST.json` sha256 of the PDF it names.**
+    ///
+    /// Measured 2026-09-05 before this test existed: 47 fixtures, 47 matching, 0 missing entries,
+    /// and no instrument that said so.
+    #[test]
+    fn every_committed_geometry_fixture_matches_the_manifest() {
+        let root = repo_root();
+        let entries = crate::authority_manifest::load(&root).expect("MANIFEST.json loads");
+        assert!(
+            !entries.is_empty(),
+            "MANIFEST.json parsed to zero entries — every fixture would then be reported as \
+             unbacked, or worse, nothing would be compared at all"
+        );
+
+        let dir = root.join("design/forms/geometry");
+        let mut paths: Vec<PathBuf> = std::fs::read_dir(&dir)
+            .unwrap_or_else(|e| {
+                panic!(
+                    "{}: geometry fixture directory unreadable: {e}",
+                    dir.display()
+                )
+            })
+            .map(|e| e.expect("directory entry is readable").path())
+            .filter(|p| p.extension().is_some_and(|x| x == "json"))
+            .collect();
+        paths.sort();
+        // ★ The walk is derived from the filesystem, so its own vacuity is the failure mode to
+        //   guard: a wrong directory panics above, a wrong extension filter lands here.
+        assert!(
+            !paths.is_empty(),
+            "no *.json fixtures under {} — the walk is not reaching the fixtures",
+            dir.display()
+        );
+
+        let mut checked = 0usize;
+        let mut findings: Vec<String> = Vec::new();
+        for path in &paths {
+            let stem = path
+                .file_stem()
+                .expect("a *.json path has a file stem")
+                .to_string_lossy()
+                .into_owned();
+            // ★★ Unreadable or unparseable is a FAILURE, never a skip — the sibling cover-sheet
+            //    guard shipped with `continue` here and silently skipped the very defect planted to
+            //    prove it worked.
+            let text = std::fs::read_to_string(path)
+                .unwrap_or_else(|e| panic!("{stem}: geometry fixture unreadable: {e}"));
+            let g: Geometry = serde_json::from_str(&text)
+                .unwrap_or_else(|e| panic!("{stem}: geometry fixture does not parse: {e}"));
+            checked += 1;
+            findings.extend(
+                findings_for(&entries, &stem, &g)
+                    .iter()
+                    .map(Finding::describe),
+            );
+        }
+        assert_eq!(
+            checked,
+            paths.len(),
+            "{} fixtures found but only {checked} inspected — a fixture was skipped",
+            paths.len()
+        );
+        assert!(
+            findings.is_empty(),
+            "{} of {checked} committed geometry fixtures are not observations of the document \
+             MANIFEST.json points at:\n  {}",
+            findings.len(),
+            findings.join("\n  ")
+        );
+    }
+
+    // ─────────────────────────── B1: seen RED on a planted defect ───────────────────────────
+
+    /// Two `note` entries in the manifest's real serialised shape, so these tests exercise the same
+    /// `Entry` deserialisation the live manifest goes through.
+    const SAMPLE_MANIFEST: &str = r#"[
+      { "path": "design/forms/2026/f6251--2026-DRAFT.pdf", "kind": "form", "storage": "note",
+        "sha256": "aaaa000000000000000000000000000000000000000000000000000000000001",
+        "bytes": 100, "url": "https://www.irs.gov/pub/irs-dft/f6251--dft.pdf", "extract": "" },
+      { "path": "design/forms/2025/f6251--2025.pdf", "kind": "form", "storage": "note",
+        "sha256": "bbbb000000000000000000000000000000000000000000000000000000000002",
+        "bytes": 100, "url": "https://www.irs.gov/pub/irs-pdf/f6251.pdf", "extract": "" }
+    ]"#;
+
+    fn sample_entries() -> Vec<Entry> {
+        serde_json::from_str(SAMPLE_MANIFEST).expect("the sample manifest is manifest-shaped")
+    }
+
+    fn fixture(stem: &str, sha: &str) -> Geometry {
+        Geometry {
+            form: stem.to_string(),
+            pdf_sha256: sha.to_string(),
+            pages: vec![Page {
+                n: 1,
+                width: 612.0,
+                height: 792.0,
+            }],
+            words: vec![],
+            boxes: vec![],
+        }
+    }
+
+    /// ★★★ **The kill.** A truthful fixture must pass and a fixture whose recorded hash has drifted
+    /// by ONE character must be rejected — otherwise the walk above is a decoration that reports
+    /// success on a stale observation, which is the exact class it exists to close.
+    #[test]
+    fn a_recorded_hash_that_drifts_from_the_manifest_is_rejected() {
+        let entries = sample_entries();
+        let truth = "aaaa000000000000000000000000000000000000000000000000000000000001";
+
+        // Control: the fixture that tells the truth is clean.
+        assert_eq!(
+            findings_for(
+                &entries,
+                "f6251--2026-DRAFT",
+                &fixture("f6251--2026-DRAFT", truth)
+            ),
+            vec![],
+            "a fixture whose pdf_sha256 IS the manifest sha256 must pass"
+        );
+
+        // Plant: the last character only — the shape an in-place draft revision would leave, and
+        // small enough that eyeballing a truncated `sha256:aaaa0000…` would not see it.
+        let planted = "aaaa000000000000000000000000000000000000000000000000000000000009";
+        let found = findings_for(
+            &entries,
+            "f6251--2026-DRAFT",
+            &fixture("f6251--2026-DRAFT", planted),
+        );
+        assert_eq!(
+            found,
+            vec![Finding::Drifted {
+                stem: "f6251--2026-DRAFT".into(),
+                pdf: "design/forms/2026/f6251--2026-DRAFT.pdf".into(),
+                fixture: planted.into(),
+                manifest: truth.into(),
+            }],
+            "a one-character drift must be caught, not tolerated"
+        );
+
+        // And it must be compared against the RIGHT entry: the 2025 final's hash is in the same
+        // manifest, so a lookup that ignored the path would flatter a draft with a final's pin.
+        let cross = findings_for(
+            &entries,
+            "f6251--2026-DRAFT",
+            &fixture(
+                "f6251--2026-DRAFT",
+                "bbbb000000000000000000000000000000000000000000000000000000000002",
+            ),
+        );
+        assert!(
+            matches!(cross.as_slice(), [Finding::Drifted { .. }]),
+            "a draft carrying the FINAL's hash must still be rejected, got {cross:?}"
+        );
+    }
+
+    /// ★★ **Skipping is not passing.** A fixture whose PDF the manifest does not track is a finding
+    /// reported by name — the alternative (no entry ⇒ nothing to compare ⇒ fine) is how a whole
+    /// document leaves the tracked set without anyone noticing.
+    #[test]
+    fn a_fixture_with_no_manifest_entry_is_named_not_skipped() {
+        let entries = sample_entries();
+        let found = findings_for(
+            &entries,
+            "f8283--2026-DRAFT",
+            &fixture("f8283--2026-DRAFT", "cccc"),
+        );
+        assert_eq!(
+            found,
+            vec![Finding::NoManifestEntry {
+                stem: "f8283--2026-DRAFT".into(),
+                pdf: "design/forms/2026/f8283--2026-DRAFT.pdf".into(),
+            }],
+            "an untracked fixture must be reported by name"
+        );
+        assert!(
+            found[0].describe().contains("f8283--2026-DRAFT"),
+            "the message must name the fixture: {}",
+            found[0].describe()
+        );
+
+        // And two entries claiming one path is ALSO not a pass — "the" expected hash is undefined.
+        let mut dupes = sample_entries();
+        let mut clone = dupes[0].clone();
+        clone.sha256 = "dddd000000000000000000000000000000000000000000000000000000000003".into();
+        dupes.push(clone);
+        assert!(
+            matches!(
+                findings_for(
+                    &dupes,
+                    "f6251--2026-DRAFT",
+                    &fixture(
+                        "f6251--2026-DRAFT",
+                        "aaaa000000000000000000000000000000000000000000000000000000000001"
+                    )
+                )
+                .as_slice(),
+                [Finding::Ambiguous { .. }]
+            ),
+            "two manifest entries for one path must be a finding, not a first-match win"
+        );
+    }
+
+    /// ★ The two identities a fixture is looked up by — its FILENAME and its own `form` field — must
+    /// agree, and a filename that is not a form stem is a refusal rather than a silent pass.
+    #[test]
+    fn a_fixture_that_misidentifies_itself_is_a_finding() {
+        let entries = sample_entries();
+        assert_eq!(
+            findings_for(
+                &entries,
+                "f6251--2026-DRAFT",
+                &fixture(
+                    "f6251--2025",
+                    "aaaa000000000000000000000000000000000000000000000000000000000001"
+                )
+            ),
+            vec![Finding::NameDisagrees {
+                stem: "f6251--2026-DRAFT".into(),
+                recorded: "f6251--2025".into(),
+            }],
+            "the fixture's own `form` field disagreeing with its filename must be caught"
+        );
+        assert!(
+            matches!(
+                findings_for(&entries, "notastem", &fixture("notastem", "aaaa")).as_slice(),
+                [Finding::UnusableStem { .. }]
+            ),
+            "a filename that is not `<form>--<year>` must be a finding, not an unchecked fixture"
         );
     }
 }

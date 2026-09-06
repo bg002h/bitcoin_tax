@@ -9,7 +9,30 @@ Last updated: **2026-09-05**. Next year: `design/TY2026_PORT_REPORT.md` (the dec
 
 ---
 
-## 0. ★★★ TARGET CHANGED (owner ruling, 2026-09-05): **TY2026 IS THE FIRST FILED YEAR**
+## 0. ★★★ THE GOAL: **FUTURE tax returns — every year, not one year**
+
+Owner, 2026-09-05: *"keep in mind future tax returns is our main goal."*
+
+**This is the north star and it outranks any single tax year.** TY2026 is the first year we intend to
+file; it is a MILESTONE, not the objective. The objective is that filing year N+1 costs a fraction of
+filing year N — which is why the deliverable is the year-transition MACHINERY and why a fix that only
+makes TY2026 work is worth less than one that makes every year work.
+
+**Three consequences for prioritisation, applied throughout this document:**
+
+1. **A defect that recurs every year outranks a bigger one that happens once.** The four hand-listed
+   form registries drift every year; a single wrong TY2026 field does not.
+2. **An instrument that goes quiet as the year moves is worse than a missing instrument**, because it
+   reports success. This is the whole of §2.
+3. ★ **A shipped-but-unvalidated LEGACY year is cost without benefit.** TY2017 ships a tax table with
+   no validated counterpart, no notes, no manifest entries, no extracts, no geometry fixtures and no
+   census sections — and nobody files a TY2017 return going forward. **Whether TY2017 should ship at
+   all is an OWNER decision**, not one to make by quietly narrowing `SUPPORTED_YEARS` to green a
+   test. Recorded here rather than acted on.
+
+---
+
+## 0a. ★★ TARGET (owner ruling, 2026-09-05): **TY2026 IS THE FIRST FILED YEAR**
 
 Work on TY2025 is **PAUSED**. TY2026 is now the target, and the reasoning holds up:
 

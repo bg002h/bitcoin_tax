@@ -195,6 +195,19 @@ pub fn manifest_path(root: &Path) -> PathBuf {
     root.join("design/forms/MANIFEST.json")
 }
 
+/// The sha256 a provenance note records, found by HEX RUN rather than by a prefix.
+///
+/// ★ One reader for one file format. The notes in this repo spell the digest `# sha256  <hex>`, and
+/// a second reader that looked for `sha256:` parsed **0 of 78** of them while the check at
+/// `NoteIsNotAProvenanceNote` read all 78 correctly. Both call this now.
+#[must_use]
+pub fn sha256_in_note(note_text: &str) -> Option<String> {
+    note_text
+        .split(|c: char| !c.is_ascii_hexdigit())
+        .find(|t| t.len() == 64)
+        .map(str::to_string)
+}
+
 pub fn sha256_of(p: &Path) -> std::io::Result<(String, u64)> {
     let bytes = std::fs::read(p)?;
     let mut h = Sha256::new();
@@ -225,6 +238,29 @@ pub enum Problem {
     },
     /// A named extract does not exist.
     MissingExtract { path: String, extract: String },
+    /// ★★★ **A text layer exists on disk and the entry records `extract: ""`.**
+    ///
+    /// The inverse of [`Problem::MissingExtract`], and the half that was missing. An entry naming
+    /// an extract that is gone is loud; an entry silently naming *none* while the file sits right
+    /// there is not — it reads exactly like the common, correct case of a source with no text
+    /// layer yet. Measured 2026-09-05: all 15 TY2026 draft entries carried `extract: ""` while
+    /// their text layers existed, because the archiver wrote them under the filename this tree
+    /// reserves for the provenance NOTE. A year whose text layer IS extracted read as *not
+    /// extracted*, and nothing anywhere said so.
+    ExtractNotRecorded { path: String, found: String },
+    /// ★★★ **A `<source>.txt` that is not a provenance note.**
+    ///
+    /// The note filename `<source>.pdf.txt` and the text-layer filename are one suffix apart in
+    /// the head, and were briefly the SAME filename: `scripts/archive_drafts.py` dumped
+    /// `pdftotext -layout` output straight onto the note path, so `design/forms/2026/*.pdf.txt`
+    /// held a ~9.5 KB form dump where 2024/2025 hold a ~740-byte URL + sha256 note. Both are
+    /// `.pdf.txt`; only their CONTENT distinguishes them, so the content is what is checked.
+    ///
+    /// A note vouches for bytes: its first line is the fetch URL and it records the sha256 those
+    /// bytes must reproduce. A text layer does neither, and cannot be made to without ceasing to
+    /// be a text layer — which is what makes this a structural bar rather than a naming
+    /// convention. See [`Problem::ExtractNotRecorded`] for the damage the collision did.
+    NoteIsNotAProvenanceNote { path: String, first_line: String },
     /// A primary source exists in an accounted-for tree but no manifest entry names it.
     NotInManifest(String),
     /// Listed as unrecoverable, but a URL is present after all — stale excuse.
@@ -250,6 +286,19 @@ impl Problem {
             Problem::MissingExtract { path, extract } => {
                 format!("{path} — names extract `{extract}`, which does not exist")
             }
+            Problem::ExtractNotRecorded { path, found } => format!(
+                "{path} — records no extract, but its text layer is on disk at `{found}`\n\
+                 \x20       ★ An empty `extract` is normal and means \"no text layer yet\". Here it \
+                 is FALSE: the layer exists and the manifest hides it."
+            ),
+            Problem::NoteIsNotAProvenanceNote { path, first_line } => format!(
+                "{path}.txt — is not a provenance note; it starts `{first_line}`\n\
+                 \x20       ★ A note's first line is the fetch URL and it records the sha256 those \
+                 bytes must reproduce.\n\
+                 \x20       ★ A pdftotext dump belongs in an extract tree ({}), NEVER on the note \
+                 path — the two are one suffix apart and must never be the same file.",
+                EXTRACT_TREES.join(", ")
+            ),
             Problem::NotInManifest(p) => {
                 format!("{p} — a primary source in an accounted-for tree with NO manifest entry")
             }
@@ -282,8 +331,35 @@ pub fn verify(root: &Path, entries: &[Entry]) -> Vec<Problem> {
             Storage::Note => {
                 // The binary is deliberately absent; the NOTE is the artifact that must survive.
                 let note = root.join(format!("{}.txt", e.path));
-                if !note.is_file() {
-                    out.push(Problem::MissingNote(e.path.clone()));
+                match std::fs::read_to_string(&note) {
+                    Err(_) => out.push(Problem::MissingNote(e.path.clone())),
+                    // ★★★ **AND THE NOTE MUST BE A NOTE.** Existence was the whole check, and
+                    //     existence is satisfied by any bytes at all — including a text layer.
+                    //     Measured 2026-09-05: 15 TY2026 entries passed this arm with a
+                    //     `pdftotext -layout` dump on the note path, so `MissingNote` was green on
+                    //     every one of them while not one recorded a URL or a hash. The two are
+                    //     *checkable* apart because a note vouches for bytes and a dump does not:
+                    //     line 1 is the fetch URL, and the sha256 those bytes must reproduce is
+                    //     written down. Neither is a thing a form's printed text contains.
+                    Ok(text) => {
+                        let first = text
+                            .lines()
+                            .map(str::trim)
+                            .find(|l| !l.is_empty())
+                            .unwrap_or("");
+                        // A 64-character run of hex digits: the sha256 the note vouches for.
+                        // Derived from the shape of the digest, not from the label around it —
+                        // the committed notes spell it `# sha256  <hex>` and `sha256:<hex>` both.
+                        let has_sha = text
+                            .split(|c: char| !c.is_ascii_hexdigit())
+                            .any(|t| t.len() == 64);
+                        if !first.starts_with("http") || !has_sha {
+                            out.push(Problem::NoteIsNotAProvenanceNote {
+                                path: e.path.clone(),
+                                first_line: first.chars().take(60).collect(),
+                            });
+                        }
+                    }
                 }
                 // ★★★ **AND HASH THE BINARY WHENEVER IT IS ACTUALLY THERE.**
                 //
@@ -314,7 +390,19 @@ pub fn verify(root: &Path, entries: &[Entry]) -> Vec<Problem> {
                 }
             }
         }
-        if !e.extract.is_empty() && !root.join(&e.extract).is_file() {
+        if e.extract.is_empty() {
+            // ★★★ **The other direction: a text layer that EXISTS and is not recorded.**
+            //     `extract_for` is the same resolver `regen` uses, so this asks precisely "would a
+            //     regen right now find one?" — and if it would, the committed manifest is under-
+            //     reporting the archive rather than describing a source that has no text layer.
+            let found = extract_for(root, &e.path);
+            if !found.is_empty() {
+                out.push(Problem::ExtractNotRecorded {
+                    path: e.path.clone(),
+                    found,
+                });
+            }
+        } else if !root.join(&e.extract).is_file() {
             out.push(Problem::MissingExtract {
                 path: e.path.clone(),
                 extract: e.extract.clone(),
@@ -793,18 +881,23 @@ pub fn regen(root: &Path) -> Result<usize, String> {
         let note = root.join(format!("{rel}.txt"));
         let note_text = std::fs::read_to_string(&note).unwrap_or_default();
         let note_url = note_text.lines().next().unwrap_or("").trim().to_string();
-        let note_sha = note_text
-            .lines()
-            .find_map(|l| l.split_once("sha256:").map(|(_, s)| s.trim().to_string()))
-            .or_else(|| {
-                note_text
-                    .lines()
-                    .find(|l| {
-                        l.trim().len() == 64 && l.trim().chars().all(|c| c.is_ascii_hexdigit())
-                    })
-                    .map(|l| l.trim().to_string())
-            })
-            .unwrap_or_default();
+        // ★★★ **THE DIGEST IS FOUND BY HEX RUN, not by a prefix — because the prefix never matched.**
+        //
+        //     This looked for `sha256:` and then for a line that is EXACTLY 64 hex characters. The
+        //     committed notes spell it `# sha256  <hex>` — two spaces, no colon, and the hex shares
+        //     its line with a comment marker. Measured: **0 of 78** committed provenance notes
+        //     parsed. So a regen run without the gitignored binaries present (a fresh clone, or CI)
+        //     blanked the sha256 on all 78 note entries, and 31 of those are caught by nothing.
+        //
+        //     ★ This is the SAME class as the URL blanking fixed earlier today: a regen destroying
+        //       provenance it cannot re-derive. `regen_would_drop` is keyed on PATHS and is blind to
+        //       an entry losing a FIELD, so neither loss had a guard.
+        //
+        //     ★★ And the correct detector already existed 500 lines up in this file, at the
+        //        `NoteIsNotAProvenanceNote` check: split on non-hex characters and take any 64-long
+        //        run. Two readers of one file format, one of them wrong — so they are now one
+        //        function, and `verify` and `regen` cannot drift apart again.
+        let note_sha = sha256_in_note(&note_text).unwrap_or_default();
 
         let (sha256, bytes) = match sha256_of(&abs) {
             Ok(v) => v,
@@ -1014,6 +1107,88 @@ mod tests {
             verify(r, &[bad_extract])[..],
             [Problem::MissingExtract { .. }]
         ));
+
+        // 6. ★★★ **A text layer that EXISTS while the entry records `extract: ""`.** The inverse
+        //    of (4), and the half that was missing: (4) fires on a NAME pointing at nothing, so it
+        //    is structurally unable to see a file pointed at by nothing. Measured 2026-09-05: all
+        //    15 TY2026 entries sat in this state and every instrument was green.
+        std::fs::create_dir_all(r.join("design/forms/2026")).expect("mkdir");
+        std::fs::create_dir_all(r.join("design/forms/extract")).expect("mkdir");
+        let drel = "design/forms/2026/f9999--2026-DRAFT.pdf";
+        std::fs::write(r.join(drel), b"%PDF-1.7 draft").expect("write");
+        std::fs::write(
+            r.join(format!("{drel}.txt")),
+            format!(
+                "https://www.irs.gov/pub/irs-dft/f9999--dft.pdf\n# sha256  {}\n",
+                "b".repeat(64)
+            ),
+        )
+        .expect("write note");
+        let (dsha, dbytes) = sha256_of(&r.join(drel)).expect("hash");
+        let mut unrecorded = Entry {
+            path: drel.into(),
+            kind: Kind::Form,
+            storage: Storage::Note,
+            sha256: dsha,
+            bytes: dbytes,
+            url: "https://www.irs.gov/pub/irs-dft/f9999--dft.pdf".into(),
+            extract: String::new(),
+        };
+        assert!(
+            verify(r, std::slice::from_ref(&unrecorded)).is_empty(),
+            "with no text layer on disk, an empty `extract` is the NORMAL case and must stay silent \
+             — otherwise the check below is noise rather than a finding"
+        );
+        std::fs::write(
+            r.join("design/forms/extract/f9999--2026-DRAFT.txt"),
+            "# GENERATED\n6251 Alternative Minimum Tax\n",
+        )
+        .expect("write extract");
+        assert!(
+            matches!(
+                verify(r, std::slice::from_ref(&unrecorded))[..],
+                [Problem::ExtractNotRecorded { .. }]
+            ),
+            "a text layer on disk that the manifest records as absent MUST be caught, got {:?}",
+            verify(r, std::slice::from_ref(&unrecorded))
+        );
+        unrecorded.extract = "design/forms/extract/f9999--2026-DRAFT.txt".into();
+        assert!(
+            verify(r, &[unrecorded]).is_empty(),
+            "recording the extract must clear it — a check that cannot go green is not a check"
+        );
+
+        // 7. ★★★ **A text layer written onto the PROVENANCE NOTE's path.** The two filenames are
+        //    one suffix apart and were briefly the same file. `MissingNote` cannot see this: a dump
+        //    exists exactly as well as a note does. A note vouches for bytes — URL first, sha256
+        //    recorded — and a `pdftotext` dump can do neither.
+        let crel = "design/forms/2026/f9998--2026-DRAFT.pdf";
+        std::fs::write(r.join(crel), b"%PDF-1.7 draft").expect("write");
+        std::fs::write(
+            r.join(format!("{crel}.txt")),
+            "Note: The draft you are looking for begins on the next page.\n  Caution: \
+             DRAFT—NOT FOR FILING\n      6251  Alternative Minimum Tax—Individuals\n",
+        )
+        .expect("write dump-on-note-path");
+        let (csha, cbytes) = sha256_of(&r.join(crel)).expect("hash");
+        let collided = Entry {
+            path: crel.into(),
+            kind: Kind::Form,
+            storage: Storage::Note,
+            sha256: csha,
+            bytes: cbytes,
+            url: "https://www.irs.gov/pub/irs-dft/f9998--dft.pdf".into(),
+            extract: String::new(),
+        };
+        assert!(
+            matches!(
+                verify(r, &[collided])[..],
+                [Problem::NoteIsNotAProvenanceNote { .. }]
+            ),
+            "a pdftotext dump sitting on the note path MUST be caught — `MissingNote` is satisfied \
+             by any bytes at all, which is how 15 documents kept no URL and no hash while the \
+             manifest reported them fine"
+        );
 
         // 5. ★★ The census direction: a real source on disk that NO entry names. Without this the
         //    manifest verifies itself into a green light while half the archive is unlisted.
@@ -1427,6 +1602,127 @@ mod tests {
     }
 
     /// ★ The statute and the regulations must actually be represented. If a refactor dropped the
+    /// ★★★ **THE LIVE GATE for F5 — no entry may hide a text layer that is on disk.**
+    ///
+    /// The committed manifest is asked the question directly: for every entry recording
+    /// `extract: ""`, does [`extract_for`] find one anyway? Measured 2026-09-05 before the fix:
+    /// **15 of 128 entries** — every archived TY2026 draft — answered yes, because
+    /// `scripts/archive_drafts.py` wrote its `pdftotext` output to `design/forms/<year>/
+    /// <name>.pdf.txt` (the provenance NOTE's filename) instead of `design/forms/extract/
+    /// <stem>.txt` (the one path this resolver reads). So the first year whose text layers were
+    /// fully extracted read, in the manifest, as *not extracted*.
+    ///
+    /// ★ Non-vacuity is asserted, because "no entry hides a text layer" is trivially true of a
+    ///   repo with no text layers. 106 of 128 entries record one at the time of writing.
+    #[test]
+    fn no_manifest_entry_hides_a_text_layer_that_exists_on_disk() {
+        let root = crate::form_geometry::repo_root();
+        let entries = load(&root).expect("manifest loads");
+        let recorded = entries.iter().filter(|e| !e.extract.is_empty()).count();
+        assert!(
+            recorded > 50,
+            "only {recorded} entries record a text layer — this test would be near-vacuous"
+        );
+        let hidden: Vec<(&str, String)> = entries
+            .iter()
+            .filter(|e| e.extract.is_empty())
+            .filter_map(|e| {
+                let found = extract_for(&root, &e.path);
+                (!found.is_empty()).then_some((e.path.as_str(), found))
+            })
+            .collect();
+        assert!(
+            hidden.is_empty(),
+            "these entries record `extract: \"\"` while their text layer sits on disk: {hidden:#?}\n\
+             Run `xtask authority-manifest --regen`. An empty `extract` must mean \"no text layer \
+             yet\" and nothing else, or the field stops carrying information."
+        );
+    }
+
+    /// ★★ **A DRAFT's text layer is archived like any other — and named so it can never be read
+    /// as authority.**
+    ///
+    /// Derived from the manifest, so a draft archived tomorrow is covered. Two things are asserted
+    /// that a bare "extract is non-empty" would miss: the file is a generated text layer (not a
+    /// note that wandered into the extract tree), and its stem keeps the `-DRAFT` marker — which
+    /// is what makes `line_coverage_check`'s `<form>--<year>` lookup structurally unable to land
+    /// on it. `f6251--2026` is not `f6251--2026-DRAFT`.
+    #[test]
+    fn every_archived_draft_records_a_text_layer_that_still_says_draft() {
+        let root = crate::form_geometry::repo_root();
+        let entries = load(&root).expect("manifest loads");
+        let drafts: Vec<&Entry> = entries.iter().filter(|e| e.is_draft()).collect();
+        assert!(
+            !drafts.is_empty(),
+            "no drafts in the manifest — this test would pass vacuously"
+        );
+        for d in drafts {
+            assert!(
+                !d.extract.is_empty(),
+                "{} records no text layer; the draft set is archived so that a port can DIFF it, \
+                 and a diff needs the text",
+                d.path
+            );
+            let text = std::fs::read_to_string(root.join(&d.extract)).unwrap_or_else(|e| {
+                panic!("{} names {} which cannot be read: {e}", d.path, d.extract)
+            });
+            assert!(
+                text.starts_with("# GENERATED"),
+                "{} is not a generated text layer — first line: {:?}",
+                d.extract,
+                text.lines().next()
+            );
+            assert!(
+                d.extract.contains("DRAFT"),
+                "{} lost the DRAFT marker from its filename. A clean stem is exactly how a draft \
+                 gets read as authority by a check keyed on `<form>--<year>`",
+                d.extract
+            );
+        }
+    }
+
+    /// ★★★ **The note path is NOT an extract path — the resolver must refuse to conflate them.**
+    ///
+    /// `<source>.pdf.txt` and the text layer are one suffix apart, and for TY2026 they were briefly
+    /// the same file. This pins the resolver half of the separation: a text layer sitting on the
+    /// note path resolves to NOTHING, so the collision can never be papered over by teaching
+    /// `extract_for` to accept it. (The other half — that such a file is *caught* — is
+    /// [`Problem::NoteIsNotAProvenanceNote`], planted in `every_problem_class_is_caught`.)
+    #[test]
+    fn a_text_layer_on_the_note_path_resolves_to_no_extract() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let r = dir.path();
+        std::fs::create_dir_all(r.join("design/forms/2026")).expect("mkdir");
+        std::fs::create_dir_all(r.join("design/forms/extract")).expect("mkdir");
+        let rel = "design/forms/2026/f9999--2026-DRAFT.pdf";
+        std::fs::write(r.join(rel), b"%PDF").expect("write");
+
+        // A perfectly good text layer, in the wrong place — beside the binary, on the note's name.
+        std::fs::write(
+            r.join(format!("{rel}.txt")),
+            "# GENERATED\n6251 Alternative Minimum Tax\n",
+        )
+        .expect("write");
+        assert_eq!(
+            extract_for(r, rel),
+            "",
+            "a text layer on the note path must resolve to NO extract — the note path belongs to \
+             provenance, and one filename may not mean two things"
+        );
+
+        // The same bytes under the one path the resolver reads.
+        std::fs::write(
+            r.join("design/forms/extract/f9999--2026-DRAFT.txt"),
+            "# GENERATED\n6251 Alternative Minimum Tax\n",
+        )
+        .expect("write");
+        assert_eq!(
+            extract_for(r, rel),
+            "design/forms/extract/f9999--2026-DRAFT.txt",
+            "and there it must be found, or nothing populates the manifest's `extract` field"
+        );
+    }
+
     /// `legal/` tree from the manifest, direction 2 would red — but this says *why it matters*:
     /// rung 4 is the only rung that is law, and an archive without it is not an authority archive.
     #[test]
@@ -1580,5 +1876,55 @@ mod regen_preserves_provenance_tests {
                 d.url
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod note_reader_tests {
+    use super::*;
+
+    /// ★★★ **Every committed provenance note must parse — measured, not assumed.**
+    ///
+    /// The regen path used to look for `sha256:` and for a line that is EXACTLY 64 hex characters.
+    /// The notes spell it `# sha256  <hex>`: two spaces, no colon, hex sharing a line with a comment
+    /// marker. **0 of 78 parsed**, so a regen run without the gitignored binaries — a fresh clone,
+    /// or CI — blanked the digest on all 78 note entries, and 31 of those are caught by nothing.
+    ///
+    /// The same file already read them correctly 500 lines away. Two readers of one format, one
+    /// wrong. This asserts the surviving reader handles the real corpus, not a synthetic sample.
+    #[test]
+    fn the_note_reader_finds_the_digest_in_every_committed_note() {
+        let root = crate::form_geometry::repo_root();
+        let entries = load(&root).expect("manifest loads");
+        let mut checked = 0usize;
+        let mut unparsed: Vec<String> = Vec::new();
+        for e in entries.iter().filter(|e| e.storage == Storage::Note) {
+            let note = root.join(format!("{}.txt", e.path));
+            let Ok(text) = std::fs::read_to_string(&note) else {
+                continue; // absent notes are `MissingNote`'s business, not this test's
+            };
+            checked += 1;
+            match sha256_in_note(&text) {
+                Some(sha) if sha == e.sha256 => {}
+                Some(sha) => unparsed.push(format!(
+                    "{}: note says {sha}, manifest says {}",
+                    e.path, e.sha256
+                )),
+                None => unparsed.push(format!("{}: no 64-char hex run found", e.path)),
+            }
+        }
+        assert!(
+            checked > 60,
+            "only {checked} notes inspected — the corpus is not being reached, and a reader that \
+             parses nothing would pass vacuously"
+        );
+        assert!(
+            unparsed.is_empty(),
+            "{} provenance note(s) the reader cannot parse or that disagree with the manifest — a \
+             regen without the binaries present would blank these digests:\n  {}",
+            unparsed.len(),
+            unparsed.join("\n  ")
+        );
+        eprintln!("{checked} provenance notes parsed, all agreeing with the manifest");
     }
 }

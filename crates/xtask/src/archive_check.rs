@@ -85,6 +85,24 @@ fn irs_guidance(name: &str) -> bool {
         .any(|p| u.starts_with(p))
 }
 
+/// `SSA_COLA_Determinations_2026.pdf` — a **Social Security Administration** determination published
+/// in the Federal Register, which is where the OASDI contribution-and-benefit base (the SS wage base)
+/// is actually set.
+///
+/// ★★ **Its own shape rather than a sixth prefix on `irs_guidance`, because it is not IRS guidance.**
+/// The SS wage base is the one figure in `tax_tables.rs` that no revenue procedure contains — the IRS
+/// procedures set brackets and breakpoints, the SSA sets the wage base — so the document class is
+/// genuinely different and a reader who found it filed under "irs-guidance" would be misled about
+/// which agency's determination governs.
+///
+/// ★ Added 2026-09-05 when four of these were archived to close the shipped-tables ratchet. Before
+/// that, `classify` returned `None` for them and the manifest walker skipped them SILENTLY: the
+/// files sat in an accounted-for tree, unrecorded, and the entry count simply did not move. That is
+/// the shape of a gap this registry exists to make impossible.
+fn ssa_determination(name: &str) -> bool {
+    ext_is_document(name) && name.to_ascii_uppercase().starts_with("SSA_")
+}
+
 /// `Form_1099-DA.pdf`, `Instructions_1099-DA.pdf` — the human-readable convention
 /// `legal/primary-sources/` uses, which is exactly why shape-matching needs more than the IRS stem:
 /// the two archives name the SAME documents differently, and a detector that knew only one
@@ -122,6 +140,11 @@ pub const SHAPES: &[Shape] = &[
         name: "irs-guidance",
         matches: irs_guidance,
         witness: "Notice_2014-21.pdf",
+    },
+    Shape {
+        name: "ssa-determination",
+        matches: ssa_determination,
+        witness: "SSA_COLA_Determinations_2026.pdf",
     },
     Shape {
         name: "human-readable-form",

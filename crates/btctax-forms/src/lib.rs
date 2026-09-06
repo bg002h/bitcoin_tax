@@ -65,6 +65,24 @@ use time::macros::format_description;
 /// The tax years this build bundles forms + maps for. Each fill dispatches to the year's committed
 /// map + bundled PDF via the `Map::for_year` constructors; an unlisted year fails closed with
 /// [`FormsError::UnsupportedYear`].
+///
+/// ★★★ **Membership means "some form of this year fills", not "this year is prepared."** Until
+/// `tests/supported_years_cross_product.rs` landed, this list was asserted by NOTHING — no test
+/// mentioned it outside its own definition, and the sentence a filer reads in
+/// [`FormsError::UnsupportedYear`] is a separate literal 57 lines below. That test now holds the
+/// product `SUPPORTED_YEARS × (every bundled form)` against a measured, shrink-only record, and it
+/// is where the honest per-year state is written down. Read it before adding a year: three of the
+/// facts it pins are counter-intuitive.
+///
+/// - **TY2017 is fillable and unevidenced.** Five forms, five maps, five `for_year(2017)` arms — and
+///   **zero** provenance notes, `MANIFEST.json` entries, committed extracts, geometry fixtures and
+///   `[census]` sections. Nothing hash-pins those five bundled PDFs to an irs.gov document.
+/// - **TY2025 is listed and 10 of its 15 committed forms are unreachable** — asset and map committed,
+///   never `include_bytes!`'d, `for_year(2025)` refusing. The inverse of the usual defect: a
+///   *prepared* year refused.
+/// - **Adding a year here is not the last edit.** The list is one of four year-sets that govern four
+///   entry points (`BundledTaxTables`, this constant, the maps on disk, `full_return_for`), and the
+///   only one whose refusal message repeats it in prose.
 pub const SUPPORTED_YEARS: &[i32] = &[2017, 2024, 2025];
 
 /// Format a date as **MM/DD/YYYY** — Form 8949's native date format for columns (b)/(c).

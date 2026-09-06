@@ -573,7 +573,7 @@
     "sha256": "a017a1b717d1c70ff8d831ef8b73c730e5b24f147c394c37f792035a9df22fad",
     "bytes": 285998,
     "url": "https://www.irs.gov/pub/irs-dft/f1040s1--dft.pdf",
-    "extract": ""
+    "extract": "design/forms/extract/f1040s1--2026-DRAFT.txt"
   },
   {
     "path": "design/forms/2026/f1040s1a--2026-DRAFT.pdf",
@@ -582,7 +582,7 @@
     "sha256": "e22aec7feb2f5b734e16ee74d70acfdfdc0d66a5292f69cf0ced3b87543d95ac",
     "bytes": 167291,
     "url": "https://www.irs.gov/pub/irs-dft/f1040s1a--dft.pdf",
-    "extract": ""
+    "extract": "design/forms/extract/f1040s1a--2026-DRAFT.txt"
   },
   {
     "path": "design/forms/2026/f1040s2--2026-DRAFT.pdf",
@@ -591,7 +591,7 @@
     "sha256": "0e3d4faa4b96f692bc31119d2c86189c3d8b9263e8f3aaaf7c3da371887ebc56",
     "bytes": 220330,
     "url": "https://www.irs.gov/pub/irs-dft/f1040s2--dft.pdf",
-    "extract": ""
+    "extract": "design/forms/extract/f1040s2--2026-DRAFT.txt"
   },
   {
     "path": "design/forms/2026/f1040s3--2026-DRAFT.pdf",
@@ -600,7 +600,7 @@
     "sha256": "5feb6f8d0f08191a2da153573d195fc354f385e26915b99b57d4588893b7cef0",
     "bytes": 235422,
     "url": "https://www.irs.gov/pub/irs-dft/f1040s3--dft.pdf",
-    "extract": ""
+    "extract": "design/forms/extract/f1040s3--2026-DRAFT.txt"
   },
   {
     "path": "design/forms/2026/f1040sa--2026-DRAFT.pdf",
@@ -609,7 +609,7 @@
     "sha256": "d49acff9afc2faa178b7bf1f70d826d03c2c6def43700880f8ae5bb8bb5a0ffa",
     "bytes": 268032,
     "url": "https://www.irs.gov/pub/irs-dft/f1040sa--dft.pdf",
-    "extract": ""
+    "extract": "design/forms/extract/f1040sa--2026-DRAFT.txt"
   },
   {
     "path": "design/forms/2026/f1040sb--2026-DRAFT.pdf",
@@ -618,7 +618,7 @@
     "sha256": "aa6272f6b3b8a8c6a2aa6ef9d1069f1edb88fb9df4df60278d198da89cdfd93f",
     "bytes": 244683,
     "url": "https://www.irs.gov/pub/irs-dft/f1040sb--dft.pdf",
-    "extract": ""
+    "extract": "design/forms/extract/f1040sb--2026-DRAFT.txt"
   },
   {
     "path": "design/forms/2026/f1040sc--2026-DRAFT.pdf",
@@ -627,7 +627,7 @@
     "sha256": "287b4510dd847c11f6cbbcc98fee05ac5ff187cc18e1413f8759a4a7cd802224",
     "bytes": 306693,
     "url": "https://www.irs.gov/pub/irs-dft/f1040sc--dft.pdf",
-    "extract": ""
+    "extract": "design/forms/extract/f1040sc--2026-DRAFT.txt"
   },
   {
     "path": "design/forms/2026/f1040sd--2026-DRAFT.pdf",
@@ -636,7 +636,7 @@
     "sha256": "0df9af0711964b3198ea04bb0037b29d6afa85578a671553daed46251630b5f1",
     "bytes": 212300,
     "url": "https://www.irs.gov/pub/irs-dft/f1040sd--dft.pdf",
-    "extract": ""
+    "extract": "design/forms/extract/f1040sd--2026-DRAFT.txt"
   },
   {
     "path": "design/forms/2026/f1040sse--2026-DRAFT.pdf",
@@ -645,7 +645,7 @@
     "sha256": "a59fa5dcf2f0a8a5a71c46aa3837e9e8e605eeecc0a666bcb784a368900d141c",
     "bytes": 254304,
     "url": "https://www.irs.gov/pub/irs-dft/f1040sse--dft.pdf",
-    "extract": ""
+    "extract": "design/forms/extract/f1040sse--2026-DRAFT.txt"
   },
   {
     "path": "design/forms/2026/f6251--2026-DRAFT.pdf",
@@ -654,7 +654,7 @@
     "sha256": "a547fc9d629e1f04bdc30e088214c716667b88cb1b45447c580c0ae33095b5cc",
     "bytes": 295209,
     "url": "https://www.irs.gov/pub/irs-dft/f6251--dft.pdf",
-    "extract": ""
+    "extract": "design/forms/extract/f6251--2026-DRAFT.txt"
   },
   {
     "path": "design/forms/2026/f8949--2026-DRAFT.pdf",
@@ -663,7 +663,7 @@
     "sha256": "891d869c87ffe9c6d7f79079d19ebf4ac0afa7257f6374cd95936e44a7079ffe",
     "bytes": 246098,
     "url": "https://www.irs.gov/pub/irs-dft/f8949--dft.pdf",
-    "extract": ""
+    "extract": "design/forms/extract/f8949--2026-DRAFT.txt"
   },
   {
     "path": "design/forms/2026/f8959--2026-DRAFT.pdf",
@@ -672,7 +672,7 @@
     "sha256": "8f663b2ca3dd052537a4d8aea4ae9aada0606b0f7dc7711fa8948489ef870d2f",
     "bytes": 194202,
     "url": "https://www.irs.gov/pub/irs-dft/f8959--dft.pdf",
-    "extract": ""
+    "extract": "design/forms/extract/f8959--2026-DRAFT.txt"
   },
   {
     "path": "design/forms/2026/f8960--2026-DRAFT.pdf",
@@ -681,7 +681,7 @@
     "sha256": "2306f4f334a8b3b1ed73fd5045dec86eed194902923462bf485431c756f66982",
     "bytes": 199244,
     "url": "https://www.irs.gov/pub/irs-dft/f8960--dft.pdf",
-    "extract": ""
+    "extract": "design/forms/extract/f8960--2026-DRAFT.txt"
   },
   {
     "path": "design/forms/2026/f8995--2026-DRAFT.pdf",
@@ -690,7 +690,7 @@
     "sha256": "d698390e2990de21b8df9ccb485f9309b817707d4871581118337bf7c1b14fd8",
     "bytes": 237458,
     "url": "https://www.irs.gov/pub/irs-dft/f8995--dft.pdf",
-    "extract": ""
+    "extract": "design/forms/extract/f8995--2026-DRAFT.txt"
   },
   {
     "path": "design/forms/2026/f8995a--2026-DRAFT.pdf",
@@ -699,7 +699,43 @@
     "sha256": "ab37e54f8be99cbc3a2e3c338324b9450e51c4ea8ebbd8fc9a752ce7fab43a49",
     "bytes": 300051,
     "url": "https://www.irs.gov/pub/irs-dft/f8995a--dft.pdf",
-    "extract": ""
+    "extract": "design/forms/extract/f8995a--2026-DRAFT.txt"
+  },
+  {
+    "path": "legal/primary-sources/federal-register/SSA_COLA_Determinations_2017.pdf",
+    "kind": "guidance",
+    "storage": "committed",
+    "sha256": "ec5064213c786ab18472bda65b7060e1cfd08f6529b710894d525696bcf4273a",
+    "bytes": 205526,
+    "url": "https://www.govinfo.gov/content/pkg/FR-2016-10-27/pdf/2016-26026.pdf",
+    "extract": "legal/text/federal-register/SSA_COLA_Determinations_2017.txt"
+  },
+  {
+    "path": "legal/primary-sources/federal-register/SSA_COLA_Determinations_2024.pdf",
+    "kind": "guidance",
+    "storage": "committed",
+    "sha256": "d017bbd10d837f8e8546c690682232aa2fcdda01030224b9374c97eb7715ef62",
+    "bytes": 220543,
+    "url": "https://www.govinfo.gov/content/pkg/FR-2023-10-23/pdf/2023-23317.pdf",
+    "extract": "legal/text/federal-register/SSA_COLA_Determinations_2024.txt"
+  },
+  {
+    "path": "legal/primary-sources/federal-register/SSA_COLA_Determinations_2025.pdf",
+    "kind": "guidance",
+    "storage": "committed",
+    "sha256": "dea3f4c99208968c6c43847c271a4797ddb53e4a8e1c8f32650323d3aeec5de6",
+    "bytes": 259757,
+    "url": "https://www.govinfo.gov/content/pkg/FR-2024-10-25/pdf/2024-24871.pdf",
+    "extract": "legal/text/federal-register/SSA_COLA_Determinations_2025.txt"
+  },
+  {
+    "path": "legal/primary-sources/federal-register/SSA_COLA_Determinations_2026.pdf",
+    "kind": "guidance",
+    "storage": "committed",
+    "sha256": "4d2754905fbbe1f1cc44b043853098c58abb163dc8cc97b7b7417bd8d9326f97",
+    "bytes": 224273,
+    "url": "https://www.govinfo.gov/content/pkg/FR-2025-11-03/pdf/2025-19763.pdf",
+    "extract": "legal/text/federal-register/SSA_COLA_Determinations_2026.txt"
   },
   {
     "path": "legal/primary-sources/federal-register/TD_10000_89FR56480_broker_regs.pdf",

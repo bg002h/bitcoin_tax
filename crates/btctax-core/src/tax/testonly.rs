@@ -914,6 +914,530 @@ pub fn build_golden_return(i: &GoldenInputs) -> (ReturnInputs, LedgerState) {
     (ri, state)
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// The VALIDATED tax tables — one per shipped year, transcribed INDEPENDENTLY from each year's
+// revenue procedure. `shipped_tables_are_the_validated_tables.rs` compares `tax_tables.rs` against
+// these, so a figure here that was copied from there would make that test assert a number equals
+// itself. They are placed ABOVE the test module deliberately: appended below it they were `items
+// after a test module`, which clippy rejects.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// The real TY2025 ordinary + §1(h) schedules, transcribed from **Rev. Proc. 2024-40**, 2024-45 I.R.B.
+/// 1100 — §2.01 Tax Rate Tables (§1(j)(2)(A)–(E)) Tables 1–4, and §2.03 Maximum Capital Gains Rate
+/// (§1(h), §1(j)(5)). The gift figures are §2.43(1) (§2503 annual exclusion) and §2.41 (§2010 basic
+/// exclusion amount). The Social Security wage base is **not in the revenue procedure at all** — it is
+/// an SSA determination, taken here from 89 FR 85279 (Vol. 89 No. 207, Friday 25 October 2024),
+/// committed at `legal/text/federal-register/SSA_COLA_Determinations_2025.txt`.
+///
+/// ★★★ **Transcribed from the procedure's TEXT LAYER, never from `tax_tables.rs`.** The shipped table
+/// was not opened until this function was complete; had it been copied across, the equality in
+/// `shipped_tables_are_the_validated_tables.rs` would assert that a number equals itself — an echo,
+/// not a witness — and would certify a typo forever. TY2025 was the file's own worst exposure: only
+/// 8 of 28 shipped bracket thresholds were asserted by anything, the whole interior of the MFJ and
+/// HoH schedules among them.
+///
+/// ★★ **Every threshold below is independently confirmed by the procedure's own cumulative-tax
+/// column**, which is a second, redundant encoding of the same breakpoints: reading TABLE 2's
+/// "$55,484 plus 32%" backwards gives `38,460 + 0.32 × (250,500 − 197,300) = 55,484`, which pins the
+/// HoH 35% floor at **$250,500** and rules out $250,525 (that would yield $55,492). All 24 interior
+/// rows were checked this way and all 24 agree — so a mis-keyed digit is caught by arithmetic rather
+/// than by a re-read, which is the failure mode `CLAUDE.md` records for Form 6251 line 33.
+///
+/// ★ **`Qss` is deliberately absent**, matching [`ty2024_table`]: §1(j)(2)(A) gives a qualifying
+/// surviving spouse the joint schedule (TABLE 1 is titled "Married Individuals Filing Joint Returns
+/// **and Surviving Spouses**"), and `TaxTable::key` normalises `Qss → Mfj` at lookup. That absence is
+/// lawful only when BOTH sides omit it, which the ratchet checks rather than assumes.
+pub fn ty2025_table() -> TaxTable {
+    let mut ordinary = BTreeMap::new();
+    // §2.01 TABLE 3 - Section 1(j)(2)(C) - Unmarried Individuals (other than Surviving Spouses and
+    // Heads of Households).
+    ordinary.insert(
+        FilingStatus::Single,
+        OrdinarySchedule {
+            brackets: vec![
+                bracket(dec!(0), dec!(0.10)),
+                bracket(dec!(11925), dec!(0.12)),
+                bracket(dec!(48475), dec!(0.22)),
+                bracket(dec!(103350), dec!(0.24)),
+                bracket(dec!(197300), dec!(0.32)),
+                bracket(dec!(250525), dec!(0.35)),
+                bracket(dec!(626350), dec!(0.37)),
+            ],
+        },
+    );
+    // §2.01 TABLE 1 - Section 1(j)(2)(A) - Married Individuals Filing Joint Returns and Surviving
+    // Spouses.
+    ordinary.insert(
+        FilingStatus::Mfj,
+        OrdinarySchedule {
+            brackets: vec![
+                bracket(dec!(0), dec!(0.10)),
+                bracket(dec!(23850), dec!(0.12)),
+                bracket(dec!(96950), dec!(0.22)),
+                bracket(dec!(206700), dec!(0.24)),
+                bracket(dec!(394600), dec!(0.32)),
+                bracket(dec!(501050), dec!(0.35)),
+                bracket(dec!(751600), dec!(0.37)),
+            ],
+        },
+    );
+    // §2.01 TABLE 4 - Section 1(j)(2)(D) - Married Individuals Filing Separate Returns.
+    // ★ Identical to Single through the 35% bracket and then DIVERGES: the 37% bracket starts at
+    //   $375,800, exactly half the joint $751,600, per §1(j)(2)(D). Same shape as TY2024, and the
+    //   same reason a copy-paste closure across statuses would be worthless.
+    ordinary.insert(
+        FilingStatus::Mfs,
+        OrdinarySchedule {
+            brackets: vec![
+                bracket(dec!(0), dec!(0.10)),
+                bracket(dec!(11925), dec!(0.12)),
+                bracket(dec!(48475), dec!(0.22)),
+                bracket(dec!(103350), dec!(0.24)),
+                bracket(dec!(197300), dec!(0.32)),
+                bracket(dec!(250525), dec!(0.35)),
+                bracket(dec!(375800), dec!(0.37)),
+            ],
+        },
+    );
+    // §2.01 TABLE 2 - Section 1(j)(2)(B) - Heads of Households.
+    // ★ The 35% floor is $250,500 — TWENTY-FIVE DOLLARS below Single/MFS's $250,525, and the two are
+    //   equal in the 24% and 32% rows either side of it, so the digit is easy to lose. TABLE 2's own
+    //   "$55,484 plus 35%" is what settles it (see the arithmetic note on this function).
+    ordinary.insert(
+        FilingStatus::HoH,
+        OrdinarySchedule {
+            brackets: vec![
+                bracket(dec!(0), dec!(0.10)),
+                bracket(dec!(17000), dec!(0.12)),
+                bracket(dec!(64850), dec!(0.22)),
+                bracket(dec!(103350), dec!(0.24)),
+                bracket(dec!(197300), dec!(0.32)),
+                bracket(dec!(250500), dec!(0.35)),
+                bracket(dec!(626350), dec!(0.37)),
+            ],
+        },
+    );
+    // §2.03 Maximum Capital Gains Rate (§1(h), §1(j)(5)) — the "Maximum Zero Rate Amount" and
+    // "Maximum 15% Rate Amount" columns, verbatim.
+    let mut ltcg = BTreeMap::new();
+    // "All Other Individuals".
+    ltcg.insert(
+        FilingStatus::Single,
+        LtcgBreakpoints {
+            max_zero: dec!(48350),
+            max_fifteen: dec!(533400),
+        },
+    );
+    // "Married Individuals Filing Joint Returns and Surviving Spouse".
+    ltcg.insert(
+        FilingStatus::Mfj,
+        LtcgBreakpoints {
+            max_zero: dec!(96700),
+            max_fifteen: dec!(600050),
+        },
+    );
+    // "Married Individuals Filing Separate Returns". ★ The 15% ceiling is $300,000 — a round number,
+    // and NOT half of the joint $600,050 ($300,025). The procedure prints $300,000; it governs.
+    ltcg.insert(
+        FilingStatus::Mfs,
+        LtcgBreakpoints {
+            max_zero: dec!(48350),
+            max_fifteen: dec!(300000),
+        },
+    );
+    // "Heads of Household".
+    ltcg.insert(
+        FilingStatus::HoH,
+        LtcgBreakpoints {
+            max_zero: dec!(64750),
+            max_fifteen: dec!(566700),
+        },
+    );
+    TaxTable {
+        year: 2025,
+        source: "TEST-TY2025",
+        ordinary,
+        ltcg,
+        gift_annual_exclusion: dec!(19000),
+        ss_wage_base: dec!(176100),
+        gift_lifetime_exclusion: dec!(13_990_000),
+    }
+}
+
+/// The real TY2026 ordinary + §1(h) schedules, transcribed from **Rev. Proc. 2025-32**, 2025-45 I.R.B.
+/// — §4.01 Tax Rate Tables (§1(j)(2)(A)–(E)) Tables 1–4, and §4.03 Maximum Capital Gains Rate (§1(h),
+/// §1(j)(5)). The gift annual exclusion is §4.42(1) (§2503). The gift **lifetime** figure is NOT in
+/// §4 at all this year: OBBBA §70106 amended §2010(c)(3) to set the basic exclusion amount at a flat
+/// $15,000,000 for calendar year 2026, stated in **§2.14** (SECTION 2, CHANGES) rather than as an
+/// inflation adjustment. The Social Security wage base is not in the revenue procedure at all — it is
+/// an SSA determination, taken here from **90 FR 49047, 49050** (Vol. 90 No. 210, Monday 3 November
+/// 2025), committed at `legal/text/federal-register/SSA_COLA_Determinations_2026.txt`.
+///
+/// ★★★ **Transcribed from the procedure's TEXT LAYER, never from `tax_tables.rs`.** The shipped table
+/// was not opened until this function was complete; had it been copied across, the equality in
+/// `shipped_tables_are_the_validated_tables.rs` would assert that a number equals itself — an echo,
+/// not a witness — and would certify a typo forever.
+///
+/// ★★ **TY2026 is the OBBBA year, and Rev. Proc. 2025-32 is a MODIFYING procedure, not a fresh one.**
+/// Its §1 says it "modifies certain sections of Rev. Proc. 2024-40 … to reflect the amendments to the
+/// Internal Revenue Code … by Public Law 119-21 … (OBBBA)", for the Code "as in effect on October 9,
+/// 2025"; §6 says flatly "Rev. Proc. 2024-40 is modified." Three consequences bear on this table:
+///
+///   1. **§2.01** — OBBBA §70101 made the post-TCJA §1(j) rate tables **permanent**. The seven rates
+///      10/12/22/24/32/35/37% "remain in effect", so the SHAPE of every schedule below is the same
+///      seven-bracket shape as TY2024/TY2025 and there is no 2026 sunset back to pre-TCJA §1(a)–(d).
+///      That sunset is the single largest thing that could have gone wrong in a TY2026 port.
+///   2. **What it REMOVES is retroactive to 2025, not 2026.** §3.01 removes §2.15(1) of Rev. Proc.
+///      2024-40 (the 2025 standard deduction, superseded by §63(c)(7): MFJ $31,500 / HoH $23,625 /
+///      Single $15,750 / MFS $15,750) and §3.02 removes §2.25 (the 2025 §179 expensing limits,
+///      superseded by $2,500,000 / $4,000,000). ★ **Neither removal touches anything in this
+///      function** — §2.01 (rate tables) and §2.03 (capital gains) of Rev. Proc. 2024-40 are NOT
+///      removed, because they were only ever the TY2025 figures and the TY2026 ones live in §4 here.
+///      Recorded because "what did it supersede" is exactly the question a silent port never asks.
+///   3. §2.04 removes the §36B(f)(2)(B) adjustment outright; not a field of this table.
+///
+/// ★★ **Every threshold below is independently confirmed by the procedure's own cumulative-tax
+/// column**, which is a second, redundant encoding of the same breakpoints. Reading TABLE 2's
+/// "$56,631 plus 35%" backwards gives `39,207 + 0.32 × (256,200 − 201,750) = 56,631`, which pins the
+/// HoH 35% floor at **$256,200** and rules out $256,225 (that would yield $56,639). All 24 interior
+/// rows were checked this way, by script, and all 24 agree — so a mis-keyed digit is caught by
+/// arithmetic rather than by a re-read, which is the failure mode `CLAUDE.md` records for Form 6251
+/// line 33.
+///
+/// ★ **Statuses round INDEPENDENTLY, and TY2026 is worse than TY2025 for it.** In TY2025 exactly one
+/// HoH row sat $25 below Single's; in TY2026 **two** do — the 32% floor ($201,750 vs $201,775) and
+/// the 35% floor ($256,200 vs $256,225) — while the 24% floor ($105,700) and the 37% floor
+/// ($640,600) are IDENTICAL across the two schedules, on both sides of the divergence. Never compute
+/// one status from another.
+///
+/// ★ **`Qss` is deliberately absent**, matching [`ty2024_table`] and [`ty2025_table`]: §1(j)(2)(A)
+/// gives a qualifying surviving spouse the joint schedule (TABLE 1 is titled "Married Individuals
+/// Filing Joint Returns and Surviving Spouses"), and `TaxTable::key` normalises `Qss → Mfj` at
+/// lookup. That absence is lawful only when BOTH sides omit it, which the ratchet checks rather than
+/// assumes.
+pub fn ty2026_table() -> TaxTable {
+    let mut ordinary = BTreeMap::new();
+    // §4.01 TABLE 3 - Section 1(j)(2)(C) - Unmarried Individuals (other than Surviving Spouses and
+    // Heads of Households).
+    ordinary.insert(
+        FilingStatus::Single,
+        OrdinarySchedule {
+            brackets: vec![
+                bracket(dec!(0), dec!(0.10)),
+                bracket(dec!(12400), dec!(0.12)),
+                bracket(dec!(50400), dec!(0.22)),
+                bracket(dec!(105700), dec!(0.24)),
+                bracket(dec!(201775), dec!(0.32)),
+                bracket(dec!(256225), dec!(0.35)),
+                bracket(dec!(640600), dec!(0.37)),
+            ],
+        },
+    );
+    // §4.01 TABLE 1 - Section 1(j)(2)(A) - Married Individuals Filing Joint Returns and Surviving
+    // Spouses.
+    ordinary.insert(
+        FilingStatus::Mfj,
+        OrdinarySchedule {
+            brackets: vec![
+                bracket(dec!(0), dec!(0.10)),
+                bracket(dec!(24800), dec!(0.12)),
+                bracket(dec!(100800), dec!(0.22)),
+                bracket(dec!(211400), dec!(0.24)),
+                bracket(dec!(403550), dec!(0.32)),
+                bracket(dec!(512450), dec!(0.35)),
+                bracket(dec!(768700), dec!(0.37)),
+            ],
+        },
+    );
+    // §4.01 TABLE 4 - Section 1(j)(2)(D) - Married Individuals Filing Separate Returns.
+    // ★ Identical to Single through the 35% bracket and then DIVERGES: the 37% bracket starts at
+    //   $384,350, exactly half the joint $768,700, per §1(j)(2)(D). Same shape as TY2024/TY2025.
+    ordinary.insert(
+        FilingStatus::Mfs,
+        OrdinarySchedule {
+            brackets: vec![
+                bracket(dec!(0), dec!(0.10)),
+                bracket(dec!(12400), dec!(0.12)),
+                bracket(dec!(50400), dec!(0.22)),
+                bracket(dec!(105700), dec!(0.24)),
+                bracket(dec!(201775), dec!(0.32)),
+                bracket(dec!(256225), dec!(0.35)),
+                bracket(dec!(384350), dec!(0.37)),
+            ],
+        },
+    );
+    // §4.01 TABLE 2 - Section 1(j)(2)(B) - Heads of Households.
+    // ★★ TWO floors sit $25 BELOW Single/MFS this year — 32% at $201,750 (vs $201,775) and 35% at
+    //    $256,200 (vs $256,225) — and they are bracketed by rows that are EQUAL across the two
+    //    schedules ($105,700 below, $640,600 above), so a digit is easy to lose in either direction.
+    //    TABLE 2's own "$39,207 plus 32%" and "$56,631 plus 35%" are what settle both.
+    ordinary.insert(
+        FilingStatus::HoH,
+        OrdinarySchedule {
+            brackets: vec![
+                bracket(dec!(0), dec!(0.10)),
+                bracket(dec!(17700), dec!(0.12)),
+                bracket(dec!(67450), dec!(0.22)),
+                bracket(dec!(105700), dec!(0.24)),
+                bracket(dec!(201750), dec!(0.32)),
+                bracket(dec!(256200), dec!(0.35)),
+                bracket(dec!(640600), dec!(0.37)),
+            ],
+        },
+    );
+    // §4.03 Maximum Capital Gains Rate (§1(h), §1(j)(5)) — the "Maximum Zero Rate Amount" and
+    // "Maximum 15% Rate Amount" columns, verbatim.
+    let mut ltcg = BTreeMap::new();
+    // "All Other Individuals".
+    ltcg.insert(
+        FilingStatus::Single,
+        LtcgBreakpoints {
+            max_zero: dec!(49450),
+            max_fifteen: dec!(545500),
+        },
+    );
+    // "Married Individuals Filing Joint Returns and Surviving Spouse".
+    ltcg.insert(
+        FilingStatus::Mfj,
+        LtcgBreakpoints {
+            max_zero: dec!(98900),
+            max_fifteen: dec!(613700),
+        },
+    );
+    // "Married Individuals Filing Separate Returns". ★ For TY2026 both MFS figures DO happen to be
+    // exactly half the joint ones ($49,450 = 98,900/2, $306,850 = 613,700/2) — unlike TY2025, whose
+    // MFS 15% ceiling was a round $300,000 and NOT half of $600,050. That coincidence is read off
+    // the printed table, never derived from it; the arithmetic is a check, not a source.
+    ltcg.insert(
+        FilingStatus::Mfs,
+        LtcgBreakpoints {
+            max_zero: dec!(49450),
+            max_fifteen: dec!(306850),
+        },
+    );
+    // "Heads of Household".
+    ltcg.insert(
+        FilingStatus::HoH,
+        LtcgBreakpoints {
+            max_zero: dec!(66200),
+            max_fifteen: dec!(579600),
+        },
+    );
+    TaxTable {
+        year: 2026,
+        // ★ Deliberately NOT the shipped table's string. `compare_tables` destructures `source: _`
+        //   precisely so the two artifacts cite different provenance; equal strings would be the
+        //   signature of a copy.
+        source: "TEST-TY2026 (Rev. Proc. 2025-32 §4.01 Tables 1-4, §4.03, §4.42(1), §2.14; \
+                 90 FR 49047)",
+        ordinary,
+        ltcg,
+        // §4.42(1) — "the first $19,000 of gifts to any person (other than gifts of future interests
+        // in property) are not included in the total amount of taxable gifts under § 2503".
+        // ★ Unchanged from TY2025's $19,000; a flat year-over-year figure is a real reading here, not
+        //   a carried-over one — §4.42(1) prints it for calendar year 2026 in its own words.
+        gift_annual_exclusion: dec!(19000),
+        // ★ NOT in Rev. Proc. 2025-32. SSA determination: "The OASDI contribution and benefit base is
+        //   $184,500 for remuneration paid in 2026 and self-employment income earned in tax years
+        //   beginning in 2026" — 90 FR 49050 (the summary at 90 FR 49047 prints the same figure).
+        ss_wage_base: dec!(184500),
+        // §2.14 — OBBBA §70106 amends §2010(c)(3), "increasing the basic exclusion amount to
+        // $15,000,000 for calendar year 2026". Set by statute, not by an inflation adjustment, which
+        // is why it appears in SECTION 2 (CHANGES) and has no §4 entry.
+        gift_lifetime_exclusion: dec!(15_000_000),
+    }
+}
+
+/// The real **TY2017** ordinary + §1(h) schedules, transcribed from **Rev. Proc. 2016-55**, 2016-45
+/// I.R.B. 707 — §3.01 *Tax Rate Tables* TABLE 1 (§1(a)), TABLE 2 (§1(b)), TABLE 3 (§1(c)) and TABLE 4
+/// (§1(d)). The gift figures are §3.37(1) (§2503 annual exclusion, $14,000) and §3.35 (§2010 basic
+/// exclusion amount, $5,490,000). The Social Security wage base is **not in the revenue procedure at
+/// all** — it is an SSA determination, taken here from 81 FR 74854 (Vol. 81 No. 208, Thursday 27
+/// October 2016), committed at `legal/text/federal-register/SSA_COLA_Determinations_2017.txt`.
+///
+/// ★★★ **Transcribed from the procedure's TEXT LAYER, never from `tax_tables.rs`.** The shipped table
+/// was not opened until this function was complete. Copying it in would make the equality in
+/// `shipped_tables_are_the_validated_tables.rs` assert that a number equals itself — an echo, not a
+/// witness — and would certify a typo forever. TY2017 shipped in the binary with **no** counterpart at
+/// all until this landed.
+///
+/// ★★ **PRE-TCJA — this is the 10 / 15 / 25 / 28 / 33 / 35 / 39.6 schedule of §1(a)–(d), NOT §1(j).**
+/// §1(j) was added by TCJA §11001 and applies only to taxable years beginning after 2017, so it does
+/// not exist for TY2017. Seven rates either way, but different rates at different thresholds: a TY2017
+/// transcription reading 10/12/22/24/32/35/37 is wrong no matter what artifact it agrees with. Note
+/// also that the 33%→35% breakpoint is **$416,700 for Single, MFJ *and* HoH alike** (and $208,350 =
+/// half of it for MFS) — pre-TCJA the top of the 33% bracket was shared, which post-TCJA it is not.
+///
+/// ★★ **Every threshold below is independently confirmed by the procedure's own cumulative-tax
+/// column**, which is a second, redundant encoding of the same breakpoints. All 24 interior rows were
+/// re-derived and all 24 agree, so a mis-keyed digit is caught by arithmetic rather than by a re-read —
+/// the failure mode `CLAUDE.md` records for Form 6251 line 33. Worked examples, one per table:
+///
+/// - TABLE 1 (MFJ): `52,222.50 + 0.33 × (416,700 − 233,350) = 112,728` ✓ pins the 35% floor at
+///   **$416,700**.
+/// - TABLE 2 (HoH): `117,202.50 + 0.35 × (444,550 − 416,700) = 126,950` ✓ pins the 39.6% floor at
+///   **$444,550**.
+/// - TABLE 3 (Single): `120,910.25 + 0.35 × (418,400 − 416,700) = 121,505.25` ✓ — a $1,700-wide 35%
+///   bracket, the narrowest row in the procedure and the easiest to lose.
+/// - TABLE 4 (MFS): `26,111.25 + 0.33 × (208,350 − 116,675) = 56,364` ✓ pins the 35% floor at
+///   **$208,350**.
+///
+/// ★★ **The §1(h) breakpoints are NOT printed anywhere in Rev. Proc. 2016-55** — there is no
+/// "Maximum Capital Gains Rate" section in it, because pre-TCJA §1(h) defines the breakpoints *by
+/// reference to the ordinary brackets* rather than by its own indexed dollar figures (§1(j)(5), which
+/// gives them independent amounts, did not yet exist). Read against
+/// `legal/primary-sources/statute-irc/26USC_s1.html`:
+///
+/// - §1(h)(1)(B)(i) — 0% applies up to *"the amount of taxable income which would … be taxed at a rate
+///   **below 25 percent**"*, i.e. the **top of the 15% bracket** = the "not over" figure on each
+///   table's second row.
+/// - §1(h)(1)(C)(ii)(I) — 15% applies up to *"the amount of taxable income which would … be taxed at a
+///   rate **below 39.6 percent**"*, i.e. the **top of the 35% bracket** = the "not over" figure on each
+///   table's sixth row (equivalently, where the 39.6% bracket starts).
+///
+/// These are therefore *derived*, not transcribed — the one place in this function where that is
+/// unavoidable — but the derivation is a statutory quotation applied to figures transcribed above, not
+/// a closed form. They reproduce the 2017 *Qualified Dividends and Capital Gain Tax Worksheet*'s own
+/// printed constants ($37,950 / $75,900 / $50,800 and $418,400 / $470,700 / $235,350 / $444,550), which
+/// is the independent confirmation.
+///
+/// ★ Statuses were read INDEPENDENTLY, never computed from one another. For TY2017 several MFS figures
+/// *do* happen to be exactly half the joint ones ($235,350 = ½ × $470,700; $208,350 = ½ × $416,700)
+/// while others are not ($76,550 ≠ ½ × $153,100 = $76,550 — that one is; but $116,675 = ½ × $233,350 —
+/// also is, and HoH's $50,800 is unrelated to anything). Coincidence in one year is not a rule; every
+/// row below came off its own table.
+///
+/// ★ `Qss` is deliberately absent, matching [`ty2024_table`] and [`ty2025_table`]: §1(a) gives a
+/// surviving spouse the joint schedule (TABLE 1 is titled "Married Individuals Filing Joint Returns
+/// **and Surviving Spouses**"), and `TaxTable::key` normalises `Qss → Mfj` at lookup. That absence is
+/// lawful only when BOTH sides omit it, which the ratchet checks rather than assumes.
+pub fn ty2017_table() -> TaxTable {
+    let mut ordinary = BTreeMap::new();
+    // §3.01 TABLE 3 - Section 1(c) – Unmarried Individuals (other than Surviving Spouses and Heads of
+    // Households).
+    ordinary.insert(
+        FilingStatus::Single,
+        OrdinarySchedule {
+            brackets: vec![
+                bracket(dec!(0), dec!(0.10)),
+                bracket(dec!(9325), dec!(0.15)),
+                bracket(dec!(37950), dec!(0.25)),
+                bracket(dec!(91900), dec!(0.28)),
+                bracket(dec!(191650), dec!(0.33)),
+                bracket(dec!(416700), dec!(0.35)),
+                bracket(dec!(418400), dec!(0.396)),
+            ],
+        },
+    );
+    // §3.01 TABLE 1 - Section 1(a) - Married Individuals Filing Joint Returns and Surviving Spouses.
+    ordinary.insert(
+        FilingStatus::Mfj,
+        OrdinarySchedule {
+            brackets: vec![
+                bracket(dec!(0), dec!(0.10)),
+                bracket(dec!(18650), dec!(0.15)),
+                bracket(dec!(75900), dec!(0.25)),
+                bracket(dec!(153100), dec!(0.28)),
+                bracket(dec!(233350), dec!(0.33)),
+                bracket(dec!(416700), dec!(0.35)),
+                bracket(dec!(470700), dec!(0.396)),
+            ],
+        },
+    );
+    // §3.01 TABLE 4 - Section 1(d) – Married Individuals Filing Separate Returns.
+    // ★ Identical to Single only through the 15% bracket ($9,325 / $37,950) and then diverges at EVERY
+    //   subsequent row: $76,550 vs $91,900, $116,675 vs $191,650, $208,350 vs $416,700, $235,350 vs
+    //   $418,400. Read off TABLE 4, not halved from TABLE 1.
+    ordinary.insert(
+        FilingStatus::Mfs,
+        OrdinarySchedule {
+            brackets: vec![
+                bracket(dec!(0), dec!(0.10)),
+                bracket(dec!(9325), dec!(0.15)),
+                bracket(dec!(37950), dec!(0.25)),
+                bracket(dec!(76550), dec!(0.28)),
+                bracket(dec!(116675), dec!(0.33)),
+                bracket(dec!(208350), dec!(0.35)),
+                bracket(dec!(235350), dec!(0.396)),
+            ],
+        },
+    );
+    // §3.01 TABLE 2 - Section 1(b) – Heads of Households.
+    // ★ The 35% floor is $416,700 — the SAME figure as Single and MFJ, which is a pre-TCJA property and
+    //   not a copy: TABLE 2's own "$117,202.50 plus 35%" is what settles it
+    //   (49,816.50 + 0.33 × (416,700 − 212,500) = 117,202.50).
+    ordinary.insert(
+        FilingStatus::HoH,
+        OrdinarySchedule {
+            brackets: vec![
+                bracket(dec!(0), dec!(0.10)),
+                bracket(dec!(13350), dec!(0.15)),
+                bracket(dec!(50800), dec!(0.25)),
+                bracket(dec!(131200), dec!(0.28)),
+                bracket(dec!(212500), dec!(0.33)),
+                bracket(dec!(416700), dec!(0.35)),
+                bracket(dec!(444550), dec!(0.396)),
+            ],
+        },
+    );
+    // §1(h)(1)(B)(i) and §1(h)(1)(C)(ii)(I), applied to the §3.01 tables above — see the derivation
+    // note on this function. `max_zero` = top of the 15% bracket; `max_fifteen` = top of the 35%
+    // bracket.
+    let mut ltcg = BTreeMap::new();
+    // TABLE 3 rows 2 and 6.
+    ltcg.insert(
+        FilingStatus::Single,
+        LtcgBreakpoints {
+            max_zero: dec!(37950),
+            max_fifteen: dec!(418400),
+        },
+    );
+    // TABLE 1 rows 2 and 6.
+    ltcg.insert(
+        FilingStatus::Mfj,
+        LtcgBreakpoints {
+            max_zero: dec!(75900),
+            max_fifteen: dec!(470700),
+        },
+    );
+    // TABLE 4 rows 2 and 6.
+    ltcg.insert(
+        FilingStatus::Mfs,
+        LtcgBreakpoints {
+            max_zero: dec!(37950),
+            max_fifteen: dec!(235350),
+        },
+    );
+    // TABLE 2 rows 2 and 6.
+    ltcg.insert(
+        FilingStatus::HoH,
+        LtcgBreakpoints {
+            max_zero: dec!(50800),
+            max_fifteen: dec!(444550),
+        },
+    );
+    TaxTable {
+        year: 2017,
+        // ★ Deliberately NOT the shipped table's `source` string. Identical provenance strings on the
+        //   two artifacts would be the signature of a copy, which is the one thing this pair exists to
+        //   rule out. `compare_tables` excludes `source` from the equality for exactly that reason.
+        source: "TEST-TY2017 (Rev. Proc. 2016-55 §3.01 TABLES 1-4 = §1(a)-(d); §1(h)(1)(B)-(C) \
+                 breakpoints derived from those tables; §3.37(1); §3.35; SSA 81 FR 74854)",
+        ordinary,
+        ltcg,
+        // §3.37(1) — "For calendar year 2017, the first $14,000 of gifts to any person … are not
+        // included in the total amount of taxable gifts under § 2503 made during that year."
+        gift_annual_exclusion: dec!(14000),
+        // 81 FR 74854 (27 Oct 2016), "OASDI Contribution and Benefit Base": "The OASDI contribution and
+        // benefit base is $127,200 for remuneration paid in 2017 and self-employment income earned in
+        // taxable years beginning in 2017."
+        ss_wage_base: dec!(127200),
+        // §3.35 — "For an estate of any decedent dying in calendar year 2017, the basic exclusion
+        // amount is $5,490,000 … under § 2010."
+        gift_lifetime_exclusion: dec!(5_490_000),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

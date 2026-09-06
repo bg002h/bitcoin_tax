@@ -69,7 +69,9 @@
 
 use btctax_adapters::tax_tables::{BundledFullReturnTables, BundledTaxTables};
 use btctax_core::tax::tables::{FullReturnParams, FullReturnTables, TaxTable, TaxTables};
-use btctax_core::tax::testonly::{ty2024_params, ty2024_table};
+use btctax_core::tax::testonly::{
+    ty2017_table, ty2024_params, ty2024_table, ty2025_table, ty2026_table,
+};
 use btctax_core::tax::types::FilingStatus;
 use btctax_core::Usd;
 use std::collections::{BTreeMap, BTreeSet};
@@ -218,7 +220,10 @@ fn shipped_param_years(bundle: &BundledFullReturnTables) -> BTreeSet<i32> {
 /// The independently transcribed table the corpus computes against for `year`, if one exists.
 fn validated_table_for(year: i32) -> Option<TaxTable> {
     match year {
+        2017 => Some(ty2017_table()),
         2024 => Some(ty2024_table()),
+        2025 => Some(ty2025_table()),
+        2026 => Some(ty2026_table()),
         _ => None,
     }
 }
@@ -767,7 +772,7 @@ fn every_shipped_year_has_a_validated_counterpart() {
     //
     //     ★★ It must NEVER be closed by copying `tax_tables.rs` into the corpus. That is an echo,
     //        not a witness, and it would make this test assert that a number equals itself.
-    const KNOWN_UNVALIDATED_TABLE_YEARS: &[i32] = &[2017, 2025, 2026];
+    const KNOWN_UNVALIDATED_TABLE_YEARS: &[i32] = &[];
     let unexpected: Vec<&String> = missing_tables
         .iter()
         .filter(|d| {

@@ -47,6 +47,7 @@ see design/ty2025/SPEC.md. What they are FOR is structure: which forms exist, ho
 what a port must change. That is how Critical R2 (Schedule 1-A line 37 -> 43) was found.
 
 Usage:  .venv/bin/python scripts/archive_drafts.py 2026 [--dry-run]
+        .venv/bin/python scripts/archive_drafts.py --relayout 2026   # notes + text layers, no network
         .venv/bin/python scripts/archive_drafts.py --self-test
 """
 
@@ -96,6 +97,122 @@ _REV = re.compile(r"\(Rev\.\s+([A-Z][a-z]+\s+20\d\d)\)")
 # PDFs: yMin = 49pt on a 792pt page (6.2%). The window is deliberately far looser than the
 # measurement, and falling outside it produces a NAMED REFUSAL, never a silent pass.
 TOP_OF_PAGE = 0.20
+
+
+# ★★★ THE TWO OUTPUTS OF ARCHIVING, AND WHY THEY MAY NEVER SHARE A FILENAME.
+#
+# Every archived binary produces exactly two committed artifacts, and they answer different
+# questions:
+#
+#   the PROVENANCE NOTE   `design/forms/<year>/<name>.pdf.txt`   where did these bytes come from?
+#   the TEXT LAYER        `design/forms/extract/<stem>.txt`      what does the document SAY?
+#
+# Until 2026-09-05 this script wrote `pdftotext -layout` output to the FIRST of those — the
+# filename design/forms/README.md reserves for the note — so for TY2026 one suffix meant two
+# things: a ~740-byte URL+sha256 note in 2024/2025, and a ~9,494-byte form dump in 2026. Both
+# costs were real and both were silent:
+#
+#   * `authority_manifest::extract_for` resolves a text layer at ONE path,
+#     `design/forms/extract/<stem>.txt`. Nothing was there, so all 15 TY2026 manifest entries
+#     recorded `"extract": ""` — *a year whose text layer IS extracted reading as not extracted*.
+#   * `authority_manifest::verify` checked only that `<binary>.txt` EXISTED, and a dump exists
+#     just as well as a note does. So 15 documents had no recorded URL and no recorded hash while
+#     the manifest reported them fine.
+#
+# The bar against a repeat is structural rather than a naming convention: `note_text` writes a
+# fetch URL and a sha256, `extract_text` writes a `# GENERATED` header and the form's own words,
+# and `authority_manifest::Problem::NoteIsNotAProvenanceNote` reds on any `<binary>.txt` that is
+# not the former. A text layer cannot satisfy that check without ceasing to be a text layer.
+EXTRACT_DIR = ROOT / "design" / "forms" / "extract"
+
+
+def draft_url(stem: str) -> str:
+    """The ONE unversioned IRS path a draft is served from."""
+    return f"https://www.irs.gov/pub/irs-dft/{stem}--dft.pdf"
+
+
+def note_path(pdf: pathlib.Path) -> pathlib.Path:
+    """The provenance note for `pdf` — beside it, `<name>.pdf.txt`."""
+    return pdf.with_name(pdf.name + ".txt")
+
+
+def extract_path(pdf: pathlib.Path, extract_dir: pathlib.Path | None = None) -> pathlib.Path:
+    """The committed text layer for `pdf`.
+
+    ★ `<extract_dir>/<stem>.txt` is not a choice — it is the ONLY path
+    `authority_manifest::extract_for` resolves for a `design/forms/<year>/<stem>.pdf` source
+    (`crates/xtask/src/authority_manifest.rs`, arm (A)). Writing anywhere else populates nothing.
+
+    ★ The stem keeps its `-DRAFT` marker, so `line_coverage_check`'s `<form>--<year>` lookup can
+    never land on a draft's text layer by accident: `f6251--2026` is not `f6251--2026-DRAFT`.
+    """
+    return (extract_dir or EXTRACT_DIR) / (pdf.stem + ".txt")
+
+
+def note_text(pdf: pathlib.Path, url: str, sha: str, nbytes: int, extract_rel: str) -> str:
+    """The provenance note — line 1 is the URL, and the sha256 the bytes must reproduce."""
+    return (
+        f"{url}\n"
+        f"\n"
+        f"# {pdf.name} — IRS primary source, NOT committed (publicly available; keeps the repo small).\n"
+        f"# sha256  {sha}\n"
+        f"# bytes   {nbytes}\n"
+        f"#\n"
+        f"# Fetch:    curl -sL -o {pdf.name} {url}\n"
+        f"# Verify:   sha256sum {pdf.name}   # must equal the sha256 above\n"
+        f"#\n"
+        f"# ★★ THIS IS A DRAFT — evidence only, NEVER transcribed as authority (design/ty2025/SPEC.md).\n"
+        f"#    The IRS serves drafts from one unversioned path and REPLACES THEM IN PLACE, so a\n"
+        f"#    re-fetch that hashes differently means the IRS posted a NEW draft. Review the diff\n"
+        f"#    and update deliberately — never absorb it silently.\n"
+        f"#\n"
+        f"# The committed text layer is\n"
+        f"# {extract_rel} — that is what the conformance tests read,\n"
+        f"# so they run with no PDF and no network.\n"
+    )
+
+
+def _rel(p: pathlib.Path) -> str:
+    """Repo-relative when it is in the repo; the bare name in a temp fixture."""
+    return p.relative_to(ROOT).as_posix() if p.is_relative_to(ROOT) else p.name
+
+
+def extract_text(pdf: pathlib.Path, sha: str, year: int, body: str) -> str:
+    """The text layer, with the same `# GENERATED` header the 64 committed extracts carry."""
+    rel = _rel(pdf)
+    return (
+        f"# GENERATED — do not hand-edit. Text layer of {rel}\n"
+        f"# sha256:{sha[:16]}…  |  pdftotext -layout\n"
+        f"# Regenerate: .venv/bin/python scripts/archive_drafts.py --relayout {year}\n"
+        f"# ★ DRAFT — evidence only, never transcribed as authority (design/ty2025/SPEC.md).\n"
+        f"#\n"
+        f"{body}"
+    )
+
+
+def record(pdf: pathlib.Path, url: str, year: int,
+           extract_dir: pathlib.Path | None = None) -> tuple[pathlib.Path, pathlib.Path]:
+    """Write BOTH artifacts for an archived binary, to their two distinct homes.
+
+    Returns `(note, extract)`. Raises if they would be the same file — the defect this replaced.
+    """
+    note = note_path(pdf)
+    extract = extract_path(pdf, extract_dir)
+    if note.resolve() == extract.resolve():
+        raise AssertionError(
+            f"the provenance note and the text layer resolve to ONE file ({note}); they answer "
+            f"different questions and must never share a name"
+        )
+    data = pdf.read_bytes()
+    sha = hashlib.sha256(data).hexdigest()
+    extract.parent.mkdir(parents=True, exist_ok=True)
+    note.write_text(note_text(pdf, url, sha, len(data), _rel(extract)))
+    body = subprocess.run(
+        ["pdftotext", "-layout", str(pdf), "-"],
+        capture_output=True, text=True, timeout=300,
+    ).stdout
+    extract.write_text(extract_text(pdf, sha, year, body))
+    return note, extract
 
 
 def fetch(url: str) -> bytes | None:
@@ -332,6 +449,96 @@ def _negative_fixture_kill() -> list[str]:
     return fails
 
 
+def _note_extract_collision_kill() -> list[str]:
+    """★★★ THE B1 KILL for F5 — a provenance note and a text layer may never be one file.
+
+    `record` is driven over a REAL archived draft in a temp directory, and both outputs are then
+    checked for the properties that make them different KINDS of artifact:
+
+      the note      first line is the fetch URL, carries a 64-hex sha256, and is SMALL — it
+                    vouches for bytes it does not contain.
+      the text layer `# GENERATED` header, lands under `<extract_dir>/<stem>.txt` (the ONE path
+                    `authority_manifest::extract_for` resolves), and is the form's own words.
+
+    ★ THE PLANTS THIS REDS ON, each the actual regression it guards:
+      * point `record`'s pdftotext output back at `note_path(pdf)` (the code this replaced):
+        rows 1-3 red — the note no longer starts with a URL, carries no sha, and is 9 KB.
+      * make `extract_path` return `pdf.with_name(pdf.name + ".txt")`: row 0 reds — `record`
+        itself raises before writing, because the two resolve to one file.
+      * move the extract anywhere but `<extract_dir>/<stem>.txt`: row 5 reds, and with it the
+        manifest's `extract` field goes empty again, which is the defect that started this.
+
+    Nothing here writes into `design/forms/` — the archive is read, never manufactured into.
+    """
+    import shutil
+    import tempfile
+
+    drafts = sorted(ROOT.glob("design/forms/[0-9][0-9][0-9][0-9]/*-DRAFT.pdf"))
+    if not drafts:
+        return ["note/extract collision kill: no archived draft PDF — the check cannot run, so it FAILS"]
+    src = drafts[0]
+    year = int(re.search(r"--(\d{4})-DRAFT", src.name).group(1))
+    stem = src.name.split("--", 1)[0]
+    fails = []
+    with tempfile.TemporaryDirectory() as d:
+        d = pathlib.Path(d)
+        (d / str(year)).mkdir()
+        pdf = d / str(year) / src.name
+        shutil.copyfile(src, pdf)
+        edir = d / "extract"
+        url = draft_url(stem)
+        try:
+            note, extract = record(pdf, url, year, extract_dir=edir)
+        except AssertionError as e:
+            return [f"note/extract collision: record refused to write — {e}"]
+
+        # 0. the two artifacts are two files.
+        if note.resolve() == extract.resolve():
+            fails.append("collision kill: the note and the text layer are the SAME FILE")
+        # 1-3. the note is a note: URL first, a sha256 in it, and small enough not to be a dump.
+        note_txt = note.read_text()
+        if not note_txt.startswith(url):
+            fails.append(f"collision kill: the note does not start with the fetch URL — it starts "
+                         f"{note_txt.splitlines()[0][:60]!r}")
+        if not re.search(r"\b[0-9a-f]{64}\b", note_txt):
+            fails.append("collision kill: the note records no sha256, so it vouches for nothing")
+        if len(note_txt) > 4000:
+            fails.append(f"collision kill: the note is {len(note_txt):,} bytes — that is a document "
+                         f"dump, not a provenance note")
+        if "NOT FOR FILING" in note_txt.upper():
+            fails.append("collision kill: the note contains the DRAFT COVER SHEET — pdftotext "
+                         "output was written to the note path")
+        # 4. the text layer is a text layer, not a note.
+        ex_txt = extract.read_text()
+        if not ex_txt.startswith("# GENERATED"):
+            fails.append(f"collision kill: the text layer lacks the GENERATED header — it starts "
+                         f"{ex_txt.splitlines()[0][:60]!r}")
+        if ex_txt.splitlines()[0].startswith("http") or len(ex_txt) < 3000:
+            fails.append(f"collision kill: the text layer is {len(ex_txt):,} bytes and does not look "
+                         f"like a form dump")
+        # 5. and it is where the MANIFEST looks: <extract_dir>/<stem>.txt, stem keeping -DRAFT.
+        want = edir / (pdf.stem + ".txt")
+        if extract != want:
+            fails.append(f"collision kill: the text layer went to {extract}, but "
+                         f"authority_manifest::extract_for resolves only {want}")
+
+    # And the same contract over the REAL archive, enumerated from the filesystem: every archived
+    # draft's text layer must exist at the path the manifest resolves. A draft with no text layer
+    # here is the F5 defect itself, still present.
+    for pdf in drafts:
+        want = extract_path(pdf)
+        if not want.is_file():
+            fails.append(f"{pdf.relative_to(ROOT)} has no text layer at "
+                         f"{want.relative_to(ROOT)} — the manifest will record `extract: \"\"`")
+        note = note_path(pdf)
+        if not note.is_file():
+            fails.append(f"{pdf.relative_to(ROOT)} has no provenance note at {note.relative_to(ROOT)}")
+        elif not note.read_text().startswith("http"):
+            fails.append(f"{note.relative_to(ROOT)} is not a provenance note — its first line is "
+                         f"not a URL")
+    return fails
+
+
 def _corpus_audit() -> list[str]:
     """Every committed FORM must declare the year its own filename claims.
 
@@ -472,6 +679,10 @@ def self_test() -> int:
     nf = _negative_fixture_kill()
     print(f"    {'FAIL' if nf else 'ok'} — 3 rows")
     fails += nf
+    print("  note/extract collision kill (F5) ...")
+    ne = _note_extract_collision_kill()
+    print(f"    {'FAIL' if ne else 'ok'} — 6 rows in a temp dir + every archived draft")
+    fails += ne
     print("  corpus audit (design/forms/*/f*.pdf) ...")
     corpus, excused, checked = _corpus_audit()
     print(f"    {'FAIL' if corpus else 'ok'} — {len(checked)} declared their own year, "
@@ -486,9 +697,50 @@ def self_test() -> int:
     return 0
 
 
+def relayout(year: int) -> int:
+    """Rewrite the note + text layer for drafts ALREADY archived under `design/forms/<year>/`.
+
+    No network. This is what repairs an archive written by the old code path, and it is the
+    `# Regenerate:` command the extract headers name.
+
+    ★ Only `*--<year>-DRAFT.pdf` is touched, so the TY2024/TY2025 finals — whose notes are correct
+      and hand-verified by round-trip — are structurally out of reach.
+    ★ A draft whose binary is absent (gitignored, not fetched) is REPORTED BY NAME and fails the
+      run. It cannot be re-hashed, so "skip it" would quietly leave a wrong note in place.
+    """
+    ydir = ROOT / "design" / "forms" / str(year)
+    pdfs = sorted(ydir.glob(f"*--{year}-DRAFT.pdf"))
+    stale = sorted(
+        n for n in ydir.glob(f"*--{year}-DRAFT.pdf.txt")
+        if not n.with_suffix("").exists()
+    )
+    if not pdfs and not stale:
+        print(f"  no TY{year} drafts archived under {ydir.relative_to(ROOT)}")
+        return 1
+    for pdf in pdfs:
+        stem = pdf.name.split("--", 1)[0]
+        note, extract = record(pdf, draft_url(stem), year)
+        print(f"  {stem:10} note {note.relative_to(ROOT)}  ·  "
+              f"extract {extract.relative_to(ROOT)} ({extract.stat().st_size:,} bytes)")
+    print(f"\n  relayout: {len(pdfs)} draft(s) rewritten")
+    if stale:
+        print("  ** FAILED — these .pdf.txt files have no binary to re-hash, so their contents "
+              "cannot be trusted as a note; fetch the drafts and re-run: **")
+        for n in stale:
+            print(f"    {n.relative_to(ROOT)}")
+        return 1
+    return 0
+
+
 def main() -> int:
     if "--self-test" in sys.argv:
         return self_test()
+    if "--relayout" in sys.argv:
+        i = sys.argv.index("--relayout")
+        if i + 1 >= len(sys.argv) or not sys.argv[i + 1].isdigit():
+            print("usage: --relayout <year>")
+            return 2
+        return relayout(int(sys.argv[i + 1]))
     if len(sys.argv) < 2 or not sys.argv[1].isdigit():
         print(__doc__)
         return 2
@@ -526,7 +778,10 @@ def main() -> int:
             got.append(stem)
             continue
         tmp.replace(dest)
-        subprocess.run(["pdftotext", "-layout", str(dest), str(dest) + ".txt"], check=False)
+        # ★ BOTH artifacts, to their two distinct homes — see the EXTRACT_DIR block above. This
+        #   line used to be `pdftotext -layout <dest> <dest>.txt`, which put the text layer on the
+        #   provenance note's path and left the manifest recording `"extract": ""` for every draft.
+        record(dest, url, year)
         got.append(stem)
         print(f"  {stem:10} archived — {why}, {len(body):,} bytes, "
               f"sha256:{hashlib.sha256(body).hexdigest()[:8]}")

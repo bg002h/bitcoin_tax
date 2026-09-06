@@ -390,21 +390,60 @@ fn form_8275_map_carries_the_32_new_continuation_fields() {
     assert_eq!(got, all_33_declared_continuation_fields());
 }
 
+/// The names `map` targets that do NOT exist in `pdf`'s AcroForm — the whole content of the
+/// map-vs-PDF check below, factored out so the SAME comparison can be watched failing on a document
+/// it should reject (`the_fieldset_check_can_fail_…`). A check nobody has seen discriminate is not a
+/// check (B1).
+fn map_fields_absent_from(pdf: &[u8], map: &Form8275Map) -> Vec<String> {
+    let set = fieldset(pdf);
+    map.field_names()
+        .into_iter()
+        .filter(|n| !set.contains(*n))
+        .map(str::to_string)
+        .collect()
+}
+
 #[test]
 fn map_year_matches_bundled_pdf_fieldset_for_every_supported_year() {
-    // Form 8275 aliases the SAME bundled PDF to every SUPPORTED_YEAR, so this asserts the map's field
-    // names all exist in that one asset, once per year the map is stamped for.
+    // ★ Each year against THAT YEAR'S OWN asset (`Form8275Map::bundled_pdf`), never against the 2024
+    // literal. Form 8275 aliases one Rev. 10-2024 document to every supported year TODAY, so the two
+    // spellings agree today — and they stop agreeing the moment a year bundles a different revision,
+    // which is precisely the case this test exists to see. Written against `F8275_PDF_2024` it could
+    // not: it read as year-general and was a 2024 re-check wearing a loop.
+    let mut checked = Vec::new();
     for &year in btctax_forms::SUPPORTED_YEARS {
         let map = Form8275Map::for_year(year).unwrap();
         assert_eq!(map.year, year);
-        let set = fieldset(F8275_PDF_2024);
-        for name in map.field_names() {
-            assert!(
-                set.contains(name),
-                "year {year}: 8275 map field absent from the bundled PDF: {name}"
-            );
-        }
+        let pdf = Form8275Map::bundled_pdf(year).unwrap_or_else(|e| {
+            panic!("TY{year} is a SUPPORTED_YEAR with no bundled Form 8275: {e}")
+        });
+        let absent = map_fields_absent_from(pdf, &map);
+        assert!(
+            absent.is_empty(),
+            "year {year}: 8275 map fields absent from TY{year}'s own bundled PDF: {absent:?}"
+        );
+        checked.push(year);
     }
+    // Skipping is not passing: the loop must have covered every supported year, not zero of them.
+    assert_eq!(
+        checked,
+        btctax_forms::SUPPORTED_YEARS.to_vec(),
+        "the per-year fieldset check did not run for every SUPPORTED_YEAR"
+    );
+}
+
+/// B1 kill-test for the check above: the same comparison, pointed at a *different* bundled IRS form,
+/// must REPORT the mismatch. Without this the loop could be structurally incapable of failing (its
+/// previous shape, against one hard-coded asset, effectively was).
+#[test]
+fn the_fieldset_check_can_fail_when_the_pdf_is_not_this_form() {
+    let map = Form8275Map::ty2024();
+    let absent = map_fields_absent_from(F8283_PDF_2024, &map);
+    assert!(
+        !absent.is_empty(),
+        "the map-vs-PDF check found every Form 8275 field name inside Form 8283's AcroForm — it is \
+         not comparing anything"
+    );
 }
 
 #[test]
@@ -771,5 +810,195 @@ fn fault_injected_8275_part_iv_reordered_fields_breaks_descent_and_is_red() {
     assert!(
         matches!(&err, FormsError::Geometry(msg) if msg.contains("descent")),
         "expected a Geometry error naming the broken descent, got {err:?}"
+    );
+}
+
+// ── #9 — the Form 8275 alias states its own PRECONDITION, instead of resting on a year list ────────
+//
+// `Form8275Map::for_year` was the only one of sixteen map constructors that aliased rather than
+// refused: `2017 | 2024 | 2025 => ty2024() with the year re-stamped`. Aliasing is right for a form the
+// IRS versions by REVISION — but a year list asserts nothing checkable, so `| 2026` was a one-token
+// edit that would hand a Rev. 12-2026 Form 8275 the Rev. 10-2024 field names. The constructor now asks
+// the asset registry which years ship a Form 8275, and the bytes whether it is still THIS revision.
+
+/// The nearest miss: the same document, one byte different — a stand-in for a new IRS revision, which
+/// is the event no test can wait for.
+fn one_byte_different_8275() -> Vec<u8> {
+    let mut v = F8275_PDF_2024.to_vec();
+    let i = v.len() / 2;
+    v[i] ^= 0xff;
+    assert_ne!(
+        v.as_slice(),
+        F8275_PDF_2024,
+        "the plant did not change the bytes"
+    );
+    v
+}
+
+#[test]
+fn the_8275_alias_is_licensed_by_the_asset_not_by_the_calendar() {
+    // Positive control: the revision the map WAS transcribed from licenses the alias — for a year the
+    // build has never heard of, because the licence is about the document, not the year.
+    Form8275Map::alias_is_licensed_by(2026, F8275_PDF_2024)
+        .expect("the Rev. 10-2024 asset must license the map that was transcribed from it");
+
+    // Planted defect 1 — a DIFFERENT IRS form in the 8275 slot.
+    let err = Form8275Map::alias_is_licensed_by(2026, F8283_PDF_2024)
+        .expect_err("a different document must NOT license the 8275 map");
+    let msg = err.to_string();
+    assert!(
+        matches!(err, FormsError::Structure(_)) && msg.contains("2026") && msg.contains("8275"),
+        "expected a refusal naming the year and the form, got {msg}"
+    );
+
+    // Planted defect 2 — the nearest miss: this form, a different revision.
+    let err = Form8275Map::alias_is_licensed_by(2026, &one_byte_different_8275())
+        .expect_err("a changed Form 8275 revision must NOT license the Rev. 10-2024 map");
+    assert!(
+        matches!(err, FormsError::Structure(_)),
+        "expected a Structure refusal, got {err:?}"
+    );
+}
+
+#[test]
+fn for_year_answers_exactly_what_the_bundled_asset_registry_answers() {
+    // The expected set is DERIVED — `bundled_pdf` (i.e. `pdf::f8275_pdf`) is the single authority for
+    // which years ship a Form 8275. The probe range only decides which years get asked. Re-introducing
+    // a year literal in `map.rs` (`2017 | 2024 | 2025 | 2026 => …`) reds here on 2026.
+    let (mut supported, mut refused) = (0usize, 0usize);
+    for year in 2010..=2035 {
+        let asset = Form8275Map::bundled_pdf(year).is_ok();
+        let map = Form8275Map::for_year(year);
+        assert_eq!(
+            map.is_ok(),
+            asset,
+            "TY{year}: bundled_pdf says {asset} but Form8275Map::for_year says {} — the map has \
+             re-acquired a year list of its own",
+            map.is_ok()
+        );
+        if let Ok(m) = map {
+            assert_eq!(m.year, year, "the alias must re-stamp the requested year");
+            supported += 1;
+        } else {
+            refused += 1;
+        }
+    }
+    // Skipping is not passing: a probe that never saw either verdict would prove nothing.
+    assert!(
+        supported > 0 && refused > 0,
+        "the probe saw {supported} supported and {refused} refused years — it discriminates nothing"
+    );
+    // NOT asserted here: how many years that is. Which years ship a Form 8275 is the asset registry's
+    // business, and `map_year_matches_bundled_pdf_fieldset_for_every_supported_year` already requires
+    // every `SUPPORTED_YEAR` to have one. This test owns one question — that `for_year` has no opinion
+    // of its own about years — and coupling it to a second constant only makes it red for other reasons.
+}
+
+// ── #11 — an unknown key in a committed map is a PARSE ERROR, not a silent drop ────────────────────
+//
+// Measured before the fix, on `forms/2025/f6251.map.toml` (the TY2025 line-1 split): a *missing*
+// required `line1` was a loud parse error, while the *added* `line1a` / `line1b` were discarded in
+// silence. So a vanished line was loud and a RENAMED line was dropped without a word — and the map
+// structs now carry `#[serde(deny_unknown_fields)]`, with `[census]` modelled (`CensusDecision`)
+// rather than swallowed as an unknown key.
+
+#[test]
+fn an_unknown_key_in_a_map_is_a_parse_error_not_a_silent_drop() {
+    // Positive control — the committed map still parses.
+    Form8275Map::parse(F8275_MAP_2024).expect("the committed Rev. 10-2024 map parses");
+
+    // Planted defect: a line ADDED under a name the struct does not model (the silent half of a
+    // rename). Anchored after `year = 2024` so it lands at the top level, not inside a table.
+    let added = F8275_MAP_2024.replace(
+        "\nyear = 2024\n",
+        "\nyear = 2024\npart_ii_line7 = \"topmostSubform[0].Page1[0].p1-t86[0]\"\n",
+    );
+    assert_ne!(added, F8275_MAP_2024, "the plant did not apply");
+    let msg = Form8275Map::parse(&added)
+        .expect_err("an unmodelled key must be refused, not dropped")
+        .to_string();
+    assert!(
+        msg.contains("unknown field") && msg.contains("part_ii_line7"),
+        "the refusal must NAME the key that would have vanished, got: {msg}"
+    );
+
+    // Planted defect: the full rename shape — old key gone, new key present. The failure must name the
+    // NEW key (the half that used to be invisible), not merely report the old one missing.
+    let renamed = F8275_MAP_2024.replace("\npart_ii_narrative =", "\npart_ii_line1 =");
+    assert_ne!(renamed, F8275_MAP_2024, "the rename plant did not apply");
+    let msg = Form8275Map::parse(&renamed)
+        .expect_err("a renamed line must be refused")
+        .to_string();
+    assert!(
+        msg.contains("part_ii_line1"),
+        "the refusal must name the renamed key, got: {msg}"
+    );
+}
+
+#[test]
+fn the_census_block_is_parsed_not_ignored() {
+    // `deny_unknown_fields` must not have been bought by teaching the struct to swallow `[census]`:
+    // the block is modelled, so every entry is really deserialized. The expected count is DERIVED from
+    // the committed file's own text (the `[census]` section's FQN-keyed lines), never hand-counted.
+    let in_census = F8275_MAP_2024
+        .lines()
+        .skip_while(|l| l.trim() != "[census]")
+        .filter(|l| l.trim_start().starts_with('"'))
+        .count();
+    assert!(
+        in_census > 0,
+        "the f8275 map has no [census] entries to check"
+    );
+
+    let map = Form8275Map::ty2024();
+    assert_eq!(
+        map.census.len(),
+        in_census,
+        "the parsed census must hold every entry the file writes"
+    );
+    for (fqn, d) in &map.census {
+        assert!(
+            !d.line.is_empty() && !d.rule.is_empty() && !d.reason.is_empty(),
+            "census entry {fqn} has an empty line/rule/reason"
+        );
+    }
+
+    // Planted defect: a fourth key inside a census entry — a decision the model does not understand
+    // must be loud too, for the same reason a map line must.
+    let doctored = F8275_MAP_2024.replace("{ line = ", "{ evidence = \"see the PDF\", line = ");
+    assert_ne!(doctored, F8275_MAP_2024, "the census plant did not apply");
+    let msg = Form8275Map::parse(&doctored)
+        .expect_err("an unmodelled census key must be refused")
+        .to_string();
+    assert!(
+        msg.contains("unknown field") && msg.contains("evidence"),
+        "the refusal must name the unmodelled census key, got: {msg}"
+    );
+}
+
+/// The one key set `deny_unknown_fields` cannot be written on directly: `MoneyCell` is
+/// `#[serde(untagged)]`, and serde does not accept the attribute there. MEASURED here rather than
+/// assumed — the table *variant* (`MoneyPair`) carries it, and an untagged enum whose every variant
+/// fails is an error rather than a default, so an extra key inside an inline money-pair table is loud
+/// too. (TY2017's Schedule SE is the committed map that still uses dollars/cents pairs.)
+#[test]
+fn an_unknown_key_inside_an_inline_money_pair_is_refused_too() {
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("forms/2017/schedule_se.map.toml");
+    let src = std::fs::read_to_string(&path).expect("the TY2017 Schedule SE map is committed");
+    ScheduleSeMap::parse(&src).expect("the committed TY2017 Schedule SE map parses");
+
+    let doctored = src.replacen(
+        "{ dollars_field = ",
+        "{ pennies_field = \"topmostSubform[0].Page2[0].f2_99[0]\", dollars_field = ",
+        1,
+    );
+    assert_ne!(doctored, src, "the money-pair plant did not apply");
+    let msg = ScheduleSeMap::parse(&doctored)
+        .expect_err("an unmodelled key inside a money pair must be refused")
+        .to_string();
+    assert!(
+        msg.contains("pennies_field") || msg.contains("did not match any variant"),
+        "the refusal must be about the unmodelled money-pair key, got: {msg}"
     );
 }
