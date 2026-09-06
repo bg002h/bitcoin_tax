@@ -6,6 +6,19 @@ _Last updated: **2026-09-06**. Written at a deliberate pause; safe to exit. **Re
 
 # ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
 
+> ## ★★★ RESUME 2026-09-06 (evening 2) — owner RULED S9 (drop TY2017) and S10 (REVERSED: the slice must file TY2026 with crypto sales); spec R6 written (`d63a971a`); its one-round opus design review is IN FLIGHT. Read this block first.
+>
+> **Queue (one opus agent at a time):** (1) the R6 review returns → copy from the worktree, persist,
+> ledger, fold Criticals/Importants into the spec (the controller edits the spec; a build task list
+> may move), commit; (2) BUILD R6 (FR-62) by one opus agent under a brief written from the folded R6
+> (three-way dispatch in admin.rs, the TUI export, the two exit sentences, the report note, the kills
+> R6 lists) → review the build (opus, seams) → fold → sonnet re-verify → close FR-62; (3) S9 drop
+> (FR-61) by one opus agent under `BRIEF-build-S9-drop-ty2017.md` → sonnet verify the pins → close
+> FR-61. The TY2017 TaxTable is KEPT (say so to the owner if they want it gone too).
+> **Owner-facing facts to repeat when reporting:** R6 cannot print TY2026 until the 2026 Form 8949 /
+> Schedule D finals are bundled (Nov 2026 – Jan 2027) — that becomes the only gate for a TY2026
+> crypto-slice filing; the full return still needs FullReturnParams TY2026 + the January package.
+
 > ## ★★★ RESUME 2026-09-06 (end of day) — BOTH builds are GREEN and CLOSED: 1099-DA (FR-46) and 4868/1040-V (FR-49). No agent in flight. Read this block first.
 >
 > **Chain today (all on `main`, nothing pushed, tree clean at `a2fde63e`):** 1099-DA T0–T6 + T7
