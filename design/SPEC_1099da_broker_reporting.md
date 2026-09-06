@@ -205,6 +205,10 @@ pub struct BrokerReporting(pub BTreeMap<String, CohortAnswers>); // TOML: [broke
   refusal** (the promise S10 makes, held — r4 M-new-4). This retires the slice as a product surface for TY2026+ (btctax has
   no users; the full return is the product) — recorded in `ROADMAP_STATUS.md` §0a as S10, an
   owner-visible decision; reversing it means a `broker_reporting` vault table both arms read.
+  **★ SUPERSEDED by R6 (owner ruling 2026-09-06, "we will need to have option to file 2026 tax year
+  with crypto sales"):** the slice is NOT retired for TY2026+; it files a live year from the stored
+  answers when the full return cannot compute. The no-inputs refusal above stands; its exit sentence
+  no longer says "then export the full return" — the slice itself fills once the answers are stored.
 - **TY2025 is UNCHANGED (I3).** Liveness is gated on `basis`, so TY2025 keeps I/L and the [I5]
   advisory as shipped. A proceeds-only 1099-DA row does belong in H/K; that gap is recorded in
   `FOLLOWUPS.md` as owned by the owner's S1 decision (the TY2025 rehearsal), because flipping it is a
@@ -268,6 +272,48 @@ by `map_pdf_conformance`; `pdf.rs:351-368` already rejects an on-state the widge
 A 2025+ map must carry the table and a pre-2025 map must not (a kill each way). On
 TY2025 only I/L are USED (R1); the **2026** map inherits the six-box table at port time (the port
 runbook gains the row). TY2024's map keeps C/F only.
+
+**R6 — the crypto slice files a LIVE year from the stored answers when the year's full return cannot
+compute (owner ruling 2026-09-06, reversing S10).** THE DISPATCH in `export_irs_pdf_from_session`
+(`crates/btctax-cli/src/cmd/admin.rs`, the block headed "THE DISPATCH (P6.5)") becomes three-way:
+
+1. **inputs stored AND `full_return_for(year)` is `Some`** → the full-return packet, unchanged.
+2. **inputs stored AND no full-return parameters bundled** → the CRYPTO SLICE, with the Form 8949 boxes
+   ROUTED from `ri.broker_reporting` through exactly the screen and router the full return uses
+   (`screen_broker_reporting` then `route_8949_boxes`): an unanswered, `mixed` or `basis_differs` key,
+   or a stored answer no row reads, refuses BEFORE any byte with the same refusal text the full return
+   prints. The slice's Schedule D carries the per-box lines (1b/2/8b/9) exactly as T4 prints them. The
+   export report carries one note, printed after the file list: *"TY{y}: full-return parameters are not
+   bundled in this build — this is the crypto slice (Form 8949, Schedule D, …) with the boxes routed
+   from your Form 1099-DA answers; the full return follows when the year's package is bundled."* The
+   `--forms full-return` and `--pay-by-check` refusals stand on this arm (there is no Form 1040 line 37).
+3. **no inputs stored** → the slice as today: a live year with ≥1 exchange disposition refuses before
+   any byte and names the exit; the exit sentence becomes *"… answer them in the TUI input form (the
+   Form 1099-DA block lists your venues) or via `income import`, then export again — the crypto slice
+   fills from the answers; a full return is not required."*
+
+`report --tax-year Y` in state (2) keeps its outcome (uncomputable; the inputs are kept) and
+`uncomputable_sentence` gains one clause: *"`export-irs-pdf --tax-year {y}` still prints the crypto
+slice from these inputs."* The TUI's export (`crates/btctax-tui/src/export.rs`) takes the same
+three-way dispatch, reading the stored answers the way the T3–T6 fold gave the viewer Snapshot the
+answers (`c25f7489`). No new vault table: the answers stay on `ReturnInputs` (one source of truth),
+authored through the TUI input form — whose Form 1099-DA block is seeded from the ledger's keys on a
+basis year — or `income import`.
+
+**What R6 does not change.** TY2026 prints nothing until its Form 8949 and Schedule D FINAL revisions
+are bundled (`SUPPORTED_YEARS` is the template years; both forms are "unchanged" in shape on the 2026
+drafts per `TY2026_WORK_LIST.md`, so the port is two rows); that lands Nov 2026 – Jan 2027, earlier
+than and independent of `FullReturnParams` TY2026, the i1040gi worksheets and the OTS-2026 census. A
+year with inputs AND parameters is the full return, always — R6 never lets a slice print where the
+full packet can.
+
+**Kills (the build lands each with its own):** TY2025 (templates, no params) + stored inputs → the
+slice PRINTS (today it refuses "no full-return tables for 2025"); the LIVE regime injected on the
+TY2025 templates (the T-tests' pattern) + inputs with `basis_matches` → `f8949.pdf` carries a G
+page-set and Schedule D line 1b carries the G total; same with one key unanswered → refusal, no byte
+(`wrote_nothing`); a stored answer no row reads → the unread refusal; TY2024 + inputs → the full
+packet still (unchanged); `--pay-by-check` on arm (2) → the I-7 refusal; the TUI export on the same
+three states; the report note present on arm (2) only; the two exit sentences.
 
 ## Current state — hook points (recon @ c76adf6b, cites re-resolved @ 2aa4ea98)
 

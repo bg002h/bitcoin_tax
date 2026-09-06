@@ -62,7 +62,7 @@ below is actioned until ruled:
 | **S2** | **Two answers:** (1) every income type / venue / deduction on the real 2026 return (W-2s? Sch C? interest/dividends > $1,500? charitable BTC and size — Section B / appraisal above $5,000 is an owner action with a before-filing deadline; car-loan interest; tips/overtime: none?); (2) state of residence | `YEAR.toml forms_expected` for 2026 becomes the OWNER's set; forms outside it become refusals with kills instead of transcriptions (Sch C/SE/8995/8995-A, 1-A Parts II/III) | "done" is currently defined against a P0 stress scenario a delegate ruled on; a W-2 filer's critical path is ~6 forms after finals, not 17 |
 | **S6** | **Right-size ceremony for a one-person autumn**: one review round per document then execute; fan-outs ≤ 6 lenses; no new instrument without a named consumer on the owner's path. KEEP every compute/emitter/provenance gate, B1 kills, the two-oracle census, the single B3 pre-mail review | `STANDARD_WORKFLOW.md`'s "review to 0C/0I" on prose artifacts | measured: 1,233 commits in July, 180 in August; five review rounds on one plan; the test is whether one person can repeat the autumn in 2027 |
 | **S7** | **Pre-rule the oracle fallback**: *if OTS 2026 is absent or disqualified on a line by 2027-03-15 → extension; by 2027-09-15 the evidence for signing without it is taxcalc 6.8.2 + the S1 rehearsal diff + the owner's hand-worked Form 6251 and Schedule 1-A on the official worksheets* | the two-oracle rule stays absolute for "validated"; this names what suffices to SIGN | OTS 2026 arrives ~2027-01-27 and carries known AMT defects; without a September ruling the argument happens in April |
-| **S9** | **Drop TY2017** | delete five wired forms + their rows in every glob-walking gate; keep the tax table if the 2017 crypto slice is wanted | zero evidence behind it (no authority, notes, geometry or census); under design r2 it is a row in every gate forever |
+| **S9** | **Drop TY2017** — **RULED 2026-09-06: DROP** ("S9 drop"). The five wired forms, their rows and every gate entry go (FR-61); the TY2017 `TaxTable` is KEPT so `report --tax-year 2017` still computes the crypto delta (the ruling's own option; say the word and it goes too) | delete five wired forms + their rows in every glob-walking gate; keep the tax table if the 2017 crypto slice is wanted | zero evidence behind it (no authority, notes, geometry or census); under design r2 it is a row in every gate forever |
 
 The four non-owner items (S3 1099-DA input NOW; S4 machinery hard stop 2026-10-31 then a hand port;
 S5 real-data runs at the 2026-09-15 and 2027-01-15 estimate dates; S8 a physical print rehearsal +
@@ -76,6 +76,16 @@ FR-49) are folded into §3's NOW bucket below and re-owned in `FOLLOWUPS.md`.
   runs only when none is stored, so on such a year it refuses before any byte and names the exit
   (`income import` → the full return). Reversing this means a `broker_reporting` vault table both
   arms read. Default if unanswered: closed (no users; the full return is the product).
+  **★ RULED 2026-09-06 — REVERSED:** *"we will need to have option to file 2026 tax year with crypto
+  sales."* The crypto slice must be able to file TY2026. Spec 1099-DA gains **R6**: on a year whose
+  full-return parameters are not bundled, a stored `ReturnInputs` no longer dispatches to the full
+  return — the crypto slice prints with the Form 8949 boxes ROUTED from the stored answers (the same
+  screen and router the full return uses), refusing only an unanswered/mixed/differing key. No new
+  vault table: the answers stay on `ReturnInputs`, authored through the TUI input form (seeded from
+  the ledger) or `income import`. What it does not change: TY2026 prints nothing until its Form 8949
+  and Schedule D finals are bundled (Nov 2026 – Jan 2027; both unchanged in shape per the work list)
+  — but that is earlier than, and independent of, `FullReturnParams` TY2026 and the i1040gi / OTS-2026
+  critical path. FR-62; one design-review round on R6, then the build.
   ★ The spec (`design/SPEC_1099da_broker_reporting.md`) is **GREEN r6** (five review rounds, 0C/0I at
   r5). **Build T0–T6 LANDED 2026-09-06** (`e4b80fda` T0 … `249d37ad` C … `d9863909` T3 … `2feb53d0`
   T4 … `ab0c98f8` T5 … `17753789`/`bb6d140d` T6; the T0–C build review 0C/3I/3M/3N folded `18d1332b`,

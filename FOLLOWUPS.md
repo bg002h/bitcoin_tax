@@ -6184,6 +6184,23 @@ build, each with an owning phase.
   fill-and-read-back kill is impossible until the 2025 Schedule D map becomes a full-return map (it is
   the crypto-slice map: no `line6`) — add the three-line fixture then; (ii) the four broker refusal
   anchors have no live path until TY2026 has `FullReturnParams` (recorded in `attribute.rs`).
+- **FR-61 — S9 RULED: drop TY2017's form package (owner, 2026-09-06: "S9 drop").** Delete
+  `crates/btctax-forms/forms/2017/` (five maps, five templates, `YEAR.toml`), the five `LineSet::*_2017`
+  revisions and their `Form*Map::ty2017()` constructors, `sp3b.rs`, and every gate row that named them
+  (the `authority = "not-yet-archived"` excuse set shrinks 6 → 1; `UNCENSUSED` 10 entries / 713 fields →
+  5 / 310; `AUTHORITY_NOT_YET_ARCHIVED`, `GRID_MAPS`, `YEAR_FLOORS`, the cross-product and row-count pins,
+  `LineSet::ALL` 41 → 36). The TY2017 `TaxTable` is KEPT (the ruling's own option) so `report --tax-year
+  2017` still computes; the TY2017 end-to-end KATs in `export_irs_pdf.rs` / `promote_cli.rs` re-point
+  to a bundled year, and the 4868 date kills plant their own TY2017-shaped record. **Owning phase:
+  NOW.** Brief: `design/agent-reports/BRIEF-build-S9-drop-ty2017.md`.
+- **FR-62 — S10 REVERSED: the crypto slice files a live year from the stored answers (owner,
+  2026-09-06: "we will need to have option to file 2026 tax year with crypto sales").** Spec 1099-DA
+  **R6** (this commit): the export dispatch becomes three-way — inputs + params → full return; inputs +
+  no params → the SLICE with boxes routed from the stored answers; no inputs → the slice's live-year
+  refusal naming the input form as the exit. No new vault table. **Owning phase: NOW** — one opus
+  design-review round on R6 (`BRIEF-review-1099da-R6.md`), fold, then the build. Note for the
+  calendar: TY2026 still prints nothing until its Form 8949 / Schedule D finals are bundled
+  (Nov 2026 – Jan 2027), which R6 makes the ONLY gate for a TY2026 crypto-slice filing.
 - **FR-47 — `AmtParams` / `FullReturnParams` TY2026 is a NOW item, not a post-finals one.**
   Transcribe from Rev. Proc. 2025-32 §2.10: exemptions (MFJ $140,200 / single $90,100 / MFS
   $70,100 / trusts $31,400), 28% breakpoints ($122,250 MFS / $244,500 others), and per status BOTH
