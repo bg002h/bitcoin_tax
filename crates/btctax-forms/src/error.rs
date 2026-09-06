@@ -78,6 +78,29 @@ pub enum FormsError {
     #[error("map parse error: {0}")]
     Map(#[from] toml::de::Error),
 
+    /// A caller-supplied value the form line cannot carry, refused BEFORE any byte is produced.
+    ///
+    /// The two live cases are both filer choices on a money line whose siblings are whole dollars:
+    /// Form 4868 line 7 (`--pay`) and Form 1040-V box 3 (`--pay`). The form's own rounding rule is
+    /// all-or-nothing — *"You can round off cents to whole dollars on Form 4868. If you do round to
+    /// whole dollars, you must round all amounts."* — so a payment carrying cents beside four
+    /// whole-dollar lines is a
+    /// form contradicting itself, and rounding it on the filer's behalf would put a number they did not
+    /// choose on a signed application. Refuse instead.
+    ///
+    /// Both are ALSO refused by the command that collects them (`btctax extension`, `export-irs-pdf
+    /// --pay-by-check`), with a message naming the flag. This variant is the second, structural gate:
+    /// the filler is reachable from a caller that never saw the flag.
+    #[error("Form {form} line {line}: {detail}")]
+    InvalidValue {
+        /// The form, as a filer names it (`"4868"`, `"1040-V"`).
+        form: &'static str,
+        /// The printed line/box number the value was destined for.
+        line: &'static str,
+        /// What is wrong with it, and what would be accepted.
+        detail: String,
+    },
+
     /// I/O error serializing the PDF.
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),

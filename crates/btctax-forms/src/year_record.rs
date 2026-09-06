@@ -176,3 +176,32 @@ impl YearRecord {
         out
     }
 }
+
+/// **26 U.S.C. §7503** — *"When the last day prescribed under authority of the internal revenue laws
+/// for performing any act falls on Saturday, Sunday, or a legal holiday, the performance of such act
+/// shall be considered timely if it is performed on the next succeeding day which is not a Saturday,
+/// Sunday, or a legal holiday."*
+///
+/// This models the WEEKEND half only, and that is a decision rather than an oversight. §7503's
+/// holiday half turns on District of Columbia legal holidays (the reason a return due April 15 moves
+/// when DC's Emancipation Day, April 16, falls beside it — TY2017's committed `return_due` of
+/// **2018-04-17** is exactly that shift, already applied), and this build does not carry a DC holiday
+/// calendar.
+///
+/// ★ Its ONE caller is safe against that gap by construction, not by luck: it shifts **June 15**, the
+/// out-of-country extension date the form itself names. No District of Columbia legal holiday falls
+/// on June 15 in any year — Juneteenth National Independence Day is June 19, and DC's Emancipation
+/// Day is April 16 — so on that date the weekend rule IS §7503, exactly. Every OTHER due date this
+/// build knows comes from [`YearRecord::return_due`], where the shift is already baked into the
+/// committed date and must not be applied a second time.
+///
+/// A due date on a Saturday moves to the following Monday (+2 days); a Sunday to the following Monday
+/// (+1); a weekday stands.
+pub fn section_7503_shift(d: time::Date) -> time::Date {
+    let days = match d.weekday() {
+        time::Weekday::Saturday => 2,
+        time::Weekday::Sunday => 1,
+        _ => 0,
+    };
+    d.saturating_add(time::Duration::days(days))
+}

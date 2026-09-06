@@ -42,6 +42,7 @@ Commands:
   config           Show or set projection config (TP8 fee treatment / pre-2025 lot method / forward method)
   export-snapshot  FR10: export decrypted SQLite + CSV (the NFR2 plaintext exception)
   export-irs-pdf   Fill the OFFICIAL IRS fillable PDFs for a tax year (a whole packet)
+  extension        File for an automatic 6-month EXTENSION of time to file: fill official Form 4868 for a tax year
   backup-key       Export the passphrase-protected key
   optimize         Lot-specific-identification optimizer (§C — read-only proposal or gated persistence)
   what-if          Read-only what-if tax planning (task #43): posit a HYPOTHETICAL, NON-persisted transaction and see its MARGINAL federal-tax effect on the current-year position. Routes through the same audited tax engine as `report --tax-year`; invents no tax authority. Writes NOTHING — no event, no side-table row, no vault mutation. Tax decision-support (consequences), not buy/sell/hold advice

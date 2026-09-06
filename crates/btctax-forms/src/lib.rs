@@ -24,6 +24,8 @@ mod fill8949;
 mod fill8949_full;
 mod form1040;
 mod form1040_full;
+mod form1040v;
+mod form4868;
 mod form6251;
 mod form8275;
 mod form8283;
@@ -53,6 +55,8 @@ mod wrap;
 
 pub use error::FormsError;
 pub use form1040::{Form1040Fill, Form1040Inputs};
+pub use form1040v::fill_form_1040v;
+pub use form4868::{fill_form_4868, form_4868_lines, Form4868Choices, Form4868Lines};
 pub use form8275::PartIiCapacity;
 pub use map::{
     AnnualTag, Form1040Map, Form8275Map, Form8283Map, Form8949Map, Form8959Map, Form8960Map,
@@ -479,6 +483,8 @@ pub mod testonly {
     pub use crate::fill8949_full::fill_8949_full_with_map;
     pub use crate::form1040::{fill_form_1040_capgains as fill_1040_with_map, Form1040Fill};
     pub use crate::form1040_full::fill_form_1040_full_with_map;
+    pub use crate::form1040v::fill_form_1040v_with_map;
+    pub use crate::form4868::fill_form_4868_with_map;
     pub use crate::form6251::fill_form_6251_with_map;
     pub use crate::form8275::fill_form_8275_with_map as fill_8275_with_map;
     pub use crate::form8283::fill_form_8283 as fill_8283_with_map;

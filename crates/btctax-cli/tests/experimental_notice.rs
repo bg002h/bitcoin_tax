@@ -521,7 +521,9 @@ fn notice_text_is_absent_from_every_file_in_the_export_directory() {
     let dir = tempfile::tempdir().unwrap();
     let vault = build_promoted_vault(dir.path());
     let out = dir.path().join("out");
-    let report = cmd::admin::export_irs_pdf(&vault, &pp(), &out, 2024, &[], None).unwrap();
+    let report =
+        cmd::admin::export_irs_pdf(&vault, &pp(), &out, 2024, &[], None, Default::default())
+            .unwrap();
     assert!(
         report.experimental_notice_active,
         "precondition: this vault IS Approach-B (a live promoted tranche) — CLI stderr fires"
@@ -677,7 +679,8 @@ fn full_return_export_notice_absent_from_every_file_in_the_export_directory() {
     give_full_return_inputs(&vault, 2024);
 
     let out = dir.path().join("out");
-    let rep = cmd::admin::export_irs_pdf(&vault, &pp(), &out, 2024, &[], None).unwrap();
+    let rep = cmd::admin::export_irs_pdf(&vault, &pp(), &out, 2024, &[], None, Default::default())
+        .unwrap();
     assert!(
         !rep.full_return_paths.is_empty(),
         "precondition: this is the full-return dispatch"

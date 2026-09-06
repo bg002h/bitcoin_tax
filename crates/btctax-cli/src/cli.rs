@@ -229,6 +229,74 @@ pub enum Command {
         /// piped (non-TTY) while pseudo-active and the export is refused.
         #[arg(long)]
         attest: Option<String>,
+        /// Also print Form 1040-V, the PAYMENT VOUCHER, when the return owes (Form 1040 line 37 > 0).
+        /// Pass this only if you are paying by CHECK or MONEY ORDER: IRS Direct Pay and EFTPS need no
+        /// voucher, and the voucher's own instructions say to pay online if you can. The voucher is
+        /// written BESIDE the packet as f1040v.pdf and goes in the envelope LOOSE — never stapled to
+        /// the return ("Do not staple or attach this voucher to your payment or return."), which is
+        /// why the manifest lists it in a block of its own below the stapling order. Without this
+        /// flag a return that owes gets a NOTE, not a file. Refused on a crypto-only year: there is
+        /// no Form 1040 line 37 to pay.
+        #[arg(long, verbatim_doc_comment)]
+        pay_by_check: bool,
+        /// PARTIAL payment for Form 1040-V box 3, in WHOLE DOLLARS. Default = the whole amount owed
+        /// (Form 1040 line 37). Refused ABOVE line 37 — the voucher pays a computed balance, so more
+        /// than it is a slip, not a choice the form names. (Contrast `btctax extension --pay`, which
+        /// has NO ceiling: Form 4868 line 7 pays against an ESTIMATE, and paying above it to limit
+        /// interest is the filer's own call.) Only meaningful with --pay-by-check.
+        #[arg(long)]
+        pay: Option<String>,
+    },
+    /// File for an automatic 6-month EXTENSION of time to file: fill official Form 4868 for a tax year.
+    ///
+    /// Writes f4868.pdf (owner-only) into --out and prints what it filled, line by line. The estimate
+    /// is the year's return AS IT STANDS TODAY — line 4 is Form 1040 line 24, line 5 is line 33 less
+    /// Schedule 3 line 10, and line 6 is the balance due — so a year whose return will not compute is
+    /// REFUSED rather than estimated: the instructions ask for an estimate "as accurate as you can",
+    /// and warn that an unreasonable one makes the extension null and void.
+    ///
+    /// ★ AN EXTENSION OF TIME TO FILE IS NOT AN EXTENSION OF TIME TO PAY. Interest runs on any tax
+    /// unpaid at the original due date whatever this form says, which is why line 7 defaults to
+    /// paying the balance due in full.
+    ///
+    /// ★ MAIL IT SEPARATELY, and well before the return. The form says so on its own page 2: "Don't
+    /// attach a copy of Form 4868 to your return." --out is therefore refused if it already holds a
+    /// packet manifest.txt.
+    ///
+    /// PSEUDO-RECONCILED ledgers: the same attestation gate as export-irs-pdf applies, AND every page
+    /// is stamped with a diagonal `DRAFT — ESTIMATE, NOT FOR FILING` watermark.
+    Extension {
+        /// The tax year to request an extension FOR (e.g. 2024 — the year whose return is late, not
+        /// the year you are filing in). This build can estimate only a year it can compute a full
+        /// return for.
+        #[arg(long)]
+        year: i32,
+        /// Output DIRECTORY receiving f4868.pdf (created owner-only). This contains your unencrypted
+        /// tax data — write --out OUTSIDE any git repo. It must NOT be the return packet's directory:
+        /// Form 4868 is mailed separately and is never attached to the return.
+        #[arg(long, verbatim_doc_comment)]
+        out: PathBuf,
+        /// Amount you are paying WITH the extension (Form 4868 line 7), in WHOLE DOLLARS. Default =
+        /// the extension payment already recorded on the return (Schedule 3 line 10) if there is one,
+        /// else the line 6 balance due. Paying LESS than line 6 is fine — "If you find you can't pay
+        /// the amount shown on line 6, you can still get the extension" — and so is paying MORE:
+        /// there is no ceiling here, because line 6 is an estimate and overshooting it limits the
+        /// interest you owe. (Contrast `export-irs-pdf --pay`, capped at Form 1040 line 37.)
+        #[arg(long)]
+        pay: Option<String>,
+        /// Check Form 4868 line 8: you are "out of the country" and a U.S. citizen or resident. This
+        /// is an assertion about YOU that only you can make, so it is never inferred — leaving it off
+        /// simply forgoes the extra two months and claims nothing. With it, the due date this command
+        /// warns against becomes June 15 of the following year (shifted off a weekend under §7503).
+        #[arg(long)]
+        out_of_country: bool,
+        /// Attestation phrase required while the ledger is PSEUDO-RECONCILED (a synthetic default
+        /// contributes to the projection). Pass the exact phrase `I attest this is true` (trimmed,
+        /// case-sensitive) to fill the DRAFT-watermarked form ON PURPOSE. Omit on a fully-real ledger
+        /// (never gated). Omit on an interactive terminal to be prompted; omit when piped (non-TTY)
+        /// while pseudo-active and the fill is refused.
+        #[arg(long)]
+        attest: Option<String>,
     },
     /// Export the passphrase-protected key.
     BackupKey {

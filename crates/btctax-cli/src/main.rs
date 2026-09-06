@@ -735,11 +735,64 @@ fn run() -> Result<ExitCode, CliError> {
                 eprint!("\n⚠ {}", btctax_core::experimental::NOTICE.plain_text());
             }
         }
+        Command::Extension {
+            year,
+            out,
+            pay,
+            out_of_country,
+            attest,
+        } => {
+            let pp = passphrase(false)?;
+            // Same attest resolution as export-irs-pdf: --attest verbatim if given, else PROMPT only
+            // on an interactive TTY and only when pseudo-active; piped + no --attest ⇒ None (the gate
+            // inside `extension` refuses if pseudo-active). The gate lives in the library handler.
+            let attest = match attest {
+                Some(phrase) => Some(phrase),
+                None => {
+                    use std::io::IsTerminal;
+                    if std::io::stdin().is_terminal()
+                        && cmd::admin::export_pseudo_active(vault, &pp)?
+                    {
+                        print!(
+                            "The ledger is pseudo-reconciled (a fictional draft). To fill the \
+                             DRAFT-watermarked Form 4868 ON PURPOSE, type the exact phrase\n  {}\n> ",
+                            btctax_cli::ATTEST_PHRASE
+                        );
+                        use std::io::Write;
+                        std::io::stdout().flush().ok();
+                        let mut line = String::new();
+                        std::io::stdin().read_line(&mut line)?;
+                        Some(line)
+                    } else {
+                        None
+                    }
+                }
+            };
+            let report = cmd::admin::extension(
+                vault,
+                &pp,
+                &out,
+                year,
+                pay.as_deref()
+                    .map(btctax_cli::eventref::parse_usd_arg)
+                    .transpose()?,
+                out_of_country,
+                attest.as_deref(),
+                now,
+            )?;
+            print!("{}", render::render_extension(&report));
+            // ★ THE NO-AUTHORISATION NOTICE, on every path that hands the user a fillable IRS form
+            //   this tool produced — and this one is handed to them with a cheque attached. One
+            //   constant, two arms, so the two can never drift.
+            eprintln!("\n⚠ {}", btctax_cli::NOT_AUTHORISED_FOR_FILING);
+        }
         Command::ExportIrsPdf {
             out,
             tax_year,
             forms,
             attest,
+            pay_by_check,
+            pay,
         } => {
             let pp = passphrase(false)?;
             // Same attest resolution as export-snapshot: --attest verbatim if given, else PROMPT only
@@ -767,8 +820,21 @@ fn run() -> Result<ExitCode, CliError> {
                     }
                 }
             };
-            let report =
-                cmd::admin::export_irs_pdf(vault, &pp, &out, tax_year, &forms, attest.as_deref())?;
+            let report = cmd::admin::export_irs_pdf(
+                vault,
+                &pp,
+                &out,
+                tax_year,
+                &forms,
+                attest.as_deref(),
+                cmd::admin::VoucherChoice {
+                    pay_by_check,
+                    pay: pay
+                        .as_deref()
+                        .map(btctax_cli::eventref::parse_usd_arg)
+                        .transpose()?,
+                },
+            )?;
             let written: Vec<String> = [
                 report.f8949_path.as_ref(),
                 report.schedule_d_path.as_ref(),
@@ -801,15 +867,7 @@ fn run() -> Result<ExitCode, CliError> {
             // where the disclaimer has to land. See NOTICE / `btctax limitations`. It disclaims
             // authorisation, warranty and liability; it does NOT restrict the licence or forbid
             // filing (the licence grant stays MIT OR Unlicense, unrestricted).
-            eprintln!(
-                "\n⚠ NOT AUTHORISED FOR FILING. btctax is a mechanical calculator. No right is \
-                 granted and no authorisation is given to use it, or anything it produces, to \
-                 prepare or file a tax return, and NO WARRANTY is given that any figure or form it \
-                 produces is accurate, complete, or fit to file. If you file any of this, you do so \
-                 entirely on your own responsibility: YOU are the preparer, you must check every \
-                 figure against the forms and instructions before you sign, and the authors accept \
-                 no liability for the consequences. This is not tax advice. See `btctax limitations`."
-            );
+            eprintln!("\n⚠ {}", btctax_cli::NOT_AUTHORISED_FOR_FILING);
             // Approach-B experimental disclosure (`design/approach-b-experimental-notice`): a live
             // (non-voided) DeclareTranche/PromoteTranche is on file — INTERFACE-only, stderr here,
             // never written into the export directory. Covers BOTH the crypto-slice and the full-return
@@ -838,6 +896,16 @@ fn run() -> Result<ExitCode, CliError> {
                 );
                 for p in &report.full_return_paths {
                     println!("  {}", p.display());
+                }
+                // ★ FORM 1040-V (spec R4) — listed SEPARATELY from the packet above and below the
+                //   stapling order, because it is enclosed LOOSE: "Do not staple or attach this
+                //   voucher to your payment or return." Printing it inside the packet list would be
+                //   an instruction to do the one thing the form forbids.
+                if let Some(v) = &report.form_1040v_path {
+                    println!(
+                        "\nForm 1040-V (payment voucher) — ENCLOSE LOOSE, do not staple:\n  {}",
+                        v.display()
+                    );
                 }
                 if let Some(m) = &report.full_return_manifest {
                     println!("  {}  ← your stapling order", m.display());
@@ -890,6 +958,12 @@ fn run() -> Result<ExitCode, CliError> {
                 // needs told. Same `advisories_for` derivation as the report — never a second list.
                 if !report.advisories.is_empty() {
                     eprint!("{}", render::render_advisories(&report.advisories));
+                }
+                // ★ The voucher NOTE: the return owes but no --pay-by-check was passed, the flag was
+                //   passed on a return that owes nothing, or a PARTIAL payment leaves interest
+                //   running. Silence about a balance due is the one answer a tax tool may not give.
+                if let Some(note) = &report.form_1040v_note {
+                    eprintln!("note: {note}");
                 }
             } else {
                 // The crypto slice only: Schedule D Part III is answered as far as the printed page

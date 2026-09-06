@@ -783,7 +783,9 @@ fn export_with_a_promoted_leg_but_incomplete_8275_refuses_before_bytes() {
     let vault = raw_vault_promote_with_empty_part_ii(dir.path());
     let out = dir.path().join("export_out"); // deliberately NOT pre-created
 
-    let err = cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None).unwrap_err();
+    let err =
+        cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None, Default::default())
+            .unwrap_err();
     assert!(
         matches!(err, CliError::Usage(ref m) if m.contains("Form 8275")),
         "a promoted leg without a complete Form 8275 must be REFUSED naming 'Form 8275': {err}"
@@ -807,7 +809,9 @@ fn a_clean_promoted_export_writes_the_8275_by_name_no_watermark() {
     let vault = vault_with_promoted_disposal_via_cli(dir.path());
     let out = dir.path().join("export_out");
 
-    let report = cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None).unwrap();
+    let report =
+        cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None, Default::default())
+            .unwrap();
     assert!(
         out.join("form_8275.txt").exists(),
         "a clean promoted export emits the 8275 content by its OWN name (form_8275.txt)"
@@ -870,7 +874,9 @@ fn export_irs_pdf_with_an_overflowing_part_ii_narrative_refuses_before_bytes() {
     let vault = vault_with_promoted_disposal_and_overflowing_part_ii(dir.path());
     let out = dir.path().join("export_out"); // deliberately NOT pre-created
 
-    let err = cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None).unwrap_err();
+    let err =
+        cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None, Default::default())
+            .unwrap_err();
     assert!(
         matches!(err, CliError::Usage(ref m)
             if m.contains(&T14_YEAR.to_string())
@@ -898,7 +904,9 @@ fn export_full_return_with_an_overflowing_part_ii_narrative_refuses_with_a_named
     plant_full_return_ri(&vault, T14_YEAR);
     let out = dir.path().join("export_out");
 
-    let err = cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None).unwrap_err();
+    let err =
+        cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None, Default::default())
+            .unwrap_err();
     assert!(
         matches!(err, CliError::Usage(ref m)
             if m.contains(&T14_YEAR.to_string())
@@ -926,8 +934,16 @@ fn a_narrowed_forms_f8949_slice_still_emits_the_mandatory_8275_pdf_on_a_promoted
     let out = dir.path().join("export_out");
 
     // `--forms f8949` ONLY — deliberately excludes f8275 from the requested slice.
-    let report =
-        cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[FormArg::F8949], None).unwrap();
+    let report = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        &out,
+        T14_YEAR,
+        &[FormArg::F8949],
+        None,
+        Default::default(),
+    )
+    .unwrap();
     assert!(
         out.join("f8949.pdf").exists(),
         "the requested 8949 slice is written"
@@ -987,7 +1003,9 @@ fn export_full_return_refuses_before_bytes_on_incomplete_8275() {
     plant_full_return_ri(&vault, T14_YEAR);
     let out = dir.path().join("export_out"); // deliberately NOT pre-created
 
-    let err = cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None).unwrap_err();
+    let err =
+        cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None, Default::default())
+            .unwrap_err();
     assert!(
         matches!(err, CliError::Usage(ref m) if m.contains("Form 8275")),
         "the FULL-RETURN placement must refuse a promoted leg without a complete Form 8275: {err}"
@@ -1034,7 +1052,7 @@ fn export_full_return_writes_form_8275_txt_by_name() {
     plant_full_return_ri(&vault, T14_YEAR);
     let out = dir.path().join("export_out");
 
-    cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None)
+    cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None, Default::default())
         .expect("a complete promoted disclosure exports via the dispatched full-return path");
     assert!(
         out.join("form_8275.txt").exists(),
@@ -1130,8 +1148,11 @@ fn a_promoted_2025_export_fills_the_8275_and_the_gate_passes() {
         let vault = vault_with_promoted_disposal_via_cli_year(dir.path(), year);
         let out = dir.path().join("export_out");
 
-        let report = cmd::admin::export_irs_pdf(&vault, &pp(), &out, year, &[], None)
-            .unwrap_or_else(|e| panic!("year {year}: a complete promote must export cleanly: {e}"));
+        let report =
+            cmd::admin::export_irs_pdf(&vault, &pp(), &out, year, &[], None, Default::default())
+                .unwrap_or_else(|e| {
+                    panic!("year {year}: a complete promote must export cleanly: {e}")
+                });
         assert!(
             out.join("form_8275.pdf").exists(),
             "year {year}: the crypto-slice export must fill the official Form 8275 PDF"
@@ -1158,7 +1179,9 @@ fn export_gate_now_refuses_when_the_8275_pdf_is_absent() {
     let vault = raw_vault_promote_with_empty_part_ii(dir.path());
     let out = dir.path().join("export_out"); // deliberately NOT pre-created
 
-    let err = cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None).unwrap_err();
+    let err =
+        cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None, Default::default())
+            .unwrap_err();
     assert!(
         matches!(err, CliError::Usage(ref m) if m.contains("Form 8275")),
         "an incomplete Form 8275 must still refuse the export post-T16: {err}"
@@ -1251,7 +1274,7 @@ fn promoted_export_with_more_than_6_legs_refuses_cleanly_not_panics() {
     // This KAT's own job is to prove there is NO panic — assert it directly rather than relying on the
     // harness to merely report one.
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None)
+        cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None, Default::default())
     }));
     let err = match result {
         Ok(Err(e)) => e,
@@ -1290,7 +1313,7 @@ fn promoted_crypto_slice_export_with_more_than_6_legs_refuses_cleanly_not_panics
     let out = dir.path().join("export_out"); // deliberately NOT pre-created
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None)
+        cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None, Default::default())
     }));
     let err = match result {
         Ok(Err(e)) => e,
@@ -1420,8 +1443,9 @@ fn characterization_crypto_slice_export_pins_the_shipped_file_set_and_report() {
     let vault = vault_with_promoted_disposal_via_cli(dir.path());
     let out = dir.path().join("export_out");
 
-    let report = cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None)
-        .expect("the crypto-slice arm exports cleanly");
+    let report =
+        cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None, Default::default())
+            .expect("the crypto-slice arm exports cleanly");
 
     let mut names: Vec<String> = std::fs::read_dir(&out)
         .unwrap()
@@ -1493,8 +1517,9 @@ fn characterization_full_return_export_pins_the_shipped_file_set_and_report() {
     plant_full_return_ri(&vault, T14_YEAR);
     let out = dir.path().join("export_out");
 
-    let report = cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None)
-        .expect("the full-return arm exports cleanly");
+    let report =
+        cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None, Default::default())
+            .expect("the full-return arm exports cleanly");
 
     let mut names: Vec<String> = std::fs::read_dir(&out)
         .unwrap()

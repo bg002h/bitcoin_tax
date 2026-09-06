@@ -295,6 +295,21 @@ pub fn cli_io_with_path(e: CliError, path: &std::path::Path, hint: &str) -> CliE
     }
 }
 
+/// ★ **THE NO-AUTHORISATION NOTICE**, printed on stderr by every command that hands the user a
+/// fillable IRS form this tool produced — `export-irs-pdf` and `extension`.
+///
+/// One constant, not two literals: the moment a filer is holding a form with a cheque beside it is
+/// exactly where this has to land, and a second copy in a second arm is a second copy to drift. It
+/// disclaims authorisation, warranty and liability; it does NOT restrict the licence or forbid filing
+/// (the grant stays MIT OR Unlicense, unrestricted — see NOTICE / `btctax limitations`).
+pub const NOT_AUTHORISED_FOR_FILING: &str = "NOT AUTHORISED FOR FILING. btctax is a mechanical \
+     calculator. No right is granted and no authorisation is given to use it, or anything it \
+     produces, to prepare or file a tax return, and NO WARRANTY is given that any figure or form it \
+     produces is accurate, complete, or fit to file. If you file any of this, you do so entirely on \
+     your own responsibility: YOU are the preparer, you must check every figure against the forms \
+     and instructions before you sign, and the authors accept no liability for the consequences. \
+     This is not tax advice. See `btctax limitations`.";
+
 /// The exact phrase a user must affirm to export a form/data file while the ledger is pseudo-reconciled
 /// (sub-project 3). Compared TRIMMED, case-SENSITIVE, exact. The prompt + both error strings are BUILT
 /// from this constant [R0-M1] so there is no drift (a KAT asserts they contain it). `pub` so btctax-tui

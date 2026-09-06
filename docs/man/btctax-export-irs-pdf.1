@@ -4,7 +4,7 @@
 .SH NAME
 export\-irs\-pdf \- Fill the OFFICIAL IRS fillable PDFs for a tax year (a whole packet)
 .SH SYNOPSIS
-\fBexport\-irs\-pdf\fR <\fB\-\-out\fR> <\fB\-\-tax\-year\fR> [\fB\-\-forms\fR] [\fB\-\-attest\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+\fBexport\-irs\-pdf\fR <\fB\-\-out\fR> <\fB\-\-tax\-year\fR> [\fB\-\-forms\fR] [\fB\-\-attest\fR] [\fB\-\-pay\-by\-check\fR] [\fB\-\-pay\fR] [\fB\-h\fR|\fB\-\-help\fR] 
 .SH DESCRIPTION
 Fill the OFFICIAL IRS fillable PDFs for a tax year (a whole packet).
 .PP
@@ -51,6 +51,19 @@ full\-return: The COMPLETE return packet — the 1040 and every schedule it cite
 .TP
 \fB\-\-attest\fR \fI<ATTEST>\fR
 Attestation phrase required to export while the ledger is PSEUDO\-RECONCILED (a synthetic default contributes to the projection). Pass the exact phrase `I attest this is true` (trimmed, case\-sensitive) to fill the DRAFT\-watermarked forms ON PURPOSE. Omit on a fully\-real ledger (never gated). Omit on an interactive terminal to be prompted; omit when piped (non\-TTY) while pseudo\-active and the export is refused
+.TP
+\fB\-\-pay\-by\-check\fR
+Also print Form 1040\-V, the PAYMENT VOUCHER, when the return owes (Form 1040 line 37 > 0).
+Pass this only if you are paying by CHECK or MONEY ORDER: IRS Direct Pay and EFTPS need no
+voucher, and the voucher\*(Aqs own instructions say to pay online if you can. The voucher is
+written BESIDE the packet as f1040v.pdf and goes in the envelope LOOSE — never stapled to
+the return ("Do not staple or attach this voucher to your payment or return."), which is
+why the manifest lists it in a block of its own below the stapling order. Without this
+flag a return that owes gets a NOTE, not a file. Refused on a crypto\-only year: there is
+no Form 1040 line 37 to pay.
+.TP
+\fB\-\-pay\fR \fI<PAY>\fR
+PARTIAL payment for Form 1040\-V box 3, in WHOLE DOLLARS. Default = the whole amount owed (Form 1040 line 37). Refused ABOVE line 37 — the voucher pays a computed balance, so more than it is a slip, not a choice the form names. (Contrast `btctax extension \-\-pay`, which has NO ceiling: Form 4868 line 7 pays against an ESTIMATE, and paying above it to limit interest is the filer\*(Aqs own call.) Only meaningful with \-\-pay\-by\-check
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help (see a summary with \*(Aq\-h\*(Aq)

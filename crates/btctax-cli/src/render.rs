@@ -5151,3 +5151,81 @@ mod broker_answers_tests {
         assert!(render_broker_answers(2025, Some(R::PROCEEDS_ONLY), &c, None).is_none());
     }
 }
+
+/// Render what `btctax extension` filled — Form 4868, line by line, closing with the form's own
+/// sentence about not attaching it.
+///
+/// ★ The values come from the report, which carries the SAME `Form4868Lines` the PDF was filled
+/// from. There is no second derivation, so the terminal and the paper cannot disagree about line 6.
+///
+/// ★ A line the form leaves BLANK is shown as `(blank)`, never as `0`. On a return signed under
+/// 26 USC §6065 those are different assertions, and a filer checking the printout against the page
+/// needs to see the same thing on both.
+pub fn render_extension(r: &crate::cmd::admin::ExtensionReport) -> String {
+    use std::fmt::Write as _;
+    let cell = |v: Option<Usd>| match v {
+        Some(x) => format!("${x}"),
+        None => "(blank)".to_string(),
+    };
+    let mut s = String::new();
+    let _ = writeln!(
+        s,
+        "Form 4868 — application for an automatic extension of time to file, tax year {}{}",
+        r.tax_year,
+        if r.watermarked {
+            "  (DRAFT — estimate, watermarked)"
+        } else {
+            ""
+        }
+    );
+    let _ = writeln!(s, "  {}", r.path.display());
+    let _ = writeln!(s, "\nWhat was filled:");
+    let _ = writeln!(
+        s,
+        "  line 4  estimate of total tax liability   ${}",
+        r.lines.line4
+    );
+    let _ = writeln!(
+        s,
+        "  line 5  total payments (excl. Sch 3 L10)  {}",
+        cell(r.lines.line5)
+    );
+    let _ = writeln!(
+        s,
+        "  line 6  balance due                       ${}",
+        r.lines.line6
+    );
+    let _ = writeln!(
+        s,
+        "  line 7  amount you're paying              {}",
+        cell(r.lines.line7)
+    );
+    let _ = writeln!(
+        s,
+        "  line 8  out of the country                {}",
+        if r.lines.line8 { "CHECKED" } else { "(blank)" }
+    );
+    if let Some(n) = r.recorded_extension_payment {
+        let _ = writeln!(
+            s,
+            "\nnote: ${n} is already recorded on the return as paid with the extension; --pay \
+             overrides it"
+        );
+    }
+    if r.past_due {
+        let _ = writeln!(
+            s,
+            "\n⚠ the due date for this application has PASSED — it was {due}{why}. Form 4868 extends \
+             the time to FILE, never the time to PAY: interest runs on any tax unpaid from the \
+             original due date. File the return itself as soon as you can.",
+            due = r.due,
+            why = if r.out_of_country {
+                " (June 15, the out-of-country date you claimed on line 8)"
+            } else {
+                ""
+            }
+        );
+    }
+    let _ = writeln!(s, "\nDon't attach a copy of Form 4868 to your return.");
+    s
+}

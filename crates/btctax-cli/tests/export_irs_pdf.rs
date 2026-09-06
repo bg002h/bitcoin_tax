@@ -106,7 +106,7 @@ fn export_irs_pdf_out_collision_names_path() {
     let out = tmp.path().join("collide");
     std::fs::write(&out, b"i am a file, not a directory").unwrap();
 
-    let err = cmd::admin::export_irs_pdf(&vault, &pp(), &out, 2025, &[], None)
+    let err = cmd::admin::export_irs_pdf(&vault, &pp(), &out, 2025, &[], None, Default::default())
         .expect_err("an --out that collides with a file must error");
     let msg = err.to_string();
     assert!(
@@ -120,8 +120,16 @@ fn real_ledger_fills_clean_official_pdfs() {
     let (_dir, vault) = make_vault(&real_events());
     let out = tempfile::tempdir().unwrap();
 
-    let report = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2025, &[], None)
-        .expect("real ledger export must succeed");
+    let report = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2025,
+        &[],
+        None,
+        Default::default(),
+    )
+    .expect("real ledger export must succeed");
     assert!(!report.watermarked, "a real ledger fill is NOT watermarked");
 
     let f8949 = std::fs::read(out.path().join("f8949.pdf")).unwrap();
@@ -195,7 +203,16 @@ fn a_dependents_statement_is_marked_draft_only_on_a_pseudo_ledger() {
         s.save().unwrap();
     }
     let out = tempfile::tempdir().unwrap();
-    let rep = cmd::admin::export_irs_pdf(&clean, &pp(), out.path(), 2024, &[], None).unwrap();
+    let rep = cmd::admin::export_irs_pdf(
+        &clean,
+        &pp(),
+        out.path(),
+        2024,
+        &[],
+        None,
+        Default::default(),
+    )
+    .unwrap();
     assert!(!rep.watermarked, "a real ledger is never watermarked");
     let body = std::fs::read_to_string(out.path().join("dependents_statement.txt"))
         .expect("nine dependents ⇒ a statement");
@@ -249,6 +266,7 @@ fn a_dependents_statement_is_marked_draft_only_on_a_pseudo_ledger() {
         2024,
         &[],
         Some(btctax_cli::ATTEST_PHRASE),
+        Default::default(),
     )
     .expect("a TY2024 full return on a pseudo ledger exports under attestation");
     assert!(rep2.watermarked, "a pseudo ledger IS watermarked");
@@ -273,7 +291,16 @@ fn pseudo_fill_requires_attestation() {
     let out = tempfile::tempdir().unwrap();
 
     // No attestation ⇒ refused, nothing written.
-    let err = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2025, &[], None).unwrap_err();
+    let err = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2025,
+        &[],
+        None,
+        Default::default(),
+    )
+    .unwrap_err();
     assert!(
         matches!(err, CliError::AttestationRequired),
         "pseudo-active export without attestation must be refused, got {err:?}"
@@ -284,14 +311,29 @@ fn pseudo_fill_requires_attestation() {
     );
 
     // Wrong phrase ⇒ failed.
-    let err =
-        cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2025, &[], Some("nope")).unwrap_err();
+    let err = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2025,
+        &[],
+        Some("nope"),
+        Default::default(),
+    )
+    .unwrap_err();
     assert!(matches!(err, CliError::AttestationFailed), "got {err:?}");
 
     // Correct phrase ⇒ permitted AND watermarked.
-    let report =
-        cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2025, &[], Some(ATTEST_PHRASE))
-            .unwrap();
+    let report = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2025,
+        &[],
+        Some(ATTEST_PHRASE),
+        Default::default(),
+    )
+    .unwrap();
     assert!(report.watermarked, "a pseudo fill must be watermarked");
     let f8949 = std::fs::read(out.path().join("f8949.pdf")).unwrap();
     assert!(
@@ -343,7 +385,16 @@ fn sp2_packet_writes_schedule_se_and_1040_capgains() {
     .unwrap();
     let out = tempfile::tempdir().unwrap();
 
-    let report = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2025, &[], None).unwrap();
+    let report = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2025,
+        &[],
+        None,
+        Default::default(),
+    )
+    .unwrap();
     // Full packet written; no donation ⇒ no 8283.
     assert!(
         report.schedule_se_path.is_some(),
@@ -389,9 +440,16 @@ fn sp2_forms_filter_selects_subset() {
     let (_dir, vault) = make_vault(&real_events());
     let out = tempfile::tempdir().unwrap();
     // --forms f8949 ⇒ ONLY Form 8949 (no Schedule D, no 1040 even though there is activity).
-    let report =
-        cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2025, &[FormArg::F8949], None)
-            .unwrap();
+    let report = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2025,
+        &[FormArg::F8949],
+        None,
+        Default::default(),
+    )
+    .unwrap();
     assert!(report.f8949_path.is_some());
     assert!(report.schedule_d_path.is_none(), "Schedule D not selected");
     assert!(report.form_1040_path.is_none(), "1040 not selected");
@@ -404,7 +462,16 @@ fn unsupported_year_is_refused() {
     let (_dir, vault) = make_vault(&real_events());
     let out = tempfile::tempdir().unwrap();
     // This build bundles TY2017 + TY2024 + TY2025; 2023 is refused.
-    let err = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2023, &[], None).unwrap_err();
+    let err = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2023,
+        &[],
+        None,
+        Default::default(),
+    )
+    .unwrap_err();
     assert!(
         matches!(
             err,
@@ -459,8 +526,16 @@ fn ty2024_real_ledger_fills_box_c_f_and_line7_and_da() {
     // the adjacency oracle (c1_5).
     let (_dir, vault) = make_vault(&real_events_2024());
     let out = tempfile::tempdir().unwrap();
-    let report = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
-        .expect("2024 real-ledger export must succeed");
+    let report = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        &[],
+        None,
+        Default::default(),
+    )
+    .expect("2024 real-ledger export must succeed");
     assert!(!report.watermarked);
 
     use btctax_forms::testonly::*;
@@ -530,8 +605,16 @@ fn ty2017_real_ledger_fills_box_c_f_and_line13_no_da() {
     // question anywhere.
     let (_dir, vault) = make_vault(&real_events_2017());
     let out = tempfile::tempdir().unwrap();
-    let report = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2017, &[], None)
-        .expect("2017 real-ledger export must succeed");
+    let report = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2017,
+        &[],
+        None,
+        Default::default(),
+    )
+    .expect("2017 real-ledger export must succeed");
     assert!(!report.watermarked);
 
     use btctax_forms::testonly::*;
@@ -603,8 +686,16 @@ fn export_dispatches_a_full_return_year_to_the_full_packet() {
         s.save().unwrap();
     }
 
-    let rep = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
-        .expect("a full-return year exports the full packet");
+    let rep = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        &[],
+        None,
+        Default::default(),
+    )
+    .expect("a full-return year exports the full packet");
 
     assert!(
         out.path().join("00_f1040.pdf").exists(),
@@ -653,7 +744,16 @@ fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
 fn crypto_slice_1040_is_watermarked_as_a_worksheet() {
     let (_dir, vault) = make_vault(&real_events());
     let out = tempfile::tempdir().unwrap();
-    let report = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2025, &[], None).unwrap();
+    let report = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2025,
+        &[],
+        None,
+        Default::default(),
+    )
+    .unwrap();
     assert!(report.form_1040_path.is_some(), "1040 written");
 
     // ★ …and the CRYPTO SLICE carries none: it computes no full return, so there is nothing to advise
@@ -717,7 +817,7 @@ fn export_full_return_out_collision_names_path() {
     let out = tmp.path().join("collide");
     std::fs::write(&out, b"i am a file, not a directory").unwrap();
 
-    let err = cmd::admin::export_irs_pdf(&vault, &pp(), &out, 2024, &[], None)
+    let err = cmd::admin::export_irs_pdf(&vault, &pp(), &out, 2024, &[], None, Default::default())
         .expect_err("a full-return --out that collides with a file must error");
     let msg = err.to_string();
     assert!(
@@ -743,6 +843,7 @@ fn forms_full_return_on_a_crypto_only_year_refuses_instead_of_writing_nothing() 
         2024,
         &[FormArg::FullReturn],
         None,
+        Default::default(),
     )
     .expect_err("full-return was asked for on a year that has no full-return inputs");
     let msg = format!("{err:?}");
@@ -786,8 +887,16 @@ fn forms_slice_ignored_on_full_return_year_is_flagged_and_packet_unchanged() {
 
     // A --forms slice on a full-return year: ignored, but flagged; the full packet still writes.
     let out = tempfile::tempdir().unwrap();
-    let rep = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[FormArg::F8949], None)
-        .expect("full-return export succeeds");
+    let rep = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        &[FormArg::F8949],
+        None,
+        Default::default(),
+    )
+    .expect("full-return export succeeds");
     assert!(
         rep.forms_ignored_full_return,
         "a --forms slice on a full-return year is flagged as ignored"
@@ -809,6 +918,7 @@ fn forms_slice_ignored_on_full_return_year_is_flagged_and_packet_unchanged() {
         2024,
         &[FormArg::FullReturn],
         None,
+        Default::default(),
     )
     .expect("--forms full-return on a full-return year succeeds");
     assert!(
@@ -822,8 +932,16 @@ fn forms_slice_ignored_on_full_return_year_is_flagged_and_packet_unchanged() {
 
     // Same year, NO --forms: nothing ignored, and the packet is identical (the slice never changed it).
     let out2 = tempfile::tempdir().unwrap();
-    let rep2 = cmd::admin::export_irs_pdf(&vault, &pp(), out2.path(), 2024, &[], None)
-        .expect("full-return export succeeds");
+    let rep2 = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out2.path(),
+        2024,
+        &[],
+        None,
+        Default::default(),
+    )
+    .expect("full-return export succeeds");
     assert!(
         !rep2.forms_ignored_full_return,
         "no --forms → nothing was ignored"
@@ -924,8 +1042,16 @@ fn export_without_return_inputs_still_gets_the_crypto_slice() {
     let (_dir, vault) = make_vault(&real_events());
     let out = tempfile::tempdir().unwrap();
 
-    let rep = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2025, &[], None)
-        .expect("a crypto-only year exports the slice");
+    let rep = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2025,
+        &[],
+        None,
+        Default::default(),
+    )
+    .expect("a crypto-only year exports the slice");
 
     assert!(
         rep.full_return_paths.is_empty(),
@@ -969,8 +1095,16 @@ fn a_full_return_without_an_ssn_refuses_and_writes_no_bytes() {
         s.save().unwrap();
     }
 
-    let err = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
-        .expect_err("an unnamed return must not produce a filable packet");
+    let err = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        &[],
+        None,
+        Default::default(),
+    )
+    .expect_err("an unnamed return must not produce a filable packet");
     assert!(
         format!("{err}").contains("no SSN"),
         "the refusal says what is missing: {err}"
@@ -1028,7 +1162,16 @@ fn the_two_pipelines_cannot_overwrite_each_others_files() {
     }
 
     // 1) The full packet (2024 — it HAS a Schedule D and an 8949).
-    cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None).unwrap();
+    cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        &[],
+        None,
+        Default::default(),
+    )
+    .unwrap();
     let snapshot: BTreeMap<String, Vec<u8>> = std::fs::read_dir(out.path())
         .unwrap()
         .map(|e| {
@@ -1052,7 +1195,16 @@ fn the_two_pipelines_cannot_overwrite_each_others_files() {
     );
 
     // 2) The crypto slice for ANOTHER year, into the SAME directory — the collision scenario.
-    cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2017, &[], None).unwrap();
+    cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2017,
+        &[],
+        None,
+        Default::default(),
+    )
+    .unwrap();
 
     // ★ Every packet file must still be byte-for-byte what the packet wrote.
     for (name, bytes) in &snapshot {
@@ -1100,7 +1252,16 @@ fn export_irs_pdf_writes_basis_methodology_when_a_tranche_is_filed() {
     drop(s); // release the vault lock before the export opens its own session
 
     let out = tempfile::tempdir().unwrap();
-    cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2025, &[], None).unwrap();
+    cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2025,
+        &[],
+        None,
+        Default::default(),
+    )
+    .unwrap();
     let disclosure = out.path().join("basis_methodology.txt");
     assert!(
         disclosure.exists(),
@@ -1182,9 +1343,16 @@ fn the_export_path_refuses_on_an_input_screen_and_writes_no_bytes() {
         // Un-answer a mandatory class-(A) declaration that `answer_all_live_declarations` had set.
         ri.header.can_be_claimed_as_dependent_taxpayer = None;
     });
-    let err = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None).expect_err(
-        "an unanswered mandatory declaration must refuse the EXPORT, not just the report",
-    );
+    let err = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        &[],
+        None,
+        Default::default(),
+    )
+    .expect_err("an unanswered mandatory declaration must refuse the EXPORT, not just the report");
     let msg = format!("{err:?}");
     assert!(
         msg.contains("not computable") && msg.contains("no forms were written"),
@@ -1212,8 +1380,16 @@ fn the_export_path_refuses_on_the_compute_screen_and_writes_no_bytes() {
             ..Default::default()
         });
     });
-    let err = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
-        .expect_err("an incomplete required Form 8283 must refuse the export");
+    let err = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        &[],
+        None,
+        Default::default(),
+    )
+    .expect_err("an incomplete required Form 8283 must refuse the export");
     let msg = format!("{err:?}");
     assert!(
         msg.contains("not computable") && msg.contains("no forms were written"),
@@ -1255,8 +1431,16 @@ fn an_above_threshold_reit_only_export_files_form_8995a() {
     // ★★★ §G-28/B1a — THIS EXPORT NOW SUCCEEDS, and writes Form 8995-A. The filer's only §199A item is
     //     REIT dividends, so there is no trade or business for Parts I-III to attach to, and i8995a
     //     sends them straight to Part IV. Until B1a this refused outright.
-    let rep = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
-        .expect("a REIT/PTP-only filer above the threshold files on Form 8995-A Part IV");
+    let rep = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        &[],
+        None,
+        Default::default(),
+    )
+    .expect("a REIT/PTP-only filer above the threshold files on Form 8995-A Part IV");
     let names: Vec<String> = rep
         .full_return_paths
         .iter()
@@ -1350,8 +1534,16 @@ fn a_full_return_with_more_8949_legs_than_a_page_holds_now_files_on_multiple_cop
         "the TY2024 grid — the capacity 16 legs must exceed"
     );
 
-    cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
-        .expect("★ 16 legs must FILE now that the full-return 8949 paginates (P2b)");
+    cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        &[],
+        None,
+        Default::default(),
+    )
+    .expect("★ 16 legs must FILE now that the full-return 8949 paginates (P2b)");
 
     // ★ The full-return packet writes SEQUENCE-PREFIXED names (`12A_f8949.pdf`) so a slice run and a
     // packet run into one directory cannot interleave; find it by stem rather than pinning the
@@ -1421,8 +1613,16 @@ fn full_return_vault_with_a_gift_over_its_ceiling(
 #[test]
 fn the_full_return_export_report_carries_the_charitable_carryover_out() {
     let (_d, vault, out) = full_return_vault_with_a_gift_over_its_ceiling();
-    let rep = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
-        .expect("the packet exports");
+    let rep = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        &[],
+        None,
+        Default::default(),
+    )
+    .expect("the packet exports");
     assert!(
         !rep.charitable_carryover_out.is_empty(),
         "a gift over its §170(b) ceiling must carry its carryover out on the export report"
@@ -1470,8 +1670,16 @@ fn export_irs_pdf_tells_the_filer_about_the_charitable_carryover() {
 fn a_full_return_with_exactly_a_full_8949_page_of_legs_still_exports() {
     let (_d, vault, out) = full_return_vault(&dca_events_2024(14), |_ri| {});
 
-    cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
-        .expect("14 legs fit the page exactly and must still file");
+    cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        &[],
+        None,
+        Default::default(),
+    )
+    .expect("14 legs fit the page exactly and must still file");
     assert!(
         out.path().join("00_f1040.pdf").exists(),
         "the packet writes on the boundary case"
@@ -1516,8 +1724,16 @@ fn no_crypto_full_return_vault() -> (tempfile::TempDir, PathBuf, tempfile::TempD
 #[test]
 fn a_no_crypto_packet_names_the_marks_the_filer_must_make_by_hand() {
     let (_d, vault, out) = no_crypto_full_return_vault();
-    let rep = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
-        .expect("a plain wage earner's packet exports");
+    let rep = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        &[],
+        None,
+        Default::default(),
+    )
+    .expect("a plain wage earner's packet exports");
     let manifest = std::fs::read_to_string(out.path().join("manifest.txt")).unwrap();
 
     assert!(
@@ -1552,8 +1768,16 @@ fn a_no_crypto_packet_names_the_marks_the_filer_must_make_by_hand() {
 #[test]
 fn a_crypto_packet_does_not_list_marks_btctax_already_made() {
     let (_d, vault, out) = full_return_vault(&real_events_2024(), |_ri| {});
-    let rep = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
-        .expect("the crypto packet exports");
+    let rep = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        &[],
+        None,
+        Default::default(),
+    )
+    .expect("the crypto packet exports");
     let manifest = std::fs::read_to_string(out.path().join("manifest.txt")).unwrap();
 
     assert!(
@@ -1682,8 +1906,16 @@ fn the_manifest_names_the_qualified_appraisal_over_500k_and_stays_quiet_below_it
     // ── OVER the threshold: $700,000 claimed. The manifest must say to attach the appraisal. ──
     let (_d1, big) = donation_vault("700000.00");
     let out1 = tempfile::tempdir().unwrap();
-    cmd::admin::export_irs_pdf(&big, &pp(), out1.path(), 2024, &[], None)
-        .expect("the $700,000-donation full return exports");
+    cmd::admin::export_irs_pdf(
+        &big,
+        &pp(),
+        out1.path(),
+        2024,
+        &[],
+        None,
+        Default::default(),
+    )
+    .expect("the $700,000-donation full return exports");
     let man = std::fs::read_to_string(out1.path().join("manifest.txt")).unwrap();
     assert!(
         man.contains("qualified appraisal")
@@ -1707,8 +1939,16 @@ fn the_manifest_names_the_qualified_appraisal_over_500k_and_stays_quiet_below_it
     //    thresholds — without it, wiring the gate to $5,000 would go unnoticed.
     let (_d2, small) = donation_vault("20000.00");
     let out2 = tempfile::tempdir().unwrap();
-    cmd::admin::export_irs_pdf(&small, &pp(), out2.path(), 2024, &[], None)
-        .expect("the $20,000-donation full return exports");
+    cmd::admin::export_irs_pdf(
+        &small,
+        &pp(),
+        out2.path(),
+        2024,
+        &[],
+        None,
+        Default::default(),
+    )
+    .expect("the $20,000-donation full return exports");
     let man2 = std::fs::read_to_string(out2.path().join("manifest.txt")).unwrap();
     assert!(
         !man2.contains("qualified appraisal"),
@@ -1750,11 +1990,423 @@ fn a_live_year_refuses_the_crypto_slice_before_any_byte() {
     let (_dir, vault) = make_vault(&live_2026_events());
     let out = tempfile::tempdir().unwrap();
     let out_dir = out.path().join("slice-2026");
-    let err = cmd::admin::export_irs_pdf(&vault, &pp(), &out_dir, 2026, &[], None).unwrap_err();
+    let err =
+        cmd::admin::export_irs_pdf(&vault, &pp(), &out_dir, 2026, &[], None, Default::default())
+            .unwrap_err();
     let msg = err.to_string();
     assert!(
         msg.contains("Form 1099-DA answers") && msg.contains("income import"),
         "the slice refusal names the exit: {msg}"
     );
     assert!(!out_dir.exists(), "a refusal writes NO bytes");
+}
+
+// ── Form 1040-V, the payment voucher (spec SPEC_form_4868_1040v.md R4, task T4) ─────────────────
+//
+// The voucher's whole point is that it rides in the envelope WITHOUT being part of the stapled
+// return: *"Do not staple or attach this voucher to your payment or return."* Every assertion below
+// is about keeping those two facts apart — the file is written BESIDE the packet, and the manifest
+// names it in a block BELOW the stapling list.
+
+/// A TY2024 full-return vault that OWES: $250,000 of wages with NO federal withholding, so Form 1040
+/// line 37 is large and positive.
+fn owing_vault() -> (tempfile::TempDir, PathBuf, tempfile::TempDir) {
+    use btctax_core::tax::return_inputs::{Owner, W2};
+    full_return_vault(&real_events_2024(), |ri| {
+        ri.w2s = vec![W2 {
+            owner: Owner::Taxpayer,
+            employer: "ACME".into(),
+            box1_wages: dec!(250000),
+            box2_fed_withheld: dec!(0),
+            box3_ss_wages: dec!(168600),
+            box4_ss_withheld: dec!(10453.20),
+            box5_medicare_wages: dec!(250000),
+            ..Default::default()
+        }];
+    })
+}
+
+/// The stapling list is every `{seq}  {file}` / `  ATT  ` line the manifest prints before any
+/// free-form block. Derived from the file rather than a hand-list, so a new packet member is covered.
+fn stapling_list_lines(manifest: &str) -> Vec<&str> {
+    manifest
+        .lines()
+        .take_while(|l| !l.contains("ENCLOSE LOOSE"))
+        .collect()
+}
+
+/// ★★ THE END-TO-END KAT — `--pay-by-check` on a return that owes writes `f1040v.pdf` BESIDE the
+/// packet, box 3 equals Form 1040 line 37 read back from the written voucher, and the manifest gains
+/// its own block below the stapling list.
+#[test]
+fn pay_by_check_writes_a_voucher_beside_the_packet_with_line_37_in_box_3() {
+    let (_d, vault, out) = owing_vault();
+    let rep = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        &[],
+        None,
+        btctax_cli::cmd::admin::VoucherChoice {
+            pay_by_check: true,
+            pay: None,
+        },
+    )
+    .expect("a return that owes, paying by check, gets its voucher");
+
+    let path = rep
+        .form_1040v_path
+        .clone()
+        .expect("the voucher path rides out on the report");
+    assert_eq!(path, out.path().join("f1040v.pdf"));
+    assert!(path.exists());
+
+    // ★ BESIDE the packet, never IN it: `full_return_paths` is the stapling order.
+    assert!(
+        !rep.full_return_paths.contains(&path),
+        "the voucher must not be listed among the stapled forms"
+    );
+    assert!(
+        !rep.full_return_paths
+            .iter()
+            .any(|p| p.file_name().is_some_and(|n| n == "f1040v.pdf")),
+        "…under any prefix either"
+    );
+
+    // ★ Box 3 = Form 1040 line 37, read back OUT OF THE WRITTEN VOUCHER — not from a struct.
+    let doc = btctax_forms::testonly::load(&std::fs::read(&path).unwrap()).unwrap();
+    let fields = btctax_forms::testonly::collect_fields(&doc).unwrap();
+    let map = btctax_forms::testonly::Form1040VMap::ty2024();
+    let box3 = fields
+        .iter()
+        .find(|f| f.fqn == map.box3_amount)
+        .and_then(|f| btctax_forms::testonly::text_value(&doc, f.id))
+        .expect("box 3 carries a value");
+    // The same figure the packet's own 1040 prints on line 37.
+    let f1040 = std::fs::read(out.path().join("00_f1040.pdf")).unwrap();
+    let f1040_doc = btctax_forms::testonly::load(&f1040).unwrap();
+    let f1040_fields = btctax_forms::testonly::collect_fields(&f1040_doc).unwrap();
+    let f1040_map = btctax_forms::testonly::Form1040Map::ty2024();
+    let line37 = f1040_fields
+        .iter()
+        .find(|f| {
+            match f1040_map
+                .line37
+                .as_ref()
+                .expect("TY2024's 1040 map binds line 37")
+            {
+                btctax_forms::testonly::MoneyCell::Single(s) => &f.fqn == s,
+                btctax_forms::testonly::MoneyCell::Pair(p) => f.fqn == p.dollars_field,
+            }
+        })
+        .and_then(|f| btctax_forms::testonly::text_value(&f1040_doc, f.id))
+        .expect("the packet's 1040 prints line 37");
+    assert_eq!(
+        box3, line37,
+        "★ the voucher and the return it accompanies must agree about what is owed"
+    );
+
+    // ★ The manifest block: present, verbatim, and SEPARATE from the stapling list.
+    let manifest = std::fs::read_to_string(out.path().join("manifest.txt")).unwrap();
+    assert!(
+        manifest.contains(btctax_cli::cmd::admin::ENCLOSE_LOOSE_LINE),
+        "the manifest must carry the enclose-loose line:\n{manifest}"
+    );
+    let stapled = stapling_list_lines(&manifest);
+    assert!(
+        !stapled.iter().any(|l| l.contains("f1040v")),
+        "★ the voucher must NOT appear in the stapling list — the manifest is what a filer follows \
+         when assembling the envelope, and this is the one page the form says not to staple:\n{manifest}"
+    );
+    assert!(
+        stapled.iter().any(|l| l.contains("00_f1040.pdf")),
+        "premise: the stapling list is non-empty and really is the list:\n{manifest}"
+    );
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "the voucher carries the filer's SSN");
+    }
+}
+
+/// ★ KILL — without `--pay-by-check` a return that owes gets a NOTE, not a file. Most filers who owe
+/// pay online, and Direct Pay / EFTPS need no voucher — but silence about a balance due is the one
+/// answer a tax tool may not give.
+#[test]
+fn a_return_that_owes_without_the_flag_gets_the_note_and_no_voucher() {
+    let (_d, vault, out) = owing_vault();
+    let rep = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        &[],
+        None,
+        Default::default(),
+    )
+    .unwrap();
+
+    assert!(rep.form_1040v_path.is_none(), "no flag ⇒ no voucher");
+    assert!(
+        !out.path().join("f1040v.pdf").exists(),
+        "…and no file on disk"
+    );
+    let note = rep.form_1040v_note.expect("a balance due is never silent");
+    assert!(
+        note.contains("Direct Pay / EFTPS need no voucher; pass --pay-by-check for Form 1040-V"),
+        "the note names the alternative and the flag: {note}"
+    );
+    assert!(
+        !note.contains("IGNORED"),
+        "no --pay was given, so there is nothing to report as discarded: {note}"
+    );
+
+    // ★ `--pay` WITHOUT `--pay-by-check` is discarded — and the note says so. Not a refusal (that
+    // would cost the filer every form over one inapplicable flag), but not silent either: they typed
+    // an amount they meant to pay, and nothing else on the run would tell them it went nowhere.
+    let out2 = tempfile::tempdir().unwrap();
+    let rep2 = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out2.path(),
+        2024,
+        &[],
+        None,
+        btctax_cli::cmd::admin::VoucherChoice {
+            pay_by_check: false,
+            pay: Some(dec!(500)),
+        },
+    )
+    .unwrap();
+    assert!(rep2.form_1040v_path.is_none());
+    let note2 = rep2
+        .form_1040v_note
+        .expect("a discarded --pay is never silent");
+    assert!(
+        note2.contains("--pay $500 was IGNORED"),
+        "the note must name the flag it dropped: {note2}"
+    );
+    let manifest = std::fs::read_to_string(out.path().join("manifest.txt")).unwrap();
+    assert!(
+        !manifest.contains("ENCLOSE LOOSE"),
+        "and the manifest gains no block for a page that was not written"
+    );
+}
+
+/// ★ KILL — `--pay-by-check` on a return that owes NOTHING writes no voucher and says why. A voucher
+/// for $0 is not a payment.
+#[test]
+fn pay_by_check_on_a_refund_return_is_a_note_not_a_voucher() {
+    let (_d, vault, out) = full_return_vault(&real_events_2024(), |_| {});
+    let rep = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        &[],
+        None,
+        btctax_cli::cmd::admin::VoucherChoice {
+            pay_by_check: true,
+            pay: None,
+        },
+    )
+    .unwrap();
+    assert!(rep.form_1040v_path.is_none());
+    assert!(!out.path().join("f1040v.pdf").exists());
+    let note = rep
+        .form_1040v_note
+        .expect("asking for a voucher on a refund return deserves an answer");
+    assert!(
+        note.contains("owes nothing"),
+        "the note says why there is none: {note}"
+    );
+}
+
+/// ★ KILL — `--pay` above line 37, or negative, or with cents, is REFUSED.
+///
+/// The ceiling is the deliberate asymmetry with `btctax extension --pay`, which has none: the
+/// voucher pays a COMPUTED balance, so more than it is a slip; Form 4868 line 7 pays against an
+/// ESTIMATE, which a filer may overshoot on purpose to limit interest. The refusal says so.
+#[test]
+fn a_partial_payment_above_line_37_or_negative_or_fractional_is_refused() {
+    let (_d, vault, out) = owing_vault();
+    let call = |pay: btctax_core::Usd| {
+        cmd::admin::export_irs_pdf(
+            &vault,
+            &pp(),
+            out.path(),
+            2024,
+            &[],
+            None,
+            btctax_cli::cmd::admin::VoucherChoice {
+                pay_by_check: true,
+                pay: Some(pay),
+            },
+        )
+    };
+
+    let err = call(dec!(99_999_999)).expect_err("above line 37 must refuse");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("more than the") && msg.contains("btctax extension --pay"),
+        "the refusal names the ceiling AND the flag that has none: {msg}"
+    );
+
+    assert!(call(dec!(-1))
+        .expect_err("a negative payment is not a payment")
+        .to_string()
+        .contains("--pay must be >= 0"));
+    assert!(call(dec!(100.25))
+        .expect_err("cents disagree with a whole-dollar return")
+        .to_string()
+        .contains("WHOLE DOLLARS"));
+
+    // …and a PARTIAL payment below line 37 is allowed, with a note about the interest that runs.
+    let rep = call(dec!(1000)).expect("a partial payment is a legitimate choice");
+    assert!(rep.form_1040v_path.is_some());
+    let note = rep
+        .form_1040v_note
+        .expect("a partial payment is never silent");
+    assert!(
+        note.contains("PARTIAL payment of $1000") && note.contains("interest"),
+        "the note names what is left unpaid: {note}"
+    );
+}
+
+/// ★ KILL (I-7) — `--pay-by-check` on a crypto-slice year REFUSES, naming the reason. That year
+/// computes no Form 1040 at all, so there is no line 37 for box 3 to carry, and a voucher whose
+/// amount btctax invented would tell the Service the filer is paying a figure no return supports.
+#[test]
+fn pay_by_check_on_a_crypto_slice_year_refuses_naming_the_reason() {
+    let (_dir, vault) = make_vault(&real_events_2024());
+    let out = tempfile::tempdir().unwrap();
+    let err = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        &[],
+        None,
+        btctax_cli::cmd::admin::VoucherChoice {
+            pay_by_check: true,
+            pay: None,
+        },
+    )
+    .expect_err("there is no line 37 on a crypto-slice year");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("there is no Form 1040 line 37 for 2024")
+            && msg.contains("Form 1040-V accompanies a full return")
+            && msg.contains("income import"),
+        "the refusal names the reason and the exit: {msg}"
+    );
+    assert!(
+        wrote_nothing(out.path()),
+        "★ and it refuses BEFORE any byte — the slice is not written either"
+    );
+}
+
+/// ★ KILL — a pseudo-reconciled voucher is attestation-gated and DRAFT-watermarked, exactly like the
+/// packet it rides with (spec C-2). A page with a CHEQUE attached may not be the exception.
+#[test]
+fn a_pseudo_voucher_is_gated_and_watermarked_like_the_packet() {
+    use btctax_core::tax::return_inputs::{Owner, ReturnInputs, W2};
+    use btctax_core::tax::types::FilingStatus;
+
+    let (_d2, pseudo) = make_vault(&pseudo_events());
+    cmd::reconcile::pseudo_set_mode(&pseudo, &pp(), true).unwrap();
+    {
+        let mut s = Session::open(&pseudo, &pp()).unwrap();
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: btctax_core::tax::testonly::not_a_dependent(),
+            ..Default::default()
+        };
+        ri.header.taxpayer = btctax_core::tax::return_inputs::Person {
+            first_name: "Pat".into(),
+            last_name: "Roe".into(),
+            ssn: "222-33-4444".into(),
+            ..Default::default()
+        };
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        ri.w2s = vec![W2 {
+            owner: Owner::Taxpayer,
+            employer: "ACME".into(),
+            box1_wages: dec!(250000),
+            box2_fed_withheld: dec!(0),
+            box3_ss_wages: dec!(168600),
+            box4_ss_withheld: dec!(10453.20),
+            box5_medicare_wages: dec!(250000),
+            ..Default::default()
+        }];
+        btctax_cli::return_inputs::set(s.conn(), 2024, &ri).unwrap();
+        s.save().unwrap();
+    }
+    let out = tempfile::tempdir().unwrap();
+    let voucher = btctax_cli::cmd::admin::VoucherChoice {
+        pay_by_check: true,
+        pay: None,
+    };
+
+    let err = cmd::admin::export_irs_pdf(&pseudo, &pp(), out.path(), 2024, &[], None, voucher)
+        .expect_err("a fictional draft may not print a payment voucher unattested");
+    assert!(err.to_string().contains(ATTEST_PHRASE), "{err}");
+    assert!(
+        !out.path().join("f1040v.pdf").exists(),
+        "a refused attestation writes no voucher"
+    );
+
+    let out2 = tempfile::tempdir().unwrap();
+    let rep = cmd::admin::export_irs_pdf(
+        &pseudo,
+        &pp(),
+        out2.path(),
+        2024,
+        &[],
+        Some(ATTEST_PHRASE),
+        voucher,
+    )
+    .expect("with the phrase the DRAFT packet + voucher are written ON PURPOSE");
+    let path = rep.form_1040v_path.expect("the voucher is written");
+    assert!(
+        contains(&std::fs::read(&path).unwrap(), b"NOT FOR FILING"),
+        "★ the VOUCHER page carries the DRAFT watermark, not just the packet"
+    );
+}
+
+/// ★★ KILL (structural, spec R4) — **no code path hands either new stem to `FiledPacket::stapled`.**
+///
+/// `stapled` takes any `Vec<NamedForm>`, so this is not held by the type system — the spec says so
+/// plainly ("held by test — it is not structural"). The population is the SOURCE: every file that
+/// can reach the packet constructor is scanned for a mention of the two stems beside it.
+#[test]
+fn no_code_path_pushes_the_4868_or_the_voucher_into_the_stapled_packet() {
+    let packet_src = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../btctax-forms/src/packet.rs"
+    ))
+    .expect("the packet source is readable from the test");
+
+    // `fill_full_return` is the ONLY producer of the `Vec<NamedForm>` that reaches `stapled`, and it
+    // destructures `PrintedForms` with no `..` — so a form can only get in there by being pushed by
+    // name inside this file. Neither stem is.
+    let body = packet_src
+        .split("pub fn fill_full_return")
+        .nth(1)
+        .expect("fill_full_return is in packet.rs");
+    for stem in ["f4868", "f1040v"] {
+        assert!(
+            !body.contains(&format!("\"{stem}\"")),
+            "★ {stem} must never be pushed into the packet: the manifest's stapling order is what a \
+             filer follows, and both forms say in their own words not to attach them"
+        );
+    }
+    // …and the packet's own sequence table gives each of them `None`, by an explicit arm.
+    assert_eq!(btctax_forms::attachment_sequence("f4868", 2024), None);
+    assert_eq!(btctax_forms::attachment_sequence("f1040v", 2024), None);
+    assert_eq!(btctax_forms::attachment_sequence("f4868", 2025), None);
+    assert_eq!(btctax_forms::attachment_sequence("f1040v", 2025), None);
 }

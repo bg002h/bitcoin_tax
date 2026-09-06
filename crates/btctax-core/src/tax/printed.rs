@@ -1621,8 +1621,16 @@ pub struct Schedule3Lines {
     pub line15: Usd,
 }
 
-/// Derive the printed Schedule 3 chain. Returns `None` when there is neither a foreign tax credit nor
-/// an excess-Social-Security credit — the schedule is then not filed.
+/// Derive the printed Schedule 3 chain. Returns `None` only when the schedule has NOTHING to print:
+/// no nonrefundable credit (line 8) AND no other payment (line 15 — which is line 10, the amount paid
+/// with a request for an extension, plus line 11, the §6413(c) excess Social Security). Any one of the
+/// three files the schedule.
+///
+/// ★ The mention of line 10 is load-bearing and was MISSING from this sentence: it read "neither a
+/// foreign tax credit nor an excess-Social-Security credit", which says an extension payment alone
+/// leaves `sch_3` at `None`. It does not — `line15 = line10 + line11` — and Form 4868 line 5 subtracts
+/// exactly this `line10`, so a reader who trusted the old sentence would conclude the subtraction was
+/// dead code (spec `SPEC_form_4868_1040v.md` C-1).
 pub fn schedule_3_lines(ar: &AbsoluteReturn) -> Option<Schedule3Lines> {
     let line1 = round_dollar(ar.foreign_tax_credit);
     let line8 = line1; // lines 2-4, 5a, 5b, 7 are all conservatively omitted (blank)

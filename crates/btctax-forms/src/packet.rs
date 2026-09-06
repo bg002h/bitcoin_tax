@@ -93,6 +93,17 @@ pub fn attachment_sequence(stem: &str, year: i32) -> Option<&'static str> {
         // Rev. 12-2025 renumbered Form 8283 from 155 to 36; TY2017 (Rev. 12-2014) and TY2024
         // (Rev. 12-2023) print 155.
         "f8283" => Some(if year >= 2025 { "36" } else { "155" }),
+        // ★ NEITHER OF THESE IS A PACKET MEMBER, and each is `None` by DECISION rather than by
+        // falling through the catch-all below — the shape this repo distrusts, since `None == None`
+        // makes the row gate green either way (`map_rows.rs::packet_sequences_agree_with_every_map_row`).
+        // Both are measured: `grep -c "Sequence No"` on all four committed extracts is 0.
+        //
+        // Form 4868 is MAILED SEPARATELY, before the return exists — its own page 2 says *"Don't
+        // attach a copy of Form 4868 to your return."* Form 1040-V rides in the return's envelope but
+        // is ENCLOSED LOOSE, never stapled: *"Do not staple or attach this voucher to your payment or
+        // return."* A sequence number is a stapling position, so a number on either would instruct
+        // the filer to do the one thing the form forbids.
+        "f4868" | "f1040v" => None,
         _ => None,
     }
 }

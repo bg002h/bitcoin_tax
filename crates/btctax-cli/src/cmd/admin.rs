@@ -281,6 +281,25 @@ pub fn export_pseudo_active(vault_path: &Path, pp: &Passphrase) -> Result<bool, 
     Ok(state.pseudo_active())
 }
 
+/// The **Form 1040-V** decision the filer makes at export time (spec R4).
+///
+/// It is a CHOICE, never an inference. Most filers who owe pay online — *"Save time by paying online."*
+/// says the voucher's own page 2 — and IRS Direct Pay / EFTPS need no voucher at all; printing one
+/// unasked would put a page in the envelope that the return does not need and the form says not to
+/// staple. So the default is *no voucher, and a note saying it exists*.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct VoucherChoice {
+    /// `--pay-by-check` — the filer is enclosing a check or money order, so print Form 1040-V.
+    pub pay_by_check: bool,
+    /// `--pay <whole dollars>` — a PARTIAL payment, overriding Form 1040 line 37 in box 3.
+    ///
+    /// ★ Its ceiling is line 37, and that asymmetry with `btctax extension --pay` is deliberate (spec,
+    /// box 3): the voucher pays a COMPUTED balance, so more than it is a filer error rather than a
+    /// choice the form names — while the 4868's line 7 is an estimate the filer may deliberately
+    /// overshoot to limit interest.
+    pub pay: Option<Usd>,
+}
+
 /// Outcome of `export_irs_pdf`: the written PDF paths, the unresolved-Hard-blocker count (same
 /// INFORMATIONAL disclosure as `export-snapshot`), whether the fill was watermarked (pseudo-active),
 /// the count of rows that MIGHT belong on a separate broker-reported 8949 (the [I5] advisory — the
@@ -325,6 +344,16 @@ pub struct IrsPdfReport {
     /// promoted-basis disposal leg files in `tax_year` (and selected). Always `None` on the full-return
     /// path — its 8275 is inside `full_return_paths` instead (sequence-prefixed, e.g. `92_f8275.pdf`).
     pub form_8275_path: Option<PathBuf>,
+    /// ★ **Form 1040-V** (spec R4) — the payment voucher, written BESIDE the packet when the return
+    /// owes (`line37 > 0`) and the filer passed `--pay-by-check`. Deliberately NOT in
+    /// [`Self::full_return_paths`]: that list is the STAPLING ORDER, and the voucher is enclosed
+    /// LOOSE (*"Do not staple or attach this voucher to your payment or return."*).
+    pub form_1040v_path: Option<PathBuf>,
+    /// The voucher NOTE, when there is one to give: the return owes but no `--pay-by-check` was
+    /// passed (Direct Pay / EFTPS need no voucher), or the flag was passed on a return that owes
+    /// nothing. `None` when neither applies. Silence about a balance due is the one answer a tax tool
+    /// may not give.
+    pub form_1040v_note: Option<String>,
     /// ★ The FULL-RETURN packet's files, in Attachment Sequence order (empty on the crypto-slice path).
     /// The two paths write NON-OVERLAPPING names, so no two runs can be collated into a chimera return.
     pub full_return_paths: Vec<PathBuf>,
@@ -587,10 +616,13 @@ pub fn export_irs_pdf(
     tax_year: i32,
     forms: &[FormArg],
     attest: Option<&str>,
+    voucher: VoucherChoice,
 ) -> Result<IrsPdfReport, CliError> {
     let session = Session::open(vault_path, pp)?;
     let (events, state, _cfg) = session.load_events_and_project()?;
-    export_irs_pdf_from_session(&session, &state, &events, out_dir, tax_year, forms, attest)
+    export_irs_pdf_from_session(
+        &session, &state, &events, out_dir, tax_year, forms, attest, voucher,
+    )
 }
 
 /// The `&Session` inner of `export_irs_pdf` (★ arch-C-1): fill the OFFICIAL IRS PDFs for `tax_year` over
@@ -606,6 +638,7 @@ pub fn export_irs_pdf(
 /// ★ arch-m-new-1/n-new-1: the full-vs-slice `return_inputs::exists` dispatch lives ONCE, HERE — both
 /// the thin `export_irs_pdf` opener AND the chokepoint's `apply_export` (`chokepoint/mod.rs`) route
 /// through this ONE fn, so the dispatch is never duplicated.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn export_irs_pdf_from_session(
     session: &Session,
     state: &btctax_core::state::LedgerState,
@@ -614,6 +647,7 @@ pub(crate) fn export_irs_pdf_from_session(
     tax_year: i32,
     forms: &[FormArg],
     attest: Option<&str>,
+    voucher: VoucherChoice,
 ) -> Result<IrsPdfReport, CliError> {
     // ★ THE DISPATCH (P6.5). Exactly one function decides which pipeline runs, and the two write
     // NON-OVERLAPPING filenames, so artifacts from two runs can never be collated into a chimera
@@ -629,7 +663,8 @@ pub(crate) fn export_irs_pdf_from_session(
     // in BOTH directions.
     if crate::return_inputs::exists(session.conn(), tax_year)? {
         // The full-return pipeline runs the BG-D8 gate itself (checked first there too).
-        let mut report = export_full_return(session, state, events, out_dir, tax_year, attest)?;
+        let mut report =
+            export_full_return(session, state, events, out_dir, tax_year, attest, voucher)?;
         // UX-P4-5: a --forms slice cannot be honored on a full-return year (the 14-form packet is
         // jointly computed; a slice of it is tax-unsound). The packet still writes in full; flag the
         // ignored slice so the caller warns.
@@ -638,6 +673,18 @@ pub(crate) fn export_irs_pdf_from_session(
         report.forms_ignored_full_return =
             !forms.is_empty() && forms.iter().any(|f| *f != FormArg::FullReturn);
         return Ok(report);
+    }
+
+    // ★★★ (I-7) `--pay-by-check` on a year with NO full-return inputs must REFUSE, naming the reason.
+    // The crypto slice computes no Form 1040 at all, so there is no line 37 for box 3 to carry — and a
+    // voucher whose amount btctax invented would tell the Service the filer is paying a figure no
+    // return supports. Writing the slice silently and skipping the voucher the filer asked for is the
+    // one answer a tax tool may not give.
+    if voucher.pay_by_check {
+        return Err(CliError::Usage(format!(
+            "there is no Form 1040 line 37 for {tax_year} — Form 1040-V accompanies a full return; \
+             see `income import`"
+        )));
     }
 
     // ★★★ `--forms full-return` on a year with NO full-return inputs must REFUSE, loudly. `wants()` is
@@ -911,6 +958,10 @@ pub(crate) fn export_irs_pdf_from_session(
         // 1040"), it is never signed or filed, and the note printed for it already says every other
         // line is the filer's.
         hand_marks: Vec::new(),
+        // The crypto slice never reaches a Form 1040 line 37, and `--pay-by-check` already refused
+        // above — so there is neither a voucher nor a note to give.
+        form_1040v_path: None,
+        form_1040v_note: None,
         full_return_paths: Vec::new(),
         full_return_manifest: None,
         forms_ignored_full_return: false, // crypto-slice path honors --forms
@@ -934,6 +985,133 @@ pub(crate) fn export_irs_pdf_from_session(
         form_8275_path,
         experimental_notice_active,
     })
+}
+
+/// The literal sentence the manifest's voucher block leads with. Kept as a constant so the KAT and
+/// the file assert the SAME string — the manifest is what tells a filer what to put in the envelope,
+/// and this is the line that stops them stapling it.
+pub const ENCLOSE_LOOSE_LINE: &str = "ENCLOSE LOOSE — do not staple: f1040v.pdf with the check";
+
+/// Write Form 1040-V beside the packet when the return owes AND the filer asked for it, appending
+/// its own block to `manifest`. Returns `(path, note)` for [`IrsPdfReport`].
+///
+/// The four cases, all of them from spec R4 and none of them silent:
+///
+/// | line 37 | `--pay-by-check` | outcome |
+/// |---|---|---|
+/// | `> 0` | yes | the voucher, plus the manifest block |
+/// | `> 0` | no  | NO file, and a note naming Direct Pay / EFTPS and the flag |
+/// | `0`   | yes | NO file, and a note saying the return owes nothing |
+/// | `0`   | no  | nothing at all — there is nothing to say |
+///
+/// `--pay` (a partial payment) is refused above line 37 or below zero. That ceiling is the
+/// asymmetry with `btctax extension --pay`, which has none: the voucher pays a COMPUTED balance, so
+/// more than it is a filer error; the 4868's line 7 pays against an ESTIMATE, which a filer may
+/// deliberately overshoot to limit interest.
+fn write_payment_voucher(
+    printed: &btctax_core::tax::packet::PrintedReturn,
+    out_dir: &Path,
+    tax_year: i32,
+    voucher: VoucherChoice,
+    watermarked: bool,
+    manifest: &mut String,
+) -> Result<(Option<PathBuf>, Option<String>), CliError> {
+    use std::fmt::Write as _;
+
+    let owed = printed.forms.f1040.line37;
+
+    if owed <= Usd::ZERO {
+        let note = voucher.pay_by_check.then(|| {
+            format!(
+                "no Form 1040-V was written — the {tax_year} return owes nothing (Form 1040 line 37 \
+                 is ${owed}). A payment voucher accompanies a payment; there is none to make."
+            )
+        });
+        return Ok((None, note));
+    }
+
+    if !voucher.pay_by_check {
+        // ★ A note, NOT a refusal and NOT a voucher. Most filers who owe pay online — the voucher's
+        //   own page 2 opens *"Save time by paying online."* — and Direct Pay / EFTPS need no
+        //   voucher at all. But a filer who is about to post a cheque needs to know the page exists,
+        //   and silence about a balance due is the one answer a tax tool may not give.
+        //
+        // ★★ A `--pay` given WITHOUT `--pay-by-check` is discarded here, and the note says so
+        //    outright. It is not a refusal — refusing the whole packet over an inapplicable flag
+        //    would cost the filer every form to make a point about one — but it may not be silent
+        //    either: they typed an amount they meant to pay, and nothing else on the run would tell
+        //    them it went nowhere.
+        let ignored = match voucher.pay {
+            Some(p) => format!(
+                " (--pay ${p} was IGNORED: it sets Form 1040-V box 3, and no voucher was written)"
+            ),
+            None => String::new(),
+        };
+        return Ok((
+            None,
+            Some(format!(
+                "amount owed ${owed} — Direct Pay / EFTPS need no voucher; pass --pay-by-check for \
+                 Form 1040-V{ignored}"
+            )),
+        ));
+    }
+
+    // The amount: line 37 as printed, or the partial payment the filer chose.
+    let amount = match voucher.pay {
+        None => owed,
+        Some(p) if p < Usd::ZERO => {
+            return Err(CliError::Usage(format!(
+                "--pay must be >= 0 (got {p}) — a negative payment is not a payment"
+            )))
+        }
+        Some(p) if p > owed => {
+            return Err(CliError::Usage(format!(
+                "--pay ${p} is more than the ${owed} this return owes (Form 1040 line 37). The \
+                 voucher pays a COMPUTED balance, so paying above it is a slip rather than a choice \
+                 the form names — drop --pay to pay the whole ${owed}, or lower it for a partial \
+                 payment. (`btctax extension --pay` has no such ceiling: line 7 there pays against an \
+                 ESTIMATE, which you may deliberately overshoot to limit interest.)"
+            )))
+        }
+        Some(p) if p != p.trunc() => {
+            return Err(CliError::Usage(format!(
+                "--pay must be WHOLE DOLLARS (got {p}). The return is printed in whole dollars, so a \
+                 voucher carrying cents would disagree with the Form 1040 it accompanies about what \
+                 is being paid."
+            )))
+        }
+        Some(p) => p,
+    };
+
+    let bytes = btctax_forms::fill_form_1040v(printed, tax_year, amount)?;
+    let bytes = if watermarked {
+        btctax_forms::stamp_draft_watermark(&bytes)?
+    } else {
+        bytes
+    };
+    let path = out_dir.join("f1040v.pdf");
+    write_bytes_owner_only(&path, &bytes)?;
+
+    // ★ A block of its OWN, below the stapling list. The blank line and the un-indented heading are
+    //   what make it read as a separate instruction rather than one more thing to staple.
+    let _ = write!(
+        manifest,
+        "\n{ENCLOSE_LOOSE_LINE}\n  \
+         Form 1040-V is the payment voucher for the ${amount} you are paying by check or money order. \
+         Put it in the envelope with your payment, LOOSE — the voucher says \"Do not staple or attach \
+         this voucher to your payment or return.\"\n  \
+         Make the check or money order payable to \"United States Treasury\", and write your SSN, your \
+         daytime phone number and \"{tax_year} Form 1040\" on it.\n"
+    );
+
+    let note = (amount < owed).then(|| {
+        format!(
+            "Form 1040-V carries a PARTIAL payment of ${amount} against the ${owed} owed (Form 1040 \
+             line 37) — interest and any late-payment penalty run on the ${rest} left unpaid.",
+            rest = owed - amount
+        )
+    });
+    Ok((Some(path), note))
 }
 
 /// The Form 8275 Part II narrative overflow refusal (T-f8275-part-ii-overflow round 2 finding 2) —
@@ -993,34 +1171,37 @@ pub fn backup_key(vault_path: &Path, pp: &Passphrase, out_path: &Path) -> Result
     Ok(())
 }
 
-/// ★ **The full-return export** (P6.3b / P6.5) — the whole filable packet, not the crypto slice.
+/// The screened, computed return that BOTH full-return-shaped paths start from: the packet export
+/// (`export_full_return`) and the extension application (`extension`).
 ///
-/// Runs the same fail-closed screens the report runs (a return the report will not compute is a return
-/// the exporter must not print), assembles the printed packet in CORE, and fills it ALL-OR-NOTHING: if
-/// any member form refuses, zero bytes reach the disk. A 1040 whose line 2b cites a Schedule B that is
-/// not attached is a wrong return, so partial emission would be a fail-open.
+/// ★ It exists so spec R2's *"`export_full_return`'s three refusals, reused as they stand and in its
+/// order"* is STRUCTURAL rather than a promise. The three are `no full-return tables for {y}`, `no
+/// return_inputs stored for {y}`, and the `not computable … — no forms were written` screens; a
+/// second hand-copy of them in the extension arm is exactly the seam this repo's B3 note is about —
+/// each lane green, the product wrong where they meet.
 ///
-/// **The packet exports CLEAN** (no DRAFT watermark, no attestation) — the user's §9 decision, folded
-/// into the SPEC. The one exception is PSEUDO-reconciled figures, which are FICTIONAL and can never be
-/// filed: those are watermarked regardless, and that gate composes with (and dominates) everything else.
-fn export_full_return(
+/// The tables are loaded by the CALLER and borrowed here, because `params` and `table` are references
+/// into them and must outlive this call.
+struct ScreenedReturn<'a> {
+    params: &'a btctax_core::tax::tables::FullReturnParams,
+    table: &'a btctax_core::tax::tables::TaxTable,
+    ri: btctax_core::tax::return_inputs::ReturnInputs,
+    ar: btctax_core::tax::return_1040::AbsoluteReturn,
+    regime: btctax_core::InformationReturnRegime,
+}
+
+/// The year's tables, the stored inputs, and the three fail-closed screens the report runs — in the
+/// report's own order. A refusal here has written NO bytes, by construction: nothing in it touches
+/// the filesystem.
+fn screen_full_return<'a>(
     session: &Session,
     state: &btctax_core::state::LedgerState,
-    events: &[LedgerEvent],
-    out_dir: &Path,
     tax_year: i32,
-    attest: Option<&str>,
-) -> Result<IrsPdfReport, CliError> {
-    use btctax_adapters::{BundledFullReturnTables, BundledTaxTables};
+    tables: &'a BundledTaxTables,
+    fr_tables: &'a btctax_adapters::BundledFullReturnTables,
+) -> Result<ScreenedReturn<'a>, CliError> {
     use btctax_core::tax::tables::{FullReturnTables, TaxTables};
-    use std::fmt::Write as _;
 
-    // BG-D8 completeness gate — checked FIRST (before the tables lookup, the fail-closed screens, and any
-    // byte written): a promoted-basis leg without its complete Form 8275 is a HARD refusal.
-    promote_export_gate(state, events, Some(tax_year))?;
-
-    let tables = BundledTaxTables::load();
-    let fr_tables = BundledFullReturnTables::load();
     let (Some(params), Some(table)) = (
         fr_tables.full_return_for(tax_year),
         tables.table_for(tax_year),
@@ -1057,6 +1238,51 @@ fn export_full_return(
     {
         return Err(refuse(r));
     }
+    Ok(ScreenedReturn {
+        params,
+        table,
+        ri,
+        ar,
+        regime,
+    })
+}
+
+/// ★ **The full-return export** (P6.3b / P6.5) — the whole filable packet, not the crypto slice.
+///
+/// Runs the same fail-closed screens the report runs (a return the report will not compute is a return
+/// the exporter must not print), assembles the printed packet in CORE, and fills it ALL-OR-NOTHING: if
+/// any member form refuses, zero bytes reach the disk. A 1040 whose line 2b cites a Schedule B that is
+/// not attached is a wrong return, so partial emission would be a fail-open.
+///
+/// **The packet exports CLEAN** (no DRAFT watermark, no attestation) — the user's §9 decision, folded
+/// into the SPEC. The one exception is PSEUDO-reconciled figures, which are FICTIONAL and can never be
+/// filed: those are watermarked regardless, and that gate composes with (and dominates) everything else.
+#[allow(clippy::too_many_arguments)]
+fn export_full_return(
+    session: &Session,
+    state: &btctax_core::state::LedgerState,
+    events: &[LedgerEvent],
+    out_dir: &Path,
+    tax_year: i32,
+    attest: Option<&str>,
+    voucher: VoucherChoice,
+) -> Result<IrsPdfReport, CliError> {
+    use btctax_adapters::{BundledFullReturnTables, BundledTaxTables};
+    use std::fmt::Write as _;
+
+    // BG-D8 completeness gate — checked FIRST (before the tables lookup, the fail-closed screens, and any
+    // byte written): a promoted-basis leg without its complete Form 8275 is a HARD refusal.
+    promote_export_gate(state, events, Some(tax_year))?;
+
+    let tables = BundledTaxTables::load();
+    let fr_tables = BundledFullReturnTables::load();
+    let ScreenedReturn {
+        params,
+        table,
+        ri,
+        ar,
+        regime,
+    } = screen_full_return(session, state, tax_year, &tables, &fr_tables)?;
     // ★ §G-19d — the same advisories `report --tax-year` shows, carried out on the report so the
     // EXPORT path surfaces them too. Derived from the identical `advisories_for` call, never a second
     // list: two derivations would drift, and the one the filer saw would depend on which command they
@@ -1252,6 +1478,23 @@ fn export_full_return(
     // belongs in the stapling list. N4's block below is a set of MARKS ON FORMS the filer must make
     // by hand. The appraisal is deliberately NOT folded into the hand-marks list: it is not a mark,
     // and it is not the filer's to write — only a qualified appraiser can produce it.
+    // ★★★ FORM 1040-V (spec R4) — the payment voucher, and its own manifest block.
+    //
+    // It goes in the envelope but NOT in the stapling list above, and the two facts are the whole
+    // point: the voucher says on its own face *"Do not staple or attach this voucher to your payment
+    // or return."*, and its instructions again — *"Don't staple or otherwise attach your payment or
+    // Form 1040-V"* *"to your return or to each other. Instead, just put them loose in"* *"the
+    // envelope."* So it is written BESIDE the packet, listed BELOW the stapling list in a block of its
+    // own, and never handed to `FiledPacket::stapled` (whose output IS the stapling order).
+    let (form_1040v_path, form_1040v_note) = write_payment_voucher(
+        &printed,
+        out_dir,
+        tax_year,
+        voucher,
+        watermarked,
+        &mut manifest,
+    )?;
+
     let marks = hand_marks(&printed);
     manifest.push_str(&hand_marks_block(&marks));
     let manifest_path = out_dir.join("manifest.txt");
@@ -1288,6 +1531,8 @@ fn export_full_return(
             .as_ref()
             .map_or(0, |f| f.possibly_broker_reported),
         regime,
+        form_1040v_path,
+        form_1040v_note,
         full_return_paths: paths,
         full_return_manifest: Some(manifest_path),
         forms_ignored_full_return: false, // set by the dispatch (which has `forms`), not here
@@ -1319,6 +1564,217 @@ fn export_full_return(
         // (`92_f8275.pdf`), not this crypto-slice-only bare-named field.
         form_8275_path: None,
         experimental_notice_active,
+    })
+}
+
+// ── `btctax extension` — Form 4868 (spec SPEC_form_4868_1040v.md R2) ────────────────────────────
+
+/// What `btctax extension` filled and what the filer needs told about it.
+///
+/// The LINE VALUES ride out here rather than being re-derived for the screen: `btctax_forms`'
+/// [`btctax_forms::form_4868_lines`] is asked once, the PDF and this report are both rendered from
+/// that one answer, and so the paper and the terminal cannot disagree about what is on line 6.
+#[derive(Debug, Clone)]
+pub struct ExtensionReport {
+    pub tax_year: i32,
+    /// The written `f4868.pdf` (owner-only, like every other export).
+    pub path: PathBuf,
+    /// The ledger was pseudo-reconciled, so every page carries the DRAFT watermark.
+    pub watermarked: bool,
+    /// Form 4868 Part II exactly as printed — `None` on a line means it is BLANK on the paper.
+    pub lines: btctax_forms::Form4868Lines,
+    /// The date this application is due: the year record's `return_due`, REPLACED by the
+    /// out-of-country June 15 (§7503-shifted) when line 8 is checked.
+    pub due: time::Date,
+    /// The clock (`BTCTAX_NOW`) is past [`Self::due`]. A WARNING, never a refusal: a filer who is
+    /// already late still needs the form, and a useless form is not worse than silence.
+    pub past_due: bool,
+    /// Line 8 was checked.
+    pub out_of_country: bool,
+    /// `Some(N)` when the RETURN already prints an extension payment on Schedule 3 line 10 (I-6).
+    /// Not a refusal — the field records a payment, not a filing, and recording first and printing
+    /// second is the natural order.
+    pub recorded_extension_payment: Option<Usd>,
+}
+
+/// The date Form 4868 is due, given the year's committed `return_due` and the line-8 choice.
+///
+/// ★ The out-of-country date is **June 15 of the following year, §7503-shifted** — the date the form
+/// itself names (*"If you're out of the country"* *"and file a calendar year income tax return, you
+/// can pay the tax and"* *"file your return or this form by June 15, 2026."*) — and NOT
+/// `return_due + 2 months`. The two differ whenever the April date was itself shifted: TY2017's
+/// committed `return_due` is **2018-04-17** (the Emancipation Day shift), and 04-17 + 2 months is
+/// 06-17 against the real **2018-06-15**. Pinned by test in both directions.
+///
+/// Pure, and deliberately takes the record's date rather than reading it, so a TY2017-shaped record
+/// can be exercised on a path TY2017 itself cannot reach (it has no full-return tables, so the
+/// command refuses long before the warning).
+pub fn extension_due_date(
+    tax_year: i32,
+    return_due: time::Date,
+    out_of_country: bool,
+) -> time::Date {
+    if !out_of_country {
+        // The committed `return_due` has §7503 already applied — shifting it again would move a
+        // correct date.
+        return return_due;
+    }
+    let june_15 = time::Date::from_calendar_date(tax_year + 1, time::Month::June, 15)
+        .expect("June 15 exists in every year");
+    btctax_forms::year_record::section_7503_shift(june_15)
+}
+
+/// ★ **The extension application** (spec R2) — Form 4868, written ALONE into `--out`.
+///
+/// It is not a packet member and never rides with the return: the form's own page 2 says *"Don't
+/// attach a copy of Form 4868 to your return."*, and it is mailed weeks earlier in its own envelope.
+///
+/// **`promote_export_gate` is deliberately NOT applied**, and the spec says why (R2): *"a promoted
+/// tranche does lower line 24 and so lines 4/6, but the §1.6662-4(f) disclosure obligation attaches
+/// to the RETURN Form 8275 is filed with, not to the extension application; the 1040-V rides the
+/// packet path, whose first statement is the gate … so it inherits it (decision, not gap)."*
+///
+/// Every other gate the packet export runs, this runs — the three fail-closed refusals through the
+/// shared [`screen_full_return`], and the pseudo-reconciled attestation + DRAFT watermark, because a
+/// form MONEY is attached to may not be the exception (C-2).
+#[allow(clippy::too_many_arguments)]
+pub fn extension(
+    vault_path: &Path,
+    pp: &Passphrase,
+    out_dir: &Path,
+    tax_year: i32,
+    pay: Option<Usd>,
+    out_of_country: bool,
+    attest: Option<&str>,
+    now: time::OffsetDateTime,
+) -> Result<ExtensionReport, CliError> {
+    let session = Session::open(vault_path, pp)?;
+    let (events, state, _cfg) = session.load_events_and_project()?;
+    extension_from_session(
+        &session,
+        &state,
+        &events,
+        out_dir,
+        tax_year,
+        pay,
+        out_of_country,
+        attest,
+        now,
+    )
+}
+
+/// The `&Session` inner of [`extension`] — no `Session::open`, no re-project.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn extension_from_session(
+    session: &Session,
+    state: &btctax_core::state::LedgerState,
+    events: &[LedgerEvent],
+    out_dir: &Path,
+    tax_year: i32,
+    pay: Option<Usd>,
+    out_of_country: bool,
+    attest: Option<&str>,
+    now: time::OffsetDateTime,
+) -> Result<ExtensionReport, CliError> {
+    use btctax_adapters::{BundledFullReturnTables, BundledTaxTables};
+
+    // (1)-(3) The packet export's own three refusals, reused as they stand and in its order — the
+    // SAME function it calls, so the wording cannot drift (spec R2). No estimate exists for a year
+    // that will not compute, and the instructions demand one *"as accurate as you can"*.
+    let tables = BundledTaxTables::load();
+    let fr_tables = BundledFullReturnTables::load();
+    let screened = screen_full_return(session, state, tax_year, &tables, &fr_tables)?;
+
+    // (4) `--out` is the RETURN's envelope directory. The 4868 is mailed separately and weeks
+    // earlier; an unlabelled copy sitting in the return's envelope is the one thing the form
+    // forbids, and a filer who collated that directory by filename would attach it.
+    if out_dir.join("manifest.txt").exists() {
+        return Err(CliError::Usage(format!(
+            "{} already holds a manifest.txt — that is a full-return packet directory, and Form 4868 \
+             is MAILED SEPARATELY, before the return exists. The form's own page 2 says \"Don't attach \
+             a copy of Form 4868 to your return.\", so an unlabelled copy in the return's envelope is \
+             exactly what it forbids. Write the extension to its own --out directory.",
+            out_dir.display()
+        )));
+    }
+
+    // (5) `--pay`. Negative or with cents is refused; ABOVE line 6 is allowed — paying ahead of an
+    // estimate is the filer's own choice, and the instructions bless paying less as well.
+    if let Some(p) = pay {
+        if p < Usd::ZERO {
+            return Err(CliError::Usage(format!(
+                "--pay must be >= 0 (got {p}) — a negative payment is not a payment"
+            )));
+        }
+        if p != p.trunc() {
+            return Err(CliError::Usage(format!(
+                "--pay must be WHOLE DOLLARS (got {p}). Form 4868's lines 4-6 are printed in whole \
+                 dollars, and the form's own rule is all-or-nothing: \"You can round off cents to \
+                 whole dollars on Form 4868. If you do round to whole dollars, you must round all \
+                 amounts.\" btctax will not round your payment for you — enter the dollars you mean."
+            )));
+        }
+    }
+
+    // (6) The pseudo-reconciled gate (C-2), in the same slot the packet export puts it: pseudo
+    // figures are FICTIONAL and can never be filed, so they are attestation-gated and watermarked no
+    // matter what. A refusal here has written nothing.
+    let watermarked = state.pseudo_active();
+    if watermarked {
+        require_attestation(attest)?;
+    }
+
+    let details = session.donation_details()?;
+    let printed = btctax_core::tax::packet::assemble_printed_return(
+        &screened.ri,
+        state,
+        &details,
+        &screened.ar,
+        screened.table,
+        tax_year,
+        events,
+        screened.regime,
+    )
+    .map_err(|e| CliError::Usage(format!("the {tax_year} return cannot be printed: {e}")))?;
+
+    let choices = btctax_forms::Form4868Choices {
+        pay,
+        out_of_country,
+    };
+    // ★ ONE derivation, two renderings: the report's line values and the PDF's cells come from the
+    // same call, so the terminal cannot say one thing and the paper another.
+    let lines = btctax_forms::form_4868_lines(&printed, choices)?;
+    // ★ The fill runs BEFORE `mkdir_out` — a refusal leaves `--out` untouched, exactly as the packet
+    // export's all-or-nothing fill does.
+    let bytes = btctax_forms::fill_form_4868(&printed, tax_year, choices)?;
+    let bytes = if watermarked {
+        btctax_forms::stamp_draft_watermark(&bytes)?
+    } else {
+        bytes
+    };
+
+    mkdir_out(out_dir)?;
+    let path = out_dir.join("f4868.pdf");
+    write_bytes_owner_only(&path, &bytes)?;
+
+    // The due date, from the YEAR RECORD — never a hardcoded month/day (TY2017's is 2018-04-17).
+    let record = btctax_forms::year_record::YearRecord::for_year(tax_year)
+        .ok_or_else(|| CliError::FormFill(btctax_forms::FormsError::UnsupportedYear(tax_year)))?;
+    let due = extension_due_date(tax_year, record.return_due, out_of_country);
+
+    Ok(ExtensionReport {
+        tax_year,
+        path,
+        watermarked,
+        lines,
+        due,
+        past_due: now.date() > due,
+        out_of_country,
+        recorded_extension_payment: printed
+            .forms
+            .sch_3
+            .map(|s| s.line10)
+            .filter(|v| *v > Usd::ZERO),
     })
 }
 
