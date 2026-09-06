@@ -6224,7 +6224,12 @@ build, each with an owning phase.
   prints `NO PRIOR SIDE` / `NO DRAFT` / `NO FINAL` per cell instead of omitting the row. Two forms
   fell out of the computed work list today (`f1040s1`, `f8283`), plus `f8995a`. Archive
   `f1040s1--2025` (it is the prior side of an emitted form's delta; §5d's "moot" is withdrawn).
-  **Owning phase: the port machine, before its first regeneration of the work list.**
+  ✅ **(a) DONE 2026-09-06:** `f1040s1--2025` archived (note + extract + geometry + manifest URL); the
+  work list's Schedule 1 row is now computed (72 common / 1 added / 1 removed) with its moved cell
+  **UNWITNESSED** (FR-58), and `the_committed_work_list_matches_form_delta_at_head` already enumerates
+  from every map's `irs_stem` — a stem with no row in either table reds, which is the denominator
+  `port-status` was to fix. **Still open: the `forms port-status <year>` command itself** (the test
+  is the checker; the command is the operator's view). **Owning phase: the port machine.**
 - **FR-51 — widen `LineCoverage` to unquoted instruction predicates** (I6): who-must-file tests,
   worksheet definitions, thresholds that live only in the booklet — so `Coverage::quoting(year)`
   re-verifies them too and step 24's residual shrinks to nothing. Do NOT build a separate "meaning"
@@ -6274,3 +6279,10 @@ build, each with an owning phase.
   remaining path is a `pub` field on a `#[non_exhaustive]` struct. Make the fields private behind
   `forms()`/`statements()` readers when the next packet change touches the type. **Owning phase: the next
   `packet.rs` change (Form 4868/1040-V lands two non-members and a `stapled` kill).**
+- **FR-58 — the label reader cannot read Schedule 1's 2026 draft** (`f1040s1--2026-DRAFT`: *"bare
+  sub-letter `a` at page 1 y=120.859 has no numeric parent"*; the 2025 final reads fine, 64 labels /
+  73 boxes). Schedule 1 line 8 prints its a–z sub-lines as bare letters under one parent; the draft's
+  layout moves the parent out of the reader's state machine. Until the reader learns that shape, the
+  pair's "lines that moved" cell is **UNWITNESSED** (the work-list test refuses a number there) and a
+  TY2026 Schedule 1 map would be unwitnessed with a recorded `why`. **Owning phase: the TY2026 port
+  (AFTER FINALS — the final may differ from the draft).**

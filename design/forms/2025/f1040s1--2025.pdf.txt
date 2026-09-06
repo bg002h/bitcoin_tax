@@ -1,0 +1,16 @@
+https://www.irs.gov/pub/irs-prior/f1040s1--2025.pdf
+
+# f1040s1--2025.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  8dafec719f6a4716c259a2bdaca546d9bb9e262d1eabef885fe116a7327458fa
+# bytes   99940
+#
+# Fetch:    curl -sL -o f1040s1--2025.pdf https://www.irs.gov/pub/irs-prior/f1040s1--2025.pdf
+# Verify:   sha256sum f1040s1--2025.pdf   # must equal the sha256 above
+#
+# ★ A DIFFERENT hash does not mean a corrupt download — it means the IRS REVISED this
+# document. That is a change to the authority: review it, never silently absorb it.
+#
+# Archived 2026-09-06 for FR-50: the TY2025 FINAL of Schedule 1 (Form 1040), 2 pages, 73 AcroForm
+# boxes — the PRIOR SIDE of an emitted form's TY2026 delta (the work list had no row for it). Its
+# 2026 draft's label set cannot be read (bare sub-letter `a` at p1 y=120.9; FR-58), so the pair's
+# "lines that moved" cell is UNWITNESSED until the reader learns Schedule 1's a–z sub-lines.

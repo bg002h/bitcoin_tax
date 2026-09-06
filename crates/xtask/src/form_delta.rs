@@ -491,6 +491,18 @@ mod tests {
             1,
             "a numeric row whose pair does not exist: {wrong:?}"
         );
+        let (_, _, wrong) = check_work_list("| `f1040s1` | 72 | 1 | 1 | 0 | port |\n");
+        assert_eq!(
+            wrong.len(),
+            1,
+            "0 moved printed for a pair the reader cannot witness: {wrong:?}"
+        );
+        let (_, _, wrong) = check_work_list("| `f6251` | 62 | 0 | 0 | **UNWITNESSED** | port |\n");
+        assert_eq!(
+            wrong.len(),
+            1,
+            "UNWITNESSED printed for a pair that WAS compared: {wrong:?}"
+        );
         let (_, _, wrong) = check_work_list(
             "| `f6251` | yes | `f6251--2025` | **NO DRAFT** — planted | **NO DRAFT** |\n",
         );
@@ -539,18 +551,35 @@ mod tests {
             };
             let pair = super::compute(&format!("{form}--2025"), &format!("{form}--2026-DRAFT"));
             match (cells, pair) {
-                (Some(cells), Ok(d)) => {
+                (Some((common, added, removed, moved)), Ok(d)) => {
                     compared.push(form.clone());
-                    let got = (
-                        d.common.len(),
-                        d.added.len(),
-                        d.removed.len(),
-                        d.label_moved.len(),
-                    );
-                    if got != cells {
+                    let counts = (d.common.len(), d.added.len(), d.removed.len());
+                    if counts != (common, added, removed) {
                         wrong.push(format!(
-                            "{form}: table says {cells:?}, form-delta at HEAD says {got:?}"
+                            "{form}: table says {:?}, form-delta at HEAD says {counts:?}",
+                            (common, added, removed)
                         ));
+                    }
+                    // ★ A moved count is a number ONLY when labels were compared: a pair one side
+                    //   of which the reader cannot witness prints UNWITNESSED, never 0 — the
+                    //   "clean verdict from zero comparisons" trap this document was corrected for.
+                    match moved {
+                        Some(n) if d.label_compared == 0 && !d.common.is_empty() => {
+                            wrong.push(format!(
+                                "{form}: table prints {n} moved, but form-delta compared 0 of {} labels — the cell must say UNWITNESSED",
+                                d.common.len()
+                            ))
+                        }
+                        Some(n) if n != d.label_moved.len() => wrong.push(format!(
+                            "{form}: table says {n} moved, form-delta at HEAD says {}",
+                            d.label_moved.len()
+                        )),
+                        None if d.label_compared > 0 => wrong.push(format!(
+                            "{form}: table says UNWITNESSED, but form-delta compared {} labels ({} moved) — print the number",
+                            d.label_compared,
+                            d.label_moved.len()
+                        )),
+                        _ => {}
                     }
                 }
                 (Some(_), Err(e)) => {
@@ -590,15 +619,30 @@ mod tests {
     #[allow(clippy::type_complexity)]
     fn parse_work_list_row(
         l: &str,
-    ) -> Option<(String, Option<(usize, usize, usize, usize)>, String, String)> {
+    ) -> Option<(
+        String,
+        Option<(usize, usize, usize, Option<usize>)>,
+        String,
+        String,
+    )> {
         let cells: Vec<&str> = l.split('|').map(str::trim).collect();
         if cells.len() < 6 || !cells[1].starts_with('`') {
             return None;
         }
         let form = cells[1].trim_matches('`').to_string();
         let n = |i: usize| cells.get(i).and_then(|c| c.parse::<usize>().ok());
-        let numeric = match (n(2), n(3), n(4), n(5)) {
-            (Some(a), Some(b), Some(c), Some(d)) => Some((a, b, c, d)),
+        // the moved cell may be a number or the word UNWITNESSED (a reader could not witness a side)
+        let moved_cell = cells.get(5).copied().unwrap_or("");
+        let numeric = match (n(2), n(3), n(4)) {
+            (Some(a), Some(b), Some(c)) => {
+                if let Some(d) = n(5) {
+                    Some((a, b, c, Some(d)))
+                } else if moved_cell.contains("UNWITNESSED") {
+                    Some((a, b, c, None))
+                } else {
+                    None
+                }
+            }
             _ => None,
         };
         Some((

@@ -297,6 +297,15 @@
     "extract": "design/forms/extract/f1040--2025.txt"
   },
   {
+    "path": "design/forms/2025/f1040s1--2025.pdf",
+    "kind": "form",
+    "storage": "note",
+    "sha256": "8dafec719f6a4716c259a2bdaca546d9bb9e262d1eabef885fe116a7327458fa",
+    "bytes": 99940,
+    "url": "https://www.irs.gov/pub/irs-prior/f1040s1--2025.pdf",
+    "extract": "design/forms/extract/f1040s1--2025.txt"
+  },
+  {
     "path": "design/forms/2025/f1040s1a--2025.pdf",
     "kind": "form",
     "storage": "note",

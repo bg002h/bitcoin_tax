@@ -24,6 +24,7 @@ an excused row below actually HAS a pair, or when a stem with a map in any bundl
 
 | form | common | added | removed | lines that moved | shape |
 |---|---|---|---|---|---|
+| `f1040s1` | 72 | 1 | 1 | **UNWITNESSED** — the 2026 draft's label set cannot be read (bare sub-letter `a` at p1 y=120.9 has no numeric parent; FR-58), so the moved count is NOT a number here | port |
 | `f1040s1a` | 10 | 175 | 44 | 1 | **REBUILT** |
 | `f1040s2` | 44 | 24 | 19 | 23 | port |
 | `f1040s3` | 35 | 3 | 2 | 2 | port |
@@ -48,7 +49,6 @@ shape the cover-sheet correction was about, one level up. Until `forms port-stat
 | form | emitted? | prior side (`--2025` final) | TY2026 side | cell |
 |---|---|---|---|---|
 | `f1040` | **yes** — the return itself | `f1040--2025` | **NO DRAFT** — the file archived as `f1040--2026-DRAFT.pdf` was the TY2025 form (found 2026-09-05); its fixture is gone and the "199 common, unchanged" row it produced was a reader artifact (removed 2026-09-06 by the work-list test) | **NO DRAFT** |
-| `f1040s1` | **yes** — `packet.rs:104`, whenever Schedule 1 has content (crypto ordinary income lands there) | **NO PRIOR SIDE** — bundled for 2024 only; no `f1040s1--2025` authority archived | draft archived (`f1040s1--2026-DRAFT`) | **NO PRIOR SIDE** → archive `f1040s1--2025`, then diff |
 | `f8283` | yes — `packet.rs:223` | `f8283--2025` (Rev. 12-2025, periodic) | **NO DRAFT** — the draft URL served a 2025 document; archiver refused | **NO DRAFT** |
 | `f8275` | yes — `packet.rs:218` | `f8275--2024` (Rev. 10-2024, periodic; aliased by hash for 2025) | **NO DRAFT** — the draft URL served a 2024 document; archiver refused | **NO DRAFT** — periodic; a new revision would be a hash change, not a year |
 | `f8995a` | yes — `packet.rs:194` | **NO PRIOR SIDE** — bundled for 2024 only; no `f8995a--2025` authority or extract archived (the port report §5d's "keep" was a to-do, not a fact) | draft archived (`f8995a--2026-DRAFT`) | **NO PRIOR SIDE** → archive `f8995a--2025` + `i8995a--2025`, then diff |
