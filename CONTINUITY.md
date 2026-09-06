@@ -14,16 +14,20 @@ _Last updated: **2026-09-06**. Written at a deliberate pause; safe to exit. **Re
 >
 > **Done today (each review persisted VERBATIM → VERIFICATION ledger → fold, three commits):**
 > - TY2024 goldens regenerated under taxcalc 6.8.2, every moved field explained (`22a4c0c4`).
-> - **Spec 1099-DA** r1→r4 through three Opus reviews (r1 4C/3I/8M, r2 1C/5I/8M, r3 0C/4I/6M; folds
->   `3b0a35a2`, `64676905`, `08dd6006`). r4 IN REVIEW → `…/2026-09-06-spec-1099da-review-r4.md`.
+> - **Spec 1099-DA** r1→r5 through four Opus reviews (4C/3I/8M → 1C/5I/8M → 0C/4I/6M → 0C/1I/6M/6N;
+>   folds `3b0a35a2`, `64676905`, `08dd6006`, `41a060e1`). r5 (sonnet verification) IN REVIEW →
+>   `…/2026-09-06-spec-1099da-review-r5.md`. r4's Important: reward-credited lots are NONCOVERED
+>   ((J)'s services limb is a broker's own services; the 1099-DA instructions say so at :41-57, :364-366).
 > - **Label-join instrument** through three fold reviews (0C/4I/4M → 0C/2I/4M/3N → 0C/1I/5M/3N, gate
 >   TRUSTED; folds `91070215`, `fab4f2fa`, `3070a797`): `Word::y2`, inline tables, `[lineN]` sections
 >   and `[[lineN…]]` arrays all parsed+counted, floors 261/215, `map_reach_problem` planted, the work
->   list held by `the_committed_work_list_matches_form_delta_at_head`. r4 (sonnet verification) IN
->   REVIEW → `…/2026-09-06-label-join-fold-review-r4.md`.
+>   list held by `the_committed_work_list_matches_form_delta_at_head`. r4 verification 0C/0I/0M/0N —
+>   **TRACK GREEN at `3070a797`** (`0e623ce7`, `af096a4c`).
 > - **Spec 4868/1040-V** r1 (2C/8I/13M/3N) → r2 (`ddd0df68`). IN REVIEW → `…/2026-09-06-spec-4868-1040v-review-r2.md`.
-> - **FR-50(a):** Schedule 1's TY2025 final archived (`933efdca`); the work list computes 14 pairs, 4
->   excused, 18 stems, Schedule 1's moved cell UNWITNESSED (FR-58). FOLLOWUPS FR-56..FR-60 filed.
+> - **FR-50 CLOSED:** Schedule 1's TY2025 final archived (`933efdca`); `xtask port-status <prior> <new>`
+>   prints the work list's two tables from the emitting surface and the doc is held to it (`bb37c352`;
+>   sonnet verification IN REVIEW → `…/2026-09-06-port-status-review.md`). **FR-53 CLOSED** (`2699ea22`).
+>   FOLLOWUPS FR-56..FR-60 filed.
 >
 > **NEXT, in order:** persist → ledger → fold each landing review until 0C/0I; when 1099-DA is green,
 > build T0–T7 (T0 = `forms/2026/YEAR.toml` + the regime value + `DisposalLeg.acquisition_at`; note
