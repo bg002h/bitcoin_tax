@@ -6178,8 +6178,15 @@ build, each with an owning phase.
   `public-law` archive shape landed with it, plus the class-closing guard
   `every_document_under_primary_sources_has_a_shape`. So the 0.50 rate is now a TRANSCRIPTION from
   Pub. L. 119-21 §70107(c), corroborated by the Rev. Proc. identity.
-  **Owning phase: NOW (ROADMAP_STATUS §3).** Rewrite `ty2026_full_return_must_stay_fail_closed`'s
-  doc to reasons 2 and 3 only when the params land (reason 1 is struck through today).
+  **Owning phase: NOW — DONE `8b36aba0`** (`pub fn ty2026_full_return()`, KAT-pinned incl. the 0.50
+  identity; NOT in `by_year`; the gate's message now names reasons 2 and 3). **Residue:** (a) the
+  MFS kicker start/cap as the 2026 instructions print them — D8, AFTER FINALS; (b) R27, no MFS QBI
+  threshold slot (201,775 vs 201,750); (c) ★ **the oracle-sweep goldens** (`crates/btctax-core/tests/
+  goldens/full_return_goldens.json`, `oracle_2_version: 6.7.2`) carry taxcalc's understated AMT for
+  standard-deduction households — regenerate DELIBERATELY under 6.8.2 (port report §6 rule 13, never
+  to make a red green), which needs `OTS_DIR` for the oracle-1 half; unset in this session, so not
+  done here. **Owning phase: the pre-season oracle refresh (AFTER OTS 2026 for TY2026; any time for
+  the TY2024 goldens).**
 - **FR-48 — `YearReadiness` + the three LIVE refusal-surface defects** (port report §2.5, D7):
   `income import --year 2026` commits a write and then `report` exits 2 prescribing `income clear`,
   which deletes the filer's W-2s; `selected_year: 2025` literal in two TUIs; `export-snapshot`

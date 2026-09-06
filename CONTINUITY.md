@@ -356,6 +356,11 @@ suite alone said green, because `maximal_sentinel` pins every provenance field a
 
 ## Repo hazards learned this session
 
+- ★ **`.claude/worktrees/` grew to 270 GB** (21 leftover agent worktrees, each with a `target/`).
+  Cleaned 2026-09-05: 20 merged+clean removed, 1 unmerged inspected (all four commits already on
+  main by content/subject) and removed; 21 throwaway `worktree-agent-*` branches deleted. Check
+  `du -sh .claude/worktrees` after any fan-out; `git worktree list` should be 1 line at rest.
+
 - **The pre-commit hook used to leak `GIT_DIR` into the test suite**, which re-inited the shared repo
   as BARE and broke every `git add` with *"must be run in a work tree"*. Fixed at the hook
   (`scripts/pre-commit`) and in the production path (`xtask harness_check`). If it ever recurs:
