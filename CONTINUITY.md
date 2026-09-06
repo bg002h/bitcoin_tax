@@ -6,6 +6,24 @@ _Last updated: **2026-09-06**. Written at a deliberate pause; safe to exit. **Re
 
 # ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
 
+> ## ★★★ RESUME 2026-09-06 (end of day) — BOTH builds are GREEN and CLOSED: 1099-DA (FR-46) and 4868/1040-V (FR-49). No agent in flight. Read this block first.
+>
+> **Chain today (all on `main`, nothing pushed, tree clean at `a2fde63e`):** 1099-DA T0–T6 + T7
+> recorded, two seam reviews folded and re-verified 0C/0I; 4868/1040-V archive + T1–T5 + T2–T4, seam
+> review 0C/4I/5M/2N folded `7eb93c27`, re-verified 11/11 (`f8e35037`), F-1 (a committed-blob hash
+> drift) folded `a2fde63e` with `every_committed_entry_hashes_true_in_the_committed_blob_too`. Suite
+> 3153 green. Process: one opus agent at a time under persisted `BRIEF-*.md` files; sonnet for
+> re-verification; the controller persists → ledgers → folds → commits.
+>
+> **NEXT (nothing autonomous is queued by a spec):** the roadmap's NOW bucket is exhausted except the
+> OWNER items — S5's 2026-09-15 real-data run of `report --tax-year 2026` (needs the owner's 2026
+> exports), S8's physical print rehearsal (now possible: `btctax extension` + `export-irs-pdf
+> --pay-by-check` exist), T7 (Notice 2026-20 order), decisions S1/S2/S6/S7/S9/S10, the push. Candidate
+> autonomous work if the owner wants more: the four cite-check excuse-list pairs (a `FORMS` row + an
+> extract each); the TY2025 Schedule D per-box read-back once its map is a full-return map; the
+> §7503 DC-holiday calendar; refreshing the progress page
+> (https://claude.ai/code/artifact/ff1208a5-0353-4b33-9810-96e0bca8b59b) with the day's closures.
+
 > ## ★★★ RESUME 2026-09-06 (last) — the 4868/1040-V seam review is FOLDED (`7eb93c27`, 3152 tests); its sonnet re-verification (worktree) is IN FLIGHT. Read this block first.
 >
 > Chain: review persisted `17e180bf` (0C/4I/5M/2N), ledger `7c6fe99f` (6/6 HOLD), fold brief

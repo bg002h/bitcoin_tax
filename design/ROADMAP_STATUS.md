@@ -88,8 +88,11 @@ FR-49) are folded into §3's NOW bucket below and re-owned in `FOLLOWUPS.md`.
   `fill_form_1040v`, `btctax extension`, `export-irs-pdf --pay-by-check`), each by one opus agent
   under a persisted brief. The independent SEAM review of T1–T6 (`17e180bf`, 0C/4I/5M/2N — the
   envelope guard was one-directional and a refused `--pay` could leave a manifest-less packet; the
-  experimental notice and the record-your-payment note were missing) is FOLDED `7eb93c27` (3152
-  tests); its sonnet re-verification is in flight. FR-49 closes at 0C/0I.
+  experimental notice and the record-your-payment note were missing) is FOLDED `7eb93c27` and
+  re-verified **11/11 RESOLVED** (`f8e35037`); the verifier's one new finding — a committed-blob hash
+  drift only a fresh checkout could see — is folded `a2fde63e`. **The 4868/1040-V build is GREEN;
+  FR-49 CLOSED** (3153 tests). Form 4868 with payment is what the extension-by-default calendar
+  needs on 2027-04-15; the physical print rehearsal (S8) is still the owner's.
 
 - **T7 (spec 1099-DA, recorded 2026-09-06) — the OWNER ACTION under Notice 2026-20 §4.02(2). Dated:
   before the next 2026 sale on a custodial venue, and no later than 2026-09-30 (strategy S3's month).**

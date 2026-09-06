@@ -6242,8 +6242,12 @@ build, each with an owning phase.
   **★ BUILD LANDED 2026-09-06** (spec GREEN r6; archive `b60c600c`, T1+T5 `dc9941d5`, T2–T4 `a51b8c53`;
   3145 tests): `btctax extension` and `export-irs-pdf --pay-by-check` exist, with the §7503 weekend
   shifter (DC holidays deliberately unmodelled — recorded in `year_record.rs`). The T1–T6 seam review
-  (0C/4I/5M/2N, `17e180bf`) is folded `7eb93c27`; its re-verification is in flight — FR-49 closes at
-  0C/0I. Residue filed by the build: the cite-check excuse
+  (0C/4I/5M/2N, `17e180bf`) is folded `7eb93c27` and re-verified 11/11 RESOLVED (`f8e35037`); the
+  verifier's one new finding (a manifest hash that only a fresh checkout redded — one CR byte that
+  LF-normalization stripped from the committed statute page) is folded `a2fde63e` with a census that
+  hashes the committed blob. **FR-49 is CLOSED** (2026-09-06, 3153 tests). Residue: DC legal holidays
+  are not modelled in the §7503 shifter (weekends only, recorded in `year_record.rs`); the four
+  cite-check excuse-list pairs. Residue filed by the build: the cite-check excuse
   list gained the four (stem, year) pairs like 36 of 37 others — closing them is a `FORMS` row plus a
   cite-check extract per pair.
 - **FR-50 — `forms port-status <year>`** enumerates from the emitting surface (`Stem` × year) and
