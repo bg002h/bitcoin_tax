@@ -47,6 +47,30 @@ _Last updated: **2026-09-04**. Written at a deliberate pause; safe to exit. **Re
 > 7. The Fable reminder in `ROADMAP_STATUS.md` §5 and the memory file: DISCHARGED — the switch
 >    happened and the review ran.
 >
+> ## ★★★ STATE AT 61bfae16 (2026-09-05, latest) — what landed after the two reviews
+>
+> - **Fold A** of the r2 fold review: `18027b03` (ledger `c0eb7f32`, 12/12 hold). Design r2 §4/§9/§10
+>   rewritten so step 1 is executable (irs_stem join; `line_set` = revision, many-to-one; four kills
+>   at step 1, the `line_set` kill at step 3; manifest join expected red on 6/37 with the
+>   `authority = "not-yet-archived"` header as the excuse); the sibling documents aligned; R28 +
+>   §6 rule 18 (1099-DA) registered; FR-54. **A re-review of this fold is RUNNING** → report at
+>   `design/agent-reports/2026-09-05-fable-plan-review.r2-fold-review-r2.md`. Persist it verbatim,
+>   ledger it, fold it; when it is 0C/0I, **step 1 begins.**
+> - **Fold B** of the strategy review: `3de5c272`. The five OWNER decisions are listed in
+>   `ROADMAP_STATUS.md` §0a "OWNER DECISIONS PENDING" (S1 rehearsal / S2 real profile / S6 ceremony
+>   / S7 oracle fallback / S9 TY2017) — **not actioned; put them in front of the owner.** The four
+>   non-owner items are in §3's NOW row (FR-46 1099-DA input by end of Sept; machinery hard stop
+>   2026-10-31; two real-data runs; 4868 + 1040-V + a physical print).
+> - **FR-47's statute archived**: `58200a59` — `26USC_s55.html`, `PLAW-119publ21_OBBBA.pdf`
+>   (§70107(c) "substituting '50 percent' for '25 percent'"), `26USC_s55_OLRC-prelim.html`; a
+>   `public-law` archive shape and the class-closing guard `every_document_under_primary_sources_has_a_shape`
+>   (observed red). `AmtParams` TY2026 itself is NOT yet encoded — that is the next NOW build item
+>   after step 1 (or in parallel; it touches `tax_tables.rs` only).
+> - **taxcalc 6.7.2 → 6.8.2** in `.venv`: `61bfae16`. #3108 is fixed upstream; rule 12 applied
+>   (gap #1 deleted, `TAXCALC_FLOOR` refuses older). `verify_f6251.py` 0 unexpected / 3 known.
+>   ★ The oracle-sweep goldens were generated under 6.7.x and carry the understated AMT for
+>   standard-deduction households — regenerate DELIBERATELY (rule 13), not to make a red green.
+>
 > ## ★★★ TWO MORE REVIEWS LANDED AND ARE PERSISTED (2026-09-05, late) — read before building
 >
 > 1. **The r2 FOLD review** — `design/agent-reports/2026-09-05-fable-plan-review.r2-fold-review.md`
