@@ -1,0 +1,12 @@
+https://www.irs.gov/pub/irs-prior/f1040v--2025.pdf
+
+# f1040v--2025.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  2426bb330ac54b765b32fbc3eceb878544aa333a3a823e1170aa8261a40fd251
+# bytes   97663
+#
+# Fetch:    curl -sL -o f1040v--2025.pdf https://www.irs.gov/pub/irs-prior/f1040v--2025.pdf
+# Verify:   sha256sum f1040v--2025.pdf   # must equal the sha256 above
+#
+# Archived 2026-09-05 for FR-49 (strategy review S8): Form 4868 (extension, 17 AcroForm fields) and
+# Form 1040-V (payment voucher, 15 fields) — the physical last mile. FINAL revisions from irs-prior,
+# not drafts; the TY2026 revisions are archived when the IRS posts them (~Dec 2026).
