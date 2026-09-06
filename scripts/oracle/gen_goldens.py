@@ -276,11 +276,13 @@ def taxcalc_run(households, year: int = 2024):
             "sch_d_to_l7": float(calc.array("c01000")[n]),  # Sch D L21 → 1040 L7 (§1211-limited)
             "total_tax": float(calc.array("c09200")[n]),    # 1040 L24 equiv (see docstring)
             # ── G-6 · the AMT. 1040 L17 ⊇ Form 6251 line 11; v1 has no other Schedule 2 Part I item.
-            #    ★ KNOWN-SUSPECT for STANDARD-DEDUCTION filers: taxcalc's AMTI omits Form 6251 line 2a's
-            #    standard-deduction add-back, so `c09600` UNDERSTATES their AMT by the tax on the
-            #    deduction (PSLmodels/Tax-Calculator#3108, open; corroborated against OpenTaxSolver and
-            #    the IRS PDF). Emitted anyway — a witness we can characterise beats a silent gap, and the
-            #    harness records WHICH oracle agreed rather than collapsing them into one verdict.
+            #    ★ Through taxcalc 6.7.x, for STANDARD-DEDUCTION filers taxcalc's AMTI omitted Form
+            #    6251 line 2a's standard-deduction add-back, so `c09600` UNDERSTATED their AMT by the
+            #    tax on the deduction (PSLmodels/Tax-Calculator#3108). FIXED in 6.8.2 (2026-09-05).
+            #    ★ Goldens generated under 6.7.x therefore carry the understated `amt` on those
+            #    households and record `taxcalc_version` = 6.7.x; regenerate them DELIBERATELY under
+            #    6.8.2 (port report §6 rule 13: never to make a red green), and the harness still
+            #    records WHICH oracle agreed rather than collapsing them into one verdict.
             "amt": float(calc.array("c09600")[n]),
             # provenance leaves
             "qual_div_l3a": float(calc.array("e00650")[n]),  # 1040 L3a qualified dividends

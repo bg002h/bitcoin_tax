@@ -516,7 +516,12 @@ LIVE · **MOOT** (the risk was real and is retired by the pause — recorded, no
 11. **Do NOT edit `DUPLICATE_SOURCE_GROUPS` to get past an `f8275` red.** The red is the safe
     failure and the code comment names this exact moment.
 12. **Do NOT widen a tolerance when `_amti_verdict` reds after the 6.8.2 upgrade.** Delete expected
-    gap #1 and the `STANDARD_DEDUCTION` excuse table instead.
+    gap #1 and the `STANDARD_DEDUCTION` excuse table instead. **DONE 2026-09-05:** `.venv` taxcalc
+    6.7.2 → 6.8.2; the eight standard-deduction vectors came back "off by 0.00, predicted 29,200"
+    exactly as this rule foresaw; gap #1 and the table are deleted; a version floor (`TAXCALC_FLOOR
+    = 6.8.2`) refuses an older taxcalc, observed red under 6.7.2. `verify_f6251.py`: 0 unexpected,
+    3 known (V23–V25's §55(d)(3) kicker, plus V8's now sized as its own 5,000 kicker).
+    `verify_schedule_1a.py` unchanged under 6.8.2 (D-8 QSS still disqualified).
 13. **Do NOT regenerate a golden to make a red green**, and **do not widen OTS's year-scoped excuse
     sets speculatively** — `{2024}` is correct until someone reads `taxsolve_US_1040_2026.c`. **No
     excuse list keyed by vector *name*;** compute the disqualification from the defect's mechanism.

@@ -21,26 +21,21 @@ will not file, so these vectors exercise Part I through Part III on returns the 
 `ots_direct.py` never reads line 17". The second half was true and is now fixed; the first half was an
 assumption. OTS computes Form 6251 in full (`taxsolve_US_1040_2024.c:222`) and always did.
 
-★ THE STANDARD-DEDUCTION DIVERGENCE, adjudicated against the FORM (not against a second oracle).
-On every STANDARD-DEDUCTION vector, taxcalc's AMTI is lower than ours by EXACTLY the standard
-deduction. That is a Tax-Calculator defect, not ours (`taxcalc/calcfunctions.py`, the AMTI block):
+★ THE STANDARD-DEDUCTION DIVERGENCE — CLOSED UPSTREAM in taxcalc 6.8.2 (2026-09-05).
+Through taxcalc 6.7.x, on every STANDARD-DEDUCTION vector taxcalc's AMTI was lower than ours by EXACTLY
+the standard deduction (`calcfunctions.py`: `c62100 = c00100 - e00700 - qbided - standard`, never
+added back — PSLmodels/Tax-Calculator#3108). Form 6251 line 2a says "otherwise, enter the amount from
+Form 1040 or 1040-SR, line 12", §56(b)(1)(E) mandates the add-back, and this script carried that gap as
+a PREDICTED, SIZED excuse — "this vector must disagree by exactly this much, for this reason" — so that
+the day taxcalc fixed it, the wrong-shape rule would red and tell us. It did: under 6.8.2 the eight
+standard-deduction vectors came back "★ AMTI off by 0.00, predicted 29,200.00". 6.8.2's own source now
+reads: "the standard deduction subtracted on line 1b is added back on line 2a (IRC 56(b)(1)(E)), so it
+nets out of AMTI entirely" (`calcfunctions.py:2619-2622`).
 
-    if standard > 0.0:
-        c62100 = c00100 - e00700 - qbided - standard
-
-It subtracts the standard deduction and never adds it back. Its itemizer branch DOES add back
-Schedule A line 7 (`+ c18300`), which is why every itemizing vector agrees. But Form 6251 line 2a says:
-"If filing Schedule A (Form 1040), enter the taxes from Schedule A, line 7; **otherwise, enter the
-amount from Form 1040 or 1040-SR, line 12**" — i.e. add the standard deduction back. i6251 p.2 repeats
-it, §56(b)(1)(D) mandates it, and i6251's own TIP turns on it ("the standard deduction isn't allowed
-for the AMT"). The form is the authority; a taxcalc disagreement is adjudicated against the PDF and
-never encoded. Direction: taxcalc UNDERSTATES AMT for standard-deduction filers.
-
-★ THAT EXCUSE IS CHECKED, NOT ASSERTED. This used to be a `KNOWN_DIVERGENT = {"V4", "V5"}` name
-list: a vector on the list could diverge for ANY reason and still print "KNOWN". `_amti_verdict`
-now requires the ΔAMTI to be exactly the standard deduction on a standard-deduction vector and
-exactly zero on an itemizing one — so a divergence of the wrong SHAPE is reported as unexpected
-even on a vector whose divergence we expect, and the day taxcalc fixes #3108 this reds and tells us.
+Per TY2026_PORT_REPORT.md §6 rule 12 the excuse was DELETED, not widened: no `STANDARD_DEDUCTION`
+table, no gap #1. What remains is the version floor below — a `.venv` older than 6.8.2 reds this script
+outright instead of quietly re-opening a closed gap — and the one taxcalc AMT omission still standing,
+the §55(d)(3) MFS line-4 add-back, sized from the vector itself.
 """
 import json, os, shutil, sys, tempfile, warnings, pathlib
 
@@ -48,22 +43,6 @@ warnings.filterwarnings("ignore")
 import pandas as pd, taxcalc as tc  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-# Standard deduction by YEAR, keyed by the fixture's own filing-status tokens. Used to CHECK that the
-# taxcalc divergence has the shape we claim — never to compute.
-#
-# ★ TY2025 is OBBBA, NOT the Rev. Proc. `f1040--2025.pdf`'s own margin prints 15,750 / 31,500 / 23,625,
-# where Rev. Proc. 2024-40 gives 15,000 / 30,000 / 22,500. Both oracles agree with the form (OTS
-# `S_STD_DEDUC = 15750.0`; taxcalc `STD` 2025 = [15750, 31500, 15750, 23625, 31500]). Using the Rev.
-# Proc. figures here would mis-size the #3108 gap and report a real divergence as expected.
-STANDARD_DEDUCTION = {
-    2024: {  # Rev. Proc. 2023-34 §2.15
-        "single": 14_600.0, "mfj": 29_200.0, "mfs": 14_600.0, "hoh": 21_900.0, "qss": 29_200.0,
-    },
-    2025: {  # OBBBA, Pub. L. 119-21 — verified against f1040--2025.pdf
-        "single": 15_750.0, "mfj": 31_500.0, "mfs": 15_750.0, "hoh": 23_625.0, "qss": 31_500.0,
-    },
-}
-
 # A vector without an explicit `year` is TY2024, which is what every committed vector is today.
 DEFAULT_FIXTURE_YEAR = 2024
 
@@ -72,16 +51,6 @@ def _year_of(v) -> int:
     """The tax year a vector belongs to. Absent = TY2024, the year the fixture was authored in."""
     return int(v.get("year", DEFAULT_FIXTURE_YEAR))
 
-
-def _standard_deduction(v) -> float:
-    year, st = _year_of(v), v["inputs"]["filing_status"]
-    try:
-        return STANDARD_DEDUCTION[year][st]
-    except KeyError:
-        raise KeyError(
-            f"no standard deduction for TY{year}/{st}; add it with that year's controlling source "
-            f"(for TY2025+ that is OBBBA, not the Rev. Proc.)"
-        ) from None
 
 # ★ OTS's disqualifications are COMPUTED, never listed by vector name.
 # `ots_direct._ots_amt_disqualified` is the fail-closed predicate — an unrecognised shape returns a
@@ -177,9 +146,9 @@ def _taxcalc_expected_gaps(v) -> list[tuple[float, str]]:
     taxcalc UNDERSTATE AMTI (and so AMT). Naming the size is the point: it turns "this vector is
     allowed to disagree" into "this vector must disagree by exactly this much, for this reason".
 
-    1. **Line 2a, the standard-deduction add-back** — PSLmodels/Tax-Calculator#3108, open.
-       `calcfunctions.py` computes `c62100 = c00100 - e00700 - qbided - standard` and never adds the
-       standard deduction back. Size: the filer's standard deduction.
+    1. ~~Line 2a, the standard-deduction add-back~~ — PSLmodels/Tax-Calculator#3108, **FIXED in
+       taxcalc 6.8.2** (`calcfunctions.py:2619-2622` adds it back "so it nets out of AMTI entirely").
+       No longer a predicted gap; the version floor in `main()` is what holds this.
 
     2. **Line 4's parenthetical, the §55(d)(3) MFS AMTI add-back** — verified by reading
        `calcfunctions.py` (taxcalc 6.7.2), not assumed. Its `c62100` block has no MFS branch at all.
@@ -195,9 +164,8 @@ def _taxcalc_expected_gaps(v) -> list[tuple[float, str]]:
     """
     f, st = v["form6251"], v["inputs"]["filing_status"]
     gaps: list[tuple[float, str]] = []
-    if not v["derived"]["itemized"]:
-        std = _standard_deduction(v)
-        gaps.append((std, f"line 2a's {std:,.0f} standard-deduction add-back (#3108)"))
+    # (gap #1 — the line-2a standard-deduction add-back, #3108 — was deleted 2026-09-05 when taxcalc
+    #  6.8.2 fixed it; see the module docstring and the version floor in main().)
     pre_kicker = sum(float(f[k]) for k in ("line1", "line2a", "line2b", "line3"))
     kicker = float(f["line4"]) - pre_kicker
     if abs(kicker) > 0.005:
@@ -224,7 +192,23 @@ def _amti_verdict(v, their_amti: float) -> tuple[str, bool]:
     return "AMTI short by " + " + ".join(why for _, why in gaps), False
 
 
+TAXCALC_FLOOR = (6, 8, 2)  # #3108 fixed here; below it the deleted gap #1 silently reopens
+
+
+def _taxcalc_version_ok() -> bool:
+    parts = tuple(int(p) for p in tc.__version__.split(".")[:3])
+    return parts >= TAXCALC_FLOOR
+
+
 def main() -> int:
+    if not _taxcalc_version_ok():
+        print(
+            f"REFUSING: taxcalc {tc.__version__} < {'.'.join(map(str, TAXCALC_FLOOR))}. This script "
+            "deleted the #3108 standard-deduction excuse when 6.8.2 fixed it; an older taxcalc would "
+            "diverge on every standard-deduction vector and the census would read that as a finding. "
+            "Upgrade: .venv/bin/pip install 'taxcalc>=6.8.2'"
+        )
+        return 2
     vectors = json.loads(
         (ROOT / "crates/btctax-core/src/tax/fixtures/form6251_vectors.json").read_text()
     )["vectors"]

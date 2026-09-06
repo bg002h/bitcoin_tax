@@ -645,8 +645,9 @@ def evaluate(h: dict) -> dict[str, float | None]:
             #    ★ Line 2a is the branch that matters: OTS codes it
             #    `if (itemized) amtws2a = SchedA[7]; else amtws2a = L[12];` — the standard deduction
             #    added back for a non-itemizer. That is btctax's branch and the form's, and it is the
-            #    one PSL Tax-Calculator omits (issue #3108). So on AMT the two oracles SPLIT, which is
-            #    diagnostic rather than ambiguous, and OTS is the one that agrees with the IRS PDF.
+            #    one PSL Tax-Calculator omitted through 6.7.x (issue #3108, fixed in 6.8.2). So on AMT
+            #    the two oracles SPLIT under an old taxcalc — diagnostic rather than ambiguous, and OTS
+            #    was the one that agreed with the IRS PDF; under 6.8.2 they agree with each other.
             "amt": amt_witnessed,                            # 1040 L17; None when OTS is DISQUALIFIED
             "amt_not_witnessed_because": amt_disqualified,    # the reason, or None
             "form6251": ots6251,                              # every printed 6251 line, by number
