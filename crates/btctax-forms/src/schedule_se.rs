@@ -35,9 +35,24 @@ const SE_CLUSTERS_UNIFIED: &[(f32, f32)] = &[(410.0, 482.0), (504.0, 576.0)];
 const SE_CLUSTERS_2017: &[(f32, f32)] = &[(350.0, 433.0), (476.0, 554.0)];
 
 fn se_clusters(year: i32) -> &'static [(f32, f32)] {
+    // ★★★ **ENUMERATED, not a wildcard.** This was `_ => SE_CLUSTERS_UNIFIED`, which handed
+    //     2024/2025 geometry to ANY year — including a year whose form nobody has looked at.
+    //     These clusters are the MAP-INDEPENDENT geometry oracle that `verify_flat` checks a filled
+    //     form against, so a wildcard makes the instrument built to catch a mis-mapped cell the one
+    //     thing that was never told the year changed. Measured on the TY2026 drafts: Form 1040
+    //     keeps all 199 field names and moves 31 printed line bindings, so "the names still
+    //     resolve" is no evidence at all that the geometry did not move.
+    //
+    //     ★ A new year must be added HERE, deliberately, after someone has compared the form. The
+    //       panic is the point: silently reusing last year's x-bands is how a wrong cell passes.
     match year {
         2017 => SE_CLUSTERS_2017,
-        _ => SE_CLUSTERS_UNIFIED,
+        2024 | 2025 => SE_CLUSTERS_UNIFIED,
+        other => panic!(
+            "se_clusters: no geometry recorded for TY{other}. The unified bands cover TY2024-2025 \
+             only; add an arm after comparing the form (xtask form-delta), never widen this to a \
+             wildcard — the 2026 drafts move 31 line bindings while renaming nothing."
+        ),
     }
 }
 

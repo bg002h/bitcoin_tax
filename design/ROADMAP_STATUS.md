@@ -9,7 +9,25 @@ Last updated: **2026-09-05**. Next year: `design/TY2026_PORT_REPORT.md` (the dec
 
 ---
 
-## 0. The one-line answer
+## 0. ★★★ TARGET CHANGED (owner ruling, 2026-09-05): **TY2026 IS THE FIRST FILED YEAR**
+
+Work on TY2025 is **PAUSED**. TY2026 is now the target, and the reasoning holds up:
+
+- The plan's own calendar already concluded **TY2025 by 2026-10-15 is not reachable**, and named
+  **TY2026 in the 2027 season** as the first return btctax could file ON TIME.
+- The owner's TY2025 return was completed outside this project, so a late TY2025 filing buys nothing.
+- Almost none of the TY2025 work is wasted: the Schedule 1-A compute, the input surface, the
+  refusals, the emitter and every instrument built for TY2025 are TY2026 requirements too. What is
+  paused is the TY2025-SPECIFIC form assets and the TY2025 fail-closed gate.
+
+★ **The honest constraint:** TY2026 FINAL forms do not exist yet (roughly Nov 2026 – Jan 2027). Work
+now is preparation against drafts, which is why `form-delta` and the draft discriminator were built.
+Nothing can be transcribed from a draft; what CAN be done is every code-shape change that stops
+assuming TY2025, so the finals become a diff.
+
+---
+
+## 0b. The one-line answer (TY2025 context, retained)
 
 **TY2025 is the only blocker.** The bitcoin engine is not what stands between btctax and a filed
 return — the year being filed is. TY2025 had 5 of 17 bundled form artifacts and no Schedule 1-A; it
