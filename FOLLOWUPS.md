@@ -6161,7 +6161,10 @@ build, each with an owning phase.
   hits the owner's own rows; (a) with `YEAR.toml` (table build step 4); (d) DONE — R28 registered
   in the port report §5 and rule 18 in §6 (`18027b03`).** Owner action alongside: a standing
   specific-identification instruction to each exchange (the engine's method) before further 2026
-  sales, and a check of what each of Coinbase / Gemini / River / Swan will put in 1099-DA box 1e.
+  sales, and a check of what each of Coinbase / Gemini / River / Swan will put in 1099-DA box **1g** (Cost or
+  Other Basis — box 1e is Date Sold; the strategy review's "1e" is a slip, corrected by the spec r1 review S3).
+  ★ TY2025 stays I/L under the spec (r2 R1): a proceeds-only 1099-DA row belongs in H/K, and that gap is owned
+  by the owner's S1 decision (the TY2025 rehearsal) — flipping it is the one-flag liveness change `proceeds`.
 - **FR-47 — `AmtParams` / `FullReturnParams` TY2026 is a NOW item, not a post-finals one.**
   Transcribe from Rev. Proc. 2025-32 §2.10: exemptions (MFJ $140,200 / single $90,100 / MFS
   $70,100 / trusts $31,400), 28% breakpoints ($122,250 MFS / $244,500 others), and per status BOTH
