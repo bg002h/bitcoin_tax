@@ -6,6 +6,15 @@ _Last updated: **2026-09-06**. Written at a deliberate pause; safe to exit. **Re
 
 # ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
 
+> ## ★★★ RESUME 2026-09-06 (night 3) — the R6 build's seam review (`c3a22a29`, 1C/2I/4M/1N; ledger `7eecd22c`) is FOLDED (`d81eea8c`, 3185 tests); its sonnet re-verification is IN FLIGHT (worktree). Read this block first.
+>
+> When it returns: copy from the worktree, persist; if 0C/0I → CLOSE FR-62 in FOLLOWUPS + roadmap §0a
+> S10 ("the 4868 and 1099-DA builds are GREEN; R6 filed the slice from the stored answers"), refresh
+> the progress page, then dispatch the S9 drop (FR-61, `BRIEF-build-S9-drop-ty2017.md`) to one opus
+> agent → sonnet verify its pins → close FR-61. If not 0C/0I → persist, ledger, one more fold by one
+> opus agent, re-verify. Owner-facing facts: TY2026 prints nothing until its 2026 Form 8949 /
+> Schedule D finals are bundled; the TUI commit modal's slice clause is FR-63.
+
 > ## ★★★ RESUME 2026-09-06 (night 2) — R6 BUILT (`fb5e7fc3`, 3178 tests) after the spec loop closed at r4 (`76d8eb9a` 0C/2I folded `6ac51769`); its SEAM REVIEW is IN FLIGHT (opus, worktree at `a2f71ea6`). Read this block first.
 >
 > When the review returns: copy from the worktree, persist, ledger, fold via one opus agent under a

@@ -6203,8 +6203,14 @@ build, each with an owning phase.
   arm-(2) screen list, `report` in state (2), the TUI ordering, price coverage. r2 (`4ed35a03`), r3
   (`5f03b965`) and r4 (`76d8eb9a`) each found one blocking defect in the controller's own fold; the loop
   closed at r4 by the rule recorded in CONTINUITY, and the BUILD landed `fb5e7fc3` (3178 tests, 21 kills
-  seen red; report `…build-1099da-R6-implementation.md`). Its seam review is in flight; FR-62 closes at
-  0C/0I. Residue → FR-63. Note for the
+  seen red; report `…build-1099da-R6-implementation.md`). Its seam review (`c3a22a29`, 1C/2I/4M/1N — the
+  dispatch widening let a committed row with EMPTY answers on a params-less year skip the Form 8283
+  restriction gate) is FOLDED `d81eea8c` (3185 tests; the gate on both arms with a 2×2 kill; the slice
+  promise conditioned on templates + answers; the pre-2025 Schedule D kill on C/F boxes). Sonnet
+  re-verification in flight; FR-62 closes at 0C/0I. Residue → FR-63, and two observations from the fold
+  (ownerless): `admin.rs`'s `slice_broker_refusal` doc block is orphaned four functions above its `fn`
+  (pre-existing); the full return's Section-B unanswered-restriction row has only incidental coverage —
+  give it a named kill. Note for the
   calendar: TY2026 still prints nothing until its Form 8949 / Schedule D finals are bundled
   (Nov 2026 – Jan 2027), which R6 makes the ONLY gate for a TY2026 crypto-slice filing.
 - **FR-63 — the TUI commit modal's slice clause (R6 D-1).** R6 says the input form's commit modal,
