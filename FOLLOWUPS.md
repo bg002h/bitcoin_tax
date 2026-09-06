@@ -6177,8 +6177,13 @@ build, each with an owning phase.
   advisory; `17753789` + `bb6d140d` the surfaces: `report`'s answers block, the input-form block, the
   readiness sentence, the forms-tab note, the import doc). The grain became per (provider, cohort) with
   five answers, not the three-valued `broker_reported` first sketched here — spec R1/R2. **T7 (the owner
-  action) is recorded in `ROADMAP_STATUS.md` §0a with its date.** Remaining: the independent build review
-  of T3–T6 (next gate), then the 4868/1040-V build.
+  action) is recorded in `ROADMAP_STATUS.md` §0a with its date.** The independent T3–T6 seam review
+  (0C/3I/4M/2N: the TUI Forms tab showed UNROUTED boxes; no surface enumerated a key's rows; the block
+  was hidden on a first authoring session) was folded `c25f7489` and re-verified 0C/0I, 9/9 resolved —
+  **FR-46 is CLOSED** (2026-09-06). Residue, filed here: (i) the TY2025 Schedule D per-box
+  fill-and-read-back kill is impossible until the 2025 Schedule D map becomes a full-return map (it is
+  the crypto-slice map: no `line6`) — add the three-line fixture then; (ii) the four broker refusal
+  anchors have no live path until TY2026 has `FullReturnParams` (recorded in `attribute.rs`).
 - **FR-47 — `AmtParams` / `FullReturnParams` TY2026 is a NOW item, not a post-finals one.**
   Transcribe from Rev. Proc. 2025-32 §2.10: exemptions (MFJ $140,200 / single $90,100 / MFS
   $70,100 / trusts $31,400), 28% breakpoints ($122,250 MFS / $244,500 others), and per status BOTH

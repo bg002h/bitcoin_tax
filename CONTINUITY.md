@@ -6,6 +6,17 @@ _Last updated: **2026-09-06**. Written at a deliberate pause; safe to exit. **Re
 
 # ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
 
+> ## ★★★ RESUME 2026-09-06 (late) — the 1099-DA build is GREEN (T3–T6 review folded `c25f7489`, re-verified 0C/0I 9/9); the 4868 T1+T5 implementer (opus) is IN FLIGHT in the main tree. Read this block first.
+>
+> **Pending commits once the implementer returns (do NOT commit while its edits are half-done):**
+> (1) persist `design/agent-reports/2026-09-06-build-1099da-T3-T6-review-r2.md` (copied into the tree,
+> untracked) in its own commit; (2) the roadmap / FOLLOWUPS / continuity edits already in the working
+> tree (FR-46 CLOSED; the S10 line carries the whole chain). Then machine-check the 4868 T1+T5 report
+> (`…build-4868-T1-T5-implementation.md`), commit the build, and dispatch T2–T4 to the next single opus
+> agent with a brief in the same shape (`BRIEF-build-4868-T2-T4.md`), then T6.
+>
+> (The block below is the state as of the fold dispatch; it stays for the reasoning.)
+
 > ## ★★★ RESUME 2026-09-06 (late) — T3–T6 review persisted (0C/3I/4M/2N) and being FOLDED by one opus agent; the 4868 build's T1 archive landed and its T1+T5 brief is written. Read this block first.
 >
 > **Owner directive (2026-09-06, saved to memory `one-opus-agent-coordinator`):** delegate tasks to at

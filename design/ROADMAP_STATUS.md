@@ -79,8 +79,9 @@ FR-49) are folded into §3's NOW bucket below and re-owned in `FOLLOWUPS.md`.
   ★ The spec (`design/SPEC_1099da_broker_reporting.md`) is **GREEN r6** (five review rounds, 0C/0I at
   r5). **Build T0–T6 LANDED 2026-09-06** (`e4b80fda` T0 … `249d37ad` C … `d9863909` T3 … `2feb53d0`
   T4 … `ab0c98f8` T5 … `17753789`/`bb6d140d` T6; the T0–C build review 0C/3I/3M/3N folded `18d1332b`,
-  its re-verification 0C/0I/3M/1N folded `820b6d9b`). T7 is the owner item below; an independent
-  build review of T3–T6 is the next gate.
+  its re-verification 0C/0I/3M/1N folded `820b6d9b`; the T3–T6 SEAM review 0C/3I/4M/2N (`2ef2c2ce`,
+  ledger `e13fa24b`) folded `c25f7489` and re-verified **0C/0I/0M/0N, 9/9 resolved** —
+  `…T3-T6-review-r2.md`). **The 1099-DA build is GREEN.** T7 is the owner item below.
   ★ The spec `design/SPEC_form_4868_1040v.md` (FR-49, S8) is **GREEN r6** (five review rounds, 0C/0I at
   r5); its build T1–T6 follows the 1099-DA build.
 
