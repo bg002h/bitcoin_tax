@@ -362,6 +362,20 @@ fn every_cell_of_the_routing_table() {
         let ri = answers(&[("coinbase", Cohort::Covered, answer)]);
         route_8949_boxes(&mut rows, LIVE, &ri.broker_reporting).unwrap();
         assert_eq!((rows[0].box_, rows[1].box_), (st_box, lt_box), "{answer:?}");
+        // T5 (R4): no answer prints a code or an amount the tool did not collect — (f)/(g) stay
+        // blank, never an automatic code B, never a 0
+        for r in &rows {
+            assert!(
+                r.adjustment_code.is_empty(),
+                "{answer:?}: (f) = {:?}",
+                r.adjustment_code
+            );
+            assert!(
+                r.adjustment_amount.is_zero(),
+                "{answer:?}: (g) = {}",
+                r.adjustment_amount
+            );
+        }
     }
     for answer in [BrokerReported::Mixed, BrokerReported::BasisDiffers] {
         let st = owner_like(2026);

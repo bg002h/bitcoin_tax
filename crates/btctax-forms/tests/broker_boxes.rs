@@ -114,6 +114,54 @@ fn a_mixed_short_term_set_prints_one_page_set_per_box() {
     );
 }
 
+/// spec 1099-DA T5 (R4) — a row routed to a broker-reported box prints NOTHING in columns (f) and
+/// (g): no automatic code B, no `0`, on any copy. Read back from the PDF's text values.
+#[test]
+fn a_broker_reported_row_prints_nothing_in_columns_f_and_g() {
+    let rows = vec![
+        boxed(Form8949Part::ShortTerm, Form8949Box::G, 1),
+        boxed(Form8949Part::ShortTerm, Form8949Box::H, 2),
+        boxed(Form8949Part::LongTerm, Form8949Box::J, 3),
+        boxed(Form8949Part::LongTerm, Form8949Box::K, 4),
+    ];
+    let bytes = fill_form_8949(&rows, 2025).expect("T3: broker boxes print on 2025");
+    let doc = load(&bytes).unwrap();
+    let fields = collect_fields(&doc).unwrap();
+    let map = Form8949Map::ty2025();
+    let below_root = |fqn: &str| fqn.split_once('.').map(|(_, r)| r.to_string()).unwrap();
+    // columns (a)..(h) are indices 0..=7; (f) = 5, (g) = 6 — row 1 of each part, every copy
+    for part in &map.parts {
+        for col in [5usize, 6] {
+            let v = values_ending(&doc, &fields, &below_root(&part.rows[0][col]));
+            assert!(
+                v.iter().all(|s| s.trim().is_empty()),
+                "{} row 1 column {}: {v:?}",
+                part.term,
+                if col == 5 { "(f)" } else { "(g)" }
+            );
+        }
+        let g_total = values_ending(&doc, &fields, &below_root(&part.totals.adj_g));
+        assert!(
+            g_total.iter().all(|s| s.trim().is_empty()),
+            "{} (g) total: {g_total:?}",
+            part.term
+        );
+    }
+    // and no text value anywhere on the packet is a bare code B or a bare 0
+    let all: Vec<String> = fields
+        .iter()
+        .filter_map(|f| text_value(&doc, f.id))
+        .collect();
+    assert!(!all.is_empty());
+    assert!(
+        all.iter().all(|v| v.trim() != "B" && v.trim() != "0"),
+        "a code or a zero was printed: {:?}",
+        all.iter()
+            .filter(|v| v.trim() == "B" || v.trim() == "0")
+            .collect::<Vec<_>>()
+    );
+}
+
 /// A pre-2025 map carries no digital-asset boxes: a G/H/J/K row refuses, naming the box, rather
 /// than being laundered under C/F.
 #[test]

@@ -901,9 +901,11 @@ fn run() -> Result<ExitCode, CliError> {
             // [I5] loud advisory: rows that MAY belong on a separate broker-reported 8949. The box
             // pairing is year-aware (1099-B / A/B/D/E / C/F pre-2025; 1099-DA / G/H/J/K / I/L from
             // 2025) — see `cmd::admin::broker_reporting_advisory`.
-            if let Some(advisory) =
-                cmd::admin::broker_reporting_advisory(report.tax_year, report.broker_reported_rows)
-            {
+            if let Some(advisory) = cmd::admin::broker_reporting_advisory(
+                report.tax_year,
+                report.regime,
+                report.broker_reported_rows,
+            ) {
                 eprintln!("{advisory}");
             }
             // ── Form 1040 partial-scope + loss notices (only when the 1040 was written). ──

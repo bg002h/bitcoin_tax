@@ -7,7 +7,7 @@ use crate::{require_attestation, CliConfig, CliError, Session};
 use btctax_adapters::BundledTaxTables;
 use btctax_core::{
     compute_se_tax, se_net_income, FeeTreatment, LedgerEvent, LotMethod, ScheduleDPart, Severity,
-    TaxTables, Usd, DIGITAL_ASSET_8949_FIRST_YEAR,
+    TaxTables, Usd,
 };
 use btctax_forms::Form1040Inputs;
 use btctax_store::{fsperms, Passphrase};
@@ -294,6 +294,9 @@ pub struct IrsPdfReport {
     pub tax_year: i32,
     pub unresolved_hard: usize,
     pub broker_reported_rows: usize,
+    /// spec 1099-DA — the year's Form 1099-DA regime, joined from its record; the [I5] advisory's
+    /// wording follows it, never the constant.
+    pub regime: btctax_core::forms::InformationReturnRegime,
     pub watermarked: bool,
     /// Schedule SE — written only when SE income ≥ the $400 floor (and selected).
     pub schedule_se_path: Option<PathBuf>,
@@ -464,29 +467,49 @@ fn hand_marks_block(marks: &[String]) -> String {
     s
 }
 
-/// The **[I5]** broker-reporting advisory line, year-aware — or `None` when no disposition may have
+/// The **[I5]** broker-reporting advisory line, regime-aware — or `None` when no disposition may have
 /// been broker-reported (`broker_reported_rows == 0`).
 ///
-/// The "separate 8949 / not-reported box" pairing depends on the form revision, exactly as the box
-/// assignment does (mirrors [`btctax_core::DIGITAL_ASSET_8949_FIRST_YEAR`]): pre-TY2025 an exchange
-/// disposal may have been reported on a **1099-B**, belongs on a separate 8949 under **Box A/B (ST) /
-/// D/E (LT)**, and this export files every row under **Box C/F**; from TY2025 it is the **1099-DA**,
-/// **Box G/H/J/K**, and every row files under **Box I/L**. Emitting the 2025 pairing on a pre-2025
-/// export would steer the filer to boxes that do not exist on that revision — hence the year gate.
-pub fn broker_reporting_advisory(tax_year: i32, broker_reported_rows: usize) -> Option<String> {
+/// The wording follows the year's Form 1099-DA **regime** (spec 1099-DA R1/R4, joined from
+/// `forms/<year>/YEAR.toml`), never a constant:
+///
+/// - **no proceeds reporting** (pre-TY2025): an exchange disposal may have been reported on a
+///   **1099-B**, belongs on a separate 8949 under **Box A/B (ST) / D/E (LT)**, and this export files
+///   every row under **Box C/F**;
+/// - **proceeds only** (TY2025): it is the **1099-DA**, **Box G/H/J/K**, and every row files under
+///   **Box I/L** — the question is not asked on that year (R1);
+/// - **proceeds and basis** (live, TY2026 on): the rows were ROUTED by the filer's answers, and the
+///   advisory is R4's: compare column (e) of every G/J row with **box 1g** and column (d) of every
+///   listed row with **box 1f**; a difference needs the broker's figure in that column and the
+///   correction in (g) — "Note: If you checked Box A or Box G above but the basis reported to the IRS
+///   was incorrect, enter in column (e) the basis as reported to the IRS, and enter an adjustment in
+///   column (g) to correct the basis." (f8949--2025.txt:54). btctax prints NET proceeds and the
+///   broker reduces box 1f by transaction costs too (Instructions_1099-DA.txt:470-472), so the figures
+///   normally coincide; the advisory names the limb anyway. It also states once how a custodial venue
+///   outside the four adapters earns a 1099-DA key (spec r5 NEW-3).
+///
+/// Emitting the 2025 pairing on a pre-2025 export would steer the filer to boxes that do not exist
+/// on that revision — hence the regime gate.
+pub fn broker_reporting_advisory(
+    tax_year: i32,
+    regime: btctax_core::forms::InformationReturnRegime,
+    broker_reported_rows: usize,
+) -> Option<String> {
     if broker_reported_rows == 0 {
         return None;
     }
-    let (broker_form, separate_boxes, filed_boxes) = if tax_year >= DIGITAL_ASSET_8949_FIRST_YEAR {
+    if regime.basis {
+        return Some(format!(
+            "⚠ [I5] {broker_reported_rows} disposition(s) occurred on a venue that issues Form 1099-DA for TY{tax_year}; each was filed under the Form 8949 box your answer chose (G/H short-term, J/K long-term), with columns (f) and (g) left blank. Compare column (e) of every G/J row with box 1g of the 1099-DA, and column (d) of every listed row with box 1f; if any differs, the return needs the broker's figure in that column and the correction in column (g) — see the Note on Form 8949. A custodial venue outside the built-in adapters must be recorded as `exchange:PROVIDER:ACCOUNT` to get a 1099-DA key."
+        ));
+    }
+    let (broker_form, separate_boxes, filed_boxes) = if regime.proceeds {
         ("1099-DA", "Box G/H/J/K", "Box I/L")
     } else {
         ("1099-B", "Box A/B (ST) / D/E (LT)", "Box C/F")
     };
     Some(format!(
-        "⚠ [I5] {broker_reported_rows} disposition(s) occurred on an exchange that MAY have issued \
-         {broker_form} broker basis reporting — those would belong on a SEPARATE Form 8949 under \
-         {separate_boxes}. This export files EVERY Bitcoin row under {filed_boxes} (not-reported \
-         default) and says so; reclassify by hand if you received a {broker_form}."
+        "⚠ [I5] {broker_reported_rows} disposition(s) occurred on an exchange that MAY have issued {broker_form} broker basis reporting — those would belong on a SEPARATE Form 8949 under {separate_boxes}. This export files EVERY Bitcoin row under {filed_boxes} (not-reported default) and says so; reclassify by hand if you received a {broker_form}."
     ))
 }
 
@@ -892,6 +915,7 @@ pub(crate) fn export_irs_pdf_from_session(
         tax_year,
         unresolved_hard,
         broker_reported_rows: btctax_forms::rows_possibly_broker_reported(&rows),
+        regime,
         watermarked,
         schedule_se_path,
         se_below_floor,
@@ -1259,6 +1283,7 @@ fn export_full_return(
             .f8949
             .as_ref()
             .map_or(0, |f| f.possibly_broker_reported),
+        regime,
         full_return_paths: paths,
         full_return_manifest: Some(manifest_path),
         forms_ignored_full_return: false, // set by the dispatch (which has `forms`), not here
@@ -1296,13 +1321,15 @@ fn export_full_return(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use btctax_core::forms::InformationReturnRegime as Regime;
 
     /// [I5] r2/NEW-IMPORTANT-1: the broker-reporting advisory is YEAR-AWARE. On the TY2025+
     /// digital-asset revision it must cite the 1099-DA and the digital-asset boxes (G/H/J/K separate,
     /// I/L filed) — never the securities boxes.
     #[test]
     fn broker_advisory_ty2025_cites_1099da_and_digital_asset_boxes() {
-        let msg = broker_reporting_advisory(2025, 3).expect("3 broker rows → an advisory");
+        let msg = broker_reporting_advisory(2025, Regime::PROCEEDS_ONLY, 3)
+            .expect("3 broker rows → an advisory");
         assert!(msg.contains("1099-DA"), "TY2025 cites the 1099-DA: {msg}");
         assert!(msg.contains("Box G/H/J/K"), "separate 8949 boxes: {msg}");
         assert!(msg.contains("Box I/L"), "filed-under boxes: {msg}");
@@ -1323,7 +1350,8 @@ mod tests {
     /// C/F filed) — boxes G–L do not exist on those form revisions.
     #[test]
     fn broker_advisory_pre_2025_cites_1099b_and_securities_boxes() {
-        let msg = broker_reporting_advisory(2024, 1).expect("1 broker row → an advisory");
+        let msg =
+            broker_reporting_advisory(2024, Regime::NONE, 1).expect("1 broker row → an advisory");
         assert!(msg.contains("1099-B"), "pre-2025 cites the 1099-B: {msg}");
         assert!(msg.contains("Box A/B"), "separate ST securities box: {msg}");
         assert!(msg.contains("D/E"), "separate LT securities box: {msg}");
@@ -1343,8 +1371,45 @@ mod tests {
     /// [I5]: no exchange disposition → no advisory, in either era.
     #[test]
     fn broker_advisory_is_none_without_broker_rows() {
-        assert!(broker_reporting_advisory(2025, 0).is_none());
-        assert!(broker_reporting_advisory(2024, 0).is_none());
+        assert!(broker_reporting_advisory(2026, Regime::PROCEEDS_AND_BASIS, 0).is_none());
+        assert!(broker_reporting_advisory(2025, Regime::PROCEEDS_ONLY, 0).is_none());
+        assert!(broker_reporting_advisory(2024, Regime::NONE, 0).is_none());
+    }
+
+    /// spec 1099-DA T5 (R4): on a live year the advisory names box 1g AND box 1f, the columns to
+    /// compare them with, and the correction column — and none of the not-asked wording.
+    #[test]
+    fn broker_advisory_on_a_live_year_names_box_1g_and_box_1f() {
+        let msg = broker_reporting_advisory(2026, Regime::PROCEEDS_AND_BASIS, 2)
+            .expect("2 keyed rows → an advisory");
+        for needle in [
+            "box 1g",
+            "box 1f",
+            "column (e)",
+            "column (d)",
+            "column (g)",
+            "Note on Form 8949",
+            "exchange:PROVIDER:ACCOUNT",
+            "1099-DA",
+        ] {
+            assert!(
+                msg.contains(needle),
+                "live advisory names {needle:?}:\n{msg}"
+            );
+        }
+        assert!(
+            !msg.contains("reclassify by hand"),
+            "the live year ROUTED, it does not ask for a hand reclassification:\n{msg}"
+        );
+        assert!(
+            !msg.contains("Box I/L"),
+            "no blanket I/L filing on a live year:\n{msg}"
+        );
+        // and the not-live wordings never say 1g/1f — they have nothing to compare against
+        for (y, r) in [(2025, Regime::PROCEEDS_ONLY), (2024, Regime::NONE)] {
+            let m = broker_reporting_advisory(y, r, 1).unwrap();
+            assert!(!m.contains("box 1g") && !m.contains("box 1f"), "TY{y}: {m}");
+        }
     }
 
     /// UX-P4-8 (fold I2): `mkdir_out` — the shared export-`--out` directory creator — names the
