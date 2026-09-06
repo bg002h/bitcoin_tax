@@ -6197,8 +6197,11 @@ build, each with an owning phase.
   2026-09-06: "we will need to have option to file 2026 tax year with crypto sales").** Spec 1099-DA
   **R6** (this commit): the export dispatch becomes three-way — inputs + params → full return; inputs +
   no params → the SLICE with boxes routed from the stored answers; no inputs → the slice's live-year
-  refusal naming the input form as the exit. No new vault table. **Owning phase: NOW** — one opus
-  design-review round on R6 (`BRIEF-review-1099da-R6.md`), fold, then the build. Note for the
+  refusal naming the input form as the exit. No new vault table. **Owning phase: NOW.** r1 design review 2C/5I/6M/2N (`cd7cfbd9`, ledger 8/8 HOLD)
+  FOLDED into R6 (`92179086`): build tasks T8 (the slice's Schedule D per box, from the routed rows)
+  and T9 (commit the broker answers on a params-less year, I-11 untouched), the form-level gate, the
+  arm-(2) screen list, `report` in state (2), the TUI ordering, price coverage. r2 review next, then
+  the build. Note for the
   calendar: TY2026 still prints nothing until its Form 8949 / Schedule D finals are bundled
   (Nov 2026 – Jan 2027), which R6 makes the ONLY gate for a TY2026 crypto-slice filing.
 - **FR-47 — `AmtParams` / `FullReturnParams` TY2026 is a NOW item, not a post-finals one.**
