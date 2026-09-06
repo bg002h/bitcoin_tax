@@ -36,6 +36,11 @@ pub(super) fn form8949_box_tag(b: Form8949Box) -> &'static str {
         Form8949Box::F => "F",
         Form8949Box::I => "I",
         Form8949Box::L => "L",
+        // spec 1099-DA R2 — the broker-reported boxes, chosen from the filer's answers on a live year
+        Form8949Box::G => "G",
+        Form8949Box::H => "H",
+        Form8949Box::J => "J",
+        Form8949Box::K => "K",
     }
 }
 

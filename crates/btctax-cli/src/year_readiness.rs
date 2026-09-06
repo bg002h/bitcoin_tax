@@ -211,6 +211,17 @@ pub fn regime_for(year: i32) -> Option<btctax_core::InformationReturnRegime> {
     })
 }
 
+/// [`regime_for`], or the refusal a command gives when the year has no record — the regime is a fact
+/// about the year and a command must never guess it (spec 1099-DA R1).
+pub fn regime_or_refuse(
+    year: i32,
+) -> Result<btctax_core::InformationReturnRegime, crate::CliError> {
+    // a year with no record is exactly an UNSUPPORTED year — the same typed refusal the export arms
+    // raise before any byte, so the two gates cannot disagree about what "unsupported" means
+    regime_for(year)
+        .ok_or_else(|| crate::CliError::FormFill(btctax_forms::FormsError::UnsupportedYear(year)))
+}
+
 pub fn default_year() -> i32 {
     *bundled_years()
         .iter()

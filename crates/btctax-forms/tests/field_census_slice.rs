@@ -65,8 +65,17 @@ fn one_real_return_field_census() {
     let table = ty2024_table();
     let ar = assemble_absolute(&ri, &state, &ty2024_params(), &table, 2024);
     let details: BTreeMap<_, _> = BTreeMap::new();
-    let pr = assemble_printed_return(&ri, &state, &details, &ar, &table, 2024, &[])
-        .expect("kitchen_sink assembles");
+    let pr = assemble_printed_return(
+        &ri,
+        &state,
+        &details,
+        &ar,
+        &table,
+        2024,
+        &[],
+        btctax_core::InformationReturnRegime::NONE,
+    )
+    .expect("kitchen_sink assembles");
     let forms = fill_full_return(&pr, 2024).expect("the packet fills").forms;
 
     // The 15 forms the census tracks — the STATIC decision surface, per census.rs's settled rule
@@ -256,8 +265,17 @@ fn a_w2_only_return_shows_whether_the_schedule_d_case_arises() {
     let table = ty2024_table();
     let ar = assemble_absolute(&ri, &state, &ty2024_params(), &table, 2024);
     let details: BTreeMap<_, _> = BTreeMap::new();
-    let pr = assemble_printed_return(&ri, &state, &details, &ar, &table, 2024, &[])
-        .expect("w2_only assembles");
+    let pr = assemble_printed_return(
+        &ri,
+        &state,
+        &details,
+        &ar,
+        &table,
+        2024,
+        &[],
+        btctax_core::InformationReturnRegime::NONE,
+    )
+    .expect("w2_only assembles");
     // ★★ `sch_d` is NOT an Option — Schedule D is ALWAYS in the packet. `f8949` IS optional.
     println!(
         "  w2_only: schedule_d always present (not Option); f8949 emitted = {}",

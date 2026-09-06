@@ -38,6 +38,7 @@ fn the_nine_dependent_amt_return_files_a_complete_packet() {
         &ty2024_table(),
         2024,
         &[],
+        btctax_core::InformationReturnRegime::NONE,
     )
     .expect("this return must FILE — every one of its four features was a refusal before v0.15.0");
 

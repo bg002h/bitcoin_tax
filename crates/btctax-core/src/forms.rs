@@ -49,6 +49,97 @@ pub enum Form8949Box {
     I,
     /// Box **L** — long-term digital-asset sale NOT reported on a 1099-DA (TY2025+ default).
     L,
+    /// Box **G** — short-term, reported on a 1099-DA *"with an amount shown for cost or other
+    /// basis"* (box 2 checked); the filer answered `BasisMatches` (spec 1099-DA R2).
+    G,
+    /// Box **H** — short-term, reported on a 1099-DA *"without an amount shown for cost or other
+    /// basis"* (box 2 unchecked); the filer answered `ProceedsOnly`.
+    H,
+    /// Box **J** — long-term, the G case.
+    J,
+    /// Box **K** — long-term, the H case.
+    K,
+}
+
+/// Why [`route_8949_boxes`] could not choose a box (spec 1099-DA R1/R2). Mapped into
+/// `RefuseReason` by the screen; kept its own type so `forms` does not depend on `tax`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BrokerRouteError {
+    /// A live year's key has rows and no answer — the tool never chooses.
+    Unanswered { provider: String, cohort: Cohort },
+    /// The filer answered `Mixed`: no single box is true of the key's rows.
+    Mixed { provider: String, cohort: Cohort },
+    /// The filer answered `BasisDiffers`: the row needs the broker's figure in (e) and the
+    /// correction in (g), which only a per-lot 1099-DA import can supply.
+    BasisDiffers { provider: String, cohort: Cohort },
+}
+
+/// The (provider, cohort) key a row answers under — `None` for a non-`Exchange` wallet, for which
+/// no Form 1099-DA can exist (btctax models a non-`Exchange` wallet as non-custodial; a custodial
+/// venue must be recorded as `exchange:PROVIDER:ACCOUNT`, spec 1099-DA R2).
+pub fn broker_key(row: &Form8949Row) -> Option<(String, Cohort)> {
+    match &row.wallet {
+        WalletId::Exchange { provider, .. } => Some((provider.clone(), row.cohort)),
+        _ => None,
+    }
+}
+
+/// Is the Form 1099-DA question LIVE for these rows under this regime (spec 1099-DA R1): the year's
+/// regime reports BASIS and at least one row was disposed on an exchange.
+pub fn broker_question_is_live(rows: &[Form8949Row], regime: InformationReturnRegime) -> bool {
+    regime.basis && rows.iter().any(|r| broker_key(r).is_some())
+}
+
+/// ★ Route every row's Form 8949 box from the filer's answers on a LIVE year (spec 1099-DA R2):
+/// `NotReported` → I/L, `ProceedsOnly` → H/K, `BasisMatches` → G/J; `Mixed` and `BasisDiffers`
+/// and an unanswered key are errors, never a box. A row with no key (self-custody) routes I/L by
+/// mechanism. On a year that is NOT live the rows are left exactly as [`form_8949`] built them
+/// (I/L from TY2025, C/F before), whatever the answers say — the screen refuses those answers.
+pub fn route_8949_boxes(
+    rows: &mut [Form8949Row],
+    regime: InformationReturnRegime,
+    answers: &BrokerReporting,
+) -> Result<(), BrokerRouteError> {
+    if !broker_question_is_live(rows, regime) {
+        return Ok(());
+    }
+    for row in rows.iter_mut() {
+        let Some((provider, cohort)) = broker_key(row) else {
+            continue; // I/L by mechanism: no broker, no form
+        };
+        let st = matches!(row.part, Form8949Part::ShortTerm);
+        row.box_ = match answers.answer(&provider, cohort) {
+            None => return Err(BrokerRouteError::Unanswered { provider, cohort }),
+            Some(BrokerReported::Mixed) => {
+                return Err(BrokerRouteError::Mixed { provider, cohort })
+            }
+            Some(BrokerReported::BasisDiffers) => {
+                return Err(BrokerRouteError::BasisDiffers { provider, cohort })
+            }
+            Some(BrokerReported::NotReported) => {
+                if st {
+                    Form8949Box::I
+                } else {
+                    Form8949Box::L
+                }
+            }
+            Some(BrokerReported::ProceedsOnly) => {
+                if st {
+                    Form8949Box::H
+                } else {
+                    Form8949Box::K
+                }
+            }
+            Some(BrokerReported::BasisMatches) => {
+                if st {
+                    Form8949Box::G
+                } else {
+                    Form8949Box::J
+                }
+            }
+        };
+    }
+    Ok(())
 }
 
 /// The first tax year the 2025 Form 8949 digital-asset boxes (G–L) apply; before this, the securities
@@ -69,6 +160,24 @@ pub struct InformationReturnRegime {
     /// Box 1g / box 2 (basis, "basis reported to IRS") is reported for covered assets this year —
     /// the year the broker-reporting question goes LIVE.
     pub basis: bool,
+}
+
+impl InformationReturnRegime {
+    /// No Form 1099-DA at all (TY2017, TY2024). For FIXTURES; production joins `YEAR.toml` via the CLI.
+    pub const NONE: Self = Self {
+        proceeds: false,
+        basis: false,
+    };
+    /// Proceeds only (TY2025). For fixtures.
+    pub const PROCEEDS_ONLY: Self = Self {
+        proceeds: true,
+        basis: false,
+    };
+    /// Proceeds and basis (TY2026+) — the question is live. For fixtures.
+    pub const PROCEEDS_AND_BASIS: Self = Self {
+        proceeds: true,
+        basis: true,
+    };
 }
 
 /// ★ The first day a digital asset bought INTO a custodial broker's account is a COVERED security —

@@ -521,7 +521,8 @@ pub fn report_tax_year(
         ) {
             (Some(ri), Some(params), Some(table)) => {
                 let ar = btctax_core::assemble_absolute(&ri, &state, params, table, year);
-                match btctax_core::screen_absolute(&ri, &ar, params, &state, year) {
+                let regime = crate::year_readiness::regime_or_refuse(year)?;
+                match btctax_core::screen_absolute(&ri, &ar, params, &state, year, regime) {
                     Some(refusal) => Some(format!(
                         "\n═══ Absolute filed return (Form 1040) — tax year {year} ═══\n  \
                          Profile source: {}\n  NOT COMPUTABLE [{:?}]: {}\n",
@@ -540,7 +541,7 @@ pub fn report_tax_year(
                         // ARTIFACT needs a name and an SSN).
                         let details = s.donation_details()?;
                         let printed = btctax_core::tax::packet::assemble_printed_forms(
-                            &ri, &state, &details, &ar, table, year, &events,
+                            &ri, &state, &details, &ar, table, year, &events, regime,
                         );
                         let mut block = crate::render::render_dual_report(
                             year,
@@ -685,14 +686,17 @@ pub fn report_tax_year(
                         //   worksheet carryforward. That violated this fold's own stated rule.
                         (btctax_core::tax::return_refuse::screen_inputs(&ri_prev, table, params)
                             .is_none()
-                            && btctax_core::screen_absolute(
-                                &ri_prev,
-                                &ar_prev,
-                                params,
-                                &state,
-                                year - 1,
-                            )
-                            .is_none())
+                            && crate::year_readiness::regime_for(year - 1).is_some_and(|rg| {
+                                btctax_core::screen_absolute(
+                                    &ri_prev,
+                                    &ar_prev,
+                                    params,
+                                    &state,
+                                    year - 1,
+                                    rg,
+                                )
+                                .is_none()
+                            }))
                         .then_some(ar_prev.capital_loss_carryforward_out)
                     }
                     _ => None,
@@ -884,7 +888,8 @@ pub fn write_back_carryover(
     let ri = crate::return_inputs::get(s.conn(), year)?
         .ok_or_else(|| CliError::Usage(format!("no return_inputs stored for {year}")))?;
     let ar = btctax_core::assemble_absolute(&ri, &state, params, table, year);
-    if let Some(refusal) = btctax_core::screen_absolute(&ri, &ar, params, &state, year) {
+    let regime = crate::year_readiness::regime_or_refuse(year)?;
+    if let Some(refusal) = btctax_core::screen_absolute(&ri, &ar, params, &state, year, regime) {
         return Err(CliError::Usage(format!(
             "the {year} absolute return is not computable [{:?}]: {} — carryover not written",
             refusal.reason, refusal.detail

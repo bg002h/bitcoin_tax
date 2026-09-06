@@ -50,10 +50,26 @@ fn computed(ri: &ReturnInputs, state: &LedgerState) -> (AbsoluteReturn, PrintedF
         panic!("this fixture must COMPUTE, but screen_inputs refused: {r:?}");
     }
     let ar = assemble_absolute(ri, state, &params, &table, 2024);
-    if let Some(r) = screen_absolute(ri, &ar, &params, state, 2024) {
+    if let Some(r) = screen_absolute(
+        ri,
+        &ar,
+        &params,
+        state,
+        2024,
+        btctax_core::InformationReturnRegime::NONE,
+    ) {
         panic!("this fixture must COMPUTE, but screen_absolute refused: {r:?}");
     }
-    let pf = assemble_printed_forms(ri, state, &BTreeMap::new(), &ar, &table, 2024, &[]);
+    let pf = assemble_printed_forms(
+        ri,
+        state,
+        &BTreeMap::new(),
+        &ar,
+        &table,
+        2024,
+        &[],
+        btctax_core::InformationReturnRegime::NONE,
+    );
     (ar, pf)
 }
 
@@ -203,7 +219,16 @@ fn the_corpus_carries_a_household_where_a_gift_and_the_niit_actually_meet() {
         }
         let (ri, state) = build_golden_return(&h.inputs);
         let ar = assemble_absolute(&ri, &state, &params, &table, 2024);
-        let pf = assemble_printed_forms(&ri, &state, &BTreeMap::new(), &ar, &table, 2024, &[]);
+        let pf = assemble_printed_forms(
+            &ri,
+            &state,
+            &BTreeMap::new(),
+            &ar,
+            &table,
+            2024,
+            &[],
+            btctax_core::InformationReturnRegime::NONE,
+        );
         let Some(f8960) = pf.f8960.as_ref() else {
             continue; // a gifting household that owes no NIIT witnesses only half of the pair
         };
@@ -285,7 +310,16 @@ fn the_two_niit_chains_reconcile_on_every_household_that_files_form_8960() {
     for h in golden_households() {
         let (ri, state) = build_golden_return(&h.inputs);
         let ar = assemble_absolute(&ri, &state, &params, &table, 2024);
-        let pf = assemble_printed_forms(&ri, &state, &BTreeMap::new(), &ar, &table, 2024, &[]);
+        let pf = assemble_printed_forms(
+            &ri,
+            &state,
+            &BTreeMap::new(),
+            &ar,
+            &table,
+            2024,
+            &[],
+            btctax_core::InformationReturnRegime::NONE,
+        );
         let Some(f8960) = pf.f8960.as_ref() else {
             continue;
         };
@@ -379,7 +413,16 @@ fn form_6251_lines_20_and_27_are_the_qdcgt_worksheets_line_5() {
     for (json, floor_must_bind) in cases {
         let (ri, state) = household(json);
         let ar = assemble_absolute(&ri, &state, &params, &table, 2024);
-        let pf = assemble_printed_forms(&ri, &state, &BTreeMap::new(), &ar, &table, 2024, &[]);
+        let pf = assemble_printed_forms(
+            &ri,
+            &state,
+            &BTreeMap::new(),
+            &ar,
+            &table,
+            2024,
+            &[],
+            btctax_core::InformationReturnRegime::NONE,
+        );
 
         // The worksheet, transcribed. Its operands are the ones `qdcgt_line16` itself is handed at
         // `return_1040.rs` — 1040 line 15, 1040 line 3a and the §1(h) preferential net capital gain.
@@ -599,7 +642,14 @@ fn the_limitations_row_for_the_1211_1212_edge_is_true_of_the_code() {
         "premise: the worksheet's two header declarations are answered, so the INPUT screen is clean"
     );
     assert_eq!(
-        screen_absolute(&ri, &ar, &params, &state, 2024),
+        screen_absolute(
+            &ri,
+            &ar,
+            &params,
+            &state,
+            2024,
+            btctax_core::InformationReturnRegime::NONE
+        ),
         None,
         "★ taxable income of $0 WITH a capital-loss carryforward-in now FILES"
     );
@@ -608,7 +658,15 @@ fn the_limitations_row_for_the_1211_1212_edge_is_true_of_the_code() {
     let (ri_no, state_no) = household(r#"{"filing_status":"Single","w2_income":10000}"#);
     let ar_no = assemble_absolute(&ri_no, &state_no, &params, &table, 2024);
     assert!(
-        screen_absolute(&ri_no, &ar_no, &params, &state_no, 2024).is_none(),
+        screen_absolute(
+            &ri_no,
+            &ar_no,
+            &params,
+            &state_no,
+            2024,
+            btctax_core::InformationReturnRegime::NONE
+        )
+        .is_none(),
         "the refund-only filer with NO carryforward was never refused, and still is not"
     );
 
@@ -627,7 +685,15 @@ fn the_limitations_row_for_the_1211_1212_edge_is_true_of_the_code() {
     let h3_ar = assemble_absolute(&h3, &h3_state, &params, &table, 2024);
     assert!(
         screen_inputs(&h3, &table, &params).is_none()
-            && screen_absolute(&h3, &h3_ar, &params, &h3_state, 2024).is_none(),
+            && screen_absolute(
+                &h3,
+                &h3_ar,
+                &params,
+                &h3_state,
+                2024,
+                btctax_core::InformationReturnRegime::NONE
+            )
+            .is_none(),
         "★ H3 must FILE — while it refused, the `report` path never entered the arm that builds \
          advisories and the export path returned before `advisories_for` was called, so the one \
          household this advisory was written for could not be shown it"
@@ -832,7 +898,15 @@ fn the_mortgage_debt_limit_question_is_asked_on_inputs_and_refuses_on_the_deduct
         "the fixture must lose to the standard deduction, or it tests the other branch"
     );
     assert!(
-        screen_absolute(&ri, &ar, &params, &state2, 2024).is_none(),
+        screen_absolute(
+            &ri,
+            &ar,
+            &params,
+            &state2,
+            2024,
+            btctax_core::InformationReturnRegime::NONE
+        )
+        .is_none(),
         "an over-the-limit filer whose Schedule A LOSES to the standard deduction files normally: \
          line 8a never prints, so the answer changes no figure. Refusing here is the misfire phase \
          2's review C fixed."
@@ -844,8 +918,15 @@ fn the_mortgage_debt_limit_question_is_asked_on_inputs_and_refuses_on_the_deduct
     ri.schedule_a.as_mut().unwrap().mortgage_within_debt_limit = Some(false);
     let ar = assemble_absolute(&ri, &state3, &params, &table, 2024);
     assert!(ar.deduction_is_itemized, "the twin must itemize");
-    let refusal = screen_absolute(&ri, &ar, &params, &state3, 2024)
-        .expect("an ITEMIZING return over the §163(h)(3)(B) limit must refuse");
+    let refusal = screen_absolute(
+        &ri,
+        &ar,
+        &params,
+        &state3,
+        2024,
+        btctax_core::InformationReturnRegime::NONE,
+    )
+    .expect("an ITEMIZING return over the §163(h)(3)(B) limit must refuse");
     assert_eq!(format!("{:?}", refusal.reason), "MortgageOverDebtLimit");
     let _ = state;
 }
@@ -959,7 +1040,7 @@ fn the_standard_deduction_deferral_donor_still_files_but_is_neither_told_nothing
         "nothing refuses at the input screen"
     );
     assert!(
-        screen_absolute(&ri, &ar, &params, &state, 2024).is_none(),
+        screen_absolute(&ri, &ar, &params, &state, 2024, btctax_core::InformationReturnRegime::NONE).is_none(),
         "★ and the RETURN IS STILL FILABLE. It claims no §170 deduction, so §170(f)(8)(A) — which \
          conditions *a deduction* — denies nothing on it. If this ever refuses, the fix went in as a \
          wider gate and the `Some(false)` cure (\"remove that gift from the deduction\") is now \
@@ -1144,7 +1225,14 @@ fn a_mixed_use_mortgage_that_is_also_over_the_debt_limit_files_a_disclosed_zero(
         "nothing refuses at the input screen once the question is answered"
     );
     assert_eq!(
-        screen_absolute(&ri, &ar, &params, &state, 2024),
+        screen_absolute(
+            &ri,
+            &ar,
+            &params,
+            &state,
+            2024,
+            btctax_core::InformationReturnRegime::NONE
+        ),
         None,
         "★★ AND THE RETURN FILES. Refusing here stopped a filer whose printed return btctax can \
          compute honestly today, and offered them no honest answer: `None` refuses as unanswered, \
@@ -1181,8 +1269,15 @@ fn a_mixed_use_mortgage_that_is_also_over_the_debt_limit_files_a_disclosed_zero(
         !sa_x.mortgage_mixed_use_box,
         "…with the line-8 box UNCHECKED — the undisclosed zero problem the refusal's text names"
     );
-    let r = screen_absolute(&ri_x, &ar_x, &params, &state_x, 2024)
-        .expect("★ an over-limit itemizer whose 8a is NOT already zeroed must still REFUSE");
+    let r = screen_absolute(
+        &ri_x,
+        &ar_x,
+        &params,
+        &state_x,
+        2024,
+        btctax_core::InformationReturnRegime::NONE,
+    )
+    .expect("★ an over-limit itemizer whose 8a is NOT already zeroed must still REFUSE");
     assert_eq!(
         format!("{:?}", r.reason),
         "MortgageOverDebtLimit",
@@ -1195,7 +1290,7 @@ fn a_mixed_use_mortgage_that_is_also_over_the_debt_limit_files_a_disclosed_zero(
     // over the limit: this filer prints the same disclosed zero and always could.
     let (ri_m, state_m, ar_m) = build(Some(false), Some(true));
     assert_eq!(
-        screen_absolute(&ri_m, &ar_m, &params, &state_m, 2024),
+        screen_absolute(&ri_m, &ar_m, &params, &state_m, 2024, btctax_core::InformationReturnRegime::NONE),
         None,
         "a mixed-use filer inside the debt limit files a disclosed zero — this was never in doubt, \
          and it is the return the over-limit filer now gets too"

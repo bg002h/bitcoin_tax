@@ -744,7 +744,16 @@ fn assemble(inputs: &GoldenInputs) -> Option<Ready> {
         return None;
     }
     let ar = assemble_absolute(&ri, &state, &params, &table, YEAR);
-    if screen_absolute(&ri, &ar, &params, &state, YEAR).is_some() {
+    if screen_absolute(
+        &ri,
+        &ar,
+        &params,
+        &state,
+        YEAR,
+        btctax_core::InformationReturnRegime::NONE /* TY2024 only: no Form 1099-DA regime (spec 1099-DA T0) */,
+    )
+    .is_some()
+    {
         // ★ T5 (r2 I-7): this stays a COMBINED check, deliberately. The plan once said to narrow it to
         // the AMT reason; that was wrong twice over. (a) Deleting or narrowing it would admit
         // QBI-over-threshold and taxable-income≤0 returns the corpus excludes for unrelated reasons.
@@ -753,10 +762,20 @@ fn assemble(inputs: &GoldenInputs) -> Option<Ready> {
         // Form 6251, which belongs out of domain until Tier 2 can FILE the form.
         return None;
     }
-    let pr = assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, &table, YEAR, &[]).ok()?; // identity would not print (D-2)
-                                                                                                   // ★ The harness reads PDFs back; statements carry no AcroForm and no compared line, so it takes
-                                                                                                   //   the forms half. That is a deliberate narrowing, not an oversight: a statement is prose the
-                                                                                                   //   filer attaches, and `read_back_lines` has nothing to read from it.
+    let pr = assemble_printed_return(
+        &ri,
+        &state,
+        &BTreeMap::new(),
+        &ar,
+        &table,
+        YEAR,
+        &[],
+        btctax_core::InformationReturnRegime::NONE,
+    )
+    .ok()?; // identity would not print (D-2)
+            // ★ The harness reads PDFs back; statements carry no AcroForm and no compared line, so it takes
+            //   the forms half. That is a deliberate narrowing, not an oversight: a statement is prose the
+            //   filer attaches, and `read_back_lines` has nothing to read from it.
     let forms = fill_full_return(&pr, YEAR).ok()?.forms; // a member filler refused (overflow etc.)
     Some((ar, pr, forms))
 }

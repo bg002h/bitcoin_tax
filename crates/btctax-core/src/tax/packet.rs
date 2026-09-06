@@ -532,6 +532,7 @@ pub struct PrintedForms {
     pub f8275: Option<Printed8275>,
 }
 
+#[allow(clippy::too_many_arguments)] // the Form 1099-DA regime is the eighth (spec 1099-DA R1); a params struct is a later tidy
 /// ★ **The single composition site.** Build every printed chain from one `AbsoluteReturn`, in dependency
 /// order: the upstream chains are ARGUMENTS to the downstream ones, which is precisely what makes the
 /// filed packet tie out — Schedule 2 line 11 is Form 8959's *printed* line 18, and 1040 line 23 is
@@ -548,14 +549,16 @@ pub fn assemble_printed_return(
     table: &TaxTable,
     year: i32,
     events: &[LedgerEvent],
+    regime: crate::forms::InformationReturnRegime,
 ) -> Result<PrintedReturn, HeaderError> {
     Ok(PrintedReturn {
         header: ReturnHeader::build(ri, year)?,
         filing_status: ri.filing_status,
-        forms: assemble_printed_forms(ri, state, donation_details, ar, table, year, events),
+        forms: assemble_printed_forms(ri, state, donation_details, ar, table, year, events, regime),
     })
 }
 
+#[allow(clippy::too_many_arguments)] // the Form 1099-DA regime is the eighth (spec 1099-DA R1); a params struct is a later tidy
 /// The printed form chains, with **no identity** — infallible, and PII-free.
 ///
 /// The report renders THESE, so the terminal shows exactly the figures the filed PDF will carry (SPEC
@@ -570,13 +573,21 @@ pub fn assemble_printed_forms(
     table: &TaxTable,
     year: i32,
     events: &[LedgerEvent],
+    regime: crate::forms::InformationReturnRegime,
 ) -> PrintedForms {
     let status = ri.filing_status;
     let pi = &ar.printed_inputs;
 
     // The 8949 is built FIRST: Schedule D's lines 3 and 10 are its printed column totals, so the
     // detail form is upstream of the schedule that summarizes it.
-    let f8949 = form_8949_printed(&crate::forms::form_8949(state, year));
+    // ★ spec 1099-DA R2 — the boxes are ROUTED from the filer's Form 1099-DA answers on a live year.
+    //   `screen_absolute` is the gate that refuses an unanswered key, Mixed or BasisDiffers before
+    //   any packet is assembled; this is the backstop, and it is loud, never a silent I/L.
+    let mut rows = crate::forms::form_8949(state, year);
+    crate::forms::route_8949_boxes(&mut rows, regime, &ri.broker_reporting).unwrap_or_else(|e| {
+        panic!("assemble_printed_forms reached an unscreened Form 1099-DA key — screen_absolute is the gate and must run first: {e:?}")
+    });
+    let f8949 = form_8949_printed(&rows);
 
     // Attachments first — each downstream chain takes the printed lines of the ones above it.
     let f8959 = form_8959_lines(
@@ -1211,6 +1222,7 @@ mod tests {
             &ty2024_table(),
             2024,
             &[],
+            crate::forms::InformationReturnRegime::NONE,
         )
         .unwrap();
 
@@ -1356,6 +1368,7 @@ mod tests {
                 &ty2024_table(),
                 2024,
                 &[],
+                crate::forms::InformationReturnRegime::NONE,
             )
             .unwrap();
             let line2 = pr.forms.sch_2.as_ref().and_then(|s| s.line2);
@@ -1438,6 +1451,7 @@ mod tests {
                 &ty2024_table(),
                 2024,
                 &[],
+                crate::forms::InformationReturnRegime::NONE,
             )
             .unwrap();
             assert_eq!(
@@ -1467,6 +1481,7 @@ mod tests {
             &ty2024_table(),
             2024,
             &[],
+            crate::forms::InformationReturnRegime::NONE,
         )
         .unwrap();
 
@@ -1513,6 +1528,7 @@ mod tests {
             &ty2024_table(),
             2024,
             &[],
+            crate::forms::InformationReturnRegime::NONE,
         )
         .unwrap();
 

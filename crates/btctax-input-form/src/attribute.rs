@@ -67,7 +67,8 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         //   at that block; this arm is what makes that a compile-time obligation, not a memory.
         R::BrokerReportingUnanswered { .. }
         | R::BrokerReportingMixed { .. }
-        | R::BrokerBasisDiffers { .. } => vec![Anchor::NotInForm {
+        | R::BrokerBasisDiffers { .. }
+        | R::BrokerAnswerUnread { .. } => vec![Anchor::NotInForm {
             note: "spec 1099-DA: the per-(provider, cohort) Form 1099-DA answers live in `income import`'s \
                    `[broker_reporting.<provider>]` table (covered / noncovered = not_reported | \
                    proceeds_only | basis_matches | basis_differs | mixed) until T6 adds the input-form \

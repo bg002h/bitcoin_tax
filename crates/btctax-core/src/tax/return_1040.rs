@@ -2611,7 +2611,14 @@ pub fn screen_absolute(
     params: &FullReturnParams,
     state: &LedgerState,
     year: i32,
+    regime: crate::forms::InformationReturnRegime,
 ) -> Option<Refusal> {
+    // ★ spec 1099-DA R1 — the Form 1099-DA screen runs FIRST: it is the only screen whose refusal
+    //   names an input the filer must go and READ (the physical forms), and a box chosen without it
+    //   is a wrong return on its own (port report §6 rule 18).
+    if let Some(r) = crate::tax::return_refuse::screen_broker_reporting(ri, state, year, regime) {
+        return Some(r);
+    }
     // ★★★ §G-21 — Form 8283 Section B lines 5a/5b/5c, the restriction questions.
     //
     // ★★ r3 I-2/I-3 put this HERE rather than in `screen_compute_dependent`, and re-keyed it. It was
@@ -3757,7 +3764,15 @@ mod tests {
             let st = donation_state(claimed);
             let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
             assert!(ar.deduction_is_itemized, "the fixture must itemize");
-            screen_absolute(&ri, &ar, &p, &st, 2024).map(|r| r.reason)
+            screen_absolute(
+                &ri,
+                &ar,
+                &p,
+                &st,
+                2024,
+                crate::forms::InformationReturnRegime::NONE,
+            )
+            .map(|r| r.reason)
         };
 
         // ★ THE DEFECT: a declared restriction under $5,000 sailed through and deducted full FMV.
@@ -3818,7 +3833,15 @@ mod tests {
                 !ar.deduction_is_itemized,
                 "the fixture must take the STANDARD deduction"
             );
-            screen_absolute(&ri, &ar, &p, &st, 2024).map(|r| r.reason)
+            screen_absolute(
+                &ri,
+                &ar,
+                &p,
+                &st,
+                2024,
+                crate::forms::InformationReturnRegime::NONE,
+            )
+            .map(|r| r.reason)
         };
 
         for answer in [None, Some(true), Some(false)] {
@@ -5573,6 +5596,7 @@ mod tests {
             &table,
             2024,
             &[],
+            crate::forms::InformationReturnRegime::NONE,
         );
         let f8275 = forms.f8275.as_ref().expect(
             "a certified return FILES a Form 8275 — a silent undisclosed position would be \
@@ -5699,6 +5723,7 @@ mod tests {
                 &table,
                 2024,
                 &[],
+                crate::forms::InformationReturnRegime::NONE
             )
             .f8275
             .is_none(),
@@ -6034,7 +6059,15 @@ mod tests {
         //     and Part IV needs no input btctax lacks. Refusing them was refusing a return the form
         //     itself tells us how to complete.
         assert_eq!(
-            screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024).map(|r| r.reason),
+            screen_absolute(
+                &ri,
+                &ar,
+                &p,
+                &empty_ledger(),
+                2024,
+                crate::forms::InformationReturnRegime::NONE
+            )
+            .map(|r| r.reason),
             None,
             "a REIT/PTP-only filer above the threshold files on Form 8995-A Part IV"
         );
@@ -6057,7 +6090,14 @@ mod tests {
         no_qbi.div_1099[0].box5_section_199a = Usd::ZERO;
         let ar2 = assemble_absolute(&no_qbi, &empty_ledger(), &p, &table, 2024);
         assert_eq!(
-            screen_absolute(&no_qbi, &ar2, &p, &empty_ledger(), 2024),
+            screen_absolute(
+                &no_qbi,
+                &ar2,
+                &p,
+                &empty_ledger(),
+                2024,
+                crate::forms::InformationReturnRegime::NONE
+            ),
             None
         );
     }
@@ -6107,6 +6147,7 @@ mod tests {
             &table,
             2024,
             &[],
+            crate::forms::InformationReturnRegime::NONE,
         )
         .expect("the printed return assembles");
         let d = &pr.forms.sch_d;
@@ -6475,6 +6516,7 @@ mod tests {
             &table,
             2024,
             &[],
+            crate::forms::InformationReturnRegime::NONE,
         )
         .expect("the printed return assembles");
         let d = &pr.forms.sch_d;
@@ -6769,7 +6811,15 @@ mod tests {
         );
         let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
         assert_eq!(
-            screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024).map(|r| r.reason),
+            screen_absolute(
+                &ri,
+                &ar,
+                &p,
+                &empty_ledger(),
+                2024,
+                crate::forms::InformationReturnRegime::NONE
+            )
+            .map(|r| r.reason),
             None,
             "…and nothing downstream refuses it either"
         );
@@ -6837,7 +6887,15 @@ mod tests {
              and this test is asserting the wrong regime's answer"
         );
         assert_eq!(
-            screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024).map(|r| r.reason),
+            screen_absolute(
+                &ri,
+                &ar,
+                &p,
+                &empty_ledger(),
+                2024,
+                crate::forms::InformationReturnRegime::NONE
+            )
+            .map(|r| r.reason),
             None,
             "an over-threshold Schedule C with no wages and no UBIA is COMPUTABLE — Form 8995-A \
              Parts I-III figure the §199A(b)(2) cap from two numbers the filer stated"
@@ -6909,7 +6967,15 @@ mod tests {
         let st = state_income(vec![mining(dec!(240000))]);
         let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
         assert_eq!(
-            screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024).map(|r| r.reason),
+            screen_absolute(
+                &ri,
+                &ar,
+                &p,
+                &empty_ledger(),
+                2024,
+                crate::forms::InformationReturnRegime::NONE
+            )
+            .map(|r| r.reason),
             None,
             "this return must FILE, else the test proves nothing"
         );
@@ -6921,6 +6987,7 @@ mod tests {
             &table,
             2024,
             &[],
+            crate::forms::InformationReturnRegime::NONE,
         )
         .expect("the printed return assembles");
         let a = pr
@@ -6999,7 +7066,15 @@ mod tests {
                 ..Default::default()
             };
             let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
-            let r = screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024).expect("must refuse");
+            let r = screen_absolute(
+                &ri,
+                &ar,
+                &p,
+                &empty_ledger(),
+                2024,
+                crate::forms::InformationReturnRegime::NONE,
+            )
+            .expect("must refuse");
             assert_eq!(
                 r.reason,
                 RefuseReason::QbiAboveThreshold,
@@ -7050,7 +7125,15 @@ mod tests {
         };
         let st = state_income(vec![mining(dec!(260000))]);
         let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
-        let r = screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024).expect("must refuse");
+        let r = screen_absolute(
+            &ri,
+            &ar,
+            &p,
+            &empty_ledger(),
+            2024,
+            crate::forms::InformationReturnRegime::NONE,
+        )
+        .expect("must refuse");
         assert_eq!(
             r.reason,
             RefuseReason::SstbUnanswered,
@@ -7096,7 +7179,15 @@ mod tests {
             "TI-before-QBI must be UNDER the threshold, else this test proves the opposite"
         );
         assert_eq!(
-            screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024).map(|r| r.reason),
+            screen_absolute(
+                &ri,
+                &ar,
+                &p,
+                &empty_ledger(),
+                2024,
+                crate::forms::InformationReturnRegime::NONE
+            )
+            .map(|r| r.reason),
             None,
             "under the threshold the SSTB answer is irrelevant — Form 8995 has no such checkbox"
         );
@@ -7166,7 +7257,15 @@ mod tests {
              stands in the way"
         );
         assert_eq!(
-            screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024).map(|r| r.reason),
+            screen_absolute(
+                &ri,
+                &ar,
+                &p,
+                &empty_ledger(),
+                2024,
+                crate::forms::InformationReturnRegime::NONE
+            )
+            .map(|r| r.reason),
             None,
             "★ (A): taxable income of $0 with a carryforward brought in FILES"
         );
@@ -7180,6 +7279,7 @@ mod tests {
             &table,
             2024,
             &[],
+            crate::forms::InformationReturnRegime::NONE,
         );
         assert_eq!(pf.sch_d.line6, dec!(2000), "L6 — the carryover, paren box");
         assert_eq!(pf.sch_d.line7, dec!(-2000), "L7 — net short-term");
@@ -7227,7 +7327,15 @@ mod tests {
             "premise: the twin is at the floor too"
         );
         assert_eq!(
-            screen_absolute(&twin, &ar_twin, &p, &empty_ledger(), 2024).map(|r| r.reason),
+            screen_absolute(
+                &twin,
+                &ar_twin,
+                &p,
+                &empty_ledger(),
+                2024,
+                crate::forms::InformationReturnRegime::NONE
+            )
+            .map(|r| r.reason),
             None,
             "premise: the twin has ALWAYS filed — it is the asymmetry that was the finding"
         );
@@ -7239,6 +7347,7 @@ mod tests {
             &table,
             2024,
             &[],
+            crate::forms::InformationReturnRegime::NONE,
         );
         assert_eq!(
             pf.sch_d.routing, pf_twin.sch_d.routing,
@@ -7301,7 +7410,15 @@ mod tests {
             None
         );
         assert_eq!(
-            screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024).map(|r| r.reason),
+            screen_absolute(
+                &ri,
+                &ar,
+                &p,
+                &empty_ledger(),
+                2024,
+                crate::forms::InformationReturnRegime::NONE
+            )
+            .map(|r| r.reason),
             None,
             "premise: H9 FILES — before the lift this household was refused"
         );
@@ -7398,6 +7515,7 @@ mod tests {
             &table,
             2024,
             &[],
+            crate::forms::InformationReturnRegime::NONE,
         );
 
         let z = Usd::ZERO;
@@ -7903,7 +8021,14 @@ mod tests {
             "no Form 6251 attachment required"
         );
         assert_eq!(
-            screen_absolute(&high, &ar_high, &p, &empty_ledger(), 2024),
+            screen_absolute(
+                &high,
+                &ar_high,
+                &p,
+                &empty_ledger(),
+                2024,
+                crate::forms::InformationReturnRegime::NONE
+            ),
             None,
             "a screen-tripping, zero-AMT filer must now COMPUTE, not refuse"
         );
@@ -7911,7 +8036,14 @@ mod tests {
         let common = wages_single(dec!(150000));
         let ar_common = assemble_absolute(&common, &empty_ledger(), &p, &table, 2024);
         assert_eq!(
-            screen_absolute(&common, &ar_common, &p, &empty_ledger(), 2024),
+            screen_absolute(
+                &common,
+                &ar_common,
+                &p,
+                &empty_ledger(),
+                2024,
+                crate::forms::InformationReturnRegime::NONE
+            ),
             None
         );
     }
@@ -8008,7 +8140,17 @@ mod tests {
         assert_eq!(ar.amt.line11, Usd::ZERO, "Form 6251 line 11");
         assert_eq!(ar.amt.amt(), Usd::ZERO, "→ Schedule 2 line 2");
         // 4. And the return computes rather than refusing.
-        assert_eq!(screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024), None);
+        assert_eq!(
+            screen_absolute(
+                &ri,
+                &ar,
+                &p,
+                &empty_ledger(),
+                2024,
+                crate::forms::InformationReturnRegime::NONE
+            ),
+            None
+        );
     }
 
     /// ★ REGRESSION (2026-07-27, `fix/amt-screen-line2`) — **an ITEMIZER must not have their non-SALT
@@ -8086,7 +8228,7 @@ mod tests {
         );
         // (1) The guarantee: no false refusal. This is the assertion a filer would feel.
         assert_eq!(
-            screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024),
+            screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024, crate::forms::InformationReturnRegime::NONE),
             None,
             "an ordinary MFJ itemizer with $300k of wages owes no AMT and Form 6251 line 7 lands below \
              line 10; adding back the AMT-allowed mortgage/charitable deductions manufactures a false \
@@ -9018,7 +9160,15 @@ mod tests {
                 Usd::ZERO,
                 "…and the §170(b) ceiling must zero the noncash deduction — the whole point"
             );
-            screen_absolute(&ri, &ar, &p, &st, 2024).map(|r| r.reason)
+            screen_absolute(
+                &ri,
+                &ar,
+                &p,
+                &st,
+                2024,
+                crate::forms::InformationReturnRegime::NONE,
+            )
+            .map(|r| r.reason)
         };
 
         // ★ THE DEFECT: the return claims $0 of noncash charity and attaches no 8283, so a
@@ -9067,7 +9217,15 @@ mod tests {
                 l12 > Usd::ZERO && l12 <= crate::tax::printed::FORM_8283_THRESHOLD,
                 "fixture must claim a noncash deduction in the no-8283 band, got {l12}"
             );
-            screen_absolute(&ri, &ar, &p, &st, 2024).map(|r| r.reason)
+            screen_absolute(
+                &ri,
+                &ar,
+                &p,
+                &st,
+                2024,
+                crate::forms::InformationReturnRegime::NONE,
+            )
+            .map(|r| r.reason)
         };
         assert_eq!(
             band(None),
@@ -9109,7 +9267,15 @@ mod tests {
                     > crate::tax::printed::FORM_8283_THRESHOLD,
                 "fixture must actually claim a noncash deduction over $500"
             );
-            screen_absolute(&ri, &ar, &p, &st, 2024).map(|r| r.reason)
+            screen_absolute(
+                &ri,
+                &ar,
+                &p,
+                &st,
+                2024,
+                crate::forms::InformationReturnRegime::NONE,
+            )
+            .map(|r| r.reason)
         };
         assert_eq!(
             claiming(Some(true), dec!(9000)),
@@ -9158,7 +9324,15 @@ mod tests {
             let st = donation_state(dec!(4000));
             let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
             assert!(ar.deduction_is_itemized, "the fixture must itemize");
-            screen_absolute(&ri, &ar, &p, &st, 2024).map(|r| r.reason)
+            screen_absolute(
+                &ri,
+                &ar,
+                &p,
+                &st,
+                2024,
+                crate::forms::InformationReturnRegime::NONE,
+            )
+            .map(|r| r.reason)
         };
         assert_eq!(
             screened(None),
@@ -9207,7 +9381,14 @@ mod tests {
                 ..Default::default()
             };
             let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
-            let r = screen_absolute(&ri, &ar, &p, &st, 2024);
+            let r = screen_absolute(
+                &ri,
+                &ar,
+                &p,
+                &st,
+                2024,
+                crate::forms::InformationReturnRegime::NONE,
+            );
             (
                 ar.deduction_is_itemized,
                 r.as_ref().map(|r| r.reason.clone()),
@@ -9336,9 +9517,16 @@ mod tests {
         };
         let st_no = donation_state(dec!(50000));
         let ar_no = assemble_absolute(&ri_no, &st_no, &p, &table, 2024);
-        let d = screen_absolute(&ri_no, &ar_no, &p, &st_no, 2024)
-            .expect("answering NO on a deferred claim still refuses")
-            .detail;
+        let d = screen_absolute(
+            &ri_no,
+            &ar_no,
+            &p,
+            &st_no,
+            2024,
+            crate::forms::InformationReturnRegime::NONE,
+        )
+        .expect("answering NO on a deferred claim still refuses")
+        .detail;
         assert!(
             !d.contains("remove that gift from the deduction"),
             "a filer deducting nothing this year has no deduction to remove — offering that cure is \
@@ -9423,8 +9611,15 @@ mod tests {
             dec!(10000),
             "the bound is min(5a, 5e, cap) = min(30,000, 10,000, 10,000)"
         );
-        let r = screen_absolute(&over, &ar, &p, &empty_ledger(), 2024)
-            .expect("$10,001 exceeds the $10,000 the return actually deducted");
+        let r = screen_absolute(
+            &over,
+            &ar,
+            &p,
+            &empty_ledger(),
+            2024,
+            crate::forms::InformationReturnRegime::NONE,
+        )
+        .expect("$10,001 exceeds the $10,000 the return actually deducted");
         assert_eq!(r.reason, RefuseReason::Nii9bExceedsDeductedSalt);
         for phrase in ["§1411(c)(1)(B)", "§164(b)(6)(B)", "$10,000"] {
             assert!(
@@ -9438,7 +9633,15 @@ mod tests {
         let at = p8_return(dec!(30000), None, Some(dec!(10000)));
         let ar_at = assemble_absolute(&at, &empty_ledger(), &p, &table, 2024);
         assert_eq!(
-            screen_absolute(&at, &ar_at, &p, &empty_ledger(), 2024).map(|r| r.reason),
+            screen_absolute(
+                &at,
+                &ar_at,
+                &p,
+                &empty_ledger(),
+                2024,
+                crate::forms::InformationReturnRegime::NONE
+            )
+            .map(|r| r.reason),
             None,
             "a 9b AT the bound is the filer's own lawful allocation and must not be refused"
         );
@@ -9470,8 +9673,15 @@ mod tests {
             Usd::ZERO,
             "sales taxes are never deductible in computing net investment income"
         );
-        let r = screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024)
-            .expect("even $1 of line 9b is unallowable under the sales-tax election");
+        let r = screen_absolute(
+            &ri,
+            &ar,
+            &p,
+            &empty_ledger(),
+            2024,
+            crate::forms::InformationReturnRegime::NONE,
+        )
+        .expect("even $1 of line 9b is unallowable under the sales-tax election");
         assert_eq!(r.reason, RefuseReason::Nii9bExceedsDeductedSalt);
         assert!(
             r.detail.contains("Sales taxes aren't deductible"),
@@ -9496,8 +9706,15 @@ mod tests {
              itemized branch again"
         );
         assert_eq!(nii_line9b_bound(&ar), Usd::ZERO);
-        let r = screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024)
-            .expect("a standard-deduction return deducted no state income tax to allocate");
+        let r = screen_absolute(
+            &ri,
+            &ar,
+            &p,
+            &empty_ledger(),
+            2024,
+            crate::forms::InformationReturnRegime::NONE,
+        )
+        .expect("a standard-deduction return deducted no state income tax to allocate");
         assert_eq!(r.reason, RefuseReason::Nii9bExceedsDeductedSalt);
         assert!(
             r.detail.contains("STANDARD deduction"),
@@ -9525,7 +9742,14 @@ mod tests {
             "there IS a pool to forgo"
         );
         assert_eq!(
-            screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024),
+            screen_absolute(
+                &ri,
+                &ar,
+                &p,
+                &empty_ledger(),
+                2024,
+                crate::forms::InformationReturnRegime::NONE
+            ),
             None,
             "collect-or-blank: silence claims nothing and must never gate the return"
         );
@@ -9735,8 +9959,15 @@ mod tests {
             };
             let st = donation_state(dec!(4000));
             let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
-            let r = screen_absolute(&ri, &ar, &p, &st, 2024)
-                .unwrap_or_else(|| panic!("{answer:?} must refuse"));
+            let r = screen_absolute(
+                &ri,
+                &ar,
+                &p,
+                &st,
+                2024,
+                crate::forms::InformationReturnRegime::NONE,
+            )
+            .unwrap_or_else(|| panic!("{answer:?} must refuse"));
             let d = r.detail.to_ascii_lowercase();
             for phrase in [
                 "by the date you file your return or the due date (including extensions)",
@@ -9822,7 +10053,14 @@ mod tests {
             "…and must still roll a carryover OUT (apply_170b runs unconditionally)"
         );
         assert_eq!(
-            screen_absolute(&ri, &ar, &p, &st, 2024),
+            screen_absolute(
+                &ri,
+                &ar,
+                &p,
+                &st,
+                2024,
+                crate::forms::InformationReturnRegime::NONE
+            ),
             None,
             "…and the YEAR itself is correctly computable — r3's I-3 fix stands"
         );

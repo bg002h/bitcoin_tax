@@ -65,6 +65,15 @@ pub enum RefuseReason {
         provider: String,
         cohort: crate::forms::Cohort,
     },
+    /// spec 1099-DA R1 — an answer the tool would never read: for a key with NO rows this year, or on
+    /// a year where the question is not live (no basis regime, or no exchange disposition). A
+    /// declaration about nothing is fabricated; one silently discarded is testimony overridden by a
+    /// default — both refuse.
+    BrokerAnswerUnread {
+        provider: String,
+        cohort: crate::forms::Cohort,
+        year: i32,
+    },
     /// ★★★ **§170(f)(8)** — the contemporaneous-written-acknowledgment question is unresolved on a
     /// return that CLAIMS a charitable deduction and has at least one single contribution of $250 or
     /// more: either unanswered, or answered **No**.
@@ -870,6 +879,111 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
     None
 }
 
+/// ★ spec 1099-DA R1 — the Form 1099-DA screen, at the site that holds the LEDGER (called from
+/// `screen_absolute`). Liveness = the regime reports basis AND ≥ 1 exchange disposition this year.
+/// Live: every (provider, cohort) key with rows must be answered, and `Mixed`/`BasisDiffers` refuse
+/// naming the per-lot import as the exit. Live or not: an answer for a key with no rows, or any
+/// answer on a year that is not live, refuses (`BrokerAnswerUnread`) — the tool never discards
+/// testimony silently. Returns the FIRST refusal in key order so the message is deterministic.
+pub fn screen_broker_reporting(
+    ri: &ReturnInputs,
+    state: &crate::state::LedgerState,
+    year: i32,
+    regime: crate::forms::InformationReturnRegime,
+) -> Option<Refusal> {
+    use crate::forms::{broker_key, broker_question_is_live, form_8949, BrokerReported, Cohort};
+    use std::collections::BTreeMap;
+    let rows = form_8949(state, year);
+    let mut keys_with_rows: BTreeMap<(String, Cohort), usize> = BTreeMap::new();
+    for r in &rows {
+        if let Some(k) = broker_key(r) {
+            *keys_with_rows.entry(k).or_insert(0) += 1;
+        }
+    }
+    let live = broker_question_is_live(&rows, regime);
+    let slot_name = |c: Cohort| match c {
+        Cohort::Covered => "covered",
+        Cohort::Noncovered => "noncovered",
+    };
+    // answers that nothing would read: a key with no rows, or any answer while not live
+    for (provider, answers) in &ri.broker_reporting.0 {
+        for (cohort, given) in [
+            (Cohort::Covered, answers.covered),
+            (Cohort::Noncovered, answers.noncovered),
+        ] {
+            let Some(given) = given else { continue };
+            let has_rows = keys_with_rows.contains_key(&(provider.clone(), cohort));
+            if !live || !has_rows {
+                let why = if !regime.basis {
+                    format!(
+                        "TY{year}'s Form 1099-DA regime reports {} — the tool would never read this answer, and testimony it would discard is not kept",
+                        if regime.proceeds { "proceeds only (no basis)" } else { "nothing" }
+                    )
+                } else if !live {
+                    format!("TY{year} has no disposition on an exchange, so no Form 1099-DA question is asked")
+                } else {
+                    format!("no TY{year} Form 8949 row falls under ({provider}, {cohort:?}) — a declaration about nothing is fabricated")
+                };
+                return Some(Refusal {
+                    reason: RefuseReason::BrokerAnswerUnread {
+                        provider: provider.clone(),
+                        cohort,
+                        year,
+                    },
+                    detail: format!(
+                        "broker_reporting.{provider}.{} = {given:?}: {why}. Remove the answer.",
+                        slot_name(cohort)
+                    ),
+                });
+            }
+        }
+    }
+    if !live {
+        return None;
+    }
+    for ((provider, cohort), n) in &keys_with_rows {
+        match ri.broker_reporting.answer(provider, *cohort) {
+            None => {
+                return Some(Refusal {
+                    reason: RefuseReason::BrokerReportingUnanswered {
+                        provider: provider.clone(),
+                        cohort: *cohort,
+                        year,
+                    },
+                    detail: format!(
+                        "{n} TY{year} Form 8949 row(s) were disposed on {provider} as {cohort:?} lots and no Form 1099-DA answer is recorded for them — btctax never chooses a box on its own. Answer from the physical form(s): `income import` with `[broker_reporting.{provider}] {} = \"not_reported\" | \"proceeds_only\" | \"basis_matches\" | \"basis_differs\" | \"mixed\"`, or the TUI input form; `report` lists the rows under each key.",
+                        slot_name(*cohort)
+                    ),
+                });
+            }
+            Some(BrokerReported::Mixed) => {
+                return Some(Refusal {
+                    reason: RefuseReason::BrokerReportingMixed {
+                        provider: provider.clone(),
+                        cohort: *cohort,
+                    },
+                    detail: format!(
+                        "the Form 1099-DA(s) for the {n} ({provider}, {cohort:?}) row(s) do not all say the same thing, so no single Form 8949 box is true of the set — a per-lot 1099-DA import (out of scope today) is the exit; no forms were written"
+                    ),
+                });
+            }
+            Some(BrokerReported::BasisDiffers) => {
+                return Some(Refusal {
+                    reason: RefuseReason::BrokerBasisDiffers {
+                        provider: provider.clone(),
+                        cohort: *cohort,
+                    },
+                    detail: format!(
+                        "at least one ({provider}, {cohort:?}) row's box 1g basis differs from btctax's column (e): the row needs the broker's figure in (e) and the correction in (g) (Form 8949's own Note), which only a per-lot 1099-DA import (out of scope today) can supply; no forms were written"
+                    ),
+                });
+            }
+            Some(_) => {}
+        }
+    }
+    None
+}
+
 /// Screen the **input-screenable** refuse-guard rows (SPEC §4.10). Returns the FIRST [`Refusal`] found,
 /// or `None` if nothing input-screenable trips (the compute/ledger-dependent rows are checked later).
 pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) -> Option<Refusal> {
@@ -1532,8 +1646,15 @@ mod tests {
         let ar = assemble_absolute(r, &st, &params(), &tbl(), 2024);
         (
             ar.deduction_is_itemized,
-            crate::tax::return_1040::screen_absolute(r, &ar, &params(), &st, 2024)
-                .map(|x| x.reason),
+            crate::tax::return_1040::screen_absolute(
+                r,
+                &ar,
+                &params(),
+                &st,
+                2024,
+                crate::forms::InformationReturnRegime::NONE,
+            )
+            .map(|x| x.reason),
         )
     }
 
@@ -2968,9 +3089,16 @@ mod tests {
         let st = LedgerState::default();
         let over = build(dec!(13000.01), Usd::ZERO, dec!(1000));
         let ar = assemble_absolute(&over, &st, &params(), &tbl(), 2024);
-        let detail = crate::tax::return_1040::screen_absolute(&over, &ar, &params(), &st, 2024)
-            .expect("over the ceiling refuses")
-            .detail;
+        let detail = crate::tax::return_1040::screen_absolute(
+            &over,
+            &ar,
+            &params(),
+            &st,
+            2024,
+            crate::forms::InformationReturnRegime::NONE,
+        )
+        .expect("over the ceiling refuses")
+        .detail;
         assert!(
             !detail.contains("   "),
             "no run of 3+ spaces may reach the filer — that is the missing-continuation defect: \
@@ -3102,8 +3230,15 @@ mod tests {
             ar.deduction_is_itemized,
             "fixture premise: $130,000 of interest itemizes"
         );
-        let refusal = crate::tax::return_1040::screen_absolute(&r, &ar, &params(), &st, 2024)
-            .expect("over-limit refuses on an ITEMIZING return");
+        let refusal = crate::tax::return_1040::screen_absolute(
+            &r,
+            &ar,
+            &params(),
+            &st,
+            2024,
+            crate::forms::InformationReturnRegime::NONE,
+        )
+        .expect("over-limit refuses on an ITEMIZING return");
         assert_eq!(refusal.reason, RefuseReason::MortgageOverDebtLimit);
         let d = refusal.detail.to_ascii_lowercase();
         for phrase in [

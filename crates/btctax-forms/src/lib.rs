@@ -114,6 +114,26 @@ pub(crate) fn fmt_money(d: Usd) -> String {
 /// copy is geometry-verified before merge.
 pub fn fill_form_8949(rows: &[Form8949Row], year: i32) -> Result<Vec<u8>, FormsError> {
     let map = Form8949Map::for_year(year)?;
+    // ★ spec 1099-DA T3 — until the per-(part, box) page-sets land, every map checks ONE box per part
+    //   (the not-reported I/L, or C/F before TY2025). A row routed to G/H/J/K from the filer's Form
+    //   1099-DA answers must therefore REFUSE to print, never be laundered under the I/L checkbox:
+    //   the map has no field for that box, and saying so is the only honest output.
+    if let Some(r) = rows.iter().find(|r| {
+        matches!(
+            r.box_,
+            btctax_core::forms::Form8949Box::G
+                | btctax_core::forms::Form8949Box::H
+                | btctax_core::forms::Form8949Box::J
+                | btctax_core::forms::Form8949Box::K
+        )
+    }) {
+        return Err(FormsError::UnmappedField(format!(
+            "Form 8949 box {:?} (TY{year}, row \"{}\"): the bundled map checks one box per part — the \
+             per-(part, box) page-sets for the broker-reported boxes G/H/J/K are spec 1099-DA T3; \
+             no page was written",
+            r.box_, r.description
+        )));
+    }
     let cap = map.rows_per_page;
     let (st, lt) = fill8949::split_parts(rows);
     let n_pages = div_ceil(st.len(), cap).max(div_ceil(lt.len(), cap)).max(1);

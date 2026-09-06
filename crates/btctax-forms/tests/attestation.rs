@@ -60,12 +60,37 @@ fn file(ri: &ReturnInputs, state: &LedgerState) -> Filed {
     );
     let ar = assemble_absolute(ri, state, &params, &table, 2024);
     assert!(
-        screen_absolute(ri, &ar, &params, state, 2024).is_none(),
+        screen_absolute(
+            ri,
+            &ar,
+            &params,
+            state,
+            2024,
+            btctax_core::InformationReturnRegime::NONE
+        )
+        .is_none(),
         "this fixture must FILE, but screen_absolute refused: {:?}",
-        screen_absolute(ri, &ar, &params, state, 2024).map(|r| r.reason)
+        screen_absolute(
+            ri,
+            &ar,
+            &params,
+            state,
+            2024,
+            btctax_core::InformationReturnRegime::NONE
+        )
+        .map(|r| r.reason)
     );
-    let pr = assemble_printed_return(ri, state, &BTreeMap::new(), &ar, &table, 2024, &[])
-        .expect("the fixture carries a well-formed SSN");
+    let pr = assemble_printed_return(
+        ri,
+        state,
+        &BTreeMap::new(),
+        &ar,
+        &table,
+        2024,
+        &[],
+        btctax_core::InformationReturnRegime::NONE,
+    )
+    .expect("the fixture carries a well-formed SSN");
     let packet = fill_full_return(&pr, 2024).expect("the packet must fill");
     Filed {
         ar,
@@ -433,8 +458,15 @@ fn the_same_gift_on_an_itemizing_return_refuses_until_the_acknowledgment_is_answ
          so nothing may refuse at the input screen here"
     );
     let ar = assemble_absolute(&ri, &state, &params, &table, 2024);
-    let refusal = screen_absolute(&ri, &ar, &params, &state, 2024)
-        .expect("an ITEMIZING return with an unanswered §170(f)(8) acknowledgment must REFUSE");
+    let refusal = screen_absolute(
+        &ri,
+        &ar,
+        &params,
+        &state,
+        2024,
+        btctax_core::InformationReturnRegime::NONE,
+    )
+    .expect("an ITEMIZING return with an unanswered §170(f)(8) acknowledgment must REFUSE");
     assert_eq!(
         format!("{:?}", refusal.reason),
         "CharitableCwaUnresolved",

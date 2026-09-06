@@ -90,8 +90,17 @@ fn all_arms_return() -> PrintedReturn {
     let table = ty2024_table();
     let ar = assemble_absolute(&ri, &state, &ty2024_params(), &table, 2024);
     let details: BTreeMap<_, _> = BTreeMap::new();
-    let mut pr = assemble_printed_return(&ri, &state, &details, &ar, &table, 2024, &[])
-        .expect("kitchen_sink assembles");
+    let mut pr = assemble_printed_return(
+        &ri,
+        &state,
+        &details,
+        &ar,
+        &table,
+        2024,
+        &[],
+        btctax_core::InformationReturnRegime::NONE,
+    )
+    .expect("kitchen_sink assembles");
     assert!(
         pr.forms.f8283.is_none(),
         "premise: kitchen_sink has no f8283 — if this fires the fixture assumption changed"
@@ -200,9 +209,17 @@ fn full_return_packet_emits_8275_iff_a_promoted_leg_is_filed() {
     });
 
     let ar = assemble_absolute(&ri, &state, &params, &table, 2024);
-    let pr_unpromoted =
-        assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, &table, 2024, &[])
-            .expect("the fixture assembles");
+    let pr_unpromoted = assemble_printed_return(
+        &ri,
+        &state,
+        &BTreeMap::new(),
+        &ar,
+        &table,
+        2024,
+        &[],
+        btctax_core::InformationReturnRegime::NONE,
+    )
+    .expect("the fixture assembles");
     assert!(
         pr_unpromoted.forms.f8275.is_none(),
         "a plain (non-promoted) disposal leg discloses nothing"
@@ -240,9 +257,17 @@ fn full_return_packet_emits_8275_iff_a_promoted_leg_is_filed() {
     }];
 
     let ar = assemble_absolute(&ri, &state, &params, &table, 2024);
-    let pr_promoted =
-        assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, &table, 2024, &events)
-            .expect("the promoted fixture assembles");
+    let pr_promoted = assemble_printed_return(
+        &ri,
+        &state,
+        &BTreeMap::new(),
+        &ar,
+        &table,
+        2024,
+        &events,
+        btctax_core::InformationReturnRegime::NONE,
+    )
+    .expect("the promoted fixture assembles");
     let f8275 = pr_promoted
         .forms
         .f8275
@@ -364,6 +389,7 @@ fn an_above_threshold_return_files_8995a_instead() {
         &table,
         2024,
         &[],
+        btctax_core::InformationReturnRegime::NONE,
     )
     .expect("the printed return assembles");
     // ★★ EXACTLY ONE of the two §199A forms — filing both would claim the deduction twice on paper.

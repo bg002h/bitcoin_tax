@@ -629,6 +629,14 @@ pub(crate) fn export_irs_pdf_from_session(
 
     // Reuse the projection's capital-gains data verbatim (no recompute).
     let rows = btctax_core::form_8949(state, tax_year);
+    // ★ spec 1099-DA R1 / ROADMAP §0a S10 — the crypto slice is CLOSED on a LIVE year: the Form
+    //   1099-DA answers live on the return inputs, and this arm runs only when none is stored, so a
+    //   live year refuses BEFORE any byte and names the exit. TY2025 (proceeds only) and a live year
+    //   with no exchange disposition fill as before.
+    let regime = crate::year_readiness::regime_or_refuse(tax_year)?;
+    if let Some(e) = slice_broker_refusal(tax_year, regime, &rows) {
+        return Err(e);
+    }
     let totals = btctax_core::schedule_d(state, tax_year);
 
     // Form 8275 (Disclosure Statement) — Task 16: `Some` iff a promoted-basis disposal leg files in
@@ -1005,8 +1013,10 @@ fn export_full_return(
         return Err(refuse(r));
     }
     let ar = btctax_core::tax::return_1040::assemble_absolute(&ri, state, params, table, tax_year);
+    // ★ spec 1099-DA R1 — the year's Form 1099-DA regime, joined from its record, never assumed
+    let regime = crate::year_readiness::regime_or_refuse(tax_year)?;
     if let Some(r) =
-        btctax_core::tax::return_1040::screen_absolute(&ri, &ar, params, state, tax_year)
+        btctax_core::tax::return_1040::screen_absolute(&ri, &ar, params, state, tax_year, regime)
     {
         return Err(refuse(r));
     }
@@ -1026,7 +1036,7 @@ fn export_full_return(
 
     let details = session.donation_details()?;
     let printed = btctax_core::tax::packet::assemble_printed_return(
-        &ri, state, &details, &ar, table, tax_year, events,
+        &ri, state, &details, &ar, table, tax_year, events, regime,
     )
     .map_err(|e| {
         // `HeaderError`'s Display carries the right remedy per variant (a malformed SSN, an unanswered
@@ -1351,6 +1361,106 @@ mod tests {
         assert!(
             msg.contains("does not already exist as a file"),
             "Display carries the hint content: {msg}"
+        );
+    }
+}
+
+/// ★ spec 1099-DA R1 — the crypto-slice arm's Form 1099-DA refusal, as a pure predicate so it can be
+/// planted red in every direction (B1): `Some` iff the question is LIVE for these rows (the year's
+/// regime reports basis AND ≥ 1 row was disposed on an exchange). The answers are not consulted —
+/// they live on `ReturnInputs`, which this arm has by construction not got.
+pub(crate) fn slice_broker_refusal(
+    tax_year: i32,
+    regime: btctax_core::InformationReturnRegime,
+    rows: &[btctax_core::Form8949Row],
+) -> Option<CliError> {
+    if !btctax_core::broker_question_is_live(rows, regime) {
+        return None;
+    }
+    let n = rows
+        .iter()
+        .filter(|r| btctax_core::broker_key(r).is_some())
+        .count();
+    Some(CliError::Usage(format!(
+        "TY{tax_year} Form 8949 needs the Form 1099-DA answers for its {n} exchange row(s), and those \
+         live on the return inputs — `income import` (the `[broker_reporting.<provider>]` table) or \
+         the TUI input form, then export the FULL return; the crypto-slice packet is closed on a \
+         year whose brokers report basis. No forms were written."
+    )))
+}
+
+#[cfg(test)]
+mod slice_broker_tests {
+    use super::*;
+    use btctax_core::forms::Cohort;
+    use btctax_core::{Form8949Box, Form8949Part, Form8949Row, InformationReturnRegime};
+    use rust_decimal_macros::dec;
+    use time::macros::date;
+
+    fn row(exchange: bool) -> Form8949Row {
+        Form8949Row {
+            part: Form8949Part::ShortTerm,
+            box_: Form8949Box::I,
+            box_needs_review: exchange,
+            cohort: Cohort::Covered,
+            description: "1.00000000 BTC".into(),
+            date_acquired: date!(2026 - 02 - 01),
+            date_sold: date!(2026 - 06 - 01),
+            proceeds: dec!(1000),
+            cost_basis: dec!(400),
+            adjustment_code: String::new(),
+            adjustment_amount: dec!(0),
+            gain: dec!(600),
+            wallet: if exchange {
+                btctax_core::WalletId::Exchange {
+                    provider: "coinbase".into(),
+                    account: "default".into(),
+                }
+            } else {
+                btctax_core::WalletId::SelfCustody {
+                    label: "cold".into(),
+                }
+            },
+            disposition_kind: btctax_core::event::DisposeKind::Sell,
+        }
+    }
+
+    /// ★ the three directions the spec names: a live year refuses before any byte and names the
+    /// exit; TY2025 (proceeds only) fills; a live year with only self-custody rows fills (S10).
+    #[test]
+    fn the_slice_arm_refuses_only_on_a_live_year() {
+        let e = slice_broker_refusal(
+            2026,
+            InformationReturnRegime::PROCEEDS_AND_BASIS,
+            &[row(true)],
+        )
+        .expect("live: refuse");
+        let msg = e.to_string();
+        assert!(
+            msg.contains("income import") && msg.contains("No forms were written"),
+            "{msg}"
+        );
+        assert!(
+            slice_broker_refusal(2025, InformationReturnRegime::PROCEEDS_ONLY, &[row(true)])
+                .is_none(),
+            "TY2025 fills"
+        );
+        assert!(
+            slice_broker_refusal(2024, InformationReturnRegime::NONE, &[row(true)]).is_none(),
+            "TY2024 fills"
+        );
+        assert!(
+            slice_broker_refusal(
+                2026,
+                InformationReturnRegime::PROCEEDS_AND_BASIS,
+                &[row(false)]
+            )
+            .is_none(),
+            "self-custody only: fills (S10's limb)"
+        );
+        assert!(
+            slice_broker_refusal(2026, InformationReturnRegime::PROCEEDS_AND_BASIS, &[]).is_none(),
+            "no rows: fills"
         );
     }
 }

@@ -3143,6 +3143,7 @@ fn the_packet_is_all_or_nothing_when_a_member_filler_refuses() {
         &ty2024_table(),
         2024,
         &[],
+        btctax_core::InformationReturnRegime::NONE,
     )
     .unwrap();
 
@@ -3180,6 +3181,7 @@ fn the_packet_emits_every_required_form_in_attachment_sequence_order() {
         &ty2024_table(),
         2024,
         &[],
+        btctax_core::InformationReturnRegime::NONE,
     )
     .unwrap();
 
@@ -3236,6 +3238,7 @@ fn the_amt_packet_staples_form_6251_at_sequence_32_before_form_8995a() {
         &ty2024_table(),
         2024,
         &[],
+        btctax_core::InformationReturnRegime::NONE,
     )
     .unwrap();
 
@@ -3272,6 +3275,7 @@ fn a_w2_only_household_files_a_1040_and_nothing_else() {
         &ty2024_table(),
         2024,
         &[],
+        btctax_core::InformationReturnRegime::NONE,
     )
     .unwrap();
 
@@ -3302,6 +3306,7 @@ fn the_reports_amount_owed_is_the_figure_printed_on_the_filed_1040() {
         &ty2024_table(),
         2024,
         &[],
+        btctax_core::InformationReturnRegime::NONE,
     );
 
     // The figure the report prints (it renders `printed.f1040`, not `ar`).
@@ -3596,6 +3601,7 @@ fn the_1040_line7_not_required_box_is_never_checked() {
         &ty2024_table(),
         2024,
         &[],
+        btctax_core::InformationReturnRegime::NONE,
     )
     .unwrap();
     // The premise: this filer really does attach no Schedule D, so the box is REACHABLE here. Without
