@@ -71,8 +71,22 @@ fn sec_clusters(year: i32, section: Form8283Section) -> &'static [(f32, f32)] {
     match (year, section) {
         (2017, Form8283Section::A) => SEC_A_CLUSTERS_2017,
         (2017, Form8283Section::B) => SEC_B_CLUSTERS_2017,
-        (_, Form8283Section::A) => SEC_A_CLUSTERS_2023,
-        (_, Form8283Section::B) => SEC_B_CLUSTERS_2023,
+        // ★★★ **THE THIRD WILDCARD, and it was found by a reviewer holding all three at once.**
+        //
+        //     `form1040.rs` and `schedule_se.rs` had byte-for-byte this defect and both were fixed
+        //     earlier the same day — and this one was not, because no agent held both files. That is
+        //     CLAUDE.md B3's own case: **the failure mode is a field of view, not ignorance.**
+        //
+        //     A wildcard does not merely leave a year unchecked; it DISARMS the dollars/cents column
+        //     guard, because an unsupported year silently inherits another revision's x-bands and
+        //     the guard then "passes" against the wrong column.
+        (2024 | 2025, Form8283Section::A) => SEC_A_CLUSTERS_2023,
+        (2024 | 2025, Form8283Section::B) => SEC_B_CLUSTERS_2023,
+        (other, _) => panic!(
+            "sec_clusters: no Form 8283 amount-column band recorded for TY{other}. Measure it off \
+             that year's blank PDF (xtask dump-fields) and add the arm — never widen this to a \
+             wildcard, which hands the year another revision's bands and disarms the column guard."
+        ),
     }
 }
 
@@ -573,4 +587,54 @@ fn fill_one(
     let fields = pdf::collect_fields(&check)?;
     verify_flat(&check, &fields, &placements, clusters)?;
     Ok(bytes)
+}
+
+#[cfg(test)]
+mod geometry_year_tests {
+    use super::*;
+
+    fn resolves(year: i32, section: Form8283Section) -> bool {
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let ok = std::panic::catch_unwind(|| sec_clusters(year, section)).is_ok();
+        std::panic::set_hook(prev);
+        ok
+    }
+
+    /// ★★★ **The enumeration IS the guard, and the expected answer is DERIVED.**
+    ///
+    /// Transplanted from `form1040.rs`, where this test was written twice today while THIS file —
+    /// carrying byte-for-byte the same wildcard — was missed, because no agent held both. That is
+    /// `CLAUDE.md` B3: the failure mode is a field of view, not ignorance. So it lives here too,
+    /// deriving its expected set from [`crate::SUPPORTED_YEARS`] rather than a hand-list, and reds
+    /// in BOTH directions:
+    ///
+    /// * a year wired into the product with no amount-column band measured for it, and
+    /// * a band handed to a year the product does not support — i.e. the wildcard is back.
+    ///
+    /// **Planted-defect check (B1):** restore `(_, Form8283Section::A) => SEC_A_CLUSTERS_2023` and
+    /// this reds on the first unsupported probe year.
+    #[test]
+    fn form8283_geometry_is_recorded_for_exactly_the_supported_years() {
+        for year in 2010..=2040 {
+            let supported = crate::SUPPORTED_YEARS.contains(&year);
+            for section in [Form8283Section::A, Form8283Section::B] {
+                let answered = resolves(year, section);
+                assert_eq!(
+                    answered,
+                    supported,
+                    "TY{year} {section:?}: SUPPORTED_YEARS.contains = {supported} but sec_clusters \
+                     {} — {}",
+                    if answered { "answered" } else { "panicked" },
+                    if supported {
+                        "a supported year with no band recorded: measure the amount column off that \
+                         year's blank PDF and add the arm"
+                    } else {
+                        "an unsupported year must NOT inherit another revision's x-band; the \
+                         wildcard is back, and it DISARMS the dollars/cents column guard"
+                    }
+                );
+            }
+        }
+    }
 }
