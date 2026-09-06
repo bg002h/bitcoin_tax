@@ -7,6 +7,10 @@ Form 6251 does NOT move a line for TY2026). **Regenerate when a final lands, OR 
 changes** — the handoff is a diff, not a rebuild from memory. `xtask`'s
 `the_committed_work_list_matches_form_delta_at_head` reds when a row here disagrees with the tool, when
 an excused row below actually HAS a pair, or when a stem with a map in any bundled year has no row in either table.
+**Regenerate with `cargo run -p xtask -- port-status 2025 2026-DRAFT`** (FR-50): it prints both tables from the
+emitting surface; `port_status_prints_the_committed_work_list` holds this document to it. The shape column
+is mechanical: **REBUILT** when added + removed exceed the common fields, **unchanged** when nothing was
+added, removed or moved with labels compared, **port** otherwise.
 
 ★ Drafts are EVIDENCE ONLY. Nothing here is transcribed; these are counts of what CHANGED.
 
@@ -28,16 +32,16 @@ an excused row below actually HAS a pair, or when a stem with a map in any bundl
 | `f1040s1a` | 10 | 175 | 44 | 1 | **REBUILT** |
 | `f1040s2` | 44 | 24 | 19 | 23 | port |
 | `f1040s3` | 35 | 3 | 2 | 2 | port |
-| `f1040sa` | 14 | 33 | 19 | 2 | port |
+| `f1040sa` | 14 | 33 | 19 | 2 | **REBUILT** |
 | `f1040sb` | 72 | 0 | 0 | 0 | unchanged |
-| `f1040sc` | 59 | 50 | 46 | 8 | port |
+| `f1040sc` | 59 | 50 | 46 | 8 | **REBUILT** |
 | `f1040sd` | 55 | 0 | 0 | 0 | unchanged |
 | `f1040sse` | 25 | 2 | 2 | 0 | port |
 | `f6251` | 62 | 0 | 0 | 0 | unchanged |
 | `f8949` | 202 | 0 | 0 | 0 | unchanged |
 | `f8959` | 26 | 0 | 0 | 0 | unchanged |
 | `f8960` | 38 | 0 | 0 | 0 | unchanged |
-| `f8995` | 22 | 14 | 11 | 8 | port |
+| `f8995` | 22 | 14 | 11 | 8 | **REBUILT** |
 
 ## Not listed — stated PER CELL, never omitted (Fable plan review I8)
 

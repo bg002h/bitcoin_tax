@@ -140,6 +140,22 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some("port-status") => {
+            let (Some(a), Some(b)) = (args.get(1), args.get(2)) else {
+                eprintln!(
+                    "usage: cargo run -p xtask -- port-status <prior-tag> <new-tag>\n\
+                     e.g. port-status 2025 2026-DRAFT   (prints the work list's two tables from the emitting surface)"
+                );
+                std::process::exit(2);
+            };
+            match form_delta::port_status(a, b) {
+                Ok(s) => print!("{s}"),
+                Err(e) => {
+                    eprintln!("xtask port-status: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
         Some("extract-geometry") => {
             let Some(stem) = args.get(1) else {
                 eprintln!(
