@@ -37,6 +37,20 @@ fn every_bundled_year_has_a_record_that_partitions_the_closed_set_and_matches_th
             Stem::ALL.len(),
             "TY{year}: expected + absent must be every form the crate can fill"
         );
+        // ★ The anti-shrink pin (steps-4/5 review R6): `forms_expected` was COMPUTED from disk and
+        //   `glob_problems` compares it against the same glob, so a record regenerated to match a
+        //   directory that lost a file would pass both. These counts do not come from the glob.
+        let expected_count = match year {
+            2017 => 5,
+            2024 => 17,
+            2025 => 15,
+            other => panic!("TY{other}: record the expected form count here — a new year does not arrive silently"),
+        };
+        assert_eq!(
+            r.forms_expected.len(),
+            expected_count,
+            "TY{year}: the expected set shrank or grew"
+        );
     }
     assert_eq!(bundled_years(), &[2017, 2024, 2025]);
 }

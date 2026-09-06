@@ -57,7 +57,8 @@ use std::collections::BTreeMap;
 
 /// Compiled-in tax tables for the years whose Rev. Procs. have been independently verified.
 ///
-/// Currently contains **TY2024** (Rev. Proc. 2023-34), **TY2025** (Rev. Proc. 2024-40), and
+/// Currently contains **TY2017** (Rev. Proc. 2016-55, the crypto-slice year), **TY2024** (Rev. Proc.
+/// 2023-34), **TY2025** (Rev. Proc. 2024-40), and
 /// **TY2026** (Rev. Proc. 2025-32 + OBBBA Pub. L. 119-21). TY2027+ are added once the IRS/SSA
 /// publish those figures (fall 2026).
 ///

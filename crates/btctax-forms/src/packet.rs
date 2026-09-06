@@ -50,6 +50,7 @@ pub struct NamedStatement {
 
 /// The complete filed packet: PDFs plus any statements they oblige.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive] // ★ a literal `FiledPacket { .. }` is not constructible outside this crate — go through `stapled` (steps-4/5 review R8)
 pub struct FiledPacket {
     pub forms: Vec<NamedForm>,
     pub statements: Vec<NamedStatement>,
@@ -288,16 +289,18 @@ pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<FiledPacket, Fo
     //   order — so a renumbered form (8283: 155 → 36 on Rev. 12-2025) was pushed in its OLD place.
     //   Derive it: stable-sort by the printed sequence number, the 1040 (no number) first. For TY2024
     //   this is a no-op (the push order was already ascending), so no golden moves.
-    // ★ The ONLY way to build a packet is the constructor that sorts (steps-2/3 review Q2): removing
-    //   the sort is now a compile error, not an untested omission — "prefer designs in which an
-    //   omission does not compile" (CLAUDE.md).
+    // ★ The way to build a packet is the constructor that sorts (steps-2/3 review Q2). Outside this
+    //   crate the struct is `#[non_exhaustive]`, so a literal cannot bypass it; inside this crate the
+    //   guarantee is HELD BY TEST (`the_only_packet_constructor_staples_in_sequence_order` and the
+    //   derived per-year test), not by the compiler — stated honestly per steps-4/5 review R8.
     Ok(FiledPacket::stapled(out, statements))
 }
 
 impl FiledPacket {
-    /// The one constructor: forms go in in ANY order and come out in stapling order (stable sort by
-    /// the printed attachment sequence, the 1040 first). `fill_full_return` cannot return an
-    /// unsorted packet because it cannot name the fields.
+    /// The constructor: forms go in in ANY order and come out in stapling order (stable sort by the
+    /// printed attachment sequence, the 1040 first). `fill_full_return` returns through it; the
+    /// struct is `#[non_exhaustive]` so no downstream literal can skip the sort, and the two sequence
+    /// tests hold the in-crate path.
     pub fn stapled(mut forms: Vec<NamedForm>, statements: Vec<NamedStatement>) -> Self {
         sort_by_attachment_sequence(&mut forms);
         Self { forms, statements }

@@ -34,7 +34,7 @@ f8995a       = "§199A did not exist for TY2017 (TCJA, TY2018+)"
 
 [oracles]
 ots     = "none — OTS 2017 is not archived; the TY2017 slice has no oracle (owner decision open: strategy review S9)"
-taxcalc = "none"
+taxcalc = "none wired — taxcalc 6.8.2 covers TY2017 (JSON_START_YEAR 2013), but no slice harness path exists (strategy review S9)"
 
 [information_returns.f1099da]
 proceeds = false

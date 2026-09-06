@@ -85,6 +85,12 @@ impl YearReadiness {
                 }
             }
             YearStatus::Slice | YearStatus::Preparing => {
+                if d.status == YearStatus::Slice && !self.table {
+                    out.push(format!(
+                        "TY{}: declared a crypto-slice year but no TaxTable is bundled — the slice cannot compute",
+                        self.year
+                    ));
+                }
                 if self.params {
                     out.push(format!(
                         "TY{}: FullReturnParams are bundled but the year declares itself {:?} — declare it filable or unbundle them",
@@ -250,6 +256,14 @@ mod tests {
             .problems()
             .iter()
             .any(|m| m.contains("before prices_through")));
+        // …a `slice` year with no table (R11)…
+        let mut r = YearReadiness::for_year(2017, &tables, &full, &prices);
+        assert!(r.problems().is_empty(), "TY2017 has its table");
+        r.table = false;
+        assert!(r
+            .problems()
+            .iter()
+            .any(|m| m.contains("crypto-slice year but no TaxTable")));
         // …and the reverse: params bundled for a year that says `preparing`.
         let mut r = YearReadiness::for_year(2025, &tables, &full, &prices);
         r.params = true;

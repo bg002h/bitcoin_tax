@@ -1014,19 +1014,70 @@ mod tests {
 /// everything below it down, with **zero renames**. TY2024's `line11`, the AMT itself, then prints
 /// in the TY2025 form's **line-10 box**. A wrong number on signed testimony, and the exists-check is
 /// structurally blind to it, because a rename is not what happened.
+/// Every numbered-label WORD the page prints — `(label, page, top-down y, x2)` — raw, not column-
+/// resolved. Used by the x-aware join for the one case a column reader cannot see: a label printed
+/// INLINE immediately before its box on a row that also carries the margin label (the 1040's `2b`
+/// at x≈489 beside the `2a`/`2b` row; Form 6251's `1a` at x≈395 before its box). A union over
+/// resolved label COLUMNS was tried first and admitted prose numbers ("Form 1040, line 14") that
+/// happen to align into a column — a raw word with a small gap to the box is the right candidate.
+pub fn inline_label_words(g: &Geometry) -> Vec<(String, u32, f64, f64)> {
+    g.words
+        .iter()
+        .filter(|w| is_numeric_label(&w.text))
+        .map(|w| (w.text.clone(), w.page, w.y, w.x2))
+        .collect()
+}
+
+/// Every box with its LEFT edge — `(page, top, bottom, left x, name)` — for the x-aware join.
+pub fn witness_boxes_x(g: &Geometry) -> Vec<(u32, f64, f64, f64, String)> {
+    g.boxes
+        .iter()
+        .filter_map(|b| {
+            let (top, bottom) = g.box_top_down_y(b)?;
+            Some((b.page, top, bottom, b.x, b.name.clone()))
+        })
+        .collect()
+}
+
+/// The line→box join: for every AcroForm box, the printed line label that governs it.
+///
+/// ★ x-AWARE (2026-09-06): within the box's own row (label centre inside the box's vertical span,
+/// ±2pt), the label nearest to the LEFT of the box wins, across every label column — so the 1040's
+/// `2b` cell joins to "2b" and its `2a` cell to "2a". Only when no label shares the row does the
+/// older rule apply: the lowest label at or above the box centre in the primary column (a multi-line
+/// item whose number prints on the first line, the box on a later one).
 pub fn label_join(stem: &str) -> Result<std::collections::BTreeMap<String, String>, String> {
     let g = crate::form_geometry::load(&crate::form_geometry::repo_root(), stem)?;
-    let labels = witness_text(&g)?;
-    let boxes = witness_boxes(&g);
+    let primary = witness_text(&g)?;
+    let inline = inline_label_words(&g);
+    let boxes = witness_boxes_x(&g);
     let mut out = std::collections::BTreeMap::new();
-    for (bp, top, bottom, name) in &boxes {
+    for (bp, top, bottom, left, name) in &boxes {
         let centre = (top + bottom) / 2.0;
-        let label = labels
+        // "In the row" = the label's own vertical extent lies inside the box's span (labels are
+        // ~9.6pt tall; rows are ~12pt apart, so the NEXT row's label top sits just below the box
+        // bottom and must NOT qualify — a ±2pt band on the label's top edge admitted it and produced
+        // a uniform off-by-one on first measurement) — AND the label ends within 12pt of the box's
+        // left edge: an inline label is printed right before its box; a prose number is not.
+        let in_row = inline
             .iter()
-            .filter(|(_, lp, ly)| lp == bp && *ly <= centre + 2.0)
-            .max_by(|(_, _, a), (_, _, b)| a.total_cmp(b))
-            .map(|(l, _, _)| l.as_str())
-            .unwrap_or("?");
+            .filter(|(_, lp, ly, lx2)| {
+                lp == bp
+                    && *ly >= top - 2.0
+                    && *ly + 4.0 <= *bottom
+                    && *lx2 <= left + 1.0
+                    && left - *lx2 <= 12.0
+            })
+            .max_by(|(_, _, _, a), (_, _, _, b)| a.total_cmp(b))
+            .map(|(l, _, _, _)| l.as_str());
+        let label = in_row.unwrap_or_else(|| {
+            primary
+                .iter()
+                .filter(|(_, lp, ly)| lp == bp && *ly <= centre + 2.0)
+                .max_by(|(_, _, a), (_, _, b)| a.total_cmp(b))
+                .map(|(l, _, _)| l.as_str())
+                .unwrap_or("?")
+        });
         out.insert(name.clone(), label.to_string());
     }
     Ok(out)
@@ -1057,13 +1108,25 @@ mod map_label_join_tests {
                 if !key.starts_with("line") {
                     continue;
                 }
-                if let Some(v) = rhs
-                    .trim()
+                let line = &key["line".len()..];
+                // Only NUMBERED lines carry a printed label (`line7a`, `line22b`); a named cell
+                // (`line_a_business`, Schedule C's `line_b_naics`) is not a line on the page and
+                // `label_matches` would compare its empty first token to nothing.
+                if !line.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+                    continue;
+                }
+                // ★ The FIRST quoted token on the right-hand side — not "the whole RHS is one quoted
+                //   string". Every binding that carried a trailing `# comment` used to be dropped
+                //   SILENTLY here: TY2025's Schedule A contributed ZERO of its nineteen bindings to
+                //   the join while the year's floor stayed green (steps-4/5 review R2).
+                let rhs = rhs.trim();
+                let v = rhs
                     .strip_prefix('"')
-                    .and_then(|s| s.strip_suffix('"'))
-                {
+                    .and_then(|s| s.split_once('"'))
+                    .map(|(v, _)| v);
+                if let Some(v) = v {
                     if v.contains('[') && v.contains('.') {
-                        out.insert(key["line".len()..].to_string(), v.to_string());
+                        out.insert(line.to_string(), v.to_string());
                     }
                 }
             }
@@ -1263,16 +1326,20 @@ mod map_label_join_tests {
         },
         YearFloor {
             year: "2024",
-            min_joins: 99,
+            // 99 → 235 on 2026-09-06: the binding parser dropped every `line = "…" # comment` (R2),
+            // and the join gained the x-aware in-row rule. Measured, not estimated.
+            min_joins: 235,
             max_unwitnessed: 1,
             why: "f8283 — design/forms/ holds i8283--2024 (the instructions) but not the form, so \
                   there is no PDF to extract geometry from.",
         },
         YearFloor {
             year: "2025",
-            min_joins: 82,
+            // 82 → 193 on 2026-09-06 (same fix as 2024). Every TY2025 map contributes; the per-map
+            // zero-join check below is what would say otherwise.
+            min_joins: 193,
             max_unwitnessed: 0,
-            why: "",
+            why: "every TY2025 form is archived with geometry; nothing is unreachable",
         },
     ];
 
@@ -1350,6 +1417,7 @@ mod map_label_join_tests {
     fn every_mapped_line_lands_on_its_own_printed_label() {
         let mut wrong: Vec<String> = Vec::new();
         let mut reach: Vec<YearReach> = Vec::new();
+        let mut per_map_zero: Vec<String> = Vec::new();
         let mut unlabelled = 0usize;
 
         for m in every_map() {
@@ -1377,19 +1445,43 @@ mod map_label_join_tests {
                     continue;
                 }
             };
-            for (line, fqn) in line_bindings(&m.path) {
-                let Some(got) = join.get(&fqn) else { continue };
+            let bindings = line_bindings(&m.path);
+            let (mut map_joined, mut map_unboxed) = (0usize, 0usize);
+            for (line, fqn) in &bindings {
+                let Some(got) = join.get(fqn) else {
+                    map_unboxed += 1; // the FQN is not a box the geometry fixture holds — counted, not silent
+                    continue;
+                };
                 if got == "?" {
                     unlabelled += 1;
                     continue; // the reader could not witness a label for this box
                 }
                 r.joins += 1;
-                if !label_matches(&line, got) {
+                map_joined += 1;
+                if !label_matches(line, got) {
                     wrong.push(format!(
                         "{}/{}: map says line {line} -> {fqn}, but the form prints \"{got}\" beside that box",
                         m.year, m.form
                     ));
                 }
+            }
+            // ★ Per-map reach, printed on every run: a map with bindings that contributes ZERO joins
+            //   is the shape R2 found — the aggregate floor cannot see it, this line can.
+            eprintln!(
+                "  {}/{}: {} numbered bindings, {} joined, {} not a geometry box",
+                m.year,
+                m.form,
+                bindings.len(),
+                map_joined,
+                map_unboxed
+            );
+            if !bindings.is_empty() && map_joined == 0 {
+                per_map_zero.push(format!(
+                    "{}/{} ({} bindings, 0 joined)",
+                    m.year,
+                    m.form,
+                    bindings.len()
+                ));
             }
         }
 
@@ -1416,6 +1508,10 @@ mod map_label_join_tests {
              print on the WRONG LINE of a signed return:\n  {}",
             wrong.len(),
             wrong.join("\n  ")
+        );
+        assert!(
+            per_map_zero.is_empty(),
+            "maps with line bindings and ZERO joins — the join never examined them (R2): {per_map_zero:?}"
         );
         if let Err(e) = audit_year_reach(&reach, YEAR_FLOORS) {
             panic!("per-year coverage of the line->label join is not what was recorded:\n  {e}");

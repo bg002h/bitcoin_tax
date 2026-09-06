@@ -6,7 +6,7 @@
 year           = 2025
 status         = "preparing"
 return_due     = 2026-04-15
-tables         = "Rev. Proc. 2024-40 (TaxTable); FullReturnParams TY2025 NOT bundled (the year is PAUSED — ROADMAP_STATUS §0a); Pub. L. 119-21 for the OBBBA figures"
+tables         = "Rev. Proc. 2024-40 (TaxTable — OBBBA did not change the TY2025 thresholds or breakpoints); FullReturnParams TY2025 NOT bundled (the year is PAUSED — ROADMAP_STATUS §0a; when they are, Pub. L. 119-21 is the authority for the OBBBA figures)"
 prices_through = 2025-12-31
 
 forms_expected = [
@@ -29,11 +29,11 @@ forms_expected = [
 
 [forms_absent]
 f1040s1      = "Schedule 1 is bundled for 2024 only; the TY2025 revision has no map yet (NO PRIOR SIDE in the TY2026 work list — archive f1040s1--2025, then port)"
-f8275        = "periodic (Rev. 10-2024) — served by hash from forms/2024/, licensed in Form8275Map::alias_is_licensed_by"
+f8275        = "periodic (Rev. 10-2024) — served from forms/2024/ by bundled::periodic_template, whose pairing of the bytes with the year whose row says periodic is the licence"
 f8995a       = "not ported to TY2025 (Form 8995-A Rev. 2025 map not yet transcribed); the simplified Form 8995 is bundled"
 
 [oracles]
-ots     = "OTS_2025 — archived? no; expected as the TY2026 baseline's prior side"
+ots     = "OpenTaxSolver 2025 (OpenTaxSolver2025_23.06_linux64) — an EXTERNAL install selected by scripts/oracle/ots_direct.py via OTS_DIR + OTS_YEAR=2025; not archived in-repo. The TY2026 baseline's prior side."
 taxcalc = ">= 6.8.2"
 
 [information_returns.f1099da]

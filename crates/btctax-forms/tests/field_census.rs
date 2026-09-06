@@ -611,7 +611,18 @@ fn every_emittable_form_is_reached_by_the_gate_or_named_absent() {
         // "Complete" is the year's DECLARATION (`status = "filable"`), held above to what is on disk —
         // not "every one of the 18 forms present": Schedule 1-A exists for TY2025+ only, so no year
         // can bundle all of `Stem::ALL`, and each absence carries its reason in the record.
+        // A declaration alone would be a tautology (steps-4/5 review R7), so a `filable` year's
+        // MEASURED absences must obey a structural rule: only a schedule that did not exist for the
+        // year (Schedule 1-A, TY2025+) or a periodic form served from another year's revision may be
+        // absent. (The "every year on disk is registered" kill now lives in `build.rs`, which refuses
+        // a year directory without `YEAR.toml`.)
         if record.status == btctax_forms::year_record::YearStatus::Filable {
+            let allowed = |stem: &str| stem == "f1040s1a" || stem == "f8275" || stem == "f8283";
+            let unlawful: Vec<&&str> = measured.iter().filter(|s| !allowed(s)).collect();
+            assert!(
+                unlawful.is_empty(),
+                "{year} declares itself filable but is missing {unlawful:?}, which no structural rule excuses"
+            );
             complete_years.push(*year);
         }
     }

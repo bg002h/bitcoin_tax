@@ -61,6 +61,14 @@ _Last updated: **2026-09-04**. Written at a deliberate pause; safe to exit. **Re
 >   review of steps 4–5 + that fold is RUNNING** → `design/agent-reports/2026-09-05-r2-step4-review.md`
 >   (★ the first attempt died on an API rate limit — HTTP 429, session limit — before writing
 >   anything; re-dispatched 2026-09-06. If the report is absent, that is why: re-dispatch it).
+> - **Steps-4/5 review FOLDED** (0C/4I/6M, `5b073355`; ledger + fold commits after): ★ R2 was the real one —
+>   the label reader dropped every binding with a trailing `#` comment (Schedule A/2025 contributed
+>   ZERO joins to step 5's justification) and, once widened, its one-column vertical rule mislabelled
+>   the 1040's 2b/3b boxes; fixed with an x-aware in-row join (2024: 152→235 joins, 2025: 116→193; a
+>   planted 2a/2b swap reds both ways; floors raised). The eight wired TY2025 maps now rest on eight
+>   maps' evidence. R1 the TY2025 record's `ots` was false (OTS 2025 IS installed, external). R3/R4
+>   closed by FR-48. **FR-46's SPEC is DRAFT r1** (`design/SPEC_1099da_broker_reporting.md`), its
+>   review dispatched.
 > - **FR-48 (build-order 1b) DONE** (the commit after 9e81a9b0): `report --tax-year` prints the
 >   readiness line; its refusal for a not-ready year is built from readiness and KEEPS the inputs;
 >   `income import` stores + warns (not refuses — the carryover chain needs the row); `export-snapshot`
