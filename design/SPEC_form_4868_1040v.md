@@ -1,13 +1,15 @@
 # SPEC — Form 4868 (extension) and Form 1040-V (payment voucher) fillers (FR-49 / strategy review S8)
 
-**Status: DRAFT r4 (2026-09-06), for review to 0C/0I before build.** Reviews r1 (2C/8I/13M/3N),
-r2 (0C/2I/7M/1N) and r3 (0C/2I/6M/2N, `design/agent-reports/2026-09-06-spec-4868-1040v-review-r3.md`;
-ledgers 17/17, 10/10, 10/10) folded. r4 takes the label reader out of the plan entirely: the 4868's
-Part I identity cells are captions (they never form a label column) and are bound by NAME with the
-printed numbers in their doc comments; the grid case is decided BEFORE the join so a declared grid is
-neither witnessed nor counted unwitnessed (N3-I1, N3-I2); the six Minors and two Nits are folded.
-Owning phase: NOW — the physical rehearsal (S1, an owner decision) and the first filed year (TY2026,
-due 2027-04-15) both walk the extension and the payment envelope; today btctax can print neither.
+**Status: DRAFT r5 (2026-09-06), for review to 0C/0I before build.** Reviews r1 (2C/8I/13M/3N),
+r2 (0C/2I/7M/1N), r3 (0C/2I/6M/2N) and r4 (0C/2I/2M/4N,
+`design/agent-reports/2026-09-06-spec-4868-1040v-review-r4.md`; ledgers 17/17, 10/10, 10/10, 8/8)
+folded. r5: the grid branch sits AFTER the geometry join and BEFORE `label_join`, with the kill that a
+declared grid losing its fixture still reds its year (R4-I1); the line-8 checkbox — the form's one
+filer-collected assertion — gets its kill (R4-I2); the Part I naming is recorded as a DEVIATION from
+the transcription rule's naming clause and logged under §G-5 (R4-M2); the corpus's cell names are used
+(R4-N3). Owning phase: NOW — the physical rehearsal (S1, an owner decision) and the first filed year
+(TY2026, due 2027-04-15) both walk the extension and the payment envelope; today btctax can print
+neither.
 
 ## Why this exists
 
@@ -76,15 +78,23 @@ the 4868's Part II lines 4–8 are bound as `line4`…`line8` in the form's numb
 witnesses them today: `f1_11` → "4" … `c1_1` → "8"); line 9 is a `[census]` `never` entry, not a key;
 its Part I cells — lines 1–3, the address — are CAPTIONS (the labels `1`, `2`, `3` never form a label
 column: `candidate_columns` needs ≥ 3 tokens in one x2 bucket, and Part I offers `1`/`2` at one x and
-`3` alone at another — r3 N3-I1) and are bound by NAME (`name`, `address`, `city`, `state`, `zip`,
-`ssn`, `spouse_ssn`) with the printed line number in each doc comment, so a mis-join cannot occur and
-the transcription rule is kept where it lives (the doc comment says "L1 — Your name(s)"). The 1040-V's
+`3` alone at another — r3 N3-I1) and are bound by NAME with the corpus's own cell names (`name_line`, `address_street`,
+`address_city`, `address_state`, `address_zip`, `taxpayer_ssn`, `spouse_ssn` — `forms/2024/
+f1040.map.toml:117-127` spells the same cells so), with the printed line number in each doc comment.
+★ **This is a recorded DEVIATION from the transcription rule's naming clause** ("one field per numbered
+line, named for the line"): Form 4868 is the first form in the corpus that NUMBERS its identity cells,
+and binding them `line1`…`line3` would red the row gate three times per year on labels the reader
+provably cannot see (Part I forms no candidate column — three tokens across two adjacent 2pt buckets
+are needed, and Part I offers two at one x and one alone at another). The line number is carried in
+the doc comment and the box→line assignment is pinned by the `[census]` and by r1's 32/32 audit.
+Logged under `FOLLOWUPS.md` §G-5 (the constellation audit of this rule). The 1040-V's
 four numbered boxes are likewise bound by NAME (`box1_ssn`, `box2_spouse_ssn`, `box3_amount`,
 `box4_first_name`, the rest by name), because its labels are cell CAPTIONS printed ~21pt above and, for
 box 3, 130pt left of their fields — not line labels beside them (N-I2) — and the map is listed in
 `GRID_MAPS` for both years with that measured reason. **The fourth row gate** the new rows meet, beside
-the three of I-3: `every_mapped_line_lands_on_its_own_printed_label`, which today would red a
-conformant 4868 map three times per year (`f1_4` → "5", `f1_9`/`f1_10` → "9"). `LineSet`
+the three of I-3: `every_mapped_line_lands_on_its_own_printed_label`, which a map binding Part I as
+`line1`…`line3` would red three times per year (`f1_4` → "5", `f1_9`/`f1_10` → "9") — the reason
+those cells are bound by name above; as specified, the map meets it with zero findings. `LineSet`
 gains the four revisions; `Schema` gains `Form4868Map` and `Form1040VMap`; every exhaustive `match`
 on `Stem` reds until each site decides. TY2017 records both as absent (*"fillers begin at TY2024"*);
 `forms/2024/YEAR.toml` expected 17 → 19, `forms/2025/YEAR.toml` 15 → 17. **The three row gates the
@@ -126,7 +136,7 @@ extension; --pay overrides it"* — never a refusal (I-6: the field records a pa
 a filer who records first and prints second is doing it in the natural order).
 
 **R3 — the return already carries the payment.** `Payments.extension_payment: Usd`
-(`return_inputs.rs:708`) is collected by the TUI input form and by `income import`, enters the exact
+(`crates/btctax-core/src/tax/return_inputs.rs:708`) is collected by the TUI input form and by `income import`, enters the exact
 `total_payments` (`return_1040.rs:2338`), and prints on Schedule 3 line 10 (`printed.rs:1543`), with
 tests holding it. **This spec changes nothing there.** The one open question — whether it becomes
 `Option<Usd>` so a $0 line 10 on a filed Schedule 3 is a blank rather than a sworn zero — is filed as
@@ -184,12 +194,15 @@ port runbook as two more rows. Nothing here is year-specific except the archived
   `Option<Schedule3Lines>`; the YEAR is a separate argument, exactly as `fill_full_return(pr, year)`
   takes it (`crates/btctax-forms/src/packet.rs:100`) — `PrintedReturn` carries no year, and the year
   selects the map, template and line set; passing the header twice would let the two diverge. Lines 4–7 as the
-  table says (line 5 = line 33 − `Schedule3Lines.line10`, 0 when `sch_3` is `None`; I-2).
+  table says (line 5 = line 33 − `Schedule3Lines.line10`, 0 when `sch_3` is `None`; I-2), and the
+  **line-8 checkbox from `choices`** — the form's one filer-collected assertion (r4 R4-I2).
   Kills: L5 > L4 → line 6 prints `0`; line 4 zero prints `0`; line 5 zero prints blank; default line 7
   = line 6, or the printed Schedule 3 line 10 when > 0; `--pay` negative or with cents → refuse; an excess-SS
   credit with no extension payment ⇒ line 5 = line 33, and with both ⇒ line 5 excludes only the
   extension payment; MFS ⇒ line 3 blank; MFJ ⇒ line 3 filled; the fiscal-year header blank; `c1_2`
-  never set.
+  never set; **`--out-of-country` ⇒ `c1_1` checked, absent ⇒ `c1_1` blank** — mutation-verified by
+  removing the write (an unchecked box and a never-written box print identically; only the test tells
+  them apart).
 - **T3 — the command.** `btctax extension` with R2's refusals, the pseudo gate + watermark, and the
   warning from `return_due` — replaced by June 15 of the following year shifted by §7503 when line 8
   is checked (clock seam `BTCTAX_NOW`). Kills: uncomputable year
@@ -203,7 +216,7 @@ port runbook as two more rows. Nothing here is year-specific except the archived
   → no file, the note; line 37 = 0 → no file; MFS ⇒ box 2 and `f1_7`/`f1_8` blank; `--pay` > line 37 or
   negative → refuse; slice year → refusal naming the reason; pseudo gate + watermark; no test or
   code path passes either stem to `stapled`; a TY2024 end-to-end KAT.
-- **T5 — the label reader is NOT changed; the grid case is decided BEFORE the join (r3 N3-I1/N3-I2).**
+- **T5 — the reader proper is NOT changed (its `#[cfg(test)]` walk is); the grid case is decided BEFORE the label join (r3 N3-I1/N3-I2).**
   Measured today: `xtask label-boxes f4868--2025` joins Part I's boxes to Part II's labels (`f1_4` →
   "5", `f1_9`/`f1_10` → "9") because Part I's labels never form a candidate column; the multi-column
   mechanism r3 commissioned cannot reach them and, replayed over the corpus, mislabels 12 Schedule B
@@ -212,9 +225,12 @@ port runbook as two more rows. Nothing here is year-specific except the archived
   (*"no numbered label column found"*), and the walk pushes `unwitnessed` on that `Err` BEFORE
   `GRID_MAPS` is consulted (`every_mapped_line_lands_on_its_own_printed_label`), so a committed
   voucher map would move both `max_unwitnessed` ratchets (2024's 1, spent on f8283; 2025's 0). T5
-  reorders the walk: `numbered_line_keys` is counted first; when it is 0 AND `GRID_MAPS` names
-  `(year, form)`, the map goes to a third printed bucket — *"grid — {reason}"* — and the join is skipped,
-  neither witnessed nor unwitnessed; every undeclared keyless map still meets `map_reach_problem`'s
+  reorders the walk: the grid branch sits **AFTER the `m.stem` geometry join and BEFORE `label_join`**
+  (r4 R4-I1) — `numbered_line_keys` is counted there; when it is 0 AND `GRID_MAPS` names `(year,
+  form)`, the map goes to a third printed bucket — *"grid — {reason}"* — and the label join is skipped,
+  neither witnessed nor unwitnessed, while a declared grid that has LOST its geometry fixture is still
+  counted unwitnessed by the join above it (kill: deleting a declared grid's fixture must still red its
+  year — the six grid maps are the population); every undeclared keyless map still meets `map_reach_problem`'s
   `(false, 0, …)` red, and a keyless map NOT in `GRID_MAPS` whose form has no label column is the kill
   (it must still red). **Neither `max_unwitnessed` moves** — raising one is the option that makes
   "unreadable" and "declared grid" indistinguishable. Floors: `+N per year, measured by the T5 run and

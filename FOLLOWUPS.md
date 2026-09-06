@@ -2403,6 +2403,11 @@ now with the knowledge that the AMT half of that gate cannot be trusted for stan
 
 ### G-5 — ★★★ CONSTELLATION AUDIT: transcribe IRS forms, never paraphrase them (2026-07-27)
 
+- **Recorded deviation (2026-09-06, spec 4868/1040-V r5):** Form 4868's Part I identity cells (lines 1–3)
+  are bound by NAME in the map (`name_line`, `taxpayer_ssn`, …) with the line number in the doc comment,
+  because those labels form no candidate column for the label reader and `line1`…`line3` keys would red the
+  row gate on labels it cannot see. The box→line assignment is pinned by the `[census]` and the r1 32/32 audit.
+
 **The rule is now normative in `CLAUDE.md`.** One field per numbered line, in the form's own numbering,
 with the official instruction text verbatim as the doc comment. A derived/closed form is allowed only
 with a written equivalence proof naming the branch where it breaks **and** a KAT pinning that branch.
