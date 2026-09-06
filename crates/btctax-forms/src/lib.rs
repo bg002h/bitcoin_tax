@@ -493,10 +493,10 @@ pub mod testonly {
     // The committed map TOML, for the line-keyed inverse transcriber (`extract_lines`). Downstream
     // read-back tests need the map itself, not just its parsed struct.
     pub use crate::map::{
-        AmountCols, AmountColsNoAdjustment, Form1040Map, Form6251Map, Form8275Map, Form8275Row,
-        Form8283Map, Form8949Map, Form8959Map, Form8960Map, Form8995AMap, Form8995Map, MoneyCell,
-        MoneyPair, PartMap, Schedule1Map, Schedule2Map, Schedule3Map, ScheduleAMap, ScheduleBMap,
-        ScheduleCMap, ScheduleDMap, ScheduleSeMap,
+        AmountCols, AmountColsNoAdjustment, Form1040Map, Form1040VMap, Form4868Map, Form6251Map,
+        Form8275Map, Form8275Row, Form8283Map, Form8949Map, Form8959Map, Form8960Map, Form8995AMap,
+        Form8995Map, MoneyCell, MoneyPair, PartMap, Schedule1Map, Schedule2Map, Schedule3Map,
+        ScheduleAMap, ScheduleBMap, ScheduleCMap, ScheduleDMap, ScheduleSeMap,
     };
     pub use crate::pdf::{
         button_on_states, checkbox_on, collect_fields, f6251_pdf, f8995a_pdf, index, load,

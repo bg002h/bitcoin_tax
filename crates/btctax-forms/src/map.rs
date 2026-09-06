@@ -1799,6 +1799,323 @@ impl Form8959Map {
     }
 }
 
+/// **Form 4868** (Application for Automatic Extension of Time To File U.S. Individual Income Tax
+/// Return) — the field map for one tax year (spec `SPEC_form_4868_1040v.md` R1).
+///
+/// ★ **A recorded DEVIATION from the transcription rule's naming clause, spelled out in R1.** Form
+/// 4868 is the first form in this corpus that NUMBERS its identity cells: Part I's *"Your name(s)"*,
+/// *"Your social security number"* and *"Spouse’s social security number"* are printed lines 1, 2 and
+/// 3. They are nevertheless bound BY NAME here, because Part I's labels never form a candidate label
+/// column for the reader (`candidate_columns` needs ≥ 3 tokens in one 2pt x-bucket; Part I offers
+/// `1`/`2` at one x and `3` alone at another), so the reader joins those boxes to Part II's labels —
+/// `f1_4` → "5", `f1_9`/`f1_10` → "9" — and a `line1`…`line3` spelling would red
+/// `every_mapped_line_lands_on_its_own_printed_label` three times per year on a label the reader
+/// provably cannot see. The printed line number is carried in each doc comment instead, and the
+/// box→line assignment is pinned by the `[census]` and by the r1 review's 32/32 geometry audit.
+/// Only Part II's lines 4–8, whose labels the reader DOES witness, are spelled `lineN`.
+///
+/// 12 of the 17 AcroForm boxes are bound; the other five are named in the map's `[census]` with the
+/// rule that leaves each blank (the fiscal-year header, the Form 1040-NR box, the page-3
+/// electronic-payment confirmation cell).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Form4868Map {
+    /// `"f4868"`.
+    pub form: String,
+    /// Tax year.
+    pub year: i32,
+    // ── design r2 §4 — the ROW. The same keys as [`MapRow`]; required ones REFUSE when missing. ──
+    /// IRS basename (`"f4868"` — no alias). See [`MapRow::irs_stem`].
+    pub irs_stem: String,
+    /// Annual or periodic. See [`MapRow::versioning`].
+    pub versioning: Versioning,
+    /// sha256 of the bundled PDF. See [`MapRow::template_sha256`].
+    pub template_sha256: String,
+    /// OPTIONAL — the manifest-join excuse. See [`MapRow::authority`]. Absent on both 4868 rows:
+    /// each year's revision is archived and its hash joins the manifest.
+    #[serde(default)]
+    pub authority: Option<String>,
+    /// OPTIONAL — a second extract root. See [`MapRow::extract_override`].
+    #[serde(default)]
+    pub extract_override: Option<String>,
+    /// Instructions stem — `"f4868"`: the form IS its own instructions document (the IRS publishes
+    /// no `i4868`). See [`MapRow::instructions`].
+    pub instructions: String,
+    /// OPTIONAL — the instruction pages inside the document `instructions` names. See
+    /// [`MapRow::instr_pages`].
+    #[serde(default)]
+    pub instr_pages: Option<[u32; 2]>,
+    /// The line-set revision. See [`MapRow::line_set`].
+    pub line_set: String,
+    /// OPTIONAL — ABSENT here: Form 4868 prints no "Attachment Sequence No." (measured: the extract
+    /// contains none), because it is not attached to a return. Its own page 2 says so: *"Don’t
+    /// attach a copy of Form 4868 to your return."* See [`MapRow::attachment_sequence`].
+    #[serde(default)]
+    pub attachment_sequence: Option<String>,
+    /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
+    /// fill, mapped to the [`CensusDecision`] that leaves it blank.
+    #[serde(default)]
+    pub census: std::collections::BTreeMap<String, CensusDecision>,
+    /// L1 — "Your name(s) (see instructions)". Bound by NAME after the Rust field
+    /// `ReturnHeader.name_line` it is filled from (see the struct's deviation note).
+    pub name_line: String,
+    /// (Part I, under line 1) — "Address (see instructions)".
+    pub address_street: String,
+    /// (Part I, under line 1) — "City, town, or post office".
+    pub address_city: String,
+    /// (Part I, under line 1) — "State". `/MaxLen` 2.
+    pub address_state: String,
+    /// (Part I, under line 1) — "ZIP code". `/MaxLen` 10.
+    pub address_zip: String,
+    /// L2 — "Your social security number". `/MaxLen` 11 ⇒ hyphenated (`cells::push_identity`).
+    pub taxpayer_ssn: String,
+    /// L3 — "Spouse’s social security number". `/MaxLen`
+    /// 11. Filled only for a joint return.
+    pub spouse_ssn: String,
+    /// L4 — "Estimate of total tax liability for <year>" (the extract prints the tax year; the 2024
+    /// and 2025 revisions differ in that numeral alone).
+    pub line4: String,
+    /// L5 — "Total <year> payments" (again, the tax year is the only difference between revisions).
+    pub line5: String,
+    /// L6 — "Balance due. Subtract line 5 from line 4." / "See instructions".
+    pub line6: String,
+    /// L7 — "Amount you’re paying (see instructions)".
+    pub line7: String,
+    /// L8 — "Check here if you’re “out of the country” and a U.S. citizen or resident. See
+    /// instructions" — a CHECKBOX, on-state `/1`. The form’s one filer-collected assertion.
+    pub line8: CheckChoice,
+}
+
+impl Form4868Map {
+    /// Parse the committed TOML.
+    pub fn parse(toml_src: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(toml_src)
+    }
+
+    /// The TY2024 map.
+    pub fn ty2024() -> Self {
+        Self::for_year(2024).expect("the bundled TY2024 Form 4868 map is wired and parses")
+    }
+
+    /// The TY2025 map.
+    pub fn ty2025() -> Self {
+        Self::for_year(2025).expect("the bundled TY2025 Form 4868 map is wired and parses")
+    }
+
+    /// The bundled Form 4868 template for `year`, or the refusal that says this build ships none.
+    pub fn bundled_pdf(year: i32) -> Result<&'static [u8], FormsError> {
+        crate::bundled::template(crate::bundled::Stem::F4868, year)
+            .ok_or(FormsError::UnsupportedYear(year))
+    }
+
+    /// The map for a tax year — design r2 §10 step 3: the file comes from the glob
+    /// (`bundled::map_text`), the revision from its ROW, and the ONE exhaustive
+    /// `line_set → schema` match (`line_set::schema`) decides whether THIS struct parses it.
+    pub fn for_year(year: i32) -> Result<Self, FormsError> {
+        let text = crate::bundled::map_text(crate::bundled::Stem::F4868, year)
+            .ok_or(FormsError::UnsupportedYear(year))?;
+        let row = MapRow::read(text).map_err(|e| {
+            FormsError::Structure(format!("F4868 TY{year}: the map's row does not parse: {e}"))
+        })?;
+        let ls = crate::line_set::LineSet::parse(&row.line_set).ok_or_else(|| {
+            FormsError::Structure(format!(
+                "F4868 TY{year}: line_set {:?} is not a revision this build knows",
+                row.line_set
+            ))
+        })?;
+        match crate::line_set::schema(ls) {
+            crate::line_set::Schema::Form4868Map => Self::parse(text).map_err(|e| {
+                FormsError::Structure(format!(
+                    "F4868 TY{year}: the bundled map does not parse: {e}"
+                ))
+            }),
+            crate::line_set::Schema::Unwired => Err(FormsError::UnwiredLineSet {
+                stem: "F4868",
+                year,
+                line_set: ls.as_str(),
+            }),
+            other => Err(FormsError::Structure(format!(
+                "F4868 TY{year}: line_set {} parses into {other:?}, not Form4868Map",
+                ls.as_str()
+            ))),
+        }
+    }
+
+    /// Every AcroForm field name this map targets, for the `map_…_matches_bundled_pdf_fieldset`
+    /// guard. The checkbox contributes its FIELD, not its on-state.
+    pub fn field_names(&self) -> Vec<&str> {
+        vec![
+            self.name_line.as_str(),
+            self.address_street.as_str(),
+            self.address_city.as_str(),
+            self.address_state.as_str(),
+            self.address_zip.as_str(),
+            self.taxpayer_ssn.as_str(),
+            self.spouse_ssn.as_str(),
+            self.line4.as_str(),
+            self.line5.as_str(),
+            self.line6.as_str(),
+            self.line7.as_str(),
+            self.line8.field.as_str(),
+        ]
+    }
+}
+
+/// **Form 1040-V** (Payment Voucher for Individuals) — the field map for one tax year (spec
+/// `SPEC_form_4868_1040v.md` R1).
+///
+/// ★ **Every cell is bound BY NAME, including the four the form NUMBERS** (boxes 1–4). The voucher's
+/// labels are cell CAPTIONS printed ~21pt ABOVE their fields and, for box 3, ~130pt to their left —
+/// not line labels beside them — so `label_join` refuses the form outright (*"no numbered label
+/// column found"*) and the map is declared in the label walk's `GRID_MAPS` for both years with that
+/// measured reason. Binding `line1`…`line4` would claim a label column the form does not print.
+///
+/// 12 of the 15 AcroForm boxes are bound; the three foreign-address cells are named in the map's
+/// `[census]` — `ReturnHeader` carries no foreign address, so they are left blank, and that blank is
+/// correct (the TY2024 Form 1040 map censuses its own three the same way).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Form1040VMap {
+    /// `"f1040v"`.
+    pub form: String,
+    /// Tax year.
+    pub year: i32,
+    // ── design r2 §4 — the ROW. The same keys as [`MapRow`]; required ones REFUSE when missing. ──
+    /// IRS basename (`"f1040v"` — no alias). See [`MapRow::irs_stem`].
+    pub irs_stem: String,
+    /// Annual or periodic. See [`MapRow::versioning`].
+    pub versioning: Versioning,
+    /// sha256 of the bundled PDF. See [`MapRow::template_sha256`].
+    pub template_sha256: String,
+    /// OPTIONAL — the manifest-join excuse. See [`MapRow::authority`]. Absent on both 1040-V rows.
+    #[serde(default)]
+    pub authority: Option<String>,
+    /// OPTIONAL — a second extract root. See [`MapRow::extract_override`].
+    #[serde(default)]
+    pub extract_override: Option<String>,
+    /// Instructions stem — `"f1040v"`: the voucher IS its own instructions document (the IRS
+    /// publishes no `i1040v`). See [`MapRow::instructions`].
+    pub instructions: String,
+    /// OPTIONAL — the instruction pages inside the document `instructions` names. See
+    /// [`MapRow::instr_pages`].
+    #[serde(default)]
+    pub instr_pages: Option<[u32; 2]>,
+    /// The line-set revision. See [`MapRow::line_set`].
+    pub line_set: String,
+    /// OPTIONAL — ABSENT here: Form 1040-V prints no "Attachment Sequence No." (measured: the
+    /// extract contains none). The voucher says why on its own face: *"Do not staple or attach this
+    /// voucher to your payment or return."* See [`MapRow::attachment_sequence`].
+    #[serde(default)]
+    pub attachment_sequence: Option<String>,
+    /// The §G-13 **field census** — every AcroForm field on this year's PDF that this build does NOT
+    /// fill, mapped to the [`CensusDecision`] that leaves it blank.
+    #[serde(default)]
+    pub census: std::collections::BTreeMap<String, CensusDecision>,
+    /// Box 1 — "Your social security number (SSN)" / "(if a joint return, SSN shown first on your
+    /// return)". `/MaxLen` 11 ⇒ hyphenated.
+    pub box1_ssn: String,
+    /// Box 2 — "If a joint return, SSN shown second" / "on your return". `/MaxLen` 11. Filled only
+    /// for a joint return.
+    pub box2_spouse_ssn: String,
+    /// Box 3 — "Amount you are paying by check or" / "money order. Make your check or" / "money
+    /// order payable to “United States" / "Treasury”".
+    pub box3_amount: String,
+    /// Box 4 — "Your first name and middle initial".
+    pub box4_first_name: String,
+    /// Box 4 — "Last name".
+    pub box4_last_name: String,
+    /// (under box 4) — "If a joint return, spouse’s first name and middle initial".
+    pub spouse_first_name: String,
+    /// (under box 4) — "Last name" (the spouse's row).
+    pub spouse_last_name: String,
+    /// (under box 4) — "Home address (number and street)".
+    pub address_street: String,
+    /// (under box 4) — "Apt. no.".
+    pub address_apt: String,
+    /// (under box 4) — "City, town, or post office. If you have a foreign address, also complete
+    /// spaces below."
+    pub address_city: String,
+    /// (under box 4) — "State". `/MaxLen` 2.
+    pub address_state: String,
+    /// (under box 4) — "ZIP code". `/MaxLen` 10.
+    pub address_zip: String,
+}
+
+impl Form1040VMap {
+    /// Parse the committed TOML.
+    pub fn parse(toml_src: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(toml_src)
+    }
+
+    /// The TY2024 map.
+    pub fn ty2024() -> Self {
+        Self::for_year(2024).expect("the bundled TY2024 Form 1040-V map is wired and parses")
+    }
+
+    /// The TY2025 map.
+    pub fn ty2025() -> Self {
+        Self::for_year(2025).expect("the bundled TY2025 Form 1040-V map is wired and parses")
+    }
+
+    /// The bundled Form 1040-V template for `year`, or the refusal that says this build ships none.
+    pub fn bundled_pdf(year: i32) -> Result<&'static [u8], FormsError> {
+        crate::bundled::template(crate::bundled::Stem::F1040v, year)
+            .ok_or(FormsError::UnsupportedYear(year))
+    }
+
+    /// The map for a tax year — the glob, the row, and the one exhaustive `line_set → schema` match.
+    pub fn for_year(year: i32) -> Result<Self, FormsError> {
+        let text = crate::bundled::map_text(crate::bundled::Stem::F1040v, year)
+            .ok_or(FormsError::UnsupportedYear(year))?;
+        let row = MapRow::read(text).map_err(|e| {
+            FormsError::Structure(format!(
+                "F1040V TY{year}: the map's row does not parse: {e}"
+            ))
+        })?;
+        let ls = crate::line_set::LineSet::parse(&row.line_set).ok_or_else(|| {
+            FormsError::Structure(format!(
+                "F1040V TY{year}: line_set {:?} is not a revision this build knows",
+                row.line_set
+            ))
+        })?;
+        match crate::line_set::schema(ls) {
+            crate::line_set::Schema::Form1040VMap => Self::parse(text).map_err(|e| {
+                FormsError::Structure(format!(
+                    "F1040V TY{year}: the bundled map does not parse: {e}"
+                ))
+            }),
+            crate::line_set::Schema::Unwired => Err(FormsError::UnwiredLineSet {
+                stem: "F1040V",
+                year,
+                line_set: ls.as_str(),
+            }),
+            other => Err(FormsError::Structure(format!(
+                "F1040V TY{year}: line_set {} parses into {other:?}, not Form1040VMap",
+                ls.as_str()
+            ))),
+        }
+    }
+
+    /// Every AcroForm field name this map targets, for the `map_…_matches_bundled_pdf_fieldset`
+    /// guard.
+    pub fn field_names(&self) -> Vec<&str> {
+        vec![
+            self.box1_ssn.as_str(),
+            self.box2_spouse_ssn.as_str(),
+            self.box3_amount.as_str(),
+            self.box4_first_name.as_str(),
+            self.box4_last_name.as_str(),
+            self.spouse_first_name.as_str(),
+            self.spouse_last_name.as_str(),
+            self.address_street.as_str(),
+            self.address_apt.as_str(),
+            self.address_city.as_str(),
+            self.address_state.as_str(),
+            self.address_zip.as_str(),
+        ]
+    }
+}
+
 /// The Form 8960 (Net Investment Income Tax) field map for one tax year.
 ///
 /// Only the lines v1 FILLS are mapped. Annuities (3), Schedule E (4a–4c), CFC/PFIC (6), investment

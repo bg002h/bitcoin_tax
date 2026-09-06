@@ -36,6 +36,12 @@ pub enum Stem {
     F1040sb,
     /// Schedule C — Profit or Loss From Business.
     F1040sc,
+    /// Form 1040-V — Payment Voucher for Individuals. Enclosed LOOSE with the return and the
+    /// check; never stapled, never attached (the voucher says so on its own face).
+    F1040v,
+    /// Form 4868 — Application for Automatic Extension of Time To File. Mailed on its own, not
+    /// with the return (the form's page 2: *"Don't attach a copy of Form 4868 to your return."*).
+    F4868,
     /// Form 6251 — Alternative Minimum Tax.
     F6251,
     /// Form 8275 — Disclosure Statement (periodic; Rev. 10-2024).
@@ -70,6 +76,8 @@ impl Stem {
         Stem::F1040sa,
         Stem::F1040sb,
         Stem::F1040sc,
+        Stem::F1040v,
+        Stem::F4868,
         Stem::F6251,
         Stem::F8275,
         Stem::F8283,
@@ -93,6 +101,8 @@ impl Stem {
             Stem::F1040sa => "f1040sa",
             Stem::F1040sb => "f1040sb",
             Stem::F1040sc => "f1040sc",
+            Stem::F1040v => "f1040v",
+            Stem::F4868 => "f4868",
             Stem::F6251 => "f6251",
             Stem::F8275 => "f8275",
             Stem::F8283 => "f8283",

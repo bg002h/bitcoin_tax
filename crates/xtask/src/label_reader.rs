@@ -1166,7 +1166,75 @@ mod map_label_join_tests {
             "f8283",
             "the Rev. 12-2025 map binds property rows positionally and no Section B question line",
         ),
+        (
+            "2024",
+            "f1040v",
+            "the voucher's box numbers are cell CAPTIONS, not line labels: `label_join` refuses the \
+             form (no numbered label column), because the captions are printed ABOVE their fields \
+             (box 1: caption at PDF y 156.5-164.8, widget at y 132.0-144.0) and box 3's sits 129.6pt \
+             to the LEFT of its widget. Every cell is bound by name",
+        ),
+        (
+            "2025",
+            "f1040v",
+            "the voucher's box numbers are cell CAPTIONS, not line labels: `label_join` refuses the \
+             form (no numbered label column), because the captions are printed ABOVE their fields \
+             (box 1: caption at PDF y 156.5-164.8, widget at y 132.0-144.0) and box 3's sits 129.6pt \
+             to the LEFT of its widget. Every cell is bound by name",
+        ),
     ];
+
+    /// ★★ **T5 — the GRID branch, as a pure predicate.** `Some(reason)` exactly when a map holds NO
+    /// numbered line key AND `GRID_MAPS` names it for that year. Anything else is `None` and falls
+    /// through to the label join, so an UNDECLARED keyless map still reaches `map_reach_problem`'s
+    /// `(false, 0, …)` red (or, when its form has no label column at all, the year's unwitnessed
+    /// ratchet), and a DECLARED grid that grew a numbered key still reaches the `(true, k, …)` red.
+    fn grid_reason(year: &str, form: &str, keys: usize) -> Option<&'static str> {
+        if keys != 0 {
+            return None;
+        }
+        GRID_MAPS
+            .iter()
+            .find(|(y, f, _)| *y == year && *f == form)
+            .map(|(_, _, why)| *why)
+    }
+
+    /// What the walk does with one map, decided in ORDER — pure, so the order itself can be planted.
+    #[derive(Debug, PartialEq, Eq)]
+    enum Disposition {
+        /// `<form> — <why>`: this check could not reach the map at all.
+        Unwitnessed(String),
+        /// `<form> — grid: <reason>`: a declared grid with no numbered line key. Neither witnessed
+        /// nor unwitnessed — a recorded blank, printed on every run.
+        Grid(String),
+        /// Go on to `label_join` with this geometry-fixture stem.
+        Join(String),
+    }
+
+    /// ★★★ **The branch ORDER is the guarantee (r4 R4-I1), and it is why this is a function.**
+    ///
+    /// The geometry join is decided FIRST and the grid declaration SECOND, so a declared grid whose
+    /// fixture has been lost is counted UNWITNESSED — it is not laundered as "grid" by a declaration
+    /// written when the fixture still existed. Deleting a declared grid's fixture must still red its
+    /// year, and that is exactly what this order buys.
+    ///
+    /// The grid branch nevertheless sits BEFORE `label_join` (which the caller runs on `Join`),
+    /// because a form whose captions are not a label column makes the join REFUSE, and refusing is
+    /// what would otherwise spend a year's `max_unwitnessed` allowance on a map that is complete.
+    fn disposition(
+        year: &str,
+        form: &str,
+        stem: &Result<String, String>,
+        keys: usize,
+    ) -> Disposition {
+        match stem {
+            Err(why) => Disposition::Unwitnessed(format!("{form} — {why}")),
+            Ok(s) => match grid_reason(year, form, keys) {
+                Some(why) => Disposition::Grid(format!("{form} — grid: {why}")),
+                None => Disposition::Join(s.clone()),
+            },
+        }
+    }
 
     /// The one predicate behind the per-map reach line — pure, so it can be planted red without
     /// touching the tree. `keys` is [`numbered_line_keys`] (raw text), `extracted` what
@@ -1446,6 +1514,11 @@ mod map_label_join_tests {
         maps: usize,
         /// `<form> — <why>`, one per map this check could not reach. Named, never counted.
         unwitnessed: Vec<String>,
+        /// ★ T5 — the THIRD bucket: `<form> — grid: <reason>`, one per DECLARED grid map with no
+        /// numbered line key. Neither witnessed nor unwitnessed, printed like the others, and
+        /// deliberately NOT counted against `max_unwitnessed` — raising that allowance instead is
+        /// the option that would make "unreadable" and "declared grid" indistinguishable.
+        grid: Vec<String>,
         /// line→label joins actually compared for this year.
         joins: usize,
     }
@@ -1480,9 +1553,18 @@ mod map_label_join_tests {
             year: "2024",
             // 99 → 235 on 2026-09-06: the binding parser dropped every `line = "…" # comment` (R2),
             // and the join gained the x-aware in-row rule; 235 → 249 when Schedule D's inline-table
-            // rows joined (fold review L4); 249 → the value below when `[lineN]` table sections
-            // joined (fold review r2 N1). Measured, not estimated.
-            min_joins: 261,
+            // rows joined (fold review L4); 249 → 261 when `[lineN]` table sections joined (fold
+            // review r2 N1). Measured, not estimated.
+            //
+            // ★ 261 → 282 on 2026-09-06, in TWO parts, both measured by the run this comment records:
+            //   +16 was already owed at HEAD — spec 1099-DA T4 (c25f7489) MAPPED sixteen Schedule D
+            //        cells that had been censused (lines 1b/2/8b/9 × columns d/e/g/h) without raising
+            //        this floor, and a `min_joins` floor only reds when coverage FALLS, so the stale
+            //        value passed. Measured today: 277 without the 4868 map;
+            //   +5  is Form 4868's own Part II — `line4`…`line8`, the only labels on that form the
+            //        reader witnesses (spec 4868/1040-V T5). Form 1040-V contributes 0 by design: it
+            //        is a declared grid (below), counted in neither bucket.
+            min_joins: 282,
             max_unwitnessed: 1,
             why: "f8283 — design/forms/2024/ holds only i8283--2024 (the instructions); the form \
                   AUTHORITY was never archived, so `xtask extract-geometry f8283--2024` has no \
@@ -1493,11 +1575,16 @@ mod map_label_join_tests {
         YearFloor {
             year: "2025",
             // 82 → 193 on 2026-09-06 (same fix as 2024); 193 → 201 when Schedule D's inline-table
-            // rows joined (fold review L4); 201 → the value below when `[lineN]` table sections
-            // joined (fold review r2 N1). Thirteen of fifteen TY2025 maps
-            // contribute; `f8949` and `f8283` are positional grids with no numbered key, named in
-            // `GRID_MAPS` so that blank is recorded rather than silent (L5).
-            min_joins: 215,
+            // rows joined (fold review L4); 201 → 215 when `[lineN]` table sections joined (fold
+            // review r2 N1).
+            //
+            // ★ 215 → 236 on 2026-09-06, the same two parts as TY2024 and the same sizes: +16 already
+            //   owed at HEAD (spec 1099-DA T4 mapped Schedule D lines 1b/2/8b/9 × d/e/g/h here too —
+            //   measured 231 without the 4868 map), and +5 for Form 4868's `line4`…`line8`.
+            //   Fourteen of the seventeen TY2025 maps contribute; `f8949`, `f8283` and `f1040v` hold
+            //   no numbered key and are named in `GRID_MAPS`, so those blanks are recorded rather
+            //   than silent (L5) and are counted in neither bucket.
+            min_joins: 236,
             max_unwitnessed: 0,
             why: "every TY2025 form is archived with geometry; nothing is unreachable",
         },
@@ -1586,17 +1673,25 @@ mod map_label_join_tests {
                     year: m.year.clone(),
                     maps: 0,
                     unwitnessed: Vec::new(),
+                    grid: Vec::new(),
                     joins: 0,
                 });
             }
             let r = reach.last_mut().expect("just pushed");
             r.maps += 1;
-            let stem = match &m.stem {
-                Ok(s) => s.clone(),
-                Err(why) => {
-                    r.unwitnessed.push(format!("{} — {why}", m.form));
+            let keys = numbered_line_keys(&std::fs::read_to_string(&m.path).unwrap());
+            // ★ T5 — the geometry join, then the grid declaration, then the label join. The order is
+            //   the guarantee: see `disposition`.
+            let stem = match disposition(&m.year, &m.form, &m.stem, keys) {
+                Disposition::Unwitnessed(line) => {
+                    r.unwitnessed.push(line);
                     continue;
                 }
+                Disposition::Grid(line) => {
+                    r.grid.push(line);
+                    continue;
+                }
+                Disposition::Join(s) => s,
             };
             let join = match label_join(&stem) {
                 Ok(j) => j,
@@ -1606,7 +1701,6 @@ mod map_label_join_tests {
                 }
             };
             let bindings = line_bindings(&m.path);
-            let keys = numbered_line_keys(&std::fs::read_to_string(&m.path).unwrap());
             let (mut map_joined, mut map_unboxed) = (0usize, 0usize);
             for (line, fqn) in &bindings {
                 let Some(got) = join.get(fqn) else {
@@ -1648,14 +1742,18 @@ mod map_label_join_tests {
         //   form has no archived PDF" from "we forgot to extract its geometry".
         for r in &reach {
             eprintln!(
-                "{}: {} map(s), {} join(s) checked, {} unreachable",
+                "{}: {} map(s), {} join(s) checked, {} unreachable, {} declared grid(s)",
                 r.year,
                 r.maps,
                 r.joins,
-                r.unwitnessed.len()
+                r.unwitnessed.len(),
+                r.grid.len()
             );
             for u in &r.unwitnessed {
                 eprintln!("      NOT WITNESSED {u}");
+            }
+            for g in &r.grid {
+                eprintln!("      DECLARED GRID {g}");
             }
         }
         eprintln!("{unlabelled} binding(s) landed on a box the reader could not label (`?`)");
@@ -1692,8 +1790,9 @@ mod map_label_join_tests {
         }];
         let good = |joins: usize, unwitnessed: Vec<String>| YearReach {
             year: "2025".to_string(),
-            maps: 15,
+            maps: 17,
             unwitnessed,
+            grid: Vec::new(),
             joins,
         };
         audit_year_reach(&[good(100, vec![])], floors).expect("the calibrated case must PASS");
@@ -1706,6 +1805,7 @@ mod map_label_join_tests {
                     year: "2026".to_string(),
                     maps: 12,
                     unwitnessed: vec!["f6251 — no geometry fixture".to_string()],
+                    grid: Vec::new(),
                     joins: 0,
                 },
             ],
@@ -1939,11 +2039,104 @@ mod map_label_join_tests {
             p("2025", "f8949", 0, 0, 0).is_none(),
             "a grid map with no key is the recorded blank"
         );
+        assert!(
+            p("2025", "f1040v", 0, 0, 0).is_none(),
+            "2025/f1040v is the newly recorded blank (spec 4868/1040-V T5)"
+        );
+        assert!(
+            p("2024", "f1040v", 1, 1, 1).is_some(),
+            "a 1040-V map that grew a numbered line key must red — the form prints no label column"
+        );
+        assert!(
+            p("2024", "f4868", 0, 0, 0).is_some(),
+            "the 4868 is NOT a grid: a 4868 map that stopped binding line4..line8 must red"
+        );
         assert!(p("2025", "f1040", 5, 5, 3).is_none(), "a healthy map");
         assert!(
             p("2025", "schedule_d", 5, 11, 11).is_none(),
             "inline tables extract MORE FQNs than keys"
         );
+    }
+
+    /// ★★ **B1 for T5 — the GRID branch and, above all, its ORDER.**
+    ///
+    /// [`grid_reason`] and [`disposition`] are pure so the three failures the branch could introduce
+    /// can be planted without touching the tree:
+    ///
+    /// 1. a keyless map NOT in `GRID_MAPS` must NOT be swallowed by the branch — it must fall through
+    ///    to the label join, where `map_reach_problem`'s `(false, 0, …)` arm reds it;
+    /// 2. a DECLARED grid that has LOST its geometry fixture must still be counted **unwitnessed**,
+    ///    so deleting a declared grid's fixture reds its year through `max_unwitnessed`. This is what
+    ///    the branch order buys: the `m.stem` Err is decided BEFORE the declaration is consulted, so a
+    ///    declaration written when the fixture existed cannot launder its later loss;
+    /// 3. a declared grid that grew a numbered line key must fall through too (and then red).
+    #[test]
+    fn the_grid_branch_reds_on_an_undeclared_blank_and_never_launders_a_lost_fixture() {
+        // (1) undeclared and keyless — no grid reason, so the walk goes on to the label join.
+        assert_eq!(grid_reason("2025", "f1040", 0), None);
+        assert_eq!(grid_reason("2024", "f4868", 0), None);
+        assert!(
+            map_reach_problem("2025", "f1040", 0, 0, 0).is_some(),
+            "and the join path must red it — otherwise the branch has hidden a keyless map"
+        );
+        // The declared ones DO get a reason, or the branch does nothing at all.
+        assert!(grid_reason("2025", "f1040v", 0).is_some());
+        assert!(grid_reason("2024", "f1040v", 0).is_some());
+        assert!(grid_reason("2025", "f8949", 0).is_some());
+
+        // (3) a declared grid that grew a numbered key falls through, and `map_reach_problem` reds it.
+        assert_eq!(grid_reason("2025", "f1040v", 1), None);
+        assert!(map_reach_problem("2025", "f1040v", 1, 1, 1).is_some());
+
+        // (2) THE ORDER. The same declared grid, once with its fixture and once without.
+        let with_fixture: Result<String, String> = Ok("f1040v--2025".to_string());
+        let lost: Result<String, String> =
+            Err("no geometry fixture was observed from …".to_string());
+        assert_eq!(
+            disposition("2025", "f1040v", &with_fixture, 0),
+            Disposition::Grid(
+                "f1040v — grid: the voucher's box numbers are cell CAPTIONS, not line labels: \
+                 `label_join` refuses the form (no numbered label column), because the captions are \
+                 printed ABOVE their fields (box 1: caption at PDF y 156.5-164.8, widget at y \
+                 132.0-144.0) and box 3's sits 129.6pt to the LEFT of its widget. Every cell is \
+                 bound by name"
+                    .to_string()
+            )
+        );
+        let d = disposition("2025", "f1040v", &lost, 0);
+        assert!(
+            matches!(&d, Disposition::Unwitnessed(w) if w.starts_with("f1040v — no geometry fixture")),
+            "a DECLARED grid whose fixture is gone must be UNWITNESSED, not laundered as grid: {d:?}"
+        );
+        // …and an unwitnessed map is what `audit_year_reach` reds a year on. TY2025's real floor
+        // allows zero, restated here as a one-year set so the observation need not carry every year.
+        let floors = &[YearFloor {
+            year: "2025",
+            min_joins: 236,
+            max_unwitnessed: 0,
+            why: "",
+        }];
+        let observed = |unwitnessed: Vec<String>, grid: Vec<String>| {
+            [YearReach {
+                year: "2025".to_string(),
+                maps: 17,
+                unwitnessed,
+                grid,
+                joins: 236,
+            }]
+        };
+        let e = audit_year_reach(
+            &observed(vec!["f1040v — no geometry fixture".to_string()], Vec::new()),
+            floors,
+        )
+        .expect_err("TY2025 tolerates zero unreachable maps");
+        assert!(e.contains("cannot reach") && e.contains("f1040v"), "{e}");
+        // A map in the grid bucket, by contrast, spends none of that allowance.
+        audit_year_reach(
+            &observed(Vec::new(), vec!["f1040v — grid: …".to_string()]),
+            floors,
+        )
+        .expect("a declared grid is neither witnessed nor unwitnessed");
     }
 
     /// ★ B1 for fold review r2 N1 — all three binding shapes are parsed, and the key counter counts

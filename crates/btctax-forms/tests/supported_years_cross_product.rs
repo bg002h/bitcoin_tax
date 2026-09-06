@@ -31,8 +31,9 @@
 //!
 //! ## The record is a RATCHET, and it is deliberately not green-by-narrowing
 //!
-//! 21 of the 37 bundled (year, form) cells are missing at least one supporting artifact, 54
-//! obligations unmet in total. Those are recorded in [`KNOWN_GAPS`] **cell by cell, artifact by
+//! 21 of the 37 bundled (year, form) cells were missing at least one supporting artifact when this
+//! was written, 54 obligations unmet in total; the four Form 4868 / Form 1040-V cells added
+//! 2026-09-06 are complete on all eight and add no row. Those are recorded in [`KNOWN_GAPS`] **cell by cell, artifact by
 //! artifact** — measured, never estimated. A gap that appears anywhere else fails. A gap that *closes*
 //! also fails, with instructions to delete the line: an excuse register that may be edited in either
 //! direction records nothing.
@@ -43,9 +44,9 @@
 //! record it, in the open.
 
 use btctax_forms::testonly::{
-    Form1040Map, Form6251Map, Form8275Map, Form8283Map, Form8949Map, Form8959Map, Form8960Map,
-    Form8995AMap, Form8995Map, Schedule1Map, Schedule2Map, Schedule3Map, ScheduleAMap,
-    ScheduleBMap, ScheduleCMap, ScheduleDMap, ScheduleSeMap,
+    Form1040Map, Form1040VMap, Form4868Map, Form6251Map, Form8275Map, Form8283Map, Form8949Map,
+    Form8959Map, Form8960Map, Form8995AMap, Form8995Map, Schedule1Map, Schedule2Map, Schedule3Map,
+    ScheduleAMap, ScheduleBMap, ScheduleCMap, ScheduleDMap, ScheduleSeMap,
 };
 use btctax_forms::{FormsError, SUPPORTED_YEARS};
 use sha2::{Digest, Sha256};
@@ -150,7 +151,9 @@ const BUNDLED_BUT_NOT_SUPPORTED: &[i32] = &[2026]; // TY2026: a `preparing` reco
 
 /// How many forms each supported year bundles. Pinned so that **deleting** an asset is as loud as
 /// adding one — a cell with no recorded gap vanishing from the matrix would otherwise be silent.
-const BUNDLED_FORMS_PER_YEAR: &[(i32, usize)] = &[(2017, 5), (2024, 17), (2025, 15)];
+// 2026-09-06: 2024 17 → 19 and 2025 15 → 17 — the Form 4868 and Form 1040-V rows (spec 4868/1040-V
+// T1). TY2017 bundles neither: the fillers begin at TY2024 and no 2017 authority is archived.
+const BUNDLED_FORMS_PER_YEAR: &[(i32, usize)] = &[(2017, 5), (2024, 19), (2025, 17)];
 
 /// Bundled stems for which this build ships **no map type at all**, so nothing can parse the
 /// committed `*.map.toml`. Recorded rather than skipped (`CLAUDE.md`: *skipping is not passing*).
@@ -233,6 +236,8 @@ fn map_resolves(stem: &str, year: i32) -> Option<bool> {
         "f1040sa" => ScheduleAMap::for_year(year).is_ok(),
         "f1040sb" => ScheduleBMap::for_year(year).is_ok(),
         "f1040sc" => ScheduleCMap::for_year(year).is_ok(),
+        "f1040v" => Form1040VMap::for_year(year).is_ok(),
+        "f4868" => Form4868Map::for_year(year).is_ok(),
         "f6251" => Form6251Map::for_year(year).is_ok(),
         "f8275" => Form8275Map::for_year(year).is_ok(),
         "f8283" => Form8283Map::for_year(year).is_ok(),
@@ -316,7 +321,7 @@ fn measure() -> BTreeMap<(i32, String), CellState> {
     // that bound nothing would measure every cell unwired and this file would report a defect that
     // is really a blind instrument. The old reader asserted `include_bytes!` appeared in src/.
     assert!(
-        btctax_forms::bundled::BUNDLED.len() >= 37,
+        btctax_forms::bundled::BUNDLED.len() >= 41,
         "the generated bindings hold {} pairs — the reader has gone blind",
         btctax_forms::bundled::BUNDLED.len()
     );

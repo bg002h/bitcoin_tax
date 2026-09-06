@@ -55,6 +55,8 @@ hand-maintained — only the numeric table above is pasted verbatim, and the tes
 | form | emitted? | prior side (`--2025` final) | TY2026 side | cell |
 |---|---|---|---|---|
 | `f1040` | **yes** — the return itself | `f1040--2025` | **NO DRAFT** — the file archived as `f1040--2026-DRAFT.pdf` was the TY2025 form (found 2026-09-05); its fixture is gone and the "199 common, unchanged" row it produced was a reader artifact (removed 2026-09-06 by the work-list test) | **NO DRAFT** |
+| `f4868` | yes — the extension application; NOT a packet member (spec 4868/1040-V R2 makes it `btctax extension`, mailed on its own) | `f4868--2025` | **NO DRAFT** — the IRS posts no TY2026 Form 4868 draft; the revision arrives with the January 2027 package | **NO DRAFT** |
+| `f1040v` | yes — the payment voucher, written BESIDE the packet and enclosed loose (spec 4868/1040-V R4) | `f1040v--2025` | **NO DRAFT** — the IRS posts no TY2026 Form 1040-V draft; the revision arrives with the January 2027 package | **NO DRAFT** |
 | `f8283` | yes — `packet.rs:223` | `f8283--2025` (Rev. 12-2025, periodic) | **NO DRAFT** — the draft URL served a 2025 document; archiver refused | **NO DRAFT** |
 | `f8275` | yes — `packet.rs:218` | **NO PRIOR SIDE** for the `--2025` tag — `f8275--2024` (Rev. 10-2024, periodic) is aliased by hash for 2025 | **NO DRAFT** — the draft URL served a 2024 document; archiver refused | **NO DRAFT** — periodic; a new revision would be a hash change, not a year |
 | `f8995a` | yes — `packet.rs:194` | **NO PRIOR SIDE** — bundled for 2024 only; no `f8995a--2025` authority or extract archived (the port report §5d's "keep" was a to-do, not a fact) | draft archived (`f8995a--2026-DRAFT`) | **NO PRIOR SIDE** → archive `f8995a--2025` + `i8995a--2025`, then diff |

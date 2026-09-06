@@ -9,8 +9,9 @@
 //!    `authority = "not-yet-archived: …"`, the ONLY excuse, on exactly the six rows the design names
 //!    and no seventh (kill 3);
 //! 4. `attachment_sequence` equals the "Attachment Sequence No." printed on the archived extract,
-//!    absent exactly on the 1040 (kill 4) — and `btctax_forms::attachment_sequence` (the packet's
-//!    stapling order) agrees with every row, which is how the Form 8283 155→36 renumber was found.
+//!    absent exactly on the rows whose extract prints none (kill 4) — and
+//!    `btctax_forms::attachment_sequence` (the packet's stapling order) agrees with every row, which
+//!    is how the Form 8283 155→36 renumber was found.
 //!
 //! Every kill was observed RED on a planted defect before it was trusted (B1): each `check_*` helper
 //! takes a root, and the `a_planted_*` tests build a tempdir copy with exactly one defect.
@@ -243,7 +244,8 @@ fn every_committed_map_has_a_row_that_parses_and_all_four_kills_are_green() {
         &manifest_authority_hashes(&ws),
         &ws.join("design/forms/extract"),
     );
-    assert!(rows.len() >= 37, "the walk found only {} rows", rows.len());
+    // 37 → 41 on 2026-09-06: the four Form 4868 / Form 1040-V rows (spec 4868/1040-V T1).
+    assert!(rows.len() >= 41, "the walk found only {} rows", rows.len());
     // The rows whose sequence number NO extract can verify — exactly the five TY2017 templates
     // (`design/forms/` has no 2017 archive). Shrink-only: archiving one removes it here.
     let unverifiable: Vec<(i32, String)> = problems
@@ -295,10 +297,20 @@ fn every_committed_map_has_a_row_that_parses_and_all_four_kills_are_green() {
             r.year,
             r.form
         );
+        // ★ R1 / spec I-3: this used to read `is_none() == (form == "f1040")`, which was a
+        //   HAND-LIST of one wearing an equality. The predicate that actually holds the value is
+        //   kill 4 above — every row's `attachment_sequence` is compared against
+        //   `printed_sequence(<that year's archived extract>)`, so a wrong number, a missing one and
+        //   an invented one are all caught from the FORM. What survives here is the shape assertion:
+        //   the set of rows whose extract prints no sequence number may only be these three forms,
+        //   so a fourth stem quietly losing its number still reds even before the extract is read.
         assert_eq!(
             r.attachment_sequence.is_none(),
-            r.form == "f1040",
-            "{}/{}: only the 1040 carries no sequence number",
+            matches!(r.form.as_str(), "f1040" | "f4868" | "f1040v"),
+            "{}/{}: the sequence number is absent exactly on the rows whose extract prints none — \
+             the 1040 itself, Form 4868 (mailed separately: \"Don\u{2019}t attach a copy of Form 4868 \
+             to your return.\") and Form 1040-V (\"Do not staple or attach this voucher to your \
+             payment or return.\")",
             r.year,
             r.form
         );
@@ -334,7 +346,23 @@ fn every_committed_map_has_a_row_that_parses_and_all_four_kills_are_green() {
         .filter(|r| r.instr_pages.is_some())
         .map(|r| (r.year, r.form.as_str(), r.instr_pages.unwrap()))
         .collect();
-    assert_eq!(pages, vec![(2025, "f1040s1a", [101, 110])]);
+    // ★ R1 / spec I-3: a SET, not one pinned row. `f1040s1a` is a section of the `i1040gi` booklet;
+    //   the four 4868 / 1040-V rows name pages inside the FORM itself, which is its own instructions
+    //   document (the IRS publishes no i4868 / i1040v). Each range was measured from the committed
+    //   extract's form-feed page breaks: `f4868--<year>.txt` has 4 form feeds and prints instruction
+    //   text on all four pages (page 1 above the DETACH HERE rule, pages 2–4 in full);
+    //   `f1040v--<year>.txt` has 2 and prints instruction text on both (page 1's upper half carries
+    //   "How To Fill in Form 1040-V", page 2 the payment methods and mailing addresses).
+    assert_eq!(
+        pages,
+        vec![
+            (2024, "f1040v", [1, 2]),
+            (2024, "f4868", [1, 4]),
+            (2025, "f1040s1a", [101, 110]),
+            (2025, "f1040v", [1, 2]),
+            (2025, "f4868", [1, 4]),
+        ]
+    );
 }
 
 /// ★ The consumer-side kill: the packet's stapling order (`packet.rs`) must agree with the form's
@@ -533,6 +561,45 @@ fn a_planted_wrong_sequence_number_is_reported() {
         }),
         "{problems:?}"
     );
+}
+
+/// ★★ **B1 — kill 4 observed red on a row whose form prints NO sequence number.** This is the kill
+/// that had to exist before `map_rows.rs:298` could be widened from *"absent iff form == f1040"* to
+/// *"absent exactly on the rows whose extract prints none"* (R1 / spec I-3): the widened shape check
+/// is a hand-list of three, and what actually holds the value is this comparison against the archived
+/// extract. Planting a sequence number on the 4868 — which prints none, because it is mailed
+/// separately rather than attached — must be reported as a mismatch.
+#[test]
+fn a_planted_sequence_number_on_a_form_that_prints_none_is_reported() {
+    let ws = workspace_root();
+    let dir = plant(2025, "f4868", |t| {
+        t.replace(
+            "line_set        = \"f4868/2025\"",
+            "line_set        = \"f4868/2025\"\nattachment_sequence = \"99\"",
+        )
+    });
+    let (_, problems) = check_rows(
+        dir.path(),
+        &manifest_authority_hashes(&ws),
+        &ws.join("design/forms/extract"),
+    );
+    assert!(
+        problems.contains(&RowProblem::SequenceMismatch {
+            year: 2025,
+            stem: "f4868".into(),
+            row: Some("99".into()),
+            printed: None,
+        }),
+        "{problems:?}"
+    );
+    // …and the same row unplanted is clean, or the plant proves nothing.
+    let clean = plant(2025, "f4868", |t| t);
+    let (_, problems) = check_rows(
+        clean.path(),
+        &manifest_authority_hashes(&ws),
+        &ws.join("design/forms/extract"),
+    );
+    assert!(problems.is_empty(), "{problems:?}");
 }
 
 /// The printed-sequence reader on the two layouts the extracts use (inline, and split across the

@@ -1,0 +1,93 @@
+# Form 1040-V (Payment Voucher for Individuals), tax year 2024 — logical cell → fully-qualified PDF
+# field name.
+#
+# Written 2026-09-06 for spec SPEC_form_4868_1040v.md (FR-49 / strategy review S8), task T1.
+#
+#   bundled PDF   crates/btctax-forms/forms/2024/f1040v.pdf
+#                 sha256:84fcdaf1f8bf95aa3dfcfa2dad8e91ff55da1aa586bd7bb539c34c1961b255ee, 97292 bytes
+#                 — a byte-for-byte copy of design/forms/2024/f1040v--2024.pdf, whose `.pdf.txt` note
+#                 records the same hash against https://www.irs.gov/pub/irs-prior/f1040v--2024.pdf
+#   inventory     `cargo run -p xtask -- dump-fields design/forms/2024/f1040v--2024.pdf` → 15 AcroForm
+#                 fields, all text, all on page 1. There is no f1_4: the fields run f1_1…f1_3 then
+#                 f1_5…f1_16. Diffed with the same command against the other bundled year: the 15
+#                 field names AND widget rects are IDENTICAL across TY2024 and TY2025.
+#   printed text  design/forms/extract/f1040v--2024.txt (`pdftotext -layout`), the voucher block below
+#                 the "Separate here" rule — every comment below is transcribed from THAT text layer,
+#                 with its typographic apostrophes and quotation marks kept.
+#   instr_pages   MEASURED from the extract's form-feed page breaks: 2 form feeds ⇒ 2 pages, and
+#                 instruction text is printed on BOTH — page 1's upper half carries "What Is Form
+#                 1040-V?", "How To Fill in Form 1040-V" (the line-by-line block) and "How To Prepare
+#                 Your Payment"; page 2 carries the payment methods and the mailing-address table.
+#                 So the range is [1, 2]. `instructions = "f1040v"` because the voucher IS its own
+#                 instructions document: the IRS publishes no i1040v.
+#
+# ★ NO `attachment_sequence` KEY. Form 1040-V prints no Attachment Sequence No. — grepping the
+#   committed extract for `Sequence No` yields 0 hits — and the voucher says why on its own face:
+#   "Do not staple or attach this voucher to your payment or return."
+#
+# ★★ EVERY CELL IS BOUND BY NAME, INCLUDING THE FOUR THE FORM NUMBERS (boxes 1–4). Measured, not
+#    stylistic: `xtask label-boxes f1040v--2024` REFUSES this form outright — "no numbered label
+#    column found" — because the voucher's "1", "2", "3", "4" are cell CAPTIONS printed ABOVE their
+#    fields, not line labels beside them. Measured with `pdftotext -bbox` against the dumped widget
+#    rects: the box-1 caption occupies PDF y 156.5–164.8 while its widget is y 132.0–144.0 (20.8pt
+#    top-to-top, 12.5pt of clear space), and the box-3 caption sits at x 327.3–331.2 while its widget
+#    starts at x 460.8 — 129.6pt to its RIGHT.
+#    Binding `line1`…`line4` would claim a label column the form does not print, and the row gate
+#    `every_mapped_line_lands_on_its_own_printed_label` could never witness it. The map is therefore
+#    declared in that walk's GRID_MAPS for this year with the same measured reason, so the blank is
+#    RECORDED rather than silent. The printed box number is carried in each comment below.
+form = "f1040v"
+year = 2024
+# ── design r2 §4 — the ROW of the year-package table. sha256 COMPUTED from the bundled PDF with
+#    sha256sum; instr_pages measured from the extract's page breaks. ──
+irs_stem        = "f1040v"
+versioning      = "annual"
+template_sha256 = "84fcdaf1f8bf95aa3dfcfa2dad8e91ff55da1aa586bd7bb539c34c1961b255ee"
+instructions    = "f1040v"
+instr_pages     = [1, 2]
+line_set        = "f1040v/2024"
+
+# ── The voucher's own boxes ──────────────────────────────────────────────────────────────────────
+# Box 1 — "Your social security number (SSN)"
+#         "(if a joint return, SSN shown first on your return)"   (/MaxLen 11 ⇒ hyphenated)
+box1_ssn          = "topmostSubform[0].Page1[0].f1_1[0]"
+# Box 2 — "If a joint return, SSN shown second"
+#         "on your return"   (/MaxLen 11); filled only for a joint return
+box2_spouse_ssn   = "topmostSubform[0].Page1[0].f1_2[0]"
+# Box 3 — "Amount you are paying by check or"
+#         "money order. Make your check or"
+#         "money order payable to “United States"
+#         "Treasury”"
+box3_amount       = "topmostSubform[0].Page1[0].f1_3[0]"
+# Box 4 — "Your first name and middle initial"
+box4_first_name   = "topmostSubform[0].Page1[0].f1_5[0]"
+# Box 4 — "Last name"
+box4_last_name    = "topmostSubform[0].Page1[0].f1_6[0]"
+# (the row under box 4) — "If a joint return, spouse’s first name and middle initial"
+spouse_first_name = "topmostSubform[0].Page1[0].f1_7[0]"
+# (the row under box 4) — "Last name" (the spouse's row)
+spouse_last_name  = "topmostSubform[0].Page1[0].f1_8[0]"
+# "Home address (number and street)"
+address_street    = "topmostSubform[0].Page1[0].f1_9[0]"
+# "Apt. no."
+address_apt       = "topmostSubform[0].Page1[0].f1_10[0]"
+# "City, town, or post office. If you have a foreign address, also complete spaces below."
+address_city      = "topmostSubform[0].Page1[0].f1_11[0]"
+# "State" (/MaxLen 2)
+address_state     = "topmostSubform[0].Page1[0].f1_12[0]"
+# "ZIP code" (/MaxLen 10)
+address_zip       = "topmostSubform[0].Page1[0].f1_13[0]"
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# ★★★ THE FIELD CENSUS (§G-13). Every AcroForm field must be accounted for EXACTLY ONCE: mapped
+# above (we fill it) or named here with the rule that says why we do not.
+#
+# 15 fields = 12 mapped + 3 censused. No field appears twice.
+#
+# rule = "unmodeled"  a situation outside btctax's scope. Nothing REFUSES a foreign address here; the
+#                     three cells are simply left blank, and that blank is correct — the TY2024 Form
+#                     1040 map records its own three foreign boxes the same way and in the same words.
+[census]
+"topmostSubform[0].Page1[0].f1_14[0]" = { line = "foreign country",  rule = "unmodeled", reason = "Foreign country name — btctax models a domestic filer address (street/city/state/ZIP are mapped above)." }
+"topmostSubform[0].Page1[0].f1_15[0]" = { line = "foreign province", rule = "unmodeled", reason = "Foreign province/state/county — same." }
+"topmostSubform[0].Page1[0].f1_16[0]" = { line = "foreign postcode", rule = "unmodeled", reason = "Foreign postal code — same." }

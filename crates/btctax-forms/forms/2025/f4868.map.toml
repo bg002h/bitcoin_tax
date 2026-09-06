@@ -1,0 +1,94 @@
+# Form 4868 (Application for Automatic Extension of Time To File U.S. Individual Income Tax Return),
+# tax year 2025 — logical cell → fully-qualified PDF field name.
+#
+# Written 2026-09-06 for spec SPEC_form_4868_1040v.md (FR-49 / strategy review S8), task T1.
+# Everything below was MEASURED, never typed from memory:
+#
+#   bundled PDF   crates/btctax-forms/forms/2025/f4868.pdf
+#                 sha256:36c7607db08ff469ed4e5df89e27ca90f29023c7cd6ca77c69343045e8f33d29, 529415 bytes
+#                 — a byte-for-byte copy of design/forms/2025/f4868--2025.pdf, whose `.pdf.txt` note
+#                 records the same hash against https://www.irs.gov/pub/irs-prior/f4868--2025.pdf
+#   inventory     `cargo run -p xtask -- dump-fields design/forms/2025/f4868--2025.pdf` → 17 AcroForm
+#                 fields: 15 text and 2 button (c1_1, c1_2, both on-state /1). 16 on page 1, 1 on page 3.
+#   printed text  design/forms/extract/f4868--2025.txt (`pdftotext -layout`), lines 81–92 — every doc
+#                 comment below is transcribed from THAT text layer, with its typographic apostrophes
+#                 and quotation marks kept, never from the rendered page.
+#   instr_pages   MEASURED from the extract's form-feed page breaks: 4 form feeds ⇒ 4 pages, and
+#                 instruction text is printed on ALL FOUR — page 1 above the DETACH HERE rule
+#                 (`There are three ways to request an automatic extension...`, `Qualifying for the
+#                 Extension`) and pages 2–4 in full. So the range is [1, 4]. `instructions = "f4868"`
+#                 because the form IS its own instructions document: the IRS publishes no i4868.
+#
+# ★ NO `attachment_sequence` KEY. Form 4868 prints no Attachment Sequence No. — grepping the committed
+#   extract for `Sequence No` yields 0 hits, and the form's own page 2 says why: it is not attached to
+#   the return at all.
+#
+# ★★ THE BOX→LINE ASSIGNMENT, and the ONE deviation from the transcription rule's naming clause.
+#    Part II's lines 4–8 are bound `line4`…`line8`, in the form's own numbering, because the label
+#    reader witnesses exactly those labels beside exactly those boxes (`xtask label-boxes f4868--2025`:
+#    f1_11→4, f1_12→5, f1_13→6, f1_14→7, c1_1→8).
+#    Part I's cells are NUMBERED on the printed page (1 = name, 2 = your SSN, 3 = spouse's SSN) and are
+#    nevertheless bound BY NAME. The reason is measured, not stylistic: Part I's labels never form a
+#    candidate label column (`candidate_columns` needs at least 3 tokens in one 2pt x-bucket, and Part I
+#    prints `1`/`2` at one x with `3` alone at another), so the reader joins those boxes to Part II's
+#    labels — f1_4 reads "5", f1_9/f1_10 read "9". A `line1`…`line3` spelling would red the row gate
+#    `every_mapped_line_lands_on_its_own_printed_label` three times per year against a label the reader
+#    provably cannot see. The printed line number is carried in each comment instead; the assignment is
+#    pinned by the [census] below and by the spec review r1's 32/32 geometry audit. Recorded as a
+#    deviation in the spec (R1) and in Form4868Map's doc comment.
+form = "f4868"
+year = 2025
+# ── design r2 §4 — the ROW of the year-package table. sha256 COMPUTED from the bundled PDF with
+#    sha256sum; instr_pages measured from the extract's page breaks. ──
+irs_stem        = "f4868"
+versioning      = "annual"
+template_sha256 = "36c7607db08ff469ed4e5df89e27ca90f29023c7cd6ca77c69343045e8f33d29"
+instructions    = "f4868"
+instr_pages     = [1, 4]
+line_set        = "f4868/2025"
+
+# ── Part I — Identification (printed lines 1–3 plus the address block; bound BY NAME, see above) ──
+# L1 — "Your name(s) (see instructions)"
+name_line      = "topmostSubform[0].Page1[0].PartI_ReadOrder[0].f1_4[0]"
+# "Address (see instructions)"
+address_street = "topmostSubform[0].Page1[0].PartI_ReadOrder[0].f1_5[0]"
+# "City, town, or post office"
+address_city   = "topmostSubform[0].Page1[0].PartI_ReadOrder[0].f1_6[0]"
+# "State" (/MaxLen 2)
+address_state  = "topmostSubform[0].Page1[0].PartI_ReadOrder[0].f1_7[0]"
+# "ZIP code" (/MaxLen 10)
+address_zip    = "topmostSubform[0].Page1[0].PartI_ReadOrder[0].f1_8[0]"
+# L2 — "Your social security number" (/MaxLen 11 ⇒ hyphenated, per cells::push_identity)
+taxpayer_ssn   = "topmostSubform[0].Page1[0].PartI_ReadOrder[0].f1_9[0]"
+# L3 — "Spouse’s social security number" (/MaxLen 11); filled only for a joint return
+spouse_ssn     = "topmostSubform[0].Page1[0].PartI_ReadOrder[0].f1_10[0]"
+
+# ── Part II — Individual Income Tax (lines 4–8; the reader witnesses every one of these labels) ──
+# L4 — "Estimate of total tax liability for 2025 .   .   .       $"
+line4 = "topmostSubform[0].Page1[0].f1_11[0]"
+# L5 — "Total 2025 payments . . . . ."
+line5 = "topmostSubform[0].Page1[0].f1_12[0]"
+# L6 — "Balance due. Subtract line 5 from line 4."
+#      "See instructions . . . . . . . . ."
+line6 = "topmostSubform[0].Page1[0].f1_13[0]"
+# L7 — "Amount you’re paying (see instructions) . ."
+line7 = "topmostSubform[0].Page1[0].f1_14[0]"
+# L8 — "Check here if you’re “out of the country” and a U.S. citizen or"
+#      "resident. See instructions . . . . . . . . . . . ."
+#      A CHECKBOX. The on-state is dumped from the PDF, not assumed: `on=["1"]`.
+line8 = { field = "topmostSubform[0].Page1[0].c1_1[0]", on = "1" }
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# ★★★ THE FIELD CENSUS (§G-13). Every AcroForm field must be accounted for EXACTLY ONCE: mapped
+# above (we fill it) or named here with the rule that says why we do not.
+#
+# 17 fields = 12 mapped + 5 censused. No field appears twice.
+#
+# rule = "unmodeled"  a situation outside btctax's scope. Using btctax FORGOES it, so the reason must
+#                     name what is given up.
+[census]
+"topmostSubform[0].Page1[0].VoucherHeader[0].f1_1[0]" = { line = "header", rule = "unmodeled", reason = "Fiscal-year header — the form prints “For calendar year 2025, or other tax year beginning”, and this cell takes the fiscal year’s start month/day. btctax is calendar-year only (every YearRecord is a calendar year), so the calendar-year default the form already prints stands and the cell is left blank." }
+"topmostSubform[0].Page1[0].VoucherHeader[0].f1_2[0]" = { line = "header", rule = "unmodeled", reason = "Fiscal-year header, the ending month/day of “, 2025, and ending”. Dead with the start cell blank — btctax is calendar-year only." }
+"topmostSubform[0].Page1[0].VoucherHeader[0].f1_3[0]" = { line = "header", rule = "unmodeled", reason = "Fiscal-year header, the 2-digit ending year of “, 20”. Dead with the start cell blank — btctax is calendar-year only." }
+"topmostSubform[0].Page1[0].c1_2[0]" = { line = "9", rule = "unmodeled", reason = "“Check here if you file Form 1040-NR and didn’t receive wages as an employee subject to U.S. income tax withholding” — btctax produces no Form 1040-NR (it emits Form 1040 only), so this box is never checked. Checking it would assert a return this build cannot file." }
+"topmostSubform[0].Page3[0].Col4[0].f3_1[0]" = { line = "page 3 confirmation", rule = "unmodeled", reason = "“Enter confirmation number here:” on the instruction page — the confirmation an electronic payment returns. It is the filer’s own private record, is not part of what is mailed to the IRS, and btctax makes no electronic payment (out of scope, spec §Out of scope), so nothing can populate it." }

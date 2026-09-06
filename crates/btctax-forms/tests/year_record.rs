@@ -42,8 +42,9 @@ fn every_bundled_year_has_a_record_that_partitions_the_closed_set_and_matches_th
         //   directory that lost a file would pass both. These counts do not come from the glob.
         let expected_count = match year {
             2017 => 5,
-            2024 => 17,
-            2025 => 15,
+            // 2026-09-06: 17 → 19 and 15 → 17 — Form 4868 and Form 1040-V (spec 4868/1040-V T1).
+            2024 => 19,
+            2025 => 17,
             2026 => 0, // preparing: the record exists, no TY2026 revision is released (spec 1099-DA T0)
             other => panic!("TY{other}: record the expected form count here — a new year does not arrive silently"),
         };

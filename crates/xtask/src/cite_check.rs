@@ -795,8 +795,9 @@ pub fn irs_basename(stem: &str) -> Result<&str, String> {
 /// form and reds the ratchet until each is archived or consciously excused.
 ///
 /// ★ Measured 2026-09-05, and the reason this is a function and not a `const`: the hand-written
-/// `EMITTED_FORMS` it replaces listed **16** form basenames. The real surface is **18 stems / 37
-/// (form, year) pairs**. The hand-list omitted `f1040s1` and `f8995a` outright — both of which
+/// `EMITTED_FORMS` it replaces listed **16** form basenames. The real surface was **18 stems / 37
+/// (form, year) pairs** then, and is **20 stems / 41** since the Form 4868 and Form 1040-V rows
+/// landed (2026-09-06). The hand-list omitted `f1040s1` and `f8995a` outright — both of which
 /// `btctax-forms/src/packet.rs` pushes into the filed packet — so the ratchet passed on those two
 /// forms by finding nothing to check.
 pub fn emitted_form_years() -> Result<BTreeSet<FormYear>, String> {
@@ -890,6 +891,15 @@ pub const AUTHORITY_NOT_YET_ARCHIVED: &[(&str, &[i32])] = &[
     ("f1040sc", &[2024, 2025]),
     ("f1040sd", &[2017, 2024, 2025]),
     ("f1040sse", &[2017, 2024, 2025]),
+    // ★ 2026-09-06, spec 4868/1040-V T1. Both revisions of each ARE archived under design/forms/ —
+    //   note, MANIFEST entry, `-layout` extract and geometry fixture — which is what the map rows'
+    //   `template_sha256` joins and what the label walk reads. What is NOT yet on disk is the pair
+    //   of `crates/btctax-core/src/tax/fixtures/<stem>_{form,instructions}.txt` cite-check fixtures
+    //   this ratchet counts as coverage, so they are excused here exactly like every other bundled
+    //   form-year but `f1040s1a/2025`. `instructions` is the form ITSELF for both (the IRS publishes
+    //   no i4868 / i1040v), so closing these is a `FORMS` row plus an extract, not an archive hunt.
+    ("f1040v", &[2024, 2025]),
+    ("f4868", &[2024, 2025]),
     ("f6251", &[2024, 2025]),
     ("f8275", &[2024]),
     ("f8283", &[2017, 2024, 2025]),
@@ -1137,7 +1147,8 @@ mod tests {
     }
 
     /// ★★ **R16 — the hand-list omitted forms btctax really prints.** `EMITTED_FORMS` listed 16 form
-    /// basenames; the emitting surface is 18 stems / 37 `(form, year)` pairs. `f8995a` and `f1040s1`
+    /// basenames; the emitting surface is 20 stems / 41 `(form, year)` pairs (18 / 37 when this was
+    /// written; the Form 4868 and Form 1040-V rows landed 2026-09-06). `f8995a` and `f1040s1`
     /// were both absent, and `packet.rs` pushes both into the filed packet — so the ratchet passed on
     /// them by finding nothing, and no instrument checked either transcription.
     ///
@@ -1338,8 +1349,9 @@ mod map_row_tests {
         );
         assert_eq!(
             from_rows.len(),
-            37,
-            "37 rows on disk today; a new year adds files, not a list"
+            41,
+            "41 rows on disk today (37 → 41 on 2026-09-06: the four Form 4868 / Form 1040-V rows, \
+             spec 4868/1040-V T1); a new year adds files, not a list"
         );
     }
 

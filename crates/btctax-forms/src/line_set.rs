@@ -23,7 +23,7 @@
 //! Many-to-one by design: several revisions may parse into one struct (`Form1040Map` absorbs
 //! 2017/2024/2025 with `Option` lines today).
 
-/// The closed set of line-set revisions this build knows. Generated 2026-09-05 from the 37 rows.
+/// The closed set of line-set revisions this build knows. Generated 2026-09-05 from the 37 rows; the four `f4868`/`f1040v` revisions added 2026-09-06 (spec 4868/1040-V R1) make 41.
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum LineSet {
@@ -51,6 +51,10 @@ pub enum LineSet {
     F1040sb_2024,
     /// `"f1040sc/2024"`.
     F1040sc_2024,
+    /// `"f1040v/2024"`.
+    F1040v_2024,
+    /// `"f4868/2024"`.
+    F4868_2024,
     /// `"f6251/2024"`.
     F6251_2024,
     /// `"f8275/2024"`.
@@ -85,6 +89,10 @@ pub enum LineSet {
     F1040sb_2025,
     /// `"f1040sc/2025"` — wired at step 5 (2026-09-05): map ⊆ PDF fields, the label join and `[census]` all green; parses into the 2024 struct (a constants-only revision of the same line set).
     F1040sc_2025,
+    /// `"f1040v/2025"`.
+    F1040v_2025,
+    /// `"f4868/2025"`.
+    F4868_2025,
     /// `"f6251/2025"` — UNWIRED: not yet verified against a struct (design r2 §10 step 5).
     F6251_2025,
     /// `"f8283/2025"`.
@@ -119,6 +127,8 @@ impl LineSet {
             "f1040sa/2024" => Some(LineSet::F1040sa_2024),
             "f1040sb/2024" => Some(LineSet::F1040sb_2024),
             "f1040sc/2024" => Some(LineSet::F1040sc_2024),
+            "f1040v/2024" => Some(LineSet::F1040v_2024),
+            "f4868/2024" => Some(LineSet::F4868_2024),
             "f6251/2024" => Some(LineSet::F6251_2024),
             "f8275/2024" => Some(LineSet::F8275_2024),
             "f8283/2024" => Some(LineSet::F8283_2024),
@@ -136,6 +146,8 @@ impl LineSet {
             "f1040sa/2025" => Some(LineSet::F1040sa_2025),
             "f1040sb/2025" => Some(LineSet::F1040sb_2025),
             "f1040sc/2025" => Some(LineSet::F1040sc_2025),
+            "f1040v/2025" => Some(LineSet::F1040v_2025),
+            "f4868/2025" => Some(LineSet::F4868_2025),
             "f6251/2025" => Some(LineSet::F6251_2025),
             "f8283/2025" => Some(LineSet::F8283_2025),
             "f8949/2025" => Some(LineSet::F8949_2025),
@@ -163,6 +175,8 @@ impl LineSet {
             LineSet::F1040sa_2024 => "f1040sa/2024",
             LineSet::F1040sb_2024 => "f1040sb/2024",
             LineSet::F1040sc_2024 => "f1040sc/2024",
+            LineSet::F1040v_2024 => "f1040v/2024",
+            LineSet::F4868_2024 => "f4868/2024",
             LineSet::F6251_2024 => "f6251/2024",
             LineSet::F8275_2024 => "f8275/2024",
             LineSet::F8283_2024 => "f8283/2024",
@@ -180,6 +194,8 @@ impl LineSet {
             LineSet::F1040sa_2025 => "f1040sa/2025",
             LineSet::F1040sb_2025 => "f1040sb/2025",
             LineSet::F1040sc_2025 => "f1040sc/2025",
+            LineSet::F1040v_2025 => "f1040v/2025",
+            LineSet::F4868_2025 => "f4868/2025",
             LineSet::F6251_2025 => "f6251/2025",
             LineSet::F8283_2025 => "f8283/2025",
             LineSet::F8949_2025 => "f8949/2025",
@@ -205,6 +221,8 @@ impl LineSet {
         LineSet::F1040sa_2024,
         LineSet::F1040sb_2024,
         LineSet::F1040sc_2024,
+        LineSet::F1040v_2024,
+        LineSet::F4868_2024,
         LineSet::F6251_2024,
         LineSet::F8275_2024,
         LineSet::F8283_2024,
@@ -222,6 +240,8 @@ impl LineSet {
         LineSet::F1040sa_2025,
         LineSet::F1040sb_2025,
         LineSet::F1040sc_2025,
+        LineSet::F1040v_2025,
+        LineSet::F4868_2025,
         LineSet::F6251_2025,
         LineSet::F8283_2025,
         LineSet::F8949_2025,
@@ -238,6 +258,10 @@ impl LineSet {
 pub enum Schema {
     /// Parses into [`crate::map::Form1040Map`].
     Form1040Map,
+    /// Parses into [`crate::map::Form1040VMap`].
+    Form1040VMap,
+    /// Parses into [`crate::map::Form4868Map`].
+    Form4868Map,
     /// Parses into [`crate::map::Form6251Map`].
     Form6251Map,
     /// Parses into [`crate::map::Form8275Map`].
@@ -291,6 +315,8 @@ pub fn schema(ls: LineSet) -> Schema {
         LineSet::F1040sa_2024 => Schema::ScheduleAMap,
         LineSet::F1040sb_2024 => Schema::ScheduleBMap,
         LineSet::F1040sc_2024 => Schema::ScheduleCMap,
+        LineSet::F1040v_2024 => Schema::Form1040VMap,
+        LineSet::F4868_2024 => Schema::Form4868Map,
         LineSet::F6251_2024 => Schema::Form6251Map,
         LineSet::F8275_2024 => Schema::Form8275Map,
         LineSet::F8283_2024 => Schema::Form8283Map,
@@ -308,6 +334,8 @@ pub fn schema(ls: LineSet) -> Schema {
         LineSet::F1040sa_2025 => Schema::ScheduleAMap,
         LineSet::F1040sb_2025 => Schema::ScheduleBMap,
         LineSet::F1040sc_2025 => Schema::ScheduleCMap,
+        LineSet::F1040v_2025 => Schema::Form1040VMap,
+        LineSet::F4868_2025 => Schema::Form4868Map,
         LineSet::F6251_2025 => Schema::Unwired,
         LineSet::F8283_2025 => Schema::Form8283Map,
         LineSet::F8949_2025 => Schema::Form8949Map,
@@ -329,7 +357,8 @@ mod tests {
             assert_eq!(LineSet::parse(ls.as_str()), Some(*ls));
         }
         assert_eq!(LineSet::parse("f6251/1999"), None);
-        assert_eq!(LineSet::ALL.len(), 37);
+        // 37 → 41 on 2026-09-06: the four Form 4868 / Form 1040-V revisions (spec 4868/1040-V R1).
+        assert_eq!(LineSet::ALL.len(), 41);
     }
 
     /// The Unwired set is EXACTLY the two that step 5 could not wire — a shrink-only pin: wiring

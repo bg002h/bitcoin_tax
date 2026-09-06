@@ -202,3 +202,109 @@ fn a_year_with_no_bundled_6251_map_refuses_instead_of_reusing_another_years_geom
         );
     }
 }
+
+/// ★★ **The TYPED fieldset guard for the two rows spec 4868/1040-V T1 landed** — sp2/sp3 style, but
+/// per YEAR and against THAT year's own bundled asset.
+///
+/// [`every_committed_map_field_exists_in_its_own_pdf`] above already walks these maps as TEXT. This
+/// one asks the different question: does the *struct* the filler will read — `Form4868Map` /
+/// `Form1040VMap`, whose `field_names()` is what a fill enumerates — name only fields the bundled PDF
+/// actually has? A binding the struct forgot to model would pass the text walk and be invisible here
+/// by absence, which is why `field_names()` is length-checked too: 12 of the 4868's 17 boxes and 12
+/// of the 1040-V's 15 are bound, the rest are `[census]` entries.
+#[test]
+fn the_4868_and_1040v_maps_name_only_fields_their_own_bundled_pdf_carries() {
+    use btctax_forms::testonly::{Form1040VMap, Form4868Map};
+    let present = |bytes: &[u8]| -> BTreeSet<String> {
+        collect_fields(&load(bytes).unwrap())
+            .unwrap()
+            .into_iter()
+            .map(|f| f.fqn)
+            .collect()
+    };
+    let mut checked = 0usize;
+    for year in [2024, 2025] {
+        let m = Form4868Map::for_year(year).unwrap_or_else(|e| panic!("TY{year} f4868 map: {e}"));
+        assert_eq!(m.year, year);
+        let set = present(Form4868Map::bundled_pdf(year).unwrap());
+        assert_eq!(set.len(), 17, "TY{year} Form 4868 has 17 AcroForm fields");
+        let names = m.field_names();
+        assert_eq!(names.len(), 12, "TY{year} f4868 binds 12 of the 17 boxes");
+        for n in &names {
+            assert!(
+                set.contains(*n),
+                "TY{year} f4868: {n} is not a field of its own PDF"
+            );
+            checked += 1;
+        }
+
+        let v = Form1040VMap::for_year(year).unwrap_or_else(|e| panic!("TY{year} f1040v map: {e}"));
+        assert_eq!(v.year, year);
+        let set = present(Form1040VMap::bundled_pdf(year).unwrap());
+        assert_eq!(set.len(), 15, "TY{year} Form 1040-V has 15 AcroForm fields");
+        let names = v.field_names();
+        assert_eq!(names.len(), 12, "TY{year} f1040v binds 12 of the 15 boxes");
+        for n in &names {
+            assert!(
+                set.contains(*n),
+                "TY{year} f1040v: {n} is not a field of its own PDF"
+            );
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 48, "2 forms x 2 years x 12 bindings");
+}
+
+/// ★★★ B1 for the guard above — and the plant turned out to be REAL, not hypothetical.
+///
+/// The same comparison pointed at the OTHER form's bundled PDF must report the mismatch. It does,
+/// but only for **8 of the 4868's 12 bindings**: `f1_11`…`f1_14` — Form 4868's lines 4, 5, 6 and 7,
+/// the money — are spelled `topmostSubform[0].Page1[0].f1_NN[0]` on BOTH forms, so those four names
+/// exist in the Form 1040-V AcroForm too. Only the seven `PartI_ReadOrder`-prefixed cells and the
+/// `c1_1` checkbox are absent. **A fieldset/existence check is therefore necessary and NOT
+/// sufficient** for these two rows — a 4868 map applied to the voucher would write the balance due
+/// into the voucher's name and address boxes with every field name resolving — which is exactly why
+/// the line→label join (`xtask`'s `every_mapped_line_lands_on_its_own_printed_label`) witnesses the
+/// 4868's five numbered lines against the geometry fixture of its own PDF. The counts below are
+/// measured and pinned in both directions, so a future revision that renames its way into or out of
+/// the collision is loud.
+#[test]
+fn the_4868_1040v_fieldset_guard_reds_when_the_pdf_is_the_other_form() {
+    use btctax_forms::testonly::{Form1040VMap, Form4868Map};
+    let present = |bytes: &[u8]| -> BTreeSet<String> {
+        collect_fields(&load(bytes).unwrap())
+            .unwrap()
+            .into_iter()
+            .map(|f| f.fqn)
+            .collect()
+    };
+    let voucher = present(Form1040VMap::bundled_pdf(2025).unwrap());
+    let ext_map = Form4868Map::ty2025();
+    let absent: Vec<&str> = ext_map
+        .field_names()
+        .into_iter()
+        .filter(|n| !voucher.contains(*n))
+        .collect();
+    assert_eq!(
+        absent.len(),
+        8,
+        "measured 2026-09-06: 8 of the 4868's 12 bindings are absent from the 1040-V's AcroForm \
+         (the seven PartI_ReadOrder cells and c1_1); the four that are NOT absent are f1_11..f1_14, \
+         the 4868's lines 4-7, whose unprefixed names the voucher also carries. Found {absent:?}"
+    );
+
+    let extension = present(Form4868Map::bundled_pdf(2025).unwrap());
+    let v_map = Form1040VMap::ty2025();
+    let absent: Vec<&str> = v_map
+        .field_names()
+        .into_iter()
+        .filter(|n| !extension.contains(*n))
+        .collect();
+    assert_eq!(
+        absent.len(),
+        9,
+        "measured 2026-09-06: 9 of the voucher's 12 bindings are absent from Form 4868's AcroForm; \
+         the three that are not are f1_11/f1_12/f1_13 — the same collision seen from the other \
+         side. Found {absent:?}"
+    );
+}
