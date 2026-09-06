@@ -1020,11 +1020,11 @@ mod tests {
 /// at x≈489 beside the `2a`/`2b` row; Form 6251's `1a` at x≈395 before its box). A union over
 /// resolved label COLUMNS was tried first and admitted prose numbers ("Form 1040, line 14") that
 /// happen to align into a column — a raw word with a small gap to the box is the right candidate.
-pub fn inline_label_words(g: &Geometry) -> Vec<(String, u32, f64, f64)> {
+pub fn inline_label_words(g: &Geometry) -> Vec<(String, u32, f64, f64, f64)> {
     g.words
         .iter()
         .filter(|w| is_numeric_label(&w.text))
-        .map(|w| (w.text.clone(), w.page, w.y, w.x2))
+        .map(|w| (w.text.clone(), w.page, w.y, w.y2, w.x2))
         .collect()
 }
 
@@ -1041,9 +1041,9 @@ pub fn witness_boxes_x(g: &Geometry) -> Vec<(u32, f64, f64, f64, String)> {
 
 /// The line→box join: for every AcroForm box, the printed line label that governs it.
 ///
-/// ★ x-AWARE (2026-09-06): within the box's own row (label centre inside the box's vertical span,
-/// ±2pt), the label nearest to the LEFT of the box wins, across every label column — so the 1040's
-/// `2b` cell joins to "2b" and its `2a` cell to "2a". Only when no label shares the row does the
+/// ★ x-AWARE (2026-09-06): within the box's own row (the label's FULL vertical extent inside the
+/// box's span, 2pt of slack on the top edge only), the label nearest to the LEFT of the box wins,
+/// across every label column — so the 1040's `2b` cell joins to "2b" and its `2a` cell to "2a". Only when no label shares the row does the
 /// older rule apply: the lowest label at or above the box centre in the primary column (a multi-line
 /// item whose number prints on the first line, the box on a later one).
 pub fn label_join(stem: &str) -> Result<std::collections::BTreeMap<String, String>, String> {
@@ -1054,22 +1054,31 @@ pub fn label_join(stem: &str) -> Result<std::collections::BTreeMap<String, Strin
     let mut out = std::collections::BTreeMap::new();
     for (bp, top, bottom, left, name) in &boxes {
         let centre = (top + bottom) / 2.0;
-        // "In the row" = the label's own vertical extent lies inside the box's span (labels are
-        // ~9.6pt tall; rows are ~12pt apart, so the NEXT row's label top sits just below the box
-        // bottom and must NOT qualify — a ±2pt band on the label's top edge admitted it and produced
-        // a uniform off-by-one on first measurement) — AND the label ends within 12pt of the box's
-        // left edge: an inline label is printed right before its box; a prose number is not.
+        // "In the row" = the label's own vertical extent lies inside the box's span — its top at or
+        // just above the box top (2pt slack) AND its REAL bottom edge (`Word::y2`) at or above the
+        // box bottom. ★ Measured, not assumed (fold review L1, 4,216 label words / 49 fixtures):
+        // label heights are p50 10.49pt, max 11.93pt; a CHECKBOX is 8.0pt tall, so its option
+        // numeral ("1 ☐8814 2 ☐4972" on the 1040's line 16) can never fit inside it. The first cut
+        // used `ly + 4.0 <= bottom` as a proxy for the bottom edge and admitted exactly those
+        // numerals — 20 mislabelled checkboxes, and a planted `line1a` → line-16 checkbox binding
+        // went FAIL → PASS. Rows are ~12pt apart, so the next row's label still does not qualify.
+        //   AND the label ends within 12pt of the box's left edge: an inline label is printed right
+        // before its box; a prose number is not. ★ The 12pt is CALIBRATED to this corpus, not derived
+        // (L8): over 1,425 in-row firings the largest accepted gap is 11.30pt and the nearest
+        // rejected candidate anywhere is 12.30pt — a 1.0pt window. Falling off it degrades to the
+        // column rule silently; if a new layout crosses it, the per-map join counts below are what
+        // will say so.
         let in_row = inline
             .iter()
-            .filter(|(_, lp, ly, lx2)| {
+            .filter(|(_, lp, ly, ly2, lx2)| {
                 lp == bp
                     && *ly >= top - 2.0
-                    && *ly + 4.0 <= *bottom
+                    && *ly2 <= *bottom
                     && *lx2 <= left + 1.0
                     && left - *lx2 <= 12.0
             })
-            .max_by(|(_, _, _, a), (_, _, _, b)| a.total_cmp(b))
-            .map(|(l, _, _, _)| l.as_str());
+            .max_by(|(_, _, _, _, a), (_, _, _, _, b)| a.total_cmp(b))
+            .map(|(l, _, _, _, _)| l.as_str());
         let label = in_row.unwrap_or_else(|| {
             primary
                 .iter()
@@ -1093,11 +1102,61 @@ mod map_label_join_tests {
         crate::form_geometry::repo_root().join("crates/btctax-forms/forms")
     }
 
-    /// `lineN = "<FQN>"` bindings from a committed map. Only the plain per-line ones — repeating
-    /// grids address rows positionally and carry no single printed label.
-    fn line_bindings(path: &std::path::Path) -> BTreeMap<String, String> {
+    /// How many NUMBERED `lineN…` keys a map's text holds, counted on the raw text with no parsing
+    /// of the right-hand side — so a parser that drops a binding cannot also hide the key it dropped
+    /// (fold review L2: the R2 parser produced EMPTY maps, and an emptiness guard is silent on empty).
+    fn numbered_line_keys(text: &str) -> usize {
+        text.lines()
+            .map(str::trim)
+            .filter(|l| !l.starts_with('#'))
+            .filter_map(|l| l.split_once('=').map(|(k, _)| k.trim()))
+            .filter(|k| {
+                k.strip_prefix("line")
+                    .is_some_and(|rest| rest.chars().next().is_some_and(|c| c.is_ascii_digit()))
+            })
+            .count()
+    }
+
+    /// Maps that hold NO numbered line key BY DESIGN — repeating grids whose rows are addressed
+    /// positionally and carry no single printed label: Form 8949's transaction rows, Form 8283's
+    /// property rows, Form 8275's disclosure-item rows (measured 2026-09-06: 0 numbered keys each). A map here with a numbered key,
+    /// or a map NOT here without one, is a red: the two blanks must never look alike (L5).
+    const GRID_MAPS: &[&str] = &["f8949", "f8283", "f8275"];
+
+    /// The one predicate behind the per-map reach line — pure, so it can be planted red without
+    /// touching the tree. `keys` is [`numbered_line_keys`] (raw text), `extracted` what
+    /// [`line_bindings`] parsed, `joined` how many of those landed on a geometry box.
+    fn map_reach_problem(
+        form: &str,
+        keys: usize,
+        extracted: usize,
+        joined: usize,
+    ) -> Option<String> {
+        let grid = GRID_MAPS.contains(&form);
+        match (grid, keys, extracted, joined) {
+            (true, 0, _, _) => None,
+            (true, k, _, _) => Some(format!(
+                "{form}: listed in GRID_MAPS but holds {k} numbered line key(s) — remove it from the list or the keys"
+            )),
+            (false, 0, _, _) => Some(format!(
+                "{form}: NO numbered line key — a grid map must be named in GRID_MAPS; anything else must bind its lines"
+            )),
+            (false, k, 0, _) => Some(format!(
+                "{form}: {k} numbered line key(s), 0 extracted — the parser dropped every binding (the R2 shape)"
+            )),
+            (false, _, e, 0) => Some(format!("{form}: {e} binding(s) extracted, 0 joined — the join never examined them")),
+            _ => None,
+        }
+    }
+
+    /// `lineN = "<FQN>"` bindings from a committed map, one entry per (line, FQN). A line bound as
+    /// an inline table (`line3 = { proceeds_d = "…", cost_e = "…", gain_h = "…" }` — Schedule D's
+    /// single named rows with several columns) yields one entry per column: each of those cells sits
+    /// beside the same printed label, and dropping them was a second silent drop (fold review L4,
+    /// 22 free joins). Named cells (`line_a_business`) still carry no label and are skipped.
+    fn line_bindings(path: &std::path::Path) -> Vec<(String, String)> {
         let text = std::fs::read_to_string(path).unwrap();
-        let mut out = BTreeMap::new();
+        let mut out = Vec::new();
         for l in text.lines() {
             let l = l.trim();
             if l.starts_with('#') {
@@ -1120,13 +1179,19 @@ mod map_label_join_tests {
                 //   SILENTLY here: TY2025's Schedule A contributed ZERO of its nineteen bindings to
                 //   the join while the year's floor stayed green (steps-4/5 review R2).
                 let rhs = rhs.trim();
-                let v = rhs
-                    .strip_prefix('"')
-                    .and_then(|s| s.split_once('"'))
-                    .map(|(v, _)| v);
-                if let Some(v) = v {
+                let quoted: Vec<&str> = if rhs.starts_with('{') {
+                    // every `"…"` value in the inline table, in order
+                    rhs.split('"').skip(1).step_by(2).collect()
+                } else {
+                    rhs.strip_prefix('"')
+                        .and_then(|s| s.split_once('"'))
+                        .map(|(v, _)| v)
+                        .into_iter()
+                        .collect()
+                };
+                for v in quoted {
                     if v.contains('[') && v.contains('.') {
-                        out.insert(line.to_string(), v.to_string());
+                        out.push((line.to_string(), v.to_string()));
                     }
                 }
             }
@@ -1328,16 +1393,18 @@ mod map_label_join_tests {
             year: "2024",
             // 99 → 235 on 2026-09-06: the binding parser dropped every `line = "…" # comment` (R2),
             // and the join gained the x-aware in-row rule. Measured, not estimated.
-            min_joins: 235,
+            min_joins: 249,
             max_unwitnessed: 1,
             why: "f8283 — design/forms/ holds i8283--2024 (the instructions) but not the form, so \
                   there is no PDF to extract geometry from.",
         },
         YearFloor {
             year: "2025",
-            // 82 → 193 on 2026-09-06 (same fix as 2024). Every TY2025 map contributes; the per-map
-            // zero-join check below is what would say otherwise.
-            min_joins: 193,
+            // 82 → 193 on 2026-09-06 (same fix as 2024); then 193 → the value below when Schedule
+            // D's inline-table rows joined (fold review L4). Thirteen of fifteen TY2025 maps
+            // contribute; `f8949` and `f8283` are positional grids with no numbered key, named in
+            // `GRID_MAPS` so that blank is recorded rather than silent (L5).
+            min_joins: 201,
             max_unwitnessed: 0,
             why: "every TY2025 form is archived with geometry; nothing is unreachable",
         },
@@ -1446,6 +1513,7 @@ mod map_label_join_tests {
                 }
             };
             let bindings = line_bindings(&m.path);
+            let keys = numbered_line_keys(&std::fs::read_to_string(&m.path).unwrap());
             let (mut map_joined, mut map_unboxed) = (0usize, 0usize);
             for (line, fqn) in &bindings {
                 let Some(got) = join.get(fqn) else {
@@ -1465,23 +1533,20 @@ mod map_label_join_tests {
                     ));
                 }
             }
-            // ★ Per-map reach, printed on every run: a map with bindings that contributes ZERO joins
-            //   is the shape R2 found — the aggregate floor cannot see it, this line can.
+            // ★ Per-map reach, printed on every run: a map whose bindings contribute ZERO joins, or
+            //   whose numbered KEYS the parser extracted none of, is the shape R2 found — the
+            //   aggregate floor cannot see it; `map_reach_problem` (planted red below) can.
             eprintln!(
-                "  {}/{}: {} numbered bindings, {} joined, {} not a geometry box",
+                "  {}/{}: {} numbered line key(s), {} binding(s) extracted, {} joined, {} not a geometry box",
                 m.year,
                 m.form,
+                keys,
                 bindings.len(),
                 map_joined,
                 map_unboxed
             );
-            if !bindings.is_empty() && map_joined == 0 {
-                per_map_zero.push(format!(
-                    "{}/{} ({} bindings, 0 joined)",
-                    m.year,
-                    m.form,
-                    bindings.len()
-                ));
+            if let Some(p) = map_reach_problem(&m.form, keys, bindings.len(), map_joined) {
+                per_map_zero.push(format!("{}/{p}", m.year));
             }
         }
 
@@ -1657,10 +1722,10 @@ mod map_label_join_tests {
         let m2024 = line_bindings(&forms_root().join("2024/f6251.map.toml"));
         let m2025 = line_bindings(&forms_root().join("2025/f6251.map.toml"));
 
-        let count_wrong = |m: &BTreeMap<String, String>| {
+        let count_wrong = |m: &[(String, String)]| {
             m.iter()
                 .filter(|(line, fqn)| {
-                    join.get(*fqn)
+                    join.get(fqn)
                         .is_some_and(|g| g != "?" && !label_matches(line, g))
                 })
                 .count()
@@ -1677,6 +1742,100 @@ mod map_label_join_tests {
             "the TY2024 map applied to the TY2025 form must be caught landing lines on the wrong \
              labels (measured: 12 of 41). If this is now 0, the join check has gone blind — and an \
              existence check passes on this exact input, with 0 of 61 field names absent."
+        );
+    }
+
+    /// ★ B1 — the plant `ROADMAP_STATUS.md` cites for the x-aware rule, COMMITTED: swap the 1040's
+    /// `2a`/`2b` FQNs and both must be caught. Under the column-only rule both cells read "2a" and
+    /// the swap was invisible on one of them.
+    #[test]
+    fn a_planted_2a_2b_swap_reds_both_boxes() {
+        let join = label_join("f1040--2024").expect("TY2024 Form 1040 geometry fixture");
+        let map = line_bindings(&forms_root().join("2024/f1040.map.toml"));
+        let fqn = |line: &str| {
+            map.iter()
+                .find(|(l, _)| l == line)
+                .map(|(_, f)| f.clone())
+                .unwrap_or_else(|| panic!("the TY2024 1040 map binds line {line}"))
+        };
+        let (a, b) = (fqn("2a"), fqn("2b"));
+        let count_wrong = |m: &[(String, String)]| {
+            m.iter()
+                .filter(|(line, fqn)| {
+                    join.get(fqn)
+                        .is_some_and(|g| g != "?" && !label_matches(line, g))
+                })
+                .count()
+        };
+        assert_eq!(
+            count_wrong(&map),
+            0,
+            "the committed map is right before the plant"
+        );
+        let swapped: Vec<(String, String)> = map
+            .iter()
+            .map(|(l, f)| match l.as_str() {
+                "2a" => (l.clone(), b.clone()),
+                "2b" => (l.clone(), a.clone()),
+                _ => (l.clone(), f.clone()),
+            })
+            .collect();
+        assert_eq!(
+            count_wrong(&swapped),
+            2,
+            "a 2a/2b swap must red BOTH boxes — the x-aware rule reads each cell's own label"
+        );
+    }
+
+    /// ★ B1 for fold review L1 — a checkbox's option numeral must NOT be read as its line label.
+    /// The 1040's page-2 line 16 prints "Check if any from Form(s): 1 ☐8814 2 ☐4972 3 ☐"; the
+    /// first cut's `ly + 4.0 <= bottom` proxy admitted the "1" and a planted `line1a` binding to that
+    /// 8pt checkbox went FAIL → PASS. With the word's real bottom edge required inside the box, the
+    /// numeral cannot fit and the box reads its row's line, "16".
+    #[test]
+    fn a_checkbox_option_numeral_is_not_its_line_label() {
+        let join = label_join("f1040--2024").expect("TY2024 Form 1040 geometry fixture");
+        let fqn = "topmostSubform[0].Page2[0].c2_1[0]";
+        let got = join
+            .get(fqn)
+            .unwrap_or_else(|| panic!("{fqn} is a box in the TY2024 1040 geometry fixture"));
+        assert_eq!(
+            got, "16",
+            "the line-16 checkbox reads its row's line, not its option numeral"
+        );
+        assert!(
+            !label_matches("1a", got),
+            "a planted `line1a` binding to the line-16 checkbox must FAIL"
+        );
+    }
+
+    /// The per-map reach predicate, planted on every shape it exists to catch (fold review L2:
+    /// the first cut's `!bindings.is_empty()` guard was silent on the exact map R2 found).
+    #[test]
+    fn map_reach_problem_reds_on_every_planted_shape() {
+        assert!(
+            map_reach_problem("f1040sa", 19, 0, 0).is_some(),
+            "keys but nothing extracted (R2)"
+        );
+        assert!(
+            map_reach_problem("f1040sa", 5, 5, 0).is_some(),
+            "extracted but nothing joined"
+        );
+        assert!(
+            map_reach_problem("f1040", 0, 0, 0).is_some(),
+            "no numbered key on a non-grid map"
+        );
+        assert!(
+            map_reach_problem("f8949", 1, 1, 1).is_some(),
+            "a grid map grew a numbered key"
+        );
+        assert!(
+            map_reach_problem("f8949", 0, 0, 0).is_none(),
+            "a grid map with no key is the recorded blank"
+        );
+        assert!(
+            map_reach_problem("f1040", 5, 5, 3).is_none(),
+            "a healthy map"
         );
     }
 }

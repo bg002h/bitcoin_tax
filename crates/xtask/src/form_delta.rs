@@ -418,6 +418,127 @@ pub fn run(old: &str, new: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    /// ★ B1 for the label-join fold review L3: `design/TY2026_WORK_LIST.md` is this tool's OUTPUT,
+    /// and it decayed silently when the reader behind the "lines that moved" column changed (four
+    /// cells, including the only claim that Form 6251 moves a line). Every numeric row of the
+    /// committed table is recomputed here at HEAD; every excused row ("Not listed") must be excused
+    /// for a REAL reason (no pair at HEAD); and every stem with a map in any bundled year must
+    /// appear in one table or the other — the doc's own "wrong denominator" warning, made a check.
+    #[test]
+    fn the_committed_work_list_matches_form_delta_at_head() {
+        let doc = std::fs::read_to_string(
+            crate::form_geometry::repo_root().join("design/TY2026_WORK_LIST.md"),
+        )
+        .unwrap();
+        let mut compared: Vec<String> = Vec::new();
+        let mut excused: Vec<String> = Vec::new();
+        let mut wrong: Vec<String> = Vec::new();
+        for l in doc.lines() {
+            let Some((form, cells)) = parse_work_list_row(l) else {
+                continue;
+            };
+            let pair = super::compute(&format!("{form}--2025"), &format!("{form}--2026-DRAFT"));
+            match (cells, pair) {
+                (Some(cells), Ok(d)) => {
+                    compared.push(form.clone());
+                    let got = (
+                        d.common.len(),
+                        d.added.len(),
+                        d.removed.len(),
+                        d.label_moved.len(),
+                    );
+                    if got != cells {
+                        wrong.push(format!(
+                            "{form}: table says {cells:?}, form-delta at HEAD says {got:?}"
+                        ));
+                    }
+                }
+                (Some(_), Err(e)) => {
+                    wrong.push(format!("{form}: a numeric row, but no pair at HEAD ({e})"))
+                }
+                (None, Err(_)) => excused.push(form.clone()),
+                (None, Ok(_)) => wrong.push(format!(
+                    "{form}: excused as having no pair, but form-delta computes one"
+                )),
+            }
+        }
+        let mut stems: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let forms = crate::form_geometry::repo_root().join("crates/btctax-forms/forms");
+        for year in std::fs::read_dir(&forms).unwrap().flatten() {
+            let Ok(maps) = std::fs::read_dir(year.path()) else {
+                continue;
+            };
+            for m in maps.flatten() {
+                let p = m.path();
+                if !p.to_string_lossy().ends_with(".map.toml") {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&p).unwrap();
+                if let Some(v) = text.lines().find_map(|l| l.trim().strip_prefix("irs_stem")) {
+                    stems.insert(
+                        v.trim()
+                            .trim_start_matches('=')
+                            .trim()
+                            .trim_matches('"')
+                            .to_string(),
+                    );
+                }
+            }
+        }
+        let listed: std::collections::BTreeSet<String> =
+            compared.iter().chain(&excused).cloned().collect();
+        let missing: Vec<&String> = stems.iter().filter(|s| !listed.contains(*s)).collect();
+        assert!(
+            stems.len() >= 18,
+            "expected every emitted stem's irs_stem across the bundled maps, found {stems:?}"
+        );
+        assert!(
+            missing.is_empty(),
+            "stems with a map in a bundled year but NO row in either work-list table: {missing:?}"
+        );
+        eprintln!(
+            "work list: {} compared, {} excused, {} stems on the emitting surface",
+            compared.len(),
+            excused.len(),
+            stems.len()
+        );
+        assert!(
+            wrong.is_empty(),
+            "work list rows that no longer match the tool:\n  {}",
+            wrong.join("\n  ")
+        );
+        // the plant: a cell off by one is a disagreement, so the comparison above can fail
+        let (f, c) = parse_work_list_row("| `f6251` | 62 | 0 | 0 | 1 | port |").unwrap();
+        let d = super::compute("f6251--2025", "f6251--2026-DRAFT").unwrap();
+        assert_eq!(f, "f6251");
+        assert_ne!(
+            Some((
+                d.common.len(),
+                d.added.len(),
+                d.removed.len(),
+                d.label_moved.len()
+            )),
+            c
+        );
+    }
+
+    /// A row of either work-list table: `| \`form\` | common | added | removed | moved | shape |`
+    /// → `(form, Some(cells))`; a "Not listed" row (`| \`form\` | emitted? | … |`) → `(form, None)`.
+    #[allow(clippy::type_complexity)]
+    fn parse_work_list_row(l: &str) -> Option<(String, Option<(usize, usize, usize, usize)>)> {
+        let cells: Vec<&str> = l.split('|').map(str::trim).collect();
+        if cells.len() < 6 || !cells[1].starts_with('`') {
+            return None;
+        }
+        let form = cells[1].trim_matches('`').to_string();
+        let n = |i: usize| cells.get(i).and_then(|c| c.parse::<usize>().ok());
+        let numeric = match (n(2), n(3), n(4), n(5)) {
+            (Some(a), Some(b), Some(c), Some(d)) => Some((a, b, c, d)),
+            _ => None,
+        };
+        Some((form, numeric))
+    }
+
     use super::*;
 
     /// ★★★ **Calibrated on the pair that motivated the whole tool.**

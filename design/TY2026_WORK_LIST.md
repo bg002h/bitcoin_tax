@@ -1,7 +1,12 @@
 # TY2026 port work list — computed, not estimated
 
-Generated 2026-09-05 by `xtask form-delta <2025-final> <2026-draft>`. **Regenerate when a final
-lands** — the handoff is a diff, not a rebuild from memory.
+Generated 2026-09-05 by `xtask form-delta <2025-final> <2026-draft>`; **regenerated 2026-09-06**
+after the x-aware label join changed the reader behind the "lines that moved" column (fold review
+L3: four cells were reader artifacts — f1040s2 27→23, f1040s3 3→2, f1040sa 5→2, **f6251 1→0**, so
+Form 6251 does NOT move a line for TY2026). **Regenerate when a final lands, OR when the label reader
+changes** — the handoff is a diff, not a rebuild from memory. `xtask`'s
+`the_committed_work_list_matches_form_delta_at_head` reds when a row here disagrees with the tool, when
+an excused row below actually HAS a pair, or when a stem with a map in any bundled year has no row in either table.
 
 ★ Drafts are EVIDENCE ONLY. Nothing here is transcribed; these are counts of what CHANGED.
 
@@ -19,16 +24,15 @@ lands** — the handoff is a diff, not a rebuild from memory.
 
 | form | common | added | removed | lines that moved | shape |
 |---|---|---|---|---|---|
-| `f1040` | 199 | 0 | 0 | 0 | unchanged |
 | `f1040s1a` | 10 | 175 | 44 | 1 | **REBUILT** |
-| `f1040s2` | 44 | 24 | 19 | 27 | port |
-| `f1040s3` | 35 | 3 | 2 | 3 | port |
-| `f1040sa` | 14 | 33 | 19 | 5 | port |
+| `f1040s2` | 44 | 24 | 19 | 23 | port |
+| `f1040s3` | 35 | 3 | 2 | 2 | port |
+| `f1040sa` | 14 | 33 | 19 | 2 | port |
 | `f1040sb` | 72 | 0 | 0 | 0 | unchanged |
 | `f1040sc` | 59 | 50 | 46 | 8 | port |
 | `f1040sd` | 55 | 0 | 0 | 0 | unchanged |
 | `f1040sse` | 25 | 2 | 2 | 0 | port |
-| `f6251` | 62 | 0 | 0 | 1 | port |
+| `f6251` | 62 | 0 | 0 | 0 | unchanged |
 | `f8949` | 202 | 0 | 0 | 0 | unchanged |
 | `f8959` | 26 | 0 | 0 | 0 | unchanged |
 | `f8960` | 38 | 0 | 0 | 0 | unchanged |
@@ -43,6 +47,7 @@ shape the cover-sheet correction was about, one level up. Until `forms port-stat
 
 | form | emitted? | prior side (`--2025` final) | TY2026 side | cell |
 |---|---|---|---|---|
+| `f1040` | **yes** — the return itself | `f1040--2025` | **NO DRAFT** — the file archived as `f1040--2026-DRAFT.pdf` was the TY2025 form (found 2026-09-05); its fixture is gone and the "199 common, unchanged" row it produced was a reader artifact (removed 2026-09-06 by the work-list test) | **NO DRAFT** |
 | `f1040s1` | **yes** — `packet.rs:104`, whenever Schedule 1 has content (crypto ordinary income lands there) | **NO PRIOR SIDE** — bundled for 2024 only; no `f1040s1--2025` authority archived | draft archived (`f1040s1--2026-DRAFT`) | **NO PRIOR SIDE** → archive `f1040s1--2025`, then diff |
 | `f8283` | yes — `packet.rs:223` | `f8283--2025` (Rev. 12-2025, periodic) | **NO DRAFT** — the draft URL served a 2025 document; archiver refused | **NO DRAFT** |
 | `f8275` | yes — `packet.rs:218` | `f8275--2024` (Rev. 10-2024, periodic; aliased by hash for 2025) | **NO DRAFT** — the draft URL served a 2024 document; archiver refused | **NO DRAFT** — periodic; a new revision would be a hash change, not a year |

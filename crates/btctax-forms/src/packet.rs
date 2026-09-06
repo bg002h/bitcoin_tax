@@ -49,7 +49,8 @@ pub struct NamedStatement {
 }
 
 /// The complete filed packet: PDFs plus any statements they oblige.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
+// ★ no `Default` either (fold review L7): `default()` + `pub` fields was a second way to an unsorted packet
 #[non_exhaustive] // ★ a literal `FiledPacket { .. }` is not constructible outside this crate — go through `stapled` (steps-4/5 review R8)
 pub struct FiledPacket {
     pub forms: Vec<NamedForm>,

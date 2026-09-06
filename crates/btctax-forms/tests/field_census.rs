@@ -617,7 +617,23 @@ fn every_emittable_form_is_reached_by_the_gate_or_named_absent() {
         // absent. (The "every year on disk is registered" kill now lives in `build.rs`, which refuses
         // a year directory without `YEAR.toml`.)
         if record.status == btctax_forms::year_record::YearStatus::Filable {
-            let allowed = |stem: &str| stem == "f1040s1a" || stem == "f8275" || stem == "f8283";
+            // ★ The rule is STRUCTURAL, consulted from the crate, not a stem list (fold review L6:
+            //   the first cut named three stems and ignored `year`, so Schedule 1-A was excusable on
+            //   every filable year — including TY2025+, where it exists).
+            let first_bundled_year = |stem: &str| {
+                years
+                    .iter()
+                    .copied()
+                    .filter(|y| stems_for(*y).iter().any(|s| s == stem))
+                    .min()
+            };
+            let allowed = |stem: &str| {
+                let periodic = Stem::ALL
+                    .iter()
+                    .find(|s| s.file_stem() == stem)
+                    .is_some_and(|s| btctax_forms::bundled::periodic_template(*s, *year).is_some());
+                periodic || first_bundled_year(stem).is_some_and(|fy| fy > *year)
+            };
             let unlawful: Vec<&&str> = measured.iter().filter(|s| !allowed(s)).collect();
             assert!(
                 unlawful.is_empty(),

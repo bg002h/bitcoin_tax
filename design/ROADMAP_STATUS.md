@@ -176,7 +176,8 @@ Added while working the phases, because a claim nobody executes is not a claim:
   rule; `YearReadiness`: filable ⇒ params + table + prices through 12-31; slice ⇒ table.
 - **The label reader**: every `line* = "…"` binding is parsed (trailing comments no longer drop it); an
   x-aware in-row join; per-map join counts printed every run with a zero-join map as a red; floors 235 (2024)
-  / 193 (2025). A planted 2a/2b swap reds both boxes.
+  / 193 (2025). Kills: `a_planted_2a_2b_swap_reds_both_boxes`, `a_checkbox_option_numeral_is_not_its_line_label`,
+  `map_reach_problem_reds_on_every_planted_shape` (label-join fold review L1/L2, 2026-09-06).
 
 ## 3. The honest calendar — partitioned by what each item WAITS ON (Fable plan review I5)
 
