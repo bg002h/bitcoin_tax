@@ -65,3 +65,5 @@ design/forms/**/*.pdf
 # Compiler ICE dumps — rustc writes these to CWD on an internal error. One was committed on
 # 2026-08-02 and found by review r6 (N-1); it is build debris, never a source artifact.
 rustc-ice-*.txt
+# A reviewer agent's cargo target dir (worktree reviews build here, on disk, not in /tmp tmpfs).
+target-review/

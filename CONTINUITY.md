@@ -6,6 +6,36 @@ _Last updated: **2026-09-06**. Written at a deliberate pause; safe to exit. **Re
 
 # ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
 
+> ## ★★★ RESUME 2026-09-06 (late) — T3–T6 review persisted (0C/3I/4M/2N) and being FOLDED by one opus agent; the 4868 build's T1 archive landed and its T1+T5 brief is written. Read this block first.
+>
+> **Owner directive (2026-09-06, saved to memory `one-opus-agent-coordinator`):** delegate tasks to at
+> most ONE opus agent at a time; this session coordinates (briefs, machine-checks, persist → ledger →
+> fold → commit). Do not run two opus agents concurrently.
+>
+> **State:** review `design/agent-reports/2026-09-06-build-1099da-T3-T6-review.md` persisted
+> `2ef2c2ce`; its ledger (10/10 HOLD) `e13fa24b`. The three Importants are on the READ surfaces:
+> I-1 the TUI Forms tab prints UNROUTED boxes on a live year (route in `tabs/forms.rs::render`, the
+> Snapshot needs the stored answers); I-2 no surface ENUMERATES a key's rows (spec R1 MUST — `report`
+> block and the TUI row pane must list date sold · amount · proceeds · (e) per row); I-3 the block never
+> appears on a FIRST authoring session (seed only runs at open with `working: Some`; re-seed after
+> NI-2 materialization). M-1..M-4, N-1, N-2 folded in the same pass where cheap (M-4 recorded as
+> forward-looking). **An opus fold agent is IN FLIGHT** in the main tree; it writes
+> `…T3-T6-fold-implementation.md` and does not commit. When it returns: machine-check its report
+> (`git diff --stat`, run the crates it names, diff the goldens), commit the FOLD (one commit, gate
+> output in the message), then a sonnet re-verification of the fold (`…T3-T6-review-r2.md`),
+> persist → ledger → fold any residue → 0C/0I closes the 1099-DA build.
+>
+> **4868/1040-V build:** T1's archive half landed `b60c600c` (TY2024 f4868/f1040v: notes, extracts,
+> geometry, manifest 138). The T1+T5 implementer brief is
+> `design/agent-reports/BRIEF-build-4868-T1-T5.md` — dispatch it to ONE opus agent after the fold
+> agent returns (never concurrently), then T2–T4, T6 per the spec's Plan. Then the calendar: the
+> 09-15 real-data run (S5) needs the owner's 2026 exports.
+>
+> **Traps (new):** a reviewer's report lives in ITS worktree (`.claude/worktrees/agent-…`) — copy it
+> into the main tree before `git worktree remove --force` + `git branch -D`; do not commit while an
+> implementer agent has half-done edits in the shared tree (the pre-commit hook runs `make check` on
+> the working tree); briefs live in `design/agent-reports/BRIEF-*.md`, not a new directory.
+
 > ## ★★★ RESUME 2026-09-06 (night) — the 1099-DA build is COMPLETE through T6, T7 recorded; next is its independent build review, then the 4868/1040-V build. Read this block first.
 >
 > **Owner resumed the session with "Resume"; autonomous again.** Tree clean, `main` not pushed.
