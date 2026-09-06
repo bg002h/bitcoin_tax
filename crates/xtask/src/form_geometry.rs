@@ -209,7 +209,46 @@ pub fn extract(stem: &str) -> Result<(), String> {
     if !out.status.success() {
         return Err(format!("pdftotext exited {:?}", out.status.code()));
     }
-    let (pages, words) = parse_bbox(&String::from_utf8_lossy(&out.stdout));
+    let (mut pages, mut words) = parse_bbox(&String::from_utf8_lossy(&out.stdout));
+
+    // ★★★ **DROP AN IRS DRAFT COVER SHEET, and renumber — otherwise words and boxes disagree by a
+    //     page and every label join on a draft is silently wrong.**
+    //
+    //     Every IRS draft is served with a cover sheet reading "Caution: DRAFT—NOT FOR FILING"; the
+    //     form itself begins on page 2. Box pages here come from the FQN (`Page1[0]`), which still
+    //     says 1, while word pages come from pdftotext's PHYSICAL page, which says 2. The join then
+    //     matches page-1 boxes against page-1 words — the cover sheet — and produces labels that
+    //     are not merely wrong but plausible.
+    //
+    //     ★ Measured: every one of the 16 archived TY2026 drafts has exactly one more page than its
+    //       final (f6251 3 vs 2, f1040 3 vs 2, f8960 2 vs 1) with an IDENTICAL box count. It voided
+    //       the whole "lines that moved" column of a work list built on top of it, and the
+    //       calibration tests did not catch it because they compare two FINALS.
+    //
+    //     ★★ Detected from the page's own TEXT, not the filename. A filename is a convention; the
+    //        cover sheet is the document telling us what it is.
+    let cover = pages.first().is_some_and(|p| {
+        let t: String = words
+            .iter()
+            .filter(|w| w.page == p.n)
+            .map(|w| w.text.to_uppercase())
+            .collect::<Vec<_>>()
+            .join(" ");
+        t.contains("DRAFT") && t.contains("NOT FOR FILING")
+    });
+    if cover {
+        let first = pages[0].n;
+        words.retain(|w| w.page != first);
+        for w in &mut words {
+            w.page -= 1;
+        }
+        pages.remove(0);
+        for p in &mut pages {
+            p.n -= 1;
+        }
+        eprintln!("extract-geometry: dropped the DRAFT cover sheet and renumbered pages");
+    }
+
     if words.is_empty() {
         return Err(
             "pdftotext -bbox produced no words — refusing to write an empty observation".into(),
@@ -353,5 +392,71 @@ mod tests {
         assert!((top - 94.0).abs() < 0.01, "top was {top}");
         assert!((bottom - 108.0).abs() < 0.01, "bottom was {bottom}");
         assert!(top < bottom, "top-down y must increase downward");
+    }
+}
+
+#[cfg(test)]
+mod cover_sheet_tests {
+    use super::*;
+
+    /// ★★★ **No committed geometry fixture may still contain a DRAFT COVER SHEET.**
+    ///
+    /// The cover sheet is not part of the form. Box pages come from the AcroForm FQN (`Page1[0]`),
+    /// word pages from pdftotext's PHYSICAL page — so a surviving cover sheet shifts one and not the
+    /// other, and every line→label join on that form is off by a page. It does not produce garbage:
+    /// it produces PLAUSIBLE labels, which is why it went unnoticed.
+    ///
+    /// ★ Measured cost when it did: `design/TY2026_WORK_LIST.md` reported Form 1040 moving **31**
+    /// printed line bindings and Form 6251 **28**. With the cover sheet dropped the true figures are
+    /// **0** and **1**. A whole column of a committed document, and its headline, were an artifact.
+    /// The calibration tests missed it because they compare two FINALS, neither of which has a cover.
+    #[test]
+    fn no_committed_geometry_fixture_contains_a_draft_cover_sheet() {
+        let dir = repo_root().join("design/forms/geometry");
+        let mut checked = 0usize;
+        let mut offenders: Vec<String> = Vec::new();
+        let mut entries: Vec<_> = std::fs::read_dir(&dir)
+            .expect("geometry fixture directory exists")
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "json"))
+            .collect();
+        entries.sort();
+        for path in entries {
+            let stem = path.file_stem().unwrap().to_string_lossy().into_owned();
+            // ★★ A fixture that will not READ or PARSE is a FAILURE, not a skip. The first draft
+            //    of this guard `continue`d on both, so a corrupt fixture passed — and the planted
+            //    defect that was supposed to prove the guard worked was silently skipped instead of
+            //    caught. A checker that treats "cannot inspect" as "fine" is the exact shape it
+            //    exists to prevent.
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("{stem}: geometry fixture unreadable: {e}"));
+            let g: Geometry = serde_json::from_str(&text)
+                .unwrap_or_else(|e| panic!("{stem}: geometry fixture does not parse: {e}"));
+            checked += 1;
+            let Some(first) = g.pages.first() else {
+                continue;
+            };
+            let joined: String = g
+                .words
+                .iter()
+                .filter(|w| w.page == first.n)
+                .map(|w| w.text.to_uppercase())
+                .collect::<Vec<_>>()
+                .join(" ");
+            if joined.contains("DRAFT") && joined.contains("NOT FOR FILING") {
+                offenders.push(stem);
+            }
+        }
+        assert!(
+            checked > 30,
+            "only {checked} fixtures inspected — the walk is not reaching design/forms/geometry"
+        );
+        assert!(
+            offenders.is_empty(),
+            "these fixtures still carry the draft cover sheet as page 1, so their box pages (from \
+             the FQN) and word pages (physical) are off by one and every label join on them is \
+             wrong — regenerate with `xtask extract-geometry <stem>`: {offenders:?}"
+        );
     }
 }
