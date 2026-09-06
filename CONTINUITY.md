@@ -6,40 +6,39 @@ _Last updated: **2026-09-06**. Written at a deliberate pause; safe to exit. **Re
 
 # ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
 
-> ## ★★★ RESUME 2026-09-06 (midday) — BOTH specs GREEN; the 1099-DA build is in progress. Read this block first.
+> ## ★★★ RESUME 2026-09-06 (afternoon) — the 1099-DA build is through T3 and reviewed; T4 next. Read this block first.
 >
 > **Owner asleep; autonomous.** Everything is committed on `main` (not pushed). Owner decisions
 > S1/S2/S6/S7/S9/**S10** (`ROADMAP_STATUS.md` §0a) are NOT actioned.
 >
-> **GREEN artifacts (each review persisted VERBATIM → VERIFICATION ledger → fold, separate commits):**
-> - `design/SPEC_1099da_broker_reporting.md` **r6 GREEN** — five Opus/sonnet rounds (4C/3I/8M → … →
->   0C/0I/1M/2N). Key rulings: per-(provider, cohort) answers; `Mixed`/`BasisDiffers` refuse; reward
->   lots NONCOVERED; Notice 2026-20 books-and-records governs the blind spot; the crypto slice CLOSED
->   on a LIVE year (S10); the lot's own date travels on the leg.
-> - `design/SPEC_form_4868_1040v.md` **r6 GREEN** — five rounds (2C/8I/13M/3N → … → 0C/0I/1M/2N).
->   Key rulings: the payment already exists (`payments.extension_payment`); pseudo gate + watermark on
->   both emitters; MFJ-conditioned spouse boxes; Part I bound by NAME (a recorded G-5 deviation); the
->   grid decided between the geometry join and the label join; TY2024 revisions bundled too.
-> - Label-join instrument GREEN (four rounds); `xtask port-status` (FR-50) through five verifications —
->   the work list declares its tags, the checker computes with them, NO FINAL planted load-bearing.
+> **GREEN artifacts:** spec 1099-DA r6; spec 4868/1040-V r6; the label-join instrument; `xtask
+> port-status` (FR-50; five verifications, the work list declares its tags). Reports + ledgers under
+> `design/agent-reports/2026-09-06-*`.
 >
-> **1099-DA BUILD (spec T-plan), commits so far:** T0 `e4b80fda` (forms/2026/YEAR.toml preparing;
-> `InformationReturnRegime` value + `regime_for` join + kills; `default_year()` → 2026;
-> `SUPPORTED_YEARS` = TEMPLATE_YEARS; the unlock's latest_year now reads removals); T2-a `ee02e503`
-> (`DisposalLeg.lot_acquired_at`; `Cohort`/`cohort_of`; rows carry cohort; the answer types); T1-a
-> `36d83f13` (`ReturnInputs.broker_reporting`; census class; refuse reasons; kills).
-> **NEXT = step C:** `Form8949Box::{G,H,J,K}` + `route_8949_boxes`; `screen_absolute` gains `regime`
-> and the broker screen (unanswered live key / answer with no rows / answer on a non-live year / basis
-> answer under basis=false / Mixed / BasisDiffers); `assemble_printed_forms` routes after the screen;
-> `export_full_return` passes `regime_for(year)`; the slice arm refuses on a LIVE year before bytes
-> (three directions). Then T3 (map boxes + per-(part, box) pages), T4 (Schedule D 1b/2/8b/9), T5
-> ((f)/(g) blank + advisory box 1g/1f), T6 (surfaces, input-form block re-points the NotInForm anchors),
-> T7 (owner action, Notice 2026-20). Then the 4868/1040-V build T1–T6.
+> **1099-DA BUILD (spec T-plan), commits:** T0 `e4b80fda`; T2-a `ee02e503`; T1-a `36d83f13`; step C
+> `249d37ad` (screen at the ledger, router in the packet, slice closed on a live year); **T3**
+> `d9863909` (one 8949 page-set per (part, box); the 2025 map names G/H/I and J/K/L by letter; both
+> fillers group by box); the Opus BUILD REVIEW of T0–C (`…build-1099da-T0-C-review.md`, 0C/3I/3M/3N,
+> ledger 9/9) folded in `18d1332b` (the 8949 CSV gated+routed before any byte on both export paths;
+> the three gate wirings watched red; a fold-driven Covered lot; `regime_or_pre_regime`). A sonnet
+> verification of that fold is IN FLIGHT → `…build-1099da-T0-C-review-r2.md`.
+> **NEXT = T4:** Schedule D per-box totals — `ScheduleDLines` gains 1b/2 (ST: G, H) and 8b/9 (LT: J,
+> K) beside 1a/3 and 8a/10, line 3 = the I-box totals only, 10 = L only, transcribed from
+> `f1040sd--2025.txt:32-37, 57-62` ("Totals for all transactions reported on Form(s) 8949 with Box A
+> or Box G checked" …); the 2025 map binds Row1b/Row2/Row8b/Row9 (dump-fields: f1_7..10, f1_11..14,
+> f1_27.., …); the fillers write them; `line_coverage` quotes; kill: the G-total lands on 1b, not 3.
+> Then T5 ((f)/(g) blank + the advisory naming box 1g and box 1f), T6 (surfaces: `report` lists keys
+> and rows; the TUI input-form block re-points the NotInForm anchors; `YearReadiness::sentence`; the
+> advisory + TUI forms tab read the regime), T7 (owner action, Notice 2026-20). Then the 4868/1040-V
+> build T1–T6 (archive the TY2024 revisions first).
 >
-> **Traps:** the harness's bypass guard string-matches ` -n` — never put `sed -n` in a Bash call that
-> also commits; a staged file from a BLOCKED commit rides into the next commit — `git status` before
-> grouping; `git commit -m` with backticks eats words — `-F -` + quoted heredoc; rustfmt reflows
-> anchors — patch by span/regex, assert before writing.
+> **Traps:** the harness's bypass guard string-matches ` -n`/`-nE` — never `sed -n`/`grep -n` in a
+> Bash call that also commits; a staged file from a BLOCKED commit rides into the next — `git status`
+> before grouping; `git commit -m` with backticks eats words — `-F -` + quoted heredoc; rustfmt
+> reflows anchors — patch by span/regex, assert before writing; the shrink-only census registers
+> (`field_census.rs`) must be lowered by hand when a map gains fields; `assemble_absolute` refuses
+> TY2026 (Form 6251 2026 untranscribed) — wiring kills run on TY2025 with the live regime as a value;
+> build reviews run on a worktree at the commit (the tree was dirty once).
 
 > ## ★★★ RESUME 2026-09-05 (late) — the Fable plan review is being FOLDED. Read this block first.
 >
