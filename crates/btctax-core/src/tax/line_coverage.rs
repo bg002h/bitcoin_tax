@@ -2755,6 +2755,7 @@ pub fn cover_printed8949row(r: &crate::tax::printed::Printed8949Row, part: &str)
         description: _,
         date_acquired: _,
         date_sold: _,
+        box_: _, // a checkbox, not a money column (spec 1099-DA T3)
         proceeds_d,
         cost_e,
         gain_h,
@@ -2812,6 +2813,7 @@ fn fmt_part(part: &str, line: &str, col: &str) -> String {
 fn zero_printed8949row() -> crate::tax::printed::Printed8949Row {
     crate::tax::printed::Printed8949Row {
         description: String::new(),
+        box_: crate::forms::Form8949Box::I,
         date_acquired: crate::conventions::TaxDate::from_ordinal_date(2024, 1).unwrap(),
         date_sold: crate::conventions::TaxDate::from_ordinal_date(2024, 1).unwrap(),
         proceeds_d: Usd::ZERO,

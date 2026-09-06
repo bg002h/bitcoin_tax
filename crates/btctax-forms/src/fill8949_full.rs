@@ -57,6 +57,7 @@ fn printed_part_data(rows: &[Printed8949Row]) -> PartData {
         ]);
     }
     PartData {
+        box_letter: rows.first().map(|r| format!("{:?}", r.box_)),
         rows: out,
         totals: [
             sp.to_string(),
@@ -94,33 +95,41 @@ pub fn fill_8949_full_with_map(
     map: &Form8949Map,
 ) -> Result<Vec<u8>, FormsError> {
     let cap = map.rows_per_page;
-    let st = &printed.short_term;
-    let lt = &printed.long_term;
-    let n_copies = st.len().div_ceil(cap).max(lt.len().div_ceil(cap)).max(1);
-
-    if n_copies == 1 {
-        return fill_8949_parts_with_identity(
-            &printed_part_data(st),
-            &printed_part_data(lt),
-            map,
-            header,
-        );
+    // ★ spec 1099-DA R3/T3 — the same rule as `fill_form_8949`: per part, rows grouped by BOX in
+    //   letter order, each group paginated on its own, the groups' pages concatenated; copies =
+    //   max(|ST pages|, |LT pages|); an exhausted side is left blank; a page never mixes boxes.
+    fn pages(part: &[Printed8949Row], cap: usize) -> Vec<Vec<Printed8949Row>> {
+        let mut by_box: std::collections::BTreeMap<String, Vec<Printed8949Row>> =
+            std::collections::BTreeMap::new();
+        for r in part {
+            by_box
+                .entry(format!("{:?}", r.box_))
+                .or_default()
+                .push(r.clone());
+        }
+        let mut out = Vec::new();
+        for (_, group) in by_box {
+            for chunk in group.chunks(cap) {
+                out.push(chunk.to_vec());
+            }
+        }
+        out
     }
-
-    let chunk = |rows: &[Printed8949Row], k: usize| -> PartData {
-        let lo = (k * cap).min(rows.len());
-        let hi = (lo + cap).min(rows.len());
-        printed_part_data(&rows[lo..hi])
-    };
+    let st_pages = pages(&printed.short_term, cap);
+    let lt_pages = pages(&printed.long_term, cap);
+    let n_copies = st_pages.len().max(lt_pages.len()).max(1);
+    let empty: Vec<Printed8949Row> = Vec::new();
     let mut copies = Vec::with_capacity(n_copies);
     for k in 0..n_copies {
-        // Each copy is filled on ORIGINAL names and geometry-verified there (fails closed).
         copies.push(fill_8949_parts_with_identity(
-            &chunk(st, k),
-            &chunk(lt, k),
+            &printed_part_data(st_pages.get(k).unwrap_or(&empty)),
+            &printed_part_data(lt_pages.get(k).unwrap_or(&empty)),
             map,
             header,
         )?);
+    }
+    if n_copies == 1 {
+        return Ok(copies.remove(0));
     }
     crate::overflow::merge_copies(&copies)
 }

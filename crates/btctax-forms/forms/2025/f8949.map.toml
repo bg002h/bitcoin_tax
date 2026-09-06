@@ -17,6 +17,10 @@ term = "short"
 page = 0
 box_field = "topmostSubform[0].Page1[0].c1_1[5]"
 box_on = "6"
+# ★ spec 1099-DA R5/T3 — Part I's digital-asset boxes by letter. The form prints (A)(B)(C)(G)(H)(I) top
+#   to bottom and the widgets c1_1[0..5] carry on-states "1".."6" in that order (xtask dump-fields,
+#   2026-09-06): G = [3]/"4", H = [4]/"5", I = [5]/"6" (I repeats the scalar pair above).
+boxes = { G = { field = "topmostSubform[0].Page1[0].c1_1[3]", on = "4" }, H = { field = "topmostSubform[0].Page1[0].c1_1[4]", on = "5" }, I = { field = "topmostSubform[0].Page1[0].c1_1[5]", on = "6" } }
 totals = { proceeds_d = "topmostSubform[0].Page1[0].f1_91[0]", cost_e = "topmostSubform[0].Page1[0].f1_92[0]", adj_g = "topmostSubform[0].Page1[0].f1_94[0]", gain_h = "topmostSubform[0].Page1[0].f1_95[0]" }
 rows = [
   ["topmostSubform[0].Page1[0].Table_Line1_Part1[0].Row1[0].f1_03[0]", "topmostSubform[0].Page1[0].Table_Line1_Part1[0].Row1[0].f1_04[0]", "topmostSubform[0].Page1[0].Table_Line1_Part1[0].Row1[0].f1_05[0]", "topmostSubform[0].Page1[0].Table_Line1_Part1[0].Row1[0].f1_06[0]", "topmostSubform[0].Page1[0].Table_Line1_Part1[0].Row1[0].f1_07[0]", "topmostSubform[0].Page1[0].Table_Line1_Part1[0].Row1[0].f1_08[0]", "topmostSubform[0].Page1[0].Table_Line1_Part1[0].Row1[0].f1_09[0]", "topmostSubform[0].Page1[0].Table_Line1_Part1[0].Row1[0].f1_10[0]"],
@@ -37,6 +41,8 @@ term = "long"
 page = 1
 box_field = "topmostSubform[0].Page2[0].c2_1[5]"
 box_on = "6"
+# Part II prints (D)(E)(F)(J)(K)(L): J = c2_1[3]/"4", K = [4]/"5", L = [5]/"6".
+boxes = { J = { field = "topmostSubform[0].Page2[0].c2_1[3]", on = "4" }, K = { field = "topmostSubform[0].Page2[0].c2_1[4]", on = "5" }, L = { field = "topmostSubform[0].Page2[0].c2_1[5]", on = "6" } }
 totals = { proceeds_d = "topmostSubform[0].Page2[0].f2_91[0]", cost_e = "topmostSubform[0].Page2[0].f2_92[0]", adj_g = "topmostSubform[0].Page2[0].f2_94[0]", gain_h = "topmostSubform[0].Page2[0].f2_95[0]" }
 rows = [
   ["topmostSubform[0].Page2[0].Table_Line1_Part2[0].Row1[0].f2_03[0]", "topmostSubform[0].Page2[0].Table_Line1_Part2[0].Row1[0].f2_04[0]", "topmostSubform[0].Page2[0].Table_Line1_Part2[0].Row1[0].f2_05[0]", "topmostSubform[0].Page2[0].Table_Line1_Part2[0].Row1[0].f2_06[0]", "topmostSubform[0].Page2[0].Table_Line1_Part2[0].Row1[0].f2_07[0]", "topmostSubform[0].Page2[0].Table_Line1_Part2[0].Row1[0].f2_08[0]", "topmostSubform[0].Page2[0].Table_Line1_Part2[0].Row1[0].f2_09[0]", "topmostSubform[0].Page2[0].Table_Line1_Part2[0].Row1[0].f2_10[0]"],

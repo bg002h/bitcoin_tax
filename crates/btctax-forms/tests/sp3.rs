@@ -622,6 +622,7 @@ fn f8949_2024_field_names() -> Vec<String> {
     let mut names = Vec::new();
     for p in &m.parts {
         names.push(p.box_field.clone());
+        names.extend(p.boxes.values().map(|c| c.field.clone())); // spec 1099-DA T3: G/H/I, J/K/L
         names.push(p.totals.proceeds_d.clone());
         names.push(p.totals.cost_e.clone());
         names.push(p.totals.adj_g.clone());

@@ -62,10 +62,13 @@ pub fn row(
         // PDF. (The core `form_8949` is year-aware — C/F pre-TY2025, I/L from TY2025 — but that value
         // is not what drives the checkbox.) We set the pre-2025 securities boxes purely as a stable,
         // recognizable fixture default.
+        // spec 1099-DA T3: the box is no longer inert — `place_part` resolves it by LETTER against
+        // the map. Fixtures carry the TY2025 not-reported default (I/L); a table-less pre-2025 map
+        // resolves every not-reported letter to its one checkbox, so the 2024 fixtures still print.
         box_: if part == Form8949Part::ShortTerm {
-            Form8949Box::C
+            Form8949Box::I
         } else {
-            Form8949Box::F
+            Form8949Box::L
         },
         box_needs_review: exchange,
         cohort: btctax_core::forms::Cohort::Noncovered, // fixture default (spec 1099-DA T2)

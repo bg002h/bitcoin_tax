@@ -46,7 +46,7 @@
 //!
 //! ★ Per `TY2026_PORT_REPORT.md` §7 D6 the alternative was to de-pin only onto *wired* years, so the
 //! gate would not red on paused TY2025 work. A register does strictly better: it fails closed on a new
-//! year exactly the same way, and it also carries TY2017's 403 and TY2025's 330 as **numbers in the
+//! year exactly the same way, and it also carries TY2017's 403 and TY2025's 326 as **numbers in the
 //! suite** rather than as prose in a report nobody executes.
 
 use btctax_forms::testonly::{collect_fields, load};
@@ -80,7 +80,7 @@ const UNCENSUSED: &[(i32, &str, usize)] = &[
     // TY2025 — ten of fifteen maps DO carry a census and account for 100%. These five do not.
     (2025, "f1040", 196),
     (2025, "f8283", 63),
-    (2025, "f8949", 16),
+    (2025, "f8949", 12), // 16 → 12 on 2026-09-06: spec 1099-DA T3 mapped the four broker-reported checkboxes G/H (c1_1[3..4]) and J/K (c2_1[3..4])
     (2025, "schedule_d", 40),
     (2025, "schedule_se", 15),
 ];
@@ -88,7 +88,7 @@ const UNCENSUSED: &[(i32, &str, usize)] = &[
 /// The register's own totals, pinned so that a single edited line is visible as a changed number.
 /// 5 + 5 entries; 403 + 330 fields.
 const UNCENSUSED_ENTRIES: usize = 10;
-const UNCENSUSED_FIELDS: usize = 733;
+const UNCENSUSED_FIELDS: usize = 729;
 
 // ★ Design r2 §10 step 4: the per-year ABSENT list is no longer a hand-list here — it is each year's
 //   `forms/<year>/YEAR.toml` `[forms_absent]` (with the reason beside each), read through
@@ -550,7 +550,7 @@ fn the_uncensused_register_may_only_shrink() {
     assert_eq!(
         total, UNCENSUSED_FIELDS,
         "the register totals {total} unaccounted fields, pinned {UNCENSUSED_FIELDS}. This number is \
-         the census's outstanding debt across every bundled year — TY2017's 403 and TY2025's 330 — \
+         the census's outstanding debt across every bundled year — TY2017's 403 and TY2025's 326 — \
          and DOWN is the only legal direction"
     );
 

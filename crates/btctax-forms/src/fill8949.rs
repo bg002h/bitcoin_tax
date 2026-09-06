@@ -16,6 +16,10 @@ use rust_decimal::Decimal;
 
 /// One part's formatted rows + totals, ready to place on the form.
 pub struct PartData {
+    /// ★ spec 1099-DA T3 — the ONE Form 8949 box every row on this page-set carries (`G`…`L`, or
+    /// `C`/`F`/`I`/`L` for a not-reported set); `None` for an empty part. A page-set never mixes
+    /// boxes: the filler groups rows by (part, box) before paginating.
+    pub box_letter: Option<String>,
     /// Each row's 8 column strings (a..h); an empty string means "leave that cell blank".
     pub rows: Vec<[String; 8]>,
     /// Totals row: (d) proceeds, (e) cost, (g) adjustment, (h) gain — as display strings.
@@ -52,6 +56,15 @@ fn row_cells(r: &Form8949Row) -> Result<[String; 8], FormsError> {
 
 /// Build one part's `PartData` from its rows.
 pub fn part_data(rows: &[&Form8949Row]) -> Result<PartData, FormsError> {
+    let box_letter = rows.first().map(|r| format!("{:?}", r.box_));
+    if let Some(b) = &box_letter {
+        if let Some(other) = rows.iter().find(|r| format!("{:?}", r.box_) != *b) {
+            return Err(FormsError::Structure(format!(
+                "a Form 8949 page-set mixes boxes {b} and {:?} — group by (part, box) before paginating (spec 1099-DA T3)",
+                other.box_
+            )));
+        }
+    }
     let mut out = Vec::with_capacity(rows.len());
     let (mut sp, mut sc, mut sg, mut sh) =
         (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO, Decimal::ZERO);
@@ -63,6 +76,7 @@ pub fn part_data(rows: &[&Form8949Row]) -> Result<PartData, FormsError> {
         sh += r.gain;
     }
     Ok(PartData {
+        box_letter,
         rows: out,
         totals: [
             sp.to_string(),
@@ -80,19 +94,26 @@ fn place_part(
     data: &PartData,
     writes: &mut Vec<(String, pdf::FieldValue)>,
     placements: &mut Vec<Placement>,
-) {
+) -> Result<(), FormsError> {
     if data.rows.is_empty() {
-        return; // nothing to report on this part — leave the box + totals blank
+        return Ok(()); // nothing to report on this part — leave the box + totals blank
     }
-    // Digital-asset box (Box I / Box L).
+    // ★ The box this page-set carries, resolved by LETTER against the map (spec 1099-DA T3): a
+    //   letter the map does not name refuses — never the default checkbox in its place.
+    let letter = data.box_letter.as_deref().unwrap_or("");
+    let (field, on) = part.box_cell(letter).ok_or_else(|| {
+        FormsError::UnmappedField(format!(
+            "Form 8949 box {letter} on the {} part: this revision's map names no checkbox for it (the \
+             scalar pair is `{}`; a 2025+ map carries the G/H/I and J/K/L table) — no page written",
+            part.term, part.box_field
+        ))
+    })?;
     writes.push((
-        part.box_field.clone(),
-        pdf::FieldValue::Check {
-            on: part.box_on.clone(),
-        },
+        field.to_string(),
+        pdf::FieldValue::Check { on: on.to_string() },
     ));
     placements.push(Placement {
-        fqn: part.box_field.clone(),
+        fqn: field.to_string(),
         geo: Geo::Check,
     });
     // Data rows.
@@ -132,6 +153,7 @@ fn place_part(
             geo: Geo::Total { col },
         });
     }
+    Ok(())
 }
 
 /// Fill Form 8949 (Part I + Part II, ≤ 11 rows each) into the bundled TY2025 PDF and return the
@@ -182,10 +204,10 @@ fn fill_8949_parts_inner(
     let mut writes: Vec<(String, pdf::FieldValue)> = Vec::new();
     let mut placements: Vec<Placement> = Vec::new();
     if let Some(p) = map.part("short") {
-        place_part(p, short, &mut writes, &mut placements);
+        place_part(p, short, &mut writes, &mut placements)?;
     }
     if let Some(p) = map.part("long") {
-        place_part(p, long, &mut writes, &mut placements);
+        place_part(p, long, &mut writes, &mut placements)?;
     }
 
     let mut doc = pdf::load(pdf::f8949_pdf(map.year)?)?;

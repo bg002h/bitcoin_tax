@@ -10,6 +10,7 @@
 
 use crate::error::FormsError;
 use serde::Deserialize;
+use std::collections::BTreeMap;
 
 /// The two identity cells every IRS form carries at its top: the name line and the SSN.
 ///
@@ -444,6 +445,33 @@ pub struct AmountColsNoAdjustment {
 }
 
 /// One Form 8949 part (Part I short-term on page 0, Part II long-term on page 1).
+/// One checkbox: its AcroForm FQN and the on-state that checks it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BoxCell {
+    pub field: String,
+    pub on: String,
+}
+
+impl PartMap {
+    /// The checkbox for `letter` on this part — the table's entry, or, on a revision with no table,
+    /// the scalar not-reported pair when `letter` IS that default (`C`/`F` before TY2025). Any other
+    /// letter is unmapped: the caller refuses rather than checking a box the map does not name.
+    pub fn box_cell(&self, letter: &str) -> Option<(&str, &str)> {
+        if let Some(c) = self.boxes.get(letter) {
+            return Some((&c.field, &c.on));
+        }
+        // A revision with no table has ONE checkbox per part: the not-reported box (C/F). Every
+        // not-reported letter resolves to it — a pre-2025 row is C/F by construction (`form_8949`
+        // keys the box on the revision's first year), and a fixture's I/L lands on the same box the
+        // old filler always checked. A broker-reported letter (G/H/J/K) never resolves here.
+        if self.boxes.is_empty() && matches!(letter, "C" | "F" | "I" | "L") {
+            return Some((&self.box_field, &self.box_on));
+        }
+        None
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PartMap {
@@ -457,6 +485,13 @@ pub struct PartMap {
     pub box_field: String,
     /// The checkbox on-state (a PDF name without the leading `/`), e.g. `"6"`.
     pub box_on: String,
+    /// ★ spec 1099-DA R5/T3 — the part's checkboxes by LETTER, for the revisions that carry the
+    /// digital-asset boxes (TY2025+: `G`/`H`/`I` on Part I, `J`/`K`/`L` on Part II, each an FQN and
+    /// its on-state read off the PDF with `xtask dump-fields`). A pre-2025 map has none (the
+    /// securities boxes are never used for digital assets), and the scalar pair above stays the
+    /// not-reported default that a 2025+ table repeats under `I`/`L` (held by a kill).
+    #[serde(default)]
+    pub boxes: BTreeMap<String, BoxCell>,
     /// The line-2 per-part totals row (d,e,g,h).
     pub totals: AmountCols,
     /// The 11 data rows; each row is the 8 column field names in order a,b,c,d,e,f,g,h.

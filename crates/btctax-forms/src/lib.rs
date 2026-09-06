@@ -114,50 +114,43 @@ pub(crate) fn fmt_money(d: Usd) -> String {
 /// copy is geometry-verified before merge.
 pub fn fill_form_8949(rows: &[Form8949Row], year: i32) -> Result<Vec<u8>, FormsError> {
     let map = Form8949Map::for_year(year)?;
-    // ★ spec 1099-DA T3 — until the per-(part, box) page-sets land, every map checks ONE box per part
-    //   (the not-reported I/L, or C/F before TY2025). A row routed to G/H/J/K from the filer's Form
-    //   1099-DA answers must therefore REFUSE to print, never be laundered under the I/L checkbox:
-    //   the map has no field for that box, and saying so is the only honest output.
-    if let Some(r) = rows.iter().find(|r| {
-        matches!(
-            r.box_,
-            btctax_core::forms::Form8949Box::G
-                | btctax_core::forms::Form8949Box::H
-                | btctax_core::forms::Form8949Box::J
-                | btctax_core::forms::Form8949Box::K
-        )
-    }) {
-        return Err(FormsError::UnmappedField(format!(
-            "Form 8949 box {:?} (TY{year}, row \"{}\"): the bundled map checks one box per part — the \
-             per-(part, box) page-sets for the broker-reported boxes G/H/J/K are spec 1099-DA T3; \
-             no page was written",
-            r.box_, r.description
-        )));
-    }
     let cap = map.rows_per_page;
     let (st, lt) = fill8949::split_parts(rows);
-    let n_pages = div_ceil(st.len(), cap).max(div_ceil(lt.len(), cap)).max(1);
-
-    if n_pages == 1 {
-        let short = fill8949::part_data(&st)?;
-        let long = fill8949::part_data(&lt)?;
-        return fill8949::fill_8949_parts(&short, &long, &map);
+    // ★ spec 1099-DA R3/T3 — one page-set per (part, BOX): per part, the rows are grouped by box in
+    //   letter order (C/F or G,H,I / J,K,L), each group paginated ⌈n/cap⌉ on its own, and the groups'
+    //   pages CONCATENATED into one page list per part; copies = max(|ST pages|, |LT pages|); copy k
+    //   carries ST page k on page 1 and LT page k on page 2, an exhausted side left blank. Each
+    //   page's checkbox is its group's letter, resolved against the map by `place_part` (a letter the
+    //   map does not name refuses). The 1040 filer never sees a mixed page.
+    fn pages<'a>(part: &[&'a Form8949Row], cap: usize) -> Vec<Vec<&'a Form8949Row>> {
+        let mut by_box: std::collections::BTreeMap<String, Vec<&'a Form8949Row>> =
+            std::collections::BTreeMap::new();
+        for r in part {
+            by_box.entry(format!("{:?}", r.box_)).or_default().push(r);
+        }
+        let mut out = Vec::new();
+        for (_, group) in by_box {
+            for chunk in group.chunks(cap) {
+                out.push(chunk.to_vec());
+            }
+        }
+        out
     }
-
-    let mut copies = Vec::with_capacity(n_pages);
-    for k in 0..n_pages {
-        let st_chunk: Vec<&Form8949Row> = st.iter().skip(k * cap).take(cap).copied().collect();
-        let lt_chunk: Vec<&Form8949Row> = lt.iter().skip(k * cap).take(cap).copied().collect();
-        let short = fill8949::part_data(&st_chunk)?;
-        let long = fill8949::part_data(&lt_chunk)?;
+    let st_pages = pages(&st, cap);
+    let lt_pages = pages(&lt, cap);
+    let n_copies = st_pages.len().max(lt_pages.len()).max(1);
+    let empty: Vec<&Form8949Row> = Vec::new();
+    let mut copies = Vec::with_capacity(n_copies);
+    for k in 0..n_copies {
+        let short = fill8949::part_data(st_pages.get(k).unwrap_or(&empty))?;
+        let long = fill8949::part_data(lt_pages.get(k).unwrap_or(&empty))?;
         // Each copy is filled on ORIGINAL names and geometry-verified here (fails closed).
         copies.push(fill8949::fill_8949_parts(&short, &long, &map)?);
     }
+    if n_copies == 1 {
+        return Ok(copies.remove(0));
+    }
     overflow::merge_copies(&copies)
-}
-
-fn div_ceil(n: usize, d: usize) -> usize {
-    n.div_ceil(d)
 }
 
 /// Stamp a diagonal `DRAFT — ESTIMATE, NOT FOR FILING` watermark on every page of a filled form.

@@ -47,6 +47,10 @@ pub struct Printed8949Row {
     pub cost_e: Usd,
     /// (h) gain/loss = **printed (d) − printed (e)** (column (g) is always blank in v1).
     pub gain_h: Usd,
+    /// ★ spec 1099-DA T3 — the Form 8949 box this row files under, as ROUTED from the filer's Form
+    /// 1099-DA answers on a live year (I/L not reported; H/K proceeds only; G/J basis matches; C/F
+    /// before TY2025). The filler groups rows by (part, box) into page-sets; a page never mixes boxes.
+    pub box_: crate::forms::Form8949Box,
 }
 
 /// A part's totals row — the sum of the PRINTED rows above it (never a re-rounding of the exact sum).
@@ -94,6 +98,7 @@ pub fn form_8949_printed(rows: &[crate::forms::Form8949Row]) -> Option<Printed89
             cost_e,
             // ★ derived from the PRINTED cells, not from `r.gain`
             gain_h: proceeds_d - cost_e,
+            box_: r.box_,
         }
     };
     let total = |rs: &[Printed8949Row]| Printed8949Totals {
