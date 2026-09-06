@@ -57,9 +57,11 @@ _Last updated: **2026-09-04**. Written at a deliberate pause; safe to exit. **Re
 >   RUNNING → `design/agent-reports/2026-09-05-r2-step1-review.md`; persist, ledger, fold.
 > - **Step 2 DONE — `68b86b8e`** (build.rs + `Stem` + generated bindings + the tarball gate; 3022 tests).
 > - **Steps-2/3 review FOLDED — `b58dee9d`** (Q1 the 8275 licence is periodic_template's pairing; Q2
->   `FiledPacket::stapled` is the only constructor, 8959 asks must_file first; Q3–Q6). **Step 4's
->   phase review is RUNNING** → `design/agent-reports/2026-09-05-r2-step4-review.md`.
-> - **Step 5 ◐ — eight of ten TY2025 maps WIRED** (the commit after b58dee9d): verified by the label
+>   `FiledPacket::stapled` is the only constructor, 8959 asks must_file first; Q3–Q6). **The phase
+>   review of steps 4–5 + that fold is RUNNING** → `design/agent-reports/2026-09-05-r2-step4-review.md`
+>   (★ the first attempt died on an API rate limit — HTTP 429, session limit — before writing
+>   anything; re-dispatched 2026-09-06. If the report is absent, that is why: re-dispatch it).
+> - **Step 5 ◐ — eight of ten TY2025 maps WIRED — `162739e8`**: verified by the label
 >   join + census + parse; `line_set_wiring.rs` pins wired ⇔ parses (plant observed red). Two stay
 >   `Unwired` on purpose: `f6251/2025` (1a/1b rebuild — do once for TY2026) and `f1040s1a/2025` (no
 >   struct; the Schedule 1-A emitter is the NOW item). **The year-package table is BUILT** (steps 1–5);
