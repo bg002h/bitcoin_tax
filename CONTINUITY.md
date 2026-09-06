@@ -6,6 +6,18 @@ _Last updated: **2026-09-06**. Written at a deliberate pause; safe to exit. **Re
 
 # ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
 
+> ## ★★★ RESUME 2026-09-06 (evening 4) — R6 r2 review (`4ed35a03`: 11/15 resolved + NEW 1C/4I/2M; ledger `13cbddc7`) FOLDED (`961c2653`); the scoped r3 review is IN FLIGHT (opus, worktree). Read this block first.
+>
+> r2's Critical was mine again: T9's `ReturnInputs::default()` would have sworn `filing_status:
+> Single` and shadowed the tax_profile. T9 is now a READ-ONLY accessor over the committed-or-DRAFT
+> row (`input_form_store::broker_answers`), arm (2)'s predicate is "answers stored", the resolver is
+> untouched; T8 maps every box to the form's own line (3 = C|I, 10 = F|L), refuses an unbound row,
+> partitions the CSV. When r3 returns: persist, ledger, fold residue (if 0C/0I → GREEN), then BUILD R6
+> (FR-62) by one opus agent under a brief written from the green R6 (T8, T9, the three-way dispatch
+> on the accessor, the gate over every reachable map, the arm-(2) screens, `report` (2a)/(2b), the TUI
+> ordering, the export-time price check, the notes and exit sentences, every kill listed) → seam
+> review → fold → sonnet re-verify → close FR-62; then the S9 drop (FR-61).
+
 > ## ★★★ RESUME 2026-09-06 (evening 3) — R6 r1 review (2C/5I/6M/2N, `cd7cfbd9`, ledger `c2905579`) FOLDED into the spec (`92179086`); the scoped r2 review is IN FLIGHT (opus, worktree at `9caab9d9`). Read this block first.
 >
 > The two Criticals were mine: the slice's Schedule D had no box dimension (→ task T8: per-box
