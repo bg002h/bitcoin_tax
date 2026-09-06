@@ -1307,15 +1307,30 @@ mod map_row_tests {
         out
     }
 
-    #[test]
-    fn the_row_set_equals_the_emitting_surface_both_ways_through_irs_stem() {
-        let from_rows: BTreeSet<FormYear> = rows()
+    fn row_set() -> BTreeSet<FormYear> {
+        rows()
             .iter()
             .map(|(_, y, r)| (r.irs_stem.clone(), *y))
-            .collect();
+            .collect()
+    }
+
+    /// THE check, shared by the green test and the plant (step-1 review P4): both directions of the
+    /// symmetric difference between the rows' `(irs_stem, year)` set and the emitting surface.
+    fn two_way_diff(
+        from_rows: &BTreeSet<FormYear>,
+        emitted: &BTreeSet<FormYear>,
+    ) -> (Vec<FormYear>, Vec<FormYear>) {
+        (
+            from_rows.difference(emitted).cloned().collect(),
+            emitted.difference(from_rows).cloned().collect(),
+        )
+    }
+
+    #[test]
+    fn the_row_set_equals_the_emitting_surface_both_ways_through_irs_stem() {
+        let from_rows = row_set();
         let emitted = emitted_form_years().expect("the emitting surface derives");
-        let only_rows: Vec<_> = from_rows.difference(&emitted).collect();
-        let only_emitted: Vec<_> = emitted.difference(&from_rows).collect();
+        let (only_rows, only_emitted) = two_way_diff(&from_rows, &emitted);
         assert!(
             only_rows.is_empty() && only_emitted.is_empty(),
             "row set ≠ emitting surface — rows without a template: {only_rows:?}; templates \
@@ -1339,20 +1354,70 @@ mod map_row_tests {
         }
     }
 
-    /// B1 — the two-way check observed red: a row whose `irs_stem` names a template that does not
-    /// exist is reported in the rows-only direction.
+    /// B1 — the SAME `two_way_diff` the green test runs, observed red in each direction on a plant.
     #[test]
-    fn a_row_pointing_at_no_template_is_caught() {
-        let mut from_rows: BTreeSet<FormYear> = rows()
-            .iter()
-            .map(|(_, y, r)| (r.irs_stem.clone(), *y))
-            .collect();
-        from_rows.insert(("f9999".to_string(), 2024));
+    fn a_row_pointing_at_no_template_is_caught_in_both_directions() {
         let emitted = emitted_form_years().unwrap();
-        assert_eq!(
-            from_rows.difference(&emitted).count(),
-            1,
-            "the planted row must be the one and only rows-only difference"
-        );
+        let mut planted_rows = row_set();
+        planted_rows.insert(("f9999".to_string(), 2024));
+        let (only_rows, only_emitted) = two_way_diff(&planted_rows, &emitted);
+        assert_eq!(only_rows, vec![("f9999".to_string(), 2024)]);
+        assert!(only_emitted.is_empty());
+        let mut planted_emitted = emitted.clone();
+        planted_emitted.insert(("f1040s1".to_string(), 2025));
+        let (only_rows, only_emitted) = two_way_diff(&row_set(), &planted_emitted);
+        assert!(only_rows.is_empty());
+        assert_eq!(only_emitted, vec![("f1040s1".to_string(), 2025)]);
+    }
+
+    /// P6 — the row's `instructions` names a document the archive HOLDS: for every row of an archived
+    /// year, `design/forms/<year>/<instructions>--<year>.pdf` is a manifest entry. (TY2017 has no
+    /// archive; those five rows are the `authority = "not-yet-archived"` rows and are skipped here
+    /// for the same reason.)
+    #[test]
+    fn every_archived_rows_instructions_stem_is_a_manifest_entry() {
+        let manifest = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .and_then(Path::parent)
+                .unwrap()
+                .join("design/forms/MANIFEST.json"),
+        )
+        .unwrap();
+        let mut checked = 0;
+        for (stem, year, row) in rows() {
+            if row.authority.is_some() {
+                continue;
+            }
+            let path = format!("design/forms/{year}/{}--{year}.pdf", row.instructions);
+            assert!(
+                manifest.contains(&format!("\"path\": \"{path}\"")),
+                "{year}/{stem}: instructions = {:?} but {path} is not in MANIFEST.json",
+                row.instructions
+            );
+            checked += 1;
+        }
+        assert!(checked >= 30, "only {checked} rows checked");
+    }
+
+    /// P6 — until `FORMS` retires into the rows, the one row it duplicates must agree with it.
+    #[test]
+    fn the_forms_const_row_agrees_with_its_map_row() {
+        for fa in FORMS {
+            let (_, _, row) = rows()
+                .into_iter()
+                .find(|(stem, year, _)| stem == fa.form && *year == fa.year)
+                .unwrap_or_else(|| {
+                    panic!("FORMS names {}/{} but no such row exists", fa.year, fa.form)
+                });
+            assert_eq!(row.instructions, fa.instructions, "{}/{}", fa.year, fa.form);
+            assert_eq!(
+                row.instr_pages.map(|p| (p[0], p[1])),
+                fa.instr_pages,
+                "{}/{}",
+                fa.year,
+                fa.form
+            );
+        }
     }
 }

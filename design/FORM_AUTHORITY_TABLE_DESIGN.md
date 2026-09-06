@@ -69,7 +69,7 @@ versioning          = "annual"          # or { periodic = "Rev. 10-2024" }: a pe
 template_sha256     = "…"               # of the bundled PDF; joined BY CONTENT to MANIFEST.json, whose entry must be is_authority()
 authority           = "not-yet-archived: <reason>"   # OPTIONAL. The ONLY excuse the MANIFEST join accepts; six rows today (all five TY2017 + f8283/2024)
 extract_override    = "…"               # OPTIONAL. Only while a second extract root exists (f1040s1a/2025); see §9
-instructions        = "i6251"           # "" only for a self-instructing form (f8275)
+instructions        = "i6251"           # fNNNN → iNNNN with the IRS's aliases; every bundled form has one (f8275 → i8275), so "" is not used — step-1 review P7
 instr_pages         = [101, 110]        # only for i1040gi-hosted schedules; the human records it once
 line_set            = "f6251/2025"      # the LINE-SET REVISION this map is a transcription of (§7): constants-only year ⇒ same line_set; renumber ⇒ new one
 attachment_sequence = "32"              # read from the extract; today 16 literals in packet.rs. ABSENT on the 1040 itself, which carries no sequence number
@@ -238,7 +238,12 @@ witness) · `forms_expected` == present ∪ absent-with-reason · every `Stem` h
    old consts; the `cargo package --list` gate in xtask with its kill. 3022 tests.
    **`build.rs` beside the old arms**, with a test that `template`/`map_text` agree byte-for-byte with
    every existing `include_*` const, and the `cargo package --list` gate.
-3. **Switch `packet.rs` fills over one at a time**; delete the 18 + 17 arms and `SUPPORTED_YEARS`. The
+3. ✅ **DONE `bc6dce35` (2026-09-05)** — `LineSet` (37) / `Schema` (17 + `Unwired`) / the exhaustive
+   `schema()` match; every `for_year` and `*_pdf` body reads the glob + row; 54 consts and the
+   `SUPPORTED_YEARS` hand-list deleted (the name is now `BUNDLED_YEARS`, derived); the periodic alias
+   is `bundled::periodic_template`, bundled years only, licensed by hash; 3023 tests. Call sites did
+   not move — the arms went, not the names.
+   **Switch `packet.rs` fills over one at a time**; delete the 18 + 17 arms and `SUPPORTED_YEARS`. The
    compiler names every remaining reader. The `line_set → struct` match lands here with an explicit
    **`Unwired`** arm for the ten TY2025 maps named in step 1 — the fifth kill is "a `line_set` that is
    neither a schema nor `Unwired`", so wiring one at step 5 is a deletion from that arm and forgetting

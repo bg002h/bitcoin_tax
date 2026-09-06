@@ -56,6 +56,14 @@ _Last updated: **2026-09-04**. Written at a deliberate pause; safe to exit. **Re
 >   template prints 36, the literal said 155). An independent phase review of `6267b6b1` is
 >   RUNNING → `design/agent-reports/2026-09-05-r2-step1-review.md`; persist, ledger, fold.
 > - **Step 2 DONE — `68b86b8e`** (build.rs + `Stem` + generated bindings + the tarball gate; 3022 tests).
+> - **Step 3 DONE — `bc6dce35`** (LineSet/Schema/Unwired; 54 consts + the SUPPORTED_YEARS hand-list gone;
+>   periodic alias by hash; 3023 tests). The step-1 phase review (`2c3044e3`, 0C/2I/6M, all 37 rows
+>   machine-verified) is FOLDED in the commit after: P1 kill 4 keyed on extract existence with the five
+>   TY2017 rows pinned as `SequenceUnverifiable`; P2 the packet is stable-sorted by sequence (the position
+>   half of FR-55); P3–P7 as tests/doc fixes. **NEXT: step 4** — `forms/<year>/YEAR.toml` + `YearReadiness`
+>   (declared vs actual) with its kills; move `TRANSITION_DATE`/`TY2025_RETURN_DUE`/`FORMS_ABSENT_FROM_YEAR`
+>   and the two `selected_year: 2025` literals in; then step 5 (wire the ten TY2025 maps, `line_set` per
+>   revision: `f6251/2025` needs the 1a/1b struct).
 > - **NEXT: step 3** — switch the fillers over (`map_text(Stem::X, y)` → row → `LineSet` → the exhaustive
 >   `line_set → schema` match with an explicit `Unwired` arm for the ten TY2025 maps), delete the 18 + 17
 >   arms, the 54 consts and `SUPPORTED_YEARS` (error message built from `bundled_years()`). Wait for the

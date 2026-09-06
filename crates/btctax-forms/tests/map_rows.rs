@@ -136,6 +136,13 @@ enum RowProblem {
         row: Option<String>,
         printed: Option<String>,
     },
+    /// No archived extract exists to read the printed number from — the value is held only by the row
+    /// agreeing with `packet::attachment_sequence`. Named separately (step-1 review P1) rather than
+    /// laundered through the MANIFEST excuse: five TY2017 rows today, pinned shrink-only.
+    SequenceUnverifiable {
+        year: i32,
+        stem: String,
+    },
 }
 
 /// The four checks, over any forms root (so a test can plant a defect in a tempdir copy).
@@ -182,20 +189,27 @@ fn check_rows(
                 stem: stem.clone(),
             });
         }
-        // kill 4 — the printed sequence number, from the archived extract.
+        // kill 4 — the printed sequence number, from the archived extract. Keyed to ITS OWN
+        // mechanism (does an extract exist?), never to the manifest excuse: `2024/f8283` is excused
+        // from the manifest join and yet has an extract printing 155, and that extract is what holds
+        // its row (step-1 review P1). A row with no extract at all is a separately-named gap.
         let extract = extract_root.join(format!("{}--{}.txt", row.irs_stem, year));
-        if row.authority.is_none() {
-            let printed = std::fs::read_to_string(&extract)
-                .ok()
-                .and_then(|t| printed_sequence(&t));
-            if printed != row.attachment_sequence {
-                problems.push(RowProblem::SequenceMismatch {
-                    year,
-                    stem: stem.clone(),
-                    row: row.attachment_sequence.clone(),
-                    printed,
-                });
+        match std::fs::read_to_string(&extract) {
+            Ok(text) => {
+                let printed = printed_sequence(&text);
+                if printed != row.attachment_sequence {
+                    problems.push(RowProblem::SequenceMismatch {
+                        year,
+                        stem: stem.clone(),
+                        row: row.attachment_sequence.clone(),
+                        printed,
+                    });
+                }
             }
+            Err(_) => problems.push(RowProblem::SequenceUnverifiable {
+                year,
+                stem: stem.clone(),
+            }),
         }
         rows.push(row);
     }
@@ -204,6 +218,14 @@ fn check_rows(
 
 /// The six rows the design names (r2 §4, §10 step 1) — a shrink-only pin. A seventh excuse reds;
 /// removing one means an authority was archived and the row's `authority` key must go.
+const SEQUENCE_UNVERIFIABLE: &[(i32, &str)] = &[
+    (2017, "f1040"),
+    (2017, "f8283"),
+    (2017, "f8949"),
+    (2017, "schedule_d"),
+    (2017, "schedule_se"),
+];
+
 const EXCUSED: &[(i32, &str)] = &[
     (2017, "f1040"),
     (2017, "f8283"),
@@ -222,6 +244,27 @@ fn every_committed_map_has_a_row_that_parses_and_all_four_kills_are_green() {
         &ws.join("design/forms/extract"),
     );
     assert!(rows.len() >= 37, "the walk found only {} rows", rows.len());
+    // The rows whose sequence number NO extract can verify — exactly the five TY2017 templates
+    // (`design/forms/` has no 2017 archive). Shrink-only: archiving one removes it here.
+    let unverifiable: Vec<(i32, String)> = problems
+        .iter()
+        .filter_map(|p| match p {
+            RowProblem::SequenceUnverifiable { year, stem } => Some((*year, stem.clone())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        unverifiable,
+        SEQUENCE_UNVERIFIABLE
+            .iter()
+            .map(|(y, s)| (*y, s.to_string()))
+            .collect::<Vec<_>>(),
+        "the sequence-unverifiable set is exactly the five TY2017 rows; archive an authority to shrink it"
+    );
+    let problems: Vec<&RowProblem> = problems
+        .iter()
+        .filter(|p| !matches!(p, RowProblem::SequenceUnverifiable { .. }))
+        .collect();
     assert!(problems.is_empty(), "row problems:\n  {:#?}", problems);
     // The excuse set is exactly the six, no more, no fewer.
     let excused: BTreeSet<(i32, String)> = rows
@@ -411,6 +454,59 @@ fn a_planted_missing_excuse_is_reported() {
         }),
         "{problems:?}"
     );
+}
+
+/// B1 — kill 4 observed red ON A MANIFEST-EXCUSED ROW that has an extract: the exemption is the
+/// manifest's, not this kill's (step-1 review P1). `2024/f8283` prints 155.
+#[test]
+fn a_planted_wrong_sequence_number_is_reported_even_on_a_manifest_excused_row() {
+    let ws = workspace_root();
+    let dir = plant(2024, "f8283", |t| {
+        t.replace(
+            "attachment_sequence = \"155\"",
+            "attachment_sequence = \"999\"",
+        )
+    });
+    let (_, problems) = check_rows(
+        dir.path(),
+        &manifest_authority_hashes(&ws),
+        &ws.join("design/forms/extract"),
+    );
+    assert!(
+        problems.contains(&RowProblem::SequenceMismatch {
+            year: 2024,
+            stem: "f8283".into(),
+            row: Some("999".into()),
+            printed: Some("155".into()),
+        }),
+        "{problems:?}"
+    );
+}
+
+/// B1 — a row with NO extract is reported as unverifiable, not silently passed (P1).
+#[test]
+fn a_row_with_no_extract_is_reported_as_unverifiable() {
+    let ws = workspace_root();
+    let dir = plant(2017, "f8949", |t| t);
+    let (_, problems) = check_rows(
+        dir.path(),
+        &manifest_authority_hashes(&ws),
+        &ws.join("design/forms/extract"),
+    );
+    assert!(problems.contains(&RowProblem::SequenceUnverifiable {
+        year: 2017,
+        stem: "f8949".into()
+    }));
+}
+
+/// P5 — `AnnualTag`'s stated guarantee: a typo is a parse refusal, not a free string.
+#[test]
+fn a_mistyped_versioning_is_refused() {
+    let text = std::fs::read_to_string(crate_root().join("forms/2024/f8959.map.toml")).unwrap();
+    assert!(MapRow::read(&text.replace("\"annual\"", "\"anual\"")).is_err());
+    let periodic = std::fs::read_to_string(crate_root().join("forms/2024/f8275.map.toml")).unwrap();
+    assert!(periodic.contains("periodic = "), "the 8275 row is periodic");
+    assert!(MapRow::read(&periodic.replace("periodic = ", "periodc = ")).is_err());
 }
 
 /// B1 — kill 4 observed red: a sequence number that is not what the form prints.

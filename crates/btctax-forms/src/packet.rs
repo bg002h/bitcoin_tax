@@ -283,8 +283,129 @@ pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<FiledPacket, Fo
         .into_iter()
         .collect();
 
+    // ★ P2 (step-1 phase review): the packet's order IS the stapling order the filer is handed
+    //   ("the prefix IS the stapling order", admin.rs), and until 2026-09-05 it was the literal push
+    //   order — so a renumbered form (8283: 155 → 36 on Rev. 12-2025) was pushed in its OLD place.
+    //   Derive it: stable-sort by the printed sequence number, the 1040 (no number) first. For TY2024
+    //   this is a no-op (the push order was already ascending), so no golden moves.
+    sort_by_attachment_sequence(&mut out);
+
     Ok(FiledPacket {
         forms: out,
         statements,
     })
+}
+
+/// The IRS attachment-sequence ORDER key: the numeric part, then the letter suffix — so `"01" <
+/// "1A" < "02"`, `"12" < "12A" < "17"`, `"55" < "55A"`. A plain string sort gets `"1A"` wrong (it
+/// would land after `"12"`), which is why this is a function and not `.sort()`.
+pub fn sequence_key(seq: &str) -> (u32, String) {
+    let digits: String = seq.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let suffix: String = seq.chars().skip_while(|c| c.is_ascii_digit()).collect();
+    (digits.parse().unwrap_or(0), suffix)
+}
+
+/// Stable-sort a packet into stapling order: forms with no sequence number (the 1040) first, then
+/// ascending [`sequence_key`]. Stable, so two forms with one number (none today) keep push order.
+pub fn sort_by_attachment_sequence(forms: &mut [NamedForm]) {
+    forms.sort_by_key(|f| f.attachment_sequence.map(sequence_key));
+}
+
+#[cfg(test)]
+mod sequence_order_tests {
+    use super::*;
+
+    fn nf(name: &str, seq: Option<&'static str>) -> NamedForm {
+        NamedForm {
+            name: name.to_string(),
+            attachment_sequence: seq,
+            bytes: Vec::new(),
+        }
+    }
+
+    /// The comparator on the cases a string sort gets wrong.
+    #[test]
+    fn sequence_key_orders_letter_suffixes_after_their_number_and_1a_after_01() {
+        let mut v = vec![
+            "12A", "55A", "1A", "02", "12", "55", "01", "155", "36", "92", "17", "32",
+        ];
+        v.sort_by_key(|s| sequence_key(s));
+        assert_eq!(
+            v,
+            ["01", "1A", "02", "12", "12A", "17", "32", "36", "55", "55A", "92", "155"]
+        );
+    }
+
+    /// ★ Derived, for EVERY bundled year: take the sequence numbers off the rows (never a hand list),
+    /// shuffle them into the worst order, sort, and the result is non-decreasing with the 1040 first.
+    #[test]
+    fn a_shuffled_packet_sorts_into_stapling_order_for_every_bundled_year() {
+        for &year in crate::bundled::bundled_years() {
+            let mut forms: Vec<NamedForm> = crate::bundled::BUNDLED
+                .iter()
+                .filter(|(_, y)| *y == year)
+                .map(|(stem, y)| {
+                    let row =
+                        crate::map::MapRow::read(crate::bundled::map_text(*stem, *y).unwrap())
+                            .unwrap();
+                    nf(
+                        stem.file_stem(),
+                        attachment_sequence(stem.file_stem(), year),
+                    )
+                    .tap_check(&row)
+                })
+                .collect();
+            forms.reverse(); // worst case: descending
+            sort_by_attachment_sequence(&mut forms);
+            assert_eq!(
+                forms[0].attachment_sequence, None,
+                "TY{year}: the 1040 staples first"
+            );
+            let keys: Vec<_> = forms
+                .iter()
+                .filter_map(|f| f.attachment_sequence.map(sequence_key))
+                .collect();
+            assert!(
+                keys.windows(2).all(|w| w[0] <= w[1]),
+                "TY{year}: not in stapling order: {keys:?}"
+            );
+            assert!(
+                keys.len() >= 4,
+                "TY{year}: the walk found only {} sequenced forms",
+                keys.len()
+            );
+        }
+    }
+
+    /// The TY2025 8283 lands between 6251 (32) and 8995 (55) — the position half of FR-55.
+    #[test]
+    fn ty2025_form_8283_staples_after_6251_and_before_8995() {
+        let mut forms = vec![
+            nf("f8995", attachment_sequence("f8995", 2025)),
+            nf("f8283", attachment_sequence("f8283", 2025)),
+            nf("f6251", attachment_sequence("f6251", 2025)),
+            nf("f1040", attachment_sequence("f1040", 2025)),
+        ];
+        sort_by_attachment_sequence(&mut forms);
+        let names: Vec<&str> = forms.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, ["f1040", "f6251", "f8283", "f8995"]);
+    }
+
+    trait TapCheck {
+        fn tap_check(self, row: &crate::map::MapRow) -> Self;
+    }
+    impl TapCheck for NamedForm {
+        /// The packet's literal and the row's printed number are one fact (held by
+        /// `tests/map_rows.rs::packet_sequences_agree_with_every_map_row`); re-asserted here so this
+        /// derived test cannot pass on a literal the row disagrees with.
+        fn tap_check(self, row: &crate::map::MapRow) -> Self {
+            assert_eq!(
+                self.attachment_sequence.map(String::from),
+                row.attachment_sequence,
+                "{}",
+                self.name
+            );
+            self
+        }
+    }
 }

@@ -140,7 +140,8 @@ pub struct MapRow {
     #[serde(default)]
     pub extract_override: Option<String>,
     /// Instructions stem: `fNNNN` → `iNNNN`, with the IRS's own aliases (`f1040sa` → `i1040sca`;
-    /// Form 1040 and Schedules 1/1-A/2/3 → `i1040gi`).
+    /// Form 1040 and Schedules 1/1-A/2/3 → `i1040gi`). Every bundled form has one (Form 8275's is
+    /// `i8275`), and for every archived year it must be a manifest entry (`xtask` map_row_tests).
     pub instructions: String,
     /// OPTIONAL. `[first, last]` page range inside an `i1040gi`-hosted booklet, recorded once by a
     /// human (runbook step 5).

@@ -1963,3 +1963,29 @@ mod note_reader_tests {
         eprintln!("{checked} provenance notes parsed, all agreeing with the manifest");
     }
 }
+
+/// Step-1 review P3: `tests/map_rows.rs` cannot call `Entry::is_authority()` (btctax-forms does not
+/// depend on xtask) and filters the manifest by string instead — "path has no `-DRAFT`, url has no
+/// `/irs-dft/`". This holds the two predicates to each other over EVERY manifest entry, so the day
+/// `is_authority` grows a third signal, this reds and the test's filter is updated.
+#[cfg(test)]
+mod authority_predicate_agreement {
+    use super::*;
+
+    #[test]
+    fn is_authority_agrees_with_the_string_filter_over_every_entry() {
+        let entries = load(&crate::form_geometry::repo_root()).expect("manifest loads");
+        assert!(entries.len() >= 100);
+        for e in &entries {
+            let by_string = !e.path.contains("-DRAFT") && !e.url.contains("/irs-dft/");
+            assert_eq!(
+                e.is_authority(),
+                by_string,
+                "{}: Entry::is_authority() = {} but the string filter says {}",
+                e.path,
+                e.is_authority(),
+                by_string
+            );
+        }
+    }
+}
