@@ -551,6 +551,11 @@ mod tests {
     fn the_committed_work_list_matches_form_delta_at_head() {
         let root = crate::form_geometry::repo_root();
         let doc = std::fs::read_to_string(root.join("design/TY2026_WORK_LIST.md")).unwrap();
+        assert_eq!(
+            work_list_tags(&doc),
+            Some(("2025".to_string(), "2026-DRAFT".to_string())),
+            "the committed work list declares the tags it was generated with"
+        );
         let (compared, excused, wrong) = check_work_list(&doc);
         let stems = super::emitting_surface();
         let listed: std::collections::BTreeSet<String> =
@@ -652,29 +657,30 @@ mod tests {
     /// wrong cell, on a numeric row with no pair, and on an excuse whose cell names the wrong side.
     #[test]
     fn the_work_list_checker_reds_on_every_planted_row() {
-        let (_, _, wrong) = check_work_list("| `f6251` | 62 | 0 | 0 | 1 | port |\n");
+        // the older plants are bare rows: check them under the committed document's own tags
+        let dflt = |doc: &str| check_work_list_with(doc, "2025", "2026-DRAFT");
+        let (_, _, wrong) = dflt("| `f6251` | 62 | 0 | 0 | 1 | port |\n");
         assert_eq!(wrong.len(), 1, "a cell off by one: {wrong:?}");
-        let (_, _, wrong) = check_work_list("| `f1040` | 199 | 0 | 0 | 0 | unchanged |\n");
+        let (_, _, wrong) = dflt("| `f1040` | 199 | 0 | 0 | 0 | unchanged |\n");
         assert_eq!(
             wrong.len(),
             1,
             "a numeric row whose pair does not exist: {wrong:?}"
         );
-        let (_, _, wrong) = check_work_list("| `f1040s1` | 72 | 1 | 1 | 0 | port |\n");
+        let (_, _, wrong) = dflt("| `f1040s1` | 72 | 1 | 1 | 0 | port |\n");
         assert_eq!(
             wrong.len(),
             1,
             "0 moved printed for a pair the reader cannot witness: {wrong:?}"
         );
-        let (_, _, wrong) = check_work_list("| `f6251` | 62 | 0 | 0 | **UNWITNESSED** | port |\n");
+        let (_, _, wrong) = dflt("| `f6251` | 62 | 0 | 0 | **UNWITNESSED** | port |\n");
         assert_eq!(
             wrong.len(),
             1,
             "UNWITNESSED printed for a pair that WAS compared: {wrong:?}"
         );
-        let (_, _, wrong) = check_work_list(
-            "| `f6251` | yes | `f6251--2025` | **NO DRAFT** — planted | **NO DRAFT** |\n",
-        );
+        let (_, _, wrong) =
+            dflt("| `f6251` | yes | `f6251--2025` | **NO DRAFT** — planted | **NO DRAFT** |\n");
         assert_eq!(
             wrong.len(),
             1,
@@ -682,24 +688,21 @@ mod tests {
         );
         // ★ isolates the `claims_no_new` conjunct (r3 R2): the pair does not compute (no prior
         //   PDF), the prior claim is true, and ONLY the draft-on-disk conjunct can red it.
-        let (_, _, wrong) = check_work_list(
-            "| `f8995a` | yes | **NO PRIOR SIDE** | **NO DRAFT** — planted | — |\n",
-        );
+        let (_, _, wrong) =
+            dflt("| `f8995a` | yes | **NO PRIOR SIDE** | **NO DRAFT** — planted | — |\n");
         assert_eq!(
             wrong.len(),
             1,
             "a NO DRAFT claim with the draft archived on disk: {wrong:?}"
         );
-        let (_, _, wrong) = check_work_list(
-            "| `f1040` | yes | **NO PRIOR SIDE** — planted | no draft either | — |\n",
-        );
+        let (_, _, wrong) =
+            dflt("| `f1040` | yes | **NO PRIOR SIDE** — planted | no draft either | — |\n");
         assert_eq!(
             wrong.len(),
             1,
             "a NO PRIOR SIDE claim with the 2025 fixture on disk: {wrong:?}"
         );
-        let (_, _, wrong) =
-            check_work_list("| `f1040` | yes | `f1040--2025` | nothing claimed | — |\n");
+        let (_, _, wrong) = dflt("| `f1040` | yes | `f1040--2025` | nothing claimed | — |\n");
         assert_eq!(
             wrong.len(),
             1,
@@ -732,9 +735,8 @@ mod tests {
             "NO FINAL is TRUE for f8995a today (a draft is not a final): {wrong:?}"
         );
         // and the false direction, on the archive itself: a NO DRAFT claim while the draft exists
-        let (_, _, wrong) = check_work_list(
-            "| `f8995a` | yes | **NO PRIOR SIDE** | **NO DRAFT** — planted | — |\n",
-        );
+        let (_, _, wrong) =
+            dflt("| `f8995a` | yes | **NO PRIOR SIDE** | **NO DRAFT** — planted | — |\n");
         assert_eq!(
             wrong.len(),
             1,
@@ -767,15 +769,28 @@ mod tests {
             "NO FINAL under a draft tag names the wrong word: {wrong:?}"
         );
         // and the tags line is read from the document itself
-        assert_eq!(
-            work_list_tags("<!-- tags: 2025 2026 -->\n| `f6251` | 62 | 0 | 0 | 0 | port |\n"),
-            Some(("2025".into(), "2026".into()))
+        // ★ the tags line is LOAD-BEARING end to end (r4 N6): the same row is excused under a document
+        //   declaring the final tag and wrong under one declaring the draft tag, through
+        //   check_work_list itself; a document with no tags line is wrong
+        let row = "| `f8995a` | yes | **NO PRIOR SIDE** | **NO FINAL** — planted | — |\n";
+        let (_, excused, wrong) = check_work_list(&format!("<!-- tags: 2025 2026 -->\n{row}"));
+        assert!(
+            wrong.is_empty() && excused == ["f8995a"],
+            "declared final tag: {wrong:?}"
         );
+        let (_, _, wrong) = check_work_list(&format!("<!-- tags: 2025 2026-DRAFT -->\n{row}"));
+        assert_eq!(
+            wrong.len(),
+            1,
+            "declared draft tag: NO FINAL is the wrong word: {wrong:?}"
+        );
+        let (_, _, wrong) = check_work_list(row);
+        assert_eq!(wrong.len(), 1, "no tags line: {wrong:?}");
+        assert!(wrong[0].contains("tags"));
         // the control tests the PREDICATE on a stem that can never be archived (r3 R5) — the
         // inventory coupling belongs to the_committed_work_list_matches_form_delta_at_head
-        let (_, excused, wrong) = check_work_list(
-            "| `zzz-not-a-form` | yes | **NO PRIOR SIDE** | **NO DRAFT** — synthetic | — |\n",
-        );
+        let (_, excused, wrong) =
+            dflt("| `zzz-not-a-form` | yes | **NO PRIOR SIDE** | **NO DRAFT** — synthetic | — |\n");
         assert!(
             wrong.is_empty() && excused == ["zzz-not-a-form"],
             "a true excuse: {wrong:?}"
@@ -799,9 +814,16 @@ mod tests {
         Some((it.next()?.to_string(), it.next()?.to_string()))
     }
 
+    /// A document WITHOUT its tags line is wrong, never checked against a guessed pair (port-status
+    /// r4 N6: a silent fallback equal to today's tags meant the parsed tags were never load-bearing).
     fn check_work_list(doc: &str) -> (Vec<String>, Vec<String>, Vec<String>) {
-        let (prior_tag, new_tag) =
-            work_list_tags(doc).unwrap_or_else(|| ("2025".to_string(), "2026-DRAFT".to_string()));
+        let Some((prior_tag, new_tag)) = work_list_tags(doc) else {
+            return (
+                Vec::new(),
+                Vec::new(),
+                vec!["the work list declares no `<!-- tags: <prior> <new> -->` line — nothing can be checked against it".to_string()],
+            );
+        };
         check_work_list_with(doc, &prior_tag, &new_tag)
     }
 
