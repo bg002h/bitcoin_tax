@@ -464,7 +464,7 @@ So the choice is not "file with btctax or never" — it is:
 
 | option | what happens | what is sacrificed |
 |---|---|---|
-| **A — recommended.** Build TY2025 properly (P1→P3), file TY2025 **late** with btctax; TY2026 is then a cheap port filed **on time** in the 2027 season | one late federal filing; the TY2025 work is not wasted, because TY2026's forms are TY2025-shaped (Schedule 1-A runs through TY2028) | timeliness of one year |
+| **A — was recommended; SUPERSEDED by the owner's choice of C (2026-09-05, `ROADMAP_STATUS.md` §0a).** Build TY2025 properly (P1→P3), file TY2025 **late** with btctax; TY2026 is then a cheap port filed **on time** in the 2027 season | one late federal filing; the TY2025 work is not wasted, because TY2026's forms are TY2025-shaped (Schedule 1-A runs through TY2028) | timeliness of one year |
 | **B.** File TY2025 by 2026-10-15 **by other means** (a preparer, or FFFF — manual entry, no import, recon-efile §1), then use btctax's TY2025 packet as a check | nothing technical; costs money and a day | nothing in this plan |
 | **C.** Skip TY2025; target TY2026 only | TY2025 is filed entirely outside btctax, and the P0 car-loan-interest deduction is hand-computed | ~all of Phase 1/2 still has to be built for TY2026 anyway — **TY2026 needs Schedule 1-A too**. This option saves nothing. |
 | **D — REJECTED.** Ship a partial TY2025 by deleting the gate | plausible wrong numbers on signed testimony | the one thing this project refuses |
@@ -486,8 +486,11 @@ before ★ D-A is answered.
 
 ### 6.4 The realistic target, stated as a commitment
 
-**First filed return: TY2025, filed with btctax, after 2026-10-15.** **First *on-time* filed return:
-TY2026, in the 2027 season**, made cheap by Phase 5.
+~~First filed return: TY2025, filed with btctax, after 2026-10-15.~~ **Superseded 2026-09-05 (owner
+ruling, `ROADMAP_STATUS.md` §0a): the first filed return is TY2026, in the 2027 season, on the
+extension by default (`ROADMAP_STATUS.md` §3); TY2025 is paused, and the only TY2025 work that
+survives is a REHEARSAL slice if the owner takes strategy review S1.** The Phase-5 machinery is what
+makes TY2027 and after cheap, not TY2026.
 
 ---
 

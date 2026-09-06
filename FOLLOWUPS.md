@@ -6207,5 +6207,13 @@ build, each with an owning phase.
   red) + a runbook step "refresh the dataset through 12-31 before declaring the year filable".
   **Owning phase: `YEAR.toml` (table build step 4) for the field; the pre-season checklist for the
   refresh.**
+- **FR-54 — M1's three remaining "partly mechanical" H steps**, un-recorded by the first fold (fold
+  review F12): step **5** (instructions stem + pages: `fNNNN`→`iNNNN` plus the two-row alias
+  `f1040sa`→`i1040sca` / Schedules 1-A/2/3 → `i1040gi`, then a `pdftotext` header search for the
+  page range — machine proposes, human confirms, recorded once in the map header `instr_pages`);
+  step **20** (for a changed line the machine PROPOSES the extract's own line text as the doc
+  comment — that is what transcription is — and the human confirms); step **21** (the census
+  `artifact` rule — header boxes, "Reserved for future use", page-2 repeats — is mechanical by shape
+  and should be pre-filled; engine claims stay human). **Owning phase: the port machine.**
 - **Owner decision, unchanged and still open:** whether TY2017 ships at all (five wired forms, zero
   evidence behind them). Not an implementer's call.

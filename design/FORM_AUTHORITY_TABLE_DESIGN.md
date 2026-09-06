@@ -69,12 +69,22 @@ versioning          = "annual"          # or { periodic = "Rev. 10-2024" }: a pe
 template_sha256     = "…"               # of the bundled PDF; joined BY CONTENT to MANIFEST.json, whose entry must be is_authority()
 instructions        = "i6251"           # "" only for a self-instructing form (f8275)
 instr_pages         = [101, 110]        # only for i1040gi-hosted schedules; the human records it once
-line_set            = "f6251/2025"      # WHICH transcription struct parses this map (§7). constants-only year ⇒ same line_set; renumber ⇒ new one
-attachment_sequence = "32"              # read from the extract; today 16 literals in packet.rs
+line_set            = "f6251/2025"      # the LINE-SET REVISION this map is a transcription of (§7): constants-only year ⇒ same line_set; renumber ⇒ new one
+attachment_sequence = "32"              # read from the extract; today 16 literals in packet.rs. ABSENT on the 1040 itself, which carries no sequence number
 ```
 
 `versioning` is r1's `Revision`, and `line_set` is r1's `MapFamily` — the same two judgments, written
 by the human in the file they already author instead of in a Rust table.
+
+**`line_set` names a revision, and the match is many-to-one** (fold review F5). Today five structs —
+`Form1040Map`, `Form8949Map`, `Form8283Map`, `ScheduleDMap`, `ScheduleSeMap` — each absorb three
+renumbered revisions (2017/2024/2025) with `Option` + `#[serde(default)]` (`Form1040Map`'s own doc:
+`line7a` is "line 7a for 2025, line 7 for 2024, line 13 for 2017"). So those ~13 maps get **per-year
+`line_set`s** (`f1040/2017`, `f1040/2024`, `f1040/2025`) that all resolve to one struct in §5's match,
+and splitting a shared struct into per-revision structs is later work, filed per form. The rule is:
+the header records what the document IS (its revision); the match records what parses it today.
+Deciding the other way — one `line_set` per struct — would erase the renumber the field exists to
+name.
 
 **Derived by convention, never stored:** the form extract `design/forms/extract/<irs_stem>--<year>.txt`,
 the instructions extract `<instructions>--<year>.txt`, the geometry `design/forms/geometry/<irs_stem>--<year>.json`,
@@ -189,14 +199,26 @@ witness) · `forms_expected` == present ∪ absent-with-reason · every `Stem` h
 | `FORMS_ABSENT_FROM_YEAR` | `YEAR.toml` `forms_absent` |
 | `TY2025_RETURN_DUE`, `TRANSITION_DATE` | `YEAR.toml` `return_due` |
 | `selected_year: 2025` × 2 | derived from `YearReadiness` |
-| 16 attachment-sequence literals | the header field, checked against the extract |
+| 16 attachment-sequence literals | the header field, checked against the extract (the 1040 has none) |
+| `cite_check.rs::FORMS` (`FormAuthority { form, year, instructions, instr_pages, extract_stem }`, one row) | `instructions` / `instr_pages` header fields. ★ Its `extract_stem` points at a SECOND extract root, `crates/btctax-core/src/tax/fixtures/` (`schedule_1a_2025_form.txt`, `schedule_1a_2025_instructions.txt`), which §4's derive-by-convention rule cannot express. Decision: those two fixtures move to `design/forms/extract/` under the IRS stem (`f1040s1a--2025.txt`, `i1040gi--2025.txt` pages) and the core tests read them from there; until then the header carries `extract_override = "…"` and the ratchet below keeps its row (fold review F2) |
+| `cite_check.rs::AUTHORITY_NOT_YET_ARCHIVED` (shrink-only, `(form, years)`, 36 of 37 pairs excused today) | This is a DIFFERENT "archived" from the manifest join: it means "no `FormAuthority` row + extract for cite-check", and it retires as map headers gain `instructions`/extract coverage. The MANIFEST join (`template_sha256`) is the other notion and reds today on exactly **6 of 37** templates — all five TY2017 and `forms/2024/f8283.pdf` (measured by sha256 join, fold review F7) — so the header gets `authority = "not-yet-archived: <reason>"` for those six, and the join kill treats that field as the excuse. Two of the six ride on the open TY2017 decision |
 | `BundledFullReturnTables` 2024-only | **untouched** — it is the compute gate; `YEAR.toml` `status` declares, it decides |
 
 ## 10. Sequencing — proof before switch
 
 1. **Header parse + glob-derived row set + the two-way test**, consuming nothing. Add the header fields
-   to the 37 existing maps; parse them with required fields; assert `glob == emitted_form_years()`
-   both ways; plant each §4 kill. **Red on any disagreement is the deliverable.**
+   to the 37 existing maps (`attachment_sequence` absent on the three `f1040` maps; per-year
+   `line_set`s on the ~13 maps served by the five shared structs, §4); parse them with required
+   fields; assert **`{ (irs_stem, year) from the glob's headers } == emitted_form_years()`** both ways
+   — `emitted_form_years()` keys on the IRS basename (`cite_check.rs:853`), so the comparison goes
+   through the new `irs_stem` field or it reds on `schedule_d`/`schedule_se` × 3 years before any
+   defect exists (fold review F4). Plant the four kills that are self-contained here: missing required
+   field → parse refusal; `template_sha256` ≠ file; the manifest join — **expected red on exactly 6
+   rows** (five TY2017 + `forms/2024/f8283.pdf`) until their `authority = "not-yet-archived: …"`
+   header is written, which is the excuse slot (F7); `attachment_sequence` ≠ the extract's
+   "Attachment Sequence No." (tolerating the 1040, F8). The fifth kill — `line_set` naming no schema →
+   compile error — needs §5's match and is planted at step 3 (F6). **Red on any disagreement is the
+   deliverable.**
 2. **`build.rs` beside the old arms**, with a test that `template`/`map_text` agree byte-for-byte with
    every existing `include_*` const, and the `cargo package --list` gate.
 3. **Switch `packet.rs` fills over one at a time**; delete the 18 + 17 arms and `SUPPORTED_YEARS`. The

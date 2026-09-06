@@ -254,7 +254,7 @@ nature, manual today (no committed command does it). **H** = someone must read t
 | 16 | **Adjudicate wherever the two witnesses disagree** | **H** | f8959 lines 5/9/15 sit at the bottom of three-row filing-status blocks; the nearest-label-above witness is off by one on exactly those three, silently and plausibly |
 | 17 | **Decide whether a moved line is the SAME line** | **H** | f6251 `line1` → `line1a`/`line1b` is a split, not a rename; TY2026 Schedule 1-A keeps 10 of 219 fields |
 | 18 | Diff the `.map.toml` key set against the `*Map` struct field set, **both directions** | **M\*** | the check that would have caught `line1a`/`line1b` at commit time instead of at wire-up time (§2.2 #11) |
-| 19 | **Amend the `*Map` struct** when the line set changes; choose alias / new field / refusal | **H** | the struct is a **per-YEAR artifact wearing a per-FORM name** — this is the single thing that makes a year a code change |
+| 19 | **Amend the `*Map` struct** when the line set changes; choose alias / new field / refusal | **H** | the struct is a **per-LINE-SET-REVISION artifact wearing a per-FORM name** (design r2 §7; the first edition said "per-YEAR", which mis-sizes this step both ways — Form 6251 did not renumber 2025→2026, so one struct serves both years) — a new struct is code work only when the line set changes shape |
 | 20 | **Transcribe each mapped line's instruction text verbatim as its doc comment** | **H** | the *check* (comment ⊆ that line's extract text) is mechanical: 17/17 on f8959 |
 | 21 | **Write the `[census]`** — `rule` + `reason` for every unmapped field | **H** | measured volume: **551 reasons / 125,331 B** at TY2024; **242 / 55,329 B** at TY2025 |
 | 22 | Emit the five code bindings | **M\*** | `include_bytes!`, `*_pdf` arm, `include_str!`, `tyYYYY()`, `for_year` arm — **85 hand-edits for a 17-form year** |
@@ -271,10 +271,14 @@ back the F2 hand-list that `emitted_form_years()`, `field_census.rs` and the cro
 just fixed out of (Fable plan review I1; the shape is `design/FORM_AUTHORITY_TABLE_DESIGN.md` r2);
 (b) make every gate walk that glob rather than a literal, starting at `field_census.rs:105`.
 
-**The registry to grow is already in the tree, holding one row** — `cite_check.rs:651-672`
-`FormAuthority { form, year, instructions, instr_pages, extract_stem }`, the only year-as-a-**field**
-table in the workspace, already driving path construction, with a doc comment that states the recipe:
-*"adding a form is a table entry plus a transcription, never a bespoke project."*
+**The one row that exists today is NOT the registry to grow** — `cite_check.rs:740`
+`pub const FORMS: &[FormAuthority { form, year, instructions, instr_pages, extract_stem }]` is a
+hand-written Rust const, i.e. exactly the shape the paragraph above rejects. Its two facts move into
+the map header (`instructions`, `instr_pages`), and its `extract_stem` — which points at a second
+extract root under `crates/btctax-core/src/tax/fixtures/` — is the one edge case the header convention
+must absorb before the const can be deleted (design r2 §9). The recipe its doc comment states —
+*"adding a form is a table entry plus a transcription, never a bespoke project"* — survives with the
+table being the glob.
 
 ### What "REBUILT" actually means — the part, not the form
 
@@ -297,7 +301,7 @@ instruction someone eventually edits on one side only. A whole-form label indire
 
 | axis | right expression | repo exemplar (good) | repo instance (bad) |
 |---|---|---|---|
-| **quantity** — *which number this is* | semantic field name, line number in the doc comment | `AbsoluteReturn` (`return_1040.rs:1530-1660`) — zero `lineNN` fields | `printed.rs` (107), `schedule_1a.rs` (56), `qbi.rs::Form8995Lines` (16) |
+| **quantity** — *which number this is* | semantic field name, line number in the doc comment — **for a CROSS-YEAR quantity**. A transcription struct (`printed.rs`, `schedule_1a.rs`, `qbi.rs::Form8995Lines`) is line-named BY RULE (`CLAUDE.md`, scope amended 2026-09-05) and is the RIGHT place for `lineNN`; the first edition listed those three as the bad example, which was a doctrine reversal presented as synthesis (Fable plan review I2) and is withdrawn here, at the site | `AbsoluteReturn` (`return_1040.rs:1530-1660`) — zero `lineNN` fields | a cross-year consumer that reads `lineNN` fields straight off a transcription struct |
 | **instrument** — *what arithmetic this line does* | variant enum **carried on the year's params bundle**, selected once at table construction | **`SaltLimitation` on `FullReturnParams`** (`tables.rs:323`, `:465`) | `Form6251Line1Rule` — right type, selection left at `return_1040.rs:2493` |
 | **label** — *what number it prints as* | per-year `field → label` table read by emitter and census | `LineCoverage { form, year, line, field, instruction }` — the table already exists | `Schedule1A::leaves()` — 52 literal labels welded to TY2025 |
 
@@ -442,6 +446,7 @@ LIVE · **MOOT** (the risk was real and is retired by the pause — recorded, no
 | **R25** | a year bump that does not extend `TAXCALC_EXACT_YEARS` makes taxcalc smooth the Schedule 1-A step (±$100/$200) | LIVE / IMPORTANT | **LIVE / URGENT** | A TY2026 census is now the **first** thing that runs, and the divergence will read as a btctax rounding defect |
 | **R26** | `verify_schedule_1a._rows()` returns the latest row at or before the year and prints OK | LIVE / IMPORTANT | **LIVE / IMPORTANT** | Unchanged. Correct for a step function, wrong as a year gate |
 | **R27** | `PT_qbid_taxinc_thd` MFS 2026 = 201,775 | LIVE (out of reach) / MINOR | **LIVE / MINOR** | Unchanged; encode as a computed disqualification, do not file on one oracle |
+| **R28** | **Form 1099-DA: TY2026 is the first year brokers report BASIS** (TD 10000, 2026-01-01), and the TY2025 8949 maps box every row I/L ("not reported to you on Form 1099-DA") unconditionally; the owner's dispositions are on exchanges | — (not in the first edition: *"nothing in 27 risks, 24 steps or 17 rules mentions Form 1099-DA"*, Fable plan review C1) | **LIVE / CRITICAL** | The advisory path is fixed (`118b070b`: the full-return export now counts `possibly_broker_reported` instead of a literal 0). The REGIME has a slot (`YEAR.toml information_returns`) and no input: the filer's `broker_reported: none \| proceeds \| basis` answer per disposition source, and the box routing G/H/I (ST) J/K/L (LT), are `FOLLOWUPS.md` FR-46 — a NOW item, because the forms arrive ~2027-02-16 inside the window (strategy review S3) |
 | **new** | **the golden corpus's own `tax_year` label is inert, and its generator defaults to 2024 in four places** | — | **LIVE / IMPORTANT** | `gen_goldens.py` × 3 defaults + one literal, `ots_direct.py`'s `OTS_YEAR` env default, `verify_f6251.py`'s `DEFAULT_FIXTURE_YEAR`; no Rust code reads `_provenance`. The model to copy is `corpus.py:123-132 salt_for(year)`, two files away (I-7) |
 
 ### 5d. What the pause makes MOOT — recorded, not deleted
@@ -527,6 +532,11 @@ LIVE · **MOOT** (the risk was real and is retired by the pause — recorded, no
     command; TY2027 numbers should not be in the tree.
 17. **Do NOT file R24 or R27 as single-oracle upstream reports.** R22 has two independent witnesses
     and clears the bar; those two do not yet.
+18. **Do NOT ship a TY2026 Form 8949 whose box was chosen without a Form 1099-DA answer** (R28,
+    FR-46). A row on an exchange with no `broker_reported` answer REFUSES; a row answered `basis`
+    prints Box A/D (G/J on the digital-asset revision) with (f) = B and (g) = the adjustment when the
+    broker's basis differs from the engine's. The advisory alone is not a gate; it fires today and it
+    is not enough for the year the regime starts.
 
 ---
 
