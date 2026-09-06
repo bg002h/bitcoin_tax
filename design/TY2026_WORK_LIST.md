@@ -47,14 +47,15 @@ added, removed or moved with labels compared, **port** otherwise.
 
 The table above enumerates from available fixture **pairs**. That is the wrong denominator: a form
 the packet emits with no pair silently has no row — the same "clean verdict from zero comparisons"
-shape the cover-sheet correction was about, one level up. Until `forms port-status <year>` exists
-(it must enumerate from the emitting surface, `Stem` × year), the cells it would print are:
+shape the cover-sheet correction was about, one level up. `xtask port-status` prints these rows from the emitting surface (FR-50, done); the PROSE in this table is
+hand-maintained — only the numeric table above is pasted verbatim, and the test holds each row's two claims
+(prior side / new side) to the printer's:
 
 | form | emitted? | prior side (`--2025` final) | TY2026 side | cell |
 |---|---|---|---|---|
 | `f1040` | **yes** — the return itself | `f1040--2025` | **NO DRAFT** — the file archived as `f1040--2026-DRAFT.pdf` was the TY2025 form (found 2026-09-05); its fixture is gone and the "199 common, unchanged" row it produced was a reader artifact (removed 2026-09-06 by the work-list test) | **NO DRAFT** |
 | `f8283` | yes — `packet.rs:223` | `f8283--2025` (Rev. 12-2025, periodic) | **NO DRAFT** — the draft URL served a 2025 document; archiver refused | **NO DRAFT** |
-| `f8275` | yes — `packet.rs:218` | `f8275--2024` (Rev. 10-2024, periodic; aliased by hash for 2025) | **NO DRAFT** — the draft URL served a 2024 document; archiver refused | **NO DRAFT** — periodic; a new revision would be a hash change, not a year |
+| `f8275` | yes — `packet.rs:218` | **NO PRIOR SIDE** for the `--2025` tag — `f8275--2024` (Rev. 10-2024, periodic) is aliased by hash for 2025 | **NO DRAFT** — the draft URL served a 2024 document; archiver refused | **NO DRAFT** — periodic; a new revision would be a hash change, not a year |
 | `f8995a` | yes — `packet.rs:194` | **NO PRIOR SIDE** — bundled for 2024 only; no `f8995a--2025` authority or extract archived (the port report §5d's "keep" was a to-do, not a fact) | draft archived (`f8995a--2026-DRAFT`) | **NO PRIOR SIDE** → archive `f8995a--2025` + `i8995a--2025`, then diff |
 
 Re-run the archiver when the two periodic forms post a 2026 revision; regenerate this list from the

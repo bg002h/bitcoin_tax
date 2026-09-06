@@ -240,7 +240,8 @@ fn main() {
                 "usage: cargo run -p xtask -- <docs [--pdf] | examples | subcommand-coverage | \
                  check-isolation | line-coverage | cite-check | prompt-check | authority-conflicts | harness-check | archive-check | authority-manifest [--regen] | extract-geometry <stem> | label-census <stem> | label-proof <stem> | label-boxes <stem> | \
                  classify-path <path> | \
-                 extract-schedule-1a | dump-fields <pdf>>"
+                 extract-schedule-1a | dump-fields <pdf> | form-delta <old> <new> | \
+                 port-status <prior-tag> <new-tag>>"
             );
             std::process::exit(2);
         }
