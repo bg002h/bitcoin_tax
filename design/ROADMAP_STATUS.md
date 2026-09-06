@@ -161,6 +161,23 @@ Added while working the phases, because a claim nobody executes is not a claim:
 
 ---
 
+### Added 2026-09-05/06 — the year-package table's instruments
+
+- **The ROW** (`forms/<year>/<stem>.map.toml` header, all 37): parse refusal on a missing key; `template_sha256`
+  == the PDF; the manifest join on an AUTHORITY entry with `authority = "not-yet-archived"` as the only excuse
+  (exactly six rows, shrink-only); `attachment_sequence` == the printed "Attachment Sequence No." (extract
+  present) or `SequenceUnverifiable` (five TY2017 rows, pinned); the packet's stapling order == every row.
+- **The build** (`build.rs`): a non-year directory, an unpaired file, or a year without `YEAR.toml` is a
+  build error (each observed red); `cargo package --list` must ship every globbed file and `build.rs`.
+- **The revision** (`LineSet`/`Schema`): an unknown `line_set` is a refusal; a revision without an arm does
+  not compile; `Unwired` is exactly the two step 5 could not wire; wired ⇔ parses over the ten TY2025 maps.
+- **The year record** (`YEAR.toml`): expected ∪ absent == `Stem::ALL`; expected == the glob; per-year
+  expected-count pins (5/17/15) not derived from the glob; a `filable` year's absences obey a structural
+  rule; `YearReadiness`: filable ⇒ params + table + prices through 12-31; slice ⇒ table.
+- **The label reader**: every `line* = "…"` binding is parsed (trailing comments no longer drop it); an
+  x-aware in-row join; per-map join counts printed every run with a zero-join map as a red; floors 235 (2024)
+  / 193 (2025). A planted 2a/2b swap reds both boxes.
+
 ## 3. The honest calendar — partitioned by what each item WAITS ON (Fable plan review I5)
 
 **TY2025 is paused (§0a); the old "TY2025 filed after 2026-10-15" commitment is withdrawn** — it
