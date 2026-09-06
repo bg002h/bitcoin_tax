@@ -6,6 +6,67 @@ _Last updated: **2026-09-06**. Written at a deliberate pause; safe to exit. **Re
 
 # ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
 
+> ## ★★★ RESUME 2026-09-06 (evening) — the 1099-DA build is through T5; T6 (the surfaces) is MAPPED, not started. Read this block first.
+>
+> **Paused at the owner's "Find a place to pause".** Tree clean, everything on `main` (not pushed),
+> HEAD `ab0c98f8`. Owner decisions S1/S2/S6/S7/S9/S10 (`ROADMAP_STATUS.md` §0a) NOT actioned.
+>
+> **Since the afternoon block:** T4 `2feb53d0` (Schedule D 1b/2/8b/9 from the printed 8949's
+> per-box totals; lines 3/10 = the not-reported box only; both maps bind the four rows; census
+> registers lowered 2025/schedule_d 40→24, total 729→713, TY2025 326→310; kill: the G-total lands on
+> 1b). The sonnet re-verification of the T0–C fold persisted `9f977180`
+> (`…build-1099da-T0-C-review-r2.md`, **0C/0I/3M/1N**) and its three Minors folded `820b6d9b`
+> (TUI regime refusal before the exclusive mkdir; the slice refusal's readiness note WATCHED; every
+> year with full-return tables ⊆ bundled years). T5 `ab0c98f8` ((f)/(g) blank on every answer with a
+> PDF read-back kill seen red on a planted code B; `broker_reporting_advisory(year, REGIME, rows)`
+> — live text names box 1g / box 1f / the Note on Form 8949 / `exchange:PROVIDER:ACCOUNT`;
+> `IrsPdfReport.regime`; examples golden byte-identical). Full suite 3083/3083 at HEAD.
+>
+> **NEXT = T6, the surfaces (spec `SPEC_1099da_broker_reporting.md` "T6"). What is already mapped:**
+> 1. **TUI forms tab** `crates/btctax-tui/src/tabs/forms.rs:179` still branches on
+>    `DIGITAL_ASSET_8949_FIRST_YEAR`; make it `btctax_cli::year_readiness::regime_for(year)` with a
+>    third (live) wording — boxes chosen from the answers, compare (e) with box 1g.
+> 2. **`YearReadiness::sentence`** (`year_readiness.rs:115`) gains "1099-DA regime: none |
+>    proceeds | proceeds+basis" from `declared.information_returns.f1099da`; its consumers are the
+>    `report` header (`main.rs:160`) and tests at `:170/:186/:269`.
+> 3. **`report` lists the keys, their rows, the answers:** add a field to `TaxYearReport`
+>    (`cmd/tax.rs:422`) built in `report_tax_year` where `ri`/`state`/`regime` are in scope
+>    (`:524`), print it in `main.rs` after the readiness sentence. Rows per key come from
+>    `btctax_core::forms::broker_key(row)` over `form_8949(&state, year)`; only on a live regime.
+> 4. **`income import` TOML shape** — document `[broker_reporting.<provider>] covered = "…"
+>    noncovered = "…"` in `crates/btctax-cli/tests/fixtures/examples/fullreturn_inputs.toml` (the
+>    examples journey imports it — the golden will change, inspect the diff) and the `Import` doc
+>    comment in `cli.rs:399` (→ man page via `make docs`). The parse test already exists
+>    (`tax.rs:1244`).
+> 5. **The input-form block** (biggest). Seam facts: `btctax-input-form/src/seam.rs` —
+>    `SectionId` (add `BrokerReporting`), `FieldId` (add `BrokerProvider` Text, `BrokerCovered` /
+>    `BrokerNoncovered` `Enum(&["Unanswered","NotReported","ProceedsOnly","BasisMatches",
+>    "BasisDiffers","Mixed"])`), `SectionKind::Repeating{len,add,remove}` over
+>    `ri.broker_reporting.0` (BTreeMap<String, CohortAnswers{covered,noncovered: Option<_>}>; row i =
+>    i-th key; `add` inserts a placeholder key, `remove` deletes; the provider field's `set` renames
+>    the key). Declared in `spec/sections.rs` (model: `DEPENDENTS`/`W2_FIELDS`), listed in
+>    `spec/mod.rs`. The coverage KAT `spec/coverage.rs::every_in_scope_leaf_is_covered_by_exactly_
+>    one_field_or_exempt` needs: one provider entry in `maximal_fixture()` (else the map has no
+>    leaves and is not policed), `addr_for(SectionId::BrokerReporting) = RowAddr(vec![0])`, and an
+>    Enum `sentinel` per new FieldId (panics until added). `attribute.rs:71` re-points the four
+>    `Broker*` refusals from `NotInForm` to `Anchor::Field`s of the block (the TODO there says so).
+>    TUI side: `btctax-tui-edit` — form state built in `main.rs::open_tax_inputs_form` (has
+>    `app.session`; compute the per-(provider, cohort) ROW COUNTS from the ledger there and carry
+>    them on `TaxInputsFormState` so `draw_edit.rs` (RowList at `:2351`, previews from the first
+>    field at `:2577`) can ENUMERATE each key's rows before the answer, as the spec requires); seed
+>    the map with the ledger's keys at open so the rows are the keys, not typed. Then the
+>    `cmd/answer.rs` CLI twin if it enumerates FieldIds.
+> 6. **T7 (owner action, Notice 2026-20 §4.02(2))** → `ROADMAP_STATUS.md` §0a with a date; the
+>    notice text is under `legal/text/` (locate with `find legal -iname '*2026-20*'`); T6 states
+>    whether the per-year method-election record qualifies as the written standing order.
+> Then an independent build review of T3–T7 (opus, worktree at the commit, `main..HEAD` seam-scoped
+> per B3), then the 4868/1040-V build T1–T6 (archive the TY2024 f4868/f1040v revisions first).
+>
+> **Traps (new):** a python `'''` heredoc turns a Rust `\`-newline string continuation into
+> joined lines WITH the indentation — the advisory text gained runs of spaces and the examples
+> golden moved; collapse `(?<=\S) {2,}(?=\S)` inside the string and re-diff the golden. nextest
+> `test(name)` matches TEST names, not binaries — a `test(field_census)` filter ran one test.
+
 > ## ★★★ RESUME 2026-09-06 (afternoon) — the 1099-DA build is through T3 and reviewed; T4 next. Read this block first.
 >
 > **Owner asleep; autonomous.** Everything is committed on `main` (not pushed). Owner decisions
