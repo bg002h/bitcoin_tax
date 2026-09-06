@@ -6,34 +6,37 @@ _Last updated: **2026-09-06**. Written at a deliberate pause; safe to exit. **Re
 
 # ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
 
-> ## ★★★ RESUME 2026-09-06 (early morning) — three reviews in flight; nothing is gating. Read this block first.
+> ## ★★★ RESUME 2026-09-06 (morning) — three reviews in flight; nothing is gating. Read this block first.
 >
 > **Owner asleep; autonomous.** Everything below is committed on `main` (not pushed). Owner decisions
-> S1/S2/S6/S7/S9 and now **S10** (`ROADMAP_STATUS.md` §0a) are NOT actioned.
+> S1/S2/S6/S7/S9 and **S10** (`ROADMAP_STATUS.md` §0a: the crypto slice closes on a LIVE basis-regime
+> year) are NOT actioned.
 >
-> **Done today, in commit order:** the TY2024 goldens regenerated under taxcalc 6.8.2 with every moved
-> field explained (`22a4c0c4`; FOLLOWUPS FR-47 residue (c) DONE); `ROADMAP_STATUS.md` §2 lists the
-> year-package table's instruments (`370b8e80`); spec **1099-DA** r1→r2→r3 through two Opus reviews
-> (r1 4C/3I/8M `2aa4ea98`, ledger `0e53d6b1`, fold `3b0a35a2`; r2 1C/5I/8M `323ceadd`, ledger
-> `98bb056f`, fold `64676905`, S10 `2a383dc3`); the **label-join fold review** (0C/4I/4M `16584a2d`,
-> ledger, fold `91070215`: `Word::y2` bottom edge, inline-table bindings, `map_reach_problem` planted,
-> work list re-derived + held by `the_committed_work_list_matches_form_delta_at_head`, floors 249/201,
-> `FiledPacket` no `Default`, census rule structural); spec **4868/1040-V** DRAFT r1 (`b212e1e6`).
+> **Done today (each review persisted VERBATIM → VERIFICATION ledger → fold, three commits):**
+> - TY2024 goldens regenerated under taxcalc 6.8.2, every moved field explained (`22a4c0c4`).
+> - **Spec 1099-DA** r1→r4 through three Opus reviews (r1 4C/3I/8M, r2 1C/5I/8M, r3 0C/4I/6M; folds
+>   `3b0a35a2`, `64676905`, `08dd6006`). r4 IN REVIEW → `…/2026-09-06-spec-1099da-review-r4.md`.
+> - **Label-join instrument** through three fold reviews (0C/4I/4M → 0C/2I/4M/3N → 0C/1I/5M/3N, gate
+>   TRUSTED; folds `91070215`, `fab4f2fa`, `3070a797`): `Word::y2`, inline tables, `[lineN]` sections
+>   and `[[lineN…]]` arrays all parsed+counted, floors 261/215, `map_reach_problem` planted, the work
+>   list held by `the_committed_work_list_matches_form_delta_at_head`. r4 (sonnet verification) IN
+>   REVIEW → `…/2026-09-06-label-join-fold-review-r4.md`.
+> - **Spec 4868/1040-V** r1 (2C/8I/13M/3N) → r2 (`ddd0df68`). IN REVIEW → `…/2026-09-06-spec-4868-1040v-review-r2.md`.
+> - **FR-50(a):** Schedule 1's TY2025 final archived (`933efdca`); the work list computes 14 pairs, 4
+>   excused, 18 stems, Schedule 1's moved cell UNWITNESSED (FR-58). FOLLOWUPS FR-56..FR-60 filed.
 >
-> **IN FLIGHT (agents write their own reports; persist VERBATIM in its own commit, ledger, fold):**
-> 1. label-join fold re-review → `design/agent-reports/2026-09-06-label-join-fold-review-r2.md`
-> 2. spec 4868/1040-V review → `design/agent-reports/2026-09-06-spec-4868-1040v-review.md`
-> 3. spec 1099-DA r3 re-review → `design/agent-reports/2026-09-06-spec-1099da-review-r3.md`
+> **NEXT, in order:** persist → ledger → fold each landing review until 0C/0I; when 1099-DA is green,
+> build T0–T7 (T0 = `forms/2026/YEAR.toml` + the regime value + `DisposalLeg.acquisition_at`; note
+> `default_year()` → 2026 moves both TUIs); when 4868/1040-V is green, build T1–T6 (archive the TY2024
+> revisions first). Then: Schedule 1-A T2–T7 is GATED ON S1 (do not start); f6251/2025 1a/1b (do once
+> for TY2026); FR-53's runbook step; FR-50's `forms port-status` command; FR-51/52/54 after finals.
 >
-> **NEXT, in order:** fold whichever lands (persist → VERIFICATION ledger → fold → re-dispatch until
-> 0C/0I); when 1099-DA is green, build T0–T7 per its plan (T0 = `forms/2026/YEAR.toml` + the regime
-> value; note `default_year()` → 2026 moves both TUIs); when 4868/1040-V is green, build T1–T6. Then
-> the remaining design r2 holes: Schedule 1-A emitter (f1040s1a/2025, NOW for TY2026), f6251/2025
-> (1a/1b, do once for TY2026), FR-53 prices runbook, FR-50 `forms port-status`, FR-51/52/54.
->
-> **Traps hit today:** `git commit -m "…`x`…"` in a Bash call executes the backticks — use `-F -`
-> with a quoted heredoc (memory `commit-messages-via-dash-f`); `xtask cite-check` does NOT cover
-> `design/SPEC_*.md` — reviewers check `*"…"*` spans by hand; ugrep chokes on `[^<]{0,n}` — use python.
+> **Traps hit today:** `git commit -m` with backticks eats words — use `-F -` + a quoted heredoc
+> (memory `commit-messages-via-dash-f`); a downloaded PDF under `design/forms/` without its `.pdf.txt`
+> provenance note reds the manifest tests (the note's first line is the URL the regen harvests);
+> rustfmt reflows anchors — patch by regex span, assert before writing; a staged file rides into the
+> next commit — `git reset -q` before grouping commits; `xtask cite-check` does NOT cover
+> `design/SPEC_*.md` (FR-60); ugrep chokes on `[^<]{0,n}` — use python.
 
 > ## ★★★ RESUME 2026-09-05 (late) — the Fable plan review is being FOLDED. Read this block first.
 >
