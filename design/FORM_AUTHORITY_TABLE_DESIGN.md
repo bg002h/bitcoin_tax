@@ -67,6 +67,8 @@ year                = 2026              # (exists today)
 irs_stem            = "f6251"           # IRS basename; differs only for schedule_d/schedule_se — STEM_ALIASES retires into this
 versioning          = "annual"          # or { periodic = "Rev. 10-2024" }: a periodic form aliases a prior revision BY HASH, never by year list
 template_sha256     = "…"               # of the bundled PDF; joined BY CONTENT to MANIFEST.json, whose entry must be is_authority()
+authority           = "not-yet-archived: <reason>"   # OPTIONAL. The ONLY excuse the MANIFEST join accepts; six rows today (all five TY2017 + f8283/2024)
+extract_override    = "…"               # OPTIONAL. Only while a second extract root exists (f1040s1a/2025); see §9
 instructions        = "i6251"           # "" only for a self-instructing form (f8275)
 instr_pages         = [101, 110]        # only for i1040gi-hosted schedules; the human records it once
 line_set            = "f6251/2025"      # the LINE-SET REVISION this map is a transcription of (§7): constants-only year ⇒ same line_set; renumber ⇒ new one
@@ -79,7 +81,7 @@ by the human in the file they already author instead of in a Rust table.
 **`line_set` names a revision, and the match is many-to-one** (fold review F5). Today five structs —
 `Form1040Map`, `Form8949Map`, `Form8283Map`, `ScheduleDMap`, `ScheduleSeMap` — each absorb three
 renumbered revisions (2017/2024/2025) with `Option` + `#[serde(default)]` (`Form1040Map`'s own doc:
-`line7a` is "line 7a for 2025, line 7 for 2024, line 13 for 2017"). So those ~13 maps get **per-year
+`line7a` is "line 7a for 2025, line 7 for 2024, line 13 for 2017"). So those **15** maps (5 structs × 3 years) get **per-year
 `line_set`s** (`f1040/2017`, `f1040/2024`, `f1040/2025`) that all resolve to one struct in §5's match,
 and splitting a shared struct into per-revision structs is later work, filed per form. The rule is:
 the header records what the document IS (its revision); the match records what parses it today.
@@ -91,10 +93,14 @@ the instructions extract `<instructions>--<year>.txt`, the geometry `design/form
 the census (the `[census]` table in the same file). A stored path is a second copy of the truth.
 
 **B1 kills, each planted before its checker ships:** a header missing a required field → parse refusal
-(the existing `deny_unknown_fields` structs gain required fields); `template_sha256` ≠ the file → red;
-that hash absent from `MANIFEST.json`, or present on an `is_draft()` entry → red; `line_set` naming no
-schema → **compile error** via the exhaustive match in §5; `attachment_sequence` ≠ the extract's
-"Attachment Sequence No." → red.
+(the existing `deny_unknown_fields` structs gain the required fields AND the two optional ones above —
+an unknown key stays a refusal); `template_sha256` ≠ the file → red; that hash absent from
+`MANIFEST.json`, or present on an `is_draft()` entry → red **unless** the header carries
+`authority = "not-yet-archived: …"` (six rows today; the field is the excuse, and the ratchet is that
+the count may only shrink); `line_set` naming neither a schema nor `Unwired` → **compile error** via the
+exhaustive match in §5 (`Unwired` is the explicit arm for the ten TY2025 maps until step 5 wires them —
+§10); `attachment_sequence` ≠ the extract's "Attachment Sequence No." → red, **except** on a form the
+IRS prints no sequence number for (the 1040 itself).
 
 ## 5. Layer 2 — the binding is a `build.rs`
 
@@ -200,7 +206,7 @@ witness) · `forms_expected` == present ∪ absent-with-reason · every `Stem` h
 | `TY2025_RETURN_DUE`, `TRANSITION_DATE` | `YEAR.toml` `return_due` |
 | `selected_year: 2025` × 2 | derived from `YearReadiness` |
 | 16 attachment-sequence literals | the header field, checked against the extract (the 1040 has none) |
-| `cite_check.rs::FORMS` (`FormAuthority { form, year, instructions, instr_pages, extract_stem }`, one row) | `instructions` / `instr_pages` header fields. ★ Its `extract_stem` points at a SECOND extract root, `crates/btctax-core/src/tax/fixtures/` (`schedule_1a_2025_form.txt`, `schedule_1a_2025_instructions.txt`), which §4's derive-by-convention rule cannot express. Decision: those two fixtures move to `design/forms/extract/` under the IRS stem (`f1040s1a--2025.txt`, `i1040gi--2025.txt` pages) and the core tests read them from there; until then the header carries `extract_override = "…"` and the ratchet below keeps its row (fold review F2) |
+| `cite_check.rs::FORMS` (`FormAuthority { form, year, instructions, instr_pages, extract_stem }`, one row) | `instructions` / `instr_pages` header fields. ★ Its `extract_stem` points at a SECOND extract root, `crates/btctax-core/src/tax/fixtures/` (`schedule_1a_2025_form.txt`, `schedule_1a_2025_instructions.txt`), which §4's derive-by-convention rule cannot express. Decision (corrected, fold review r2 G3): the two fixtures are a SECOND EXTRACTION of files already under the convention — `f1040s1a--2025.txt` (11,153 B vs the fixture's 11,443 B) and pages 101–110 of `i1040gi--2025.txt` (the fixture is a 52,672 B slice; the booklet extract is 616,274 B). **Nothing moves**: a `mv` would clobber the booklet extract every other i1040gi-hosted schedule's gate reads, and pointing `tables.rs:1351,1365` at `design/` would make two escaping `include_str!`s — §5's publishing trap. The fixtures are regenerated at test time from the booklet extract using the header's `instr_pages`, then deleted; until then the header carries `extract_override = "…"` and the ratchet below keeps its row (fold review F2) |
 | `cite_check.rs::AUTHORITY_NOT_YET_ARCHIVED` (shrink-only, `(form, years)`, 36 of 37 pairs excused today) | This is a DIFFERENT "archived" from the manifest join: it means "no `FormAuthority` row + extract for cite-check", and it retires as map headers gain `instructions`/extract coverage. The MANIFEST join (`template_sha256`) is the other notion and reds today on exactly **6 of 37** templates — all five TY2017 and `forms/2024/f8283.pdf` (measured by sha256 join, fold review F7) — so the header gets `authority = "not-yet-archived: <reason>"` for those six, and the join kill treats that field as the excuse. Two of the six ride on the open TY2017 decision |
 | `BundledFullReturnTables` 2024-only | **untouched** — it is the compute gate; `YEAR.toml` `status` declares, it decides |
 
@@ -208,7 +214,7 @@ witness) · `forms_expected` == present ∪ absent-with-reason · every `Stem` h
 
 1. **Header parse + glob-derived row set + the two-way test**, consuming nothing. Add the header fields
    to the 37 existing maps (`attachment_sequence` absent on the three `f1040` maps; per-year
-   `line_set`s on the ~13 maps served by the five shared structs, §4); parse them with required
+   `line_set`s on the 15 maps served by the five shared structs, §4; the ten unwired TY2025 maps — `f6251`, `f8959`, `f8960`, `f8995`, `f1040s1a`, `f1040s2`, `f1040s3`, `f1040sa`, `f1040sb`, `f1040sc` — carry a `line_set` with no schema behind it until step 5); parse them with required
    fields; assert **`{ (irs_stem, year) from the glob's headers } == emitted_form_years()`** both ways
    — `emitted_form_years()` keys on the IRS basename (`cite_check.rs:853`), so the comparison goes
    through the new `irs_stem` field or it reds on `schedule_d`/`schedule_se` × 3 years before any
@@ -222,7 +228,10 @@ witness) · `forms_expected` == present ∪ absent-with-reason · every `Stem` h
 2. **`build.rs` beside the old arms**, with a test that `template`/`map_text` agree byte-for-byte with
    every existing `include_*` const, and the `cargo package --list` gate.
 3. **Switch `packet.rs` fills over one at a time**; delete the 18 + 17 arms and `SUPPORTED_YEARS`. The
-   compiler names every remaining reader.
+   compiler names every remaining reader. The `line_set → struct` match lands here with an explicit
+   **`Unwired`** arm for the ten TY2025 maps named in step 1 — the fifth kill is "a `line_set` that is
+   neither a schema nor `Unwired`", so wiring one at step 5 is a deletion from that arm and forgetting
+   one still cannot compile (fold review r2 G2).
 4. **`YEAR.toml` for 2017/2024/2025** with `YearReadiness` and its kills; move the four literals in.
 5. **`line_set`: add `f6251/2025`** (the 1a/1b struct) and wire the ten orphaned TY2025 maps. **This is
    where the TY2025 6251 map first parses.**

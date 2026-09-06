@@ -184,7 +184,7 @@ census → packet read → filed. Only the last two buckets are on it; NOW work 
 **The default plan is the extension, not April.** Form 4868 with payment by 2027-04-15, file by
 2027-10-15. The owner has said TY2027 timing is acceptable; this is the sequencing that lets every
 gate stay hard under April pressure — the pressure that produced option D ("delete the gate") last
-time. Form 4868 (one AcroForm, an estimate) and 1040-V join P4.
+time. Form 4868 and 1040-V are a NOW item (FR-49, re-owned 2026-09-05); P4 only consumes them.
 
 
 ---
