@@ -6298,6 +6298,18 @@ build, each with an owning phase.
   box 14b (*Treasury Tipped Occupation Code(s)*) at it (D-5) and covers the box with
   `Advisory::TipsDeductionForgoneWithTtoc` instead. The honest end state is the gate read by the
   compute and the box joined to it; the T5 seam review says whether the advisory is honest meanwhile.
+  *(T5 fold `2fe4ba5f`: claiming tips with any of the three conditions `false` now REFUSES
+  `QualifiedTipsCautionNotMet`, fail-closed; the compute gating remains this item.)*
+- **FR-73 — the venue/account granularity note has no docs home (T6 build `a79492ee`). Owning task:
+  interview T12.** `step0.rs::VENUE_GRANULARITY_NOTE` is printed by `income answer`; T12 carries it
+  into `LIMITATIONS.md` with the rest of the interview's stop list.
+- **FR-74 — `hand_marks`' Digital Assets entry is unreachable in production (T6 build `a79492ee`).
+  Owning phase: ownerless residue.** `screen_inputs` refuses a `None`, so no filed packet carries an
+  unanswered box; the entry was kept as a fail-closed backstop with a rewritten sentence. A later
+  pass decides whether the dead branch is deleted or kept as a named backstop with a kill.
+- **FR-75 — the Step 0 panel re-projects the ledger on every `income answer` run and TUI open (T6
+  build `a79492ee`). Owning phase: ownerless residue (post-v1 UX).** Cheap today; the TUI caches it,
+  the CLI could too if a large vault makes it noticeable.
   Owner-driven; the assistant prepares the walk (a checklist of moments from `SPEC_interview.md` §6)
   and records the findings verbatim.
 - **FR-47 — `AmtParams` / `FullReturnParams` TY2026 is a NOW item, not a post-finals one.**
