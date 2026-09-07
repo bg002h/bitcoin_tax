@@ -6247,6 +6247,22 @@ build, each with an owning phase.
   Occupation Code(s)"** — the code Schedule 1-A line 4a's tips deduction turns on; censused `NotRead`
   until T5 joins it to the line-4a gate. Both are the class one pinned edition hid: a box that exists
   only on the paper the TY2026 filer holds.
+- **FR-66 — the census join's scope is seven forms; spec §8 says "every" (T3 seam review I4). Owning
+  task: interview T5.** Schedule C carries 88 `unmodeled` entries per year with no `covered_by` and no
+  direction table (Schedule 1-A, SE, 8949, 8995 likewise); its line 6 (an income line: fuel-tax
+  credit or refund) is covered by a narrow KAT from the T3 fold, nothing else is. Bring every map the
+  interview reaches into `xtask census-join` with a direction table each; then amend R2.2's scope
+  sentence to match §8.
+- **FR-67 — the §6013(g)/(h) nonresident-alien-spouse election has no gate (T3 seam review I5).
+  Owning task: interview T8 (the filing-status gates).** btctax asks nothing about an NRA spouse; an
+  MFJ return for such a filer is computed on the U.S. spouse's income alone. The advisory's false
+  reassurance was removed in the T3 fold; the honest mechanism is a `FormQuestion` beside the HoH /
+  QSS gates whose `Yes` refuses naming the election and a preparer.
+- **FR-68 — the D11 direction flip reads "Subtract line X from line Y" only; the maps' `★ PAREN`
+  entries (Schedule 1 lines 8a, 8d, 8s — printed in parentheses, subtracted inside the line-9 total)
+  stay `Understates` (T3 seam review M4). Owning task: interview T5.** Conservative today (a `Yes`
+  refuses where a forgo would do); derive the second sentence shape from the form's text the way the
+  first is, never from the `★ PAREN` marker alone.
   Owner-driven; the assistant prepares the walk (a checklist of moments from `SPEC_interview.md` §6)
   and records the findings verbatim.
 - **FR-47 — `AmtParams` / `FullReturnParams` TY2026 is a NOW item, not a post-finals one.**
