@@ -833,6 +833,16 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
             crate::edit::form::broker_census_by_provider(&rows)
         })
         .unwrap_or_default();
+    // ★★★ C-1 / R10.4 — year N's row, for the `Durable` date-of-birth HINT and nothing else. Read
+    //     ONCE at open through the persist seam (KAT-G1 confines `conn()` to that module); a missing
+    //     prior row costs the filer a lookup, never an answer.
+    let prior_year = match &loaded {
+        Ok((btctax_cli::input_form_store::Loaded::Committed(ri), _))
+        | Ok((btctax_cli::input_form_store::Loaded::Draft { ri, .. }, _)) => ri
+            .opened_from
+            .and_then(|n| edit::persist::committed_return_inputs(app.session.as_ref().unwrap(), n)),
+        _ => None,
+    };
     let regime = btctax_cli::year_readiness::regime_for(year);
     // ★★★ R10.3 — the SESSION date every answer this flow records is stamped with, read ONCE from the
     //     `BTCTAX_NOW` seam (`app.clock`) rather than from a wall clock inside the edit loop, so a
@@ -841,6 +851,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
     let mut form = match loaded {
         Ok((btctax_cli::input_form_store::Loaded::Fresh, stale_note)) => TaxInputsFormState {
             year,
+            prior_year: prior_year.clone(),
             working: None,
             section_idx: 0,
             field_focus: 0,
@@ -866,6 +877,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
         Ok((btctax_cli::input_form_store::Loaded::Committed(ri), stale_note)) => {
             TaxInputsFormState {
                 year,
+                prior_year: prior_year.clone(),
                 working: Some(ri),
                 section_idx: 0,
                 field_focus: 0,
@@ -892,6 +904,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
         Ok((btctax_cli::input_form_store::Loaded::Draft { ri, parked }, stale_note)) => {
             TaxInputsFormState {
                 year,
+                prior_year: prior_year.clone(),
                 working: Some(ri),
                 section_idx: 0,
                 field_focus: 0,
@@ -929,6 +942,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
             //    undiscardable in-app — exactly the state P2-a exists to prevent.
             TaxInputsFormState {
                 year,
+                prior_year: prior_year.clone(),
                 working: None,
                 section_idx: 0,
                 field_focus: 0,
@@ -10371,6 +10385,64 @@ mod tests {
             crate::edit::persist::store_return_inputs_for_test(session, 2024, &ri).unwrap();
         }
         (app, dir)
+    }
+
+    /// ★★★ **C-1 / R10.4 on the FORM surface: an opened year SHOWS year N's date of birth beside
+    ///     the empty field, and never in it.**
+    ///
+    /// The Critical was `income answer`-specific (the form's `apply` records only after a successful
+    /// `SetField`, so it could not launder a record) — but the *shown* half is R10.4's, and without
+    /// it the filer meets an empty date field with no idea what last year said.
+    #[test]
+    fn the_tax_inputs_form_shows_the_prior_date_of_birth_as_a_hint() {
+        use btctax_core::tax::return_inputs::ReturnInputs;
+        let (mut app, _dir) = app_on_year_to_open(true);
+        // Year 2024's committed row carries a date of birth; year 2025 is opened from it.
+        {
+            let session = app.session.as_mut().unwrap();
+            let mut ri = btctax_core::tax::testonly::answered(ReturnInputs {
+                tax_year: 2024,
+                filing_status: btctax_core::FilingStatus::Single,
+                ..Default::default()
+            });
+            ri.header.taxpayer.date_of_birth = Some(time::macros::date!(1980 - 05 - 05));
+            crate::edit::persist::store_return_inputs_for_test(session, 2024, &ri).unwrap();
+        }
+        handle_key(&mut app, press(KeyCode::Char('n')));
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.open_next_year
+                .as_ref()
+                .and_then(|st| st.done.as_ref())
+                .is_some(),
+            "the year opened"
+        );
+        handle_key(&mut app, press(KeyCode::Esc));
+        open_tax_inputs_form(&mut app);
+        let form = app.tax_inputs_form.as_ref().expect("the form opens");
+        assert!(
+            form.prior_year.is_some(),
+            "an opened year reads year N's row for the hint"
+        );
+        let seeded = form.working.as_ref().unwrap();
+        assert_eq!(
+            seeded.header.taxpayer.date_of_birth, None,
+            "and the field itself is EMPTY — never pre-filled"
+        );
+        // Focus the Taxpayer section and render: the hint is beside the empty field.
+        let rendered = {
+            let f = app.tax_inputs_form.as_mut().unwrap();
+            f.section_idx = crate::edit::form::live_sections(f.working.as_ref().unwrap())
+                .iter()
+                .position(|s| s.id == btctax_input_form::SectionId::Skippables)
+                .expect("the Skippables section is live — the dates of birth live there");
+            let f = app.tax_inputs_form.as_ref().unwrap();
+            crate::draw_edit::tax_inputs_pane_lines_for_test(f)
+        };
+        assert!(
+            rendered.contains("(TY2024: 1980-05-05 — type it to confirm)"),
+            "the prior date is SHOWN beside the empty field:\n{rendered}"
+        );
     }
 
     /// ★★★ **T4b: the action is ABSENT when year N has no committed row** — there is nothing to open

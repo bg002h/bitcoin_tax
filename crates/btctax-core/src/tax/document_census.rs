@@ -808,6 +808,63 @@ mod tests {
         assert_eq!(ri.int_1099.len(), 1);
     }
 
+    /// ★★★ **M-4 — EVERY census setter delegates to the one writer, ONE KIND AT A TIME.**
+    ///
+    /// The seam review measured the gap: planting non-delegating `set` closures on FOUR kinds reds
+    /// exactly one test, because `screen_inputs` short-circuits at the first
+    /// `DocumentCensusContradicted` — so a kind that skips `answer_row` is caught only if it happens
+    /// to be the first offender in a fixture that realizes it. This walks the kinds and gives each
+    /// its OWN fixture, driven through the REGISTRY's `set` (not `answer_row` directly, which is the
+    /// other half of what made the old kill blind).
+    #[test]
+    fn every_census_setter_drops_its_own_pre_named_rows_through_the_registry() {
+        use crate::tax::questions::FORM_QUESTIONS;
+        use crate::tax::return_inputs::{
+            Form1099B, Form1099Div, Form1099G, Form1099Int, ReturnInputs, W2,
+        };
+        for row in DocumentRow::ALL {
+            let mut ri = ReturnInputs::default();
+            if declared_rows(&ri, *row).is_none() {
+                continue; // no section: nothing could be pre-named
+            }
+            match row {
+                DocumentRow::W2 => ri.w2s.push(W2 {
+                    employer: "E".into(),
+                    ..Default::default()
+                }),
+                DocumentRow::Int1099 => ri.int_1099.push(Form1099Int {
+                    payer: "P".into(),
+                    ..Default::default()
+                }),
+                DocumentRow::Div1099 => ri.div_1099.push(Form1099Div {
+                    payer: "P".into(),
+                    ..Default::default()
+                }),
+                DocumentRow::G1099 => ri.g_1099.push(Form1099G {
+                    payer: "P".into(),
+                    ..Default::default()
+                }),
+                DocumentRow::B1099 => ri.b_1099.push(Form1099B {
+                    payer: "P".into(),
+                    ..Default::default()
+                }),
+                other => panic!("{other:?} gained a section — give it a pre-named seed here"),
+            }
+            let q = FORM_QUESTIONS
+                .iter()
+                .find(|q| q.id == row.question_id())
+                .expect("every census row is a registry question");
+            (q.set)(&mut ri, false);
+            assert_eq!(
+                declared_rows(&ri, *row),
+                Some(0),
+                "{row:?}: its registry setter does not go through `answer_row`, so the opener's \
+                 pre-named row survives a `No` and the year refuses on a contradiction the filer \
+                 cannot clear"
+            );
+        }
+    }
+
     /// ★ **The predicate FAILS CLOSED, and here is the smallest thing that proves it**: a row whose
     /// only mark is a `transcribed_on` date — no figure at all — is still the filer's, and is kept.
     /// A predicate written as *"every money box is zero"* would delete it.

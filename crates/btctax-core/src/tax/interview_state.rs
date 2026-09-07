@@ -50,7 +50,7 @@ pub type PanelItem = AnswerKey;
 pub struct Blocking {
     pub item: PanelItem,
     /// The words the filer will be shown.
-    pub prompt: &'static str,
+    pub prompt: std::borrow::Cow<'static, str>,
     /// Why it is listed: unanswered, or answered under earlier words ([`WORDING_CHANGED_REASON`]).
     pub reason: &'static str,
     /// What the answer accounts for — the refusal's own detail, which carries the statutory cite and
@@ -62,7 +62,7 @@ pub struct Blocking {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Forgo {
     pub item: PanelItem,
-    pub prompt: &'static str,
+    pub prompt: std::borrow::Cow<'static, str>,
     /// What skipping forgoes — the registry's own `help` text, or the changed-wording reason.
     pub benefit: &'static str,
     /// ★★ The size of the forgone benefit **where computable**. `None` on a params-less year: R12
@@ -82,7 +82,7 @@ pub struct Forgo {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Refusing {
     pub item: PanelItem,
-    pub prompt: &'static str,
+    pub prompt: std::borrow::Cow<'static, str>,
     /// Derived from the question's own refusal, never re-decided here.
     pub reason: RefuseReason,
     /// The exit sentence the filer is given.
@@ -95,7 +95,7 @@ pub struct Refusing {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Waiting {
     pub item: PanelItem,
-    pub prompt: &'static str,
+    pub prompt: std::borrow::Cow<'static, str>,
     /// The package it waits on, named so the filer knows what they are waiting for.
     pub waiting_on: &'static str,
 }
@@ -181,7 +181,7 @@ fn interview_state_with(
         if let Some((_, pkg)) = params_gated.iter().find(|(id, _)| *id == q.id) {
             st.waiting.push(Waiting {
                 item,
-                prompt: q.prompt,
+                prompt: q.prompt_text(ri),
                 waiting_on: pkg,
             });
             continue;
@@ -189,16 +189,18 @@ fn interview_state_with(
         match (q.get)(ri) {
             None => st.blocking.push(Blocking {
                 item,
-                prompt: q.prompt,
+                prompt: q.prompt_text(ri),
                 reason: "this question has not been answered",
                 accounts_for: q.unanswered_detail,
             }),
             Some(v) => {
                 // ★★★ R10.3 — an answer given under EARLIER words does not stand under later ones.
-                if answer_status(ri, &item, q.prompt) == AnswerStatus::WordingChanged {
+                // ★ R10.4 — hashed against the words RENDERED for this return, so a question that
+                //   quotes a value (the carried filing status) is re-asked when the value changes.
+                if answer_status(ri, &item, &q.prompt_text(ri)) == AnswerStatus::WordingChanged {
                     st.blocking.push(Blocking {
                         item,
-                        prompt: q.prompt,
+                        prompt: q.prompt_text(ri),
                         reason: WORDING_CHANGED_REASON,
                         accounts_for: q.unanswered_detail,
                     });
@@ -209,7 +211,7 @@ fn interview_state_with(
                 if let Some(r) = refusal_of_answer(ri, q.id, v) {
                     st.refusing.push(Refusing {
                         item,
-                        prompt: q.prompt,
+                        prompt: q.prompt_text(ri),
                         reason: r.0,
                         exit: r.1,
                     });
@@ -232,7 +234,7 @@ fn interview_state_with(
         match status {
             AnswerStatus::WordingChanged => st.forgoing.push(Forgo {
                 item,
-                prompt: s.prompt,
+                prompt: std::borrow::Cow::Borrowed(s.prompt),
                 benefit: WORDING_CHANGED_REASON,
                 size: forgo_size(s.id, ri, params),
                 declined: false,
@@ -240,7 +242,7 @@ fn interview_state_with(
             // ★★★ ASKED AND PASSED OVER. Listed, marked, and never blocking. Only `Given` removes it.
             AnswerStatus::Declined => st.forgoing.push(Forgo {
                 item,
-                prompt: s.prompt,
+                prompt: std::borrow::Cow::Borrowed(s.prompt),
                 benefit: s.help,
                 size: forgo_size(s.id, ri, params),
                 declined: true,
@@ -251,7 +253,7 @@ fn interview_state_with(
                 } else {
                     st.forgoing.push(Forgo {
                         item,
-                        prompt: s.prompt,
+                        prompt: std::borrow::Cow::Borrowed(s.prompt),
                         benefit: s.help,
                         size: forgo_size(s.id, ri, params),
                         declined: false,
@@ -370,7 +372,7 @@ fn census_row_invariant(ri: &ReturnInputs, row: DocumentRow) -> Option<Refusing>
         {
             Some(Refusing {
             item,
-            prompt: row.prompt(),
+            prompt: std::borrow::Cow::Borrowed(row.prompt()),
             reason: RefuseReason::DocumentDeclaredNotTranscribed { kind: row },
                 exit: format!(
                     "you declared one or more {doc} and none is transcribed — enter the document, \
@@ -380,7 +382,7 @@ fn census_row_invariant(ri: &ReturnInputs, row: DocumentRow) -> Option<Refusing>
         }
         Some(false) if rows > 0 => Some(Refusing {
             item,
-            prompt: row.prompt(),
+            prompt: std::borrow::Cow::Borrowed(row.prompt()),
             reason: RefuseReason::DocumentCensusContradicted { kind: row },
             exit: format!(
                 "you answered NO to {doc} and this return carries {rows} transcribed row(s) of it — \

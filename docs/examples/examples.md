@@ -728,6 +728,8 @@ $ btctax --vault v.pgp income show --year 2024
   "form_2555_line45": "0",
   "form_2555_line50": "0",
   "form_4563_line15": "0",
+  "opened_from": null,
+  "filing_status_confirmed": null,
   "answer_log": {},
   "answer_log_history": []
 }

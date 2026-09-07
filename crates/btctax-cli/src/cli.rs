@@ -570,10 +570,18 @@ pub enum IncomeCmd {
     /// employer, each 1099 payer, each dependent, each exchange — every box blank, every question
     /// unanswered, and the computed carryforwards carried as data.
     ///
-    /// Nothing about last year's answers comes with them. A prior year's "no" is not testimony for
-    /// this year, so each identity is printed as its own question for you to confirm, and every
-    /// figure except the carryforwards starts blank. Dates of birth are SHOWN (they cannot change)
-    /// and still take the same keystroke a fresh answer takes.
+    /// WHAT COMES WITH THEM, and nothing else: your filing status, your name and SSN (and your
+    /// spouse's), your mailing address, each employer and payer by name and EIN/TIN with every box
+    /// blank, and last year's computed carryforwards. Every one of those is printed for you to
+    /// confirm, and the filing status gets its own question — marital status is determined on the
+    /// last day of the tax year, so last year's is not testimony for this one.
+    ///
+    /// Nothing else crosses. A prior year's "no" is not testimony for this year, so every question
+    /// starts unanswered and every box starts blank. A date of birth is SHOWN beside its prompt (it
+    /// cannot change) and still takes the same keystroke a fresh answer takes — skipping it forgoes
+    /// the age-65 addition rather than confirming the date on your behalf. Dependents and exchanges
+    /// are named as questions but no row is created: an unconfirmed dependent is absent, never
+    /// claimed.
     ///
     /// The carryforwards — §1212(b) capital loss, §170(d)(1) charitable, and the two QBI ones — are
     /// read off year N's computed RETURN, not off what you typed into it, and are stamped as

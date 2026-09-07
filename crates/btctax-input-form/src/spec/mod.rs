@@ -156,8 +156,9 @@ mod tests {
             );
         }
         assert_eq!(
-            decl_count, 15,
-            "15 declarations are Decl* fields (the other two dedup to Schedule A)"
+            decl_count, 16,
+            "16 declarations are Decl* fields (the other two dedup to Schedule A). ★ R10.4 / T4b \
+             added the sixteenth: the carried filing status's confirmation."
         );
         assert_eq!(
             deduped,
@@ -168,11 +169,11 @@ mod tests {
             "exactly the two Schedule-A-owned mortgage declarations dedup"
         );
 
-        // 15 delegating Decl* fields + the foreign_country_names Text field.
+        // 16 delegating Decl* fields + the foreign_country_names Text field.
         assert_eq!(
             decls.fields.len(),
-            16,
-            "15 declarations + foreign_country_names"
+            17,
+            "16 declarations + foreign_country_names"
         );
         assert!(decls
             .fields
@@ -274,6 +275,9 @@ mod tests {
                     expenses: rust_decimal_macros::dec!(1),
                     ..Default::default()
                 });
+                // ★ R10.4 / T4b — liveness primer for the carried filing status's confirmation: it
+                //   is live only on a year the OPENER made.
+                ri.opened_from = Some(2024);
                 ri
             };
             assert!(

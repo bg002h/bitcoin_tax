@@ -173,6 +173,21 @@ pub enum RefuseReason {
     /// the one thing D5's build-shape guard forbids — and it would silently rewrite a figure signed
     /// under 26 USC 6065.
     Nii9bExceedsDeductedSalt,
+    /// ★★★ **R10.4 / T4b — the year was OPENED from the prior one, which carried its FILING STATUS,
+    /// and the confirmation that the status is still right is unanswered.**
+    ///
+    /// §7703(a)(1) determines marital status on the **last day of the tax year**, so it is a per-year
+    /// determination by statute and the year boundary is exactly when it changes. `filing_status` has
+    /// no `None` to leave it unanswered in, so the opener carries it (not carrying asserts *Single*,
+    /// which is worse) — and this declaration is what stops the carry from being silent.
+    FilingStatusUnconfirmed,
+    /// ★★★ **R10.4 / T4b — the filer answered NO: the carried filing status is not this year's.**
+    ///
+    /// The return would compute on the wrong status — brackets, standard deduction, every threshold —
+    /// so it refuses and names where the status is changed. Answering the question again on the new
+    /// status is automatic: the prompt QUOTES the status, so R10.3's `prompt_hash` re-ask rule
+    /// returns it to unanswered the moment the status is edited.
+    FilingStatusChanged,
     /// Form 6251 line 3 — the AMT qualified-dwelling question is live but unanswered.
     AmtQualifiedDwellingUnanswered,
     /// **§164(b)(7)(B)(iv) / Schedule 1-A Part I** — the §911/931/933 exclusion gate is unanswered on
@@ -581,6 +596,10 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         //   is provenance about the ASKING (`FIELD_PROVENANCE.md:400-403` forbids superseded VALUES).
         answer_log: _,
         answer_log_history: _,
+        // ★ R10.4 — a year number and a declaration. No money leaf; the declaration's own refusals
+        //   are the registry's (unanswered) and the adverse-answer screen further down.
+        opened_from: _,
+        filing_status_confirmed: _,
     } = ri;
 
     if form_8960_line9b.is_some_and(neg) {
@@ -1503,6 +1522,21 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
              line 3 must add that deducted interest back (i6251, Line 3 — a houseboat or recreational \
              vehicle is never AMT-qualified). v1 does not model the §56(b)(1)(C) add-back, and computing \
              without it would UNDERSTATE your tax",
+        );
+    }
+    // ★★★ R10.4 / T4b seam review I-1 — the CARRIED filing status was answered NO.
+    if crate::tax::questions::question_is_live(
+        crate::tax::questions::QuestionId::FilingStatusConfirmed,
+        ri,
+    ) && ri.filing_status_confirmed == Some(false)
+    {
+        return refuse(
+            RefuseReason::FilingStatusChanged,
+            "you answered that the filing status carried from the prior year is NOT your filing \
+             status for this one. Every bracket, the standard deduction and every threshold on this \
+             return compute from it, so it cannot be filed on last year's. Change the status — in \
+             the tax-inputs form's Household section, or `filing_status` in the `income import` TOML \
+             — and the confirmation is asked again on the new status",
         );
     }
     if crate::tax::questions::question_is_live(
@@ -2539,6 +2573,8 @@ mod tests {
         match id {
             QuestionId::DependentSpouse => r.filing_status = FilingStatus::Mfj, // live with no spouse Person (P8a I1)
             QuestionId::MfsSpouseItemizes => r.filing_status = FilingStatus::Mfs,
+            // ★ R10.4 / T4b — live ONLY on a year the opener made, which is what `opened_from` says.
+            QuestionId::FilingStatusConfirmed => r.opened_from = Some(2024),
             QuestionId::MortgageAllUsedToBuyBuildImprove
             | QuestionId::AmtQualifiedDwelling
             | QuestionId::MortgageWithinDebtLimit => {
@@ -4775,6 +4811,12 @@ mod param_free_tier {
                 basis_reported_and_no_adjustments: None,
                 ..Default::default()
             });
+        });
+        // ★ R10.4 / T4b — the carried filing status, answered NO. Param-free: the refusal reads
+        //   two `Option`s and no table.
+        add("FilingStatusChanged", &|r| {
+            r.opened_from = Some(2024);
+            r.filing_status_confirmed = Some(false);
         });
         add("DocumentTypeUnsupported", &|r| {
             r.documents.set(DocumentRow::K1, Some(true));

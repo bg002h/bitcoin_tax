@@ -1337,6 +1337,38 @@ pub struct ReturnInputs {
     /// ★★ **Forbidden here** (`FIELD_PROVENANCE.md:400-403`): progress, position, "what remains",
     /// superseded values, half-typed tokens. A grep-KAT pins that no `progress` / `remaining` /
     /// `position` field exists on this struct.
+    /// ★★★ **R10.4 / T4b seam review — THE OPENER'S PROVENANCE LEAF: which year this return was
+    /// opened FROM, or `None` for a year the filer started themselves.**
+    ///
+    /// **Why a stored leaf and not a fact the opener keeps to itself.** The seam review's ruling: *the
+    /// opener may carry an identity only where THIS year has a surface to answer it.* That is a
+    /// property of the return, not of the command that made it — the filer meets the surfaces days
+    /// later, in `income answer` or the form, and by then the only thing that can say *"a prior year
+    /// put this here"* is the row. Two things read it today, and neither could exist without it:
+    /// [`Self::filing_status_confirmed`]'s liveness (a carried status is confirmed on an opened year
+    /// and nowhere else), and the date-of-birth prompt's HINT (year N's date is shown, never
+    /// pre-filled — `Durability::Durable`'s *"never Enter-to-accept, never pre-filled"*).
+    ///
+    /// ★ It is PROVENANCE, never testimony: no printed figure reads it, the filer never types it, and
+    ///   it has no neutral answer to launder. Classified beside `answer_log` for that reason.
+    #[serde(default)]
+    pub opened_from: Option<i32>,
+    /// ★★★ **R10.4 / T4b seam review I-1 — the confirmation that gives the CARRIED filing status a
+    /// surface.**
+    ///
+    /// [`Self::filing_status`] has no `None`, so the year-N+1 opener cannot leave it unanswered: not
+    /// carrying it would assert **Single**, which is a fabricated answer and the wrong one for every
+    /// MFJ filer. So it is carried — and a carried value with nothing to confirm it is exactly what
+    /// R10 forbids. §7703(a)(1) makes marital status a determination on the **last day of the tax
+    /// year**, so the year boundary is precisely when it changes, and carrying MFJ across a divorce is
+    /// the understatement direction.
+    ///
+    /// A class-(A) declaration ([`QuestionId::FilingStatusConfirmed`]), live iff
+    /// [`Self::opened_from`] is `Some`: `None` blocks, `No` refuses and names where to change the
+    /// status. The prompt QUOTES the status, so changing it changes the prompt hash and R10.3's
+    /// re-ask rule returns the question to unanswered for free.
+    #[serde(default)]
+    pub filing_status_confirmed: Option<bool>,
     #[serde(default)]
     pub answer_log: std::collections::BTreeMap<
         crate::tax::provenance::AnswerKey,
@@ -1475,6 +1507,8 @@ impl Default for ReturnInputs {
             // ★ R10.3 — EMPTY, and that is the honest default: a fresh return has been asked nothing.
             //   An entry here is the record of an ACT, so `Default` must not fabricate one any more
             //   than it fabricates an answer.
+            opened_from: None,
+            filing_status_confirmed: None,
             answer_log: std::collections::BTreeMap::new(),
             answer_log_history: Vec::new(),
         }

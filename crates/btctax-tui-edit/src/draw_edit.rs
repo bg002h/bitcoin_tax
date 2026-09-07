@@ -2398,6 +2398,29 @@ fn draw_tax_inputs_status(
 /// - DESCENDED into a nested group (`form.descent` set) that group's sub-list or a sub-row's fields.
 ///
 /// Returns the pane TITLE too (the nested group's title while descended, else the section's).
+/// ★ Test-only: the field pane as plain text, so a KAT can assert what the filer SEES rather than
+///   re-deriving it. Thin — it renders through the same `field_pane_lines` the draw path uses.
+#[cfg(test)]
+pub fn tax_inputs_pane_lines_for_test(form: &TaxInputsFormState) -> String {
+    let Some(ri) = form.working.as_ref() else {
+        return String::new();
+    };
+    let sections = crate::edit::form::live_sections(ri);
+    let Some(section) = sections.get(form.section_idx) else {
+        return String::new();
+    };
+    let (title, lines) = field_pane_lines(form, section, ri);
+    std::iter::once(title)
+        .chain(lines.iter().map(|l| {
+            l.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        }))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn field_pane_lines(
     form: &TaxInputsFormState,
     section: &'static Section,
@@ -2450,7 +2473,18 @@ fn field_pane_lines(
                         dark,
                     )));
                 }
-                push_field_lines(&mut lines, nested, ri, addr, field_focus, editing, buf);
+                push_field_lines(
+                    &mut lines,
+                    nested,
+                    &FieldContext {
+                        ri,
+                        prior_year: form.prior_year.as_ref(),
+                    },
+                    addr,
+                    field_focus,
+                    editing,
+                    buf,
+                );
                 lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled("  [Left/Esc] back", dark)));
             }
@@ -2534,7 +2568,18 @@ fn field_pane_lines(
                 }
             }
         }
-        push_field_lines(&mut lines, section, ri, addr, field_focus, editing, buf);
+        push_field_lines(
+            &mut lines,
+            section,
+            &FieldContext {
+                ri,
+                prior_year: form.prior_year.as_ref(),
+            },
+            addr,
+            field_focus,
+            editing,
+            buf,
+        );
         push_nested_drill_entry(&mut lines, form, section, ri);
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled("  [Left/Esc] back to rows", dark)));
@@ -2543,7 +2588,18 @@ fn field_pane_lines(
     }
 
     // Singleton / PRESENT optional-singleton: the live fields as `label  [value]` + the nested drill entry.
-    push_field_lines(&mut lines, section, ri, addr, field_focus, editing, buf);
+    push_field_lines(
+        &mut lines,
+        section,
+        &FieldContext {
+            ri,
+            prior_year: form.prior_year.as_ref(),
+        },
+        addr,
+        field_focus,
+        editing,
+        buf,
+    );
     push_nested_drill_entry(&mut lines, form, section, ri);
     if matches!(section.kind, SectionKind::OptionalSingleton { .. }) {
         lines.push(Line::from(""));
@@ -2627,15 +2683,24 @@ fn nested_row_preview(
 
 /// Push the live `Field`s of `section` (read at `addr`) as `label  [value]`, the focused field highlighted.
 /// Shared by the singleton pane and the inside-a-row pane so per-row editing renders identically.
+/// The two returns a field row renders against: the one being edited, and — on a year the OPENER
+/// made — year N's, for the `Durable` date hint. One parameter rather than two because they always
+/// travel together and are never meaningful apart.
+struct FieldContext<'a> {
+    ri: &'a ReturnInputs,
+    prior_year: Option<&'a ReturnInputs>,
+}
+
 fn push_field_lines(
     lines: &mut Vec<Line<'static>>,
     section: &'static Section,
-    ri: &ReturnInputs,
+    ctx: &FieldContext<'_>,
     addr: &RowAddr,
     field_focus: usize,
     editing: bool,
     buf: &str,
 ) {
+    let FieldContext { ri, prior_year } = *ctx;
     let focus_style = Style::default()
         .fg(Color::Yellow)
         .add_modifier(Modifier::BOLD);
@@ -2667,7 +2732,12 @@ fn push_field_lines(
             Style::default()
         };
         lines.push(Line::from(Span::styled(
-            format!("  {}  [{}]", f.label, value),
+            format!(
+                "  {}  [{}]{}",
+                f.label,
+                value,
+                durable_hint(f.id, ri, prior_year)
+            ),
             style,
         )));
     }
@@ -2770,6 +2840,40 @@ fn value_is_answered(v: &FieldValue) -> bool {
         FieldValue::Secret(sv) => matches!(sv, SecretView::Set { .. }),
         // `get` never returns `SecretEntry` (inbound-only); treat defensively as answered.
         FieldValue::SecretEntry(_) => true,
+    }
+}
+
+/// ★★★ **C-1 / R10.4 — the `Durable` HINT: year N's date SHOWN beside an empty field, never in it.**
+///
+/// `Durability::Durable` is *"the prior MAY be displayed, but it still requires the same explicit
+/// keystroke as a fresh ask: never Enter-to-accept, never pre-filled"*. The opener seeds the dates of
+/// birth blank and stamps `opened_from`; this is the *displayed* half. It is TEXT — nothing writes
+/// from it, and the record `apply` writes comes from the filer's own `SetField`.
+///
+/// ★ Derived through the skippable's OWN accessor (`field_to_skippable` → `get_date`), never a
+///   hand-list of the two date-of-birth fields, so a durable date added tomorrow is hinted the day
+///   it is added.
+fn durable_hint(
+    id: btctax_input_form::FieldId,
+    ri: &ReturnInputs,
+    prior_year: Option<&ReturnInputs>,
+) -> String {
+    use btctax_core::tax::questions::{Durability, SKIPPABLE_QUESTIONS};
+    let Some(prior) = prior_year else {
+        return String::new();
+    };
+    let Some(sk_id) = btctax_input_form::field_to_skippable(id) else {
+        return String::new();
+    };
+    let Some(sk) = SKIPPABLE_QUESTIONS.iter().find(|s| s.id == sk_id) else {
+        return String::new();
+    };
+    if sk.durability != Durability::Durable || (sk.get_date)(ri).is_some() {
+        return String::new(); // per-year, or already answered THIS year
+    }
+    match (sk.get_date)(prior) {
+        Some(d) => format!("  (TY{}: {d} — type it to confirm)", prior.tax_year),
+        None => String::new(),
     }
 }
 
@@ -2886,23 +2990,35 @@ pub fn draw_open_next_year(frame: &mut Frame, area: Rect, st: &crate::editor::Op
                 .add_modifier(Modifier::BOLD),
         )));
         lines.push(Line::from(""));
+        // ★★★ I-1 — the offer NAMES WHAT CROSSES before it claims anything is blank. It said
+        //     *"Every box arrives blank and every question unanswered"* while the filing status,
+        //     the taxpayer's name, SSN and mailing address crossed — and a filer who reads that has
+        //     no reason to look.
         lines.push(Line::from(format!(
-            "TY{}'s employers, payers, dependents and exchanges are carried over as NAMES, each",
+            "CARRIED from TY{} — confirm each: the filing status, your name and SSN, your",
             st.from
         )));
         lines.push(Line::from(
-            "one a question for you to confirm. Every box arrives blank and every question"
+            "mailing address, each employer and payer by name and EIN/TIN with every box"
                 .to_string(),
         ));
         lines.push(Line::from(
-            "unanswered: last year's answer is not testimony for this year.".to_string(),
+            "blank, and that year's computed carryforwards.".to_string(),
         ));
         lines.push(Line::from(""));
-        lines.push(Line::from(format!(
-            "The only figures carried are TY{}'s computed carryforwards, marked as computed",
-            st.from
-        )));
-        lines.push(Line::from("from that year's return.".to_string()));
+        lines.push(Line::from(
+            "EVERYTHING ELSE is blank and every question is unanswered: last year's answer"
+                .to_string(),
+        ));
+        lines.push(Line::from(
+            "is not testimony for this year. Dependents and exchanges are named as questions"
+                .to_string(),
+        ));
+        lines.push(Line::from(
+            "but no row is created, and a date of birth is shown beside its prompt, never"
+                .to_string(),
+        ));
+        lines.push(Line::from("filled in for you.".to_string()));
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             "  Enter  open    Esc  cancel",

@@ -70,6 +70,83 @@ pub struct FormQuestion {
     pub neutral: bool,
 }
 
+impl FormQuestion {
+    /// ★★★ **The words PUT TO THE FILER for THIS return.**
+    ///
+    /// [`Self::prompt`] verbatim for every question whose subject is fixed text — and the RENDERED
+    /// sentence for the few whose subject is a value on the return itself. The distinction is not
+    /// cosmetic: [`crate::tax::provenance::record_answer`] hashes the words that were shown, and
+    /// R10.3's re-ask rule treats a changed hash as unanswered. So a question that quotes a value
+    /// gets its re-ask **for free** when that value changes — which is exactly what
+    /// [`QuestionId::FilingStatusConfirmed`] needs: change the status, and the confirmation that
+    /// named the old one stops standing.
+    ///
+    /// ★ Rendered prompts live in [`RENDERED_PROMPTS`], a table, rather than in a `match` with a `_`
+    ///   arm: a table can be walked by a KAT (every entry names a real registry question), and a
+    ///   wildcard arm cannot.
+    #[must_use]
+    pub fn prompt_text(&self, ri: &ReturnInputs) -> std::borrow::Cow<'static, str> {
+        RENDERED_PROMPTS
+            .iter()
+            .find(|(id, _)| *id == self.id)
+            .map_or(std::borrow::Cow::Borrowed(self.prompt), |(_, render)| {
+                std::borrow::Cow::Owned(render(ri))
+            })
+    }
+}
+
+/// One question whose prompt is rendered from the return, and the renderer.
+pub type RenderedPrompt = (QuestionId, fn(&ReturnInputs) -> String);
+
+/// The questions whose prompt is RENDERED FROM THE RETURN. See [`FormQuestion::prompt_text`].
+pub const RENDERED_PROMPTS: &[RenderedPrompt] =
+    &[(QuestionId::FilingStatusConfirmed, filing_status_prompt)];
+
+/// *"Your TY2024 return filed as Head of Household. Is Head of Household your filing status for
+/// TY2025? (Marital status is determined on the last day of the tax year — Form 1040 instructions,
+/// Filing Status.)"*
+///
+/// ★ Both years come off the return (`opened_from` and `tax_year`), and the status is named in the
+///   form's own words, so the sentence is checkable against the paperwork the filer holds.
+/// ★★★ **The status in FORM 1040's OWN WORDS** — the five Filing Status checkboxes as the 2024 and
+/// 2025 forms print them.
+///
+/// It exists so a prompt can name the status the way the filer's paperwork does: a question that says
+/// *"Head of household (HOH)"* is checkable against the box on the page, and one that says `HoH` is
+/// not.
+///
+/// ★ It lives HERE and not on `FilingStatus` because `tax/types.rs` is a **frozen** file
+///   (`frozen_guard`): the delta engine is never edited, and a display helper is not worth the
+///   documented exception process.
+#[must_use]
+pub const fn filing_status_words(status: FilingStatus) -> &'static str {
+    match status {
+        FilingStatus::Single => "Single",
+        FilingStatus::Mfj => "Married filing jointly",
+        FilingStatus::Mfs => "Married filing separately (MFS)",
+        FilingStatus::HoH => "Head of household (HOH)",
+        FilingStatus::Qss => "Qualifying surviving spouse (QSS)",
+    }
+}
+
+fn filing_status_prompt(ri: &ReturnInputs) -> String {
+    let status = filing_status_words(ri.filing_status);
+    match ri.opened_from {
+        Some(from) => format!(
+            "Your TY{from} return filed as {status}. Is {status} your filing status for TY{to}? \
+             (Marital status is determined on the last day of the tax year — Form 1040 \
+             instructions, Filing Status.)",
+            to = ri.tax_year
+        ),
+        // Not reachable through `live`, and it still says something true rather than nothing.
+        None => format!(
+            "Is {status} your filing status for TY{to}? (Marital status is determined on the last \
+             day of the tax year — Form 1040 instructions, Filing Status.)",
+            to = ri.tax_year
+        ),
+    }
+}
+
 /// The identity of each registry question. `ALL` is the anchor the completeness test iterates; a new
 /// variant is a compile error in that test until it is listed (§3.5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -155,6 +232,11 @@ pub enum QuestionId {
     DocA1095,
     /// **§5.1 document census** — did the filer receive one or more Form 1098-T?
     DocT1098,
+    /// ★★★ **R10.4 / T4b seam review I-1 — is the CARRIED filing status still this year's status?**
+    ///
+    /// Live only on a year the opener made (`opened_from.is_some()`). APPENDED AT THE END for the
+    /// `decl_tristate!` array-index reason recorded above.
+    FilingStatusConfirmed,
 }
 
 impl QuestionId {
@@ -194,6 +276,7 @@ impl QuestionId {
         QuestionId::DocC1099,
         QuestionId::DocA1095,
         QuestionId::DocT1098,
+        QuestionId::FilingStatusConfirmed,
     ];
 }
 
@@ -1430,6 +1513,36 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         durability: Durability::PerYear,
         neutral: false,
     },
+    // ── ★★★ R10.4 / T4b seam review I-1 — THE CARRIED FILING STATUS'S OWN SURFACE ───────────────
+    //
+    // APPENDED AT THE END for the `decl_tristate!` array-index reason recorded above.
+    FormQuestion {
+        id: QuestionId::FilingStatusConfirmed,
+        // ★ The STATIC fallback. The words actually put to the filer are rendered from the return by
+        //   [`FormQuestion::prompt_text`] — they quote the status and both years — and that is what
+        //   `record_answer` hashes, so CHANGING the status changes the hash and R10.3's re-ask rule
+        //   returns this question to unanswered with no code of its own.
+        prompt: "Is the filing status carried from last year's return still your filing status for \
+                 this tax year? (Marital status is determined on the last day of the tax year — Form \
+                 1040 instructions, Filing Status.)",
+        unanswered: RefuseReason::FilingStatusUnconfirmed,
+        unanswered_detail:
+            "this return was opened from the prior year, which carried its FILING STATUS forward — \
+             and §7703(a)(1) determines marital status on the LAST DAY of the tax year, so last \
+             year's status is not testimony for this one. Confirm it (or say no and change it) — run \
+             `btctax income answer`",
+        // ★ Live ONLY on a year the opener made. A year the filer started themselves stated its own
+        //   status through serde (`filing_status` has no `#[serde(default)]`), which is the ground
+        //   the classifier's exemption cites; this question is the ground on the other path.
+        live: |ri| ri.opened_from.is_some(),
+        get: |ri| ri.filing_status_confirmed,
+        set: |ri, v| ri.filing_status_confirmed = Some(v),
+        // ★ §G-15 — PER-YEAR by statute: §7703(a)(1) redetermines marital status every December 31.
+        durability: Durability::PerYear,
+        // ★ Neutral at TRUE: "yes, unchanged" is the answer that needs no adjustment. A `No` REFUSES
+        //   (`screen_inputs`), because the status the return would compute on is the wrong one.
+        neutral: true,
+    },
 ];
 
 /// The identity of each SKIPPABLE prompt (§2, class B) — the questions where silence is LAWFUL: a bare
@@ -2341,6 +2454,7 @@ mod tests {
                 QuestionId::DocC1099 => 32,
                 QuestionId::DocA1095 => 33,
                 QuestionId::DocT1098 => 34,
+                QuestionId::FilingStatusConfirmed => 35,
             };
             assert_eq!(idx, i, "QuestionId::ALL is out of order / missing {id:?}");
             assert_eq!(
@@ -2351,10 +2465,10 @@ mod tests {
         }
         assert_eq!(
             QuestionId::ALL.len(),
-            35,
-            "17 declarations + the 18 R3 document-census rows"
+            36,
+            "17 declarations + the 18 R3 document-census rows + R10.4's filing-status confirmation"
         );
-        assert_eq!(FORM_QUESTIONS.len(), 35, "one entry per declaration");
+        assert_eq!(FORM_QUESTIONS.len(), 36, "one entry per declaration");
     }
 
     /// ★★★ §G-6/ISO — THE OUT-OF-SCOPE QUESTION MUST NAME THE ISO EXERCISE, WHICH IS NOT INCOME.

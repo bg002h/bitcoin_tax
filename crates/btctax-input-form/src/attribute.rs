@@ -43,6 +43,13 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::MortgageDebtLimitUnanswered => vec![decl(QuestionId::MortgageWithinDebtLimit)],
         R::Form4952DeclarationUnanswered => vec![decl(QuestionId::FilingForm4952)],
         R::AmtQualifiedDwellingUnanswered => vec![decl(QuestionId::AmtQualifiedDwelling)],
+        // ★★ R10.4 / T4b — both halves of the carried filing status anchor on the field that carries
+        //    the CONFIRMATION, not on the status itself: a filer who confirmed by mistake fixes it
+        //    here, and one whose status really changed is told where to change it by the refusal's
+        //    own text (the Household section / the TOML). Not `NotInForm` — a field exists.
+        R::FilingStatusUnconfirmed | R::FilingStatusChanged => {
+            vec![decl(QuestionId::FilingStatusConfirmed)]
+        }
         // ★★ THE CAPITAL LOSS CARRYOVER WORKSHEET'S TWO HEADER CONDITIONS — unanswered and adverse,
         //    all four anchored on the field that carries the answer.
         //

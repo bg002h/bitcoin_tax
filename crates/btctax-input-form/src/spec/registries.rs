@@ -276,6 +276,12 @@ const DECL_FIELDS: &[Field] = &[
         ri.excluded_canceled_debt = None;
         Ok(())
     }),
+    // ★★★ Index 35 — R10.4 / T4b's filing-status confirmation, live only on an OPENED year.
+    //     Appended at the END for the array-index reason above; 17..=34 are the census rows.
+    decl_tristate!(35, FieldId::DeclFilingStatusConfirmed, |ri| {
+        ri.filing_status_confirmed = None;
+        Ok(())
+    }),
     FOREIGN_COUNTRY_NAMES,
 ];
 
@@ -582,6 +588,7 @@ pub fn field_to_question(id: FieldId) -> Option<QuestionId> {
         FieldId::DocC1099 => QuestionId::DocC1099,
         FieldId::DocA1095 => QuestionId::DocA1095,
         FieldId::DocT1098 => QuestionId::DocT1098,
+        FieldId::DeclFilingStatusConfirmed => QuestionId::FilingStatusConfirmed,
         _ => return None,
     })
 }
@@ -640,6 +647,7 @@ pub fn question_to_field(id: QuestionId) -> FieldId {
         QuestionId::DocC1099 => FieldId::DocC1099,
         QuestionId::DocA1095 => FieldId::DocA1095,
         QuestionId::DocT1098 => FieldId::DocT1098,
+        QuestionId::FilingStatusConfirmed => FieldId::DeclFilingStatusConfirmed,
     }
 }
 

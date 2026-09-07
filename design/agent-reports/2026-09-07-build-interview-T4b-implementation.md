@@ -263,3 +263,235 @@ Modified: `crates/btctax-cli/{cli.rs, lib.rs, main.rs, cmd/tax.rs}`,
 `docs/man/btctax-income.1`.
 (`CONTINUITY.md`, `design/ROADMAP_STATUS.md` and the other `design/agent-reports/` files in `git
 status` are not mine.)
+
+---
+
+# Fold (seam review C-1, I-1, I-2, I-3, M-1–M-4, N-1, N-2)
+
+Brief: `design/agent-reports/BRIEF-fold-interview-T4b-review.md`. Review:
+`2026-09-07-build-interview-T4b-review.md` (1C/3I/4M/2N). Ledger:
+`…-review-VERIFICATION.md`. Tree at dispatch `f344d349`; the build under review is `44ca7075`.
+**Nothing committed, nothing pushed.** Full validation green, fmt clean, clippy `-D warnings` clean.
+
+The ledger's shape is what landed: **the opener may carry an identity only where THIS year has a
+surface to answer it**, made structural by one provenance leaf.
+
+## 1. `opened_from: Option<i32>` — the provenance leaf
+
+`ReturnInputs.opened_from`, `#[serde(default)]`, set by `seed` to N. It is what makes the ruling
+enforceable at the surfaces the filer meets *days* later: `income answer` and the form are handed a
+row, not a command history, and only this leaf can say *"a prior year put this here"*. Two things
+read it and neither could exist without it — `FilingStatusConfirmed`'s liveness, and the
+date-of-birth hint.
+
+**Classification — and one deviation, machine-checked.** The brief asked for a **`LEAF_SOURCE`
+entry**; that is not implementable and the KAT says so. `LEAF_SOURCE` is the **money**-leaf table,
+and its audit runs both directions — *"every prefix matches at least one money leaf"*. Planted the
+entry and ran the KAT:
+
+```
+left:  Audit { unsourced: [], unmatched: ["opened_from"], multi: [] }
+right: Audit { unsourced: [], unmatched: [],              multi: [] }
+```
+
+So the provenance placement is the `answer_log`-shaped pair the brief offers as the alternative:
+
+- **classifier** (`classifier.rs`) — `c.exempt(opened_from, Class::NoTaxDirection, "R10.4 opener
+  provenance — which year this return was opened FROM: no printed figure reads it, the filer never
+  types it, and `None` means \"the filer started this year themselves\" (§2.1)")`. Never a filer
+  answer.
+- **coverage KAT** (`btctax-input-form/src/spec/coverage.rs`) — `"opened_from"` in `EXEMPT_LEAVES`
+  by name, with the reason: *no form field could ask for it, because the filer does not know or
+  choose it — and the one thing it decides is asked as its own declaration, which DOES have a field.*
+- `income import` round-trips it (kill below).
+
+## 2. C-1 — shown, not pre-filled
+
+**`seed` leaves `date_of_birth: None` on taxpayer and spouse.** The prior date is DISPLAYED at
+prompt time instead, on both surfaces, read from year N's committed row via `opened_from`:
+
+- **`income answer`** — the `SkippableKind::Date` prompt now reads
+  `YOUR date of birth [none; TY2024's return gave 1980-05-05 — type it to confirm; Enter to skip]:`.
+  The hint is derived through the skippable's **own** `get_date` accessor, never a hand-list of the
+  two DOBs.
+- **the tax-inputs form** — `TaxInputsFormState.prior_year` (loaded once at open through the
+  KAT-G1 persist seam) and `draw_edit::durable_hint`, which appends `  (TY2024: 1980-05-05 — type it
+  to confirm)` beside an unanswered `Durable` date. Also derived from `Durability::Durable` +
+  `field_to_skippable`, so a durable date added tomorrow is hinted the day it is added.
+
+Typing the date is a fresh `SetField` → a fresh record; a bare Enter now leaves the value `None`, so
+`skippable_state` records **`Declined`** and `is_aged` lawfully forgoes. `skippable_state` itself is
+untouched — option (a), the smaller change, which keeps the one writer.
+
+## 3. I-1 — filing status has a surface, and what crossed is named
+
+**`filing_status_confirmed: Option<bool>` + `QuestionId::FilingStatusConfirmed`**, a class-(A)
+`FormQuestion` appended at the end of `FORM_QUESTIONS` (index 35 — the `decl_tristate!` array-index
+rule), with `FieldId::DeclFilingStatusConfirmed` and `decl_tristate!(35, …)` so the form asks it too.
+`live: |ri| ri.opened_from.is_some()`; `neutral: true`; `durability: PerYear`. `None` blocks
+(`RefuseReason::FilingStatusUnconfirmed`); `No` refuses (`RefuseReason::FilingStatusChanged`) naming
+where the status is changed — the Household section or the `income import` TOML.
+
+**The prompt as committed** (rendered, from the live binary):
+
+> Your TY2024 return filed as Head of household (HOH). Is Head of household (HOH) your filing status
+> for TY2025? (Marital status is determined on the last day of the tax year — Form 1040
+> instructions, Filing Status.)
+
+**A dynamic prompt needed machinery, and this is it** (deviation, recorded): `FormQuestion.prompt` is
+`&'static str` and cannot quote a value. Rather than add a field to all 36 literals,
+`questions::RENDERED_PROMPTS` is a **table** of `(QuestionId, fn(&ReturnInputs) -> String)` and
+`FormQuestion::prompt_text(&self, ri) -> Cow<'static, str>` reads it — a table, not a `match` with a
+`_` arm, so a KAT can walk it. Consequences, all mechanical: `provenance::current_prompt` takes `&ri`
+and returns `Cow`; `apply.rs` and `income answer` record the RENDERED words; `interview_state`
+compares and reports them (its four item structs' `prompt` became `Cow<'static, str>`). That is what
+buys **the re-ask for free**: the prompt quotes the status, so editing the status changes the hash,
+and R10.3's mismatch rule returns the confirmation to unanswered with no code of its own.
+
+**The classifier's `SerdeRequired` ground corrected** — it now names both paths, one per
+construction route: serde refuses a TOML without `filing_status`; and on a year the OPENER made,
+where no TOML is parsed, this declaration is the ground.
+
+**What crossed is named, everywhere.** `Opened.carried_identity: Vec<String>`, built from
+`CARRIED_IDENTITY` (phrase → leaf prefixes, plus an `always` flag). `render` now opens with
+
+```
+Opened TY2025 from TY2024.
+  Carried from TY2024 — CONFIRM each: the filing status (…), your name and SSN, your mailing
+  address, each employer and payer, by name and EIN/TIN, with every box blank, the carryforwards
+  computed on that return, and which year this one was opened from.
+  Everything else is blank and every question is unanswered.
+```
+
+and `cli.rs`'s `--help`, the regenerated man page and the TUI offer say the same. `always` exists
+because `filing_status` has no `None`: a Single filer's carried status is byte-identical to a
+defaulted one and no diff can see it — the miniature of the finding itself.
+
+## 4. I-2 — dependents are not seeded
+
+`seed` carries `dependents: Vec::new()`. `identities_of` still names every prior dependent from year
+N's row (name + relationship, never the SSN). An unconfirmed dependent is **absent, not claimed** —
+the row IS the claim, and it prints the person and their SSN in the 1040 Dependents grid. FR-70 (T7)
+is where the row returns, once `DEPENDENT_GATES` can answer for it.
+
+## 5. I-3 — no venue key
+
+The `broker_reporting` arm left `seed`. The prompt already read `prior`, and the key bought nothing
+while flipping `answers_stored` — the predicate `admin.rs` selects the export arm with, resolved
+through the **draft** — back to the sentence R6 fold M-4 had just fixed.
+
+## 6. M-1 → M-4, N-1, N-2
+
+- **M-1** — the report now says year N's `--write-carryover` is unnecessary and will refuse while the
+  draft exists, and *"Do not pass `--discard-draft` to it — that discards the year you just opened."*
+  The kill also asserts the refusal it warns about really fires.
+- **M-2** — `payer_of`'s `match` is exhaustive; a kind that gains a section fails to COMPILE.
+- **M-3** — the retention kill compares year N's committed row, its **draft row and that draft's
+  `parked` flag** (the answer log rides inside the committed row).
+- **M-4** — a new core KAT walks the kinds and gives each its **own** fixture, driven through the
+  REGISTRY's `set`. The old kill saw only the alphabetically-first offender (`screen_inputs`
+  short-circuits) and called `answer_row` directly.
+- **N-1** — `render` is `format!` throughout; the `s.replace("{from}", …)` over the accumulated
+  string is gone.
+- **N-2** — `--from` is `checked_add` + bounded to `2014..=2100` **before** any arithmetic.
+
+## Deviations
+
+1. **No `LEAF_SOURCE` entry for `opened_from`** — machine-checked above; the table is money-only and
+   the entry reds its own KAT. Classifier + coverage exemptions instead, as the brief's alternative.
+2. **The dynamic prompt is a table + `prompt_text`**, not a new `FormQuestion` field; `current_prompt`
+   became `ri`-aware and `interview_state`'s prompts became `Cow<'static, str>`. Required by the
+   brief's own "assert the re-ask" instruction.
+3. **`filing_status_words` lives in `questions.rs`, not on `FilingStatus`.** It was written as
+   `FilingStatus::form_1040_words` first and REVERTED: `tax/types.rs` is a **frozen** file, and
+   `frozen_guard::frozen_engine_files_are_unchanged` red immediately
+   (`left: 96a7949b… right: 51b912cc…`). Its documented exception process is *"its own
+   separately-reviewed commit"* — not something to fold into other work. `types.rs` hashes clean.
+4. **`MIN_YEAR..=MAX_YEAR` = `2014..=2100`** for N-2 — generous at the top on purpose (opening a
+   future year is how the interview is used in January) and the refusals say what is missing.
+5. **`CARRIED_IDENTITY` is a table in the source with a structural kill**, not prose in `render`, so
+   the report cannot fall behind `seed`.
+
+## Kills — every one watched RED on a planted defect
+
+| # | kill | plant | red |
+|---|---|---|---|
+| C-1a | `a_bare_enter_on_the_shown_date_of_birth_never_records_it_as_given_this_year` | the DOB pre-filled again | ``the durable fact is NOT pre-filled`` |
+| C-1b | same, **the review's own probe** (pre-fill + the value assertion suspended) | the DOB pre-filled | ``a skip may record DECLINED (asked, passed over) and NEVER `Given`: AnswerRecord { answered_on: 2026-02-03, prompt_hash: "33a53d9e…", state: Given }`` |
+| C-1c | same (the hint half) | the `income answer` hint removed | ``the prior date is SHOWN in the prompt: …`` |
+| C-1d | `the_tax_inputs_form_shows_the_prior_date_of_birth_as_a_hint` | the form hint removed | ``the prior date is SHOWN beside the empty field:`` |
+| — | `the_date_of_birth_hint_appears_only_on_an_opened_year`; `typing_the_shown_date_of_birth_writes_a_fresh_record_dated_by_the_seam` | (paired halves — a hint nobody can answer, and a hint on a year with no prior) | green |
+| I-1a | `every_leaf_the_seed_carries_is_named_in_the_report` | the mailing-address phrase deleted | ``` `header.address_street` is covered by "mailing address", which the report does not print ``` |
+| I-1b | `the_carried_filing_status_is_confirmed_by_its_own_question` | `live: |_| false` | ``live on an opened year`` |
+| I-1c | `answering_no_to_the_filing_status_confirmation_refuses_and_names_the_exit` | the adverse screen disabled | ``a NO must refuse`` (and, in core, ``the commit gate must reach FilingStatusChanged on its own fixture``) |
+| I-1d | `changing_the_filing_status_re_asks_the_confirmation` | `RENDERED_PROMPTS` emptied | ``the status changed, so the words changed, so the answer no longer stands`` |
+| I-1e | `the_filers_identity_crosses_and_the_per_year_header_facts_do_not` | *(rewritten on **HoH**, which `Default` cannot produce — the old Single fixture could not tell carried from defaulted)* | green |
+| I-2 | `a_dependent_and_a_venue_are_prompted_and_never_seeded` | dependents re-seeded | ``I-2 — the ROW is not seeded: an unconfirmed dependent is ABSENT, not claimed: [Dependent { name: "Sam Filer", … }]`` |
+| I-3a | same test | the venue key re-seeded | ``I-3 — no venue key…: {"coinbase": CohortAnswers { covered: None, noncovered: None }}`` |
+| I-3b | `the_seeded_year_does_not_claim_stored_broker_answers` | the venue key re-seeded | the `answers_stored` predicate flips true |
+| M-1 | `the_report_says_the_write_carryover_is_no_longer_needed` | the note suppressed | ``the report warns about the chain that would destroy the opened year: …`` |
+| M-3 | `nothing_about_year_n_changes` | the opener writes year N's draft | ``year N is READ: its committed row, its draft and that draft's parked flag are untouched`` |
+| M-4 | `every_census_setter_drops_its_own_pre_named_rows_through_the_registry` | **B1099** (a NON-first kind) stops delegating | ``B1099: its registry setter does not go through `answer_row`…`` |
+| N-2 | `an_out_of_range_from_year_refuses_instead_of_overflowing` | the range check removed | ``1900: usage: there are no full-return inputs for 1900…`` |
+| — | `opened_from_round_trips_through_income_import` | `#[serde(skip)]` on the field | ``unknown key(s) in the ReturnInputs TOML: opened_from`` |
+
+M-2 needs no plant: it is a compile error by construction (the exhaustive `match`).
+
+## Pinned numbers moved
+
+| number | old → new | cause |
+|---|---|---|
+| `QuestionId::ALL.len()` / `FORM_QUESTIONS.len()` | 35 → **36** | `FilingStatusConfirmed` |
+| `Decl*` field count (`spec/mod.rs`) | 15 → **16** | its form field |
+| Declarations section field count | 16 → **17** | same (+ `foreign_country_names`) |
+| coverage `field_count` | 116 → **117** | same |
+| coverage `covered.len()` | 114 → **115** | same (and the "rises to 116 when T9/T5 land" note → **117**) |
+| `m1_preserve_order` ALLOWED list | +`btctax-cli/src/open_next_year.rs` | audited: `leaves_the_seed_writes`'s two `Value`s die inside the function and decide DISPLAY text only; the draft is written by typed serde |
+| `docs/examples/examples.md` | regenerated | `income show` now prints `opened_from: null`, `filing_status_confirmed: null` |
+| `docs/man/btctax-income-open-next-year.1` | regenerated | the `--help` text names what crosses |
+
+`tax/types.rs`'s frozen SHA-256 is **unchanged** (`51b912cc…`) — see deviation 3.
+
+## Journey walk with the real binary
+
+Rebuilt and drove a scratch vault (`HoH`, one W-2): `import 2024` → `answer 2024` →
+`open-next-year --from 2024` → `answer 2025`. Observed, verbatim:
+
+- the report's first two lines name the six carried things and then bound the blankness claim;
+- `Your TY2024 return filed as Head of household (HOH). Is Head of household (HOH) your filing
+  status for TY2025? (Marital status is determined on the last day of the tax year — Form 1040
+  instructions, Filing Status.) [y/n]:`
+- `YOUR date of birth [none; TY2024's return gave 1980-05-05 — type it to confirm; Enter to skip]:`
+- the M-1 sentence about `--write-carryover`, and the `NOT the capital-loss carryover` line.
+
+## Suite lines (whole validation surface, one run each)
+
+| crate | result |
+|---|---|
+| btctax-core | 1261 tests run: **1261 passed**, 0 skipped |
+| btctax-cli | 778 tests run: **778 passed**, 1 skipped |
+| btctax-tui-edit | 388 tests run: **388 passed**, 2 skipped |
+| btctax-input-form | 68 tests run: **68 passed**, 0 skipped |
+| btctax-tui | 160 tests run: **160 passed**, 2 skipped |
+| btctax-forms | 354 tests run: **354 passed**, 4 skipped |
+| btctax-adapters | 103 tests run: **103 passed**, 0 skipped |
+| btctax-store | 45 tests run: **45 passed**, 0 skipped |
+| btctax-oracle-harness | 5 tests run: **5 passed**, 1 skipped |
+| xtask | 154 tests run: **154 passed**, 1 skipped |
+| btctax-update-prices | 5 tests run: **5 passed**, 1 skipped |
+
+`cargo fmt --all -- --check` clean. `CARGO_TARGET_DIR=target-clippy cargo clippy --workspace
+--all-targets --all-features -- -D warnings` clean (two findings fixed on the way: a
+`type_complexity` on `RENDERED_PROMPTS` → the `RenderedPrompt` alias, and `too_many_arguments` on
+`push_field_lines` → a `FieldContext` struct).
+
+## Files touched by the fold
+
+`crates/btctax-core/src/tax/{return_inputs.rs, questions.rs, classifier.rs, return_refuse.rs,
+provenance.rs, interview_state.rs, document_census.rs, scrub.rs, scrub_axis.rs}`,
+`crates/btctax-input-form/src/{apply.rs, attribute.rs, seam.rs, spec/{registries.rs, mod.rs,
+coverage.rs}}`, `crates/btctax-cli/src/{open_next_year.rs, cli.rs, cmd/answer.rs}`,
+`crates/btctax-cli/tests/{open_next_year_t4b.rs, tax_profile.rs}`,
+`crates/btctax-tui-edit/src/{draw_edit.rs, main.rs, edit/{form.rs, persist.rs}}`,
+`docs/man/btctax-income-open-next-year.1`, `docs/examples/examples.md`.
+(`CONTINUITY.md` and `scripts/pii-scan-generic.sh` in `git status` are **not mine**.)

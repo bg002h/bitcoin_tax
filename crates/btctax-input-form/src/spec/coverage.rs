@@ -94,6 +94,9 @@ fn maximal_fixture() -> ReturnInputs {
         filing_status: FilingStatus::Mfs,
         ..Default::default()
     };
+    // ★★ R10.4 / T4b — liveness primer for `DeclFilingStatusConfirmed`: the confirmation is live
+    //    only on a year the OPENER made, and this fixture must reach every field's setter.
+    ri.opened_from = Some(2024);
     ri.header.spouse = Some(Person::default());
     ri.header.ip_pin = Some("000000".to_string());
     ri.header.dependents = vec![Dependent::default()];
@@ -155,10 +158,13 @@ fn maximal_fixture() -> ReturnInputs {
             //   else is refused as unanswered by `screen_inputs` (R10.3), and a fixture that refuses
             //   for a reason unrelated to coverage is a trap for the next reader.
             prompt_hash: btctax_core::tax::provenance::prompt_hash(
-                btctax_core::tax::provenance::current_prompt(
+                // ★ R10.4 — `current_prompt` renders a question's words FROM the return, so the
+                //   fixture hands it the return it is building the record for.
+                &btctax_core::tax::provenance::current_prompt(
                     &btctax_core::tax::provenance::AnswerKey::Question(
                         btctax_core::tax::questions::QuestionId::ForeignTrust,
                     ),
+                    &ri,
                 )
                 .expect("a registry question has a prompt"),
             ),
@@ -423,6 +429,12 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
         "answer_log_history",
     ];
     const EXEMPT_LEAVES: &[&str] = &[
+        // ★★★ **R10.4 / T4b — WHICH YEAR THIS RETURN WAS OPENED FROM.** Provenance, in the same class
+        //     as the answer log above and the `*_provenance` leaves below: *ours, not the filer's*.
+        //     `open_next_year` stamps it; no form field could ask for it, because the filer does not
+        //     know or choose it — and the one thing it decides (whether the carried filing status is
+        //     confirmed) is asked as its own declaration, which DOES have a field.
+        "opened_from",
         // ★★ §G-15 — `tax_year` is the SCOPE the form is filled in, not a value the filer types into
         // it. It is set by the command (`--year`) and stamped from the storage row key, so an input
         // field for it would invite the filer to contradict the year their return is filed under.
@@ -555,15 +567,17 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     // change happened to keep the sets balanced.
     let field_count: usize = form_spec().iter().map(|s| s.fields.len()).sum();
     assert_eq!(
-        field_count, 116,
-        "expected 116 Fields — 98 + R3's eighteen document-census rows"
+        field_count, 117,
+        "expected 117 Fields — 98 + R3's eighteen document-census rows + R10.4's filing-status \
+         confirmation"
     );
     assert_eq!(
         covered.len(),
-        114,
-        "expected 114 distinctly-covered in-scope leaves — 98 + SIXTEEN of R3's eighteen census \
+        115,
+        "expected 115 distinctly-covered in-scope leaves — 98 + R10.4's filing-status confirmation \
+         + SIXTEEN of R3's eighteen census \
          rows. The other two (`form_1098` → T9, `form_1098e` → T5) have a Field but are shadowed by \
-         a scalar and so are not live; they are EXEMPT above, and this number rises to 116 when \
+         a scalar and so are not live; they are EXEMPT above, and this number rises to 117 when \
          their sections land."
     );
 
@@ -822,6 +836,10 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
     (FieldId::DocC1099, "documents.c_1099"),
     (FieldId::DocA1095, "documents.a_1095"),
     (FieldId::DocT1098, "documents.t_1098"),
+    (
+        FieldId::DeclFilingStatusConfirmed,
+        "filing_status_confirmed",
+    ),
     (FieldId::BlindTaxpayer, "header.taxpayer.blind"),
     (FieldId::BlindSpouse, "header.spouse.blind"),
     (FieldId::DobTaxpayer, "header.taxpayer.date_of_birth"),

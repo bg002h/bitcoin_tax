@@ -231,6 +231,9 @@ pub enum FieldId {
     DocA1095,
     /// Census: did the filer receive one or more Form 1098-T?
     DocT1098,
+    /// ★ R10.4 / T4b — is the filing status CARRIED by the year-N+1 opener still this year's status?
+    ///   Live only on a year the opener made (`opened_from.is_some()`).
+    DeclFilingStatusConfirmed,
 }
 
 /// The value shape of a field.

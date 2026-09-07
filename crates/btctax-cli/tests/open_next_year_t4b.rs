@@ -376,16 +376,18 @@ fn every_per_year_gate_on_the_seed_is_unanswered() {
     }
 }
 
-/// ★★★ **A `Durable` fact is SHOWN and carries NO `AnswerRecord` until a fresh keystroke confirms
-///     it — and the confirmation writes a record dated by the clock seam, hashing the prompt as it
-///     reads today.**
+/// ★★★ **C-1 — THE SEAM REVIEW'S PROBE: a `Durable` date of birth is SHOWN AS A HINT and NEVER
+///     PRE-FILLED, so the documented SKIP keystroke cannot become this year's testimony.**
 ///
-/// A carried confirmation would be a prior-year answer satisfying this year's provenance, which is
-/// the one thing R10 exists to prevent.
+/// The build pre-filled it. `income answer`'s `skippable_state` decides `Given` vs `Declined` by
+/// reading the VALUE, so a bare Enter — the documented skip — left year N's date in place and wrote
+/// `AnswerRecord { answered_on: <this session>, state: Given }`: a prior-year answer satisfying this
+/// year's provenance, one command after the module header declared that structurally impossible.
+/// `Durability::Durable` says it in words: *"never Enter-to-accept, never pre-filled"*.
 #[test]
-fn a_durable_fact_is_shown_but_unanswered_until_the_filer_confirms_it() {
-    use btctax_core::tax::provenance::{prompt_hash, AnswerKey, AnswerState};
-    use btctax_core::tax::questions::{SkippableId, SKIPPABLE_QUESTIONS};
+fn a_bare_enter_on_the_shown_date_of_birth_never_records_it_as_given_this_year() {
+    use btctax_core::tax::provenance::{AnswerKey, AnswerState};
+    use btctax_core::tax::questions::SkippableId;
     let (_dir, vault) = vault_with_year_n(|ri| {
         a_year_with_money_in_it(ri);
         // Year N ANSWERED its own date of birth — a record exists on year N.
@@ -400,48 +402,61 @@ fn a_durable_fact_is_shown_but_unanswered_until_the_filer_confirms_it() {
     open(&vault, false);
     let seed = draft(&vault);
     assert_eq!(
-        seed.header.taxpayer.date_of_birth,
-        Some(time::macros::date!(1980 - 05 - 05)),
-        "the durable fact is SHOWN"
+        seed.header.taxpayer.date_of_birth, None,
+        "the durable fact is NOT pre-filled"
     );
+    assert_eq!(seed.opened_from, Some(FROM), "the year is carried instead");
+    assert!(seed.answer_log.is_empty(), "and no record crosses");
+
+    // The filer does the documented SKIP: a bare Enter on every skippable.
+    let screen = answer_the_draft(&vault, |_| String::from("\n"));
     assert!(
-        seed.answer_log.is_empty(),
-        "and it is NOT answered: the opener carries no record at all — {:?}",
-        seed.answer_log
+        screen.contains("TY2024's return gave 1980-05-05 — type it to confirm"),
+        "the prior date is SHOWN in the prompt: {screen}"
     );
-
-    // The filer confirms it at the keyboard. The registry is walked for the script so the count
-    // cannot drift; every declaration answers "n", every skippable is passed over EXCEPT the date of
-    // birth, which is retyped.
-    let asks = cmd::answer::live_questions(&seed);
-    let mut script = String::new();
-    for a in &asks {
-        match a {
-            btctax_cli::cmd::answer::Ask::Declaration(_) => script.push_str("n\n"),
-            btctax_cli::cmd::answer::Ask::Skippable(sk) if sk.id == SkippableId::DobTaxpayer => {
-                script.push_str("1980-05-05\n");
-            }
-            btctax_cli::cmd::answer::Ask::Skippable(_) => script.push('\n'),
-        }
-    }
-    let mut keys = script.as_bytes();
-    let mut screen = Vec::new();
-    cmd::answer::answer_return_inputs(
-        &vault,
-        &pp(),
-        TO,
-        time::macros::date!(2026 - 02 - 03),
-        &mut keys,
-        &mut screen,
-        false,
-    )
-    .expect("the seeded draft is answerable");
-
     let after = draft(&vault);
+    assert_eq!(
+        after.header.taxpayer.date_of_birth, None,
+        "a skip leaves it unanswered — the §63(f) addition is lawfully forgone"
+    );
+    match after
+        .answer_log
+        .get(&AnswerKey::Skippable(SkippableId::DobTaxpayer))
+    {
+        None => {}
+        Some(rec) => assert_eq!(
+            rec.state,
+            AnswerState::Declined,
+            "a skip may record DECLINED (asked, passed over) and NEVER `Given`: {rec:?}"
+        ),
+    }
+}
+
+/// The other half: TYPING the date is a fresh answer, dated by the clock seam and hashing the words
+/// asked today. Without this, the test above passes on a prompt nobody can answer.
+#[test]
+fn typing_the_shown_date_of_birth_writes_a_fresh_record_dated_by_the_seam() {
+    use btctax_core::tax::provenance::{prompt_hash, AnswerKey, AnswerState};
+    use btctax_core::tax::questions::{SkippableId, SKIPPABLE_QUESTIONS};
+    let (_dir, vault) = vault_with_year_n(a_year_with_money_in_it);
+    open(&vault, false);
+    answer_the_draft(&vault, |sk| {
+        if sk == SkippableId::DobTaxpayer {
+            "1980-05-05\n".to_string()
+        } else {
+            "\n".to_string()
+        }
+    });
+    let after = draft(&vault);
+    assert_eq!(
+        after.header.taxpayer.date_of_birth,
+        Some(time::macros::date!(1980 - 05 - 05)),
+        "typing it is how a durable fact is confirmed"
+    );
     let rec = after
         .answer_log
         .get(&AnswerKey::Skippable(SkippableId::DobTaxpayer))
-        .expect("confirming the date of birth writes a FRESH record");
+        .expect("confirming writes a FRESH record");
     assert_eq!(
         rec.answered_on,
         time::macros::date!(2026 - 02 - 03),
@@ -457,6 +472,66 @@ fn a_durable_fact_is_shown_but_unanswered_until_the_filer_confirms_it() {
         "hashing the words asked TODAY"
     );
     assert_eq!(rec.state, AnswerState::Given);
+}
+
+/// The hint is a fact about an OPENED year: a year the filer started themselves has no prior row to
+/// read and says nothing about one.
+#[test]
+fn the_date_of_birth_hint_appears_only_on_an_opened_year() {
+    use btctax_cli::input_form_store;
+    let (_dir, vault) = vault_with_year_n(a_year_with_money_in_it);
+    // A TY2025 draft the filer started themselves — no `opened_from`.
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        input_form_store::save_draft(
+            &mut s,
+            TO,
+            &ReturnInputs {
+                tax_year: TO,
+                filing_status: FilingStatus::Single,
+                foreign_trust: Some(false),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    }
+    let screen = answer_the_draft(&vault, |_| String::from("\n"));
+    assert!(
+        !screen.contains("type it to confirm"),
+        "no prior year, no hint: {screen}"
+    );
+}
+
+/// Drive `income answer` over the year-`TO` draft, scripting every declaration `n` and each skippable
+/// by `skippable`. Returns what the filer saw.
+///
+/// ★ The script is DERIVED from `live_questions`, never a magic count — the count is exactly what
+///   broke `tax_report`'s script when the interview grew.
+fn answer_the_draft(
+    vault: &std::path::Path,
+    skippable: impl Fn(btctax_core::tax::questions::SkippableId) -> String,
+) -> String {
+    let ri = draft(vault);
+    let mut script = String::new();
+    for a in cmd::answer::live_questions(&ri) {
+        match a {
+            btctax_cli::cmd::answer::Ask::Declaration(_) => script.push_str("n\n"),
+            btctax_cli::cmd::answer::Ask::Skippable(sk) => script.push_str(&skippable(sk.id)),
+        }
+    }
+    let mut keys = script.as_bytes();
+    let mut screen = Vec::new();
+    cmd::answer::answer_return_inputs(
+        vault,
+        &pp(),
+        TO,
+        time::macros::date!(2026 - 02 - 03),
+        &mut keys,
+        &mut screen,
+        false,
+    )
+    .expect("the seeded draft is answerable");
+    String::from_utf8(screen).unwrap()
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════
@@ -604,21 +679,68 @@ fn the_open_writes_a_draft_and_no_committed_row() {
     assert!(input_form_store::draft_exists(s.conn(), TO).unwrap());
 }
 
-/// Nothing about year N changes — retention is the filer's decision, not this command's.
+/// ★★★ **Nothing about year N changes** — retention is the filer's decision, not this command's.
+///
+/// ★ M-3 — all THREE of year N's stores, not just the committed row: the draft table and its
+///   `parked` flag are separate rows the opener has no business touching, and a kill named
+///   *"nothing about year N changes"* that reads one of the three does not hold what it is named
+///   for. (The answer log lives inside the committed `ReturnInputs`, so it rides on the first.)
 #[test]
 fn nothing_about_year_n_changes() {
+    use btctax_cli::input_form_store;
     let (_dir, vault) = vault_with_year_n(a_year_with_money_in_it);
+    // Year N also holds a PARKED draft — the state with the most to lose.
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        input_form_store::save_draft(&mut s, FROM, &draft_holding_an_interview()).unwrap();
+    }
     let before = {
         let s = Session::open(&vault, &pp()).unwrap();
-        return_inputs::get(s.conn(), FROM).unwrap().unwrap()
+        (
+            return_inputs::get(s.conn(), FROM).unwrap().unwrap(),
+            match input_form_store::load(s.conn(), FROM).unwrap().0 {
+                input_form_store::Loaded::Draft { ri, parked } => Some((ri, parked)),
+                _ => None,
+            },
+        )
     };
+    assert!(before.1.is_some(), "premise: year N has a draft to protect");
     open(&vault, false);
     let s = Session::open(&vault, &pp()).unwrap();
-    assert_eq!(
+    let after = (
         return_inputs::get(s.conn(), FROM).unwrap().unwrap(),
-        before,
-        "year N is READ; it is never written, blanked or shredded"
+        match input_form_store::load(s.conn(), FROM).unwrap().0 {
+            input_form_store::Loaded::Draft { ri, parked } => Some((ri, parked)),
+            _ => None,
+        },
     );
+    assert_eq!(
+        after, before,
+        "year N is READ: its committed row, its draft and that draft's parked flag are untouched"
+    );
+}
+
+/// ★ M-1 — the opener's normal output is a non-trivial year-N+1 draft, which permanently REFUSES
+///   `report --tax-year N --write-carryover`, whose refusal then prescribes `--discard-draft`. A
+///   filer who follows that chain destroys the year they just opened, so the report says so at the
+///   moment the draft is created.
+#[test]
+fn the_report_says_the_write_carryover_is_no_longer_needed() {
+    let (_dir, vault) = vault_with_year_n(a_year_with_money_in_it);
+    let opened = open(&vault, false);
+    let rendered = opened.render();
+    assert!(
+        rendered.contains("--write-carryover` is not needed and will refuse")
+            && rendered.contains("Do not pass `--discard-draft` to it"),
+        "the report warns about the chain that would destroy the opened year: {rendered}"
+    );
+    // And the refusal it is warning about really does fire.
+    let err = cmd::tax::write_back_carryover(&vault, &pp(), FROM, false, false)
+        .expect_err("the seeded draft blocks the write-back");
+    assert!(matches!(
+        err,
+        btctax_cli::CliError::NonTrivialDraftBlocksWrite { year, .. } if year == TO
+    ));
 }
 
 /// There must be a year N to open from.
@@ -821,9 +943,19 @@ fn answering_no_to_the_census_removes_the_pre_named_rows() {
 // The rest of the identity list: dependents and venues
 // ════════════════════════════════════════════════════════════════════════════════════════════════
 
-/// Each dependent and each venue is its own prompt, and the dependent's SSN is not printed.
+/// ★★★ **I-2 / I-3 — a dependent and a venue are PROMPTS, and NOTHING ELSE crosses for them.**
+///
+/// Both were seeded by the build, and neither had a surface that could answer for it:
+///
+/// - a `Dependent` row **is** the claim — it prints the person, their SSN and their relationship in
+///   the 1040 Dependents grid, sworn testimony — with no census row, no `FormQuestion` and no
+///   `interview_state` item anywhere that could refuse it. The child who aged out rides across
+///   silently. **FR-70 (T7)** is where the row returns, once `DEPENDENT_GATES` can answer for it;
+/// - a venue KEY is answered-ness: `broker_reporting`'s contract is *"absent = unanswered:
+///   answered-ness lives in the key set, never in a sentinel value"*, and three call sites read
+///   presence in the key set as *"the filer stored 1099-DA answers"*.
 #[test]
-fn dependents_and_venues_are_prompts_too_and_no_ssn_is_printed() {
+fn a_dependent_and_a_venue_are_prompted_and_never_seeded() {
     let (_dir, vault) = vault_with_year_n(|ri| {
         ri.header.dependents = vec![Dependent {
             name: "Sam Filer".into(),
@@ -839,7 +971,7 @@ fn dependents_and_venues_are_prompts_too_and_no_ssn_is_printed() {
     let rendered = opened.render();
     assert!(
         rendered.contains("Sam Filer (daughter)") && rendered.contains("dependent for 2025"),
-        "the dependent is asked about by name: {rendered}"
+        "the dependent is ASKED about by name: {rendered}"
     );
     assert!(
         rendered.contains("coinbase"),
@@ -849,22 +981,47 @@ fn dependents_and_venues_are_prompts_too_and_no_ssn_is_printed() {
         !rendered.contains("987654321") && !rendered.contains("987-65-4321"),
         "a dependent's SSN is never printed: {rendered}"
     );
+
     let seed = draft(&vault);
-    assert_eq!(seed.header.dependents.len(), 1);
-    assert_eq!(
-        seed.header.dependents[0].date_of_birth,
-        Some(time::macros::date!(2015 - 04 - 01)),
-        "the dependent's durable fact is shown"
+    assert!(
+        seed.header.dependents.is_empty(),
+        "I-2 — the ROW is not seeded: an unconfirmed dependent is ABSENT, not claimed: {:?}",
+        seed.header.dependents
     );
-    assert_eq!(
-        seed.broker_reporting.0.keys().collect::<Vec<_>>(),
-        vec!["coinbase"],
-        "the venue key is seeded"
+    assert!(
+        seed.broker_reporting.0.is_empty(),
+        "I-3 — no venue key, so nothing reads answered-ness the filer never gave: {:?}",
+        seed.broker_reporting.0
     );
-    assert_eq!(
-        seed.broker_reporting.0["coinbase"],
-        Default::default(),
-        "with BOTH cohort slots unanswered — answered-ness lives in the slot"
+}
+
+/// ★★★ **I-3's consequence, at the predicate that reads it.** `resolve.rs`'s `answers_stored` — the
+/// same key-set test `admin.rs` selects the export's arm with, and `admin.rs` resolves through the
+/// DRAFT — must be FALSE on a seeded year, or the year-readiness sentence claims the crypto slice
+/// prints *"from the stored answers"* on a year holding none: the exact sentence R6 fold M-4 fixed.
+#[test]
+fn the_seeded_year_does_not_claim_stored_broker_answers() {
+    let (_dir, vault) = vault_with_year_n(|ri| {
+        ri.broker_reporting
+            .0
+            .insert("coinbase".into(), Default::default());
+    });
+    open(&vault, false);
+    let seed = draft(&vault);
+    let answers_stored = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::input_form_store::broker_answers(s.conn(), TO)
+            .unwrap()
+            .is_some_and(|b| !b.0.is_empty())
+    };
+    assert!(
+        !answers_stored,
+        "the opener must not make the year look as though the filer answered a 1099-DA question"
+    );
+    let sentence = btctax_cli::year_readiness::EntryStates::for_year(TO, Some(&seed)).sentence();
+    assert!(
+        !sentence.contains("from the stored answers"),
+        "and the year-readiness sentence does not claim them: {sentence}"
     );
 }
 
@@ -877,20 +1034,276 @@ fn the_ip_pin_does_not_cross_the_year_boundary() {
     assert_eq!(draft(&vault).header.ip_pin, None);
 }
 
-/// Identity crosses; a statement about the year does not.
+/// ★★★ **I-1 — identity crosses, and the test can TELL that it did.**
+///
+/// The old assertion pinned `seed.filing_status == Single` on a fixture whose year N was Single: it
+/// could not distinguish *carried* from *defaulted*, which is why nothing saw the status crossing
+/// silently. **Head of household** is the fixture now, because `Default` gives Single.
 #[test]
 fn the_filers_identity_crosses_and_the_per_year_header_facts_do_not() {
-    let (_dir, vault) = vault_with_year_n(a_year_with_money_in_it);
+    let (_dir, vault) = vault_with_year_n(|ri| {
+        a_year_with_money_in_it(ri);
+        ri.filing_status = FilingStatus::HoH;
+    });
     open(&vault, false);
     let seed = draft(&vault);
+    assert_eq!(
+        seed.filing_status,
+        FilingStatus::HoH,
+        "the status is CARRIED — and `Default` would have said Single, so this can tell"
+    );
     assert_eq!(seed.header.taxpayer.first_name, "Alex");
     assert_eq!(seed.header.taxpayer.ssn, "123456789");
     assert_eq!(seed.header.address_city, "Town");
-    assert_eq!(seed.filing_status, FilingStatus::Single);
     assert_eq!(
         seed.header.taxpayer.occupation, "",
         "an occupation is a statement about the year, and is re-asked"
     );
     assert_eq!(seed.header.can_be_claimed_as_dependent_taxpayer, None);
     assert_eq!(seed.tax_year, TO);
+    assert_eq!(seed.opened_from, Some(FROM));
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// I-1 — what crossed is NAMED, and the carried filing status has a surface
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// ★★★ **Every leaf the seed writes is claimed by a phrase the report prints.**
+///
+/// The finding was four surfaces asserting *"every box is blank and every question is unanswered"*
+/// while five fields crossed. This walks the seed against a blank return for the same year — with
+/// T1's own machinery, not a hand-list — and requires each differing leaf to be named. A field added
+/// to `seed` tomorrow fails HERE unless the report grows a phrase for it.
+#[test]
+fn every_leaf_the_seed_carries_is_named_in_the_report() {
+    use btctax_core::tax::provenance::leaf_walk;
+    let (_dir, vault) = vault_with_year_n(|ri| {
+        a_year_with_money_in_it(ri);
+        ri.filing_status = FilingStatus::HoH;
+        ri.header.spouse = None;
+    });
+    let opened = open(&vault, false);
+    let seed = draft(&vault);
+    let blank = serde_json::to_value(ReturnInputs {
+        tax_year: TO,
+        ..Default::default()
+    })
+    .unwrap();
+    let doc = serde_json::to_value(&seed).unwrap();
+    let mut leaves = Vec::new();
+    leaf_walk::walk(&doc, "", &mut leaves);
+    let changed: Vec<String> = leaves
+        .into_iter()
+        .filter(|path| leaf_walk::at(&blank, path) != leaf_walk::at(&doc, path))
+        .collect();
+    assert!(
+        changed.len() >= 8,
+        "the fixture must actually carry things, or this test is vacuous: {changed:?}"
+    );
+    // The phrases the report prints, and the leaf prefixes each stands for. This list is the TEST's,
+    // deliberately: it is what the reader of `render` would understand, checked against what the
+    // code did.
+    const NAMED: &[(&str, &[&str])] = &[
+        ("filing status", &["filing_status"]),
+        ("name and SSN", &["header.taxpayer", "header.spouse"]),
+        ("mailing address", &["header.address_"]),
+        (
+            "employer and payer",
+            &["w2s", "int_1099", "div_1099", "g_1099", "b_1099"],
+        ),
+        (
+            "carryforwards",
+            &[
+                "capital_loss_carryforward_in",
+                "charitable_carryover_in",
+                "qbi.",
+            ],
+        ),
+        ("opened from", &["opened_from", "tax_year"]),
+    ];
+    let rendered = opened.render();
+    for leaf in &changed {
+        let hit = NAMED
+            .iter()
+            .find(|(_, prefixes)| prefixes.iter().any(|p| leaf.starts_with(p)));
+        let (phrase, _) = hit.unwrap_or_else(|| {
+            panic!(
+                "the seed writes `{leaf}`, and no phrase in the opener's report names it — a filer \
+                 reading \"everything else is blank\" would have no reason to look. Report:\n{rendered}"
+            )
+        });
+        assert!(
+            opened.carried_identity.iter().any(|c| c.contains(phrase)),
+            "`{leaf}` is covered by \"{phrase}\", which the report does not print: {:?}",
+            opened.carried_identity
+        );
+    }
+    assert!(
+        rendered.contains("Carried from TY2024 — CONFIRM each:")
+            && rendered.contains("Everything else is blank"),
+        "and the blankness claim is BOUNDED by its exceptions: {rendered}"
+    );
+}
+
+/// ★★★ **The carried filing status has a surface: a class-(A) declaration, live only on an opened
+///     year, whose prompt QUOTES the status.**
+#[test]
+fn the_carried_filing_status_is_confirmed_by_its_own_question() {
+    use btctax_core::tax::questions::{QuestionId, FORM_QUESTIONS};
+    let (_dir, vault) = vault_with_year_n(|ri| {
+        a_year_with_money_in_it(ri);
+        ri.filing_status = FilingStatus::HoH;
+    });
+    open(&vault, false);
+    let seed = draft(&vault);
+    let q = FORM_QUESTIONS
+        .iter()
+        .find(|q| q.id == QuestionId::FilingStatusConfirmed)
+        .expect("the registry owns it");
+    assert!((q.live)(&seed), "live on an opened year");
+    assert_eq!(
+        (q.get)(&seed),
+        None,
+        "and unanswered — nothing answers for the filer"
+    );
+    let prompt = q.prompt_text(&seed);
+    assert!(
+        prompt.contains("Head of household (HOH)")
+            && prompt.contains("TY2024")
+            && prompt.contains("TY2025"),
+        "the prompt quotes the status in the FORM's words and both years: {prompt}"
+    );
+    assert!(
+        prompt.contains("last day of the tax year"),
+        "and cites why it is a per-year question: {prompt}"
+    );
+
+    // It BLOCKS while unanswered, exactly as the census rows do.
+    let st = btctax_core::tax::interview_state::interview_state(&seed);
+    assert!(
+        st.blocking
+            .iter()
+            .any(|b| b.prompt.contains("Head of household")),
+        "an unanswered confirmation blocks: {:?}",
+        st.blocking.iter().map(|b| &b.prompt).collect::<Vec<_>>()
+    );
+
+    // A year the filer started themselves is NOT asked it.
+    let own = ReturnInputs {
+        tax_year: TO,
+        filing_status: FilingStatus::HoH,
+        ..Default::default()
+    };
+    assert!(!(q.live)(&own), "no opener, no question");
+}
+
+/// A `No` REFUSES and names where the status is changed — the return would otherwise compute every
+/// bracket and threshold on last year's status.
+#[test]
+fn answering_no_to_the_filing_status_confirmation_refuses_and_names_the_exit() {
+    use btctax_core::tax::return_refuse::{screen_inputs, RefuseReason};
+    let mut ri = btctax_core::tax::testonly::answered(ReturnInputs {
+        tax_year: 2024,
+        filing_status: FilingStatus::HoH,
+        opened_from: Some(2023),
+        ..Default::default()
+    });
+    let table = btctax_core::tax::testonly::ty2024_table();
+    let params = btctax_core::tax::testonly::ty2024_params();
+    assert_eq!(
+        ri.filing_status_confirmed,
+        Some(true),
+        "premise: the neutral answer is YES, and it screens clean"
+    );
+    assert!(screen_inputs(&ri, &table, &params).is_none());
+    ri.filing_status_confirmed = Some(false);
+    let refusal = screen_inputs(&ri, &table, &params).expect("a NO must refuse");
+    assert_eq!(refusal.reason, RefuseReason::FilingStatusChanged);
+    assert!(
+        refusal.detail.contains("Household section") && refusal.detail.contains("income import"),
+        "the refusal names where the status is changed: {}",
+        refusal.detail
+    );
+}
+
+/// ★★★ **The re-ask comes FREE from the prompt hash.** The confirmation quotes the status, so
+/// changing the status changes the words asked — and R10.3's mismatch rule returns the answer to
+/// unanswered with no code of its own.
+#[test]
+fn changing_the_filing_status_re_asks_the_confirmation() {
+    use btctax_core::tax::provenance::{record_answer, AnswerKey, AnswerState};
+    use btctax_core::tax::questions::{QuestionId, FORM_QUESTIONS};
+    let mut ri = ReturnInputs {
+        tax_year: 2025,
+        filing_status: FilingStatus::HoH,
+        opened_from: Some(2024),
+        ..Default::default()
+    };
+    let q = FORM_QUESTIONS
+        .iter()
+        .find(|q| q.id == QuestionId::FilingStatusConfirmed)
+        .unwrap();
+    (q.set)(&mut ri, true);
+    let prompt = q.prompt_text(&ri).into_owned();
+    record_answer(
+        &mut ri,
+        AnswerKey::Question(q.id),
+        &prompt,
+        time::macros::date!(2026 - 02 - 03),
+        AnswerState::Given,
+    );
+    let named = |ri: &ReturnInputs| {
+        btctax_core::tax::interview_state::interview_state(ri)
+            .blocking
+            .iter()
+            .any(|b| b.item == AnswerKey::Question(QuestionId::FilingStatusConfirmed))
+    };
+    assert!(
+        !named(&ri),
+        "answered under today's words — it does not block"
+    );
+    ri.filing_status = FilingStatus::Single;
+    assert!(
+        named(&ri),
+        "the status changed, so the words changed, so the answer no longer stands"
+    );
+    assert_eq!(
+        (q.get)(&ri),
+        Some(true),
+        "the stored answer is untouched — it is the READING that changed (R10.3)"
+    );
+}
+
+/// `opened_from` survives the TOML round trip, so a return exported and re-imported keeps the fact
+/// that its identities were carried — and with it the confirmation and the hint.
+#[test]
+fn opened_from_round_trips_through_income_import() {
+    let (dir, vault) = fresh_vault();
+    let toml = dir.path().join("opened.toml");
+    std::fs::write(
+        &toml,
+        "filing_status = \"HoH\"\nopened_from = 2025\nfiling_status_confirmed = true\n",
+    )
+    .unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2026, &toml, false, false).unwrap();
+    let s = Session::open(&vault, &pp()).unwrap();
+    let stored = return_inputs::get(s.conn(), 2026).unwrap().unwrap();
+    assert_eq!(stored.opened_from, Some(2025));
+    assert_eq!(stored.filing_status_confirmed, Some(true));
+}
+
+/// ★ N-2 — `--from` is range-checked BEFORE the arithmetic. `i32::MAX + 1` used to panic under
+///   `debug_assertions`, ahead of every refusal the command has.
+#[test]
+fn an_out_of_range_from_year_refuses_instead_of_overflowing() {
+    let (_dir, vault) = fresh_vault();
+    let mut s = Session::open(&vault, &pp()).unwrap();
+    for year in [i32::MAX, 1900, 3000] {
+        let err = open_next_year(&mut s, year, false).expect_err("out of range");
+        assert!(
+            err.to_string()
+                .contains("not a tax year this build can open from"),
+            "{year}: {err}"
+        );
+    }
 }

@@ -262,6 +262,15 @@ fn m1_preserve_order_value_output_sites_are_enumerated() {
         //   assertion — so key order cannot reach persisted or fingerprinted bytes, which is the
         //   invariant this enumeration protects. Same audit and same conclusion as `scrub_axis.rs`.
         "btctax-core/src/tax/provenance.rs",
+        // ★ AUDITED 2026-09-07 (SPEC_interview.md R10.4 / task T4b, seam review I-1).
+        //   `open_next_year.rs`'s `Value` use is `leaves_the_seed_writes`: it serializes the seeded
+        //   draft and a blank return for the same year ONLY to diff them into a set of leaf PATHS,
+        //   which decides which sentences the opener's REPORT prints. Both `Value`s die inside the
+        //   function — it returns `Vec<String>` and its only caller builds display text — so key
+        //   order cannot reach persisted or fingerprinted bytes (the draft itself is written by typed
+        //   serde through `save_draft`, untouched by this). Same audit, same conclusion, as
+        //   `scrub_axis.rs` and `provenance.rs` above.
+        "btctax-cli/src/open_next_year.rs",
     ];
     let crates_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()

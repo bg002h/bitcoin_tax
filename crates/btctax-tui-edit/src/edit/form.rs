@@ -175,6 +175,14 @@ pub struct MutationModalState {
 pub struct TaxInputsFormState {
     /// The tax year being edited (reuses `EditorApp::selected_year`).
     pub year: i32,
+    /// ★★★ **C-1 / R10.4 — YEAR N'S ROW, FOR THE `Durable` HINT AND NOTHING ELSE.**
+    ///
+    /// `Some` iff the working return carries `opened_from` and that year has a committed row. The
+    /// dates of birth are seeded BLANK by the opener (`Durability::Durable`: *"never
+    /// Enter-to-accept, never pre-filled"*), so this is what lets the form SHOW the prior date beside
+    /// the empty field. Read-only: nothing writes from it and no `AnswerRecord` derives from it — the
+    /// filer TYPES the date, which is a `SetField`, which is what `apply` records.
+    pub prior_year: Option<btctax_core::tax::return_inputs::ReturnInputs>,
     /// The working return: `None` until a filing status materializes it (NI-2).
     pub working: btctax_input_form::Working,
     /// Index into the live section list (left-pane cursor). Task 2 renders/navigates it.
@@ -338,6 +346,7 @@ impl TaxInputsFormState {
     /// ONLY the filing-status choice until an `apply` materializes the return. Test/opener helper.
     pub fn fresh(year: i32, now: time::Date) -> Self {
         Self {
+            prior_year: None,
             year,
             working: None,
             section_idx: 0,

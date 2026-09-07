@@ -209,6 +209,24 @@ pub fn form_discard_blocked_draft(
     btctax_cli::input_form_store::discard_blocked_draft(session, year)
 }
 
+/// ★★★ **C-1 / R10.4 — year `year`'s COMMITTED row, for the date-of-birth HINT.**
+///
+/// A pure READ, and the only thing the form does with it is DISPLAY a `Durable` date beside an empty
+/// field: `Durability::Durable` is *"the prior MAY be displayed, but it still requires the same
+/// explicit keystroke as a fresh ask"*. `None` on any failure — a hint is a convenience and its
+/// absence must never block the form.
+///
+/// Lives HERE for the same reason as [`load_return_inputs`]: `Session::conn()` is confined to this
+/// module by the KAT-G1 gate.
+pub fn committed_return_inputs(
+    session: &btctax_cli::Session,
+    year: i32,
+) -> Option<btctax_core::tax::return_inputs::ReturnInputs> {
+    btctax_cli::return_inputs::get(session.conn(), year)
+        .ok()
+        .flatten()
+}
+
 /// ★★★ **T4b — is the "open TY(N+1) from TY(N)" action OFFERED for this year?**
 ///
 /// True when the year the picker is on has NOTHING yet — no committed row and no draft — and the

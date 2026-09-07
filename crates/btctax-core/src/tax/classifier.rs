@@ -142,13 +142,32 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         form_4563_line15: _,
         answer_log,
         answer_log_history,
+        opened_from,
+        filing_status_confirmed,
     } = ri;
+    // ★★★ **THE GROUND, CORRECTED (T4b seam review I-1).** The old sentence stopped at serde, and
+    //     the premise behind it — *"every path onto a `ReturnInputs` forces a human to state it"* —
+    //     stopped being true the moment `open_next_year::seed` began CONSTRUCTING one in Rust, where
+    //     deserialization never runs and the value arrives from year N. So the exemption now names
+    //     BOTH grounds, one per path, and neither is a default:
+    //       * a year the filer started themselves — serde refuses a TOML without it;
+    //       * a year the OPENER made — `FilingStatusConfirmed`, the class-(A) declaration above,
+    //         which `None` blocks on and `No` refuses.
     c.exempt(
         filing_status,
         Class::SerdeRequired,
         "filing_status has no #[serde(default)] — a TOML without it refuses to parse, so no default to \
-         launder (§2.1)",
+         launder (§2.1); and on a year the OPENER made (`opened_from`), where no TOML is parsed, the \
+         carried status is asserted this year by the class-(A) `FilingStatusConfirmed` declaration \
+         (R10.4 / §7703(a)(1))",
     );
+    // ★★★ R10.4 / T4b seam review I-1 — the CARRIED filing status has a surface, and this is it. The
+    // exemption above says a TOML cannot omit `filing_status`; `open_next_year::seed` is the first
+    // path that builds a `ReturnInputs` in Rust, where serde never runs, so the value arrives from
+    // year N. This declaration is what the filer answers on such a year, and it is class (A): §7703(a)(1)
+    // determines marital status on the LAST DAY of the tax year, so a prior year's status is not
+    // testimony for this one.
+    c.declaration(filing_status_confirmed, QuestionId::FilingStatusConfirmed);
     c.declaration(mfs_spouse_itemizes, QuestionId::MfsSpouseItemizes);
     c.declaration(foreign_accounts, QuestionId::ForeignAccounts);
     c.declaration(foreign_trust, QuestionId::ForeignTrust);
@@ -271,6 +290,18 @@ pub fn classify(ri: &ReturnInputs) -> Census {
     // it, and its absence asserts nothing (an absent record is precisely "never asked", which is the
     // distinction the log exists to make). Its `AnswerState` enum has **no** `Default`, so there is no
     // defaulted answer to launder — the shape the D-8 laundering took.
+    // ★★★ R10.4 / T4b — WHICH YEAR THIS RETURN WAS OPENED FROM. Provenance about the OPENING, in
+    // the same class as the answer log: no printed figure reads it, the filer never types it, and it
+    // has no neutral value to launder. It exists so the surfaces the filer meets DAYS later can tell
+    // a carried identity from one this year gave — which is what makes the confirmation above, and
+    // the date-of-birth HINT, possible at all.
+    c.exempt(
+        opened_from,
+        Class::NoTaxDirection,
+        "R10.4 opener provenance — which year this return was opened FROM: no printed figure reads \
+         it, the filer never types it, and `None` means \"the filer started this year themselves\" \
+         (§2.1)",
+    );
     c.exempt(
         answer_log,
         Class::NoTaxDirection,

@@ -36,9 +36,15 @@
 use crate::{input_form_store, return_inputs, CliError, Session};
 use btctax_core::tax::document_census::DocumentRow;
 use btctax_core::tax::return_inputs::{
-    CarryProvenance, Dependent, Form1099B, Form1099Div, Form1099G, Form1099Int, HouseholdHeader,
-    Person, ReturnInputs, W2,
+    CarryProvenance, Form1099B, Form1099Div, Form1099G, Form1099Int, HouseholdHeader, Person,
+    ReturnInputs, W2,
 };
+
+/// The earliest tax year this build has any table for, and the latest year it will open INTO — the
+/// bounds `--from` is checked against (N-2). Deliberately generous at the top: opening a future year
+/// is how the interview is meant to be used in January, and the refusals below say what is missing.
+const MIN_YEAR: i32 = 2014;
+const MAX_YEAR: i32 = 2100;
 
 /// One identity year N knew about, presented to the filer as its own tri-state prompt.
 ///
@@ -73,6 +79,14 @@ pub struct Opened {
     pub to: i32,
     /// One per identity, in a stable order (documents by census order, then dependents, then venues).
     pub identities: Vec<Identity>,
+    /// ★★★ **T4b seam review I-1 — EVERYTHING THAT CROSSED, NAMED.**
+    ///
+    /// The build said *"every box is blank and every question is unanswered"* in four places while
+    /// the filing status, the taxpayer's name, SSN and mailing address crossed silently — *"a filer
+    /// who reads any of those has no reason to look"*. This list is what `render`, `--help`, the man
+    /// page and the TUI offer all print, so the assertion of blankness is bounded by its own
+    /// exceptions.
+    pub carried_identity: Vec<String>,
     /// What was carried, DERIVED FROM THE ASSIGNMENT rather than from a hand-list — the same rule
     /// `write_back_carryover`'s summary learned the hard way (its capital-loss line printed on the
     /// branch where the gate skipped the write).
@@ -94,15 +108,26 @@ impl Opened {
     /// The opener's report, as `btctax income open-next-year` prints it.
     #[must_use]
     pub fn render(&self) -> String {
+        let (to, from) = (self.to, self.from);
+        // ★★★ I-1 — the blankness claim is now BOUNDED BY ITS EXCEPTIONS, in the first sentence.
+        //     Saying "everything is blank" while the filing status and the household identity cross
+        //     is the defect; saying which ones crossed is the fix, and it is said before anything
+        //     else so a filer cannot miss it.
         let mut s = format!(
-            "Opened TY{to} from TY{from}. Every box is blank and every question is unanswered — \
-             what follows is what TY{from} knew about, for you to confirm:\n",
-            to = self.to,
-            from = self.from
+            "Opened TY{to} from TY{from}.\n  Carried from TY{from} — CONFIRM each: {}.\n  \
+             Everything else is blank and every question is unanswered.\n",
+            self.carried_identity.join(", ")
         );
+        s.push_str(&format!(
+            "  What TY{from} knew about, each its own question:\n"
+        ));
+        // ★ N-1 — a `format!`, not a literal placeholder patched by `s.replace` over the whole
+        //   accumulated string (which was correct only because the header had already interpolated
+        //   its own `{from}`).
         if self.identities.is_empty() {
-            s.push_str("  (TY{from} carried no payer, dependent or venue to confirm.)\n");
-            s = s.replace("{from}", &self.from.to_string());
+            s.push_str(&format!(
+                "  (TY{from} carried no payer, dependent or venue to confirm.)\n"
+            ));
         }
         for id in &self.identities {
             s.push_str(&format!("  · {}\n", id.prompt));
@@ -126,9 +151,19 @@ impl Opened {
         }
         s.push_str(&format!(
             "\nThe answers live in the TY{to} DRAFT — `btctax income answer --year {to}`, or the \
-             tax-inputs form.\n",
-            to = self.to
+             tax-inputs form.\n"
         ));
+        // ★★ M-1 — the opener's normal output is a non-trivial TY{to} draft, which permanently
+        //    REFUSES `report --tax-year {from} --write-carryover`; that refusal then prescribes
+        //    `--discard-draft`, and following it destroys the year that was just opened. Said here,
+        //    once, at the moment the draft is created.
+        if !self.carried.is_empty() {
+            s.push_str(&format!(
+                "  (TY{from}'s carryforwards are already on it, so `report --tax-year {from} \
+                 --write-carryover` is not needed and will refuse while this draft exists. Do not \
+                 pass `--discard-draft` to it — that discards the year you just opened.)\n"
+            ));
+        }
         s
     }
 }
@@ -151,7 +186,18 @@ pub fn open_next_year(
     from: i32,
     discard_draft: bool,
 ) -> Result<Opened, CliError> {
-    let to = from + 1;
+    // ★ N-2 — the arithmetic came BEFORE every refusal, so `--from 2147483647` panicked under
+    //   `debug_assertions` before any of them could speak. Bounded to the years this build knows
+    //   about at all: `checked_add` alone would still accept a year no table, form or filer has.
+    let to = from
+        .checked_add(1)
+        .filter(|_| (MIN_YEAR..=MAX_YEAR).contains(&from))
+        .ok_or_else(|| {
+            CliError::Usage(format!(
+                "{from} is not a tax year this build can open from — btctax knows \
+                 {MIN_YEAR}..={MAX_YEAR}."
+            ))
+        })?;
     // (1) Every refusal a write onto year N+1 can raise, raised before anything is computed, and
     //     DELETING NOTHING — `coherence_check` is the read half; the destructive half runs below,
     //     next to the write it belongs to.
@@ -207,6 +253,11 @@ pub fn open_next_year(
         }
     }
 
+    // ★ AFTER the roll, deliberately: the carryforwards are part of what crossed, and a list built
+    //   before they were written would name every field except the ones carrying money. (Caught by
+    //   `every_leaf_the_seed_carries_is_named_in_the_report`, which is what that kill is for.)
+    let carried_identity = carried_identity(&seeded);
+
     // (5) The write. `coherence_clear` first, so the draft this open supersedes is gone before the
     //     seed is written into its place; `save_draft` reaches disk (I-7).
     input_form_store::coherence_clear(sess.conn(), to, &coherence)?;
@@ -215,10 +266,92 @@ pub fn open_next_year(
         from,
         to,
         identities,
+        carried_identity,
         carried,
         not_stamped,
         not_carried,
     })
+}
+
+/// ★★★ **WHAT CROSSES, IN THE FILER'S WORDS — and the leaves each phrase stands for.**
+///
+/// The seam review's I-1: four surfaces asserted *"every box is blank and every question is
+/// unanswered"* while the filing status, the taxpayer's name, SSN and mailing address crossed. This
+/// table is the one place that answers *"what crossed?"*, and
+/// [`tests::every_leaf_the_seed_carries_is_named_in_the_report`] holds it to the seed: any leaf the
+/// seed writes that no phrase here claims fails the build. So the report cannot fall behind `seed`.
+///
+/// `always` marks a field that crosses **by construction** even when its value equals the default —
+/// [`ReturnInputs::filing_status`] has no `None`, so a Single filer's carried status is
+/// byte-identical to a defaulted one, and a diff can never see it. That is the miniature of the
+/// finding itself: *"the assertion cannot distinguish carried from defaulted"*.
+const CARRIED_IDENTITY: &[(&str, &[&str], bool)] = &[
+    (
+        "the filing status (a divorce or a death changes it, and §7703(a)(1) determines it on the last day of the year)",
+        &["filing_status", "filing_status_confirmed"],
+        true,
+    ),
+    (
+        "your name and SSN",
+        &["header.taxpayer", "header.spouse"],
+        false,
+    ),
+    ("your mailing address", &["header.address_"], false),
+    (
+        "each employer and payer, by name and EIN/TIN, with every box blank",
+        &["w2s", "int_1099", "div_1099", "g_1099", "b_1099"],
+        false,
+    ),
+    (
+        "the carryforwards computed on that return",
+        &[
+            "capital_loss_carryforward_in",
+            "charitable_carryover_in",
+            "qbi.",
+        ],
+        false,
+    ),
+    (
+        "and which year this one was opened from",
+        &["opened_from", "tax_year"],
+        true,
+    ),
+];
+
+/// The [`CARRIED_IDENTITY`] phrases that are TRUE of this seed.
+fn carried_identity(seeded: &ReturnInputs) -> Vec<String> {
+    let changed = leaves_the_seed_writes(seeded);
+    CARRIED_IDENTITY
+        .iter()
+        .filter(|(_, prefixes, always)| {
+            *always
+                || changed
+                    .iter()
+                    .any(|leaf| prefixes.iter().any(|p| leaf.starts_with(p)))
+        })
+        .map(|(label, _, _)| (*label).to_string())
+        .collect()
+}
+
+/// Every serde leaf on which `seeded` DIFFERS from a blank return for the same year — the honest
+/// answer to *"what did the opener put here?"*, asked of the seed itself rather than of a comment.
+///
+/// ★ It walks with T1's own machinery (`provenance::leaf_walk`), so a field added to
+///   [`ReturnInputs`] tomorrow is compared the day it is added.
+fn leaves_the_seed_writes(seeded: &ReturnInputs) -> Vec<String> {
+    use btctax_core::tax::provenance::leaf_walk;
+    let blank = serde_json::to_value(ReturnInputs {
+        tax_year: seeded.tax_year,
+        ..Default::default()
+    })
+    .expect("ReturnInputs serializes");
+    let doc = serde_json::to_value(seeded).expect("ReturnInputs serializes");
+    let mut leaves = Vec::new();
+    leaf_walk::walk(&doc, "", &mut leaves);
+    leaves
+        .into_iter()
+        .filter(|path| leaf_walk::at(&blank, path) != leaf_walk::at(&doc, path))
+        .collect()
 }
 
 /// ★★★ **THE SEED — built by copying IN, never by blanking out.**
@@ -250,8 +383,22 @@ pub fn seed(prior: &ReturnInputs, to: i32) -> ReturnInputs {
         first_name: p.first_name.clone(),
         last_name: p.last_name.clone(),
         ssn: p.ssn.clone(),
-        // ★ The `Durable` fact. Shown; NOT answered — no `AnswerRecord` accompanies it.
-        date_of_birth: p.date_of_birth,
+        // ★★★ **C-1 — the `Durable` date of birth is SHOWN, NEVER PRE-FILLED.**
+        //
+        //     It used to cross. `Durability::Durable` says *"the prior MAY be displayed, but it
+        //     still requires the same explicit keystroke as a fresh ask: never Enter-to-accept,
+        //     never pre-filled"* — and pre-filling it broke that in one command: `income answer`'s
+        //     `skippable_state` decides `Given` vs `Declined` by reading the VALUE, so the
+        //     documented SKIP keystroke (a bare Enter) left year N's date in place and wrote a
+        //     fresh `AnswerRecord { state: Given }` dated this year. A prior-year answer satisfying
+        //     this year's provenance, which is the one thing R10 exists to prevent — and *"a
+        //     diligence record that lies is worse than none"*.
+        //
+        //     So the seed leaves it blank and `opened_from` carries the year instead: `income
+        //     answer` reads year N's row at prompt time and SHOWS the date as a hint the filer must
+        //     type to confirm. A bare Enter then records `Declined` and the §63(f) addition is
+        //     lawfully forgone — which is the truthful outcome of skipping.
+        date_of_birth: None,
         ..Default::default()
     };
     ReturnInputs {
@@ -264,22 +411,19 @@ pub fn seed(prior: &ReturnInputs, to: i32) -> ReturnInputs {
             address_city: prior.header.address_city.clone(),
             address_state: prior.header.address_state.clone(),
             address_zip: prior.header.address_zip.clone(),
-            dependents: prior
-                .header
-                .dependents
-                .iter()
-                // ★ Every field named, with NO `..Default::default()`: `Dependent` gains
-                //   seventeen §152 gates in T7, and this literal must fail to COMPILE when it does,
-                //   so a human decides whether each new field is an identity (carried) or a
-                //   declaration (re-asked). A struct-update tail would silently default them, which
-                //   is the right ANSWER for a gate and the wrong way to arrive at it.
-                .map(|d| Dependent {
-                    name: d.name.clone(),
-                    ssn: d.ssn.clone(),
-                    relationship: d.relationship.clone(),
-                    date_of_birth: d.date_of_birth,
-                })
-                .collect(),
+            // ★★★ **I-2 — DEPENDENTS ARE NOT SEEDED.** A `Dependent` row IS the claim: it prints
+            //     the person, their SSN and their relationship in the 1040 Dependents grid — sworn
+            //     testimony — and there is nothing on this year's return that can answer for it. No
+            //     census row, no `FormQuestion`, no `RefuseReason`, and (machine-checked in the
+            //     review) no `interview_state` item. The child who aged out, moved out, or is
+            //     claimed by the other parent would ride across the year silently.
+            //
+            //     R10.4 says each identity is SHOWN as its own prompt, and a shown identity that is
+            //     not seeded is exactly that: `identities_of` names every prior dependent from year
+            //     N's row, and the filer adds back the ones still theirs. **FR-70 (T7)** is where
+            //     the row returns — once `DEPENDENT_GATES` exist, there is something to answer.
+            dependents: Vec::new(),
+
             ..Default::default()
         },
         w2s: prior
@@ -328,14 +472,18 @@ pub fn seed(prior: &ReturnInputs, to: i32) -> ReturnInputs {
                 ..Default::default()
             })
             .collect(),
-        broker_reporting: btctax_core::BrokerReporting(
-            prior
-                .broker_reporting
-                .0
-                .keys()
-                .map(|provider| (provider.clone(), Default::default()))
-                .collect(),
-        ),
+        // ★★★ **I-3 — NO VENUE KEY.** `broker_reporting`'s own contract is *"absent = unanswered:
+        //     answered-ness lives in the KEY SET, never in a sentinel value"*, and an inserted key
+        //     with an empty `CohortAnswers` is precisely that sentinel. Three call sites read
+        //     presence in the key set as *"the filer stored 1099-DA answers"* — `admin.rs`'s
+        //     `answers_stored`, `resolve.rs`, `cmd/tax.rs` — and the first resolves through the
+        //     DRAFT, so the seeded key reintroduced the sentence R6 fold M-4 had just fixed:
+        //     *"prints the crypto slice from the stored answers"*, on a year holding none.
+        //
+        //     The key bought nothing: the venue prompt below reads `prior`, and
+        //     `screen_broker_reporting` derives the keys that need answering from the LEDGER's own
+        //     Form 8949 rows.
+        opened_from: Some(prior.tax_year),
         ..Default::default()
     }
 }
@@ -418,7 +566,23 @@ fn payer_of(ri: &ReturnInputs, row: DocumentRow, i: usize) -> (String, String) {
         DocumentRow::B1099 => ri.b_1099.get(i).map_or_else(Default::default, |r| {
             (r.payer.clone(), clause("TIN", &r.payer_tin))
         }),
-        _ => Default::default(),
+        // ★ M-2 — EXHAUSTIVE, no `_`. A kind that gains a transcription section must fail to
+        //   COMPILE here rather than yield a nameless prompt (*"Last year  issued you a Form
+        //   1099-R…"*) and be silently unseeded. The compensating kill existed, but it lived in
+        //   another crate — the compiler is the right instrument for an omission this shape.
+        DocumentRow::Form1098
+        | DocumentRow::Form1098e
+        | DocumentRow::R1099
+        | DocumentRow::Ssa1099
+        | DocumentRow::NecMiscK1099
+        | DocumentRow::K1
+        | DocumentRow::ScheduleERental
+        | DocumentRow::S1099
+        | DocumentRow::Oid1099
+        | DocumentRow::W2g
+        | DocumentRow::C1099
+        | DocumentRow::A1095
+        | DocumentRow::T1098 => Default::default(),
     }
 }
 

@@ -22,6 +22,7 @@ use crate::tax::questions::{QuestionId, SkippableId, FORM_QUESTIONS, SKIPPABLE_Q
 use crate::tax::return_inputs::ReturnInputs;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::str::FromStr;
@@ -623,16 +624,20 @@ pub fn answer_status(ri: &ReturnInputs, key: &AnswerKey, current_prompt: &str) -
 /// registry, which is task T7. Until it exists a dependent record has no current prompt to compare
 /// against, so nothing outside [`record_answer`] can decide a dependent record is stale — and
 /// `record_answer` never has to, because it hashes the prompt the caller actually showed.
-pub fn current_prompt(key: &AnswerKey) -> Option<&'static str> {
+pub fn current_prompt(key: &AnswerKey, ri: &ReturnInputs) -> Option<Cow<'static, str>> {
     match key {
+        // ★★ R10.4 — `prompt_text`, not `prompt`: a question whose subject is a value ON the return
+        //    (today, the carried filing status) is asked in words that quote it, and those are the
+        //    words that must be hashed. Reading the static `prompt` here would hand every surface a
+        //    hash that never changes when the value does, which is the re-ask rule silently disabled.
         AnswerKey::Question(id) => FORM_QUESTIONS
             .iter()
             .find(|q| q.id == *id)
-            .map(|q| q.prompt),
+            .map(|q| q.prompt_text(ri)),
         AnswerKey::Skippable(id) => SKIPPABLE_QUESTIONS
             .iter()
             .find(|s| s.id == *id)
-            .map(|s| s.prompt),
+            .map(|s| Cow::Borrowed(s.prompt)),
         AnswerKey::DependentGate { .. } => None,
     }
 }

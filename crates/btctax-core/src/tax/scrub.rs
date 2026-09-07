@@ -640,6 +640,10 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
         //     while no original byte survives — §3.2's rule, applied to a key instead of a value.
         answer_log: _,
         answer_log_history: _,
+        // ★ R10.4 — a tax YEAR and a yes/no. Neither carries identity; both are preserved, like every
+        //   other figure and fail-loud declaration.
+        opened_from: _,
+        filing_status_confirmed: _,
     } = ri;
 
     let mut out = ri.clone();

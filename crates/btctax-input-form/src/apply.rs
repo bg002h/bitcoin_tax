@@ -80,8 +80,12 @@ fn apply_to(ri: &mut ReturnInputs, e: Edit, now: Date) -> Result<(), ApplyError>
             //     records for the same answer. Recorded only AFTER the set succeeds: a refused edit
             //     changed nothing, so it is not an answer.
             if let Some(key) = answer_key_for(id) {
-                if let Some(prompt) = current_prompt(&key) {
-                    record_answer(ri, key, prompt, now, AnswerState::Given);
+                // ★ R10.4 — the words are RENDERED FROM THE RETURN (`prompt_text`), so a question
+                //   that quotes a value hashes the sentence the filer actually saw. Owned first,
+                //   because `record_answer` takes `&mut ri` and the rendered text borrows it.
+                let prompt = current_prompt(&key, ri).map(std::borrow::Cow::into_owned);
+                if let Some(prompt) = prompt {
+                    record_answer(ri, key, &prompt, now, AnswerState::Given);
                 }
             }
             Ok(())

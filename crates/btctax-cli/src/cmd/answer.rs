@@ -326,6 +326,20 @@ pub fn answer_return_inputs(
         )?;
     }
 
+    // ★★★ **C-1 / R10.4 — THE PRIOR YEAR'S ROW, FOR THE `Durable` HINT AND NOTHING ELSE.**
+    //
+    //     `Durability::Durable` is *"the prior MAY be displayed, but it still requires the same
+    //     explicit keystroke as a fresh ask: never Enter-to-accept, never pre-filled"*. The opener
+    //     therefore seeds the date of birth BLANK and stamps `opened_from`; this read is what makes
+    //     *displayed* possible. Nothing is written from it: the hint is text in a prompt, the filer
+    //     types the date to confirm it, and a bare Enter leaves the value `None` — so
+    //     `skippable_state` records `Declined`, which is the truthful outcome of skipping.
+    //
+    //     ★ A missing prior row is not an error: the hint is a convenience, and its absence costs
+    //       the filer a lookup, never an answer.
+    let prior_year_row = ri
+        .opened_from
+        .and_then(|n| return_inputs::get(s.conn(), n).ok().flatten());
     // ★★★ R12 / §4.2 — THE PANEL, BEFORE the first question.
     write_panel(
         out,
@@ -338,13 +352,18 @@ pub fn answer_return_inputs(
             // A MANDATORY declaration — silence with nothing on file is refused, never accepted (D-8).
             Ask::Declaration(q) => {
                 let cur = (q.get)(&ri);
+                // ★★★ R10.4 — the words PUT TO THE FILER, rendered from the return. For the carried
+                //     filing status that sentence QUOTES the status, and it is what `record_answer`
+                //     hashes below, so editing the status changes the hash and R10.3's re-ask rule
+                //     returns this question to unanswered on its own.
+                let prompt = q.prompt_text(&ri).into_owned();
                 loop {
                     let shown = match cur {
                         Some(true) => "y/n, currently y",
                         Some(false) => "y/n, currently n",
                         None => "y/n",
                     };
-                    write!(out, "{} [{}]: ", q.prompt, shown)?;
+                    write!(out, "{prompt} [{shown}]: ")?;
                     out.flush()?;
                     let mut line = String::new();
                     if input.read_line(&mut line)? == 0 {
@@ -364,7 +383,7 @@ pub fn answer_return_inputs(
                             record_answer(
                                 &mut ri,
                                 AnswerKey::Question(q.id),
-                                q.prompt,
+                                &prompt,
                                 now,
                                 AnswerState::Given,
                             );
@@ -381,9 +400,27 @@ pub fn answer_return_inputs(
             Ask::Skippable(sk) => match sk.kind {
                 SkippableKind::Date => {
                     let cur = (sk.get_date)(&ri);
+                    // ★ C-1 — the HINT: year N's date for THIS skippable, read through the
+                    //   skippable's own accessor (never a hand-list of the two DOBs), shown only
+                    //   where this year has no answer yet. Typing it is a fresh answer; skipping it
+                    //   declines. Nothing is pre-filled.
+                    let hint = cur.is_none().then_some(()).and_then(|()| {
+                        let prior = prior_year_row.as_ref()?;
+                        let d = (sk.get_date)(prior)?;
+                        Some(format!(
+                            "; TY{n}'s return gave {d} — type it to confirm",
+                            n = prior.tax_year
+                        ))
+                    });
                     loop {
                         let shown = cur.map_or_else(|| "none".to_string(), |d| d.to_string());
-                        write!(out, "{} [{}; Enter to skip]: ", sk.prompt, shown)?;
+                        write!(
+                            out,
+                            "{} [{}{}; Enter to skip]: ",
+                            sk.prompt,
+                            shown,
+                            hint.as_deref().unwrap_or_default()
+                        )?;
                         out.flush()?;
                         let mut line = String::new();
                         if input.read_line(&mut line)? == 0 {
@@ -758,6 +795,8 @@ mod tests {
         match id {
             QuestionId::DependentSpouse => r.filing_status = FilingStatus::Mfj,
             QuestionId::MfsSpouseItemizes => r.filing_status = FilingStatus::Mfs,
+            // ★ R10.4 / T4b — live only on a year the OPENER made.
+            QuestionId::FilingStatusConfirmed => r.opened_from = Some(2024),
             QuestionId::MortgageAllUsedToBuyBuildImprove
             | QuestionId::AmtQualifiedDwelling
             | QuestionId::MortgageWithinDebtLimit => {

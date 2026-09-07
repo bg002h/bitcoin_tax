@@ -450,43 +450,53 @@ pub fn maximal_sentinel() -> ReturnInputs {
         //         masks every cell of the matrix behind whatever refuses first, which is the exact
         //         failure the assertion above this matrix was written for. (It caught this fixture on
         //         its first run: `Some(ScheduleBPart3Unanswered)`.)
-        answer_log: [
-            (
-                AnswerKey::Question(QuestionId::ForeignAccounts),
-                AnswerRecord {
-                    answered_on: date!(2025 - 01 - 02),
-                    prompt_hash: prompt_hash(
-                        current_prompt(&AnswerKey::Question(QuestionId::ForeignAccounts))
-                            .expect("a registry question has a prompt"),
-                    ),
-                    state: AnswerState::Given,
-                },
-            ),
-            (
-                AnswerKey::Skippable(SkippableId::BlindTaxpayer),
-                AnswerRecord {
-                    answered_on: date!(2025 - 01 - 03),
-                    prompt_hash: prompt_hash(
-                        current_prompt(&AnswerKey::Skippable(SkippableId::BlindTaxpayer))
-                            .expect("a registry skippable has a prompt"),
-                    ),
-                    state: AnswerState::Given,
-                },
-            ),
-        ]
-        .into_iter()
-        .collect(),
-        answer_log_history: vec![(
-            AnswerKey::Question(QuestionId::ForeignTrust),
+        // ★★ R10.4 — the two provenance stores are filled AFTER the literal, because
+        //    `current_prompt` now renders a question's words FROM the return and cannot be called
+        //    while the return is still being built. Same reason the census loop below is post-literal.
+        answer_log: Default::default(),
+        answer_log_history: Default::default(),
+        // ★★★ R10.4 / T4b — the fixture is MAXIMAL, so it realizes the opener's provenance leaf and
+        //     the declaration that leaf makes live. `Some(true)` on the confirmation keeps the axis
+        //     free of a refusal that would mask every cell of the matrix (the note above).
+        opened_from: Some(2023),
+        filing_status_confirmed: Some(true),
+    };
+    ri.answer_log = [
+        (
+            AnswerKey::Question(QuestionId::ForeignAccounts),
             AnswerRecord {
-                answered_on: date!(2024 - 12 - 31),
-                // ★ A superseded hash is exactly what history holds, and NOTHING reads it as an
-                //   answer — so unlike the two above it may (and should) disagree with the registry.
-                prompt_hash: prompt_hash("SENTINEL superseded prompt"),
+                answered_on: date!(2025 - 01 - 02),
+                prompt_hash: prompt_hash(
+                    &current_prompt(&AnswerKey::Question(QuestionId::ForeignAccounts), &ri)
+                        .expect("a registry question has a prompt"),
+                ),
                 state: AnswerState::Given,
             },
-        )],
-    };
+        ),
+        (
+            AnswerKey::Skippable(SkippableId::BlindTaxpayer),
+            AnswerRecord {
+                answered_on: date!(2025 - 01 - 03),
+                prompt_hash: prompt_hash(
+                    &current_prompt(&AnswerKey::Skippable(SkippableId::BlindTaxpayer), &ri)
+                        .expect("a registry skippable has a prompt"),
+                ),
+                state: AnswerState::Given,
+            },
+        ),
+    ]
+    .into_iter()
+    .collect();
+    // ★ A superseded hash is exactly what history holds, and NOTHING reads it as an answer — so
+    //   unlike the two above it may (and should) disagree with the registry.
+    ri.answer_log_history = vec![(
+        AnswerKey::Question(QuestionId::ForeignTrust),
+        AnswerRecord {
+            answered_on: date!(2024 - 12 - 31),
+            prompt_hash: prompt_hash("SENTINEL superseded prompt"),
+            state: AnswerState::Given,
+        },
+    )];
     // ★★★ R3 — THE DOCUMENT CENSUS, answered from the fixture's own rows. Done here rather than in
     //     the literal above because the answer for a countable row IS the row count, which the
     //     literal cannot see while it is still being built. This household holds a W-2 and a row of
