@@ -165,6 +165,42 @@ pub enum CliError {
          'discard parked draft' (a confirmed delete) to drop it; then re-run this command."
     )]
     ParkedDraftBlocksWrite { year: i32 },
+    /// ★★★ **T4 / `SPEC_interview.md` R11 — a WIP draft that HOLDS AN INTERVIEW is never
+    ///     superseded on a note.**
+    ///
+    /// §6.2's rule — *"an authoritative committed-row write CLEARS that year's WIP draft"* — was
+    /// written when a draft was crash-recovery scratch: regenerable, seconds of typing, `warn if
+    /// discarding a non-trivial WIP`. R11 makes the draft the **Sep–Dec store for TY2026**, because
+    /// a year with no `FullReturnParams` cannot commit at all: the interview lives there for
+    /// months. A draft carrying `answer_log` records or transcribed document rows is therefore not
+    /// disposable — the records in particular are *unreproducible*, since `record_answer` writes
+    /// them only when btctax itself asks the question, and `income import` refuses to read them
+    /// back for exactly that reason.
+    ///
+    /// So the note becomes a refusal, and the discard becomes deliberate. `--discard-draft` is a
+    /// SEPARATE flag from `--force` on purpose: `--force` documents itself as overriding the
+    /// scrub-marker guard *"and NOTHING else"*, and a filer loading a scrubbed copy into a scratch
+    /// vault must not thereby authorise destroying an interview.
+    #[error(
+        "year {year} has a work-in-progress draft holding {holdings}, and this write would discard          it. Nothing was written. Re-run with --discard-draft to discard it deliberately, or open          the tax-inputs form for {year} to finish it (and commit it, once the year's package has          arrived)."
+    )]
+    NonTrivialDraftBlocksWrite { year: i32, holdings: String },
+    /// ★★★ **T4 / R11 — the §6.3 stale-WIP DISCARD, refused when the draft holds an interview.**
+    ///
+    /// §6.3 discards a stale-version WIP draft silently *"because it is regenerable, so refusing
+    /// would brick a resume for no benefit"*. That premise fails for a draft carrying answers or
+    /// transcribed documents: it is months of work, and the `answer_log` cannot be re-created by
+    /// re-typing. The parked half of §6.3 already fails closed for the same reason (C-1); this is
+    /// the WIP half, narrowed to the drafts that are not in fact regenerable.
+    #[error(
+        "year {year}'s draft is schema v{found} but this build expects v{expected}, and it holds          {holdings} — an upgrade changed the input format, so this build cannot read it. It was          NOT discarded. Re-run on the app version that wrote it and commit (or export) it there;          or discard it deliberately from the tax-inputs form for {year}."
+    )]
+    StaleDraftHoldsInterview {
+        year: i32,
+        found: i64,
+        expected: i64,
+        holdings: String,
+    },
     /// `income scrub` could not render the scrubbed return as TOML, or could not write it.
     ///
     /// ★ NOT `Usage` (which renders "usage:" and means the filer typed the command wrong) and NOT

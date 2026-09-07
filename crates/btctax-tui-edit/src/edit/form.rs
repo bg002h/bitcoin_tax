@@ -202,6 +202,11 @@ pub struct TaxInputsFormState {
     pub parked: bool,
     /// The §6.3 stale-WIP-discard note from `load`, if any — Task 2 renders it in the status line.
     pub stale_note: Option<btctax_cli::input_form_store::StaleNote>,
+    /// ★★★ T4/R11 — the YEAR GATE's package half, cached at open: `return-computable`, plus the
+    /// readiness sentence that says what is missing. The interview half is recomputed per frame
+    /// (`with_interview`) from `working`, so the line tracks the answer just given; the package half
+    /// is not, because it re-reads the bundled price dataset.
+    pub year_gate: btctax_cli::year_readiness::EntryStates,
     /// ★ P2-a: `true` when `load` refused a stale PARKED draft (`CliError::StaleParkedDraft`). In this
     /// state the flow renders ONLY the stale-parked message + an 'X' to discard (Task 8) / Esc to back
     /// out — NOT a normal editing form — so the undiscardable parked draft becomes discardable in-app.
@@ -313,6 +318,17 @@ pub struct PendingRemove {
 }
 
 impl TaxInputsFormState {
+    /// ★ T4/R11 — the year-gate display lines for THIS frame: the cached package half plus the
+    /// interview half recomputed from the live working return. One line when the year computes,
+    /// three when it does not — the renderer and the layout must agree on the count, so both read
+    /// it here rather than each deriving it.
+    pub fn year_gate_lines(&self) -> Vec<String> {
+        self.year_gate
+            .clone()
+            .with_interview(self.working.as_ref())
+            .lines()
+    }
+
     /// A fresh flow for `year` with no working return (NI-2: `working = None`). The renderer shows
     /// ONLY the filing-status choice until an `apply` materializes the return. Test/opener helper.
     pub fn fresh(year: i32, now: time::Date) -> Self {
@@ -328,6 +344,7 @@ impl TaxInputsFormState {
             dirty: false,
             parked: false,
             stale_note: None,
+            year_gate: btctax_cli::year_readiness::EntryStates::package_only(year),
             discard_offered: false,
             active_source_label: active_source_label(
                 &btctax_cli::input_form_store::ActiveSource::Neither,

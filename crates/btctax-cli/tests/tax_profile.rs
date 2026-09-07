@@ -144,7 +144,7 @@ fn set_profile_is_refused_while_return_inputs_exist_unless_forced() {
         "filing_status = \"Single\"\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"82000\"\nbox2_fed_withheld = \"9100\"\n",
     )
     .unwrap();
-    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false, false).unwrap();
 
     // A raw tax-profile for the SAME year is refused (Usage), and nothing is stored.
     let err = cmd::tax::set_profile(&vault, &pp(), 2024, prof_2025(), false).unwrap_err();
@@ -166,8 +166,8 @@ fn set_profile_is_refused_while_return_inputs_exist_unless_forced() {
     );
 
     // `income clear` removes the inputs; afterward the un-forced path is allowed again.
-    assert!(cmd::tax::clear_return_inputs(&vault, &pp(), 2024).unwrap());
-    assert!(!cmd::tax::clear_return_inputs(&vault, &pp(), 2024).unwrap()); // idempotent
+    assert!(cmd::tax::clear_return_inputs(&vault, &pp(), 2024, false).unwrap());
+    assert!(!cmd::tax::clear_return_inputs(&vault, &pp(), 2024, false).unwrap()); // idempotent
     cmd::tax::set_profile(&vault, &pp(), 2024, prof_2025(), false).unwrap();
 }
 
@@ -191,7 +191,7 @@ fn income_import_then_show_redacts_pii_at_the_vault_level() {
         "filing_status = \"Single\"\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\n\n[header.taxpayer]\nfirst_name = \"Pat\"\nlast_name = \"Doe\"\nssn = \"123-45-6789\"\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"82000\"\nbox2_fed_withheld = \"9100\"\n",
     )
     .unwrap();
-    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false, false).unwrap();
 
     let shown = cmd::tax::show_return_inputs(&vault, &pp(), 2024)
         .unwrap()

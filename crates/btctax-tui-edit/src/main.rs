@@ -844,6 +844,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
             dirty: false,
             parked: false,
             stale_note,
+            year_gate: btctax_cli::year_readiness::EntryStates::package_only(year),
             discard_offered: false,
             active_source_label,
             pending_remove: None,
@@ -867,6 +868,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 dirty: false,
                 parked: false,
                 stale_note,
+                year_gate: btctax_cli::year_readiness::EntryStates::package_only(year),
                 discard_offered: false,
                 active_source_label,
                 pending_remove: None,
@@ -891,6 +893,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 dirty: false,
                 parked,
                 stale_note,
+                year_gate: btctax_cli::year_readiness::EntryStates::package_only(year),
                 discard_offered: false,
                 active_source_label,
                 pending_remove: None,
@@ -902,10 +905,18 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 now,
             }
         }
-        Err(e @ btctax_cli::CliError::StaleParkedDraft { .. }) => {
+        Err(
+            e @ (btctax_cli::CliError::StaleParkedDraft { .. }
+            | btctax_cli::CliError::StaleDraftHoldsInterview { .. }),
+        ) => {
             // ★ P2-a: a stale PARKED draft is fail-closed by `load` — open a DISCARD-ONLY state (the
             // message + Esc/'X') so it is discardable in-app rather than undiscardable. `parked = true`
-            // reflects reality (it IS a parked draft); Task 8 wires the confirmed `discard_parked_draft`.
+            // reflects reality (it IS a parked draft); Task 8 wires the confirmed `discard_blocked_draft`.
+            // ★★ T4/R11 — the STALE-WIP-HOLDING-AN-INTERVIEW refusal lands here too, and it is the
+            //    payload-confirm R11 asks for on this surface: the screen names what the draft holds
+            //    (the error's own `holdings` clause) and 'X' is the confirmation. Without this arm the
+            //    new refusal would drop to the generic `Err(e)` status line and the draft would be
+            //    undiscardable in-app — exactly the state P2-a exists to prevent.
             TaxInputsFormState {
                 year,
                 working: None,
@@ -918,6 +929,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 dirty: false,
                 parked: true,
                 stale_note: None,
+                year_gate: btctax_cli::year_readiness::EntryStates::package_only(year),
                 discard_offered: true,
                 active_source_label,
                 pending_remove: None,
@@ -1641,7 +1653,7 @@ fn open_discard_parked_modal(app: &mut EditorApp) {
 }
 
 /// ★ Task 8: run the confirmed discard (the `DiscardParked` modal's Enter AND the P2-a discard-only
-/// screen's `X`). Writes through the persist seam `edit::persist::form_discard_parked_draft` (the disjoint
+/// screen's `X`). Writes through the persist seam `edit::persist::form_discard_blocked_draft` (the disjoint
 /// `app.session` borrow — review I-1), the ONLY deleter of a `parked = 1` row (it REFUSES a non-parked year
 /// — surface that refusal). On success CLOSE the flow (the parked draft is gone; reopening falls back to
 /// committed/profile/fresh — P2-a's reachable escape). On error surface the `CliError` and keep the flow
@@ -1651,10 +1663,10 @@ fn discard_parked_now(app: &mut EditorApp) {
         Some(f) => f.year,
         None => return,
     };
-    match edit::persist::form_discard_parked_draft(app.session.as_mut().unwrap(), year) {
+    match edit::persist::form_discard_blocked_draft(app.session.as_mut().unwrap(), year) {
         Ok(()) => {
-            app.tax_inputs_form = None; // the parked draft is gone — close the flow (P2-a escape / normal)
-            app.status = Some(format!("discarded the parked draft for {year}"));
+            app.tax_inputs_form = None; // the blocked draft is gone — close the flow (P2-a escape / normal)
+            app.status = Some(format!("discarded the {year} draft this build cannot open"));
         }
         Err(e) => {
             if let Some(form) = app.tax_inputs_form.as_mut() {
@@ -12618,6 +12630,91 @@ mod tests {
         );
     }
 
+    /// ★★★ **T4 / `SPEC_interview.md` R11 — THE TWO ENTRY STATES ARE ON THE ENTRY SCREEN, and a
+    ///     year whose package has not arrived says so in R11's own words.**
+    ///
+    /// The kill is the PAIR: the same return, complete either way, renders *"return: computable"* on
+    /// TY2024 and *"return: NOT computable"* plus R11's sentence on TY2026. A test that only checked
+    /// the params-less year would pass on a screen that always said the interview was blocked.
+    #[test]
+    fn the_tax_inputs_entry_screen_states_both_year_gate_states() {
+        use btctax_core::tax::return_inputs::ReturnInputs;
+        use btctax_core::tax::testonly::{answer_all_live_declarations, not_a_dependent};
+        use btctax_core::tax::types::FilingStatus;
+        use ratatui::{backend::TestBackend, Terminal};
+
+        // premise, read off the build rather than assumed: TY2024 has its package, TY2026 does not.
+        assert!(btctax_cli::year_readiness::YearReadiness::bundled(2024).params);
+        assert!(!btctax_cli::year_readiness::YearReadiness::bundled(2026).params);
+
+        let screen_for = |year: i32, blank_one: bool| -> String {
+            let (mut app, _dir) = unlocked_app_on_empty_vault(year);
+            let mut ri = ReturnInputs {
+                tax_year: year,
+                filing_status: FilingStatus::Single,
+                header: not_a_dependent(),
+                ..Default::default()
+            };
+            answer_all_live_declarations(&mut ri);
+            if blank_one {
+                ri.foreign_trust = None; // one live class-(A) declaration back to unanswered
+            }
+            let mut form = crate::edit::form::TaxInputsFormState::fresh(
+                year,
+                time::macros::date!(2026 - 09 - 01),
+            );
+            form.working = Some(ri);
+            app.tax_inputs_form = Some(form);
+
+            let backend = TestBackend::new(120, 40);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
+            let buf = terminal.backend().buffer().clone();
+            let area = buf.area();
+            (0..area.height)
+                .map(|y| {
+                    (0..area.width)
+                        .map(|x| buf.cell((x, y)).map_or(" ", |c| c.symbol()))
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        let ready = screen_for(2024, false);
+        assert!(
+            ready.contains("interview: complete · return: computable"),
+            "a year WITH its package states both, and the second is yes:\n{ready}"
+        );
+        assert!(
+            !ready.contains("wait for the TY2024 package"),
+            "and it does not tell a filer to wait for a package that is here:\n{ready}"
+        );
+
+        let waiting = screen_for(2026, false);
+        assert!(
+            waiting.contains("interview: complete · return: NOT computable"),
+            "R11: interview-complete is reachable on a year whose package has not arrived:\n{waiting}"
+        );
+        assert!(
+            waiting.contains(
+                "authoring and saving work; computing and committing wait for the TY2026 package"
+            ),
+            "R11's own sentence must be on the entry screen:\n{waiting}"
+        );
+        assert!(
+            waiting.contains("full-return params no"),
+            "and the readiness line says WHAT is missing:\n{waiting}"
+        );
+
+        // The interview half is LIVE, not a constant: blanking one declaration moves it.
+        let one_open = screen_for(2026, true);
+        assert!(
+            one_open.contains("interview: 1 question(s) still to answer · return: NOT computable"),
+            "the interview half counts the open items:\n{one_open}"
+        );
+    }
+
     // ── handle_key: regression guards ────────────────────────────────────────
 
     #[test]
@@ -13315,6 +13412,7 @@ mod tests {
             2024,
             &toml,
             // ★ no --force: an ordinary fixture carries no scrub marker (§4.3).
+            false,
             false,
         )
         .unwrap();

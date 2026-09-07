@@ -2003,15 +2003,21 @@ fn draw_tax_inputs_form(
         return;
     }
 
-    // 3 regions: [left section list | right field pane] over a bottom status block. The block is 5 rows
-    // (border + 3 content lines): active-source/screen-status, the key legend, and a NOTICE line that
-    // surfaces `app.status`/the stale-WIP note inside the flow (I-2 — the overlay clears the Browse footer).
+    // 3 regions: [left section list | right field pane] over a bottom status block. The block is 6 rows
+    // (border + 4 content lines): active-source/screen-status, the T4/R11 YEAR GATE, the key legend,
+    // and a NOTICE line that surfaces `app.status`/the stale-WIP note inside the flow (I-2 — the
+    // overlay clears the Browse footer).
     //
     // ★ FR-63: the NOTICE takes as many rows as `app.status` has `\n`-separated lines, so a two-line
-    // notice is DRAWN rather than silently cut off at the block's edge. The floor stays 5, which is
-    // what keeps every one-line state pixel-identical to before.
+    // notice is DRAWN rather than silently cut off at the block's edge. The floor is 6 — one more
+    // than before T4, because the year-gate line is unconditional.
     let notice_rows = u16::try_from(status.map_or(0, |s| s.lines().count())).unwrap_or(1);
-    let status_h = 5.max(4 + notice_rows);
+    // ★ T4/R11: the year gate is one line on a year that computes and three on one that does not
+    //   (R11's sentence plus the readiness line), so the block's height reads the SAME function the
+    //   renderer draws from — a layout that guessed would clip the fact it exists to state.
+    let gate_rows = u16::try_from(form.year_gate_lines().len()).unwrap_or(1);
+    // border(2) + active-source(1) + gate(g) + legend(1) + notice(≥1, always reserved as before T4).
+    let status_h = 4 + gate_rows + notice_rows.max(1);
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(status_h)])
@@ -2254,11 +2260,12 @@ fn draw_tax_inputs_discard(
     frame.render_widget(p, rect);
 }
 
-/// The bottom status block (border + 3 content lines):
+/// The bottom status block (border + 4 content lines):
 /// 1. the CACHED active source (`full return` / `tax-profile` / `(none)`, Task 8) + the §9A **screen
 ///    status** (`screens clean, except what report computes` / `1 issue: <section>` — I-4);
-/// 2. the key legend (`t` toggle source, `X` discard-parked when parked; the close hint is dirty-aware — I-3);
-/// 3. a NOTICE line surfacing `app.status` (I-2 — the overlay clears the Browse footer that normally renders
+/// 2. ★ T4/R11 — the YEAR GATE: interview-complete and return-computable, stated separately;
+/// 3. the key legend (`t` toggle source, `X` discard-parked when parked; the close hint is dirty-aware — I-3);
+/// 4. a NOTICE line surfacing `app.status` (I-2 — the overlay clears the Browse footer that normally renders
 ///    it) or, absent one, the §6.3 stale-WIP-discard note.
 fn draw_tax_inputs_status(
     frame: &mut Frame,
@@ -2296,15 +2303,36 @@ fn draw_tax_inputs_status(
     } else {
         format!("   [↑/↓] field · [←/→ or Tab] section · [s] commit · [t] source · {close_hint}")
     };
-    let mut lines: Vec<Line> = vec![
-        Line::from(vec![
-            Span::raw("  active source: "),
-            Span::styled(form.active_source_label, Style::default().fg(Color::Cyan)),
-            Span::raw("   ·   "),
-            Span::styled(screen_status, screen_style),
-        ]),
-        Line::from(Span::styled(legend, Style::default().fg(Color::DarkGray))),
-    ];
+    // ★★★ **T4 / `SPEC_interview.md` R11 — THE YEAR GATE, on the entry screen.**
+    //
+    // Two INDEPENDENT states, both stated: is the interview complete (a fact about the answers,
+    // derivable with no year package at all), and is the return computable (a fact about the build).
+    // Conflating them is what R11 exists to fix — on TY2026 in September a filer can finish the
+    // whole interview and still not be able to file, and a screen that says only "not ready" tells
+    // them their work is pointless.
+    //
+    // ★ The interview half is recomputed HERE, per frame, from the live working return, so the
+    //   count falls as the filer answers; the package half was cached at open (it re-reads the
+    //   bundled price dataset, which a per-keystroke redraw must not).
+    let gate_lines = form.year_gate_lines();
+    let gate_style = if form.year_gate.return_computable {
+        Style::default().fg(Color::DarkGray)
+    } else {
+        Style::default().fg(Color::Yellow)
+    };
+    let mut lines: Vec<Line> = vec![Line::from(vec![
+        Span::raw("  active source: "),
+        Span::styled(form.active_source_label, Style::default().fg(Color::Cyan)),
+        Span::raw("   ·   "),
+        Span::styled(screen_status, screen_style),
+    ])];
+    for g in &gate_lines {
+        lines.push(Line::from(Span::styled(format!("  {g}"), gate_style)));
+    }
+    lines.push(Line::from(Span::styled(
+        legend,
+        Style::default().fg(Color::DarkGray),
+    )));
     // ★ I-2: the NOTICE line — `app.status` (every in-flow refusal/error/outcome routed there stays VISIBLE)
     // takes precedence over the one-time §6.3 stale-WIP note, which shows only when there is no live status.
     //

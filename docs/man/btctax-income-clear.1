@@ -4,7 +4,7 @@
 .SH NAME
 clear \- Remove the stored full\-return inputs for a tax year (fall back to a raw `tax\-profile`)
 .SH SYNOPSIS
-\fBclear\fR <\fB\-\-year\fR> [\fB\-h\fR|\fB\-\-help\fR] 
+\fBclear\fR <\fB\-\-year\fR> [\fB\-\-discard\-draft\fR] [\fB\-h\fR|\fB\-\-help\fR] 
 .SH DESCRIPTION
 Remove the stored full\-return inputs for a tax year (fall back to a raw `tax\-profile`)
 .SH OPTIONS
@@ -12,5 +12,10 @@ Remove the stored full\-return inputs for a tax year (fall back to a raw `tax\-p
 \fB\-\-year\fR \fI<YEAR>\fR
 The tax year (e.g. 2024)
 .TP
+\fB\-\-discard\-draft\fR
+Discard a work\-in\-progress tax\-inputs DRAFT for this year that holds an interview — recorded answers, transcribed documents, dependents or a Schedule A.
+
+Without this, such a write is REFUSED and nothing is stored: on a year whose package has not arrived the draft is where the interview lives for months, and its recorded answers cannot be re\-created by re\-typing (btctax records when and in what words it asked). A draft holding none of that is superseded silently, as before.
+.TP
 \fB\-h\fR, \fB\-\-help\fR
-Print help
+Print help (see a summary with \*(Aq\-h\*(Aq)

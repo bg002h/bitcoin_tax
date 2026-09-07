@@ -126,6 +126,7 @@ fn run() -> Result<ExitCode, CliError> {
             prior_taxable_gifts,
             write_carryover,
             force,
+            discard_draft,
         } => {
             // [R0-M3] Parse --prior-taxable-gifts as exact Decimal (no float); reject negative
             // REGARDLESS of whether --tax-year is present. Validated once, before the branch.
@@ -207,7 +208,8 @@ fn run() -> Result<ExitCode, CliError> {
                 // this year's computed charitable, QBI (business-loss + REIT/PTP) and §1212(b)
                 // capital-loss carryover-outs as next year's carryover-ins.
                 if write_carryover {
-                    let summary = cmd::tax::write_back_carryover(vault, &pp, y, force)?;
+                    let summary =
+                        cmd::tax::write_back_carryover(vault, &pp, y, force, discard_draft)?;
                     println!("{summary}");
                 }
                 // UX-P4-10: exit 1 when the year produced NO filing-ready number (mirrors `verify`).
@@ -298,9 +300,14 @@ fn run() -> Result<ExitCode, CliError> {
             }
         },
         Command::Income(income) => match income {
-            IncomeCmd::Import { year, file, force } => {
+            IncomeCmd::Import {
+                year,
+                file,
+                force,
+                discard_draft,
+            } => {
                 let pp = passphrase(false)?;
-                cmd::tax::import_return_inputs(vault, &pp, year, &file, force)?;
+                cmd::tax::import_return_inputs(vault, &pp, year, &file, force, discard_draft)?;
                 println!("Imported full-return inputs for tax year {year}.");
             }
             IncomeCmd::Show { year } => {
@@ -310,7 +317,10 @@ fn run() -> Result<ExitCode, CliError> {
                     None => println!("No full-return inputs set for tax year {year}."),
                 }
             }
-            IncomeCmd::Answer { year } => {
+            IncomeCmd::Answer {
+                year,
+                discard_draft,
+            } => {
                 let pp = passphrase(false)?;
                 let stdin = std::io::stdin();
                 let mut input = stdin.lock();
@@ -324,6 +334,7 @@ fn run() -> Result<ExitCode, CliError> {
                     btctax_core::conventions::tax_date(now, UtcOffset::UTC),
                     &mut input,
                     &mut out,
+                    discard_draft,
                 )?;
                 println!("Answered the full-return questions for tax year {year}.");
             }
@@ -368,9 +379,12 @@ fn run() -> Result<ExitCode, CliError> {
                     None => println!("No full-return inputs set for tax year {year}."),
                 }
             }
-            IncomeCmd::Clear { year } => {
+            IncomeCmd::Clear {
+                year,
+                discard_draft,
+            } => {
                 let pp = passphrase(false)?;
-                if cmd::tax::clear_return_inputs(vault, &pp, year)? {
+                if cmd::tax::clear_return_inputs(vault, &pp, year, discard_draft)? {
                     println!("Cleared full-return inputs for tax year {year}.");
                 } else {
                     println!("No full-return inputs set for tax year {year}.");

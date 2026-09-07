@@ -4,7 +4,7 @@
 .SH NAME
 answer \- Answer the return\*(Aqs fail\-loud questions interactively — the yes/no boxes that have no safe default (can someone claim you as a dependent? Schedule B\*(Aqs foreign\-account and foreign\-trust lines) plus the optional dates of birth
 .SH SYNOPSIS
-\fBanswer\fR <\fB\-\-year\fR> [\fB\-h\fR|\fB\-\-help\fR] 
+\fBanswer\fR <\fB\-\-year\fR> [\fB\-\-discard\-draft\fR] [\fB\-h\fR|\fB\-\-help\fR] 
 .SH DESCRIPTION
 Answer the return\*(Aqs fail\-loud questions interactively — the yes/no boxes that have no safe default (can someone claim you as a dependent? Schedule B\*(Aqs foreign\-account and foreign\-trust lines) plus the optional dates of birth.
 .PP
@@ -15,6 +15,11 @@ Requires an existing return for the year (create one with `income import`).
 .TP
 \fB\-\-year\fR \fI<YEAR>\fR
 The tax year (e.g. 2024)
+.TP
+\fB\-\-discard\-draft\fR
+Discard a work\-in\-progress tax\-inputs DRAFT for this year that holds an interview — recorded answers, transcribed documents, dependents or a Schedule A.
+
+Without this, such a write is REFUSED and nothing is stored: on a year whose package has not arrived the draft is where the interview lives for months, and its recorded answers cannot be re\-created by re\-typing (btctax records when and in what words it asked). A draft holding none of that is superseded silently, as before.
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help (see a summary with \*(Aq\-h\*(Aq)

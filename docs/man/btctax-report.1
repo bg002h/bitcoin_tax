@@ -4,7 +4,7 @@
 .SH NAME
 report \- Show holdings + realized disposals/removals/income. With \-\-tax\-year: standalone TaxResult
 .SH SYNOPSIS
-\fBreport\fR [\fB\-\-year\fR] [\fB\-\-tax\-year\fR] [\fB\-\-prior\-taxable\-gifts\fR] [\fB\-\-write\-carryover\fR] [\fB\-\-force\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+\fBreport\fR [\fB\-\-year\fR] [\fB\-\-tax\-year\fR] [\fB\-\-prior\-taxable\-gifts\fR] [\fB\-\-write\-carryover\fR] [\fB\-\-force\fR] [\fB\-\-discard\-draft\fR] [\fB\-h\fR|\fB\-\-help\fR] 
 .SH DESCRIPTION
 Show holdings + realized disposals/removals/income. With \-\-tax\-year: standalone TaxResult.
 .PP
@@ -25,6 +25,9 @@ Cumulative prior\-year TAXABLE gifts (post\-annual\-exclusion Form 709 amounts),
 .TP
 \fB\-\-force\fR
 With `\-\-write\-carryover`: overwrite a next\-year carryover\-in that was user\-entered (`income import`). Without it, a user\-entered value is left untouched and the write refuses
+.TP
+\fB\-\-discard\-draft\fR
+With `\-\-write\-carryover`: discard a work\-in\-progress tax\-inputs DRAFT for the year WRITTEN ONTO (the year after `\-\-tax\-year`) that holds an interview — recorded answers, transcribed documents, dependents or a Schedule A. Without this, such a write is REFUSED and nothing is stored. Distinct from `\-\-force`, which is about the carryover figure
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help (see a summary with \*(Aq\-h\*(Aq)

@@ -188,7 +188,7 @@ pub fn form_park_to_profile(
 }
 
 /// Discard the parked draft for `year` — the `X` discard-parked path (§9A/P2-a) — the input-form flow's
-/// PARKED-DISCARD side. A thin wrapper over [`btctax_cli::input_form_store::discard_parked_draft`], the ONLY
+/// PARKED-DISCARD side. A thin wrapper over [`btctax_cli::input_form_store::discard_blocked_draft`], the ONLY
 /// deleter of a `parked = 1` row; it REFUSES ([`btctax_cli::CliError::Usage`]) unless the year's draft is
 /// parked, so it can never be reached to delete a work-in-progress draft (or a year with no draft) behind
 /// the "discard parked draft" affordance — the parked check is the whole safety property, and the flow
@@ -196,17 +196,17 @@ pub fn form_park_to_profile(
 ///
 /// Lives HERE, alongside [`form_park_to_profile`], because the mutation surface (`Session::conn()` /
 /// `Session::save()`) is confined to this module (the KAT-G1 gate). The flow calls THIS wrapper, never
-/// `input_form_store::discard_parked_draft` directly.
+/// `input_form_store::discard_blocked_draft` directly.
 ///
 /// Returns [`btctax_cli::CliError`], NOT [`PersistError`]: `discard_parked_draft` does its OWN
 /// snapshot/restore around its `save()` (mirrors `park_to_profile`'s atomicity), so its `Err` is routed to
 /// `app.status` DIRECTLY, not through `EditorApp::on_persist_error` (review M1). Takes `&mut Session` so the
 /// flow borrows `app.session` DISJOINTLY from `app.tax_inputs_form` (review I-1).
-pub fn form_discard_parked_draft(
+pub fn form_discard_blocked_draft(
     session: &mut btctax_cli::Session,
     year: i32,
 ) -> Result<(), btctax_cli::CliError> {
-    btctax_cli::input_form_store::discard_parked_draft(session, year)
+    btctax_cli::input_form_store::discard_blocked_draft(session, year)
 }
 
 /// Revert the in-memory DB to `pre` after a mutation-committing step failed, mapping the error:
@@ -1275,6 +1275,7 @@ mod tests {
             2025,
             &toml,
             // ★ no --force: an ordinary fixture carries no scrub marker (§4.3).
+            false,
             false,
         )
         .unwrap();

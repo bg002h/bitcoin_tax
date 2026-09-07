@@ -233,6 +233,64 @@ pub fn write_panel(
     Ok(())
 }
 
+/// ★★★ **T4 / `SPEC_interview.md` R11 — WHERE `income answer` WRITES.**
+///
+/// Two stores, and which one is the answer target is a fact about the year, not a flag:
+///
+/// - a **committed row** exists ⇒ answer it, exactly as before, and supersede the year's WIP draft
+///   on the write (the §6.2 coherence rule, now with T4's confirmation);
+/// - **no committed row but a WIP draft** ⇒ answer the DRAFT. R11: the draft is the Sep–Dec store
+///   for a year whose package has not arrived, and on such a year nothing else can hold answers.
+enum AnswerTarget {
+    Committed {
+        ri: ReturnInputs,
+        coherence: crate::input_form_store::DraftCoherence,
+    },
+    Draft(ReturnInputs),
+}
+
+/// Resolve [`AnswerTarget`], raising every refusal a write could raise BEFORE a question is asked.
+///
+/// ★ M-1 order, kept: the parked-draft refusal comes first, because a parked year has no committed
+///   row and the generic "no inputs" message would otherwise shadow its remedy.
+fn answer_target(
+    sess: &crate::Session,
+    year: i32,
+    discard_draft: bool,
+) -> Result<AnswerTarget, CliError> {
+    use crate::input_form_store::{self, Loaded};
+    if input_form_store::parked_flag(sess.conn(), year)? == Some(true) {
+        return Err(CliError::ParkedDraftBlocksWrite { year });
+    }
+    if let Some(ri) = return_inputs::get(sess.conn(), year)? {
+        // The committed row wins; the draft is what this write supersedes.
+        let coherence = input_form_store::coherence_check(sess.conn(), year, discard_draft)?;
+        return Ok(AnswerTarget::Committed { ri, coherence });
+    }
+    // ★★★ R11 — no committed row. `load` applies the §6.1 precedence and the §6.3 stale split
+    //     (a stale WIP draft holding an interview REFUSES here rather than being discarded, T4).
+    let (loaded, stale) = input_form_store::load(sess.conn(), year)?;
+    if let Some(note) = stale {
+        eprintln!("note: {note}");
+    }
+    match loaded {
+        Loaded::Draft { ri, parked: false } => Ok(AnswerTarget::Draft(ri)),
+        // Unreachable in practice (parked was refused above), and it must not become an answer
+        // target if it ever is: a parked return is testimony the filer WITHDREW.
+        Loaded::Draft { parked: true, .. } => Err(CliError::ParkedDraftBlocksWrite { year }),
+        Loaded::Committed(ri) => Ok(AnswerTarget::Committed {
+            ri,
+            coherence: crate::input_form_store::DraftCoherence::Absent,
+        }),
+        Loaded::Fresh => Err(CliError::Usage(format!(
+            "no full-return inputs and no draft for tax year {year} — `income answer` fills in the \
+             questions on an EXISTING return. Create one with `btctax income import --year {year} \
+             --file <toml>`, or start one in the tax-inputs form (which saves a draft even on a \
+             year whose package has not arrived)."
+        ))),
+    }
+}
+
 pub fn answer_return_inputs(
     vault: &Path,
     pp: &Passphrase,
@@ -240,22 +298,33 @@ pub fn answer_return_inputs(
     now: time::Date,
     input: &mut impl std::io::BufRead,
     out: &mut impl Write,
+    discard_draft: bool,
 ) -> Result<(), CliError> {
     let mut s = Session::open(vault, pp)?;
-    // ★ §6.2 (M-1): reconcile the draft BEFORE the committed-row read below — that read early-returns a
-    // generic "no inputs" message on an absent row, and a PARKED year has no committed row, so running
-    // coherence first is what surfaces the parked-refuse remedy instead of the generic message.
-    crate::input_form_store::coherence_clear_or_refuse(s.conn(), year)?;
-    let Some(mut ri) = return_inputs::get(s.conn(), year)? else {
-        return Err(CliError::Usage(format!(
-            "no full-return inputs for tax year {year} — `income answer` fills in the questions on an \
-             EXISTING return; create one first with `btctax income import --year {year} --file <toml>`"
-        )));
+    let target = answer_target(&s, year, discard_draft)?;
+    let (mut ri, into_draft, coherence) = match target {
+        AnswerTarget::Committed { ri, coherence } => (ri, false, coherence),
+        AnswerTarget::Draft(ri) => (ri, true, crate::input_form_store::DraftCoherence::Absent),
     };
 
     // ★ r3 NIT-2 — the questions say "in this tax year" but the registry prompts are `&'static str` and
     // cannot interpolate the year; a one-line banner anchors them so the filer need not hold it in their head.
     writeln!(out, "Answering full-return questions for tax year {year}:")?;
+    // ★★★ T4/R11 — THE YEAR GATE, stated before the first question: which of the two states this
+    //     year has, in R11's own words, so a filer on a params-less year knows that authoring and
+    //     saving work while computing and committing wait for the package.
+    writeln!(
+        out,
+        "{}",
+        crate::year_readiness::EntryStates::for_year(year, Some(&ri)).sentence()
+    )?;
+    if into_draft {
+        writeln!(
+            out,
+            "  (answering the {year} DRAFT — this year has no committed return, so the answers are \
+             saved to the input form's draft.)"
+        )?;
+    }
 
     // ★★★ R12 / §4.2 — THE PANEL, BEFORE the first question.
     write_panel(
@@ -432,6 +501,15 @@ pub fn answer_return_inputs(
         "after",
     )?;
 
+    if into_draft {
+        // ★★★ R11 — the draft, never `return_inputs::set`. The draft is invisible to `resolve.rs`
+        //     (`input_form_store.rs` header), so writing it carries none of the precedence-1 hazard
+        //     that made `income answer` refuse an absent committed row in the first place;
+        //     `return_inputs::get` still answers `None` after this.
+        crate::input_form_store::save_draft(&mut s, year, &ri)?;
+        return Ok(());
+    }
+    crate::input_form_store::coherence_clear(s.conn(), year, &coherence)?;
     return_inputs::set(s.conn(), year, &ri)?;
     s.save()?;
     Ok(())

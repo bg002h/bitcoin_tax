@@ -46,12 +46,28 @@ pub fn show_profile(
 
 /// `income import` — parse a full-return [`ReturnInputs`] from a TOML file (offline; key order in the file
 /// is irrelevant to deserialization) and persist it in the `return_inputs` side-table for `year`.
+///
+/// ★★★ **T4 / `SPEC_interview.md` R11 — IT SCREENS BEFORE IT WRITES.** Until T4 this wrote a
+///     committed, UNSCREENED row on every year with no `FullReturnParams`, so a TOML carrying
+///     `documents.k1 = true` was stored and poisoned the year at `resolve.rs` precedence 1 (the
+///     `SPEC_input_surface.md` §3.2 hazard) until `report` finally said so. Now
+///     [`screen_param_free`] runs on the assembled row first and a refusal writes nothing. The
+///     rules that read the year's package (§6413(c), §402(g), §904(j)) still wait for commit, and
+///     the UNANSWERED tier is deliberately not run here — see `ScreenTier`.
+///
+/// `discard_draft` is `--discard-draft`: the T4 confirmation that a work-in-progress draft holding
+/// an interview may be superseded by this write. It is a SEPARATE flag from `force`
+/// (`--force`, the scrub-marker override), which documents itself as overriding that guard *"and
+/// NOTHING else"*.
+///
+/// [`screen_param_free`]: btctax_core::tax::return_refuse::screen_param_free
 pub fn import_return_inputs(
     vault: &Path,
     pp: &Passphrase,
     year: i32,
     file: &Path,
     force: bool,
+    discard_draft: bool,
 ) -> Result<(), CliError> {
     let text = std::fs::read_to_string(file)?;
     // ★★★ §4.3 — THE MARKER GUARD, A PRE-PARSE SCAN OF THE FILE TEXT.
@@ -152,9 +168,11 @@ pub fn import_return_inputs(
     ri.answer_log.clear();
     ri.answer_log_history.clear();
     let mut s = Session::open(vault, pp)?;
-    // ★ §6.2 (M-1): reconcile the crash-recovery draft BEFORE any committed-row read/write — clear a WIP
-    // draft (regenerable) so it can't shadow this write, or refuse a parked one (its sole copy).
-    crate::input_form_store::coherence_clear_or_refuse(s.conn(), year)?;
+    // ★ §6.2 (M-1): reconcile the crash-recovery draft BEFORE any committed-row read/write — refuse a
+    // parked one (its sole copy, C-1) or a WIP one holding an interview (T4/R11) here, and CLEAR it
+    // only on the path that actually writes, below the screen. Checking first and deleting last is
+    // what makes "a refusal writes nothing" true of the draft as well as of the committed row.
+    let coherence = crate::input_form_store::coherence_check(s.conn(), year, discard_draft)?;
     // §4 R3-M6 (Fable P4.9 r1 I2): `income import` is a whole-blob upsert, so a re-import would SILENTLY
     // DROP a carryover that `report --write-carryover` computed onto this row. For QBI that is a fail-OPEN
     // (losing the REIT/PTP loss carryforward OVERSTATES the QBI deduction ⇒ understates tax). So a
@@ -245,6 +263,18 @@ pub fn import_return_inputs(
             );
         }
     }
+    // ★★★ T4/R11 — THE SCREEN, and it runs BEFORE anything is written, deleted, or ANNOUNCED. A
+    //     refusal here leaves the committed row absent and the draft untouched: `s.save()` below is
+    //     never reached, so not one byte of the in-memory session reaches disk.
+    //
+    // ★ It is placed ABOVE the FR-48 note deliberately. That note says *"these inputs are stored
+    //   now"*, and printing it and then refusing would tell the filer the opposite of what happened.
+    if let Some(refusal) = btctax_core::tax::return_refuse::screen_param_free(&ri) {
+        return Err(CliError::Usage(format!(
+            "the {year} inputs were NOT stored — [{:?}] {}",
+            refusal.reason, refusal.detail
+        )));
+    }
     // ★ FR-48: a year whose full return cannot compute yet is STORED, with a note — not refused.
     //   `report --tax-year N-1 --write-carryover` legitimately writes onto year N before N's package
     //   exists, and the TUI keeps the same row as a draft; refusing here would break that chain. What
@@ -253,6 +283,7 @@ pub fn import_return_inputs(
     {
         eprintln!("{note}");
     }
+    crate::input_form_store::coherence_clear(s.conn(), year, &coherence)?;
     return_inputs::set(s.conn(), year, &ri)?;
     s.save()
 }
@@ -400,11 +431,17 @@ pub fn scrub_return_inputs(
 
 /// `income clear` — remove the stored full-return inputs for `year` (recovery path so a year with
 /// `ReturnInputs` isn't a dead end while derivation is pending — review I3). Returns whether a row existed.
-pub fn clear_return_inputs(vault: &Path, pp: &Passphrase, year: i32) -> Result<bool, CliError> {
+pub fn clear_return_inputs(
+    vault: &Path,
+    pp: &Passphrase,
+    year: i32,
+    discard_draft: bool,
+) -> Result<bool, CliError> {
     let mut s = Session::open(vault, pp)?;
     // ★ §6.2 (M-1): a parked draft is the sole copy of a screened return — refuse rather than let this
-    // clear leave it silently orphaned; a WIP draft is cleared alongside the committed-row delete.
-    crate::input_form_store::coherence_clear_or_refuse(s.conn(), year)?;
+    // clear leave it silently orphaned; a WIP draft holding an interview needs `--discard-draft`
+    // (T4/R11); any other WIP draft is cleared alongside the committed-row delete.
+    crate::input_form_store::coherence_clear_or_refuse(s.conn(), year, discard_draft)?;
     let removed = return_inputs::delete(s.conn(), year)?;
     s.save()?;
     Ok(removed)
@@ -927,12 +964,16 @@ pub fn write_back_carryover(
     pp: &Passphrase,
     year: i32,
     force: bool,
+    discard_draft: bool,
 ) -> Result<String, CliError> {
     let mut s = Session::open(vault, pp)?;
     // ★ §6.2 (M-1): write-back reads AND writes the year+1 committed row, so it reconciles the year+1
     // draft here — before the year+1 read below, which early-returns on an absent row (a parked year has
     // none) and would otherwise shadow the parked-refuse remedy.
-    crate::input_form_store::coherence_clear_or_refuse(s.conn(), year + 1)?;
+    // ★ T4/R11: `discard_draft` is `--discard-draft`, and it is scoped to YEAR+1's draft — the year
+    //   this command writes onto. It is separate from `force`, which overrides the write-back's own
+    //   guard on a user-entered carryover and says nothing about a draft.
+    crate::input_form_store::coherence_clear_or_refuse(s.conn(), year + 1, discard_draft)?;
     let (events, state, cfg) = s.load_events_and_project()?;
     let tables = BundledTaxTables::load();
     let fr_tables = BundledFullReturnTables::load();
@@ -1260,7 +1301,7 @@ mod tests {
             crate::input_form_store::set_draft_row(s.conn(), 2024, &ri, true).unwrap(); // parked
             s.save().unwrap();
         }
-        let err = clear_return_inputs(&path, &pp, 2024).unwrap_err();
+        let err = clear_return_inputs(&path, &pp, 2024, false).unwrap_err();
         assert!(
             matches!(err, CliError::ParkedDraftBlocksWrite { year: 2024 }),
             "income clear must refuse a parked-draft year, got {err:?}"

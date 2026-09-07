@@ -163,6 +163,118 @@ impl YearReadiness {
     }
 }
 
+/// ★★★ **T4 / `SPEC_interview.md` R11 — THE TWO STATES A YEAR IS IN AT ENTRY.**
+///
+/// They are independent, and conflating them is the defect R11 exists to fix. A filer opening
+/// TY2026 in September 2026 can finish the whole interview and still not be able to file, because
+/// the IRS has not published the year's numbers — and a screen that says only *"not ready"* tells
+/// them their work is pointless, while one that says only *"complete"* promises a return they
+/// cannot get.
+///
+/// - **interview-complete** — [`btctax_core::tax::interview_state::interview_state`] (T3/R12) has
+///   nothing blocking. Derivable with no package at all: it is a fact about the ANSWERS.
+/// - **return-computable** — [`YearReadiness::params`]: this build bundles the year's
+///   `FullReturnParams`. A fact about the BUILD, and the compute gate everywhere else.
+///
+/// ★ `interview_complete` is `None` when there is no return to ask about (a year the filer has not
+///   started), so the sentence says *"not started"* rather than asserting either state of a return
+///   that does not exist.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EntryStates {
+    pub year: i32,
+    /// `Some(true)` = nothing blocking; `None` = no working return for the year yet.
+    pub interview_complete: Option<bool>,
+    /// How many class-(A) items still block, when there is a return. Named so the sentence can say
+    /// what is left instead of only that something is.
+    pub blocking: Option<usize>,
+    /// `YearReadiness::params` — the compute gate.
+    pub return_computable: bool,
+    /// The readiness line for the year, for the second clause.
+    readiness: String,
+}
+
+impl EntryStates {
+    /// Both states for `year`, over the working return `ri` (the draft or the committed row —
+    /// whichever the caller resolved; `None` when the year has neither).
+    #[must_use]
+    pub fn for_year(year: i32, ri: Option<&btctax_core::tax::return_inputs::ReturnInputs>) -> Self {
+        Self::package_only(year).with_interview(ri)
+    }
+
+    /// The PACKAGE half only — the half that cannot change while a form is open.
+    ///
+    /// ★ Split out because [`YearReadiness::bundled`] reads the bundled price dataset, and a TUI
+    ///   redraw happens on every keystroke: the build fact is cached once at open and the interview
+    ///   half — a registry walk, cheap — is recomputed per frame by [`Self::with_interview`], so the
+    ///   line the filer reads tracks the answer they just gave.
+    #[must_use]
+    pub fn package_only(year: i32) -> Self {
+        let r = YearReadiness::bundled(year);
+        Self {
+            year,
+            interview_complete: None,
+            blocking: None,
+            return_computable: r.params,
+            readiness: r.sentence(),
+        }
+    }
+
+    /// Fill the interview half over the working return (`None` = the year has no return yet).
+    #[must_use]
+    pub fn with_interview(
+        mut self,
+        ri: Option<&btctax_core::tax::return_inputs::ReturnInputs>,
+    ) -> Self {
+        let st = ri.map(btctax_core::tax::interview_state::interview_state);
+        self.interview_complete = st.as_ref().map(|s| s.blocking.is_empty());
+        self.blocking = st.as_ref().map(|s| s.blocking.len());
+        self
+    }
+
+    /// The entry states as DISPLAY LINES — one when the year computes, three when it does not.
+    ///
+    /// ★★ Lines rather than one string because the TUI's status pane is a fixed 118 columns and
+    ///    R11's sentence alone is 78 of them: a single line would be silently clipped, which is the
+    ///    FR-63 defect (*"a fact that will not fit is added BESIDE it rather than by lengthening
+    ///    it"*). [`Self::sentence`] joins them for surfaces that scroll.
+    ///
+    /// ★★ On a year with no package line 2 is R11's own words — *"authoring and saving work;
+    ///    computing and committing wait for the TY{year} package"* — because that is the fact a
+    ///    filer needs in September and no other surface says it, and line 3 is the readiness
+    ///    sentence, which says WHAT is missing.
+    ///
+    /// ★ It deliberately does NOT name a month the package is expected in. `YearReadiness` exists
+    ///   precisely to replace year literals that drift, and no bundled record declares a package
+    ///   date (`YearRecord` carries `return_due` and `prices_through`, neither of which is it), so a
+    ///   hand-typed *"expected Jan 2027"* would be the one unsourced figure on the screen.
+    #[must_use]
+    pub fn lines(&self) -> Vec<String> {
+        let interview = match (self.interview_complete, self.blocking) {
+            (None, _) => "interview: not started".to_string(),
+            (Some(true), _) => "interview: complete".to_string(),
+            (Some(false), Some(n)) => format!("interview: {n} question(s) still to answer"),
+            (Some(false), None) => "interview: incomplete".to_string(),
+        };
+        if self.return_computable {
+            return vec![format!("{interview} · return: computable")];
+        }
+        vec![
+            format!("{interview} · return: NOT computable"),
+            format!(
+                "authoring and saving work; computing and committing wait for the TY{} package",
+                self.year
+            ),
+            self.readiness.clone(),
+        ]
+    }
+
+    /// [`Self::lines`] as one sentence, for a surface that is not column-bound.
+    #[must_use]
+    pub fn sentence(&self) -> String {
+        self.lines().join(" — ")
+    }
+}
+
 /// ★★★ spec 1099-DA R6 fold (I-1) — can `export-irs-pdf --tax-year {year}` print the crypto slice
 /// AT ALL, template-wise?
 ///

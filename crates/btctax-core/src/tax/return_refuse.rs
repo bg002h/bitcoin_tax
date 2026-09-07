@@ -1173,9 +1173,81 @@ pub fn screen_document_census(ri: &ReturnInputs) -> Option<Refusal> {
     None
 }
 
+/// ★★★ **T4 / R11 — WHAT A CALLER OF THE SCREEN HAS, so there is only ever ONE screen.**
+///
+/// [`screen_inputs`] is one ordered body whose early returns are semantic — `SPEC_input_form.md` §7
+/// forbids refactoring it to collect refusals, because a later rule assumes an earlier one's
+/// integrity. R11 adds a SECOND caller, `income import`, which must screen a TOML on a year that has
+/// no [`TaxTable`] and no [`FullReturnParams`]; and the one thing that caller must not be is a
+/// second copy of the rules, because *"a rule that exists in one and not the other is the defect"*.
+///
+/// So the body stays single and this type says what the caller HOLDS. Two axes, each a MECHANISM
+/// rather than a list of rules someone must keep in step:
+///
+/// - **`package`** — the year's table and parameters. `None` skips exactly the rules that read one,
+///   and they are the only three in the whole body: §6413(c) excess social security (from
+///   `TaxTable::ss_wage_base`), §402(g) elective deferrals (`FullReturnParams::elective_deferral_limit`)
+///   and the §904(j) ceiling (`FullReturnParams::ftc_ceiling`). Every other rule needs neither and
+///   runs on both paths, by construction — there is no second list to fall out of step with.
+/// - **`unanswered_refuses`** — whether a LIVE class-(A) declaration left `None`, or answered under
+///   earlier words (R10.3), refuses here.
+///
+/// ★★★ **Why `unanswered_refuses` is `false` for `income import`, and why that is a brick rather
+///     than a preference.** `income import` is the ONLY path that creates a committed row
+///     (`answer.rs`: *"only `income import` creates one"*), and `income answer` is the ONLY path
+///     that answers a declaration without hand-editing a TOML. An import that demanded every answer
+///     would therefore make `income answer` unreachable for the filer it exists for — the D-8
+///     recovery story, a TOML-less user facing a permanently-refusing year. R11's own enumeration of
+///     what runs at import lists the census invariants, the unsupported-row refusals and
+///     `NegativeAmount`, and does not name the unanswered tier.
+///
+/// ★ The census's own VALUE rules are NOT in that tier and DO refuse at import: a declared document
+///   with nothing transcribed, a *"no"* beside transcribed rows, and an unsupported type are each
+///   unfixable by `income answer` (it captures booleans and dates, never a document row), so
+///   refusing at import is the filer's real exit, not a wall.
+#[derive(Clone, Copy)]
+pub struct ScreenTier<'a> {
+    /// The year's package, when the caller has one.
+    pub package: Option<(&'a TaxTable, &'a FullReturnParams)>,
+    /// Whether an unanswered (or wording-changed) live class-(A) declaration refuses here.
+    pub unanswered_refuses: bool,
+}
+
 /// Screen the **input-screenable** refuse-guard rows (SPEC §4.10). Returns the FIRST [`Refusal`] found,
 /// or `None` if nothing input-screenable trips (the compute/ledger-dependent rows are checked later).
+///
+/// The COMMIT gate: every tier runs, because the caller has the year's package.
 pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) -> Option<Refusal> {
+    screen_inputs_tiered(
+        ri,
+        ScreenTier {
+            package: Some((tbl, p)),
+            unanswered_refuses: true,
+        },
+    )
+}
+
+/// ★★★ **R11 — the screen `income import` runs BEFORE it writes, on a year with no package.**
+///
+/// Until T4, `income import` wrote a committed, UNSCREENED row on every params-less year — so a TOML
+/// carrying `documents.k1 = true` was stored and poisoned the year at `resolve.rs` precedence 1
+/// (`SPEC_input_surface.md` §3.2) until `report` finally said so. This is the same body
+/// [`screen_inputs`] runs, on the two tiers a params-less importer can honestly run: see
+/// [`ScreenTier`] for why those two and not others.
+#[must_use]
+pub fn screen_param_free(ri: &ReturnInputs) -> Option<Refusal> {
+    screen_inputs_tiered(
+        ri,
+        ScreenTier {
+            package: None,
+            unanswered_refuses: false,
+        },
+    )
+}
+
+/// The one screen body. See [`ScreenTier`]; the rule ORDER is unchanged from the pre-T4
+/// `screen_inputs`, so a caller holding the package gets byte-identical behaviour.
+pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<Refusal> {
     // Data integrity FIRST: any negative money is a corrupt import — refuse before any accumulation, so a
     // negative can never offset a §402(g) / §904(j) threshold into passing (R2-I1 / M4, now one gate).
     if let Some(field) = first_negative_amount(ri) {
@@ -1256,30 +1328,35 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
     // Schedule B Part III) and `schedule_b_part3_unanswered` — the latter was circular (§2.9). Refusal
     // PRECEDENCE is explicitly not contract: on a multi-defect return the reported reason may differ from
     // the pre-P9 order.
-    for q in crate::tax::questions::FORM_QUESTIONS {
-        if !(q.live)(ri) {
-            continue;
-        }
-        if (q.get)(ri).is_none() {
-            return refuse(q.unanswered.clone(), q.unanswered_detail);
-        }
-        // ★★★ **R10.3 — AN ANSWER GIVEN UNDER EARLIER WORDS DOES NOT STAND UNDER LATER ONES.**
-        //
-        // The `prompt_hash` exists so *which words were asked* is on record, and this is its ONE
-        // reader on the refusal path: a class-(A) record whose hash no longer matches the prompt the
-        // filer would be shown TODAY is refused as UNANSWERED. The case is not exotic — R11's Sep–Dec
-        // calendar makes it ordinary: a prompt edited in a November fold, sitting under an answer
-        // given in September on the same year's draft.
-        //
-        // ★ **An ABSENT record is NOT a mismatch.** Only a record that exists and disagrees refuses;
-        //   a leaf answered before the log existed (or through a surface that does not record) keeps
-        //   its value. Treating "no record" as unanswered would refuse every return in the corpus and
-        //   would be asserting provenance nobody ever collected.
-        let key = crate::tax::provenance::AnswerKey::Question(q.id);
-        if crate::tax::provenance::answer_status(ri, &key, q.prompt)
-            == crate::tax::provenance::AnswerStatus::WordingChanged
-        {
-            return refuse(q.unanswered.clone(), WORDING_CHANGED_DETAIL);
+    // ★★★ T4/R11 — THE WHOLE LOOP IS THE UNANSWERED TIER, and `income import` runs without it (see
+    //     [`ScreenTier`]: the import is the only row-creating path and `income answer` the only
+    //     answering one, so demanding the answers here would make answering unreachable).
+    if tier.unanswered_refuses {
+        for q in crate::tax::questions::FORM_QUESTIONS {
+            if !(q.live)(ri) {
+                continue;
+            }
+            if (q.get)(ri).is_none() {
+                return refuse(q.unanswered.clone(), q.unanswered_detail);
+            }
+            // ★★★ **R10.3 — AN ANSWER GIVEN UNDER EARLIER WORDS DOES NOT STAND UNDER LATER ONES.**
+            //
+            // The `prompt_hash` exists so *which words were asked* is on record, and this is its ONE
+            // reader on the refusal path: a class-(A) record whose hash no longer matches the prompt the
+            // filer would be shown TODAY is refused as UNANSWERED. The case is not exotic — R11's Sep–Dec
+            // calendar makes it ordinary: a prompt edited in a November fold, sitting under an answer
+            // given in September on the same year's draft.
+            //
+            // ★ **An ABSENT record is NOT a mismatch.** Only a record that exists and disagrees refuses;
+            //   a leaf answered before the log existed (or through a surface that does not record) keeps
+            //   its value. Treating "no record" as unanswered would refuse every return in the corpus and
+            //   would be asserting provenance nobody ever collected.
+            let key = crate::tax::provenance::AnswerKey::Question(q.id);
+            if crate::tax::provenance::answer_status(ri, &key, q.prompt)
+                == crate::tax::provenance::AnswerStatus::WordingChanged
+            {
+                return refuse(q.unanswered.clone(), WORDING_CHANGED_DETAIL);
+            }
         }
     }
 
@@ -1595,25 +1672,28 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
 
     // W-2 rows: box-12 allowlist + §402(g) deferral cap + box 8/10. (The single-employer excess-SS
     // guard is gone — see the §6413(c) block below, which refuses only on UNKNOWN employer identity.)
-    let excess_ss_max = tbl.ss_wage_base * EMPLOYEE_OASDI_RATE; // §3101(a)/§6413(c)
-                                                                // §402(g)(1) limits an INDIVIDUAL's elective deferrals — accumulate PER OWNER (each spouse on a joint
-                                                                // return gets its own limit; review I1), refusing iff any one person exceeds it. Amounts are already
-                                                                // guaranteed ≥ 0 by the negative screen above, so no per-entry clamp is needed.
-                                                                // ★★★ §6413(c) / Schedule 3 line 11 — the excess-SS credit turns on EMPLOYER IDENTITY.
-                                                                //
-                                                                // i1040gi: *"If you, or your spouse if filing a joint return, had **more than one employer** for
-                                                                // 2024 and total wages of more than $168,600 … You can take a credit … in excess of $10,453.20.
-                                                                // But if **any one employer** withheld more than $10,453.20, you can't claim the excess on your
-                                                                // return. The employer should adjust the tax for you."*
-                                                                //
-                                                                // ★★ The old guard here refused whenever ONE W-2's box 4 exceeded the cap — a proxy for employer
-                                                                // identity it did not have, and wrong in both directions. It **refused a return the instructions
-                                                                // say is fileable** (the credit is simply $0; the employer adjusts), while letting a filer with
-                                                                // several W-2s from ONE employer claim a credit they are not entitled to: a filing trial credited
-                                                                // $3,894 to a filer owed $0, turning an $1,085 liability into a $2,809 refund. Now the credit is
-                                                                // computed from EINs, and the only refusal left is the one case where the answer is genuinely
-                                                                // unknowable — over the cap, with an EIN missing.
-    {
+    // ★ T4/R11 — the §3101(a)/§6413(c) cap is a TaxTable figure, so this rule is one of the three
+    //   that wait for the year's package (the gate below is `if let Some(…) = tier.package`, which
+    //   is what `the_screen_tiers_are_read_off_the_source` reads to derive the tier census).
+    // §402(g)(1) limits an INDIVIDUAL's elective deferrals — accumulate PER OWNER (each spouse on a joint
+    // return gets its own limit; review I1), refusing iff any one person exceeds it. Amounts are already
+    // guaranteed ≥ 0 by the negative screen above, so no per-entry clamp is needed.
+    // ★★★ §6413(c) / Schedule 3 line 11 — the excess-SS credit turns on EMPLOYER IDENTITY.
+    //
+    // i1040gi: *"If you, or your spouse if filing a joint return, had **more than one employer** for
+    // 2024 and total wages of more than $168,600 … You can take a credit … in excess of $10,453.20.
+    // But if **any one employer** withheld more than $10,453.20, you can't claim the excess on your
+    // return. The employer should adjust the tax for you."*
+    //
+    // ★★ The old guard here refused whenever ONE W-2's box 4 exceeded the cap — a proxy for employer
+    // identity it did not have, and wrong in both directions. It **refused a return the instructions
+    // say is fileable** (the credit is simply $0; the employer adjusts), while letting a filer with
+    // several W-2s from ONE employer claim a credit they are not entitled to: a filing trial credited
+    // $3,894 to a filer owed $0, turning an $1,085 liability into a $2,809 refund. Now the credit is
+    // computed from EINs, and the only refusal left is the one case where the answer is genuinely
+    // unknowable — over the cap, with an EIN missing.
+    if let Some((tbl, _)) = tier.package {
+        let excess_ss_max = tbl.ss_wage_base * EMPLOYEE_OASDI_RATE; // §3101(a)/§6413(c)
         let over_cap_needs_ein = |owner: Owner| -> bool {
             let mine = ri.w2s.iter().filter(|w| w.owner == owner);
             let withheld: Usd = mine.clone().map(|w| w.box4_ss_withheld).sum();
@@ -1672,11 +1752,14 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
             }
         }
     }
-    if deferral_tp > p.elective_deferral_limit || deferral_sp > p.elective_deferral_limit {
-        return refuse(
-            RefuseReason::ExcessElectiveDeferral,
-            "one person's elective deferrals exceed the §402(g) limit — the taxable excess (1040 line 1h) is unmodeled in v1",
-        );
+    // ★ T4/R11 — the §402(g) limit is a FullReturnParams figure: it waits for the year's package.
+    if let Some((_, p)) = tier.package {
+        if deferral_tp > p.elective_deferral_limit || deferral_sp > p.elective_deferral_limit {
+            return refuse(
+                RefuseReason::ExcessElectiveDeferral,
+                "one person's elective deferrals exceed the §402(g) limit — the taxable excess (1040 line 1h) is unmodeled in v1",
+            );
+        }
     }
 
     // 1099-INT / 1099-DIV: AMT-preference bonds, special-rate gains, foreign tax over the §904(j) ceiling.
@@ -1725,11 +1808,14 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
         }
         foreign_tax += div.box7_foreign_tax;
     }
-    if foreign_tax > ftc_ceiling_for(p, ri.filing_status) {
-        return refuse(
-            RefuseReason::ForeignTaxOverCeiling,
-            "foreign tax exceeds the §904(j) $300/$600 no-Form-1116 ceiling — Form 1116 is out of scope",
-        );
+    // ★ T4/R11 — the §904(j) ceiling is a FullReturnParams figure: it waits for the year's package.
+    if let Some((_, p)) = tier.package {
+        if foreign_tax > ftc_ceiling_for(p, ri.filing_status) {
+            return refuse(
+                RefuseReason::ForeignTaxOverCeiling,
+                "foreign tax exceeds the §904(j) $300/$600 no-Form-1116 ceiling — Form 1116 is out of scope",
+            );
+        }
     }
 
     // Schedule 1 minimal surface: an affirmed HSA activity and any claimed IRA deduction refuse in v1.
@@ -1764,7 +1850,7 @@ mod tests {
     use crate::LedgerState;
 
     // A synthetic TY2024 FullReturnParams + a table with the real SS wage base for the excess-SS MAX.
-    fn params() -> FullReturnParams {
+    pub(super) fn params() -> FullReturnParams {
         let mut std_deduction = std::collections::BTreeMap::new();
         for s in [
             FilingStatus::Single,
@@ -1813,10 +1899,10 @@ mod tests {
             },
         }
     }
-    fn tbl() -> TaxTable {
+    pub(super) fn tbl() -> TaxTable {
         crate::tax::tables::synthetic_table(2024) // ss_wage_base = 176,100 (synthetic); MAX = 10,918.20
     }
-    fn ri() -> ReturnInputs {
+    pub(super) fn ri() -> ReturnInputs {
         let mut ri = ReturnInputs {
             filing_status: FilingStatus::Single,
             ..Default::default()
@@ -4493,5 +4579,529 @@ mod tests {
                 "{what} must be negative-screened, got {got:?}"
             );
         }
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// ★★★ **T4 / R11 — THE PARAM-FREE TIER, AND THE CENSUS THAT KEEPS IT HONEST.**
+//
+// `income import` runs [`screen_param_free`] before it writes; the commit gate runs
+// [`screen_inputs`]. They are the SAME body under two [`ScreenTier`]s, so R11's real hazard —
+// *"a rule that exists in one and not the other"* — cannot arise by copy drift. What could still
+// arise is a rule landing on the WRONG SIDE of a `tier.package` gate, or a new rule nobody checked
+// from the import path. So the tier assignment below is **read off this file's own source**: the
+// param-free set is every `RefuseReason` the two screen bodies name, MINUS the ones inside an
+// `if let Some(…) = tier.package {` block. Nothing is hand-listed, and a rule that moves tiers
+// moves in this census the same day.
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+#[cfg(test)]
+mod param_free_tier {
+    use super::tests::{params, ri, tbl};
+    use super::*;
+    use crate::tax::document_census::DocumentRow;
+    use crate::tax::return_inputs::{
+        Box12Entry, CharitableClass, CharitableGift, Form1099B, Form1099Div, Form1099Int, Owner,
+        ReturnInputs, Schedule1aOvertime, Schedule1aTips, ScheduleAInputs, ScheduleCInputs, W2,
+    };
+    use rust_decimal_macros::dec;
+    use std::collections::BTreeSet;
+
+    /// This file's own text. The tier census is DERIVED from it, never typed a second time — the
+    /// same discipline `line-coverage` applies to a form's extract.
+    const SRC: &str = include_str!("return_refuse.rs");
+
+    /// The body of the fn whose signature line is `sig`, up to its column-0 closing brace.
+    fn body_after(sig: &str) -> &'static str {
+        let start = SRC
+            .find(sig)
+            .unwrap_or_else(|| panic!("signature not found in the source: {sig}"));
+        let rest = &SRC[start..];
+        let end = rest
+            .find("\n}\n")
+            .unwrap_or_else(|| panic!("no column-0 closing brace after: {sig}"));
+        &rest[..end]
+    }
+
+    /// Every `RefuseReason::X` named in `body`, as bare variant names.
+    fn reasons_in(body: &str) -> BTreeSet<String> {
+        let mut out = BTreeSet::new();
+        let mut rest = body;
+        while let Some(i) = rest.find("RefuseReason::") {
+            rest = &rest[i + "RefuseReason::".len()..];
+            let n = rest
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .unwrap_or(rest.len());
+            if n > 0 {
+                out.insert(rest[..n].to_string());
+            }
+        }
+        out
+    }
+
+    /// Every `RefuseReason::X` inside a `guard { … }` block of `body`, brace-matched. `guard` must
+    /// end with its opening brace.
+    fn reasons_under_guard(body: &str, guard: &str) -> BTreeSet<String> {
+        assert!(
+            guard.ends_with('{'),
+            "the guard text must end with its brace"
+        );
+        let mut out = BTreeSet::new();
+        let mut from = 0usize;
+        let mut blocks = 0usize;
+        while let Some(i) = body[from..].find(guard) {
+            let open = from + i + guard.len() - 1; // index of the `{`
+            let bytes = body.as_bytes();
+            let (mut depth, mut j) = (0i32, open);
+            let close = loop {
+                match bytes[j] {
+                    b'{' => depth += 1,
+                    b'}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            break j;
+                        }
+                    }
+                    _ => {}
+                }
+                j += 1;
+                assert!(j < bytes.len(), "unbalanced braces after: {guard}");
+            };
+            out.extend(reasons_in(&body[open..close]));
+            blocks += 1;
+            from = close;
+        }
+        assert!(blocks > 0, "no block found for the guard: {guard}");
+        out
+    }
+
+    /// A `RefuseReason`'s variant name, so a payload-carrying variant compares like a unit one.
+    fn name_of(r: &RefuseReason) -> String {
+        let s = format!("{r:?}");
+        s.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+            .next()
+            .unwrap_or("")
+            .to_string()
+    }
+
+    /// Answer whatever the fixture's shape has just made live, WITHOUT touching the census (which
+    /// `testonly::answer_all_live_declarations` reconciles — and two fixtures below depend on an
+    /// incoherent census being left exactly as written). Iterated, because answering one question
+    /// can make another live.
+    fn answer_remaining(ri: &mut ReturnInputs) {
+        for _ in 0..8 {
+            let mut changed = false;
+            for q in crate::tax::questions::FORM_QUESTIONS {
+                if (q.live)(ri) && (q.get)(ri).is_none() {
+                    (q.set)(ri, q.neutral);
+                    changed = true;
+                }
+            }
+            if !changed {
+                return;
+            }
+        }
+        panic!("the declarations did not settle — a liveness cycle");
+    }
+
+    fn w2(mut f: impl FnMut(&mut W2)) -> W2 {
+        let mut w = W2 {
+            owner: Owner::Taxpayer,
+            employer: "ACME".into(),
+            box1_wages: dec!(50000),
+            ..Default::default()
+        };
+        f(&mut w);
+        w
+    }
+
+    fn sched_c() -> ScheduleCInputs {
+        ScheduleCInputs {
+            owner: Owner::Taxpayer,
+            business_description: "consulting".into(),
+            ..Default::default()
+        }
+    }
+
+    /// **The fixture table: one return per param-free rule.** Each is built from [`ri`] — every
+    /// always-live declaration already answered — perturbed in exactly one way, then topped up by
+    /// [`answer_remaining`] so the only thing left standing is the rule under test.
+    fn param_free_fixtures() -> Vec<(&'static str, ReturnInputs)> {
+        let mut out: Vec<(&'static str, ReturnInputs)> = Vec::new();
+        let mut add = |name: &'static str, build: &dyn Fn(&mut ReturnInputs)| {
+            let mut r = ri();
+            build(&mut r);
+            answer_remaining(&mut r);
+            out.push((name, r));
+        };
+
+        add("NegativeAmount", &|r| {
+            r.documents.set(DocumentRow::W2, Some(true));
+            r.w2s.push(w2(|w| w.box1_wages = dec!(-1)));
+        });
+        add("Schedule1aTipsFromTradeOrBusiness", &|r| {
+            r.schedule_c = Some(sched_c());
+            r.schedule_1a.tips = Some(Schedule1aTips {
+                qualified_tips_reported: dec!(1000),
+                ..Default::default()
+            });
+        });
+        add("Schedule1aOvertimeFromTradeOrBusiness", &|r| {
+            r.schedule_c = Some(sched_c());
+            r.schedule_1a.overtime = Some(Schedule1aOvertime {
+                qualified_overtime_reported: dec!(1000),
+                ..Default::default()
+            });
+        });
+        add("Form1099BNeedsForm8949", &|r| {
+            r.documents.set(DocumentRow::B1099, Some(true));
+            r.b_1099.push(Form1099B {
+                payer: "Broker".into(),
+                short_term_proceeds: dec!(500),
+                basis_reported_and_no_adjustments: None,
+                ..Default::default()
+            });
+        });
+        add("DocumentTypeUnsupported", &|r| {
+            r.documents.set(DocumentRow::K1, Some(true));
+        });
+        add("DocumentDeclaredNotTranscribed", &|r| {
+            r.documents.set(DocumentRow::W2, Some(true)); // declared, nothing transcribed
+        });
+        add("DocumentCensusContradicted", &|r| {
+            r.documents.set(DocumentRow::W2, Some(false)); // "no", beside a row
+            r.w2s.push(w2(|_| {}));
+        });
+        add("JointReturnCarryoverAttributionUnknown", &|r| {
+            r.capital_loss_carryforward_in.long = dec!(3000);
+            r.carryover_includes_spouses_joint_loss = Some(true);
+        });
+        add("ExcludedCanceledDebtAttributeReduction", &|r| {
+            r.capital_loss_carryforward_in.long = dec!(3000);
+            r.carryover_includes_spouses_joint_loss = Some(false);
+            r.excluded_canceled_debt = Some(true);
+        });
+        add("ForeignTrust", &|r| r.foreign_trust = Some(true));
+        add("Form4952Required", &|r| r.filing_form_4952 = Some(true));
+        add("AmtNonQualifiedDwelling", &|r| {
+            r.schedule_a = Some(ScheduleAInputs {
+                mortgage_interest_1098: dec!(9000),
+                mortgage_dwelling_is_amt_qualified: Some(false),
+                ..Default::default()
+            });
+        });
+        add("AmtCarryoverDiverges", &|r| {
+            r.capital_loss_carryforward_in.long = dec!(3000);
+            r.amt_carryover_same_as_regular = Some(false);
+        });
+        add("AmtDepreciationDiverges", &|r| {
+            r.schedule_c = Some(ScheduleCInputs {
+                expenses: dec!(2000),
+                other_gross_receipts: dec!(9000),
+                ..sched_c()
+            });
+            r.amt_depreciation_same_as_regular = Some(false);
+        });
+        add("OtherIncomeOutOfScope", &|r| {
+            r.other_out_of_scope_income = Some(true)
+        });
+        add("DualStatusAlienUnsupported", &|r| {
+            r.dual_status_alien = Some(true)
+        });
+        add("ScheduleBForeignCountryMissing", &|r| {
+            r.foreign_accounts = Some(true);
+            r.foreign_country_names = String::new();
+        });
+        add("SaltSalesTaxWithoutElection", &|r| {
+            r.schedule_a = Some(ScheduleAInputs {
+                salt_sales_tax_amount: dec!(1200),
+                salt_use_sales_tax: None,
+                ..Default::default()
+            });
+        });
+        add("SalesTaxElectionWithoutAmount", &|r| {
+            r.schedule_a = Some(ScheduleAInputs {
+                salt_use_sales_tax: Some(true),
+                salt_sales_tax_amount: Usd::ZERO,
+                salt_state_estimated_payments: dec!(800),
+                ..Default::default()
+            });
+        });
+        add("NonPublicCharityContribution", &|r| {
+            r.schedule_a = Some(ScheduleAInputs {
+                charitable: vec![CharitableGift {
+                    class: CharitableClass::Cash30,
+                    amount: dec!(500),
+                }],
+                ..Default::default()
+            });
+        });
+        add("DependentSpouseUnsupported", &|r| {
+            r.header.can_be_claimed_as_dependent_spouse = Some(true)
+        });
+        add("SpouseOwnerWithoutJointReturn", &|r| {
+            r.documents.set(DocumentRow::W2, Some(true));
+            r.w2s.push(w2(|w| w.owner = Owner::Spouse));
+        });
+        add("ScheduleCNoBusinessDescription", &|r| {
+            r.schedule_c = Some(ScheduleCInputs {
+                business_description: String::new(),
+                ..sched_c()
+            });
+        });
+        add("AllocatedTips", &|r| {
+            r.documents.set(DocumentRow::W2, Some(true));
+            r.w2s.push(w2(|w| w.box8_allocated_tips = dec!(400)));
+        });
+        add("DependentCareBenefit", &|r| {
+            r.documents.set(DocumentRow::W2, Some(true));
+            r.w2s.push(w2(|w| w.box10_dependent_care = dec!(400)));
+        });
+        add("UnsupportedBox12Code", &|r| {
+            r.documents.set(DocumentRow::W2, Some(true));
+            r.w2s.push(w2(|w| {
+                w.box12 = vec![Box12Entry {
+                    code: "Q".into(),
+                    amount: dec!(100),
+                }]
+            }));
+        });
+        add("PrivateActivityBondAmt", &|r| {
+            r.documents.set(DocumentRow::Int1099, Some(true));
+            r.int_1099.push(Form1099Int {
+                payer: "Bank".into(),
+                box9_private_activity_bond_amt: dec!(100),
+                ..Default::default()
+            });
+        });
+        add("InconsistentDividendSubset", &|r| {
+            r.documents.set(DocumentRow::Div1099, Some(true));
+            r.div_1099.push(Form1099Div {
+                payer: "Fund".into(),
+                box1a_ordinary: dec!(100),
+                box1b_qualified: dec!(200),
+                ..Default::default()
+            });
+        });
+        add("UnrecapturedOrSpecialRateGain", &|r| {
+            r.documents.set(DocumentRow::Div1099, Some(true));
+            r.div_1099.push(Form1099Div {
+                payer: "Fund".into(),
+                box1a_ordinary: dec!(100),
+                box2b_unrecap_1250: dec!(50),
+                ..Default::default()
+            });
+        });
+        add("HsaActivityUnsupported", &|r| {
+            r.sch1.hsa_activity = Some(true)
+        });
+        add("IraDeductionClaimed", &|r| {
+            r.sch1.ira_deduction_claimed = dec!(3000)
+        });
+        out
+    }
+
+    /// One return per rule that WAITS for the year's package.
+    fn package_fixtures() -> Vec<(&'static str, ReturnInputs)> {
+        let mut out: Vec<(&'static str, ReturnInputs)> = Vec::new();
+        let mut add = |name: &'static str, build: &dyn Fn(&mut ReturnInputs)| {
+            let mut r = ri();
+            build(&mut r);
+            answer_remaining(&mut r);
+            out.push((name, r));
+        };
+        add("ExcessSsEmployerUnknown", &|r| {
+            r.documents.set(DocumentRow::W2, Some(true));
+            // Over the §3101(a) cap, with no EIN to say whether it was one employer or two.
+            r.w2s.push(w2(|w| {
+                w.box3_ss_wages = dec!(200000);
+                w.box4_ss_withheld = dec!(40000);
+                w.ein = None;
+            }));
+        });
+        add("ExcessElectiveDeferral", &|r| {
+            r.documents.set(DocumentRow::W2, Some(true));
+            r.w2s.push(w2(|w| {
+                w.box12 = vec![Box12Entry {
+                    code: "D".into(),
+                    amount: dec!(99000),
+                }]
+            }));
+        });
+        add("ForeignTaxOverCeiling", &|r| {
+            r.documents.set(DocumentRow::Int1099, Some(true));
+            r.int_1099.push(Form1099Int {
+                payer: "Bank".into(),
+                box1_interest: dec!(5000),
+                box6_foreign_tax: dec!(5000),
+                ..Default::default()
+            });
+        });
+        out
+    }
+
+    /// ★★★ **The census: the param-free set is READ OFF THE SOURCE, and every member of it has a
+    ///     fixture that fires it through BOTH entry points.**
+    ///
+    /// Removing a rule from the body removes it from the census and leaves its fixture refusing
+    /// nothing — red on both halves. Adding one, or moving one inside/outside a `tier.package`
+    /// gate, changes the census and demands (or releases) a fixture — red until someone looks.
+    #[test]
+    fn every_param_free_rule_is_censused_from_the_source_and_fires_on_both_paths() {
+        let body = body_after(
+            "pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<Refusal> {",
+        );
+        let census_fn =
+            body_after("pub fn screen_document_census(ri: &ReturnInputs) -> Option<Refusal> {");
+
+        let named: BTreeSet<String> = reasons_in(body)
+            .union(&reasons_in(census_fn))
+            .cloned()
+            .collect();
+        let package_gated: BTreeSet<String> =
+            reasons_under_guard(body, "if let Some((tbl, _)) = tier.package {")
+                .union(&reasons_under_guard(
+                    body,
+                    "if let Some((_, p)) = tier.package {",
+                ))
+                .cloned()
+                .collect();
+        let param_free: BTreeSet<String> = named.difference(&package_gated).cloned().collect();
+
+        // A broken parse must be LOUD, not silently permissive.
+        assert!(
+            named.len() > 30 && !package_gated.is_empty(),
+            "the source census parsed nothing usable: {} named, {} package-gated",
+            named.len(),
+            package_gated.len()
+        );
+
+        let fixtures = param_free_fixtures();
+        let covered: BTreeSet<String> = fixtures.iter().map(|(n, _)| (*n).to_string()).collect();
+        assert_eq!(
+            covered, param_free,
+            "the fixture table and the source census must name the same param-free rules \
+             (left: fixtures, right: source)"
+        );
+        assert_eq!(
+            covered.len(),
+            fixtures.len(),
+            "a rule is listed twice in the fixture table"
+        );
+
+        for (name, r) in &fixtures {
+            let with_package = screen_inputs(r, &tbl(), &params()).map(|x| name_of(&x.reason));
+            assert_eq!(
+                with_package.as_deref(),
+                Some(*name),
+                "the commit gate must reach {name} on its own fixture"
+            );
+            let without = screen_param_free(r).map(|x| name_of(&x.reason));
+            assert_eq!(
+                without.as_deref(),
+                Some(*name),
+                "`income import` screens on a year with NO package — {name} must fire there too"
+            );
+        }
+    }
+
+    /// The other side of the tier: a rule that reads the year's package fires at commit and is
+    /// SILENT at import — R11's *"the param-dependent rules still wait for commit"*.
+    #[test]
+    fn a_package_dependent_rule_fires_at_commit_and_is_silent_without_the_package() {
+        let body = body_after(
+            "pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<Refusal> {",
+        );
+        let package_gated: BTreeSet<String> =
+            reasons_under_guard(body, "if let Some((tbl, _)) = tier.package {")
+                .union(&reasons_under_guard(
+                    body,
+                    "if let Some((_, p)) = tier.package {",
+                ))
+                .cloned()
+                .collect();
+        let fixtures = package_fixtures();
+        let covered: BTreeSet<String> = fixtures.iter().map(|(n, _)| (*n).to_string()).collect();
+        assert_eq!(
+            covered, package_gated,
+            "every package-gated rule needs a fixture (left: fixtures, right: source)"
+        );
+        for (name, r) in &fixtures {
+            assert_eq!(
+                screen_inputs(r, &tbl(), &params())
+                    .map(|x| name_of(&x.reason))
+                    .as_deref(),
+                Some(*name),
+                "the commit gate must reach {name}"
+            );
+            assert_eq!(
+                screen_param_free(r).map(|x| x.reason),
+                None,
+                "{name} reads a figure the year has no package for — it must not fire at import"
+            );
+        }
+    }
+
+    /// ★★★ **The UNANSWERED tier is gated, and every one of its refusals is inside the gate.**
+    ///
+    /// It raises `q.unanswered` from the registry rather than a literal `RefuseReason::X`, so the
+    /// census above cannot see it. This counts the raising sites instead: all of them must sit
+    /// inside `if tier.unanswered_refuses { … }`, or an unanswered declaration would refuse an
+    /// `income import` that is the only way to create the row it would be answered on.
+    #[test]
+    fn every_unanswered_refusal_sits_inside_the_unanswered_gate() {
+        let body = body_after(
+            "pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<Refusal> {",
+        );
+        let total = body.matches("q.unanswered.clone()").count();
+        assert_eq!(
+            total, 2,
+            "the registry loop raises exactly two unanswered refusals"
+        );
+        let open = body
+            .find("if tier.unanswered_refuses {")
+            .expect("the unanswered tier is gated");
+        let bytes = body.as_bytes();
+        let brace = open + "if tier.unanswered_refuses ".len();
+        let (mut depth, mut j) = (0i32, brace);
+        let close = loop {
+            match bytes[j] {
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break j;
+                    }
+                }
+                _ => {}
+            }
+            j += 1;
+        };
+        assert_eq!(
+            body[open..close].matches("q.unanswered.clone()").count(),
+            total,
+            "an unanswered refusal outside the gate would refuse `income import`"
+        );
+    }
+
+    /// The behavioural half of the gate: an unanswered live declaration refuses at commit and does
+    /// NOT refuse at import.
+    #[test]
+    fn an_unanswered_declaration_refuses_at_commit_and_not_at_import() {
+        let mut r = ri();
+        r.foreign_trust = None; // always live, and now unanswered
+        assert!(
+            matches!(
+                screen_inputs(&r, &tbl(), &params()).map(|x| x.reason),
+                Some(RefuseReason::ScheduleBPart3Unanswered)
+            ),
+            "the commit gate refuses an unanswered declaration: {:?}",
+            screen_inputs(&r, &tbl(), &params()).map(|x| x.reason)
+        );
+        assert_eq!(
+            screen_param_free(&r).map(|x| x.reason),
+            None,
+            "`income import` is the only path that CREATES the row `income answer` fills — it must \
+             not demand the answers"
+        );
     }
 }

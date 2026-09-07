@@ -767,7 +767,7 @@ fn report_tax_year_with_return_inputs_for_unsupported_year_refuses_with_income_c
         "filing_status = \"Single\"\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n",
     )
     .unwrap();
-    cmd::tax::import_return_inputs(&vault, &pp(), 2025, &toml, false).unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2025, &toml, false, false).unwrap();
 
     let err = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap_err();
     match err {
@@ -785,7 +785,7 @@ fn report_tax_year_with_return_inputs_for_unsupported_year_refuses_with_income_c
     }
 
     // Recovery works: after `income clear`, the same year is no longer blocked (falls back to no-profile).
-    assert!(cmd::tax::clear_return_inputs(&vault, &pp(), 2025).unwrap());
+    assert!(cmd::tax::clear_return_inputs(&vault, &pp(), 2025, false).unwrap());
     let TaxYearReport { outcome, .. } =
         cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     // No profile, no events ⇒ TaxProfileMissing (NOT the unsupported-year Usage error).
@@ -810,7 +810,7 @@ fn report_tax_year_derives_and_computes_from_ty2024_return_inputs() {
     .unwrap();
     // The CSV disposal is in 2025, but v1 full-return tables are TY2024-only; import for 2024 to exercise
     // the derive+compute happy path (the ledger has no 2024 disposals → a clean profile-only computation).
-    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false, false).unwrap();
 
     let TaxYearReport { outcome, .. } =
         cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap();
@@ -857,7 +857,7 @@ fn report_tax_year_refuses_business_income_without_schedule_c() {
     // Full-return inputs for 2024 with NO Schedule C.
     let toml = _dir.path().join("inputs.toml");
     std::fs::write(&toml, "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\nfiling_form_4952 = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n\n# R3 — the document census: this crypto-only household received no information return.\n[documents]\nw2 = false\nint_1099 = false\ndiv_1099 = false\nb_1099 = false\ng_1099 = false\nr_1099 = false\nssa_1099 = false\nnec_misc_k_1099 = false\nk1 = false\nschedule_e_rental = false\ns_1099 = false\noid_1099 = false\nw2g = false\nc_1099 = false\na_1095 = false\nt_1098 = false\n").unwrap();
-    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false, false).unwrap();
 
     let err = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap_err();
     match err {
@@ -2090,7 +2090,7 @@ fn rolling_a_carryover_never_leaves_next_year_unfilable_in_silence() {
         );
     }
 
-    let summary = cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap();
+    let summary = cmd::tax::write_back_carryover(&vault, &pp(), 2024, false, false).unwrap();
 
     // PREMISE: a carryover really was written, or "it went unfilable" has no cause.
     let next = {
@@ -2283,7 +2283,7 @@ fn the_writeback_summary_names_every_carryover_it_wrote() {
             .unwrap();
     }
 
-    let summary = cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap();
+    let summary = cmd::tax::write_back_carryover(&vault, &pp(), 2024, false, false).unwrap();
     let y2025_after = {
         let s = Session::open(&vault, &pp()).unwrap();
         btctax_cli::return_inputs::get(s.conn(), 2025)
@@ -2397,7 +2397,7 @@ fn the_summary_does_not_claim_a_capital_loss_write_the_gate_skipped() {
             .unwrap()
     };
     let before = read_2025();
-    let summary = cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap();
+    let summary = cmd::tax::write_back_carryover(&vault, &pp(), 2024, false, false).unwrap();
     let after = read_2025();
     let changed = assigned_fields(&before, &after);
 
@@ -2479,7 +2479,7 @@ fn carryover_write_back_round_trips_and_respects_user_precedence() {
     }
     // I1: with NO 2025 row yet, the write-back must REFUSE (fabricating one would shadow a stored
     // tax-profile for 2025 in the §4.12 ladder and make that year uncomputable in v1).
-    let err = cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap_err();
+    let err = cmd::tax::write_back_carryover(&vault, &pp(), 2024, false, false).unwrap_err();
     assert!(
         format!("{err:?}").contains("no full-return inputs yet"),
         "must refuse to fabricate a 2025 row: {err:?}"
@@ -2500,7 +2500,7 @@ fn carryover_write_back_round_trips_and_respects_user_precedence() {
         s.save().unwrap();
     }
     // Write-back → 2025 gets a computed charitable carryover-in.
-    let summary = cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap();
+    let summary = cmd::tax::write_back_carryover(&vault, &pp(), 2024, false, false).unwrap();
     assert!(summary.contains("written back to 2025"), "{summary}");
     let next = {
         let s = Session::open(&vault, &pp()).unwrap();
@@ -2533,11 +2533,11 @@ fn carryover_write_back_round_trips_and_respects_user_precedence() {
         s.save().unwrap();
     }
     assert!(
-        cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).is_err(),
+        cmd::tax::write_back_carryover(&vault, &pp(), 2024, false, false).is_err(),
         "must refuse to overwrite a user-entered carryover without --force"
     );
     // --force overwrites it.
-    assert!(cmd::tax::write_back_carryover(&vault, &pp(), 2024, true).is_ok());
+    assert!(cmd::tax::write_back_carryover(&vault, &pp(), 2024, true, false).is_ok());
     let forced = {
         let s = Session::open(&vault, &pp()).unwrap();
         btctax_cli::return_inputs::get(s.conn(), 2025)
@@ -2616,7 +2616,7 @@ fn income_import_preserves_a_computed_capital_loss_carryover_and_the_qbi_busines
         btctax_cli::return_inputs::set(s.conn(), 2025, &y2025).unwrap();
         s.save().unwrap();
     }
-    cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap();
+    cmd::tax::write_back_carryover(&vault, &pp(), 2024, false, false).unwrap();
 
     // ── PREMISES: all three figures are really on the 2025 row, stamped Computed. ─────────────────
     let rolled = {
@@ -2651,7 +2651,7 @@ fn income_import_preserves_a_computed_capital_loss_carryover_and_the_qbi_busines
         "filing_status = \"Single\"\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n",
     )
     .unwrap();
-    cmd::tax::import_return_inputs(&vault, &pp(), 2025, &toml, false).unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2025, &toml, false, false).unwrap();
     let after = {
         let s = Session::open(&vault, &pp()).unwrap();
         btctax_cli::return_inputs::get(s.conn(), 2025)
@@ -2749,7 +2749,7 @@ fn import_preserves_a_computed_carryover() {
         .unwrap();
         s.save().unwrap();
     }
-    cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap();
+    cmd::tax::write_back_carryover(&vault, &pp(), 2024, false, false).unwrap();
 
     // Re-import 2025 from a TOML that carries NO carryover — the computed one must SURVIVE.
     let toml = csv_dir.path().join("2025.toml");
@@ -2758,7 +2758,7 @@ fn import_preserves_a_computed_carryover() {
         "filing_status = \"Single\"\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n",
     )
     .unwrap();
-    cmd::tax::import_return_inputs(&vault, &pp(), 2025, &toml, false).unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2025, &toml, false, false).unwrap();
     let after = {
         let s = Session::open(&vault, &pp()).unwrap();
         btctax_cli::return_inputs::get(s.conn(), 2025)
@@ -2859,7 +2859,7 @@ fn a_pre_d8_vault_refuses_until_answered_and_income_answer_is_the_way_out() {
          box1_wages = \"90000\"\nbox2_fed_withheld = \"12000\"\nbox5_medicare_wages = \"90000\"\n",
     )
     .unwrap();
-    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false, false).unwrap();
 
     // (b) It REFUSES — loudly, as an error. It does not quietly hand back a number computed from a guess.
     let err = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap_err();
@@ -2927,6 +2927,7 @@ fn a_pre_d8_vault_refuses_until_answered_and_income_answer_is_the_way_out() {
         time::macros::date!(2026 - 09 - 01),
         &mut keystrokes,
         &mut screen,
+        false,
     )
     .unwrap();
     let screen = String::from_utf8(screen).unwrap();
@@ -3008,11 +3009,19 @@ fn the_editor_and_income_answer_write_the_same_answer_record() {
         "filing_status = \"Single\"\n[header]\n[header.taxpayer]\nfirst_name = \"A\"\nlast_name = \"B\"\nssn = \"123-45-6789\"\n",
     )
     .unwrap();
-    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false, false).unwrap();
     let mut keystrokes: &[u8] = b"n\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\n\n\n\n\n\n\n\n\n\n\n\n";
     let mut screen: Vec<u8> = Vec::new();
-    cmd::answer::answer_return_inputs(&vault, &pp(), 2024, NOW, &mut keystrokes, &mut screen)
-        .unwrap();
+    cmd::answer::answer_return_inputs(
+        &vault,
+        &pp(),
+        2024,
+        NOW,
+        &mut keystrokes,
+        &mut screen,
+        false,
+    )
+    .unwrap();
     let s = btctax_cli::Session::open(&vault, &pp()).unwrap();
     let from_cli = btctax_cli::return_inputs::get(s.conn(), 2024)
         .unwrap()
@@ -3136,7 +3145,7 @@ fn an_imported_toml_cannot_mint_an_answer_record_or_a_history_entry() {
         ),
     )
     .unwrap();
-    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false, false).unwrap();
 
     let s = btctax_cli::Session::open(&vault, &pp()).unwrap();
     let landed = btctax_cli::return_inputs::get(s.conn(), 2024)
@@ -3186,7 +3195,7 @@ fn a_re_import_keeps_every_answer_record_already_on_the_row() {
         "filing_status = \"Single\"\n[header]\n[header.taxpayer]\nfirst_name = \"A\"\nlast_name = \"B\"\nssn = \"123-45-6789\"\n",
     )
     .unwrap();
-    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false, false).unwrap();
     let mut keystrokes: &[u8] = b"n\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\n\n\n\n\n\n\n\n\n\n\n\n";
     let mut screen: Vec<u8> = Vec::new();
     cmd::answer::answer_return_inputs(
@@ -3196,6 +3205,7 @@ fn a_re_import_keeps_every_answer_record_already_on_the_row() {
         time::macros::date!(2026 - 09 - 01),
         &mut keystrokes,
         &mut screen,
+        false,
     )
     .unwrap();
 
@@ -3219,7 +3229,7 @@ fn a_re_import_keeps_every_answer_record_already_on_the_row() {
     );
 
     // The routine re-import: the same six-line TOML, carrying no `[answer_log]` at all.
-    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false, false).unwrap();
 
     let after = {
         let s = btctax_cli::Session::open(&vault, &pp()).unwrap();
@@ -3263,7 +3273,7 @@ fn re_answering_at_the_keyboard_moves_the_stale_record_into_history_by_itself() 
         "filing_status = \"Single\"\n[header]\n[header.taxpayer]\nfirst_name = \"A\"\nlast_name = \"B\"\nssn = \"123-45-6789\"\n",
     )
     .unwrap();
-    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false, false).unwrap();
 
     // SEPTEMBER: an answer on file, hashed against words that are no longer the ones asked. (Written
     // through the store rather than by editing the registry, which is `&'static str` — the STATE is
@@ -3291,8 +3301,16 @@ fn re_answering_at_the_keyboard_moves_the_stale_record_into_history_by_itself() 
     // NOVEMBER: the filer re-answers at the keyboard. No sweep is called anywhere.
     let mut keystrokes: &[u8] = b"n\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\n\n\n\n\n\n\n\n\n\n\n\n";
     let mut screen: Vec<u8> = Vec::new();
-    cmd::answer::answer_return_inputs(&vault, &pp(), 2024, NOV, &mut keystrokes, &mut screen)
-        .unwrap();
+    cmd::answer::answer_return_inputs(
+        &vault,
+        &pp(),
+        2024,
+        NOV,
+        &mut keystrokes,
+        &mut screen,
+        false,
+    )
+    .unwrap();
 
     let s = btctax_cli::Session::open(&vault, &pp()).unwrap();
     let after = btctax_cli::return_inputs::get(s.conn(), 2024)
@@ -3366,7 +3384,7 @@ fn a_record_whose_words_changed_still_reads_as_wording_changed_after_a_load() {
         "filing_status = \"Single\"\nforeign_trust = false\n[header]\n[header.taxpayer]\nfirst_name = \"A\"\nlast_name = \"B\"\nssn = \"123-45-6789\"\n",
     )
     .unwrap();
-    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false, false).unwrap();
 
     let key = AnswerKey::Question(QuestionId::ForeignTrust);
     {
@@ -3431,6 +3449,7 @@ fn income_answer_refuses_a_year_with_no_return() {
         time::macros::date!(2026 - 09 - 01),
         &mut keystrokes,
         &mut screen,
+        false,
     )
     .unwrap_err();
     assert!(
@@ -3501,10 +3520,10 @@ fn import_over_a_stale_row_refuses() {
     let toml_dir = tempfile::tempdir().unwrap();
     let toml = answered_toml(toml_dir.path());
 
-    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap(); // a v2 row
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false, false).unwrap(); // a v2 row
     stale_the_row(&vault, 2024); // now it is pre-P9
 
-    let err = cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap_err();
+    let err = cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false, false).unwrap_err();
     assert!(
         matches!(err, btctax_cli::CliError::StaleReturnInputs { year: 2024, .. }),
         "import over a stale row must refuse (naming the remedy), not silently overwrite it: {err:?}"
@@ -3528,14 +3547,14 @@ fn clear_then_import_recovers_a_stale_row_to_the_current_schema_version() {
     let toml_dir = tempfile::tempdir().unwrap();
     let toml = answered_toml(toml_dir.path());
 
-    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false, false).unwrap();
     stale_the_row(&vault, 2024);
 
     assert!(
-        cmd::tax::clear_return_inputs(&vault, &pp(), 2024).unwrap(),
+        cmd::tax::clear_return_inputs(&vault, &pp(), 2024, false).unwrap(),
         "clear works on a stale row (it never deserializes)"
     );
-    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap(); // no existing row now ⇒ succeeds
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false, false).unwrap(); // no existing row now ⇒ succeeds
     assert_eq!(
         row_version(&vault, 2024),
         btctax_cli::return_inputs::SCHEMA_VERSION,
@@ -3599,7 +3618,7 @@ fn the_full_remedy_chain_restores_a_computed_carryover() {
         s.save().unwrap();
     }
     // Compute the carryover onto 2025.
-    cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap();
+    cmd::tax::write_back_carryover(&vault, &pp(), 2024, false, false).unwrap();
     let carry_before = {
         let s = Session::open(&vault, &pp()).unwrap();
         let n = btctax_cli::return_inputs::get(s.conn(), 2025)
@@ -3622,8 +3641,8 @@ fn the_full_remedy_chain_restores_a_computed_carryover() {
     let toml_dir = tempfile::tempdir().unwrap();
     let toml = answered_toml(toml_dir.path());
     for year in [2024, 2025] {
-        cmd::tax::clear_return_inputs(&vault, &pp(), year).unwrap();
-        cmd::tax::import_return_inputs(&vault, &pp(), year, &toml, false).unwrap();
+        cmd::tax::clear_return_inputs(&vault, &pp(), year, false).unwrap();
+        cmd::tax::import_return_inputs(&vault, &pp(), year, &toml, false, false).unwrap();
     }
     // NOTE: the re-imported 2024 has no charitable gift (the minimal TOML), so to reproduce the carryover
     // the filer re-imports 2024's REAL inputs. Here we re-store them, then re-run the write-back.
@@ -3657,7 +3676,7 @@ fn the_full_remedy_chain_restores_a_computed_carryover() {
         .unwrap();
         s.save().unwrap();
     }
-    cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap();
+    cmd::tax::write_back_carryover(&vault, &pp(), 2024, false, false).unwrap();
 
     let carry_after = {
         let s = Session::open(&vault, &pp()).unwrap();
@@ -3740,7 +3759,7 @@ fn write_carryover_refuses_on_a_pseudo_active_ledger_and_persists_nothing() {
     let (_dir, vault) = fr2024_writeback_vault_with_pseudo_trigger();
     cmd::reconcile::pseudo_set_mode(&vault, &pp(), true).unwrap();
     let before = get_2025_row(&vault);
-    let err = cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap_err();
+    let err = cmd::tax::write_back_carryover(&vault, &pp(), 2024, false, false).unwrap_err();
     assert!(
         format!("{err:?}").contains("pseudo-reconcile mode is contributing synthetic"),
         "expected the fail-closed pseudo refuse, got: {err:?}"
@@ -3760,7 +3779,7 @@ fn write_carryover_refuses_on_a_not_computable_ledger_and_persists_nothing() {
     let (_dir, vault) = fr2024_writeback_vault_with_pseudo_trigger();
     // pseudo OFF (default): the unknown-basis 2024 Receive is a Hard blocker ⇒ NotComputable crypto-delta.
     let before = get_2025_row(&vault);
-    let err = cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap_err();
+    let err = cmd::tax::write_back_carryover(&vault, &pp(), 2024, false, false).unwrap_err();
     assert!(
         format!("{err:?}").contains("NOT COMPUTABLE"),
         "expected the fail-closed NotComputable refuse, got: {err:?}"
@@ -4105,7 +4124,7 @@ fn income_import_cannot_forge_a_computed_provenance_stamp() {
         ),
     )
     .unwrap();
-    cmd::tax::import_return_inputs(&vault, &pp(), 2025, &forged, false).unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2025, &forged, false, false).unwrap();
     let stored = {
         let s = Session::open(&vault, &pp()).unwrap();
         btctax_cli::return_inputs::get(s.conn(), 2025)
@@ -4205,7 +4224,7 @@ fn a_computed_capital_loss_stamp_survives_every_command_that_should_retract_it()
         .unwrap();
         s.save().unwrap();
     }
-    cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap();
+    cmd::tax::write_back_carryover(&vault, &pp(), 2024, false, false).unwrap();
     let rolled = read_2025().capital_loss_carryforward_in;
     assert_eq!(
         read_2025().capital_loss_carryforward_in_provenance,
@@ -4225,7 +4244,7 @@ fn a_computed_capital_loss_stamp_survives_every_command_that_should_retract_it()
         .unwrap();
         s.save().unwrap();
     }
-    let reroll = cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap();
+    let reroll = cmd::tax::write_back_carryover(&vault, &pp(), 2024, false, false).unwrap();
     assert_eq!(
         read_2025().capital_loss_carryforward_in,
         rolled,
@@ -4242,7 +4261,7 @@ fn a_computed_capital_loss_stamp_survives_every_command_that_should_retract_it()
         "★ the stale stamp must be disclosed by name: {reroll}"
     );
 
-    cmd::tax::write_back_carryover(&vault, &pp(), 2024, true).unwrap();
+    cmd::tax::write_back_carryover(&vault, &pp(), 2024, true, false).unwrap();
     assert_eq!(
         read_2025().capital_loss_carryforward_in,
         rolled,
@@ -4260,7 +4279,7 @@ fn a_computed_capital_loss_stamp_survives_every_command_that_should_retract_it()
         format!("{base}\n[capital_loss_carryforward_in]\nshort = \"0\"\nlong = \"0\"\n"),
     )
     .unwrap();
-    cmd::tax::import_return_inputs(&vault, &pp(), 2025, &zeros, false).unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2025, &zeros, false, false).unwrap();
     assert_eq!(
         read_2025().capital_loss_carryforward_in,
         rolled,
@@ -4268,8 +4287,8 @@ fn a_computed_capital_loss_stamp_survives_every_command_that_should_retract_it()
     );
 
     // ── THE ONE ESCAPE `LIMITATIONS.md` NAMES must actually work: clear, then import. ─────────────
-    cmd::tax::clear_return_inputs(&vault, &pp(), 2025).unwrap();
-    cmd::tax::import_return_inputs(&vault, &pp(), 2025, &zeros, false).unwrap();
+    cmd::tax::clear_return_inputs(&vault, &pp(), 2025, false).unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2025, &zeros, false, false).unwrap();
     assert_eq!(
         read_2025().capital_loss_carryforward_in,
         btctax_core::Carryforward::default(),

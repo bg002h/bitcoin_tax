@@ -32,10 +32,10 @@
  30││                                ││                                                                                    │
  31││                                ││                                                                                    │
  32││                                ││                                                                                    │
- 33││                                ││                                                                                    │
- 34│└────────────────────────────────┘└────────────────────────────────────────────────────────────────────────────────────┘
- 35│┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
- 36││  active source: full return   ·   screens clean, except what report computes                                         │
+ 33│└────────────────────────────────┘└────────────────────────────────────────────────────────────────────────────────────┘
+ 34│┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+ 35││  active source: full return   ·   screens clean, except what report computes                                         │
+ 36││  interview: complete · return: computable                                                                            │
  37││   [↑/↓] field · [←/→ or Tab] section · [s] commit · [t] source · [Esc/q] close (autosaved)                           │
  38││                                                                                                                      │
  39│└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
@@ -172,16 +172,14 @@
  32│ 33..34 fg=Cyan mod=BOLD
  32│ 34..35 fg=Yellow
  32│ 119..120 fg=Yellow
- 33│ 0..1 fg=Cyan mod=BOLD
- 33│ 33..34 fg=Cyan mod=BOLD
- 33│ 34..35 fg=Yellow
- 33│ 119..120 fg=Yellow
- 34│ 0..34 fg=Cyan mod=BOLD
- 34│ 34..120 fg=Yellow
- 35│ 0..120 fg=DarkGray
- 36│ 0..1 fg=DarkGray
- 36│ 18..29 fg=Cyan
- 36│ 36..78 fg=DarkGray
+ 33│ 0..34 fg=Cyan mod=BOLD
+ 33│ 34..120 fg=Yellow
+ 34│ 0..120 fg=DarkGray
+ 35│ 0..1 fg=DarkGray
+ 35│ 18..29 fg=Cyan
+ 35│ 36..78 fg=DarkGray
+ 35│ 119..120 fg=DarkGray
+ 36│ 0..43 fg=DarkGray
  36│ 119..120 fg=DarkGray
  37│ 0..92 fg=DarkGray
  37│ 119..120 fg=DarkGray

@@ -201,6 +201,23 @@ pub fn load(conn: &Connection, year: i32) -> Result<(Loaded, Option<StaleNote>),
                     expected: SCHEMA_VERSION,
                 });
             }
+            // ★★★ **T4 / R11 — §6.3's "regenerable" premise, tested rather than assumed.**
+            //
+            //     §6.3 discards a stale WIP draft silently because *"it is regenerable, so refusing
+            //     would brick a resume for no benefit"*. That is true of crash-recovery scratch and
+            //     false of an interview: `answer_log` records cannot be re-created by re-typing
+            //     (`record_answer` writes one only when btctax itself asked), and on a year with no
+            //     package the draft is the only store there is. So the discard is now narrowed to
+            //     the drafts §6.3 was written about, and the rest fail closed like the parked half.
+            let held = draft_holdings(&d.ri);
+            if !held.is_empty() {
+                return Err(CliError::StaleDraftHoldsInterview {
+                    year,
+                    found: d.version,
+                    expected: SCHEMA_VERSION,
+                    holdings: held.describe(),
+                });
+            }
             // ★ §6.3 / I-1: a stale WIP draft is regenerable — discard it and RETURN the note (never
             // eprintln! from a store read fn: plan 3's raw-mode TUI would swallow/garble it), fall through.
             delete_draft(conn, year)?;
@@ -277,29 +294,151 @@ fn committed_or_fresh(conn: &Connection, year: i32) -> Result<Loaded, CliError> 
     }
 }
 
-/// §6.2 draft-coherence: reconcile that year's input-form draft with an authoritative committed-row write.
+/// ★★★ **T4 / `SPEC_interview.md` R11 — WHAT A WIP DRAFT HOLDS.**
 ///
-/// The four writers of the committed `return_inputs` row (`income import`, `income answer`, carryover
-/// write-back, `income clear`) are ignorant of the crash-recovery draft. A stale draft would then silently
-/// shadow the freshly-written committed row at the next `load` (§6.1 precedence), and a PARKED draft — the
-/// sole copy of a screened return (C-1) — could be clobbered out of existence. This helper closes both:
+/// §6.2 called a WIP draft *"regenerable crash-scratch"* and superseded it with a note. R11 makes
+/// the draft the **Sep–Dec store for TY2026**: a year with no `FullReturnParams` cannot commit at
+/// all, so the interview lives in the draft for months. This is the predicate that tells the two
+/// apart — and it names what is at stake rather than answering a bare yes/no, because a refusal
+/// that cannot say *what* it is protecting reads as an obstruction.
 ///
-/// - **no draft** → `Ok(())` (a no-op; the writer proceeds unchanged).
-/// - **WIP** (`parked = 0`) → the draft is regenerable crash-scratch, so the write SUPERSEDES it:
-///   `delete_draft` (noting on stderr only if it held a non-trivial return, i.e. `!= default`). The delete
-///   is in-memory on `conn`; the writer's own `s.save()` persists it together with the committed write.
-/// - **parked** (`parked = 1`) → REFUSE with [`CliError::ParkedDraftBlocksWrite`] (fail closed) BEFORE any
-///   committed-row mutation — never silently destroy irreplaceable data.
+/// ★ The document counts are DERIVED from the census (`DocumentRow::ALL` × `declared_rows`), never
+///   from a hand-list of `Vec` fields: a document type that gains a section is counted here the day
+///   it gains one, with no edit to this file.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DraftHoldings {
+    /// `answer_log` records — **the unreproducible part**. `record_answer` writes one only when
+    /// btctax itself put the question, and `income import` refuses to read records back (*"a record
+    /// of an act this vault never observed"*), so a discarded log cannot be re-created by re-typing.
+    pub answers: usize,
+    /// Transcribed document rows, per census row that carries any — `("Form W-2", 2)`.
+    pub documents: Vec<(&'static str, usize)>,
+    /// Dependent rows.
+    pub dependents: usize,
+    /// Whether a Schedule A has been created.
+    pub schedule_a: bool,
+}
+
+impl DraftHoldings {
+    /// Nothing an interview put there — the draft is the disposable scratch §6.2 assumed.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.answers == 0 && self.documents.is_empty() && self.dependents == 0 && !self.schedule_a
+    }
+
+    /// What the draft holds, as the clause a refusal (or a discard note) prints.
+    #[must_use]
+    pub fn describe(&self) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        if self.answers > 0 {
+            parts.push(format!("{} recorded answer(s)", self.answers));
+        }
+        for (doc, n) in &self.documents {
+            parts.push(format!("{n} {doc} row(s)"));
+        }
+        if self.dependents > 0 {
+            parts.push(format!("{} dependent(s)", self.dependents));
+        }
+        if self.schedule_a {
+            parts.push("a Schedule A".to_string());
+        }
+        if parts.is_empty() {
+            "nothing".to_string()
+        } else {
+            parts.join(", ")
+        }
+    }
+}
+
+/// [`DraftHoldings`] for one return.
+#[must_use]
+pub fn draft_holdings(ri: &ReturnInputs) -> DraftHoldings {
+    use btctax_core::tax::document_census::{declared_rows, DocumentRow};
+    DraftHoldings {
+        answers: ri.answer_log.len(),
+        documents: DocumentRow::ALL
+            .iter()
+            .filter_map(|row| match declared_rows(ri, *row) {
+                Some(n) if n > 0 => Some((row.designation(), n)),
+                _ => None,
+            })
+            .collect(),
+        dependents: ri.header.dependents.len(),
+        schedule_a: ri.schedule_a.is_some(),
+    }
+}
+
+/// What [`coherence_check`] found, and therefore what [`coherence_clear`] may do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DraftCoherence {
+    /// No draft row for the year — the writer proceeds unchanged.
+    Absent,
+    /// A WIP draft holding nothing an interview put there: §6.2's disposable crash-scratch.
+    Disposable,
+    /// A WIP draft holding an interview, whose discard the caller has explicitly CONFIRMED
+    /// (`--discard-draft` on the CLI; a payload-confirm in the TUI).
+    ConfirmedDiscard(DraftHoldings),
+}
+
+/// §6.2 draft-coherence, READ HALF: what an authoritative committed-row write is about to
+/// supersede, refusing where it must not.
 ///
-/// ★ M-1: callers invoke this RIGHT AFTER `Session::open`, before any committed-row read or write — else
-/// the two writers that early-return on an absent committed row (`answer`, write-back) would exit with a
-/// generic "no inputs" message before the parked-refuse is ever reached (a parked year has no committed
-/// row). Takes `&Connection` (read + a conditional in-memory delete); a parked `Err` propagates via `?`.
-pub fn coherence_clear_or_refuse(conn: &Connection, year: i32) -> Result<(), CliError> {
+/// The four writers of the committed `return_inputs` row (`income import`, `income answer`,
+/// carryover write-back, `income clear`) are ignorant of the draft. A stale draft would then
+/// silently shadow the freshly-written committed row at the next `load` (§6.1 precedence); a PARKED
+/// draft — the sole copy of a screened return (C-1) — could be clobbered out of existence; and
+/// since R11 a WIP draft may be months of interview.
+///
+/// - **no draft** → [`DraftCoherence::Absent`].
+/// - **parked** (`parked = 1`) → [`CliError::ParkedDraftBlocksWrite`] (C-1, fail closed).
+/// - **WIP holding an interview**, `discard_draft = false` → [`CliError::NonTrivialDraftBlocksWrite`]
+///   (T4/R11), naming what the draft holds and the remedy.
+/// - **WIP holding an interview**, `discard_draft = true` → [`DraftCoherence::ConfirmedDiscard`].
+/// - **any other WIP** → [`DraftCoherence::Disposable`].
+///
+/// ★ It DELETES NOTHING. That is the point of the split: every refusal a write can raise is raised
+///   before the write's own screens run, and the destructive half ([`coherence_clear`]) happens
+///   only on the path that actually writes.
+pub fn coherence_check(
+    conn: &Connection,
+    year: i32,
+    discard_draft: bool,
+) -> Result<DraftCoherence, CliError> {
     match parked_flag(conn, year)? {
-        None => Ok(()),
+        None => Ok(DraftCoherence::Absent),
         Some(true) => Err(CliError::ParkedDraftBlocksWrite { year }), // ★ C-1: never clobber the sole copy
         Some(false) => {
+            let Some(d) = get_draft_row(conn, year)? else {
+                return Ok(DraftCoherence::Absent);
+            };
+            let held = draft_holdings(&d.ri);
+            if held.is_empty() {
+                return Ok(DraftCoherence::Disposable);
+            }
+            if discard_draft {
+                Ok(DraftCoherence::ConfirmedDiscard(held))
+            } else {
+                Err(CliError::NonTrivialDraftBlocksWrite {
+                    year,
+                    holdings: held.describe(),
+                })
+            }
+        }
+    }
+}
+
+/// §6.2 draft-coherence, WRITE HALF: delete the draft [`coherence_check`] admitted, saying what was
+/// superseded. The delete is in-memory on `conn`; the writer's own `save()` persists it together
+/// with the committed write, so a writer that fails before saving destroys nothing.
+pub fn coherence_clear(
+    conn: &Connection,
+    year: i32,
+    checked: &DraftCoherence,
+) -> Result<(), CliError> {
+    match checked {
+        DraftCoherence::Absent => Ok(()),
+        DraftCoherence::Disposable => {
+            // The pre-T4 note, unchanged for the drafts §6.2 was written about.
             if let Some(d) = get_draft_row(conn, year)? {
                 if d.ri != ReturnInputs::default() {
                     eprintln!(
@@ -310,7 +449,40 @@ pub fn coherence_clear_or_refuse(conn: &Connection, year: i32) -> Result<(), Cli
             delete_draft(conn, year)?;
             Ok(())
         }
+        DraftCoherence::ConfirmedDiscard(held) => {
+            eprintln!("{}", discard_note(year, held));
+            delete_draft(conn, year)?;
+            Ok(())
+        }
     }
+}
+
+/// ★ R11: a confirmed discard NAMES WHAT WAS LOST. A destruction that does not say what it
+/// destroyed is the same silence the refusal exists to break — so the sentence is a function, held
+/// by [`tests::the_confirmed_discard_note_names_what_was_lost`], rather than an `eprintln!` nobody
+/// can assert on.
+#[must_use]
+pub fn discard_note(year: i32, held: &DraftHoldings) -> String {
+    format!(
+        "note: discarded the {year} work-in-progress draft as requested; it held {}.",
+        held.describe()
+    )
+}
+
+/// [`coherence_check`] then [`coherence_clear`] — the shape a writer wants when its own screens
+/// cannot refuse between the two.
+///
+/// ★ M-1: callers invoke this RIGHT AFTER `Session::open`, before any committed-row read or write —
+/// else the two writers that early-return on an absent committed row (`answer`, write-back) would
+/// exit with a generic "no inputs" message before the parked-refuse is ever reached (a parked year
+/// has no committed row).
+pub fn coherence_clear_or_refuse(
+    conn: &Connection,
+    year: i32,
+    discard_draft: bool,
+) -> Result<(), CliError> {
+    let checked = coherence_check(conn, year, discard_draft)?;
+    coherence_clear(conn, year, &checked)
 }
 
 /// The outcome of a [`commit`] attempt.
@@ -472,11 +644,19 @@ pub fn shadows_profile(conn: &Connection, year: i32) -> Result<bool, CliError> {
 /// Runs the delete + save through `mutate_and_save`, which restores the pre-write snapshot on ANY failure
 /// (the delete OR the save; mirrors `park_to_profile`'s atomicity), so a failed discard never leaves an
 /// in-memory/disk split or a partial in-memory delete.
-pub fn discard_parked_draft(sess: &mut Session, year: i32) -> Result<(), CliError> {
-    if parked_flag(sess.conn(), year)? != Some(true) {
-        // never delete a WIP draft (or a non-existent one) behind this affordance
+pub fn discard_blocked_draft(sess: &mut Session, year: i32) -> Result<(), CliError> {
+    // ★ T4/R11: the affordance now covers BOTH drafts `load` refuses to open — a PARKED committed
+    //   return (C-1) and a STALE one holding an interview. It still refuses a readable WIP draft:
+    //   that one is editable in the form, so a blanket delete button would be a footgun.
+    let Some(row) = get_draft_row(sess.conn(), year)? else {
         return Err(CliError::Usage(format!(
-            "year {year} has no parked draft to discard"
+            "year {year} has no draft to discard"
+        )));
+    };
+    if !row.parked && row.version == SCHEMA_VERSION {
+        return Err(CliError::Usage(format!(
+            "year {year}'s draft is readable — open the tax-inputs form for {year} to edit or \
+             finish it; this affordance discards only a draft this build cannot open"
         )));
     }
     mutate_and_save(sess, |conn| {
@@ -891,14 +1071,14 @@ mod tests {
         };
         // WIP draft → cleared
         set_draft_row(&conn, 2024, &ri, false).unwrap();
-        coherence_clear_or_refuse(&conn, 2024).unwrap();
+        coherence_clear_or_refuse(&conn, 2024, false).unwrap();
         assert!(
             !draft_exists(&conn, 2024).unwrap(),
             "coherence clears a WIP draft"
         );
         // parked draft → refused, preserved, message names both exits
         set_draft_row(&conn, 2025, &ri, true).unwrap();
-        let err = coherence_clear_or_refuse(&conn, 2025).unwrap_err();
+        let err = coherence_clear_or_refuse(&conn, 2025, false).unwrap_err();
         assert!(matches!(
             err,
             CliError::ParkedDraftBlocksWrite { year: 2025 }
@@ -913,7 +1093,7 @@ mod tests {
             "a parked draft is never silently destroyed"
         );
         // no draft → Ok
-        coherence_clear_or_refuse(&conn, 2030).unwrap();
+        coherence_clear_or_refuse(&conn, 2030, false).unwrap();
     }
 
     #[test]
@@ -1012,7 +1192,7 @@ mod tests {
     }
 
     #[test]
-    fn discard_parked_draft_only_deletes_a_parked_row() {
+    fn discard_blocked_draft_only_deletes_a_draft_the_build_cannot_open() {
         let (_dir, path, pp) = tmp_vault();
         let mut sess = Session::open(&path, &pp).unwrap();
         let ri = ReturnInputs {
@@ -1022,14 +1202,191 @@ mod tests {
         // a WIP draft is NOT discardable via this path
         set_draft_row(sess.conn(), 2024, &ri, false).unwrap();
         assert!(
-            discard_parked_draft(&mut sess, 2024).is_err(),
+            discard_blocked_draft(&mut sess, 2024).is_err(),
             "won't delete a WIP behind 'discard parked'"
         );
         assert!(draft_exists(sess.conn(), 2024).unwrap());
         // a parked draft IS discardable
         set_draft_row(sess.conn(), 2024, &ri, true).unwrap();
-        discard_parked_draft(&mut sess, 2024).unwrap();
+        discard_blocked_draft(&mut sess, 2024).unwrap();
         assert!(!draft_exists(sess.conn(), 2024).unwrap());
+    }
+
+    /// ★★★ **T4/R11 — `draft_holdings` counts what an interview put there, DERIVED from the
+    ///     census, and `describe()` names it.**
+    ///
+    /// The derivation is the point: the document counts come from `DocumentRow::ALL` ×
+    /// `declared_rows`, so a type that gains a section is counted the day it gains one. A hand-list
+    /// of `Vec` fields is exactly the shape that goes stale silently — and a draft wrongly called
+    /// disposable is destroyed by a note.
+    #[test]
+    fn draft_holdings_counts_answers_documents_dependents_and_a_schedule_a() {
+        use btctax_core::tax::document_census::{declared_rows, DocumentRow};
+        use btctax_core::tax::provenance::{record_answer, AnswerKey, AnswerState};
+        use btctax_core::tax::questions::{QuestionId, FORM_QUESTIONS};
+        use btctax_core::tax::return_inputs::{Dependent, ScheduleAInputs, W2};
+
+        // (a) a bare return holds nothing — this is the disposable crash-scratch §6.2 was written about
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Mfj,
+            ..Default::default()
+        };
+        assert!(
+            draft_holdings(&ri).is_empty(),
+            "a filing status alone is not an interview"
+        );
+        assert_eq!(draft_holdings(&ri).describe(), "nothing");
+
+        // (b) one recorded answer is enough — it is the unreproducible part
+        let q = FORM_QUESTIONS
+            .iter()
+            .find(|q| q.id == QuestionId::ForeignTrust)
+            .expect("the foreign-trust declaration is in the registry");
+        record_answer(
+            &mut ri,
+            AnswerKey::Question(q.id),
+            q.prompt,
+            time::macros::date!(2026 - 09 - 01),
+            AnswerState::Given,
+        );
+        let h = draft_holdings(&ri);
+        assert!(!h.is_empty());
+        assert_eq!(h.answers, 1);
+        assert!(
+            h.describe().contains("1 recorded answer(s)"),
+            "{}",
+            h.describe()
+        );
+
+        // (c) transcribed documents, a dependent and a Schedule A each count, and each is NAMED
+        ri.w2s.push(W2 {
+            employer: "ACME".into(),
+            ..Default::default()
+        });
+        ri.header.dependents.push(Dependent::default());
+        ri.schedule_a = Some(ScheduleAInputs::default());
+        let h = draft_holdings(&ri);
+        assert_eq!(h.documents, vec![("Form W-2", 1)]);
+        assert_eq!(h.dependents, 1);
+        assert!(h.schedule_a);
+        let d = h.describe();
+        for want in [
+            "1 recorded answer(s)",
+            "1 Form W-2 row(s)",
+            "1 dependent(s)",
+            "a Schedule A",
+        ] {
+            assert!(d.contains(want), "describe() must name {want}: {d}");
+        }
+
+        // (d) the DERIVATION, asserted rather than assumed: every countable census row is reachable
+        //     here, so a new document section cannot be silently uncounted.
+        let countable: Vec<DocumentRow> = DocumentRow::ALL
+            .iter()
+            .copied()
+            .filter(|r| declared_rows(&ReturnInputs::default(), *r).is_some())
+            .collect();
+        assert!(
+            countable.contains(&DocumentRow::Int1099),
+            "premise: the census knows how to count 1099-INT rows"
+        );
+        for row in countable {
+            let mut r = ReturnInputs::default();
+            match row {
+                DocumentRow::W2 => r.w2s.push(W2::default()),
+                DocumentRow::Int1099 => r.int_1099.push(Default::default()),
+                DocumentRow::Div1099 => r.div_1099.push(Default::default()),
+                DocumentRow::B1099 => r.b_1099.push(Default::default()),
+                DocumentRow::G1099 => r.g_1099.push(Default::default()),
+                other => panic!("a new countable census row ({other:?}) needs a case here"),
+            }
+            assert!(
+                !draft_holdings(&r).is_empty(),
+                "{row:?}: a transcribed document makes a draft non-disposable"
+            );
+        }
+    }
+
+    /// ★★★ **T4/R11 — the coherence CHECK refuses without confirmation, deletes nothing, and the
+    ///     CLEAR is what deletes.** The split is what makes "a refusal writes nothing" true of the
+    ///     draft as well as of the committed row.
+    #[test]
+    fn coherence_check_refuses_a_draft_holding_an_interview_and_deletes_nothing() {
+        use btctax_core::tax::provenance::{record_answer, AnswerKey, AnswerState};
+        use btctax_core::tax::questions::{QuestionId, FORM_QUESTIONS};
+        let conn = Connection::open_in_memory().unwrap();
+        init_draft_table(&conn).unwrap();
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        let q = FORM_QUESTIONS
+            .iter()
+            .find(|q| q.id == QuestionId::ForeignTrust)
+            .unwrap();
+        record_answer(
+            &mut ri,
+            AnswerKey::Question(q.id),
+            q.prompt,
+            time::macros::date!(2026 - 09 - 01),
+            AnswerState::Given,
+        );
+        set_draft_row(&conn, 2026, &ri, false).unwrap();
+
+        let err = coherence_check(&conn, 2026, false).unwrap_err();
+        assert!(
+            matches!(err, CliError::NonTrivialDraftBlocksWrite { year: 2026, .. }),
+            "{err:?}"
+        );
+        assert!(
+            err.to_string().contains("1 recorded answer(s)"),
+            "the refusal names what is at stake: {err}"
+        );
+        assert!(
+            draft_exists(&conn, 2026).unwrap(),
+            "the CHECK deletes nothing"
+        );
+
+        // Confirmed: the check admits it, and only the CLEAR removes it.
+        let checked = coherence_check(&conn, 2026, true).unwrap();
+        assert!(matches!(checked, DraftCoherence::ConfirmedDiscard(_)));
+        assert!(draft_exists(&conn, 2026).unwrap(), "still not deleted");
+        coherence_clear(&conn, 2026, &checked).unwrap();
+        assert!(!draft_exists(&conn, 2026).unwrap());
+
+        // A disposable draft needs no confirmation, exactly as before T4.
+        set_draft_row(&conn, 2026, &ReturnInputs::default(), false).unwrap();
+        assert_eq!(
+            coherence_check(&conn, 2026, false).unwrap(),
+            DraftCoherence::Disposable
+        );
+        coherence_clear_or_refuse(&conn, 2026, false).unwrap();
+        assert!(!draft_exists(&conn, 2026).unwrap());
+    }
+
+    /// The confirmed discard's note names the year and every kind of thing that was lost.
+    #[test]
+    fn the_confirmed_discard_note_names_what_was_lost() {
+        use btctax_core::tax::provenance::{record_answer, AnswerKey, AnswerState};
+        use btctax_core::tax::questions::{QuestionId, FORM_QUESTIONS};
+        use btctax_core::tax::return_inputs::W2;
+        let mut ri = ReturnInputs::default();
+        let q = FORM_QUESTIONS
+            .iter()
+            .find(|q| q.id == QuestionId::ForeignTrust)
+            .unwrap();
+        record_answer(
+            &mut ri,
+            AnswerKey::Question(q.id),
+            q.prompt,
+            time::macros::date!(2026 - 09 - 01),
+            AnswerState::Given,
+        );
+        ri.w2s.push(W2::default());
+        let note = discard_note(2026, &draft_holdings(&ri));
+        assert!(note.contains("2026"), "{note}");
+        assert!(note.contains("1 recorded answer(s)"), "{note}");
+        assert!(note.contains("1 Form W-2 row(s)"), "{note}");
     }
 
     #[test]

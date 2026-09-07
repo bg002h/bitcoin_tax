@@ -84,6 +84,12 @@ pub enum Command {
         /// (`income import`). Without it, a user-entered value is left untouched and the write refuses.
         #[arg(long, default_value_t = false)]
         force: bool,
+        /// With `--write-carryover`: discard a work-in-progress tax-inputs DRAFT for the year
+        /// WRITTEN ONTO (the year after `--tax-year`) that holds an interview — recorded answers,
+        /// transcribed documents, dependents or a Schedule A. Without this, such a write is REFUSED
+        /// and nothing is stored. Distinct from `--force`, which is about the carryover figure.
+        #[arg(long, default_value_t = false)]
+        discard_draft: bool,
     },
     /// Discover the reconciliation event references (`ref`s) you pass to the `reconcile` verbs.
     #[command(subcommand)]
@@ -483,9 +489,18 @@ pub enum IncomeCmd {
         /// identity with placeholders, unrecoverably. Prefer a scratch vault.
         ///
         /// This overrides the scrub-marker guard and NOTHING else; a parked full return still blocks
-        /// the write.
+        /// the write, and so does a work-in-progress draft holding an interview (--discard-draft).
         #[arg(long)]
         force: bool,
+        /// Discard a work-in-progress tax-inputs DRAFT for this year that holds an interview —
+        /// recorded answers, transcribed documents, dependents or a Schedule A.
+        ///
+        /// Without this, such a write is REFUSED and nothing is stored: on a year whose package has
+        /// not arrived the draft is where the interview lives for months, and its recorded answers
+        /// cannot be re-created by re-typing (btctax records when and in what words it asked). A
+        /// draft holding none of that is superseded silently, as before.
+        #[arg(long)]
+        discard_draft: bool,
     },
     /// Show the stored full-return inputs for a tax year (JSON, PII redacted), or nothing if none set.
     Show {
@@ -541,6 +556,15 @@ pub enum IncomeCmd {
         /// The tax year (e.g. 2024).
         #[arg(long)]
         year: i32,
+        /// Discard a work-in-progress tax-inputs DRAFT for this year that holds an interview —
+        /// recorded answers, transcribed documents, dependents or a Schedule A.
+        ///
+        /// Without this, such a write is REFUSED and nothing is stored: on a year whose package has
+        /// not arrived the draft is where the interview lives for months, and its recorded answers
+        /// cannot be re-created by re-typing (btctax records when and in what words it asked). A
+        /// draft holding none of that is superseded silently, as before.
+        #[arg(long)]
+        discard_draft: bool,
     },
     /// Answer the return's fail-loud questions interactively — the yes/no boxes that have no safe
     /// default (can someone claim you as a dependent? Schedule B's foreign-account and foreign-trust
@@ -556,6 +580,15 @@ pub enum IncomeCmd {
         /// The tax year (e.g. 2024).
         #[arg(long)]
         year: i32,
+        /// Discard a work-in-progress tax-inputs DRAFT for this year that holds an interview —
+        /// recorded answers, transcribed documents, dependents or a Schedule A.
+        ///
+        /// Without this, such a write is REFUSED and nothing is stored: on a year whose package has
+        /// not arrived the draft is where the interview lives for months, and its recorded answers
+        /// cannot be re-created by re-typing (btctax records when and in what words it asked). A
+        /// draft holding none of that is superseded silently, as before.
+        #[arg(long)]
+        discard_draft: bool,
     },
 }
 
