@@ -10,6 +10,7 @@
 //! no-echo. `answer` is an ordinary echoing prompt — routing a secret through it would print a crown jewel
 //! into terminal scrollback.
 use crate::{return_inputs, CliError, Session};
+use btctax_core::tax::provenance::{record_answer, AnswerKey, AnswerState};
 use btctax_core::tax::questions::{
     FormQuestion, QuestionId, SkippableKind, SkippableQuestion, FORM_QUESTIONS, SKIPPABLE_QUESTIONS,
 };
@@ -118,10 +119,31 @@ pub fn parse_date(line: &str) -> Result<Option<time::Date>, String> {
 /// that does not exist would materialize a near-empty blob, which then takes PRECEDENCE over the user's
 /// `tax-profile` (the resolver ranks `ReturnInputs` first) — silently replacing a working profile with an
 /// empty return. A missing row is a mistake to report, not a shape to invent.
+/// ★★★ **R10.3 — what a skippable's ANSWER STATE is, after the prompt has been dealt with.**
+///
+/// The rule is mechanical and reads off the value, not off the keystroke: a live skippable that ends
+/// the prompt holding a value was **`Given`**; one that ends it holding nothing was offered and passed
+/// over, which is **`Declined`**. A bare Enter is the same keystroke in both cases and must not be the
+/// same record — declining is provenance (*asked, refused*), and R12 keeps a `Declined` benefit in the
+/// *forgoing* list precisely because of it.
+fn skippable_state(sk: &SkippableQuestion, ri: &ReturnInputs) -> AnswerState {
+    let answered = match sk.kind {
+        SkippableKind::Date => (sk.get_date)(ri).is_some(),
+        SkippableKind::YesNo => (sk.get_bool)(ri).is_some(),
+        SkippableKind::Choice(_) => (sk.get_choice)(ri).is_some(),
+    };
+    if answered {
+        AnswerState::Given
+    } else {
+        AnswerState::Declined
+    }
+}
+
 pub fn answer_return_inputs(
     vault: &Path,
     pp: &Passphrase,
     year: i32,
+    now: time::Date,
     input: &mut impl std::io::BufRead,
     out: &mut impl Write,
 ) -> Result<(), CliError> {
@@ -164,6 +186,18 @@ pub fn answer_return_inputs(
                     match parse_yes_no(&line, cur) {
                         Some(v) => {
                             (q.set)(&mut ri, v);
+                            // ★★★ R10.3 — THE ONE WRITER, reached from the keyboard. The form
+                            //     engine's `apply` reaches the same function with the same `now`, so
+                            //     the same answer produces a byte-identical record on either surface.
+                            //     A class-(A) declaration has no lawful decline, so it is always
+                            //     `Given` — the loop cannot exit without a value.
+                            record_answer(
+                                &mut ri,
+                                AnswerKey::Question(q.id),
+                                q.prompt,
+                                now,
+                                AnswerState::Given,
+                            );
                             break;
                         }
                         // ★ No default and no answer ⇒ ASK AGAIN. Accepting silence here would reintroduce
@@ -270,6 +304,13 @@ pub fn answer_return_inputs(
                     }
                 }
             },
+        }
+        // ★★★ R10.3 — one record per prompt PUT TO THE FILER, whichever shape it had. Placed here,
+        //     after the `Ask` match, so no branch can be added that asks without recording: the three
+        //     skippable shapes and the declaration all pass through this line.
+        if let Ask::Skippable(sk) = ask {
+            let state = skippable_state(sk, &ri);
+            record_answer(&mut ri, AnswerKey::Skippable(sk.id), sk.prompt, now, state);
         }
     }
 

@@ -827,6 +827,10 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
         })
         .unwrap_or_default();
     let regime = btctax_cli::year_readiness::regime_for(year);
+    // ★★★ R10.3 — the SESSION date every answer this flow records is stamped with, read ONCE from the
+    //     `BTCTAX_NOW` seam (`app.clock`) rather than from a wall clock inside the edit loop, so a
+    //     pinned clock pins the answer log too.
+    let now = app.clock.now().to_offset(time::UtcOffset::UTC).date();
     let mut form = match loaded {
         Ok((btctax_cli::input_form_store::Loaded::Fresh, stale_note)) => TaxInputsFormState {
             year,
@@ -848,6 +852,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
             refused_section: None,
             broker_census: broker_census.clone(),
             broker_regime: regime,
+            now,
         },
         Ok((btctax_cli::input_form_store::Loaded::Committed(ri), stale_note)) => {
             TaxInputsFormState {
@@ -870,6 +875,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 refused_section: None,
                 broker_census: broker_census.clone(),
                 broker_regime: regime,
+                now,
             }
         }
         Ok((btctax_cli::input_form_store::Loaded::Draft { ri, parked }, stale_note)) => {
@@ -893,6 +899,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 refused_section: None,
                 broker_census: broker_census.clone(),
                 broker_regime: regime,
+                now,
             }
         }
         Err(e @ btctax_cli::CliError::StaleParkedDraft { .. }) => {
@@ -919,6 +926,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 refused_section: None,
                 broker_census: broker_census.clone(),
                 broker_regime: regime,
+                now,
             }
         }
         Err(e) => {
@@ -10316,7 +10324,8 @@ mod tests {
     fn tax_inputs_nav_moves_section_and_field_and_clamps() {
         use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr};
         let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
-        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        let mut form =
+            crate::edit::form::TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         apply(
             &mut form.working,
             Edit::SetField {
@@ -10324,6 +10333,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Single".into()),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         app.tax_inputs_form = Some(form);
@@ -10424,7 +10434,8 @@ mod tests {
         let pp = Passphrase::new("empty-vault-pass".into());
 
         // Force the flush path to run on a None working copy: dirty = true, working = None (NI-2).
-        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        let mut form =
+            crate::edit::form::TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         form.dirty = true;
         assert!(form.working.is_none());
         app.tax_inputs_form = Some(form);
@@ -10548,7 +10559,8 @@ mod tests {
 
         // Seed a draft on disk so the commit's draft-delete is observable, then inject the working copy.
         btctax_cli::input_form_store::save_draft(app.session.as_mut().unwrap(), 2024, &ri).unwrap();
-        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        let mut form =
+            crate::edit::form::TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         form.working = Some(ri);
         form.dirty = true;
         app.tax_inputs_form = Some(form);
@@ -10625,7 +10637,8 @@ mod tests {
             ..Default::default()
         };
         answer_all_live_declarations(&mut ri);
-        let mut form = crate::edit::form::TaxInputsFormState::fresh(2099);
+        let mut form =
+            crate::edit::form::TaxInputsFormState::fresh(2099, time::macros::date!(2026 - 09 - 01));
         form.working = Some(ri);
         // r2-N1: enter the commit with UNFLUSHED edits (dirty), so the arm's `saved`-gated dirty-clear is
         // OBSERVABLE — otherwise `dirty` is already false and the assert below would be vacuous.
@@ -10720,7 +10733,8 @@ mod tests {
         };
         answer_all_live_declarations(&mut ri);
         btctax_cli::input_form_store::save_draft(app.session.as_mut().unwrap(), 2024, &ri).unwrap();
-        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        let mut form =
+            crate::edit::form::TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         form.working = Some(ri);
         form.dirty = true;
         app.tax_inputs_form = Some(form);
@@ -10786,7 +10800,8 @@ mod tests {
             ..Default::default()
         };
         answer_all_live_declarations(&mut ri);
-        let mut form = crate::edit::form::TaxInputsFormState::fresh(2099);
+        let mut form =
+            crate::edit::form::TaxInputsFormState::fresh(2099, time::macros::date!(2026 - 09 - 01));
         form.working = Some(ri);
         app.tax_inputs_form = Some(form);
 
@@ -10867,7 +10882,10 @@ mod tests {
                     },
                 );
             }
-            let mut form = crate::edit::form::TaxInputsFormState::fresh(year);
+            let mut form = crate::edit::form::TaxInputsFormState::fresh(
+                year,
+                time::macros::date!(2026 - 09 - 01),
+            );
             form.working = Some(ri);
             app.tax_inputs_form = Some(form);
 
@@ -10967,7 +10985,8 @@ mod tests {
     #[test]
     fn tax_inputs_flush_left_unsaved_gates_the_close() {
         let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
-        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        let mut form =
+            crate::edit::form::TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         form.working = None;
         form.dirty = false;
         app.tax_inputs_form = Some(form);
@@ -11018,7 +11037,8 @@ mod tests {
             salt_sales_tax_amount: dec!(500),
             ..Default::default()
         });
-        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        let mut form =
+            crate::edit::form::TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         form.working = Some(ri);
         app.tax_inputs_form = Some(form);
 
@@ -11078,7 +11098,8 @@ mod tests {
     fn tax_inputs_money_edit_via_keys_roundtrips_through_get() {
         use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
         let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
-        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        let mut form =
+            crate::edit::form::TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         // Materialize a Single return via `apply` — never construct a `ReturnInputs`.
         apply(
             &mut form.working,
@@ -11087,6 +11108,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Single".into()),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         // Focus Payments → PayEstimated (a singleton Money field, addr `[]`).
@@ -11140,7 +11162,8 @@ mod tests {
     fn tax_inputs_secret_ssn_via_keys_commits_masked() {
         use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SecretView, SectionId};
         let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
-        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        let mut form =
+            crate::edit::form::TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         apply(
             &mut form.working,
             Edit::SetField {
@@ -11148,6 +11171,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Single".into()),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         // Focus Taxpayer → SSN (a Secret singleton field, addr `[]`).
@@ -11206,7 +11230,8 @@ mod tests {
     ) -> (EditorApp, tempfile::TempDir) {
         use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr};
         let (mut app, dir) = unlocked_app_on_empty_vault(2024);
-        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        let mut form =
+            crate::edit::form::TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         apply(
             &mut form.working,
             Edit::SetField {
@@ -11214,6 +11239,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Single".into()),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         let ri = form.working.as_ref().unwrap();
@@ -11331,6 +11357,7 @@ mod tests {
                     addr: RowAddr::default(),
                     value: FieldValue::Choice("ForceItemize".into()),
                 },
+                time::macros::date!(2026 - 09 - 01),
             )
             .unwrap();
         }
@@ -12039,7 +12066,8 @@ mod tests {
             salt_sales_tax_amount: dec!(500),
             ..Default::default()
         });
-        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        let mut form =
+            crate::edit::form::TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         form.working = Some(ri);
         app.tax_inputs_form = Some(form);
 
@@ -12096,7 +12124,8 @@ mod tests {
         };
         answer_all_live_declarations(&mut ri);
         btctax_cli::input_form_store::save_draft(app.session.as_mut().unwrap(), 2024, &ri).unwrap();
-        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        let mut form =
+            crate::edit::form::TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         form.working = Some(ri);
         app.tax_inputs_form = Some(form);
 
@@ -27720,7 +27749,8 @@ mod tests {
         };
         answer_all_live_declarations(&mut ri);
         btctax_cli::input_form_store::save_draft(app.session.as_mut().unwrap(), 2024, &ri).unwrap();
-        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        let mut form =
+            crate::edit::form::TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         form.working = Some(ri);
         form.dirty = true;
         app.tax_inputs_form = Some(form);

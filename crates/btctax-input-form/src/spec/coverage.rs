@@ -135,6 +135,46 @@ fn maximal_fixture() -> ReturnInputs {
             noncovered: Some(btctax_core::forms::BrokerReported::NotReported),
         },
     );
+    // ★★ R10.3 — one record in each of the two provenance stores, so their EXEMPT entries below are
+    //    LIVE. An empty `BTreeMap`/`Vec` yields no leaf at all, and the stale-exemption assert (l)
+    //    would then fire on a perfectly correct exemption — the same trap the census exists to spring
+    //    on a real one.
+    //
+    //    ★ Deliberately `Question`/`Skippable` keys and NO `DependentGate`: nothing in the form spec
+    //      writes a dependent-gate record (that registry is task T7), and seeding one would make the
+    //      `DepSsn` setter's identity-supersede fire during the mutate-and-diff, moving a SECOND leaf
+    //      and breaking the "exactly one leaf" derivation for reasons that have nothing to do with
+    //      coverage.
+    ri.answer_log.insert(
+        btctax_core::tax::provenance::AnswerKey::Question(
+            btctax_core::tax::questions::QuestionId::ForeignTrust,
+        ),
+        btctax_core::tax::provenance::AnswerRecord {
+            answered_on: date!(2025 - 06 - 01),
+            // ★ The REGISTRY's words, not an invented string: a class-(A) record hashing anything
+            //   else is refused as unanswered by `screen_inputs` (R10.3), and a fixture that refuses
+            //   for a reason unrelated to coverage is a trap for the next reader.
+            prompt_hash: btctax_core::tax::provenance::prompt_hash(
+                btctax_core::tax::provenance::current_prompt(
+                    &btctax_core::tax::provenance::AnswerKey::Question(
+                        btctax_core::tax::questions::QuestionId::ForeignTrust,
+                    ),
+                )
+                .expect("a registry question has a prompt"),
+            ),
+            state: btctax_core::tax::provenance::AnswerState::Given,
+        },
+    );
+    ri.answer_log_history.push((
+        btctax_core::tax::provenance::AnswerKey::Skippable(
+            btctax_core::tax::questions::SkippableId::BlindTaxpayer,
+        ),
+        btctax_core::tax::provenance::AnswerRecord {
+            answered_on: date!(2025 - 05 - 01),
+            prompt_hash: btctax_core::tax::provenance::prompt_hash("older words"),
+            state: btctax_core::tax::provenance::AnswerState::Declined,
+        },
+    ));
     ri
 }
 
@@ -354,6 +394,20 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
         //     emitted by any path, and the TOML import surface still carries these fields.
         //     REMOVE THIS PREFIX when the section lands — the coverage KAT will then police it.
         "schedule_1a",
+        // ★★★ **R10.3 — THE ANSWER LOG IS PROVENANCE, NOT TESTIMONY, and that is the reason it is
+        //     exempt rather than an oversight.** Every other exemption above is a deferred INPUT
+        //     surface; these two are not inputs at all. The filer never types a record — btctax writes
+        //     one because it observed an act — so there is no `Field` that could cover it and no
+        //     prompt that could ask for it. Same class as the `*_provenance` leaves below: *ours, not
+        //     the filer's*.
+        //
+        //     ★ It is a PREFIX (not a leaf) because the map's keys are data: `answer_log.<key>.state`
+        //       is one leaf per recorded answer, and there is no fixed set of them.
+        "answer_log",
+        // ★ A SEPARATE entry, and not a redundant one: the prefix matcher requires `.` or `[` after
+        //   the prefix, so `answer_log` does NOT cover `answer_log_history`. Spelling it out is what
+        //   keeps the exemption honest rather than accidental.
+        "answer_log_history",
     ];
     const EXEMPT_LEAVES: &[&str] = &[
         // ★★ §G-15 — `tax_year` is the SCOPE the form is filled in, not a value the filer types into

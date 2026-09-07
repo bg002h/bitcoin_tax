@@ -628,10 +628,22 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
         form_2555_line45: _,
         form_2555_line50: _,
         form_4563_line15: _,
+        // ★★★ R10.3 — THE ANSWER LOG IS IDENTIFYING, and only in its KEYS. An `AnswerRecord` is a
+        //     date, a prompt hash and a two-state enum, none of which names anyone. But a
+        //     `DependentGate` key carries `ssn_hash` — a hash of a child's SSN over a *nine-digit*
+        //     space, which is brute-forceable, so shipping it in a file the tool calls shareable
+        //     would hand back the SSN this module has just replaced. Re-keyed below to the SCRUBBED
+        //     dependents' identities, which keeps the partition (which records belong to which child)
+        //     while no original byte survives — §3.2's rule, applied to a key instead of a value.
+        answer_log: _,
+        answer_log_history: _,
     } = ri;
 
     let mut out = ri.clone();
     out.header = scrub_header(header);
+    // ★ Re-key BEFORE anything else reads `out.header.dependents`: the map pairs each row's ORIGINAL
+    //   ssn with the synthetic one `scrub_header` just wrote for the same row.
+    rekey_dependent_answers(&mut out, &ri.header.dependents);
     out.foreign_country_names = scrub_name_list(foreign_country_names);
 
     if let (Some(sc_out), Some(sc)) = (out.schedule_c.as_mut(), schedule_c.as_ref()) {
@@ -737,8 +749,15 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
             box6_foreign_tax: _,
             box8_tax_exempt_interest: _,
             box9_private_activity_bond_amt: _,
+            // ★ R10.2 — mapped below through the SAME `EinMap` as a W-2 EIN: a payer TIN is the same
+            //   class of identifier, and only its sameness across rows carries information.
+            payer_tin: _,
+            // ★ KEPT: a transcription date is a provenance tag about our handling of the paper, not a
+            //   person, and a reproducer of a provenance defect needs it. Recorded as a decision.
+            transcribed_on: _,
         } = f;
         f.payer = replace_preserving_emptiness(&f.payer, format!("Payer{}", i + 1));
+        f.payer_tin = map_payer_tin(&mut eins, &f.payer_tin);
     }
     for (i, f) in out.div_1099.iter_mut().enumerate() {
         let crate::tax::return_inputs::Form1099Div {
@@ -754,8 +773,11 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
             box7_foreign_tax: _,
             box12_exempt_interest_dividends: _,
             box13_private_activity_amt: _,
+            payer_tin: _,      // R10.2 — mapped below (see the 1099-INT loop)
+            transcribed_on: _, // R10.2 — KEPT (see the 1099-INT loop)
         } = f;
         f.payer = replace_preserving_emptiness(&f.payer, format!("Payer{}", i + 1));
+        f.payer_tin = map_payer_tin(&mut eins, &f.payer_tin);
     }
     for (i, f) in out.b_1099.iter_mut().enumerate() {
         let crate::tax::return_inputs::Form1099B {
@@ -765,18 +787,71 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
             long_term_proceeds: _,
             long_term_basis: _,
             basis_reported_and_no_adjustments: _,
+            payer_tin: _,      // R10.2 — mapped below (see the 1099-INT loop)
+            transcribed_on: _, // R10.2 — KEPT (see the 1099-INT loop)
         } = f;
         f.payer = replace_preserving_emptiness(&f.payer, format!("Broker{}", i + 1));
+        f.payer_tin = map_payer_tin(&mut eins, &f.payer_tin);
     }
     for (i, f) in out.g_1099.iter_mut().enumerate() {
         let crate::tax::return_inputs::Form1099G {
             payer: _,
             box1_unemployment: _,
             box4_fed_withheld: _,
+            payer_tin: _,      // R10.2 — mapped below (see the 1099-INT loop)
+            transcribed_on: _, // R10.2 — KEPT (see the 1099-INT loop)
         } = f;
         f.payer = replace_preserving_emptiness(&f.payer, format!("Agency{}", i + 1));
+        f.payer_tin = map_payer_tin(&mut eins, &f.payer_tin);
     }
     out
+}
+
+/// Map one payer TIN through the shared [`EinMap`] — empty (or all-whitespace) stays exactly as it
+/// was, so the scrubbed copy cannot differ from the original in whether a "TIN missing" check fires.
+fn map_payer_tin(eins: &mut EinMap, tin: &str) -> String {
+    if tin.trim().is_empty() {
+        return tin.to_string();
+    }
+    eins.map(tin)
+}
+
+/// ★★★ **Re-key the answer log onto the SCRUBBED dependent identities** (R10.3 + §3.2).
+///
+/// `scrub_header` has already replaced each dependent's `ssn` with a synthetic one at the same row
+/// index, so `originals[i]` and `out.header.dependents[i]` are the same child before and after. Every
+/// `DependentGate` key is rewritten from the old identity hash to the new one — the partition
+/// survives (row 0's records still belong to row 0's child) and no original byte does.
+///
+/// ★ A key whose hash matches NO row is **dropped**, not carried: it is a record about a dependent
+/// this return no longer holds, so the scrubbed copy has nothing to attach it to, and keeping a
+/// brute-forceable hash of a person who is not even on the return is the worst of both.
+fn rekey_dependent_answers(out: &mut ReturnInputs, originals: &[Dependent]) {
+    use crate::tax::provenance::{dependent_ssn_hash, AnswerKey};
+    let remap: BTreeMap<String, String> = originals
+        .iter()
+        .zip(out.header.dependents.iter())
+        .map(|(o, n)| (dependent_ssn_hash(&o.ssn), dependent_ssn_hash(&n.ssn)))
+        .collect();
+    let rekey = |k: &AnswerKey| -> Option<AnswerKey> {
+        match k {
+            AnswerKey::DependentGate { ssn_hash, gate } => {
+                remap.get(ssn_hash).map(|h| AnswerKey::DependentGate {
+                    ssn_hash: h.clone(),
+                    gate: *gate,
+                })
+            }
+            other => Some(other.clone()),
+        }
+    };
+    out.answer_log = std::mem::take(&mut out.answer_log)
+        .into_iter()
+        .filter_map(|(k, v)| rekey(&k).map(|k| (k, v)))
+        .collect();
+    out.answer_log_history = std::mem::take(&mut out.answer_log_history)
+        .into_iter()
+        .filter_map(|(k, v)| rekey(&k).map(|k| (k, v)))
+        .collect();
 }
 
 #[cfg(test)]
@@ -786,6 +861,99 @@ mod tests {
     use crate::tax::testonly::{
         kitchen_sink_household, ty2024_params, ty2024_table, w2_only_household,
     };
+
+    /// ★★★ **R10.3 + §3.2 — THE ANSWER LOG'S KEYS SURVIVE AS A PARTITION, AND NO ORIGINAL BYTE
+    ///     SURVIVES AT ALL.**
+    ///
+    /// A `DependentGate` key carries `ssn_hash` — a salted hash of a child's SSN. The SSN space is
+    /// **nine digits**, so the hash is brute-forceable in the time it takes to read this sentence:
+    /// shipping it unchanged in a file `income scrub` tells the filer is safe to share would hand back
+    /// exactly the number the scrubber just replaced in `header.dependents[].ssn`.
+    ///
+    /// The kill plants the defect the re-key exists to prevent: it asserts the ORIGINAL hash appears
+    /// nowhere in the scrubbed JSON, while the PARTITION — which records belong to which child —
+    /// still holds. Deleting `rekey_dependent_answers` reds it on the first assertion.
+    ///
+    /// ★ The scrub axis cannot hold this one, and says so at `maximal_sentinel`: the difference lands
+    ///   at a path naming a VALUE (`answer_log.dependent:<64 hex>:<Gate>`), which a field-shaped axis
+    ///   with `&'static str` matrix rows cannot represent. This test is its stand-in, named there.
+    #[test]
+    fn a_dependent_gate_key_is_rekeyed_so_no_original_ssn_hash_survives() {
+        use crate::tax::provenance::{
+            dependent_ssn_hash, record_answer, AnswerKey, AnswerState, DependentGate,
+        };
+        use crate::tax::return_inputs::Dependent;
+
+        let (ssn0, ssn1) = ("111-22-3333", "444-55-6666");
+        let mut ri = kitchen_sink_household().0;
+        ri.header.dependents = vec![
+            Dependent {
+                name: "Kid One".into(),
+                ssn: ssn0.into(),
+                relationship: "Son".into(),
+                date_of_birth: None,
+            },
+            Dependent {
+                name: "Kid Two".into(),
+                ssn: ssn1.into(),
+                relationship: "Daughter".into(),
+                date_of_birth: None,
+            },
+        ];
+        let key = |ssn: &str, gate| AnswerKey::DependentGate {
+            ssn_hash: dependent_ssn_hash(ssn),
+            gate,
+        };
+        record_answer(
+            &mut ri,
+            key(ssn0, DependentGate::QcRelationship),
+            "p",
+            time::macros::date!(2026 - 09 - 01),
+            AnswerState::Given,
+        );
+        record_answer(
+            &mut ri,
+            key(ssn1, DependentGate::Married),
+            "p",
+            time::macros::date!(2026 - 09 - 01),
+            AnswerState::Declined,
+        );
+
+        let out = scrub_pii(&ri);
+        let json = serde_json::to_string(&out).unwrap();
+        for ssn in [ssn0, ssn1] {
+            assert!(
+                !json.contains(&dependent_ssn_hash(ssn)),
+                "the scrubbed copy still carries the ORIGINAL identity hash for {ssn} — over a \
+                 nine-digit space that IS the SSN"
+            );
+        }
+        // The partition survives: each scrubbed child keeps its own record, with its own state.
+        let new0 = dependent_ssn_hash(&out.header.dependents[0].ssn);
+        let new1 = dependent_ssn_hash(&out.header.dependents[1].ssn);
+        assert_ne!(new0, new1, "two children must stay two identities");
+        assert_eq!(
+            out.answer_log
+                .get(&AnswerKey::DependentGate {
+                    ssn_hash: new0,
+                    gate: DependentGate::QcRelationship
+                })
+                .map(|r| r.state),
+            Some(AnswerState::Given),
+            "row 0's record must follow row 0"
+        );
+        assert_eq!(
+            out.answer_log
+                .get(&AnswerKey::DependentGate {
+                    ssn_hash: new1,
+                    gate: DependentGate::Married
+                })
+                .map(|r| r.state),
+            Some(AnswerState::Declined),
+            "row 1's record must follow row 1, and keep its state"
+        );
+        assert_eq!(out.answer_log.len(), 2, "no record invented, none lost");
+    }
 
     /// ★★★ r1's CRITICAL, PINNED: **one employer spelled two ways must stay ONE employer.**
     ///

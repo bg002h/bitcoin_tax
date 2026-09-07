@@ -2910,7 +2910,15 @@ fn a_pre_d8_vault_refuses_until_answered_and_income_answer_is_the_way_out() {
     // had grown at all.
     let mut keystrokes: &[u8] = b"n\nn\nn\nn\nn\nn\nn\n\n\n\n\n\n\n\n";
     let mut screen: Vec<u8> = Vec::new();
-    cmd::answer::answer_return_inputs(&vault, &pp(), 2024, &mut keystrokes, &mut screen).unwrap();
+    cmd::answer::answer_return_inputs(
+        &vault,
+        &pp(),
+        2024,
+        time::macros::date!(2026 - 09 - 01),
+        &mut keystrokes,
+        &mut screen,
+    )
+    .unwrap();
     let screen = String::from_utf8(screen).unwrap();
     assert!(
         screen.contains("claim YOU as a dependent"),
@@ -2941,6 +2949,122 @@ fn a_pre_d8_vault_refuses_until_answered_and_income_answer_is_the_way_out() {
     );
 }
 
+/// ★★★ **T1's CENTRAL KILL — ONE WRITER, TWO SURFACES, THE SAME RECORD** (R10.3).
+///
+/// *"Written by **one** core function `record_answer(ri, key, prompt, now)` that both `apply` and
+/// `income answer` call."* The whole point of a single writer is that the editor and the keyboard
+/// cannot drift, and drift here would be invisible: both surfaces would still store the filer's
+/// answer, and only the *provenance* — the date, or which words were hashed — would differ, which
+/// nothing on the printed return would ever show.
+///
+/// So this test answers the SAME question on BOTH surfaces at the SAME `now`, and compares the two
+/// records **serialized**, byte for byte. It also pins the second half of the state rule: a skippable
+/// the filer passed over is a `Declined` RECORD, while one never reached is no record at all.
+///
+/// ★ It is why this crate carries a dev-only dependency on `btctax-input-form`: a test that can reach
+///   only one of the two writers cannot check that they agree.
+#[test]
+fn the_editor_and_income_answer_write_the_same_answer_record() {
+    use btctax_core::tax::provenance::{AnswerKey, AnswerRecord, AnswerState};
+    use btctax_core::tax::questions::{QuestionId, SkippableId, FORM_QUESTIONS};
+    use btctax_input_form::{apply, question_to_field, Edit, FieldValue, RowAddr};
+
+    const NOW: time::Date = time::macros::date!(2026 - 09 - 01);
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2025(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+
+    // ── Surface 1: the KEYBOARD. Import a return, then answer every live question "n" and skip every
+    //    skippable with a bare Enter (the script is over-long on purpose: extra Enters are consumed by
+    //    the skippables, and running SHORT fails loudly rather than silently under-answering).
+    let toml = csv_dir.path().join("ri.toml");
+    std::fs::write(
+        &toml,
+        "filing_status = \"Single\"\n[header]\n[header.taxpayer]\nfirst_name = \"A\"\nlast_name = \"B\"\nssn = \"123-45-6789\"\n",
+    )
+    .unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap();
+    let mut keystrokes: &[u8] = b"n\nn\nn\nn\nn\nn\nn\n\n\n\n\n\n\n\n\n\n\n\n";
+    let mut screen: Vec<u8> = Vec::new();
+    cmd::answer::answer_return_inputs(&vault, &pp(), 2024, NOW, &mut keystrokes, &mut screen)
+        .unwrap();
+    let s = btctax_cli::Session::open(&vault, &pp()).unwrap();
+    let from_cli = btctax_cli::return_inputs::get(s.conn(), 2024)
+        .unwrap()
+        .unwrap();
+    drop(s);
+
+    // ── Surface 2: the EDITOR. Same starting return, same answer, same `now`, through the form seam.
+    let mut working: btctax_input_form::Working =
+        Some(btctax_core::tax::return_inputs::ReturnInputs {
+            tax_year: 2024,
+            filing_status: btctax_core::FilingStatus::Single,
+            ..Default::default()
+        });
+    apply(
+        &mut working,
+        Edit::SetField {
+            id: question_to_field(QuestionId::ForeignTrust),
+            addr: RowAddr::default(),
+            value: FieldValue::TriState(Some(false)),
+        },
+        NOW,
+    )
+    .unwrap();
+    let from_editor = working.unwrap();
+
+    // ── THE COMPARISON. Same key, and the same record byte for byte once serialized.
+    let key = AnswerKey::Question(QuestionId::ForeignTrust);
+    let a: &AnswerRecord = from_cli
+        .answer_log
+        .get(&key)
+        .expect("`income answer` must record the declaration it asked");
+    let b: &AnswerRecord = from_editor
+        .answer_log
+        .get(&key)
+        .expect("the form engine's `apply` must record the declaration it set");
+    assert_eq!(
+        serde_json::to_string(a).unwrap(),
+        serde_json::to_string(b).unwrap(),
+        "the two writers produced DIFFERENT records for the same answer at the same BTCTAX_NOW — \
+         which is exactly the drift a single `record_answer` exists to make impossible"
+    );
+    assert_eq!(
+        a.answered_on, NOW,
+        "the record must carry the seam's date, not a wall clock"
+    );
+    assert_eq!(a.state, AnswerState::Given);
+    // …and the hash is the REGISTRY's words, not something either surface invented.
+    let prompt = FORM_QUESTIONS
+        .iter()
+        .find(|q| q.id == QuestionId::ForeignTrust)
+        .unwrap()
+        .prompt;
+    assert_eq!(
+        a.prompt_hash,
+        btctax_core::tax::provenance::prompt_hash(prompt),
+        "the record must hash the words the registry actually asks"
+    );
+
+    // ── `Declined` vs ABSENT, at the keyboard. Blindness was OFFERED and passed over (a record);
+    //    the SPOUSE's blindness was never live on a Single filer (no record at all). On the printed
+    //    return both are the same blank.
+    assert_eq!(
+        from_cli
+            .answer_log
+            .get(&AnswerKey::Skippable(SkippableId::BlindTaxpayer))
+            .map(|r| r.state),
+        Some(AnswerState::Declined),
+        "a skippable the filer passed over is a DECLINED record — asked, and refused"
+    );
+    assert!(
+        !from_cli
+            .answer_log
+            .contains_key(&AnswerKey::Skippable(SkippableId::BlindSpouse)),
+        "a question never put to the filer must leave NO record — that is the distinction the log exists for"
+    );
+}
+
 /// `income answer` refuses a year that has no return. Answering questions about a return that does not
 /// exist would MATERIALIZE a near-empty `ReturnInputs` row — which then takes precedence over the user's
 /// `tax-profile` (the resolver ranks `ReturnInputs` first), silently replacing a working profile with an
@@ -2953,8 +3077,15 @@ fn income_answer_refuses_a_year_with_no_return() {
 
     let mut keystrokes: &[u8] = b"n\n\n";
     let mut screen: Vec<u8> = Vec::new();
-    let err = cmd::answer::answer_return_inputs(&vault, &pp(), 2024, &mut keystrokes, &mut screen)
-        .unwrap_err();
+    let err = cmd::answer::answer_return_inputs(
+        &vault,
+        &pp(),
+        2024,
+        time::macros::date!(2026 - 09 - 01),
+        &mut keystrokes,
+        &mut screen,
+    )
+    .unwrap_err();
     assert!(
         format!("{err}").contains("income import"),
         "the refusal must say how to create the return: {err}"
@@ -3034,9 +3165,16 @@ fn import_over_a_stale_row_refuses() {
 }
 
 /// ★ IMPL r1 I-2, test (b). The named remedy WORKS: `income clear` (a bare DELETE — it never deserializes,
-/// so it cannot itself refuse) then `income import` recovers the year, and the fresh row is stamped v2.
+/// so it cannot itself refuse) then `income import` recovers the year, and the fresh row is stamped at
+/// the CURRENT schema version.
+///
+/// ★ Pinned to `SCHEMA_VERSION` rather than to a literal, and deliberately unlike the v2 refusal kills
+///   in `return_inputs.rs` / `input_form_store.rs`: the property here is *"the recovered row is
+///   current"*, which is relative by its nature. Those kills are about one SPECIFIC predecessor and
+///   must not follow the constant. (Renamed from `..._to_v2` when R10's provenance schema took the
+///   constant from 2 to 3 — a name asserting a literal would have gone stale silently.)
 #[test]
-fn clear_then_import_recovers_a_stale_row_to_v2() {
+fn clear_then_import_recovers_a_stale_row_to_the_current_schema_version() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_lt_sell_2024(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
@@ -3053,8 +3191,8 @@ fn clear_then_import_recovers_a_stale_row_to_v2() {
     cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap(); // no existing row now ⇒ succeeds
     assert_eq!(
         row_version(&vault, 2024),
-        2,
-        "the recovered row is stamped v2"
+        btctax_cli::return_inputs::SCHEMA_VERSION,
+        "the recovered row is stamped at the current schema version"
     );
 }
 

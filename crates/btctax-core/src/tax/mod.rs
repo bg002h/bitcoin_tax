@@ -25,6 +25,9 @@ pub mod oracle_diff;
 pub mod other_taxes;
 pub mod packet;
 pub mod printed;
+/// ★★★ **R10 — provenance** (`design/SPEC_interview.md`): `LEAF_SOURCE`, the answer log and its one
+/// writer, the `prompt_hash` mismatch rule, and the dependent-identity key. See module doc.
+pub mod provenance;
 pub mod qbi;
 pub mod qbi_a;
 pub mod questions;

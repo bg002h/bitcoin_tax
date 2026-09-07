@@ -11,8 +11,12 @@ use crate::seam::{
     SectionKind, SetError,
 };
 use crate::spec::form_spec;
+use btctax_core::tax::provenance::{
+    current_prompt, forget_answer, record_answer, AnswerKey, AnswerState,
+};
 use btctax_core::tax::return_inputs::ReturnInputs;
 use btctax_core::Usd;
+use time::Date;
 
 /// The working return under edit. `None` = filing status not yet chosen (no return materialized).
 pub type Working = Option<ReturnInputs>;
@@ -25,7 +29,19 @@ pub type Working = Option<ReturnInputs>;
 /// and materializes nothing — a return cannot exist until its status is explicitly chosen.
 ///
 /// [`WrongFirstEdit`]: ApplyError::WrongFirstEdit
-pub fn apply(w: &mut Working, e: Edit) -> Result<(), ApplyError> {
+/// ★★★ **R10.3 — the answer-log key a `FieldId` writes to, or `None` for a plain leaf.**
+///
+/// Derived from the two registry maps that already exist ([`crate::spec::field_to_question`] /
+/// [`crate::spec::field_to_skippable`]), so the set of fields that RECORD is the set of fields that
+/// delegate to a registry question — by identity, not by a second hand-written list that can drift.
+fn answer_key_for(id: FieldId) -> Option<AnswerKey> {
+    if let Some(q) = crate::spec::field_to_question(id) {
+        return Some(AnswerKey::Question(q));
+    }
+    crate::spec::field_to_skippable(id).map(AnswerKey::Skippable)
+}
+
+pub fn apply(w: &mut Working, e: Edit, now: Date) -> Result<(), ApplyError> {
     match w {
         // ★ NI-2: nothing exists yet — only the filing-status *choice* brings a return into being.
         None => match e {
@@ -48,17 +64,27 @@ pub fn apply(w: &mut Working, e: Edit) -> Result<(), ApplyError> {
             }
             _ => Err(ApplyError::WrongFirstEdit),
         },
-        Some(ri) => apply_to(ri, e),
+        Some(ri) => apply_to(ri, e, now),
     }
 }
 
 /// Dispatch an edit against a materialized return.
-fn apply_to(ri: &mut ReturnInputs, e: Edit) -> Result<(), ApplyError> {
+fn apply_to(ri: &mut ReturnInputs, e: Edit, now: Date) -> Result<(), ApplyError> {
     match e {
         Edit::SetField { id, addr, value } => {
             let (field, depth) = locate_field(id).ok_or(ApplyError::NoSuchSection)?;
             guard_arity(&addr, depth)?;
-            (field.set)(ri, &addr, value).map_err(ApplyError::SetError)
+            (field.set)(ri, &addr, value).map_err(ApplyError::SetError)?;
+            // ★★★ R10.3 — THE ONE WRITER, reached from the editor. `income answer` reaches the same
+            //     function with the same `now`, which is why the two surfaces produce byte-identical
+            //     records for the same answer. Recorded only AFTER the set succeeds: a refused edit
+            //     changed nothing, so it is not an answer.
+            if let Some(key) = answer_key_for(id) {
+                if let Some(prompt) = current_prompt(&key) {
+                    record_answer(ri, key, prompt, now, AnswerState::Given);
+                }
+            }
+            Ok(())
         }
         Edit::ClearField { id, addr } => {
             let (field, depth) = locate_field(id).ok_or(ApplyError::NoSuchSection)?;
@@ -71,8 +97,16 @@ fn apply_to(ri: &mut ReturnInputs, e: Edit) -> Result<(), ApplyError> {
             if let FieldKind::Enum(_) = field.kind {
                 return Err(ApplyError::SetError(SetError::Immutable));
             }
+            // ★ R10.3 — un-answering returns the question to NEVER ASKED, so the record goes. It is
+            //   NOT recorded as `Declined` (that is *"asked and passed over"*, which is a different
+            //   act, and a class-(A) declaration has no lawful decline at all) and it writes no
+            //   history (§5.6 says exactly what history holds, and a clear is neither).
             if let Some(clear) = field.clear {
-                return clear(ri, &addr).map_err(ApplyError::SetError);
+                clear(ri, &addr).map_err(ApplyError::SetError)?;
+                if let Some(key) = answer_key_for(id) {
+                    forget_answer(ri, &key);
+                }
+                return Ok(());
             }
             let empty = match field.kind {
                 FieldKind::Money => FieldValue::Money(Usd::ZERO),
@@ -83,7 +117,11 @@ fn apply_to(ri: &mut ReturnInputs, e: Edit) -> Result<(), ApplyError> {
                 FieldKind::Secret => FieldValue::SecretEntry(String::new()),
                 FieldKind::Enum(_) => unreachable!("Enum returned Immutable above"),
             };
-            (field.set)(ri, &addr, empty).map_err(ApplyError::SetError)
+            (field.set)(ri, &addr, empty).map_err(ApplyError::SetError)?;
+            if let Some(key) = answer_key_for(id) {
+                forget_answer(ri, &key);
+            }
+            Ok(())
         }
         Edit::AddRow { section, parent } => {
             let s = find_section(section).ok_or(ApplyError::NoSuchSection)?;
@@ -193,6 +231,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice(fs_name(fs).into()),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
     }
@@ -221,6 +260,7 @@ mod tests {
                 addr: RowAddr(vec![0]),
                 value: FieldValue::Choice("Single".into()),
             },
+            time::macros::date!(2026 - 09 - 01),
         );
         assert!(
             matches!(r, Err(ApplyError::SetError(SetError::NoSuchRow))),
@@ -244,6 +284,7 @@ mod tests {
                 addr: RowAddr(vec![0]),
                 value: FieldValue::Money(dec!(1)),
             },
+            time::macros::date!(2026 - 09 - 01),
         );
         assert_eq!(bad, Err(ApplyError::WrongFirstEdit));
         assert!(w.is_none());
@@ -255,6 +296,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Mfj".into()),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         let ri = w.as_ref().unwrap();
@@ -267,7 +309,8 @@ mod tests {
                 Edit::ClearField {
                     id: FieldId::FilingStatus,
                     addr: RowAddr::default()
-                }
+                },
+                time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::Immutable))
         );
@@ -308,7 +351,7 @@ mod tests {
         for e in rejects {
             let mut w: Working = None;
             assert_eq!(
-                apply(&mut w, e.clone()),
+                apply(&mut w, e.clone(), time::macros::date!(2026 - 09 - 01)),
                 Err(ApplyError::WrongFirstEdit),
                 "must refuse on None: {e:?}"
             );
@@ -333,6 +376,7 @@ mod tests {
                     addr: RowAddr::default(),
                     value: FieldValue::Choice(name.into()),
                 },
+                time::macros::date!(2026 - 09 - 01),
             )
             .unwrap();
             let expected = ReturnInputs {
@@ -361,7 +405,8 @@ mod tests {
                     id: FieldId::FilingStatus,
                     addr: RowAddr::default(),
                     value: FieldValue::Choice("Nope".into()),
-                }
+                },
+                time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::WrongKind)),
         );
@@ -382,6 +427,7 @@ mod tests {
             Edit::CreateSection {
                 section: SectionId::ScheduleA,
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         apply(
@@ -391,6 +437,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("ForceItemize".into()),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert_eq!(
@@ -404,6 +451,7 @@ mod tests {
             Edit::DeleteSection {
                 section: SectionId::ScheduleA,
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert_eq!(
@@ -428,6 +476,7 @@ mod tests {
                 section: SectionId::W2s,
                 parent: RowAddr::default(),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert_eq!(w.as_ref().unwrap().w2s.len(), 1);
@@ -438,6 +487,7 @@ mod tests {
                 addr: RowAddr(vec![0]),
                 value: FieldValue::Money(dec!(50000)),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert_eq!(w.as_ref().unwrap().w2s[0].box1_wages, dec!(50000));
@@ -449,6 +499,7 @@ mod tests {
                 section: SectionId::W2Box12,
                 parent: RowAddr(vec![0]),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert_eq!(w.as_ref().unwrap().w2s[0].box12.len(), 1);
@@ -459,6 +510,7 @@ mod tests {
                 addr: RowAddr(vec![0, 0]),
                 value: FieldValue::Money(dec!(23000)),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert_eq!(w.as_ref().unwrap().w2s[0].box12[0].amount, dec!(23000));
@@ -470,6 +522,7 @@ mod tests {
                 section: SectionId::W2Box12,
                 addr: RowAddr(vec![0, 0]),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert!(w.as_ref().unwrap().w2s[0].box12.is_empty());
@@ -479,6 +532,7 @@ mod tests {
                 section: SectionId::W2s,
                 addr: RowAddr(vec![0]),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert!(w.as_ref().unwrap().w2s.is_empty());
@@ -489,6 +543,7 @@ mod tests {
             Edit::CreateSection {
                 section: SectionId::Spouse,
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert!(w.as_ref().unwrap().header.spouse.is_some());
@@ -499,6 +554,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Text("Pat".into()),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert_eq!(
@@ -516,6 +572,7 @@ mod tests {
             Edit::DeleteSection {
                 section: SectionId::Spouse,
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert!(w.as_ref().unwrap().header.spouse.is_none());
@@ -526,6 +583,7 @@ mod tests {
             Edit::CreateSection {
                 section: SectionId::ScheduleA,
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert!(w.as_ref().unwrap().schedule_a.is_some());
@@ -534,6 +592,7 @@ mod tests {
             Edit::DeleteSection {
                 section: SectionId::ScheduleA,
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert!(w.as_ref().unwrap().schedule_a.is_none());
@@ -554,7 +613,8 @@ mod tests {
                     id: FieldId::Box1Wages,
                     addr: RowAddr(vec![]),
                     value: FieldValue::Money(dec!(1)),
-                }
+                },
+                time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
         );
@@ -565,6 +625,7 @@ mod tests {
                 section: SectionId::W2s,
                 parent: RowAddr::default(),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert_eq!(
@@ -574,7 +635,8 @@ mod tests {
                     id: FieldId::Box12Amount,
                     addr: RowAddr(vec![0]),
                     value: FieldValue::Money(dec!(1)),
-                }
+                },
+                time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
         );
@@ -585,7 +647,8 @@ mod tests {
                 Edit::AddRow {
                     section: SectionId::W2Box12,
                     parent: RowAddr(vec![])
-                }
+                },
+                time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
         );
@@ -596,7 +659,8 @@ mod tests {
                 Edit::RemoveRow {
                     section: SectionId::W2Box12,
                     addr: RowAddr(vec![0])
-                }
+                },
+                time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
         );
@@ -607,7 +671,8 @@ mod tests {
                 Edit::ClearField {
                     id: FieldId::Box1Wages,
                     addr: RowAddr(vec![])
-                }
+                },
+                time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
         );
@@ -648,6 +713,7 @@ mod tests {
                     addr: RowAddr::default(),
                     value: FieldValue::Money(rust_decimal_macros::dec!(120000)),
                 },
+                time::macros::date!(2026 - 09 - 01),
             )
             .expect("set");
             assert_eq!(
@@ -663,6 +729,7 @@ mod tests {
                     id,
                     addr: RowAddr::default(),
                 },
+                time::macros::date!(2026 - 09 - 01),
             )
             .expect("clear");
             assert_eq!(
@@ -696,7 +763,8 @@ mod tests {
                 Edit::ClearField {
                     id: FieldId::FilingStatus,
                     addr: RowAddr::default()
-                }
+                },
+                time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::Immutable)),
         );
@@ -710,6 +778,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::TriState(Some(true)),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert_eq!(w.as_ref().unwrap().foreign_accounts, Some(true));
@@ -719,6 +788,7 @@ mod tests {
                 id: FieldId::DeclForeignAccounts,
                 addr: RowAddr::default(),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert_eq!(
@@ -735,6 +805,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Date(Some(date!(1980 - 03 - 04))),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert_eq!(
@@ -747,6 +818,7 @@ mod tests {
                 id: FieldId::DobTaxpayer,
                 addr: RowAddr::default(),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert_eq!(
@@ -763,6 +835,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::SecretEntry("112233".into()),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert_eq!(w.as_ref().unwrap().header.ip_pin.as_deref(), Some("112233"));
@@ -772,6 +845,7 @@ mod tests {
                 id: FieldId::IpPin,
                 addr: RowAddr::default(),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert_eq!(
@@ -787,6 +861,7 @@ mod tests {
                 section: SectionId::Dependents,
                 parent: RowAddr::default(),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         apply(
@@ -796,6 +871,7 @@ mod tests {
                 addr: RowAddr(vec![0]),
                 value: FieldValue::Date(Some(date!(2015 - 06 - 01))),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert_eq!(
@@ -808,6 +884,7 @@ mod tests {
                 id: FieldId::DepDob,
                 addr: RowAddr(vec![0]),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert_eq!(w.as_ref().unwrap().header.dependents[0].date_of_birth, None);
@@ -819,6 +896,7 @@ mod tests {
                 section: SectionId::W2s,
                 parent: RowAddr::default(),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         apply(
@@ -828,6 +906,7 @@ mod tests {
                 addr: RowAddr(vec![0]),
                 value: FieldValue::Money(dec!(500)),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         apply(
@@ -836,6 +915,7 @@ mod tests {
                 id: FieldId::Box1Wages,
                 addr: RowAddr(vec![0]),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert_eq!(w.as_ref().unwrap().w2s[0].box1_wages, dec!(0));
@@ -848,6 +928,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Text("Sam".into()),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         apply(
@@ -856,6 +937,7 @@ mod tests {
                 id: FieldId::TpFirstName,
                 addr: RowAddr::default(),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert_eq!(w.as_ref().unwrap().header.taxpayer.first_name, "");
@@ -868,6 +950,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Bool(true),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         apply(
@@ -876,6 +959,7 @@ mod tests {
                 id: FieldId::TpPresidentialFund,
                 addr: RowAddr::default(),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert!(!w.as_ref().unwrap().header.presidential_fund_taxpayer);
@@ -888,6 +972,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::SecretEntry("123456789".into()),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         apply(
@@ -896,6 +981,7 @@ mod tests {
                 id: FieldId::TpSsn,
                 addr: RowAddr::default(),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert_eq!(w.as_ref().unwrap().header.taxpayer.ssn, "");
@@ -914,7 +1000,8 @@ mod tests {
                 Edit::AddRow {
                     section: SectionId::Taxpayer,
                     parent: RowAddr::default()
-                }
+                },
+                time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::NoSuchSection),
         );
@@ -924,7 +1011,8 @@ mod tests {
                 &mut w,
                 Edit::CreateSection {
                     section: SectionId::Payments
-                }
+                },
+                time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::NoSuchSection),
         );
@@ -941,6 +1029,7 @@ mod tests {
             Edit::CreateSection {
                 section: SectionId::ScheduleA,
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         // Prime mortgage interest so SaMortgageAllUsed is live (its set/clear gate on `mortgage_question_live`).
@@ -951,6 +1040,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Money(dec!(1000)),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         for id in [FieldId::SaSaltUseSalesTax, FieldId::SaMortgageAllUsed] {
@@ -961,6 +1051,7 @@ mod tests {
                     addr: RowAddr::default(),
                     value: FieldValue::TriState(Some(true)),
                 },
+                time::macros::date!(2026 - 09 - 01),
             )
             .unwrap();
             apply(
@@ -969,6 +1060,7 @@ mod tests {
                     id,
                     addr: RowAddr::default(),
                 },
+                time::macros::date!(2026 - 09 - 01),
             )
             .unwrap();
         }
@@ -990,6 +1082,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::TriState(Some(true)),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         apply(
@@ -998,6 +1091,7 @@ mod tests {
                 id: FieldId::BlindTaxpayer,
                 addr: RowAddr::default(),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert_eq!(
@@ -1023,7 +1117,8 @@ mod tests {
                     id: FieldId::BlindSpouse,
                     addr: RowAddr::default(),
                     value: FieldValue::TriState(Some(true)),
-                }
+                },
+                time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
         );
@@ -1035,7 +1130,8 @@ mod tests {
                     id: FieldId::SaSaltUseSalesTax,
                     addr: RowAddr::default(),
                     value: FieldValue::TriState(Some(true)),
-                }
+                },
+                time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
         );
@@ -1046,7 +1142,8 @@ mod tests {
                 Edit::ClearField {
                     id: FieldId::BlindSpouse,
                     addr: RowAddr::default()
-                }
+                },
+                time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
         );
@@ -1056,7 +1153,8 @@ mod tests {
                 Edit::ClearField {
                     id: FieldId::SaSaltUseSalesTax,
                     addr: RowAddr::default()
-                }
+                },
+                time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
         );
@@ -1067,6 +1165,7 @@ mod tests {
             Edit::CreateSection {
                 section: SectionId::Spouse,
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         apply(
@@ -1074,6 +1173,7 @@ mod tests {
             Edit::CreateSection {
                 section: SectionId::ScheduleA,
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         apply(
@@ -1083,6 +1183,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::TriState(Some(true)),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert_eq!(
@@ -1096,6 +1197,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::TriState(Some(false)),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert_eq!(
@@ -1122,7 +1224,8 @@ mod tests {
                 Edit::AddRow {
                     section: SectionId::W2Box12,
                     parent: RowAddr(vec![0])
-                }
+                },
+                time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
         );
@@ -1133,7 +1236,8 @@ mod tests {
                 Edit::AddRow {
                     section: SectionId::ScheduleACharitable,
                     parent: RowAddr::default()
-                }
+                },
+                time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
         );
@@ -1144,7 +1248,8 @@ mod tests {
                 Edit::RemoveRow {
                     section: SectionId::W2s,
                     addr: RowAddr(vec![3])
-                }
+                },
+                time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
         );
@@ -1156,6 +1261,7 @@ mod tests {
                 section: SectionId::W2s,
                 parent: RowAddr::default(),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         apply(
@@ -1164,6 +1270,7 @@ mod tests {
                 section: SectionId::W2Box12,
                 parent: RowAddr(vec![0]),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         assert_eq!(w.as_ref().unwrap().w2s[0].box12.len(), 1);
@@ -1173,7 +1280,8 @@ mod tests {
                 Edit::RemoveRow {
                     section: SectionId::W2Box12,
                     addr: RowAddr(vec![0, 5])
-                }
+                },
+                time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
         );
@@ -1191,6 +1299,7 @@ mod tests {
                 section: SectionId::W2s,
                 parent: RowAddr::default(),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
 
@@ -1202,7 +1311,8 @@ mod tests {
                     id: FieldId::Box1Wages,
                     addr: RowAddr(vec![0, 7, 9]),
                     value: FieldValue::Money(dec!(1)),
-                }
+                },
+                time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
         );
@@ -1214,7 +1324,8 @@ mod tests {
                     id: FieldId::TpFirstName,
                     addr: RowAddr(vec![0]),
                     value: FieldValue::Text("x".into()),
-                }
+                },
+                time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
         );

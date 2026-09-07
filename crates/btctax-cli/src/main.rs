@@ -315,7 +315,16 @@ fn run() -> Result<ExitCode, CliError> {
                 let stdin = std::io::stdin();
                 let mut input = stdin.lock();
                 let mut out = std::io::stdout();
-                cmd::answer::answer_return_inputs(vault, &pp, year, &mut input, &mut out)?;
+                // ★ R10.3 — the answer log's `answered_on` comes from the `BTCTAX_NOW` seam, never a
+                // wall clock read inside the loop: a pinned clock must pin the log too.
+                cmd::answer::answer_return_inputs(
+                    vault,
+                    &pp,
+                    year,
+                    btctax_core::conventions::tax_date(now, UtcOffset::UTC),
+                    &mut input,
+                    &mut out,
+                )?;
                 println!("Answered the full-return questions for tax year {year}.");
             }
             IncomeCmd::Scrub { year, out } => {

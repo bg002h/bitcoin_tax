@@ -139,6 +139,8 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         form_2555_line45: _,
         form_2555_line50: _,
         form_4563_line15: _,
+        answer_log,
+        answer_log_history,
     } = ri;
     c.exempt(
         filing_status,
@@ -262,6 +264,23 @@ pub fn classify(ri: &ReturnInputs) -> Census {
     }
     classify_schedule1(&mut c, sch1);
     classify_payments(&mut c, payments);
+    // ★★★ R10.3 — THE ANSWER LOG. Not an answer, and never a default that could answer FOR the filer:
+    // a record exists only because a writer observed an act. Class (C): no figure on the return reads
+    // it, and its absence asserts nothing (an absent record is precisely "never asked", which is the
+    // distinction the log exists to make). Its `AnswerState` enum has **no** `Default`, so there is no
+    // defaulted answer to launder — the shape the D-8 laundering took.
+    c.exempt(
+        answer_log,
+        Class::NoTaxDirection,
+        "R10.3 answer log — provenance about the ASKING, not an answer: no printed figure reads it, an \
+         absent record means \"never asked\", and `AnswerState` has no Default to launder (§2.1)",
+    );
+    c.exempt(
+        answer_log_history,
+        Class::NoTaxDirection,
+        "R10.3 answer-log history — append-only superseded records that NOTHING reads as an answer \
+         (§5.6); it can neither assert nor forgo anything on the return (§2.1)",
+    );
     classify_broker_reporting(&mut c, broker_reporting);
     classify_carryforward(&mut c, capital_loss_carryforward_in);
     for item in charitable_carryover_in {
@@ -465,6 +484,11 @@ fn classify_1099int(_c: &mut Census, i: &Form1099Int) {
         box6_foreign_tax: _,
         box8_tax_exempt_interest: _,
         box9_private_activity_bond_amt: _,
+        // R10.2 document identity — a `String` and an `Option<Date>`, both scalar leaves the `_` rule
+        // permits. Neither carries answered-ness: an empty TIN is "not transcribed", and the
+        // transcription date is a fact about OUR handling of the paper, never testimony.
+        payer_tin: _,
+        transcribed_on: _,
     } = i;
 }
 
@@ -482,6 +506,9 @@ fn classify_1099div(_c: &mut Census, d: &Form1099Div) {
         box7_foreign_tax: _,
         box12_exempt_interest_dividends: _,
         box13_private_activity_amt: _,
+        // R10.2 document identity — scalar leaves; see `classify_1099int`.
+        payer_tin: _,
+        transcribed_on: _,
     } = d;
 }
 
@@ -490,6 +517,9 @@ fn classify_1099g(_c: &mut Census, g: &Form1099G) {
         payer: _,
         box1_unemployment: _,
         box4_fed_withheld: _,
+        // R10.2 document identity — scalar leaves; see `classify_1099int`.
+        payer_tin: _,
+        transcribed_on: _,
     } = g;
 }
 
@@ -501,6 +531,9 @@ fn classify_1099b(c: &mut Census, b: &crate::tax::return_inputs::Form1099B) {
         short_term_basis: _,
         long_term_proceeds: _,
         long_term_basis: _,
+        // R10.2 document identity — scalar leaves; see `classify_1099int`.
+        payer_tin: _,
+        transcribed_on: _,
         basis_reported_and_no_adjustments,
     } = b;
     // ★★★ The two conditions Schedule D line 1a itself imposes. `None` and `Some(false)` BOTH refuse

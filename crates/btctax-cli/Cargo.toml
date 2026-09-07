@@ -41,3 +41,8 @@ rust_decimal_macros = "1.36"
 time = { version = "0.3", features = ["macros"] }
 # Integration tests inject a controlled synthetic price provider via `Session::set_prices` [R0-C1].
 btctax-adapters = { path = "../btctax-adapters", version = "0.18.0" }
+# ★ R10.3 (interview T1) — DEV-ONLY, and only so ONE test can drive BOTH writers of the answer log in
+#   one process: `income answer` (this crate) and the form engine's `apply`. The guarantee is that the
+#   two produce the same record, and a test that can only reach one of them cannot check it. No cycle:
+#   `btctax-input-form` depends on `btctax-core` alone, and this is not a runtime dependency.
+btctax-input-form = { path = "../btctax-input-form", version = "0.18.0" }

@@ -706,6 +706,64 @@ mod tests {
         );
     }
 
+    /// ★★★ **T1's kill — THE VERSION-2 SPLIT, both halves.** A v2 WIP draft is regenerable
+    /// crash-scratch, so it is DISCARDED and the fact comes back as a [`StaleNote`] the caller can
+    /// surface; a v2 PARKED draft may be the sole copy of a screened return (C-1), so it REFUSES and
+    /// the row survives. Both are pinned to the literal 2 — the specific predecessor the interview's
+    /// provenance schema replaced — rather than to `SCHEMA_VERSION - 1`, which would follow the
+    /// constant on the next bump and stop testing anything.
+    #[test]
+    fn a_version_2_wip_draft_is_discarded_with_a_note_and_a_version_2_parked_draft_refuses() {
+        let conn = Connection::open_in_memory().unwrap();
+        init_draft_table(&conn).unwrap();
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        let j = serde_json::to_string(&ri).unwrap();
+        conn.execute(
+            "INSERT INTO return_inputs_draft(year,inputs_json,schema_version,parked) VALUES(2026,?1,2,0)",
+            [&j],
+        )
+        .unwrap();
+        let (loaded, note) = load(&conn, 2026).unwrap();
+        assert!(matches!(loaded, Loaded::Fresh));
+        assert_eq!(
+            note,
+            Some(StaleNote {
+                year: 2026,
+                found: 2,
+                expected: 3
+            }),
+            "a v2 WIP draft must be discarded WITH the note (never silently)"
+        );
+        assert!(
+            !draft_exists(&conn, 2026).unwrap(),
+            "the v2 WIP draft is gone"
+        );
+
+        conn.execute(
+            "INSERT INTO return_inputs_draft(year,inputs_json,schema_version,parked) VALUES(2027,?1,2,1)",
+            [&j],
+        )
+        .unwrap();
+        assert!(
+            matches!(
+                load(&conn, 2027),
+                Err(CliError::StaleParkedDraft {
+                    year: 2027,
+                    found: 2,
+                    expected: 3
+                })
+            ),
+            "a v2 PARKED draft must REFUSE — it may hold carryover that exists nowhere else"
+        );
+        assert!(
+            draft_exists(&conn, 2027).unwrap(),
+            "the refused parked draft must survive, not be destroyed"
+        );
+    }
+
     /// The canonical screen-clean return: a minimal Single filer that is not a dependent and has answered
     /// every always-live declaration (mirrors `resolve.rs`'s fixture / the `answer.rs`
     /// `every_live_question_can_actually_be_answered_and_clears_the_screen` test). No income is needed —

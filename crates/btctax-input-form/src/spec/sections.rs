@@ -529,6 +529,23 @@ const DEPENDENT_FIELDS: &[Field] = &[
             let FieldValue::SecretEntry(s) = v else {
                 return Err(SetError::WrongKind);
             };
+            // ★★★ **R10.3 / fold I10 — THE ROW'S SSN *IS* ITS DILIGENCE IDENTITY.** A changed SSN is a
+            //     DIFFERENT PERSON, so the gate answers recorded against the old identity must stop
+            //     standing as this child's answers: they move to `answer_log_history` and the new
+            //     identity starts with no records at all. Leaving them keyed to the old hash would be
+            //     harmless; re-pointing them at the new one would be *"a diligence record that lies"*.
+            //
+            //     ★ It is done HERE, in the seam's own setter, rather than in `apply`, so every caller
+            //       of the form engine gets it — the TUI, a future web renderer, and any test that
+            //       drives `Field::set` directly.
+            let old = ri
+                .header
+                .dependents
+                .get(a.0[0])
+                .ok_or(SetError::NoSuchRow)?
+                .ssn
+                .clone();
+            btctax_core::tax::provenance::supersede_dependent_identity(ri, &old, &s);
             ri.header
                 .dependents
                 .get_mut(a.0[0])
@@ -601,6 +618,13 @@ pub(crate) const DEPENDENTS: Section = Section {
         },
         remove: |ri, a| {
             if a.0[0] < ri.header.dependents.len() {
+                // ★★★ **R10.3 — `remove` DELETES THAT IDENTITY'S ENTRIES.** Without this, deleting
+                //     row 0 would leave its gate answers in the log with nobody to attach them to,
+                //     and the next row to be given that SSN would inherit another child's
+                //     `answered_on` and `prompt_hash`. Keyed by `ssn_hash`, so the OTHER rows'
+                //     records are untouched — which is exactly what the row-index key could not do.
+                let ssn = ri.header.dependents[a.0[0]].ssn.clone();
+                btctax_core::tax::provenance::retire_dependent_identity(ri, &ssn);
                 ri.header.dependents.remove(a.0[0]);
                 Ok(())
             } else {
@@ -1752,5 +1776,89 @@ mod broker_block_tests {
                 && !ri.broker_reporting.0.contains_key("coinbase")
         );
         assert_eq!(remove(&mut ri, &RowAddr(vec![5])), Err(SetError::NoSuchRow));
+    }
+
+    /// ★★★ **I10's KILL, AT THE SEAM — a diligence record never describes the wrong person.**
+    ///
+    /// Two dependents, gate answers on both. Delete **row 0** and:
+    ///   · row 1's records are untouched — the thing a `{ row, gate }` key could not deliver, because
+    ///     row 1 becomes row 0 the instant the `Vec` shifts;
+    ///   · row 0's are gone — no orphan a future row could inherit.
+    /// Then change row 1's `ssn`: a different person, so its records become HISTORY and the new
+    /// identity starts with none.
+    ///
+    /// ★ Driven through `Field::set` / `SectionKind::remove` — the seam itself — not through the core
+    ///   helpers, because the guarantee is that the *editor* maintains the log, and a test of the
+    ///   helpers alone would pass with the seam never calling them.
+    #[test]
+    fn removing_a_dependent_row_takes_only_that_identitys_answers_and_a_new_ssn_starts_fresh() {
+        use btctax_core::tax::provenance::{
+            dependent_ssn_hash, record_answer, AnswerKey, AnswerState, DependentGate,
+        };
+        let (ssn0, ssn1) = ("111-22-3333", "444-55-6666");
+        let key = |ssn: &str| AnswerKey::DependentGate {
+            ssn_hash: dependent_ssn_hash(ssn),
+            gate: DependentGate::QcRelationship,
+        };
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        ri.header.dependents = vec![
+            Dependent {
+                ssn: ssn0.into(),
+                ..Default::default()
+            },
+            Dependent {
+                ssn: ssn1.into(),
+                ..Default::default()
+            },
+        ];
+        for ssn in [ssn0, ssn1] {
+            record_answer(
+                &mut ri,
+                key(ssn),
+                "a gate prompt",
+                time::macros::date!(2026 - 09 - 01),
+                AnswerState::Given,
+            );
+        }
+
+        let SectionKind::Repeating { remove, .. } = DEPENDENTS.kind else {
+            panic!("Dependents is a repeating section")
+        };
+        remove(&mut ri, &RowAddr(vec![0])).unwrap();
+        assert_eq!(ri.header.dependents.len(), 1);
+        assert!(
+            !ri.answer_log.contains_key(&key(ssn0)),
+            "the removed row's records must go with it"
+        );
+        assert!(
+            ri.answer_log.contains_key(&key(ssn1)),
+            "the SURVIVING row's records must be untouched — this is the whole reason the key is an \
+             identity and not the row index, which just shifted from 1 to 0"
+        );
+        assert!(
+            ri.answer_log_history.is_empty(),
+            "a withdrawn row is not a superseded answer"
+        );
+
+        // The survivor's SSN is corrected: a different person.
+        let ssn_field = DEPENDENT_FIELDS
+            .iter()
+            .find(|f| f.id == FieldId::DepSsn)
+            .unwrap();
+        (ssn_field.set)(
+            &mut ri,
+            &RowAddr(vec![0]),
+            FieldValue::SecretEntry("777-88-9999".into()),
+        )
+        .unwrap();
+        assert!(
+            ri.answer_log.is_empty(),
+            "the old identity's records must stop standing as this row's answers"
+        );
+        assert_eq!(ri.answer_log_history.len(), 1);
+        assert_eq!(ri.answer_log_history[0].0, key(ssn1));
     }
 }

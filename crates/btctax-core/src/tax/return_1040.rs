@@ -6233,6 +6233,8 @@ mod tests {
             header: crate::tax::testonly::kitchen_sink_household().0.header,
             b_1099: vec![crate::tax::return_inputs::Form1099B {
                 payer: "Broker LLC".into(),
+                payer_tin: String::new(),
+                transcribed_on: None,
                 short_term_proceeds: dec!(1050000),
                 short_term_basis: dec!(1000000), // +50,000 short-term
                 long_term_proceeds: dec!(400000),
@@ -6335,6 +6337,8 @@ mod tests {
             }],
             b_1099: vec![crate::tax::return_inputs::Form1099B {
                 payer: "Broker LLC".into(),
+                payer_tin: String::new(),
+                transcribed_on: None,
                 short_term_proceeds: dec!(30000),
                 short_term_basis: dec!(10000), // +20,000 short-term
                 long_term_proceeds: dec!(2500000),
@@ -6463,6 +6467,8 @@ mod tests {
             }],
             b_1099: vec![crate::tax::return_inputs::Form1099B {
                 payer: "Broker LLC".into(),
+                payer_tin: String::new(),
+                transcribed_on: None,
                 long_term_proceeds: Usd::ZERO,
                 long_term_basis: dec!(100000), // a $100,000 long-term LOSS
                 basis_reported_and_no_adjustments: Some(true),
@@ -6566,6 +6572,8 @@ mod tests {
             header: crate::tax::testonly::kitchen_sink_household().0.header,
             b_1099: vec![crate::tax::return_inputs::Form1099B {
                 payer: "Broker LLC".into(),
+                payer_tin: String::new(),
+                transcribed_on: None,
                 short_term_proceeds: dec!(150000),
                 short_term_basis: dec!(120000),
                 long_term_proceeds: dec!(2500000),
@@ -6716,6 +6724,8 @@ mod tests {
             header: crate::tax::testonly::kitchen_sink_household().0.header,
             b_1099: vec![crate::tax::return_inputs::Form1099B {
                 payer: "Broker LLC".into(),
+                payer_tin: String::new(),
+                transcribed_on: None,
                 // A $40,000 LONG-TERM broker LOSS, against the ledger's long-term crypto GAIN.
                 long_term_proceeds: dec!(10000),
                 long_term_basis: dec!(50000),
@@ -6769,6 +6779,8 @@ mod tests {
             header: crate::tax::testonly::kitchen_sink_household().0.header,
             b_1099: vec![crate::tax::return_inputs::Form1099B {
                 payer: "Broker LLC".into(),
+                payer_tin: String::new(),
+                transcribed_on: None,
                 short_term_proceeds: dec!(10000),
                 short_term_basis: dec!(60000), // a $50,000 short-term LOSS
                 basis_reported_and_no_adjustments: Some(true),

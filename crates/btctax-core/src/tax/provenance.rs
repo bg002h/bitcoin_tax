@@ -1,0 +1,1033 @@
+//! ★★★ **R10 — PROVENANCE IS STRUCTURAL** (`design/SPEC_interview.md` §3 R10, §5.6; build task T1).
+//!
+//! Four parts, all reachable from [`ReturnInputs`], and all of them the kind of fact that **cannot be
+//! back-filled**: nobody can reconstruct in December which words a filer was shown in September, so the
+//! schema has to exist before the interview does.
+//!
+//! 1. **Source by struct** — [`LEAF_SOURCE`] maps every money leaf's serde path prefix to the [`Source`]
+//!    it comes from. There is deliberately **no per-leaf metadata**: a box on a declared document is
+//!    testimony *because the row exists*, so the provenance of an amount is the struct it lives in.
+//! 2. **Identity per document** — `payer_tin` / `transcribed_on` on the information-return structs
+//!    (in [`super::return_inputs`], where the documents are).
+//! 3. **Per answer** — [`AnswerKey`] → [`AnswerRecord`] in `ReturnInputs::answer_log`, written by the ONE
+//!    writer [`record_answer`], superseded (never overwritten) into `answer_log_history`.
+//! 4. **Year N+1** — [`super::return_inputs::CarryProvenance::ComputedFromPriorReturn`] (the opener
+//!    itself is task T4b).
+//!
+//! ★★ **What the log deliberately does NOT hold** (`FIELD_PROVENANCE.md:400-403`): progress, position,
+//! "what remains", superseded *values*, half-typed tokens. A record says *when* an answer was given and
+//! *which words were asked* — never how far through the interview the filer got.
+
+use crate::tax::questions::{QuestionId, SkippableId, FORM_QUESTIONS, SKIPPABLE_QUESTIONS};
+use crate::tax::return_inputs::ReturnInputs;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
+use std::fmt;
+use std::str::FromStr;
+use time::Date;
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// 1. Source by struct — LEAF_SOURCE
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+/// A document type btctax transcribes. The provenance of every money leaf inside one of these
+/// structs is *"box N of this document"*, which is why no leaf carries its own source tag.
+///
+/// ★ Only the kinds whose struct exists today. The full §5.1 census (1099-R, SSA-1099, K-1 …) is
+/// task T3's `DocumentCensus`; a kind is added here when its struct lands, and adding a variant reds
+/// every exhaustive match — which is the intended blast radius.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DocumentKind {
+    W2,
+    Form1099Int,
+    Form1099Div,
+    Form1099G,
+    Form1099B,
+}
+
+/// Where one money leaf's figure comes from (R10 part 1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Source {
+    /// A numbered box on a document the filer holds and transcribed.
+    Document(DocumentKind),
+    /// The filer's OWN records — a figure no information return reports (R5). The form asks for it by
+    /// name and the filer reads it off their own books.
+    FilerRecords,
+    /// btctax's crypto ledger — a figure the tool computed from transactions, never typed by the filer.
+    Ledger,
+    /// An answer to a registry question (a figure that IS the answer, rather than a yes/no).
+    Answer,
+    /// Computed by btctax from other lines, or carried from a prior year's computed return.
+    Computed,
+}
+
+/// ★★★ **THE PER-LEAF PROVENANCE TABLE** — every money (`Usd` / `Option<Usd>`) leaf of
+/// [`ReturnInputs`], by serde path **prefix**, mapped to the [`Source`] it comes from.
+///
+/// The §8 guarantee it exists for: *"no `Money` field outside a document or filer's-records struct;
+/// every `Usd` leaf has one source"*. Its kill runs **both directions** — every money leaf matches
+/// exactly one prefix, and every prefix matches at least one money leaf (the stale-exemption
+/// discipline `coverage.rs` already applies to its own lists).
+///
+/// ★ Longest-prefix wins is NOT used, and that is deliberate: an entry that is a prefix of another
+/// entry would make two rows both "match", and the KAT reds on it. Every prefix here is disjoint, so
+/// the table can be read as a partition rather than as a priority list.
+pub const LEAF_SOURCE: &[(&str, Source)] = &[
+    // ── Documents ────────────────────────────────────────────────────────────────────────────────
+    ("w2s", Source::Document(DocumentKind::W2)),
+    ("int_1099", Source::Document(DocumentKind::Form1099Int)),
+    ("div_1099", Source::Document(DocumentKind::Form1099Div)),
+    ("g_1099", Source::Document(DocumentKind::Form1099G)),
+    ("b_1099", Source::Document(DocumentKind::Form1099B)),
+    // ── The filer's own records ──────────────────────────────────────────────────────────────────
+    // Schedule A: medical, SALT, interest, gifts — every one a figure the filer reads off their own
+    // books or a statement btctax does not transcribe. (`mortgage_interest_1098` moves to a
+    // `Form1098` document row in task T9; the prefix follows it then.)
+    ("schedule_a", Source::FilerRecords),
+    ("sch1", Source::FilerRecords),
+    ("schedule_c", Source::FilerRecords),
+    ("schedule_1a", Source::FilerRecords),
+    ("payments", Source::FilerRecords),
+    ("qbi", Source::FilerRecords),
+    // ★ Form 8960 line 9b — i8960's *"any reasonable method"* allocation. Collected, never computed:
+    //   the method is the FILER'S election, so the figure is theirs.
+    ("form_8960_line9b", Source::FilerRecords),
+    // §164(b)(7)(B)(iv) / Schedule 1-A Part I add-backs — each *"enter the amount from"* another form
+    // the filer prepared (Form 2555 lines 45/50, Form 4563 line 15) or their Puerto Rico exclusion.
+    ("excluded_puerto_rico_income", Source::FilerRecords),
+    ("form_2555_line45", Source::FilerRecords),
+    ("form_2555_line50", Source::FilerRecords),
+    ("form_4563_line15", Source::FilerRecords),
+    // ── Computed (by btctax, this year or a prior one) ───────────────────────────────────────────
+    // The two carryovers in. `CarryProvenance` (the sibling scalar) says WHICH computation — this
+    // year's write-back, the filer's own entry, or `ComputedFromPriorReturn` (T4b).
+    ("capital_loss_carryforward_in", Source::Computed),
+    ("charitable_carryover_in", Source::Computed),
+];
+
+/// Resolve one serde leaf path to its [`Source`], or `None` when no [`LEAF_SOURCE`] prefix claims it.
+///
+/// A prefix matches `p` exactly, or `p.` (a nested field), or `p[` (a row of a `Vec`) — the same
+/// matcher `coverage.rs` uses for its exemption prefixes, so the two lists mean the same thing by
+/// "prefix".
+pub fn source_of_leaf(path: &str) -> Option<Source> {
+    LEAF_SOURCE
+        .iter()
+        .find(|(p, _)| prefix_matches(p, path))
+        .map(|(_, s)| *s)
+}
+
+fn prefix_matches(prefix: &str, path: &str) -> bool {
+    path == prefix
+        || path.starts_with(&format!("{prefix}."))
+        || path.starts_with(&format!("{prefix}["))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// 3. Per answer — the answer log
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+/// ★★★ **The dependent gate identity** — §5.3's sixteen §152 gates, the four row-(5)/(6) facts, and
+/// the row's date of birth (which R6 makes REQUIRED, so its absence blocks like a gate).
+///
+/// The gates themselves are task T7's fields on `Dependent`; the **identity** is T1's, because the
+/// diligence key is exactly the thing that cannot be back-filled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum DependentGate {
+    QcRelationship,
+    ProvidedOverHalfOwnSupport,
+    FilingJointReturn,
+    JointReturnOnlyToClaimRefund,
+    QualifyingChildOfAnotherPerson,
+    CitizenNationalResidentOrCanadaMexico,
+    Married,
+    TinIssuedByDueDate,
+    CitizenNationalOrResidentAlien,
+    SsnsValidForEmploymentIssuedByDueDate,
+    QrRelationshipOrMemberOfHousehold,
+    QualifyingChildOfAnyTaxpayer,
+    GrossIncomeUnderLimit,
+    YouProvidedOverHalfSupport,
+    DivorcedSeparatedMultipleSupportOrKidnappedRuleApplies,
+    YoungerThanYouOrSpouse,
+    LivedWithYouOverHalfYear,
+    LivedWithYouInUs,
+    FullTimeStudent,
+    PermanentlyAndTotallyDisabled,
+    DateOfBirth,
+}
+
+impl DependentGate {
+    /// Every gate identity. The exhaustive `match` in the completeness test makes a new variant a
+    /// COMPILE ERROR until it is listed here.
+    pub const ALL: &'static [DependentGate] = &[
+        DependentGate::QcRelationship,
+        DependentGate::ProvidedOverHalfOwnSupport,
+        DependentGate::FilingJointReturn,
+        DependentGate::JointReturnOnlyToClaimRefund,
+        DependentGate::QualifyingChildOfAnotherPerson,
+        DependentGate::CitizenNationalResidentOrCanadaMexico,
+        DependentGate::Married,
+        DependentGate::TinIssuedByDueDate,
+        DependentGate::CitizenNationalOrResidentAlien,
+        DependentGate::SsnsValidForEmploymentIssuedByDueDate,
+        DependentGate::QrRelationshipOrMemberOfHousehold,
+        DependentGate::QualifyingChildOfAnyTaxpayer,
+        DependentGate::GrossIncomeUnderLimit,
+        DependentGate::YouProvidedOverHalfSupport,
+        DependentGate::DivorcedSeparatedMultipleSupportOrKidnappedRuleApplies,
+        DependentGate::YoungerThanYouOrSpouse,
+        DependentGate::LivedWithYouOverHalfYear,
+        DependentGate::LivedWithYouInUs,
+        DependentGate::FullTimeStudent,
+        DependentGate::PermanentlyAndTotallyDisabled,
+        DependentGate::DateOfBirth,
+    ];
+}
+
+/// ★★★ **THE KEY OF ONE ANSWER — an IDENTITY, never a position** (R10.3 / fold I10).
+///
+/// `Dependent` rows are a `Vec` with `add` and `remove` through the form seam, so a
+/// `DependentGate { row, gate }` key would move one child's `answered_on` and `prompt_hash` onto
+/// another the moment row 0 is deleted — and *"a diligence record that lies is worse than none"*.
+/// The key is therefore the row's `ssn_hash`, never the digits and never the index.
+///
+/// (The *refusal* `DependentGateUnanswered { row, gate }` keeps the row index — it points the filer at
+/// a position on screen and is not stored.)
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum AnswerKey {
+    Question(QuestionId),
+    Skippable(SkippableId),
+    DependentGate {
+        ssn_hash: String,
+        gate: DependentGate,
+    },
+}
+
+/// The serde wire form of an [`AnswerKey`] — a stable string, because a `BTreeMap` key must be one.
+impl fmt::Display for AnswerKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AnswerKey::Question(id) => write!(f, "question:{id:?}"),
+            AnswerKey::Skippable(id) => write!(f, "skippable:{id:?}"),
+            AnswerKey::DependentGate { ssn_hash, gate } => {
+                write!(f, "dependent:{ssn_hash}:{gate:?}")
+            }
+        }
+    }
+}
+
+/// Why a stored key could not be read back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnswerKeyParseError(pub String);
+
+impl fmt::Display for AnswerKeyParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "not a recognised answer-log key: {:?}", self.0)
+    }
+}
+
+impl FromStr for AnswerKey {
+    type Err = AnswerKeyParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let err = || AnswerKeyParseError(s.to_string());
+        if let Some(rest) = s.strip_prefix("question:") {
+            return QuestionId::ALL
+                .iter()
+                .find(|id| format!("{id:?}") == rest)
+                .map(|id| AnswerKey::Question(*id))
+                .ok_or_else(err);
+        }
+        if let Some(rest) = s.strip_prefix("skippable:") {
+            return SkippableId::ALL
+                .iter()
+                .find(|id| format!("{id:?}") == rest)
+                .map(|id| AnswerKey::Skippable(*id))
+                .ok_or_else(err);
+        }
+        if let Some(rest) = s.strip_prefix("dependent:") {
+            // `ssn_hash` is hex, so it never contains ':' — split on the LAST one.
+            let (hash, gate) = rest.rsplit_once(':').ok_or_else(err)?;
+            let gate = DependentGate::ALL
+                .iter()
+                .find(|g| format!("{g:?}") == gate)
+                .ok_or_else(err)?;
+            return Ok(AnswerKey::DependentGate {
+                ssn_hash: hash.to_string(),
+                gate: *gate,
+            });
+        }
+        Err(err())
+    }
+}
+
+impl Serialize for AnswerKey {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for AnswerKey {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        AnswerKey::from_str(&s).map_err(serde::de::Error::custom)
+    }
+}
+
+/// ★★ **`Declined` is a STATE, never a default.** A skippable the filer deliberately passed over is
+/// *asked and refused*; a leaf that is `None` with **no record at all** was never asked. Those two are
+/// the same bytes on the page and must never be the same thing in the model — R12 keeps a `Declined`
+/// benefit in the *forgoing* list precisely because declining is provenance, not absence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnswerState {
+    Given,
+    Declined,
+}
+
+/// One answer, as the record of an ACT: when it was given, and which words were on the screen.
+///
+/// ★ `prompt_hash` has exactly ONE reader — [`answer_status`], detecting that the words changed
+/// (R10.3). A stored value with no reader is not a guarantee.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnswerRecord {
+    pub answered_on: Date,
+    pub prompt_hash: String,
+    pub state: AnswerState,
+}
+
+/// The append-only history: every record superseded by a `prompt_hash` mismatch or a changed `ssn`.
+/// **Nothing reads it as an answer** (§5.6) — it exists so a superseded record is kept rather than
+/// destroyed, and so `answer_log` only ever holds what stands today.
+pub type AnswerLogHistory = Vec<(AnswerKey, AnswerRecord)>;
+
+/// The hash of the words a filer was shown. Not a secret — a prompt is public text — so this is a
+/// plain content fingerprint, and its only job is to be *different* when the sentence changes.
+pub fn prompt_hash(prompt: &str) -> String {
+    let mut h = Sha256::new();
+    h.update(b"btctax:prompt:v1\0");
+    h.update(prompt.as_bytes());
+    format!("{:x}", h.finalize())
+}
+
+/// ★★ **The dependent row's identity key — a salted hash of its SSN, never the digits.**
+///
+/// The salt is a fixed domain separator rather than a per-return random value, because the key must
+/// be *stable* (the log is looked up by it on every read) and deterministic across the CLI and TUI
+/// writers. It is **domain separation, not confidentiality**: the row's `ssn` is stored as entered in
+/// the same encrypted blob, so anyone who can read the log can already read the SSN. What the hash
+/// buys is that the *key* — the thing that ends up in a panel, a manifest line or a diagnostic — is
+/// never the nine digits.
+pub fn dependent_ssn_hash(ssn: &str) -> String {
+    let mut h = Sha256::new();
+    h.update(b"btctax:dependent-ssn:v1\0");
+    // Normalise the punctuation a filer may or may not type: "111-22-3333" and "111223333" are one
+    // person, and an identity that changed when a dash was added would move records between children.
+    let digits: String = ssn.chars().filter(|c| c.is_ascii_digit()).collect();
+    h.update(digits.as_bytes());
+    format!("{:x}", h.finalize())
+}
+
+/// ★★★ **THE ONE WRITER of `answer_log`** (R10.3).
+///
+/// Every surface reaches it: the form engine's `apply` (so the TUI records), and `income answer` (so
+/// the CLI records). Two writers would drift, and the drift would be invisible — an answer given at
+/// the keyboard and the same answer given in the editor must produce the **same record**, which is
+/// what the T1 kill asserts byte for byte.
+///
+/// ★ **Deviation from R10.3's four-argument sketch, recorded deliberately:** the same rule requires
+/// `Declined` to be recordable (*"a skippable skipped on purpose records `Declined`"*), which a
+/// four-argument `record_answer(ri, key, prompt, now)` cannot express. `state` is therefore the fifth
+/// parameter rather than a second writer function — one writer is the guarantee, four arguments were
+/// only the sketch.
+pub fn record_answer(
+    ri: &mut ReturnInputs,
+    key: AnswerKey,
+    prompt: &str,
+    now: Date,
+    state: AnswerState,
+) {
+    ri.answer_log.insert(
+        key,
+        AnswerRecord {
+            answered_on: now,
+            prompt_hash: prompt_hash(prompt),
+            state,
+        },
+    );
+}
+
+/// Un-answer: drop the current record, returning the question to **never asked**.
+///
+/// ★ It does NOT write history, and it does NOT write `Declined`. §5.6 says exactly what history
+/// holds — records superseded by a changed prompt or a changed `ssn` — and a clear is neither. And
+/// `Declined` is the answer *"I was asked and chose to pass"*, which is not what un-answering a
+/// class-(A) declaration means (a declaration has no lawful decline at all).
+pub fn forget_answer(ri: &mut ReturnInputs, key: &AnswerKey) {
+    ri.answer_log.remove(key);
+}
+
+/// The answered-ness of one question **as the log sees it** (R10.3 / R12's table).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnswerStatus {
+    /// No record: never asked. (The leaf's own value still decides whether that blocks.)
+    NeverAsked,
+    /// Answered under the words currently on the screen.
+    Given,
+    /// Asked and deliberately passed over — provenance, and still a forgone benefit (R12).
+    Declined,
+    /// ★★★ Answered under **earlier words**. Treated as UNANSWERED everywhere: blocking for class (A),
+    /// forgoing for class (B), and refused by `screen_inputs`.
+    WordingChanged,
+}
+
+/// The reason string R12's panel prints beside a re-asked question, and `screen_inputs`' refusal
+/// detail names. One constant so the panel, the refusal and the test cannot drift apart.
+pub const WORDING_CHANGED_REASON: &str = "the wording of this question changed since you answered";
+
+/// Read one key's [`AnswerStatus`] against the words currently asked.
+pub fn answer_status(ri: &ReturnInputs, key: &AnswerKey, current_prompt: &str) -> AnswerStatus {
+    match ri.answer_log.get(key) {
+        None => AnswerStatus::NeverAsked,
+        Some(r) if r.prompt_hash != prompt_hash(current_prompt) => AnswerStatus::WordingChanged,
+        Some(r) => match r.state {
+            AnswerState::Given => AnswerStatus::Given,
+            AnswerState::Declined => AnswerStatus::Declined,
+        },
+    }
+}
+
+/// The words currently asked for `key`, from the registry that owns it.
+///
+/// ★ `None` for a [`AnswerKey::DependentGate`]: the per-gate prompts live in the `DEPENDENT_GATES`
+/// registry, which is task T7. Until it exists a dependent record has no current prompt to compare
+/// against, so [`supersede_stale_prompts`] leaves those records alone rather than inventing a hash.
+pub fn current_prompt(key: &AnswerKey) -> Option<&'static str> {
+    match key {
+        AnswerKey::Question(id) => FORM_QUESTIONS
+            .iter()
+            .find(|q| q.id == *id)
+            .map(|q| q.prompt),
+        AnswerKey::Skippable(id) => SKIPPABLE_QUESTIONS
+            .iter()
+            .find(|s| s.id == *id)
+            .map(|s| s.prompt),
+        AnswerKey::DependentGate { .. } => None,
+    }
+}
+
+/// ★★★ **THE PROMPT-HASH MISMATCH RULE, half two: the old answer becomes HISTORY.**
+///
+/// R10.3: *"The old answer is kept as history and never as the current answer."* A record whose
+/// `prompt_hash` no longer matches the words on the screen is moved out of `answer_log` and appended
+/// to `answer_log_history`, so the question reads as unanswered and the re-answer writes a fresh
+/// record. Returns the keys it superseded, in log order.
+///
+/// ★ Idempotent by construction: the second call finds nothing in `answer_log` to move, so a sweep
+/// that runs on every load cannot grow the history. That is exactly the *"restore the text → no
+/// history entry is added"* half of the kill, seen from the other side.
+pub fn supersede_stale_prompts(ri: &mut ReturnInputs) -> Vec<AnswerKey> {
+    let stale: Vec<AnswerKey> = ri
+        .answer_log
+        .iter()
+        .filter(|(k, r)| match current_prompt(k) {
+            Some(p) => r.prompt_hash != prompt_hash(p),
+            // No current prompt to compare against — leave it standing (see `current_prompt`).
+            None => false,
+        })
+        .map(|(k, _)| k.clone())
+        .collect();
+    for key in &stale {
+        if let Some(rec) = ri.answer_log.remove(key) {
+            ri.answer_log_history.push((key.clone(), rec));
+        }
+    }
+    stale
+}
+
+/// Every `answer_log` key belonging to one dependent identity.
+fn keys_for_identity(log: &BTreeMap<AnswerKey, AnswerRecord>, hash: &str) -> Vec<AnswerKey> {
+    log.keys()
+        .filter(|k| matches!(k, AnswerKey::DependentGate { ssn_hash, .. } if ssn_hash == hash))
+        .cloned()
+        .collect()
+}
+
+/// ★★ **The dependent row was REMOVED** — delete that identity's records (R10.3: *"`remove` on the
+/// Dependents section deletes that identity's entries"*).
+///
+/// Deleted, not historied: the filer withdrew the row, so there is no superseded *answer* to keep —
+/// there is no longer a person the record could be about. Returns how many entries went.
+///
+/// ★ **A row with a BLANK `ssn` has no identity**, so every blank row shares one bucket and removing
+/// one clears it. That is the fail-closed direction — the alternative leaves records a *new* blank row
+/// would silently inherit — but it is a degenerate state, not a designed one: R6 makes a dependent's
+/// identity fields mandatory, and the per-gate registry that would let a blank row be answered at all
+/// is task T7. Recorded here so T7 decides it rather than meets it.
+pub fn retire_dependent_identity(ri: &mut ReturnInputs, ssn: &str) -> usize {
+    let hash = dependent_ssn_hash(ssn);
+    let keys = keys_for_identity(&ri.answer_log, &hash);
+    for k in &keys {
+        ri.answer_log.remove(k);
+    }
+    keys.len()
+}
+
+/// ★★ **The dependent row's `ssn` CHANGED** — a different person, so *"the old entries move to the
+/// history"* and the new identity starts fresh (R10.3).
+///
+/// A no-op when the two SSNs hash the same (a filer adding the dashes to `111223333` is not a
+/// different child). Returns how many records were superseded.
+pub fn supersede_dependent_identity(ri: &mut ReturnInputs, old_ssn: &str, new_ssn: &str) -> usize {
+    let old = dependent_ssn_hash(old_ssn);
+    if old == dependent_ssn_hash(new_ssn) {
+        return 0;
+    }
+    let keys = keys_for_identity(&ri.answer_log, &old);
+    for k in &keys {
+        if let Some(rec) = ri.answer_log.remove(k) {
+            ri.answer_log_history.push((k.clone(), rec));
+        }
+    }
+    keys.len()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tax::return_inputs::CarryProvenance;
+    use crate::tax::scrub_axis::maximal_sentinel;
+    use serde_json::Value;
+    use std::collections::BTreeSet;
+    use time::macros::date;
+
+    // ─────────────────────────────────────────────────────────────────────────────────────────────
+    // The leaf walk — the sibling of `btctax-input-form`'s coverage walk, with the same rules: a
+    // leaf is a scalar, or an all-scalar array (a serialized `time::Date` is ONE leaf, not two).
+    // ─────────────────────────────────────────────────────────────────────────────────────────────
+    fn walk(v: &Value, prefix: &str, out: &mut Vec<String>) {
+        match v {
+            Value::Object(map) => {
+                for (k, child) in map {
+                    let p = if prefix.is_empty() {
+                        k.clone()
+                    } else {
+                        format!("{prefix}.{k}")
+                    };
+                    walk(child, &p, out);
+                }
+            }
+            Value::Array(arr) if arr.iter().any(|e| e.is_object() || e.is_array()) => {
+                for (i, child) in arr.iter().enumerate() {
+                    walk(child, &format!("{prefix}[{i}]"), out);
+                }
+            }
+            _ => out.push(prefix.to_string()),
+        }
+    }
+
+    /// Replace the value at one walked leaf path. Returns `false` if the path does not resolve.
+    fn set_at(v: &mut Value, path: &str, new: Value) -> bool {
+        let mut cur = v;
+        let mut rest = path;
+        loop {
+            // A segment is `name` (after an optional leading '.') or `[i]`.
+            if let Some(after) = rest.strip_prefix('[') {
+                let Some((idx, tail)) = after.split_once(']') else {
+                    return false;
+                };
+                let Ok(i) = idx.parse::<usize>() else {
+                    return false;
+                };
+                let Some(next) = cur.get_mut(i) else {
+                    return false;
+                };
+                if tail.is_empty() {
+                    *next = new;
+                    return true;
+                }
+                cur = next;
+                rest = tail.strip_prefix('.').unwrap_or(tail);
+                continue;
+            }
+            let end = rest.find(['.', '[']).unwrap_or(rest.len());
+            let (name, tail) = rest.split_at(end);
+            let Some(next) = cur.get_mut(name) else {
+                return false;
+            };
+            if tail.is_empty() {
+                *next = new;
+                return true;
+            }
+            cur = next;
+            rest = tail.strip_prefix('.').unwrap_or(tail);
+        }
+    }
+
+    /// ★★★ **MONEY LEAVES, DETECTED BY TYPE — never by a hand-list and never by a value.**
+    ///
+    /// For each leaf: write a decimal-shaped string, then a non-numeric one, and deserialize the whole
+    /// blob back into [`ReturnInputs`] each time. A leaf that ACCEPTS `"1234.56"` and REJECTS `"zzz"`
+    /// is a `Usd` / `Option<Usd>`; a `String` accepts both, a `bool` / `Date` / enum rejects both.
+    ///
+    /// ★ That is what makes this drift-proof in the direction that matters: a newly added money field
+    /// on any reachable struct is detected the moment the fixture realizes it, with nobody having
+    /// remembered to list it. It is `Decimal`'s own deserializer doing the classifying.
+    ///
+    /// ★★ **Its honest limit, stated rather than hidden:** it can only classify a leaf the fixture
+    /// REALIZES. A new `Usd` defaults to `0` and is realized; a new `Option<Usd>` left `None` on
+    /// [`maximal_sentinel`] serializes as `null`, which rejects both probes and is therefore reported
+    /// as *not money*. The second net for that case is the classifier, which forbids `_` on an
+    /// `Option<Usd>` leaf — so it cannot be added without a human naming it.
+    fn money_leaves(ri: &ReturnInputs) -> BTreeSet<String> {
+        let base = serde_json::to_value(ri).expect("ReturnInputs serializes");
+        serde_json::from_value::<ReturnInputs>(base.clone())
+            .expect("the fixture must round-trip before any leaf is probed");
+        let mut leaves = Vec::new();
+        walk(&base, "", &mut leaves);
+        let accepts = |path: &str, probe: &str| {
+            let mut v = base.clone();
+            assert!(
+                set_at(&mut v, path, Value::String(probe.into())),
+                "unreachable leaf {path}"
+            );
+            serde_json::from_value::<ReturnInputs>(v).is_ok()
+        };
+        leaves
+            .into_iter()
+            .filter(|p| accepts(p, "1234.56") && !accepts(p, "zzz"))
+            .collect()
+    }
+
+    /// What a [`LEAF_SOURCE`] audit found. Empty on every count = the guarantee holds.
+    #[derive(Debug, Default, PartialEq, Eq)]
+    struct Audit {
+        /// Money leaves no prefix claims — *"a `Usd` field with no source"*.
+        unsourced: Vec<String>,
+        /// Prefixes that claim no money leaf — a stale entry, which over-claims silently.
+        unmatched: Vec<String>,
+        /// Money leaves claimed by more than one prefix — the table stops being a partition.
+        multi: Vec<String>,
+    }
+
+    /// The audit, parameterised on the table so a KILL can hand it a MUTATED one and watch it red.
+    fn audit(table: &[(&str, Source)], money: &BTreeSet<String>) -> Audit {
+        let mut a = Audit::default();
+        for leaf in money {
+            let hits: Vec<&str> = table
+                .iter()
+                .filter(|(p, _)| prefix_matches(p, leaf))
+                .map(|(p, _)| *p)
+                .collect();
+            match hits.len() {
+                0 => a.unsourced.push(leaf.clone()),
+                1 => {}
+                _ => a.multi.push(leaf.clone()),
+            }
+        }
+        for (p, _) in table {
+            if !money.iter().any(|leaf| prefix_matches(p, leaf)) {
+                a.unmatched.push((*p).to_string());
+            }
+        }
+        a
+    }
+
+    /// ★★★ **THE LEAF_SOURCE KAT — BOTH DIRECTIONS** (§8: *"no `Money` field outside a document or
+    /// filer's-records struct; every `Usd` leaf has one source"*).
+    #[test]
+    fn every_money_leaf_has_exactly_one_source_and_every_source_prefix_is_live() {
+        let money = money_leaves(&maximal_sentinel());
+        assert!(
+            money.len() > 50,
+            "the maximal fixture realized only {} money leaves — it has stopped being maximal, and a \
+             shrunken fixture makes this KAT vacuous",
+            money.len()
+        );
+        assert_eq!(audit(LEAF_SOURCE, &money), Audit::default());
+    }
+
+    /// ★ **The money DETECTOR, observed discriminating** (B1). A type-driven classifier can only be
+    /// trusted once it has been watched saying yes to a `Usd`, yes to an `Option<Usd>`, and no to the
+    /// `String` / `Date` / `bool` leaves sitting right beside them.
+    #[test]
+    fn the_money_detector_separates_usd_from_the_leaves_that_look_like_it() {
+        let money = money_leaves(&maximal_sentinel());
+        for yes in [
+            "w2s[0].box1_wages",                  // a plain `Usd`
+            "form_8960_line9b", // an `Option<Usd>` — realized because the fixture is maximal
+            "schedule_a.medical", // nested
+            "capital_loss_carryforward_in.short", // inside a frozen shared value type
+        ] {
+            assert!(
+                money.contains(yes),
+                "{yes} is a money leaf and was not detected"
+            );
+        }
+        for no in [
+            "w2s[0].employer",               // a String
+            "int_1099[0].payer_tin",         // a String that CAN look numeric
+            "header.taxpayer.ssn", // a String of digits — the trap a value-based detector falls in
+            "header.taxpayer.date_of_birth", // an Option<Date>, serialized as an int array
+            "foreign_accounts",    // an Option<bool>
+            "itemize_election",    // a defaulted enum
+        ] {
+            assert!(
+                !money.contains(no),
+                "{no} is NOT a money leaf but was detected as one"
+            );
+        }
+    }
+
+    /// ★★★ **KILL — a money leaf with NO source reds** (B1: plant the exact defect).
+    #[test]
+    fn deleting_a_source_prefix_reds_the_kat() {
+        let money = money_leaves(&maximal_sentinel());
+        let gutted: Vec<(&str, Source)> = LEAF_SOURCE
+            .iter()
+            .copied()
+            .filter(|(p, _)| *p != "w2s")
+            .collect();
+        let a = audit(&gutted, &money);
+        assert!(
+            a.unsourced.iter().any(|p| p.starts_with("w2s[")),
+            "deleting the `w2s` prefix must leave every W-2 money box unsourced; got {a:?}"
+        );
+    }
+
+    /// ★★★ **KILL — a STALE prefix reds** (the `coverage.rs` stale-exemption discipline). An entry
+    /// that matches nothing silently over-claims: it looks like coverage and is not.
+    #[test]
+    fn a_prefix_that_matches_no_money_leaf_reds_the_kat() {
+        let money = money_leaves(&maximal_sentinel());
+        let mut padded: Vec<(&str, Source)> = LEAF_SOURCE.to_vec();
+        padded.push(("a_leaf_that_does_not_exist", Source::Ledger));
+        let a = audit(&padded, &money);
+        assert_eq!(
+            a.unmatched,
+            vec!["a_leaf_that_does_not_exist".to_string()],
+            "a prefix matching no money leaf must red"
+        );
+    }
+
+    /// ★★★ **KILL — two prefixes claiming one leaf reds.** The table is a PARTITION, not a
+    /// priority list: if it were read longest-prefix-first, a mis-scoped entry would silently
+    /// re-attribute a figure's source and nothing would say so.
+    #[test]
+    fn two_prefixes_claiming_the_same_leaf_red_the_kat() {
+        let money = money_leaves(&maximal_sentinel());
+        let mut padded: Vec<(&str, Source)> = LEAF_SOURCE.to_vec();
+        padded.push(("schedule_a.medical", Source::Ledger));
+        let a = audit(&padded, &money);
+        assert_eq!(
+            a.multi,
+            vec!["schedule_a.medical".to_string()],
+            "a leaf claimed twice must red"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────────────────────
+    // The answer log
+    // ─────────────────────────────────────────────────────────────────────────────────────────────
+
+    fn ri() -> ReturnInputs {
+        ReturnInputs {
+            tax_year: 2025,
+            ..Default::default()
+        }
+    }
+    const D1: Date = date!(2026 - 09 - 01);
+
+    /// The wire form round-trips for all three key shapes, and a stored blob deserializes back to the
+    /// same map — the `BTreeMap` key contract.
+    #[test]
+    fn every_answer_key_shape_round_trips_through_its_string_wire_form() {
+        let keys = [
+            AnswerKey::Question(QuestionId::ForeignTrust),
+            AnswerKey::Skippable(SkippableId::DobSpouse),
+            AnswerKey::DependentGate {
+                ssn_hash: dependent_ssn_hash("111-22-3333"),
+                gate: DependentGate::GrossIncomeUnderLimit,
+            },
+        ];
+        for k in &keys {
+            assert_eq!(
+                AnswerKey::from_str(&k.to_string()).as_ref(),
+                Ok(k),
+                "{k:?} did not round-trip through {:?}",
+                k.to_string()
+            );
+        }
+        let mut r = ri();
+        for k in &keys {
+            record_answer(&mut r, k.clone(), "a prompt", D1, AnswerState::Given);
+        }
+        let back: ReturnInputs = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
+        assert_eq!(back.answer_log, r.answer_log);
+    }
+
+    /// ★★ Every gate identity is listed in `ALL` — the exhaustive `match` makes a new variant a
+    /// compile error here, and the `ALL` scan is what the wire parser depends on.
+    #[test]
+    fn every_dependent_gate_is_in_all() {
+        for (i, g) in DependentGate::ALL.iter().enumerate() {
+            let idx = match g {
+                DependentGate::QcRelationship => 0,
+                DependentGate::ProvidedOverHalfOwnSupport => 1,
+                DependentGate::FilingJointReturn => 2,
+                DependentGate::JointReturnOnlyToClaimRefund => 3,
+                DependentGate::QualifyingChildOfAnotherPerson => 4,
+                DependentGate::CitizenNationalResidentOrCanadaMexico => 5,
+                DependentGate::Married => 6,
+                DependentGate::TinIssuedByDueDate => 7,
+                DependentGate::CitizenNationalOrResidentAlien => 8,
+                DependentGate::SsnsValidForEmploymentIssuedByDueDate => 9,
+                DependentGate::QrRelationshipOrMemberOfHousehold => 10,
+                DependentGate::QualifyingChildOfAnyTaxpayer => 11,
+                DependentGate::GrossIncomeUnderLimit => 12,
+                DependentGate::YouProvidedOverHalfSupport => 13,
+                DependentGate::DivorcedSeparatedMultipleSupportOrKidnappedRuleApplies => 14,
+                DependentGate::YoungerThanYouOrSpouse => 15,
+                DependentGate::LivedWithYouOverHalfYear => 16,
+                DependentGate::LivedWithYouInUs => 17,
+                DependentGate::FullTimeStudent => 18,
+                DependentGate::PermanentlyAndTotallyDisabled => 19,
+                DependentGate::DateOfBirth => 20,
+            };
+            assert_eq!(idx, i, "DependentGate::ALL is out of order / missing {g:?}");
+        }
+        assert_eq!(
+            DependentGate::ALL.len(),
+            21,
+            "§5.3's sixteen §152 gates + the four row-(5)/(6) facts + the required date of birth"
+        );
+    }
+
+    /// ★★★ **`Declined` vs ABSENT.** The whole reason `AnswerState` exists: a skippable passed over
+    /// on purpose is a record, and a question never put to the filer is no record at all. On the
+    /// printed page both are the same blank.
+    #[test]
+    fn a_declined_skippable_is_a_record_and_an_untouched_one_is_not() {
+        let mut r = ri();
+        let declined = AnswerKey::Skippable(SkippableId::BlindTaxpayer);
+        let untouched = AnswerKey::Skippable(SkippableId::BlindSpouse);
+        record_answer(
+            &mut r,
+            declined.clone(),
+            "prompt A",
+            D1,
+            AnswerState::Declined,
+        );
+        assert_eq!(
+            answer_status(&r, &declined, "prompt A"),
+            AnswerStatus::Declined
+        );
+        assert_eq!(
+            answer_status(&r, &untouched, "prompt B"),
+            AnswerStatus::NeverAsked
+        );
+        assert_ne!(
+            answer_status(&r, &declined, "prompt A"),
+            answer_status(&r, &untouched, "prompt B"),
+            "declined and never-asked must not be the same state — they are the same BLANK"
+        );
+    }
+
+    /// ★★★ **THE PROMPT-HASH MISMATCH RULE, in one test** (§8: *"an answer given under earlier words
+    /// never stands under later ones"*). Change the words → unanswered + the old record in history;
+    /// restore them → still standing, and NO new history entry.
+    #[test]
+    fn changing_the_words_re_asks_and_historises_restoring_them_does_neither() {
+        let mut r = ri();
+        let k = AnswerKey::Question(QuestionId::ForeignTrust);
+        record_answer(
+            &mut r,
+            k.clone(),
+            "the ORIGINAL words",
+            D1,
+            AnswerState::Given,
+        );
+
+        // Same words: still an answer, and a sweep moves nothing.
+        assert_eq!(
+            answer_status(&r, &k, "the ORIGINAL words"),
+            AnswerStatus::Given
+        );
+
+        // Changed words: reported as unanswered, with the reason R12's panel prints.
+        assert_eq!(
+            answer_status(&r, &k, "the ORIGINAL words?"),
+            AnswerStatus::WordingChanged,
+            "one added character must be enough — {WORDING_CHANGED_REASON}"
+        );
+
+        // …and the supersede moves the old record OUT of the log and INTO history.
+        let mut changed = r.clone();
+        changed.answer_log.insert(
+            k.clone(),
+            AnswerRecord {
+                answered_on: D1,
+                prompt_hash: prompt_hash("words nobody asks any more"),
+                state: AnswerState::Given,
+            },
+        );
+        let moved = supersede_stale_prompts(&mut changed);
+        assert_eq!(moved, vec![k.clone()]);
+        assert!(
+            !changed.answer_log.contains_key(&k),
+            "the superseded record must NOT stay current"
+        );
+        assert_eq!(changed.answer_log_history.len(), 1);
+        assert_eq!(changed.answer_log_history[0].0, k);
+
+        // Restore: the record matches the live prompt, so a sweep adds NOTHING.
+        let mut restored = ri();
+        let live = current_prompt(&k).expect("a registry question has a current prompt");
+        record_answer(&mut restored, k.clone(), live, D1, AnswerState::Given);
+        assert!(supersede_stale_prompts(&mut restored).is_empty());
+        assert!(
+            restored.answer_log_history.is_empty(),
+            "restoring the wording must not add a history entry"
+        );
+        // And the sweep is idempotent — running it twice cannot grow the history.
+        supersede_stale_prompts(&mut changed);
+        assert_eq!(changed.answer_log_history.len(), 1);
+    }
+
+    /// ★★★ **I10 — THE DILIGENCE KEY IS AN IDENTITY.** Answer gates on two dependent rows; delete
+    /// row 0 and row 1's records are untouched while row 0's are gone; change row 1's `ssn` and its
+    /// records move to history. *"A diligence record that lies is worse than none."*
+    #[test]
+    fn deleting_one_dependent_leaves_the_others_records_alone_and_a_new_ssn_starts_fresh() {
+        let mut r = ri();
+        let (ssn0, ssn1) = ("111-22-3333", "444-55-6666");
+        let key = |ssn: &str, gate| AnswerKey::DependentGate {
+            ssn_hash: dependent_ssn_hash(ssn),
+            gate,
+        };
+        for ssn in [ssn0, ssn1] {
+            for gate in [DependentGate::QcRelationship, DependentGate::Married] {
+                record_answer(
+                    &mut r,
+                    key(ssn, gate),
+                    "a gate prompt",
+                    D1,
+                    AnswerState::Given,
+                );
+            }
+        }
+        assert_eq!(r.answer_log.len(), 4);
+
+        // Row 0 removed.
+        assert_eq!(retire_dependent_identity(&mut r, ssn0), 2);
+        assert_eq!(r.answer_log.len(), 2);
+        for gate in [DependentGate::QcRelationship, DependentGate::Married] {
+            assert!(
+                r.answer_log.contains_key(&key(ssn1, gate)),
+                "row 1's records must be untouched by row 0's removal"
+            );
+            assert!(!r.answer_log.contains_key(&key(ssn0, gate)));
+        }
+        assert!(
+            r.answer_log_history.is_empty(),
+            "a removed row is a WITHDRAWN row — there is no superseded answer to keep"
+        );
+
+        // Row 1's SSN corrected: a different person, so the old records become history.
+        assert_eq!(supersede_dependent_identity(&mut r, ssn1, "777-88-9999"), 2);
+        assert!(r.answer_log.is_empty());
+        assert_eq!(r.answer_log_history.len(), 2);
+        assert!(r.answer_log_history.iter().all(
+            |(k, _)| matches!(k, AnswerKey::DependentGate { ssn_hash, .. }
+                                   if *ssn_hash == dependent_ssn_hash(ssn1))
+        ));
+    }
+
+    /// ★ Punctuation is not identity: `111-22-3333` and `111223333` are the same child, so re-typing
+    /// the dashes must not move a single record.
+    #[test]
+    fn dashes_in_an_ssn_do_not_change_the_identity() {
+        assert_eq!(
+            dependent_ssn_hash("111-22-3333"),
+            dependent_ssn_hash("111223333")
+        );
+        let mut r = ri();
+        record_answer(
+            &mut r,
+            AnswerKey::DependentGate {
+                ssn_hash: dependent_ssn_hash("111223333"),
+                gate: DependentGate::Married,
+            },
+            "p",
+            D1,
+            AnswerState::Given,
+        );
+        assert_eq!(
+            supersede_dependent_identity(&mut r, "111223333", "111-22-3333"),
+            0
+        );
+        assert_eq!(r.answer_log.len(), 1);
+        assert!(r.answer_log_history.is_empty());
+    }
+
+    /// ★ The hash never carries the digits — the *"never the digits"* half of R10.3.
+    #[test]
+    fn the_identity_key_never_contains_the_ssn() {
+        let h = dependent_ssn_hash("111-22-3333");
+        assert!(!h.contains("111"), "the hash leaked a digit run: {h}");
+        assert!(!h.contains("223333"));
+        assert_eq!(h.len(), 64);
+        assert!(h.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    /// ★ Un-answering returns a question to NEVER ASKED, and writes no history: a clear is neither of
+    /// the two things §5.6 says history holds.
+    #[test]
+    fn forgetting_an_answer_leaves_no_record_and_no_history() {
+        let mut r = ri();
+        let k = AnswerKey::Question(QuestionId::ForeignTrust);
+        record_answer(&mut r, k.clone(), "p", D1, AnswerState::Given);
+        forget_answer(&mut r, &k);
+        assert_eq!(answer_status(&r, &k, "p"), AnswerStatus::NeverAsked);
+        assert!(r.answer_log_history.is_empty());
+    }
+
+    /// ★★ **The FORBIDDEN shapes** (R10.3 / `FIELD_PROVENANCE.md:400-403`): no progress, no position,
+    /// no "what remains" on `ReturnInputs`. A grep-KAT over the serialized leaf names, so it bites on
+    /// a field added anywhere in the reachable tree rather than only at the top level.
+    #[test]
+    fn no_progress_or_position_field_exists_on_return_inputs() {
+        let mut leaves = Vec::new();
+        walk(
+            &serde_json::to_value(maximal_sentinel()).unwrap(),
+            "",
+            &mut leaves,
+        );
+        for leaf in &leaves {
+            let name = leaf.rsplit('.').next().unwrap_or(leaf);
+            for banned in ["progress", "remaining", "position"] {
+                assert!(
+                    !name.contains(banned),
+                    "`{leaf}` names a forbidden shape ({banned}): the answer log records WHAT WAS \
+                     ASKED, never how far through the interview the filer is"
+                );
+            }
+        }
+    }
+
+    /// ★ R10.4 — the year-N+1 carry provenance is a THIRD state, distinct from both existing ones,
+    /// and it round-trips (task T4b writes it; T1 owns the schema, which cannot be back-filled).
+    #[test]
+    fn computed_from_prior_return_is_its_own_provenance_and_round_trips() {
+        let p = CarryProvenance::ComputedFromPriorReturn { year: 2026 };
+        assert_ne!(p, CarryProvenance::Computed);
+        assert_ne!(p, CarryProvenance::User);
+        assert_eq!(CarryProvenance::default(), CarryProvenance::User);
+        let j = serde_json::to_string(&p).unwrap();
+        assert_eq!(serde_json::from_str::<CarryProvenance>(&j).unwrap(), p);
+    }
+}

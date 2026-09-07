@@ -6204,7 +6204,7 @@ mod tests {
         use crate::edit::form::TaxInputsFormState;
         let backend = TestBackend::new(120, 40);
         let mut terminal = Terminal::new(backend).unwrap();
-        let form = TaxInputsFormState::fresh(2024); // working = None
+        let form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01)); // working = None
         let area = terminal.get_frame().area();
         terminal
             .draw(|f| draw_tax_inputs_form(f, area, &form, None))
@@ -6262,7 +6262,7 @@ mod tests {
         use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
         let backend = TestBackend::new(120, 40);
         let mut terminal = Terminal::new(backend).unwrap();
-        let mut form = TaxInputsFormState::fresh(2024);
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         apply(
             &mut form.working,
             Edit::SetField {
@@ -6270,6 +6270,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Single".into()),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         // Focus Payments → PayEstimated and enter edit mode with a partial buffer.
@@ -6308,7 +6309,7 @@ mod tests {
         use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
         let backend = TestBackend::new(120, 40);
         let mut terminal = Terminal::new(backend).unwrap();
-        let mut form = TaxInputsFormState::fresh(2024);
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         apply(
             &mut form.working,
             Edit::SetField {
@@ -6316,6 +6317,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Single".into()),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         // Set the taxpayer SSN via the engine (SecretEntry is inbound-only).
@@ -6326,6 +6328,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::SecretEntry("123456789".into()),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         // Focus the Taxpayer section (display, NOT editing).
@@ -6360,7 +6363,7 @@ mod tests {
         use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
         let backend = TestBackend::new(120, 40);
         let mut terminal = Terminal::new(backend).unwrap();
-        let mut form = TaxInputsFormState::fresh(2024);
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         apply(
             &mut form.working,
             Edit::SetField {
@@ -6368,6 +6371,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Single".into()),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         // Focus Taxpayer → SSN and enter no-echo mode with digits already in the buffer.
@@ -6414,7 +6418,7 @@ mod tests {
         use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr};
         let backend = TestBackend::new(120, 40);
         let mut terminal = Terminal::new(backend).unwrap();
-        let mut form = TaxInputsFormState::fresh(2024);
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         // Materialize a Single return via `apply` — never construct a `ReturnInputs` directly (NI-2).
         apply(
             &mut form.working,
@@ -6423,6 +6427,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Single".into()),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         let area = terminal.get_frame().area();
@@ -6507,7 +6512,7 @@ mod tests {
         use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr};
         let backend = TestBackend::new(120, 40);
         let mut terminal = Terminal::new(backend).unwrap();
-        let mut form = TaxInputsFormState::fresh(2024);
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         apply(
             &mut form.working,
             Edit::SetField {
@@ -6515,6 +6520,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Single".into()),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         form.active_source_label = "tax-profile"; // the cache the opener/park handler sets
@@ -6542,7 +6548,7 @@ mod tests {
         use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
         let backend = TestBackend::new(120, 40);
         let mut terminal = Terminal::new(backend).unwrap();
-        let mut form = TaxInputsFormState::fresh(2024);
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         apply(
             &mut form.working,
             Edit::SetField {
@@ -6550,6 +6556,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Single".into()),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         // Two W-2 rows via the engine.
@@ -6560,6 +6567,7 @@ mod tests {
                     section: SectionId::W2s,
                     parent: RowAddr::default(),
                 },
+                time::macros::date!(2026 - 09 - 01),
             )
             .unwrap();
         }
@@ -6598,7 +6606,7 @@ mod tests {
         use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
         let backend = TestBackend::new(120, 40);
         let mut terminal = Terminal::new(backend).unwrap();
-        let mut form = TaxInputsFormState::fresh(2024);
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         apply(
             &mut form.working,
             Edit::SetField {
@@ -6606,6 +6614,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Single".into()),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         apply(
@@ -6614,6 +6623,7 @@ mod tests {
                 section: SectionId::W2s,
                 parent: RowAddr::default(),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         let ri = form.working.as_ref().unwrap();
@@ -6658,7 +6668,7 @@ mod tests {
         use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
         let backend = TestBackend::new(120, 40);
         let mut terminal = Terminal::new(backend).unwrap();
-        let mut form = TaxInputsFormState::fresh(2024);
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         apply(
             &mut form.working,
             Edit::SetField {
@@ -6666,6 +6676,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Single".into()),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         apply(
@@ -6674,6 +6685,7 @@ mod tests {
                 section: SectionId::W2s,
                 parent: RowAddr::default(),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         let ri = form.working.as_ref().unwrap();
@@ -6717,7 +6729,7 @@ mod tests {
         use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
         let backend = TestBackend::new(120, 40);
         let mut terminal = Terminal::new(backend).unwrap();
-        let mut form = TaxInputsFormState::fresh(2024);
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         apply(
             &mut form.working,
             Edit::SetField {
@@ -6725,6 +6737,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Mfj".into()),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         for _ in 0..2 {
@@ -6734,6 +6747,7 @@ mod tests {
                     section: SectionId::W2s,
                     parent: RowAddr::default(),
                 },
+                time::macros::date!(2026 - 09 - 01),
             )
             .unwrap();
         }
@@ -6744,6 +6758,7 @@ mod tests {
                 addr: RowAddr(vec![0]),
                 value: FieldValue::Money(dec!(60000)),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         apply(
@@ -6753,6 +6768,7 @@ mod tests {
                 addr: RowAddr(vec![1]),
                 value: FieldValue::Money(dec!(45000)),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
 
@@ -6819,7 +6835,7 @@ mod tests {
         use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
         let backend = TestBackend::new(120, 40);
         let mut terminal = Terminal::new(backend).unwrap();
-        let mut form = TaxInputsFormState::fresh(2024);
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         apply(
             &mut form.working,
             Edit::SetField {
@@ -6827,6 +6843,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Single".into()),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         for _ in 0..2 {
@@ -6836,6 +6853,7 @@ mod tests {
                     section: SectionId::W2s,
                     parent: RowAddr::default(),
                 },
+                time::macros::date!(2026 - 09 - 01),
             )
             .unwrap();
         }
@@ -6883,7 +6901,7 @@ mod tests {
         use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
         let backend = TestBackend::new(120, 40);
         let mut terminal = Terminal::new(backend).unwrap();
-        let mut form = TaxInputsFormState::fresh(2024);
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         apply(
             &mut form.working,
             Edit::SetField {
@@ -6891,6 +6909,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Single".into()),
             },
+            time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
         let ri = form.working.as_ref().unwrap();

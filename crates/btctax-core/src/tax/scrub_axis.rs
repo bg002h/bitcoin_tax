@@ -138,6 +138,10 @@ pub fn replaced_paths(ri: &ReturnInputs) -> BTreeSet<String> {
 /// what is claimed is exactly what this module exists to stamp out.
 #[must_use]
 pub fn maximal_sentinel() -> ReturnInputs {
+    use crate::tax::provenance::{
+        current_prompt, prompt_hash, AnswerKey, AnswerRecord, AnswerState,
+    };
+    use crate::tax::questions::{QuestionId, SkippableId};
     use crate::tax::return_inputs::*;
     use crate::tax::types::{Carryforward, FilingStatus};
     use rust_decimal_macros::dec;
@@ -212,8 +216,16 @@ pub fn maximal_sentinel() -> ReturnInputs {
         box8_allocated_tips: dec!(0),
         box10_dependent_care: dec!(0),
     };
-    let int_1099 = |tag: &str| Form1099Int {
+    let int_1099 = |tag: &str, tin: &str| Form1099Int {
         payer: format!("SENTINEL_int_payer_{tag}"),
+        // ★ R10.2 — a REAL, canonicalizable TIN rather than a `SENTINEL_*` token, for exactly the
+        //   reason `w2s[].ein` is: scrub maps it through `EinMap`, which preserves the VALIDITY CLASS
+        //   as well as the partition, so a token that could never canonicalize would test the
+        //   malformed leg twice and the well-formed leg never.
+        payer_tin: tin.to_string(),
+        // ★ KEPT by scrub (a provenance tag, not a person) — present here so the axis would notice if
+        //   that decision were ever silently reversed.
+        transcribed_on: Some(date!(2025 - 02 - 03)),
         box1_interest: dec!(11),
         box2_early_withdrawal_penalty: dec!(1),
         box3_treasury_interest: dec!(2),
@@ -222,8 +234,10 @@ pub fn maximal_sentinel() -> ReturnInputs {
         box8_tax_exempt_interest: dec!(5),
         box9_private_activity_bond_amt: dec!(0),
     };
-    let div_1099 = |tag: &str| Form1099Div {
+    let div_1099 = |tag: &str, tin: &str| Form1099Div {
         payer: format!("SENTINEL_div_payer_{tag}"),
+        payer_tin: tin.to_string(), // R10.2 — see `int_1099`
+        transcribed_on: Some(date!(2025 - 02 - 04)),
         box1a_ordinary: dec!(21),
         box1b_qualified: dec!(11),
         box2a_capgain_distr: dec!(1),
@@ -236,13 +250,17 @@ pub fn maximal_sentinel() -> ReturnInputs {
         box12_exempt_interest_dividends: dec!(5),
         box13_private_activity_amt: dec!(0),
     };
-    let g_1099 = |tag: &str| Form1099G {
+    let g_1099 = |tag: &str, tin: &str| Form1099G {
         payer: format!("SENTINEL_g_payer_{tag}"),
+        payer_tin: tin.to_string(), // R10.2 — see `int_1099`
+        transcribed_on: Some(date!(2025 - 02 - 05)),
         box1_unemployment: dec!(31),
         box4_fed_withheld: dec!(3),
     };
-    let b_1099 = |tag: &str| Form1099B {
+    let b_1099 = |tag: &str, tin: &str| Form1099B {
         payer: format!("SENTINEL_b_payer_{tag}"),
+        payer_tin: tin.to_string(), // R10.2 — see `int_1099`
+        transcribed_on: Some(date!(2025 - 02 - 06)),
         short_term_proceeds: dec!(41),
         short_term_basis: dec!(40),
         long_term_proceeds: dec!(51),
@@ -288,10 +306,10 @@ pub fn maximal_sentinel() -> ReturnInputs {
             form8615_parent_identity_unobtainable: Some(true),
         },
         w2s: vec![w2("one", "11-1111111"), w2("two", "22-2222222")],
-        int_1099: vec![int_1099("one"), int_1099("two")],
-        div_1099: vec![div_1099("one"), div_1099("two")],
-        g_1099: vec![g_1099("one"), g_1099("two")],
-        b_1099: vec![b_1099("one"), b_1099("two")],
+        int_1099: vec![int_1099("one", "33-3333333"), int_1099("two", "44-4444444")],
+        div_1099: vec![div_1099("one", "55-5555555"), div_1099("two", "66-6666666")],
+        g_1099: vec![g_1099("one", "77-7777777"), g_1099("two", "88-8888888")],
+        b_1099: vec![b_1099("one", "99-9999999"), b_1099("two", "10-1010101")],
         schedule_c: Some(ScheduleCInputs {
             owner: Owner::Taxpayer,
             business_description: "SENTINEL_business_description".into(),
@@ -392,6 +410,63 @@ pub fn maximal_sentinel() -> ReturnInputs {
         form_2555_line45: dec!(0),
         form_2555_line50: dec!(0),
         form_4563_line15: dec!(0),
+        // ★★★ R10.3 — THE ANSWER LOG, populated so the axis sees the field at all (structural
+        //     absence is this module's stated blind spot).
+        //
+        //     ★★ **DELIBERATELY NO `DependentGate` KEY HERE, and this is the blind spot stated rather
+        //        than hidden.** Scrub RE-KEYS dependent-gate entries onto the scrubbed identities
+        //        (`scrub::rekey_dependent_answers`), and the resulting difference is at
+        //        `answer_log.dependent:<64 hex>:<Gate>` — a path naming a VALUE, not a field. The
+        //        derived axis is field-shaped (`w2s[].ein`), and §3.3's matrix rows are
+        //        `&'static str`, so a content-addressed key can be neither collapsed like an array
+        //        index nor written as a row. The re-key is therefore held by its own planted-defect
+        //        kill in `scrub.rs`
+        //        (`a_dependent_gate_key_is_rekeyed_so_no_original_ssn_hash_survives`), which is the
+        //        B1 instrument for it. The two keys below are the ones scrub does NOT touch, so the
+        //        field is present in the fixture and any FUTURE decision to rewrite them shows up
+        //        here as a new derived path with no matrix row.
+        //     ★★★ THE HASHES ARE THE REGISTRY'S OWN WORDS, and this is not cosmetic. `screen_inputs`
+        //         refuses a class-(A) record whose `prompt_hash` disagrees with the live prompt
+        //         (R10.3), so an invented hash makes the sentinel REFUSE — and a refusing baseline
+        //         masks every cell of the matrix behind whatever refuses first, which is the exact
+        //         failure the assertion above this matrix was written for. (It caught this fixture on
+        //         its first run: `Some(ScheduleBPart3Unanswered)`.)
+        answer_log: [
+            (
+                AnswerKey::Question(QuestionId::ForeignAccounts),
+                AnswerRecord {
+                    answered_on: date!(2025 - 01 - 02),
+                    prompt_hash: prompt_hash(
+                        current_prompt(&AnswerKey::Question(QuestionId::ForeignAccounts))
+                            .expect("a registry question has a prompt"),
+                    ),
+                    state: AnswerState::Given,
+                },
+            ),
+            (
+                AnswerKey::Skippable(SkippableId::BlindTaxpayer),
+                AnswerRecord {
+                    answered_on: date!(2025 - 01 - 03),
+                    prompt_hash: prompt_hash(
+                        current_prompt(&AnswerKey::Skippable(SkippableId::BlindTaxpayer))
+                            .expect("a registry skippable has a prompt"),
+                    ),
+                    state: AnswerState::Given,
+                },
+            ),
+        ]
+        .into_iter()
+        .collect(),
+        answer_log_history: vec![(
+            AnswerKey::Question(QuestionId::ForeignTrust),
+            AnswerRecord {
+                answered_on: date!(2024 - 12 - 31),
+                // ★ A superseded hash is exactly what history holds, and NOTHING reads it as an
+                //   answer — so unlike the two above it may (and should) disagree with the registry.
+                prompt_hash: prompt_hash("SENTINEL superseded prompt"),
+                state: AnswerState::Given,
+            },
+        )],
     }
 }
 
@@ -846,6 +921,53 @@ mod matrix {
                 Fixture(|r| {
                     for f in &mut r.b_1099 {
                         f.payer = "   ".into();
+                    }
+                }),
+                NoSuchState(NO_READER),
+            ),
+            // ★★ R10.2 — a payer TIN is the same class of identifier as a W-2 EIN and is mapped
+            //    through the same `EinMap`, so its partition and validity class both survive. There
+            //    is no MALFORMED row yet: nothing reads a validity class off `payer_tin` today (the
+            //    document screens that will are task T5), and a `Fixture` cell here would compare
+            //    `None == None` — the "exercised and vacuous" state this module exists to prevent.
+            //    ★ When T5 gives it a reader, this cell becomes a `Fixture` and the reason below
+            //      stops being true — which is exactly when someone should be made to look.
+            (
+                "int_1099[].payer_tin",
+                Fixture(|r| r.int_1099.clear()),
+                Fixture(|r| {
+                    for f in &mut r.int_1099 {
+                        f.payer_tin = String::new();
+                    }
+                }),
+                NoSuchState(NO_READER),
+            ),
+            (
+                "div_1099[].payer_tin",
+                Fixture(|r| r.div_1099.clear()),
+                Fixture(|r| {
+                    for f in &mut r.div_1099 {
+                        f.payer_tin = String::new();
+                    }
+                }),
+                NoSuchState(NO_READER),
+            ),
+            (
+                "g_1099[].payer_tin",
+                Fixture(|r| r.g_1099.clear()),
+                Fixture(|r| {
+                    for f in &mut r.g_1099 {
+                        f.payer_tin = String::new();
+                    }
+                }),
+                NoSuchState(NO_READER),
+            ),
+            (
+                "b_1099[].payer_tin",
+                Fixture(|r| r.b_1099.clear()),
+                Fixture(|r| {
+                    for f in &mut r.b_1099 {
+                        f.payer_tin = "   ".into();
                     }
                 }),
                 NoSuchState(NO_READER),

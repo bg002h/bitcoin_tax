@@ -8,7 +8,7 @@
 //!
 //! **The chosen edit keymap** (documented once here; the key handler in `main.rs` calls into this module):
 //! - `Enter` on a focused text-kind field (`Money`/`Text`/`Date`) → open the edit buffer (seeded from the
-//!   current value via `get`); a second `Enter` commits (`parse` → `apply(SetField)`); `Esc` cancels.
+//!   current value via `get`); a second `Enter` commits (`parse` → `apply(SetField, time::macros::date!(2026 - 09 - 01))`); `Esc` cancels.
 //! - `Enter` or `Space` on a cycle kind (`Enum`/`TriState`/`Bool`) → cycle/toggle IN PLACE (apply on the
 //!   keypress, no buffer). Enum cycles the options; TriState `never→yes→no→never`; Bool toggles.
 //! - `Secret` is skipped here (no-echo masked entry is Task 4).
@@ -259,7 +259,7 @@ pub fn cycle_focused(form: &mut TaxInputsFormState) {
 
 // ── Shape edits: add/remove row (Repeating) · create/delete section (OptionalSingleton) ────────────────
 //
-// Every shape edit goes through `apply(&mut form.working, Edit::…)` (via `apply_edit`) — the flow NEVER
+// Every shape edit goes through `apply(&mut form.working, Edit::…, time::macros::date!(2026 - 09 - 01))` (via `apply_edit`) — the flow NEVER
 // mutates `working` directly and never names a `ReturnInputs` leaf. A malformed `RowAddr` (or a create/
 // delete on the wrong section kind) is the engine's fail-closed `ApplyError` → `form.error`, never a panic.
 
@@ -554,7 +554,7 @@ fn apply_edit(form: &mut TaxInputsFormState, edit: Edit) -> bool {
     //    transition is the NI-2 materialization, and it is the one moment the open-time seed cannot
     //    reach (a `Loaded::Fresh` open has `working: None`, so `seed_broker_rows` was skipped).
     let was_unmaterialized = form.working.is_none();
-    match apply(&mut form.working, edit) {
+    match apply(&mut form.working, edit, form.now) {
         Ok(()) => {
             form.error = None;
             // ★★ Re-seed the Form 1099-DA block the moment the return exists. Gated on the
@@ -903,7 +903,7 @@ mod tests {
     /// Materialize a Single working return (via the edit-commit entry, never a constructed `ReturnInputs`)
     /// and focus the Payments → PayEstimated singleton Money field.
     fn form_focused_on_pay_estimated() -> TaxInputsFormState {
-        let mut form = TaxInputsFormState::fresh(2024);
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         assert!(tax_inputs_apply_edit(&mut form, "Single"));
         focus_field(&mut form, SectionId::Payments, FieldId::PayEstimated);
         form
@@ -932,7 +932,7 @@ mod tests {
     /// with that status, and the rest of the sections then appear.
     #[test]
     fn choosing_filing_status_materializes_then_sections_appear() {
-        let mut form = TaxInputsFormState::fresh(2024);
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         // focus is on FilingStatus; set it to Mfj via the flow's edit-commit entry.
         assert!(tax_inputs_apply_edit(&mut form, "Mfj"));
         assert!(
@@ -989,7 +989,7 @@ mod tests {
     /// option (Single), the next advances (Mfj) — reading current via `get`, never a constructed value.
     #[test]
     fn enum_cycle_advances_filing_status_in_place() {
-        let mut form = TaxInputsFormState::fresh(2024);
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         cycle_focused(&mut form);
         assert_eq!(
             form.working.as_ref().unwrap().filing_status,
@@ -1006,7 +1006,7 @@ mod tests {
     /// engine honors for a live registry-delegating tri-state). No panic on any step.
     #[test]
     fn tristate_cycles_never_yes_no_never_via_clearfield() {
-        let mut form = TaxInputsFormState::fresh(2024);
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         assert!(tax_inputs_apply_edit(&mut form, "Single"));
         focus_field(&mut form, SectionId::Skippables, FieldId::BlindTaxpayer);
 
@@ -1029,7 +1029,7 @@ mod tests {
     #[test]
     fn secret_ssn_commit_sets_field_masked_via_get() {
         use btctax_input_form::SecretView;
-        let mut form = TaxInputsFormState::fresh(2024);
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         assert!(tax_inputs_apply_edit(&mut form, "Single"));
         focus_field(&mut form, SectionId::Taxpayer, FieldId::TpSsn);
         assert!(
@@ -1055,7 +1055,7 @@ mod tests {
     #[test]
     fn secret_ip_pin_commit_uses_parse_ip_pin_not_ssn() {
         use btctax_input_form::SecretView;
-        let mut form = TaxInputsFormState::fresh(2024);
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         assert!(tax_inputs_apply_edit(&mut form, "Single"));
         focus_field(&mut form, SectionId::Taxpayer, FieldId::IpPin);
         assert!(
@@ -1107,7 +1107,7 @@ mod tests {
     /// `ApplyError` → `form.error`, never a panic, never a mutation.
     #[test]
     fn nested_box12_uses_depth2_addr_and_bad_addr_errors_no_panic() {
-        let mut form = TaxInputsFormState::fresh(2024);
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         assert!(tax_inputs_apply_edit(&mut form, "Single"));
         // Add a W-2 (row 0) via the flow's row-list `add_row`.
         focus_section(&mut form, SectionId::W2s);
@@ -1154,7 +1154,7 @@ mod tests {
     /// `[0]` and reads back there.
     #[test]
     fn entering_a_row_edits_fields_at_the_row_addr() {
-        let mut form = TaxInputsFormState::fresh(2024);
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         assert!(tax_inputs_apply_edit(&mut form, "Single"));
         focus_section(&mut form, SectionId::W2s);
         assert!(add_row(&mut form)); // one W-2, still at the row LIST (addr [])
@@ -1195,7 +1195,7 @@ mod tests {
     /// `seed`→`set` WIRING mutant (under `set` the buffer caps at 64); the unit KAT alone did not.
     #[test]
     fn begin_edit_seeds_a_long_stored_text_without_truncating_it() {
-        let mut form = TaxInputsFormState::fresh(2024);
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         assert!(tax_inputs_apply_edit(&mut form, "Single"));
 
         // Focus the taxpayer occupation (a Text field) and store a > 64-char value, as CLI/import can.
@@ -1227,7 +1227,7 @@ mod tests {
     /// navigates ROWS (not the section's 13 W-2 fields), an absent optional-singleton navigates NOTHING.
     #[test]
     fn navigable_count_matches_the_drawn_pane() {
-        let mut form = TaxInputsFormState::fresh(2024);
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         assert!(tax_inputs_apply_edit(&mut form, "Single"));
 
         // W-2s row list: 0 rows → 0 navigable; after two adds → 2 (rows, NOT the 13 W-2 fields).
@@ -1253,7 +1253,7 @@ mod tests {
     #[test]
     fn invalid_ssn_sets_error_and_does_not_apply() {
         use btctax_input_form::SecretView;
-        let mut form = TaxInputsFormState::fresh(2024);
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         assert!(tax_inputs_apply_edit(&mut form, "Single"));
         focus_field(&mut form, SectionId::Taxpayer, FieldId::TpSsn);
         assert!(
@@ -1286,7 +1286,7 @@ mod tests {
     #[test]
     fn the_broker_block_appears_after_materializing_on_a_first_session() {
         use btctax_core::InformationReturnRegime as R;
-        let mut form = TaxInputsFormState::fresh(2026);
+        let mut form = TaxInputsFormState::fresh(2026, time::macros::date!(2026 - 09 - 01));
         // the ledger's exchange keys, as `open_tax_inputs_form` reads them from the snapshot
         form.broker_census =
             crate::edit::form::broker_census_by_provider(&crate::edit::form::broker_test_rows(&[
@@ -1328,7 +1328,7 @@ mod tests {
     fn the_broker_block_is_not_seeded_on_a_year_that_does_not_ask() {
         use btctax_core::InformationReturnRegime as R;
         for regime in [None, Some(R::NONE), Some(R::PROCEEDS_ONLY)] {
-            let mut form = TaxInputsFormState::fresh(2025);
+            let mut form = TaxInputsFormState::fresh(2025, time::macros::date!(2026 - 09 - 01));
             form.broker_census =
                 crate::edit::form::broker_census_by_provider(&crate::edit::form::broker_test_rows(
                     &[("coinbase", btctax_core::forms::Cohort::Covered, 3)],
@@ -1355,7 +1355,7 @@ mod tests {
     #[test]
     fn a_removed_broker_row_is_not_resurrected_by_the_next_edit() {
         use btctax_core::InformationReturnRegime as R;
-        let mut form = TaxInputsFormState::fresh(2026);
+        let mut form = TaxInputsFormState::fresh(2026, time::macros::date!(2026 - 09 - 01));
         form.broker_census =
             crate::edit::form::broker_census_by_provider(&crate::edit::form::broker_test_rows(&[
                 ("coinbase", btctax_core::forms::Cohort::Covered, 3),
@@ -1401,7 +1401,7 @@ mod tests {
     fn a_broker_refusal_focuses_the_named_providers_row() {
         use btctax_core::forms::Cohort;
         use btctax_core::InformationReturnRegime as R;
-        let mut form = TaxInputsFormState::fresh(2026);
+        let mut form = TaxInputsFormState::fresh(2026, time::macros::date!(2026 - 09 - 01));
         form.broker_census =
             crate::edit::form::broker_census_by_provider(&crate::edit::form::broker_test_rows(&[
                 ("coinbase", Cohort::Covered, 1),

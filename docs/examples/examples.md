@@ -584,6 +584,8 @@ $ btctax --vault v.pgp income show --year 2024
   "int_1099": [
     {
       "payer": "First Bank",
+      "payer_tin": "",
+      "transcribed_on": null,
       "box1_interest": "2000",
       "box2_early_withdrawal_penalty": "0",
       "box3_treasury_interest": "0",
@@ -596,6 +598,8 @@ $ btctax --vault v.pgp income show --year 2024
   "div_1099": [
     {
       "payer": "Broker LLC",
+      "payer_tin": "",
+      "transcribed_on": null,
       "box1a_ordinary": "3000",
       "box1b_qualified": "1000",
       "box2a_capgain_distr": "500",
@@ -612,6 +616,8 @@ $ btctax --vault v.pgp income show --year 2024
   "g_1099": [
     {
       "payer": "State of IL",
+      "payer_tin": "",
+      "transcribed_on": null,
       "box1_unemployment": "1000",
       "box4_fed_withheld": "0"
     }
@@ -701,7 +707,9 @@ $ btctax --vault v.pgp income show --year 2024
   "excluded_puerto_rico_income": "0",
   "form_2555_line45": "0",
   "form_2555_line50": "0",
-  "form_4563_line15": "0"
+  "form_4563_line15": "0",
+  "answer_log": {},
+  "answer_log_history": []
 }
 ```
 

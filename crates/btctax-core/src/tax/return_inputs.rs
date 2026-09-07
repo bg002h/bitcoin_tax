@@ -84,6 +84,14 @@ pub struct W2 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Form1099Int {
     pub payer: String,
+    /// **R10.2 — document identity.** The payer's TIN as printed on the form. `#[serde(default)]`, so
+    /// an older blob loads with it empty; empty means *"not transcribed"*, never *"the payer has none"*.
+    #[serde(default)]
+    pub payer_tin: String,
+    /// **R10.2 — when this row was transcribed off the paper document.** `None` = undated, which the
+    /// manifest names rather than hides (T12).
+    #[serde(default)]
+    pub transcribed_on: Option<Date>,
     pub box1_interest: Usd, // → 1040 2b / Sch B
     #[serde(default)]
     pub box2_early_withdrawal_penalty: Usd, // → Sch 1 L18
@@ -103,6 +111,12 @@ pub struct Form1099Int {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Form1099Div {
     pub payer: String,
+    /// **R10.2 — document identity.** See [`Form1099Int::payer_tin`].
+    #[serde(default)]
+    pub payer_tin: String,
+    /// **R10.2 — when this row was transcribed.** See [`Form1099Int::transcribed_on`].
+    #[serde(default)]
+    pub transcribed_on: Option<Date>,
     pub box1a_ordinary: Usd, // → 1040 3b (INCLUDES 1b)
     #[serde(default)]
     pub box1b_qualified: Usd, // → 1040 3a (preferential)
@@ -130,6 +144,12 @@ pub struct Form1099Div {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Form1099G {
     pub payer: String,
+    /// **R10.2 — document identity.** See [`Form1099Int::payer_tin`].
+    #[serde(default)]
+    pub payer_tin: String,
+    /// **R10.2 — when this row was transcribed.** See [`Form1099Int::transcribed_on`].
+    #[serde(default)]
+    pub transcribed_on: Option<Date>,
     pub box1_unemployment: Usd, // → Sch 1 L7
     #[serde(default)]
     pub box4_fed_withheld: Usd, // → 1040 25b
@@ -158,6 +178,12 @@ pub struct Form1099B {
     /// so nothing on the printed return reads this — it exists so a filer with three brokers can tell
     /// their three rows apart.
     pub payer: String,
+    /// **R10.2 — document identity.** See [`Form1099Int::payer_tin`].
+    #[serde(default)]
+    pub payer_tin: String,
+    /// **R10.2 — when this row was transcribed.** See [`Form1099Int::transcribed_on`].
+    #[serde(default)]
+    pub transcribed_on: Option<Date>,
     /// **Schedule D line 1a, column (d)** — *"Proceeds (sales price)"*, short-term.
     #[serde(default)]
     pub short_term_proceeds: Usd,
@@ -576,6 +602,16 @@ pub enum CarryProvenance {
     #[default]
     User,
     Computed,
+    /// ★★★ **R10.4 — carried from year N's COMPUTED return**, by the year-N+1 opener (task T4b).
+    ///
+    /// Distinct from [`Self::Computed`], which means *"this year's `report --write-carryover` derived
+    /// it"*. This one says the figure crossed a year boundary: it is the ONLY thing the opener carries,
+    /// because *"a prior-year answer must NEVER silently satisfy this year's provenance"* — every
+    /// identity, gate and box the opener seeds arrives blank and is re-asked. It also closes §G-23's
+    /// *"stated zero"*: a zero carrying this provenance was computed from a return, not left unasked.
+    ComputedFromPriorReturn {
+        year: i32,
+    },
 }
 
 /// A §170(d)(1) charitable carryover item, tagged by class + vintage (5-year expiry; oldest-first) +
@@ -1272,6 +1308,34 @@ pub struct ReturnInputs {
     /// 15." (§931 American Samoa exclusion.)
     #[serde(default)]
     pub form_4563_line15: Usd,
+    /// ★★★ **R10.3 — THE ANSWER LOG: one record per answer, keyed by IDENTITY.**
+    ///
+    /// *"Every answer carries its date and the words asked."* An entry says the filer was asked, on
+    /// that date, in those words, and either gave an answer or declined; **no entry at all** says the
+    /// question was never put to them. Those two states are the same blank on the printed page and
+    /// must never be the same thing here.
+    ///
+    /// ★ Written by exactly ONE function,
+    /// [`crate::tax::provenance::record_answer`], reached by the form engine's `apply` and by
+    /// `income answer` alike. ★ The key is never a row index — see
+    /// [`crate::tax::provenance::AnswerKey`].
+    ///
+    /// ★★ **Forbidden here** (`FIELD_PROVENANCE.md:400-403`): progress, position, "what remains",
+    /// superseded values, half-typed tokens. A grep-KAT pins that no `progress` / `remaining` /
+    /// `position` field exists on this struct.
+    #[serde(default)]
+    pub answer_log: std::collections::BTreeMap<
+        crate::tax::provenance::AnswerKey,
+        crate::tax::provenance::AnswerRecord,
+    >,
+    /// ★★★ **R10.3 — the APPEND-ONLY history of superseded records.**
+    ///
+    /// A record whose prompt wording changed, or whose dependent row's `ssn` changed, moves here and
+    /// **is never read as an answer**. Keeping it is what makes *"the old answer never stands under
+    /// later words"* a fact rather than a promise: the record is preserved for the diligence file, and
+    /// the question is genuinely unanswered again.
+    #[serde(default)]
+    pub answer_log_history: crate::tax::provenance::AnswerLogHistory,
 }
 
 impl ReturnInputs {
@@ -1391,6 +1455,11 @@ impl Default for ReturnInputs {
             //   A defaulted `Usd::ZERO` would swear on a signed return that the allocation IS zero.
             form_8960_line9b: None,
             dual_status_alien: None,
+            // ★ R10.3 — EMPTY, and that is the honest default: a fresh return has been asked nothing.
+            //   An entry here is the record of an ACT, so `Default` must not fabricate one any more
+            //   than it fabricates an answer.
+            answer_log: std::collections::BTreeMap::new(),
+            answer_log_history: Vec::new(),
         }
     }
 }

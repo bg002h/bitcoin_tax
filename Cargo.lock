@@ -321,6 +321,7 @@ dependencies = [
  "btctax-adapters",
  "btctax-core",
  "btctax-forms",
+ "btctax-input-form",
  "btctax-store",
  "clap",
  "csv",

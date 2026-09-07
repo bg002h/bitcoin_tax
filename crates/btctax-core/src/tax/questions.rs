@@ -72,7 +72,7 @@ pub struct FormQuestion {
 
 /// The identity of each registry question. `ALL` is the anchor the completeness test iterates; a new
 /// variant is a compile error in that test until it is listed (§3.5).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum QuestionId {
     DependentTaxpayer,
     DependentSpouse,
@@ -788,7 +788,9 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
 /// ★ A SEPARATE identity space from [`QuestionId`] (spec §5.3 HARD RULE). A skippable is `None`-legal; a
 /// [`FormQuestion`] declaration is not. Merging the two registries would brick `screen_inputs` — it would
 /// refuse a lawfully-unanswered skippable — so the two lists must never be one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// ★ `Ord` is derived because [`crate::tax::provenance::AnswerKey`] is a `BTreeMap` key; the ordering
+/// is the declaration order and carries no meaning beyond "some stable total order".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SkippableId {
     /// ★ §63(f) BLINDNESS (taxpayer). Always live; `None` forgoes the addition and fires the advisory.
     BlindTaxpayer,
@@ -915,6 +917,38 @@ pub enum SkippableId {
     /// ★★ **This is the registry's only POLARITY-INVERTING entry**: the prompt asks what the filer
     /// CAN do and the leaf records what they cannot, so `get_bool`/`set_bool` carry a `!`.
     Form8615ParentIdentityUnobtainable,
+}
+
+impl SkippableId {
+    /// Every skippable identity, in registry order. The anchor a caller iterates when it needs the
+    /// SET of skippables rather than their prompts — notably
+    /// [`crate::tax::provenance::AnswerKey`]'s wire parser, which must resolve a stored key back to
+    /// its id without going through [`SKIPPABLE_QUESTIONS`] (a key that outlived its registry entry
+    /// must still parse, so the refuse-and-reimport gate can report it).
+    ///
+    /// ★ Mirrors [`QuestionId::ALL`], and is pinned the same way: the completeness test's `match` is
+    /// exhaustive, so a NEW variant is a compile error until it is listed here.
+    pub const ALL: &'static [SkippableId] = &[
+        SkippableId::BlindTaxpayer,
+        SkippableId::BlindSpouse,
+        SkippableId::SalesTaxElection,
+        SkippableId::DobTaxpayer,
+        SkippableId::DobSpouse,
+        SkippableId::DodTaxpayer,
+        SkippableId::DodSpouse,
+        SkippableId::TaxpayerDiedDuringYear,
+        SkippableId::SpouseDiedDuringYear,
+        SkippableId::FbarFilingRequired,
+        SkippableId::ScheduleC1099Required,
+        SkippableId::ScheduleC1099Filed,
+        SkippableId::DonationsHadRestrictions,
+        SkippableId::ScheduleCIsSstb,
+        SkippableId::ScheduleCIsCooperativePatron,
+        SkippableId::CharitableCwaObtained,
+        SkippableId::Form8615Condition3AgeSupport,
+        SkippableId::Form8615Condition4ParentAlive,
+        SkippableId::Form8615ParentIdentityUnobtainable,
+    ];
 }
 
 /// The value shape of a [`SkippableQuestion`] — a yes/no answer, a calendar date, or a fixed set of
@@ -1741,6 +1775,45 @@ mod tests {
             None,
             "and `Default` must not answer it"
         );
+    }
+
+    /// ★ **`SkippableId::ALL` is complete and in registry order** — the mirror of
+    /// `every_question_id_is_in_all_in_order_and_has_exactly_one_entry`, and it exists for a load-
+    /// bearing reason: [`crate::tax::provenance::AnswerKey`]'s wire parser scans `ALL`, so a variant
+    /// missing from it is a stored answer that can never be read back. The `match` is exhaustive, so
+    /// a NEW variant is a compile error here until a human lists it.
+    #[test]
+    fn every_skippable_id_is_in_all_in_registry_order_with_exactly_one_entry() {
+        for (i, id) in SkippableId::ALL.iter().enumerate() {
+            let idx = match id {
+                SkippableId::BlindTaxpayer => 0,
+                SkippableId::BlindSpouse => 1,
+                SkippableId::SalesTaxElection => 2,
+                SkippableId::DobTaxpayer => 3,
+                SkippableId::DobSpouse => 4,
+                SkippableId::DodTaxpayer => 5,
+                SkippableId::DodSpouse => 6,
+                SkippableId::TaxpayerDiedDuringYear => 7,
+                SkippableId::SpouseDiedDuringYear => 8,
+                SkippableId::FbarFilingRequired => 9,
+                SkippableId::ScheduleC1099Required => 10,
+                SkippableId::ScheduleC1099Filed => 11,
+                SkippableId::DonationsHadRestrictions => 12,
+                SkippableId::ScheduleCIsSstb => 13,
+                SkippableId::ScheduleCIsCooperativePatron => 14,
+                SkippableId::CharitableCwaObtained => 15,
+                SkippableId::Form8615Condition3AgeSupport => 16,
+                SkippableId::Form8615Condition4ParentAlive => 17,
+                SkippableId::Form8615ParentIdentityUnobtainable => 18,
+            };
+            assert_eq!(idx, i, "SkippableId::ALL is out of order / missing {id:?}");
+            assert_eq!(
+                SKIPPABLE_QUESTIONS.iter().filter(|s| s.id == *id).count(),
+                1,
+                "exactly one SKIPPABLE_QUESTIONS entry for {id:?}"
+            );
+        }
+        assert_eq!(SkippableId::ALL.len(), SKIPPABLE_QUESTIONS.len());
     }
 
     #[test]

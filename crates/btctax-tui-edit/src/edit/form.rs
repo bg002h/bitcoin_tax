@@ -255,6 +255,13 @@ pub struct TaxInputsFormState {
     /// <section>` segment (else `screens clean, except what report computes`). Stores a `SectionId` — a
     /// FormSpec section key, NEVER a `ReturnInputs` leaf (the never-name-a-leaf seam holds).
     pub refused_section: Option<btctax_input_form::SectionId>,
+    /// ★★★ **R10.3 — the date every answer this session records is stamped with.**
+    ///
+    /// Read ONCE at open from `app.clock` (the `BTCTAX_NOW` seam), never from a wall clock inside the
+    /// edit loop: a pinned clock must pin the answer log too, or a golden capture would rewrite itself
+    /// on every run. It is the flow's SESSION date — an edit made after midnight carries the date the
+    /// filer sat down, which is the honest reading of *"when did you answer this"*.
+    pub now: time::Date,
 }
 
 /// ★ Task 8: which confirmed action a [`TaxInputsModalState`] gates — one nested modal field serves all
@@ -308,7 +315,7 @@ pub struct PendingRemove {
 impl TaxInputsFormState {
     /// A fresh flow for `year` with no working return (NI-2: `working = None`). The renderer shows
     /// ONLY the filing-status choice until an `apply` materializes the return. Test/opener helper.
-    pub fn fresh(year: i32) -> Self {
+    pub fn fresh(year: i32, now: time::Date) -> Self {
         Self {
             year,
             working: None,
@@ -331,6 +338,7 @@ impl TaxInputsFormState {
             refused_section: None,
             broker_census: Default::default(),
             broker_regime: None,
+            now,
         }
     }
 }

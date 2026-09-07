@@ -462,6 +462,15 @@ fn ftc_ceiling_for(p: &FullReturnParams, status: FilingStatus) -> Usd {
     }
 }
 
+/// ★ The refusal detail for R10.3's re-ask. It names the reason R12's panel prints
+/// ([`crate::tax::provenance::WORDING_CHANGED_REASON`]) and the exit, because *"a refusal with no
+/// exit is just a brick with better prose"*.
+const WORDING_CHANGED_DETAIL: &str =
+    "you answered this question, but the wording of this question changed since you answered — so \
+     the answer on file was given to a different question. It has been kept in the answer log's \
+     history and is no longer treated as your answer. Re-answer it with `btctax income answer` (or \
+     in the tax-inputs editor); nothing else about your return has changed";
+
 /// The label of the FIRST negative money amount in `ri`, or `None` if every captured amount is ≥ 0.
 /// Every full-return input is a form-box magnitude (≥ 0); a negative is a corrupt import that could
 /// offset a refusal accumulator (R2-I1). **Exhaustiveness is compiler-enforced (review R3-M1):** each
@@ -524,6 +533,11 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         form_2555_line45: _,
         form_2555_line50: _,
         form_4563_line15: _,
+        // ★ R10.3 — the answer log holds dates, prompt hashes and a two-state enum. No money leaf, so
+        //   nothing here to negative-screen; a money field could never be added to it, because a record
+        //   is provenance about the ASKING (`FIELD_PROVENANCE.md:400-403` forbids superseded VALUES).
+        answer_log: _,
+        answer_log_history: _,
     } = ri;
 
     if form_8960_line9b.is_some_and(neg) {
@@ -599,6 +613,9 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             box6_foreign_tax,
             box8_tax_exempt_interest,
             box9_private_activity_bond_amt,
+            // R10.2 document identity — not money leaves, so no negative screen applies.
+            payer_tin: _,
+            transcribed_on: _,
         } = i;
         if neg(*box1_interest) {
             return Some("1099-INT box 1 interest");
@@ -636,6 +653,9 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             box7_foreign_tax,
             box12_exempt_interest_dividends,
             box13_private_activity_amt,
+            // R10.2 document identity — not money leaves, so no negative screen applies.
+            payer_tin: _,
+            transcribed_on: _,
         } = d;
         if neg(*box1a_ordinary) {
             return Some("1099-DIV box 1a ordinary dividends");
@@ -676,6 +696,9 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             payer: _,
             box1_unemployment,
             box4_fed_withheld,
+            // R10.2 document identity — not money leaves, so no negative screen applies.
+            payer_tin: _,
+            transcribed_on: _,
         } = g;
         if neg(*box1_unemployment) {
             return Some("1099-G box 1 unemployment compensation");
@@ -1113,8 +1136,29 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
     // PRECEDENCE is explicitly not contract: on a multi-defect return the reported reason may differ from
     // the pre-P9 order.
     for q in crate::tax::questions::FORM_QUESTIONS {
-        if (q.live)(ri) && (q.get)(ri).is_none() {
+        if !(q.live)(ri) {
+            continue;
+        }
+        if (q.get)(ri).is_none() {
             return refuse(q.unanswered.clone(), q.unanswered_detail);
+        }
+        // ★★★ **R10.3 — AN ANSWER GIVEN UNDER EARLIER WORDS DOES NOT STAND UNDER LATER ONES.**
+        //
+        // The `prompt_hash` exists so *which words were asked* is on record, and this is its ONE
+        // reader on the refusal path: a class-(A) record whose hash no longer matches the prompt the
+        // filer would be shown TODAY is refused as UNANSWERED. The case is not exotic — R11's Sep–Dec
+        // calendar makes it ordinary: a prompt edited in a November fold, sitting under an answer
+        // given in September on the same year's draft.
+        //
+        // ★ **An ABSENT record is NOT a mismatch.** Only a record that exists and disagrees refuses;
+        //   a leaf answered before the log existed (or through a surface that does not record) keeps
+        //   its value. Treating "no record" as unanswered would refuse every return in the corpus and
+        //   would be asserting provenance nobody ever collected.
+        let key = crate::tax::provenance::AnswerKey::Question(q.id);
+        if crate::tax::provenance::answer_status(ri, &key, q.prompt)
+            == crate::tax::provenance::AnswerStatus::WordingChanged
+        {
+            return refuse(q.unanswered.clone(), WORDING_CHANGED_DETAIL);
         }
     }
 
@@ -1701,6 +1745,81 @@ mod tests {
             )
             .map(|x| x.reason),
         )
+    }
+
+    /// ★★★ **R10.3's KILL AT THE SCREEN — an answer given under earlier words does not stand.**
+    ///
+    /// The three states have to be told apart, and only the middle one refuses:
+    ///
+    /// 1. no record at all — the pre-log corpus; the leaf's own value decides (must NOT refuse);
+    /// 2. a record whose `prompt_hash` disagrees with the registry's current words — REFUSES as
+    ///    UNANSWERED, naming the changed wording and the exit;
+    /// 3. a record hashing the words the registry asks today — stands.
+    ///
+    /// ★ State 1 is the half that would be easy to get wrong in the fail-CLOSED direction and would
+    ///   still look "safe": treating an absent record as unanswered refuses every return in the
+    ///   corpus, and asserts a provenance nobody ever collected.
+    #[test]
+    fn an_answer_hashed_against_earlier_words_refuses_and_a_missing_record_does_not() {
+        use crate::tax::provenance::{prompt_hash, record_answer, AnswerKey, AnswerState};
+        use crate::tax::questions::{QuestionId, FORM_QUESTIONS};
+
+        let q = FORM_QUESTIONS
+            .iter()
+            .find(|q| q.id == QuestionId::ForeignTrust)
+            .unwrap();
+
+        // (1) The answered leaf with NO record — the whole existing corpus. Must compute.
+        let base = ri();
+        assert_eq!(base.foreign_trust, Some(false));
+        assert!(
+            base.answer_log.is_empty(),
+            "the baseline must carry no record, or this test is not testing state (1)"
+        );
+        assert_eq!(reason(&base), None, "an ABSENT record must not refuse");
+
+        // (2) A record hashed against words nobody asks any more.
+        let mut stale = base.clone();
+        record_answer(
+            &mut stale,
+            AnswerKey::Question(QuestionId::ForeignTrust),
+            "Do you have a foreign trust? (an earlier draft of this sentence)",
+            time::macros::date!(2026 - 09 - 01),
+            AnswerState::Given,
+        );
+        assert_eq!(
+            reason(&stale),
+            Some(q.unanswered.clone()),
+            "a record hashed against EARLIER words must refuse as UNANSWERED"
+        );
+        let detail = screen_inputs(&stale, &tbl(), &params()).unwrap().detail;
+        assert!(
+            detail.contains(crate::tax::provenance::WORDING_CHANGED_REASON),
+            "the refusal must give R12's own reason: {detail}"
+        );
+        assert!(
+            detail.contains("income answer"),
+            "and its exit — a refusal with no exit is a brick with better prose: {detail}"
+        );
+
+        // (3) Re-answered under the CURRENT words: it stands again.
+        let mut fresh = base.clone();
+        record_answer(
+            &mut fresh,
+            AnswerKey::Question(QuestionId::ForeignTrust),
+            q.prompt,
+            time::macros::date!(2026 - 09 - 01),
+            AnswerState::Given,
+        );
+        assert_eq!(
+            fresh.answer_log[&AnswerKey::Question(QuestionId::ForeignTrust)].prompt_hash,
+            prompt_hash(q.prompt)
+        );
+        assert_eq!(
+            reason(&fresh),
+            None,
+            "a current-wording record must not refuse"
+        );
     }
 
     /// ★ **D-8 — and this guard shipped, once, with no test at all.**

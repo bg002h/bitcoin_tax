@@ -15,13 +15,24 @@ use std::collections::BTreeMap;
 /// - **2** — P9: `Person.blind` and `ScheduleAInputs.salt_use_sales_tax` became tri-state; `hsa_present`
 ///   was renamed `hsa_activity` (a *different* question); `dual_status_alien` and the mixed-use-mortgage
 ///   box were added.
+/// - **3** — the INTERVIEW's provenance schema (`SPEC_interview.md` R10 / task T1): `answer_log` +
+///   `answer_log_history` keyed by identity, `payer_tin` / `transcribed_on` on the information-return
+///   rows, and `CarryProvenance::ComputedFromPriorReturn`.
+///
+///   ★★★ **Why a bump, when every new field is `#[serde(default)]` and a v2 blob would load
+///   cleanly?** Because it would load cleanly *and wrongly*. Every declaration on a v2 row has a
+///   VALUE and no `AnswerRecord`, which the model reads as *"answered, but nobody knows when or in
+///   what words"* — and the whole of R10 is the claim that provenance is structural. A row admitted
+///   without it is a row whose answers cannot be re-asked when a prompt changes (R10.3's mismatch rule
+///   has nothing to compare) and cannot be dated on a diligence file. Refuse-and-reimport re-collects
+///   the answers *with* their provenance, which is the only way a v3 row can honestly carry it.
 ///
 /// ★ **P9 §2.6 — there is no migration.** The owner confirmed no real tax data has ever been entered, so a
 /// row at any version other than the current one **REFUSES** (`row_to_inputs`) rather than being read or
 /// per-key unlaundered. A version check cannot forget a key; a hand-written unlaunder list can, and did
 /// (Fable r4 I-4). Retire this the moment real data exists — the first real return needs true migrations,
 /// and prior-year carryforwards are exactly what a filer cannot reconstruct (FOLLOWUPS, release gate).
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 /// Create the `return_inputs` side-table if it does not exist, and bring an OLDER vault's table up to the
 /// current schema. Idempotent — it runs on every `get`/`set`, so it must be safe to call repeatedly.
@@ -381,6 +392,31 @@ mod p9_stale_row_refuses {
                 Err(CliError::StaleReturnInputs { found: 1, .. })
             ),
             "a v1 row must refuse as stale"
+        );
+    }
+
+    /// ★★★ **T1's kill — A VERSION-2 COMMITTED ROW REFUSES.** v2 is the schema the interview's
+    /// provenance work replaced, and it is the version a real vault on disk today would be at: every
+    /// declaration has a value and NO `AnswerRecord`, so admitting it would put answers on a v3 return
+    /// that can never be dated and can never be re-asked when their wording changes (R10.3). The
+    /// remedy the error names — `income clear` → `income import` → `report --write-carryover` —
+    /// re-collects them WITH their provenance.
+    ///
+    /// ★ Pinned to the LITERAL 2, not to `SCHEMA_VERSION - 1`: the point is this specific predecessor,
+    /// and a relative pin would silently follow the constant on the next bump and stop testing it.
+    #[test]
+    fn a_version_2_row_refuses_stale() {
+        let conn = vault_with_row_at_version(2024, 2);
+        assert!(
+            matches!(
+                get(&conn, 2024),
+                Err(CliError::StaleReturnInputs {
+                    year: 2024,
+                    found: 2,
+                    expected: 3
+                })
+            ),
+            "a v2 row (the pre-interview provenance schema) must refuse as stale"
         );
     }
 

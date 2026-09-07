@@ -255,6 +255,13 @@ fn m1_preserve_order_value_output_sites_are_enumerated() {
         //   scan reads test regions too, by design, and gating it would evade the audit rather than
         //   answer it.)
         "btctax-core/src/tax/scrub_axis.rs",
+        // ★ AUDITED 2026-09-06 (SPEC_interview.md R10 / task T1). `provenance.rs`'s `Value` use is
+        //   the LEAF_SOURCE KAT and nothing else: it serializes a `ReturnInputs`, walks it into leaf
+        //   PATHS, and re-deserializes per-leaf probes to classify each leaf's TYPE. Every `Value`
+        //   dies inside the test — the function returns `BTreeSet<String>` and every caller is an
+        //   assertion — so key order cannot reach persisted or fingerprinted bytes, which is the
+        //   invariant this enumeration protects. Same audit and same conclusion as `scrub_axis.rs`.
+        "btctax-core/src/tax/provenance.rs",
     ];
     let crates_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()

@@ -382,6 +382,10 @@ oracle-harness) = **income-show display** (`btctax-cli/src/cmd/tax.rs`, never pa
 **the scrub replaced-field derivation** (`btctax-core/src/tax/scrub_axis.rs`, added 2026-08-09 for
 SPEC_income_scrub.md §3.3: it serializes a `ReturnInputs` and its scrubbed twin ONLY to diff them into
 a `BTreeSet<String>` of field PATHS, so neither `Value` is stored, hashed or emitted and key order
-cannot reach persisted bytes); update-prices is PARSE-only (`from_str`, constructs no output `Value`);
+cannot reach persisted bytes) + **the provenance LEAF_SOURCE KAT**
+(`btctax-core/src/tax/provenance.rs`, added 2026-09-06 for SPEC_interview.md R10: it serializes a
+`ReturnInputs`, walks it into leaf PATHS and re-deserializes per-leaf probes to classify each leaf's
+TYPE, returning a `BTreeSet<String>`; every `Value` dies inside the test, so key order cannot reach
+persisted bytes either); update-prices is PARSE-only (`from_str`, constructs no output `Value`);
 `btctax-forms`/`xtask` serde_json-free. Pinned by the
 `m1_preserve_order_value_output_sites_are_enumerated` scan tripwire.
