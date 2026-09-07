@@ -6,6 +6,21 @@ _Last updated: **2026-09-06**. Written at a deliberate pause; safe to exit. **Re
 
 # ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
 
+> ## ★★★ RESUME 2026-09-07 — THE QUEUE IS EMPTY. Residue sweep 1 verified 6/6, 15/15 kills red, 0C/0I (`…build-residue-sweep-1-verification.md`). No agent in flight. Read this block first.
+>
+> `main` at the commit after `240c9f40`, 3175 tests green, tree clean, ~217 commits unpushed. Every
+> spec-queued track of 2026-09-05/06 is closed (FR-46, FR-49, FR-62, FR-61, FR-63 + the residue).
+> The progress page: https://claude.ai/code/artifact/ff1208a5-0353-4b33-9810-96e0bca8b59b
+> **What remains is the owner's:** S5's 2026-09-15 real-data run of `report --tax-year 2026` (needs
+> the 2026 exports); S8's physical print rehearsal (`btctax extension` + `export-irs-pdf
+> --pay-by-check` now exist); T7 (record the HIFO standing order under Notice 2026-20 before the next
+> 2026 sale — `btctax config --set-forward-method hifo --exchange … --effective-from …`); decisions
+> S1 (TY2025 rehearsal), S2 (name the real 2026 return), S7 (oracle fallback); the push. Then the
+> calendar's next autonomous work is after the finals (Nov 2026 – Jan 2027): the TY2026 Form 8949 and
+> Schedule D ports (two rows; R6 makes them the only gate for a TY2026 slice filing).
+> Process in force: S6 (one prose round → build → one seam review → fold → one re-verification),
+> one opus agent at a time under persisted `BRIEF-*.md`, sonnet for verification.
+
 > ## ★★★ RESUME 2026-09-06 (last) — the residue sweep LANDED (`ca3b3eb9`, 3175 tests; docs `a97db15c`); its ONE sonnet verification (S6) is IN FLIGHT (worktree). Read this block first.
 >
 > When it returns: copy, persist; fold any Critical/Important via one opus agent (else nothing);
