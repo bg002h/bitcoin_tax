@@ -6,6 +6,10 @@ _Last updated: **2026-09-06**. Written at a deliberate pause; safe to exit. **Re
 
 # ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
 
+> ## ★★★ RESUME 2026-09-07 (interview, T2 folded / re-verifying) — T2 landed `1c8a7301`; its seam review (1C/3I/4M/1N, `c5cf40ec`; ledger `edf5dde0`) is FOLDED at `0c942ac2` (3215 green): the archive is now PER REVISION serving TY2024/25/26 (17 editions added, `revision_in_force` derived + pinned, rows resolve their edition from their year, FilerRecords bound to form + line, the document set derived from the manifest, `xtask authority-refresh --check` on demand). The sonnet re-verification (`BRIEF-reverify-interview-T2.md`, worktree at `0c942ac2`, plants kills A–I + the review's own evidence) is IN FLIGHT.
+>
+> When it returns: copy its report out of the worktree, remove the worktree + branch, persist it in its own commit; 0C/0I closes T2 (else fold residue, one more sonnet pass). Then dispatch **T3** with the committed `BRIEF-build-interview-T3.md` (one opus agent, main tree; the document census, the direction tables asserted against both years' extracts, the census join with the direction rule, the residual attestation naming every line it covers, `interview_state()`, the panel in `income answer`) → seam review → persist → ledger → fold → sonnet → T4. T5 owns FR-65 (1099-G box 10, W-2 box 14b). Refresh the progress page (scratchpad `overnight-return.html`, same path = same URL) after T2 closes. The C1 lesson: a brief never pins a YEAR for a per-revision artifact — state the rule and the years served. Owner questions still open: Q1 (2026 documents), Q2 (line 19), Q4 (deposit vs check); S1/S2/S7, T7, the push — owner's.
+
 > ## ★★★ RESUME 2026-09-07 (interview, T1 folded / T2 building) — T1 landed `3142775d`, its seam review (1C/1I/4M/3N, `aeb4db8e`; ledger `f68af570`) FOLDED `d49de0c7` (3202 tests); the sonnet re-verification (worktree) AND the T2 build (opus, main tree, `BRIEF-build-interview-T2.md`) are IN FLIGHT. Read this block first.
 >
 > Pending once they return (do NOT commit while T2's edits are half-done): copy + persist the T1 r2

@@ -6240,6 +6240,13 @@ build, each with an owning phase.
   spec finding (refusal / warning / default / not our concern / doc only). **Owning phase: interview
   build, after T4 (authorable) and T5/T7/T8/T9 (complete for a W-2-plus-crypto filer); first target
   TY2024 (computable today), then TY2025 (S1) and TY2026 (January 2027 package or the R6 slice).**
+- **FR-65 — two 2026-only boxes the per-revision archive exposed (T2 fold `0c942ac2`, from seam
+  review C1). Owning task: interview T5.** (a) Form 1099-G Rev. December 2026 **box 10 "Family leave
+  benefits"** — an INCOME box; censused `RefuseIfNonzero` naming Schedule 1 until T5 chooses the
+  Schedule 1 line and the `RefuseReason` variant. (b) Form W-2 2026 **box 14b "Treasury Tipped
+  Occupation Code(s)"** — the code Schedule 1-A line 4a's tips deduction turns on; censused `NotRead`
+  until T5 joins it to the line-4a gate. Both are the class one pinned edition hid: a box that exists
+  only on the paper the TY2026 filer holds.
   Owner-driven; the assistant prepares the walk (a checklist of moments from `SPEC_interview.md` §6)
   and records the findings verbatim.
 - **FR-47 — `AmtParams` / `FullReturnParams` TY2026 is a NOW item, not a post-finals one.**
