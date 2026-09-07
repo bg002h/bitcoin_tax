@@ -6,6 +6,18 @@ _Last updated: **2026-09-06**. Written at a deliberate pause; safe to exit. **Re
 
 # ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
 
+> ## ★★★ RESUME 2026-09-07 (interview, fold) — the spec's ONE review is persisted (`1312d72b`, 1C/14I/9M/4N; ledger `a33f3ba5`) and its FOLD is IN FLIGHT (opus, prose only, `BRIEF-fold-spec-interview.md`). Read this block first.
+>
+> C1 (the `covered_by` join let an Advisory cover an income line — understatement, silent) gets a
+> DIRECTION RULE + a prompt-names-the-line KAT; I1–I14 fold as the brief lists. When the fold
+> returns: machine-check the report (every blocking finding has a quoted sentence in the spec),
+> commit the spec as r2 = GREEN-by-S6 (no second prose round), then write `BRIEF-build-interview-T1.md`
+> from §7's T1 row (the provenance schema: LEAF_SOURCE + KAT, payer_tin / transcribed_on, the answer
+> log with one writer, Declined, CarryProvenance) and dispatch one opus agent → seam review → fold →
+> sonnet re-verify → T2 (archive the information returns: W-2, 1099-INT/DIV/G/B, 1098, 1098-E +
+> instructions, irs-prior, the b60c600c pattern). Owner questions (spec §9) still open: the 2026
+> document list (S2), line 19 in v1, S1 as the first live walk, direct deposit vs check.
+
 > ## ★★★ RESUME 2026-09-07 (interview) — the INTERVIEW project: recon `bf58fcdb`, brainstorm `c5af3f60`, spec r1 `127cb75c`; its ONE Fable review (S6) is IN FLIGHT (worktree). Read this block first.
 >
 > Owner ask: an interview eliciting income, deductions, real estate, dependents + the exchange
