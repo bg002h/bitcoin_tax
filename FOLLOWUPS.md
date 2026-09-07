@@ -6194,7 +6194,8 @@ build, each with an owning phase.
   to a bundled year, and the 4868 date kills plant their own TY2017-shaped record. **DONE 2026-09-06**
   (the commit after `f9a4679e`; 3168 tests; report `…build-S9-drop-ty2017-implementation.md`, 22 pins
   moved with cause). Cost recorded: three cross-revision B1 measurements kept as history. Sonnet pin
-  verification next; **FR-61 closes on it.**
+  verification `…build-S9-drop-ty2017-verification.md`: 22/23 re-measured exact, 0C/0I (the one miss a
+  narrative miscount). **FR-61 is CLOSED** (2026-09-06).
 - **FR-62 — S10 REVERSED: the crypto slice files a live year from the stored answers (owner,
   2026-09-06: "we will need to have option to file 2026 tax year with crypto sales").** Spec 1099-DA
   **R6** (this commit): the export dispatch becomes three-way — inputs + params → full return; inputs +

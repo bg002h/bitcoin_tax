@@ -6,6 +6,20 @@ _Last updated: **2026-09-06**. Written at a deliberate pause; safe to exit. **Re
 
 # ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
 
+> ## ★★★ RESUME 2026-09-06 (close) — EVERYTHING QUEUED IS CLOSED: FR-46, FR-49, FR-62 (R6), FR-61 (S9 drop). No agent in flight. Read this block first.
+>
+> `main` at the commit after `fe517611`, 3168 tests green, tree clean, ~207 commits unpushed. The
+> progress page is current: https://claude.ai/code/artifact/ff1208a5-0353-4b33-9810-96e0bca8b59b
+> **Nothing autonomous is queued by a spec.** The NOW bucket holds only the owner's items: S5's
+> 2026-09-15 real-data run of `report --tax-year 2026` (needs the 2026 exports), S8's physical print
+> rehearsal (now possible), T7 (Notice 2026-20 standing order before the next 2026 sale), decisions
+> S1/S2/S6/S7, the push. Candidate autonomous work if asked: FR-63 (TUI commit modal clause), the
+> cite-check fixtures for the 4868/1040-V pairs, the §7503 DC-holiday calendar, a named kill for the
+> full return's Section-B unanswered row, the orphaned `slice_broker_refusal` doc block, dropping the
+> TY2017 TaxTable if the owner wants it gone too. Process that held all day: one opus agent at a time
+> under a persisted BRIEF-*, sonnet for verification, the controller persists → ledgers → folds →
+> commits; the R6 spec loop (four rounds, one Critical per fold) is the evidence for the owner's S6.
+
 > ## ★★★ RESUME 2026-09-06 (night 5) — FR-62 CLOSED (R6 green) and the S9 drop LANDED (FR-61 closes on its sonnet pin verification, in flight). Read this block first.
 >
 > When the verification returns: copy, persist; if clean → close FR-61 in FOLLOWUPS + this block,
