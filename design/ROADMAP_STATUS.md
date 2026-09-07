@@ -114,7 +114,12 @@ FR-49) are folded into §3's NOW bucket below and re-owned in `FOLLOWUPS.md`.
   the path to the lived journey the strategy review ranked as the top risk: the owner drives a
   return — their own documents, their four exchange exports — through the interview to a printed
   DRAFT packet and the two oracles, and writes down everything that hurt. This answers spec §9 Q3
-  (the rehearsal IS the interview's first live walk). What it needs, in build order: T1–T4 (the
+  (the rehearsal IS the interview's first live walk). **★ Owner, 2026-09-07: the FILED TY2024 return is
+  in hand as the reference — Forms 1040, Schedule 2, Schedules A, B, D, Forms 8949, 8889, 8959, 8960.**
+  TY2024 has maps and templates for every one of those except **Form 8889 (HSA)**, which btctax refuses
+  (`HsaActivityUnsupported`) — FR-76, an OWNER decision: transcribe Form 8889 as a task (T16) or accept
+  the refusal and compare the other eight by hand. The filed return is the third witness for the
+  simulated run (a real return beside the two oracles) and never enters the repo. What it needs, in build order: T1–T4 (the
   provenance schema, the archived information returns, the document census, the year gate — so a
   TY2026 draft can be authored this autumn), T5 (the 1099 screens), T7/T8 (dependents), T9 (real
   estate), T11 (the oracle path). ★ The earliest COMPUTABLE simulation is on **TY2024** (the only
