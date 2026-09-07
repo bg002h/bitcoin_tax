@@ -6,6 +6,17 @@ _Last updated: **2026-09-06**. Written at a deliberate pause; safe to exit. **Re
 
 # ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
 
+> ## ★★★ RESUME 2026-09-06 (late night) — S6 RULED (one prose round, then build); the RESIDUE SWEEP is next: one opus agent under `BRIEF-build-residue-sweep-1.md`, then one sonnet verification. Read this block first.
+>
+> The sweep: FR-63 (the TUI commit modal's slice clause — a second NOTICE line or a modal-body slot,
+> the ≤104-char kill kept), the §7503 DC legal-holiday calendar (TY2017's 2018-04-17 derived, not
+> typed), the cite-check fixtures for the four 4868/1040-V pairs (the excuse list shrinks 40 → 36),
+> a named kill for the full return's Section-B unanswered restriction row, the orphaned
+> `slice_broker_refusal` doc block. NOT in the sweep: the two TY2025 authorities still missing
+> (f8275 non-R — the IRS has only Rev. 10-2024, aliased; f8995a--2025 — see the curl in the commit
+> message) — they belong to S1 (TY2025 rehearsal), unruled. After the sweep: nothing autonomous is
+> queued; the owner's items stand (S5 09-15 data run, S8 rehearsal, T7, S1/S2/S7, the push).
+
 > ## ★★★ RESUME 2026-09-06 (close) — EVERYTHING QUEUED IS CLOSED: FR-46, FR-49, FR-62 (R6), FR-61 (S9 drop). No agent in flight. Read this block first.
 >
 > `main` at the commit after `fe517611`, 3168 tests green, tree clean, ~207 commits unpushed. The

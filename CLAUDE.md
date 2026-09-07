@@ -19,8 +19,10 @@ Operating reminders (full detail in `STANDARD_WORKFLOW.md`):
   rule exists to override. Ceremony scales *down* for small work; it is never
   removed (§8).
 - **Independent review.** Author ≠ reviewer on the same artifact at the same time.
-  Persist every reviewer's output verbatim **before** folding it. Re-review after
-  every fold — including the last.
+  Persist every reviewer's output verbatim **before** folding it. ★ Owner ruling
+  S6 (2026-09-06): a PROSE artifact (spec, plan) gets ONE round, then the build;
+  the BUILD gate keeps the full loop (seam review → fold → re-verification, until
+  0C/0I). See `STANDARD_WORKFLOW.md` §2 "Owner ruling S6".
 - **Artifacts:** `BRAINSTORM_*`, `SPEC_*`, `IMPLEMENTATION_PLAN_*`, a `reviews/`
   directory, and `FOLLOWUPS.md`. Verify citations against current source at write
   time.

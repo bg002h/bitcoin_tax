@@ -119,9 +119,27 @@ rubric as adversary-of-record with a written checklist; bring in a second pair o
 eyes whenever the stakes justify it. The guarantee is only as strong as this
 separation.)
 
-**The loop continues after *every* fold — including the last one.** Folding a
-finding can introduce new drift, so a fold is never "done" until a fresh review
-confirms it. "Reviewed once -> fixed -> shipped" is insufficient: the fix itself
+### ★ Owner ruling S6 (2026-09-06) — one round per PROSE artifact, then execute
+
+For a **spec or plan**, the loop above runs ONCE: dispatch → persist verbatim →
+machine-check ledger → fold → **build**. A second prose round is dispatched only
+when the first found a Critical that changes the SHAPE of the design, and then
+scoped to that change alone. The 0 Critical / 0 Important bar is unchanged for
+the **build gate**: implement → one independent seam review (a worktree at the
+commit, scoped per B3) → persist → ledger → fold → one independent
+re-verification that plants every kill red → close. Fan-outs are at most six
+lenses; no new instrument lands without a named consumer on the owner's path.
+
+*Why (measured here, 2026-09-06):* spec 1099-DA rule R6 went through four prose
+rounds and each found exactly one Critical in the previous fold — a fold is
+authorship nobody has executed, so prose review converges slowly. The build's
+seam review, which RUNS the code, then found the defect that mattered. The
+2026-07 AMT plan showed the same shape. Every compute/emitter/provenance gate,
+the B1 kills, the two-oracle census and the single B3 pre-mail review are kept.
+
+**The loop continues after *every* fold — including the last one — for the
+BUILD gate.** Folding a finding can introduce new drift, so a fold is never
+"done" until a fresh review confirms it. "Reviewed once -> fixed -> shipped" is insufficient: the fix itself
 is unreviewed. This applies to *post-implementation* folds too — a "mechanical"
 correction made just before shipping re-enters the loop; it does not get
 self-verified and waved through.
