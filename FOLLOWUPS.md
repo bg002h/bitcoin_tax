@@ -6233,6 +6233,15 @@ build, each with an owning phase.
   `tax_inputs_notables_notice_carries_the_slice_clause_only_when_the_slice_would_print` — TY2025 +
   seeded answers renders it, TY2025 with no answers does not, TY2099 (no templates) does not, and
   both rows are asserted ≤ 104 chars and present in the rendered buffer.
+- **FR-64 — the SIMULATED REAL RETURN through the interview (owner, 2026-09-07).** *"We will plan to
+  use the interview to simulate a real tax return."* The lived journey (strategy review S1/S5/S8; the
+  memory `lived-journey-scheduled-last`): the owner's documents + four exchange exports → the interview
+  → a printed DRAFT packet + the two oracles → a written list of everything that hurt, each item a
+  spec finding (refusal / warning / default / not our concern / doc only). **Owning phase: interview
+  build, after T4 (authorable) and T5/T7/T8/T9 (complete for a W-2-plus-crypto filer); first target
+  TY2024 (computable today), then TY2025 (S1) and TY2026 (January 2027 package or the R6 slice).**
+  Owner-driven; the assistant prepares the walk (a checklist of moments from `SPEC_interview.md` §6)
+  and records the findings verbatim.
 - **FR-47 — `AmtParams` / `FullReturnParams` TY2026 is a NOW item, not a post-finals one.**
   Transcribe from Rev. Proc. 2025-32 §2.10: exemptions (MFJ $140,200 / single $90,100 / MFS
   $70,100 / trusts $31,400), 28% breakpoints ($122,250 MFS / $244,500 others), and per status BOTH

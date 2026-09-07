@@ -6,6 +6,16 @@ _Last updated: **2026-09-06**. Written at a deliberate pause; safe to exit. **Re
 
 # ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
 
+> ## ★★★ RESUME 2026-09-07 (interview, T1) — spec r2 GREEN by S6 (`62424903`); T1 (provenance schema) is BUILDING with one opus agent (`BRIEF-build-interview-T1.md`); its review brief `BRIEF-review-interview-T1.md` is on disk UNCOMMITTED with the roadmap/spec/FOLLOWUPS edits below. Read this block first.
+>
+> **Owner, 2026-09-07: "We will plan to use the interview to simulate a real tax return."** Recorded
+> in `ROADMAP_STATUS.md` §0a (the simulated real return), spec §9 Q3 (answered: yes), FR-64, memory
+> `interview-project`. It is the lived journey; first computable target TY2024. Pending commits once
+> T1 returns (do NOT commit while its edits are half-done): the T1 build (code + report), then these
+> doc edits + the review brief, then dispatch the T1 seam review (opus, worktree) → persist → ledger →
+> fold → sonnet re-verify → T2 (archive the information returns). Owner questions still open: Q1 (the
+> 2026 document list), Q2 (line 19), Q4 (deposit vs check).
+
 > ## ★★★ RESUME 2026-09-07 (interview, fold) — the spec's ONE review is persisted (`1312d72b`, 1C/14I/9M/4N; ledger `a33f3ba5`) and its FOLD is IN FLIGHT (opus, prose only, `BRIEF-fold-spec-interview.md`). Read this block first.
 >
 > C1 (the `covered_by` join let an Advisory cover an income line — understatement, silent) gets a

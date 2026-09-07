@@ -1276,7 +1276,10 @@ re-verification (S6).
 2. **Line 19 in v1.** Accept the visible forgo of the child tax credit until Schedule 8812 is
    transcribed from the TY2026 final (T15), or pull T15 into v1 after finals? — *With dependents, up to
    the statutory maximum per child is on the extension deadline; without, the question is moot.*
-3. **Is the S1 rehearsal the interview's first live walk?** — *Recommended yes: the TY2025 documents in
+3. **Is the S1 rehearsal the interview's first live walk?** — **ANSWERED 2026-09-07: yes.** *"We will
+   plan to use the interview to simulate a real tax return."* The simulated return is the lived journey;
+   the first computable target is TY2024 (see `ROADMAP_STATUS.md` §0a), TY2025 on the S1 ruling, TY2026
+   with the January 2027 package or the R6 slice. *(original question follows)*  — *Recommended yes: the TY2025 documents in
    Sep–Dec 2026 are the only way to find the missing-at-moments before the ten-week window that also
    holds finals, OTS 2026 and the first 1099-DAs. If S1 stays declined, the first walk is your own
    February 2027 return and every J-n found then lands on the extension.*

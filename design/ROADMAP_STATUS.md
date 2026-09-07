@@ -109,6 +109,20 @@ FR-49) are folded into §3's NOW bucket below and re-owned in `FOLLOWUPS.md`.
   FR-49 CLOSED** (3153 tests). Form 4868 with payment is what the extension-by-default calendar
   needs on 2027-04-15; the physical print rehearsal (S8) is still the owner's.
 
+- **THE SIMULATED REAL RETURN (owner, 2026-09-07: "We will plan to use the interview to simulate a
+  real tax return").** The interview (`LONG_RANGE_PLAN_filing.md` Phase 7, `SPEC_interview.md` r2) is
+  the path to the lived journey the strategy review ranked as the top risk: the owner drives a
+  return — their own documents, their four exchange exports — through the interview to a printed
+  DRAFT packet and the two oracles, and writes down everything that hurt. This answers spec §9 Q3
+  (the rehearsal IS the interview's first live walk). What it needs, in build order: T1–T4 (the
+  provenance schema, the archived information returns, the document census, the year gate — so a
+  TY2026 draft can be authored this autumn), T5 (the 1099 screens), T7/T8 (dependents), T9 (real
+  estate), T11 (the oracle path). ★ The earliest COMPUTABLE simulation is on **TY2024** (the only
+  year with `FullReturnParams` and a validated packet) with 2024-shaped documents; a TY2025
+  simulation additionally needs the S1 ruling (TY2025 params); a TY2026 one needs the January 2027
+  package for the full return, or R6's crypto slice once the 2026 finals are bundled. Owner items
+  it depends on: Q1 (the document list), Q4 (deposit vs check); Q2 (line 19) shapes T15.
+
 - **T7 (spec 1099-DA, recorded 2026-09-06) — the OWNER ACTION under Notice 2026-20 §4.02(2). Dated:
   before the next 2026 sale on a custodial venue, and no later than 2026-09-30 (strategy S3's month).**
   `legal/text/irs-guidance/Notice_2026-20.txt`: the relief period is 2025-01-01 through 2026-12-31
