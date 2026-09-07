@@ -182,7 +182,10 @@ pub enum CliError {
     /// scrub-marker guard *"and NOTHING else"*, and a filer loading a scrubbed copy into a scratch
     /// vault must not thereby authorise destroying an interview.
     #[error(
-        "year {year} has a work-in-progress draft holding {holdings}, and this write would discard          it. Nothing was written. Re-run with --discard-draft to discard it deliberately, or open          the tax-inputs form for {year} to finish it (and commit it, once the year's package has          arrived)."
+        "year {year} has a work-in-progress draft holding {holdings}, and this write would \
+         discard it. Nothing was written. Re-run with --discard-draft to discard it \
+         deliberately, or open the tax-inputs form for {year} to finish it (and commit it, \
+         once the year's package has arrived)."
     )]
     NonTrivialDraftBlocksWrite { year: i32, holdings: String },
     /// ★★★ **T4 / R11 — the §6.3 stale-WIP DISCARD, refused when the draft holds an interview.**
@@ -193,7 +196,10 @@ pub enum CliError {
     /// re-typing. The parked half of §6.3 already fails closed for the same reason (C-1); this is
     /// the WIP half, narrowed to the drafts that are not in fact regenerable.
     #[error(
-        "year {year}'s draft is schema v{found} but this build expects v{expected}, and it holds          {holdings} — an upgrade changed the input format, so this build cannot read it. It was          NOT discarded. Re-run on the app version that wrote it and commit (or export) it there;          or discard it deliberately from the tax-inputs form for {year}."
+        "year {year}'s draft is schema v{found} but this build expects v{expected}, and it \
+         holds {holdings} — an upgrade changed the input format, so this build cannot read \
+         it. It was NOT discarded. Re-run on the app version that wrote it and commit (or \
+         export) it there; or discard it deliberately from the tax-inputs form for {year}."
     )]
     StaleDraftHoldsInterview {
         year: i32,

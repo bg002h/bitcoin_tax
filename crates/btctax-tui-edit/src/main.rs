@@ -846,6 +846,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
             stale_note,
             year_gate: btctax_cli::year_readiness::EntryStates::package_only(year),
             discard_offered: false,
+            discard_is_parked: false,
             active_source_label,
             pending_remove: None,
             descent: None,
@@ -870,6 +871,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 stale_note,
                 year_gate: btctax_cli::year_readiness::EntryStates::package_only(year),
                 discard_offered: false,
+                discard_is_parked: false,
                 active_source_label,
                 pending_remove: None,
                 descent: None,
@@ -895,6 +897,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 stale_note,
                 year_gate: btctax_cli::year_readiness::EntryStates::package_only(year),
                 discard_offered: false,
+                discard_is_parked: false,
                 active_source_label,
                 pending_remove: None,
                 descent: None,
@@ -931,6 +934,8 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 stale_note: None,
                 year_gate: btctax_cli::year_readiness::EntryStates::package_only(year),
                 discard_offered: true,
+                // ★ M-1: the chrome follows the refusal that opened this screen.
+                discard_is_parked: matches!(e, btctax_cli::CliError::StaleParkedDraft { .. }),
                 active_source_label,
                 pending_remove: None,
                 descent: None,
@@ -12712,6 +12717,89 @@ mod tests {
         assert!(
             one_open.contains("interview: 1 question(s) still to answer · return: NOT computable"),
             "the interview half counts the open items:\n{one_open}"
+        );
+    }
+
+    /// ★★★ **T4 fold, seam review M-1 — the discard-only screen's chrome follows the refusal that
+    ///     opened it.**
+    ///
+    /// Two drafts route to this screen and they are not the same thing: a stale PARKED draft is a
+    /// return the filer WITHDREW, and a stale WIP draft holding work (T4/C-1) is one they are still
+    /// writing. The kill is the PAIR — a test that only looked at the parked case would pass on a
+    /// screen that says "parked" about both, which is the shipped defect.
+    #[test]
+    fn the_discard_only_screen_never_calls_an_unreadable_wip_draft_parked() {
+        use ratatui::{backend::TestBackend, Terminal};
+
+        let screen_for = |parked: bool| -> String {
+            let (mut app, _dir) = unlocked_app_on_empty_vault(2026);
+            let mut form = crate::edit::form::TaxInputsFormState::fresh(
+                2026,
+                time::macros::date!(2026 - 09 - 01),
+            );
+            form.discard_offered = true;
+            form.discard_is_parked = parked;
+            form.parked = parked;
+            form.error = Some(if parked {
+                btctax_cli::CliError::StaleParkedDraft {
+                    year: 2026,
+                    found: 1,
+                    expected: 3,
+                }
+                .to_string()
+            } else {
+                btctax_cli::CliError::StaleDraftHoldsInterview {
+                    year: 2026,
+                    found: 1,
+                    expected: 3,
+                    holdings: "3 recorded answer(s)".into(),
+                }
+                .to_string()
+            });
+            app.tax_inputs_form = Some(form);
+
+            let backend = TestBackend::new(120, 40);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
+            let buf = terminal.backend().buffer().clone();
+            let area = buf.area();
+            (0..area.height)
+                .map(|y| {
+                    (0..area.width)
+                        .map(|x| buf.cell((x, y)).map_or(" ", |c| c.symbol()))
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        let parked = screen_for(true);
+        assert!(
+            parked.contains("Stale parked draft for 2026")
+                && parked.contains("discard the parked draft"),
+            "the parked case keeps its wording:\n{parked}"
+        );
+
+        let wip = screen_for(false);
+        assert!(
+            !wip.contains("parked"),
+            "a WIP draft holding work is NOT parked — the word must not appear:\n{wip}"
+        );
+        assert!(
+            wip.contains("cannot open") && wip.contains("Press X to discard this draft"),
+            "and the screen says what it actually is:\n{wip}"
+        );
+        // ★ The payload WRAPS inside the 78-column pane, so it is asserted on the flattened text —
+        //   which is the stronger check anyway: it pins the clause in its sentence rather than as a
+        //   loose substring, and it would still red if the pane clipped it.
+        let flat = wip
+            .replace(['│', '┌', '┐', '└', '┘', '─'], " ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            flat.contains("holds 3 recorded answer(s)"),
+            "the payload the filer is confirming against is still shown:\n{wip}"
         );
     }
 

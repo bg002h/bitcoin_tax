@@ -164,15 +164,27 @@ pub struct StaleNote {
     pub year: i32,
     pub found: i64,
     pub expected: i64,
+    /// ★★ T4 fold, seam review M-3 — `Some(clause)` when the stale draft was **KEPT** rather than
+    /// discarded: it holds work (T4/C-1), so [`load`] refuses it to a writer and [`load_for_read`]
+    /// hands a read-only caller this note instead. `None` is the §6.3 discard the note was born for.
+    pub kept_holdings: Option<String>,
 }
 
 impl std::fmt::Display for StaleNote {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "discarded a stale draft for {} (schema v{}, expected v{})",
-            self.year, self.found, self.expected
-        )
+        match &self.kept_holdings {
+            None => write!(
+                f,
+                "discarded a stale draft for {} (schema v{}, expected v{})",
+                self.year, self.found, self.expected
+            ),
+            Some(held) => write!(
+                f,
+                "KEPT a stale draft for {} (schema v{}, expected v{}) holding {held} — this build \
+                 cannot read it, so it was skipped, not deleted",
+                self.year, self.found, self.expected
+            ),
+        }
     }
 }
 
@@ -209,13 +221,13 @@ pub fn load(conn: &Connection, year: i32) -> Result<(Loaded, Option<StaleNote>),
             //     (`record_answer` writes one only when btctax itself asked), and on a year with no
             //     package the draft is the only store there is. So the discard is now narrowed to
             //     the drafts §6.3 was written about, and the rest fail closed like the parked half.
-            let held = draft_holdings(&d.ri);
-            if !held.is_empty() {
+            // ★★★ FOLD C-1 — the same structural decision, so the two paths cannot diverge.
+            if !draft_is_disposable(&d.ri) {
                 return Err(CliError::StaleDraftHoldsInterview {
                     year,
                     found: d.version,
                     expected: SCHEMA_VERSION,
-                    holdings: held.describe(),
+                    holdings: describe_draft(&d.ri),
                 });
             }
             // ★ §6.3 / I-1: a stale WIP draft is regenerable — discard it and RETURN the note (never
@@ -225,6 +237,7 @@ pub fn load(conn: &Connection, year: i32) -> Result<(Loaded, Option<StaleNote>),
                 year,
                 found: d.version,
                 expected: SCHEMA_VERSION,
+                kept_holdings: None, // §6.3: this one really was discarded
             };
             return Ok((committed_or_fresh(conn, year)?, Some(note)));
         } else {
@@ -238,6 +251,43 @@ pub fn load(conn: &Connection, year: i32) -> Result<(Loaded, Option<StaleNote>),
         }
     }
     Ok((committed_or_fresh(conn, year)?, None))
+}
+
+/// ★★★ **T4 fold, seam review M-3 — the READ-ONLY resolution of a year's working return.**
+///
+/// [`load`] fails closed on a stale draft that holds work (C-1): a caller about to WRITE must not
+/// proceed past a draft this build cannot read. A read-only caller is a different question — it
+/// deletes nothing, and refusing it turns *"your draft is unreadable"* into *"you cannot look at
+/// this year at all"*: a new hard failure on `report`, `income show-broker-answers`,
+/// `export-irs-pdf`'s broker path and `income scrub`, reachable the first time `SCHEMA_VERSION`
+/// moves.
+///
+/// So a read-only caller SKIPS the unreadable draft — **keeping** it — falls through to the
+/// committed row, and is handed a [`StaleNote`] saying so. Every existing renderer of that note
+/// already words it as *"skipped … Nothing was deleted"* (`cmd/tax.rs`'s scrub note,
+/// `cmd/admin.rs`'s `stale_draft_note`), which is exactly true on this path and was only
+/// approximately true on the §6.3 one.
+pub fn load_for_read(
+    conn: &Connection,
+    year: i32,
+) -> Result<(Loaded, Option<StaleNote>), CliError> {
+    match load(conn, year) {
+        Err(CliError::StaleDraftHoldsInterview {
+            year,
+            found,
+            expected,
+            holdings,
+        }) => Ok((
+            committed_or_fresh(conn, year)?,
+            Some(StaleNote {
+                year,
+                found,
+                expected,
+                kept_holdings: Some(holdings),
+            }),
+        )),
+        other => other,
+    }
 }
 
 /// ★★★ spec 1099-DA T9 — **the year's WORKING return, for a reader that must not create a row.**
@@ -260,7 +310,8 @@ pub fn working_return(
     conn: &Connection,
     year: i32,
 ) -> Result<(Option<ReturnInputs>, Option<StaleNote>), CliError> {
-    let (loaded, note) = load(conn, year)?;
+    // ★ M-3: read-only — an unreadable draft is skipped and kept, never a hard failure.
+    let (loaded, note) = load_for_read(conn, year)?;
     let ri = match loaded {
         // A parked draft is a WITHDRAWN return — not the working one (see above).
         Loaded::Draft { parked: true, .. } => None,
@@ -350,7 +401,57 @@ impl DraftHoldings {
     }
 }
 
+/// ★★★ **T4 fold, seam review C-1 — THE DISPOSABLE PREDICATE, AND IT NAMES NO CATEGORY.**
+///
+/// A draft is disposable exactly when it is still the year's FRESH SEED: a tax year and a filing
+/// status over `ReturnInputs::default()`. Anything else — one scalar, one answer, one row, one
+/// struct that does not exist yet — is work, and work is never destroyed on a note.
+///
+/// ★★ **Why a comparison and not a list.** T4 shipped [`DraftHoldings::is_empty`] as the decision,
+///    and it enumerates four categories. `ReturnInputs.broker_reporting` is not among them — and
+///    this file's own header calls it *"the primary authoring path on a params-less year"* — so a
+///    TY2026 draft holding the Form 1099-DA answers and a Schedule C reported *nothing* and was
+///    destroyed, unconfirmed, by `income import`, `income clear`, `report --write-carryover` and
+///    `load`'s stale discard. The failure direction of a list is OPEN: whatever is not on it is
+///    disposable. A comparison against the seed fails CLOSED, so a field added to `ReturnInputs`
+///    tomorrow is protected the day it is added and no one has to remember this file.
+///
+/// ★ The seed carries the filer's `tax_year` and `filing_status` rather than being bare
+///   `Default::default()`: opening a year and choosing a status is not work, and treating it as
+///   work would demand a confirmation for the crash-scratch §6.2 was actually written about.
+///   Everything past that point is.
+#[must_use]
+pub fn draft_is_disposable(ri: &ReturnInputs) -> bool {
+    *ri == ReturnInputs {
+        tax_year: ri.tax_year,
+        filing_status: ri.filing_status,
+        ..Default::default()
+    }
+}
+
+/// The clause a refusal or a discard note prints for `ri` — [`DraftHoldings::describe`], with the
+/// fallback the structural predicate makes necessary.
+///
+/// ★★ [`draft_is_disposable`] can say *"this holds work"* about a field [`DraftHoldings`] does not
+///    count, and a filer must never be told a draft holds **nothing** at the moment they are being
+///    asked to confirm destroying it. So a non-disposable draft with no itemised category is
+///    described as *"work not otherwise itemised"* — the honest answer, and the one that stays true
+///    as `ReturnInputs` grows.
+#[must_use]
+pub fn describe_draft(ri: &ReturnInputs) -> String {
+    let held = draft_holdings(ri);
+    let unitemised = !draft_is_disposable(ri) && held.is_empty();
+    match (held.is_empty(), unitemised) {
+        (true, true) => "work not otherwise itemised".to_string(),
+        (true, false) => "nothing".to_string(),
+        _ => held.describe(),
+    }
+}
+
 /// [`DraftHoldings`] for one return.
+///
+/// ★ This is the MESSAGE's input, not the decision's — see [`draft_is_disposable`], which is what
+///   `coherence_check` and `load` key on.
 #[must_use]
 pub fn draft_holdings(ri: &ReturnInputs) -> DraftHoldings {
     use btctax_core::tax::document_census::{declared_rows, DocumentRow};
@@ -375,9 +476,11 @@ pub enum DraftCoherence {
     Absent,
     /// A WIP draft holding nothing an interview put there: §6.2's disposable crash-scratch.
     Disposable,
-    /// A WIP draft holding an interview, whose discard the caller has explicitly CONFIRMED
-    /// (`--discard-draft` on the CLI; a payload-confirm in the TUI).
-    ConfirmedDiscard(DraftHoldings),
+    /// A WIP draft holding work, whose discard the caller has explicitly CONFIRMED
+    /// (`--discard-draft` on the CLI; a payload-confirm in the TUI). Carries the rendered clause
+    /// naming what will be lost — see [`describe_draft`], which is where the *"work not otherwise
+    /// itemised"* fallback lives.
+    ConfirmedDiscard(String),
 }
 
 /// §6.2 draft-coherence, READ HALF: what an authoritative committed-row write is about to
@@ -411,16 +514,20 @@ pub fn coherence_check(
             let Some(d) = get_draft_row(conn, year)? else {
                 return Ok(DraftCoherence::Absent);
             };
-            let held = draft_holdings(&d.ri);
-            if held.is_empty() {
+            // ★★★ FOLD C-1 — the DECISION is [`draft_is_disposable`], a comparison against the
+            //     year's fresh seed. It reads no category list, so a draft holding something this
+            //     file has never heard of (the Form 1099-DA answers were the shipped instance) is
+            //     protected. `describe_draft` renders the message, and only the message.
+            if draft_is_disposable(&d.ri) {
                 return Ok(DraftCoherence::Disposable);
             }
+            let clause = describe_draft(&d.ri);
             if discard_draft {
-                Ok(DraftCoherence::ConfirmedDiscard(held))
+                Ok(DraftCoherence::ConfirmedDiscard(clause))
             } else {
                 Err(CliError::NonTrivialDraftBlocksWrite {
                     year,
-                    holdings: held.describe(),
+                    holdings: clause,
                 })
             }
         }
@@ -449,8 +556,8 @@ pub fn coherence_clear(
             delete_draft(conn, year)?;
             Ok(())
         }
-        DraftCoherence::ConfirmedDiscard(held) => {
-            eprintln!("{}", discard_note(year, held));
+        DraftCoherence::ConfirmedDiscard(clause) => {
+            eprintln!("{}", discard_note(year, clause));
             delete_draft(conn, year)?;
             Ok(())
         }
@@ -462,11 +569,8 @@ pub fn coherence_clear(
 /// by [`tests::the_confirmed_discard_note_names_what_was_lost`], rather than an `eprintln!` nobody
 /// can assert on.
 #[must_use]
-pub fn discard_note(year: i32, held: &DraftHoldings) -> String {
-    format!(
-        "note: discarded the {year} work-in-progress draft as requested; it held {}.",
-        held.describe()
-    )
+pub fn discard_note(year: i32, clause: &str) -> String {
+    format!("note: discarded the {year} work-in-progress draft as requested; it held {clause}.")
 }
 
 /// [`coherence_check`] then [`coherence_clear`] — the shape a writer wants when its own screens
@@ -862,7 +966,8 @@ mod tests {
             Some(StaleNote {
                 year: 2024,
                 found: 0,
-                expected: SCHEMA_VERSION
+                expected: SCHEMA_VERSION,
+                kept_holdings: None,
             }),
             "the stale-WIP discard returns the note (not an eprintln!)"
         );
@@ -913,7 +1018,8 @@ mod tests {
             Some(StaleNote {
                 year: 2026,
                 found: 2,
-                expected: 3
+                expected: 3,
+                kept_holdings: None,
             }),
             "a v2 WIP draft must be discarded WITH the note (never silently)"
         );
@@ -1354,7 +1460,7 @@ mod tests {
         coherence_clear(&conn, 2026, &checked).unwrap();
         assert!(!draft_exists(&conn, 2026).unwrap());
 
-        // A disposable draft needs no confirmation, exactly as before T4.
+        // A disposable draft — the year's fresh seed — needs no confirmation, exactly as before T4.
         set_draft_row(&conn, 2026, &ReturnInputs::default(), false).unwrap();
         assert_eq!(
             coherence_check(&conn, 2026, false).unwrap(),
@@ -1383,7 +1489,7 @@ mod tests {
             AnswerState::Given,
         );
         ri.w2s.push(W2::default());
-        let note = discard_note(2026, &draft_holdings(&ri));
+        let note = discard_note(2026, &describe_draft(&ri));
         assert!(note.contains("2026"), "{note}");
         assert!(note.contains("1 recorded answer(s)"), "{note}");
         assert!(note.contains("1 Form W-2 row(s)"), "{note}");

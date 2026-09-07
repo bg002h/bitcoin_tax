@@ -2215,19 +2215,38 @@ fn draw_tax_inputs_remove_modal(frame: &mut Frame, area: Rect, form: &TaxInputsF
     frame.render_widget(p, rect);
 }
 
-/// ★ P2-a: the stale-PARKED-draft discard-only screen — the message + the back-out hint, NO editing
-/// surface (Task 8 wires the 'X' → `discard_parked_draft`).
+/// ★ P2-a: the discard-only screen for a draft `load` refuses to open — the message + the back-out
+/// hint, NO editing surface (the 'X' goes to `discard_blocked_draft`).
+///
+/// ★★ **T4 fold, seam review M-1 — the chrome DERIVES from which refusal opened the screen.** Two
+///    drafts land here and they are not the same thing: a stale PARKED draft is a return the filer
+///    WITHDREW, while a stale WIP draft holding work (T4/C-1) is a return they are still writing.
+///    Calling the second one "parked" tells the filer their in-progress interview is something it is
+///    not, on the screen where they are being asked to destroy it.
 fn draw_tax_inputs_discard(
     frame: &mut Frame,
     area: Rect,
     form: &TaxInputsFormState,
     status: Option<&str>,
 ) {
+    let (heading, title, prompt) = if form.discard_is_parked {
+        (
+            format!("Stale parked draft for {}", form.year),
+            " Tax inputs — stale parked draft ",
+            "Press X to discard the parked draft, Esc to back out.",
+        )
+    } else {
+        (
+            format!("Draft for {} that this build cannot open", form.year),
+            " Tax inputs — draft this build cannot open ",
+            "Press X to discard this draft, Esc to back out.",
+        )
+    };
     let rect = centered_rect(78, 14, area);
     frame.render_widget(Clear, rect);
     let mut v = vec![
         Line::from(Span::styled(
-            format!("Stale parked draft for {}", form.year),
+            heading,
             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
@@ -2248,12 +2267,14 @@ fn draw_tax_inputs_discard(
         }
         v.push(Line::from(""));
     }
-    v.push(Line::from(
-        "Press X to discard the parked draft, Esc to back out.",
-    ));
-    let p = Paragraph::new(v).block(
+    v.push(Line::from(prompt));
+    // ★★ T4 fold (M-1, found by its own kill): the error IS the confirmation's payload, and at 78
+    //    columns the T4 refusals run past the edge — the `{holdings}` clause, the one thing the
+    //    filer is confirming against, was clipped off. Wrap, so the payload is legible rather than
+    //    merely present.
+    let p = Paragraph::new(v).wrap(Wrap { trim: false }).block(
         Block::default()
-            .title(" Tax inputs — stale parked draft ")
+            .title(title)
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Red)),
     );

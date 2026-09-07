@@ -1586,10 +1586,15 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
         {
             return refuse(
                 RefuseReason::SalesTaxElectionWithoutAmount,
+                // ★ T4 fold, seam review M-2: the `income answer` exit is GONE. This rule is in the
+                //   import tier now (`ScreenTier`), and on a params-less year with no committed row
+                //   `income answer` refuses — `income import`, the command that just refused, is the
+                //   only path that could have created the row it would be answered on. Both exits
+                //   named here are edits to the file the filer is holding.
                 "the §164(b)(5) sales-tax election is ON but `salt_sales_tax_amount` is $0, so Schedule A \
                  line 5a would be $0 and your state/local income taxes (W-2 box 17/19 withholding, \
-                 estimates, prior-year balance) drop out — enter the amount and re-run `btctax income \
-                 import`, or run `btctax income answer` to turn the election off and deduct income taxes",
+                 estimates, prior-year balance) drop out — enter the amount, or clear \
+                 `salt_use_sales_tax` to deduct income taxes instead, and re-run `btctax income import`",
             );
         }
     }
@@ -4292,16 +4297,26 @@ mod tests {
         let refusal =
             screen_inputs(&r, &tbl(), &params()).expect("estimated-payments SALT must refuse");
         assert_eq!(refusal.reason, RefuseReason::SalesTaxElectionWithoutAmount);
-        // ★ MINOR-2 — the detail NAMES both exits: `income import` (to enter the amount — `answer` can't
-        // capture a dollar figure) and `income answer` (to flip the skippable election off).
+        // ★ MINOR-2 — the detail NAMES BOTH exits. **T4 fold, seam review M-2: the second exit is no
+        //   longer `income answer`.** This rule joined the param-free tier in T4, so it now fires at
+        //   IMPORT — and on a params-less year with no committed row `income answer` refuses ("no
+        //   full-return inputs and no draft"), because `income import`, the command that just
+        //   refused, is the only path that could have created the row it would be answered on. Both
+        //   exits are therefore edits to the file the filer is holding: enter the amount, or clear
+        //   the election key. MINOR-2's requirement — *two* exits, not one — still binds.
         assert!(
             refusal.detail.contains("income import"),
             "{}",
             refusal.detail
         );
         assert!(
-            refusal.detail.contains("income answer"),
-            "{}",
+            refusal.detail.contains("salt_use_sales_tax"),
+            "the second exit must be reachable from the TOML: {}",
+            refusal.detail
+        );
+        assert!(
+            !refusal.detail.contains("income answer"),
+            "a rule in the IMPORT tier must not prescribe `income answer`: {}",
             refusal.detail
         );
 
@@ -5002,6 +5017,40 @@ mod param_free_tier {
                 "`income import` screens on a year with NO package — {name} must fire there too"
             );
         }
+    }
+
+    /// ★★★ **T4 fold, seam review M-2 — NO REFUSAL IN THE IMPORT TIER MAY PRESCRIBE
+    ///     `income answer`.**
+    ///
+    /// T4 moved these rules from commit-time to import-time. On a params-less year with no committed
+    /// row that exit does not exist: `income answer` refuses with *"no full-return inputs and no
+    /// draft"*, and `income import` — the command that just refused — is the only path that could
+    /// have created the row it would be answered on. It is the same reasoning as the unanswered
+    /// tier's, one rule at a time.
+    ///
+    /// ★ Behavioural, not a source grep: it reads the DETAIL each fixture actually produces through
+    ///   [`screen_param_free`], so a rule joining the tier with that clause reds this the same day —
+    ///   and a rule whose clause is assembled at runtime (`entry_route`, a formatted exit sentence)
+    ///   is covered, which a grep over literals would miss.
+    ///
+    /// ★ The UNANSWERED tier is exempt BY CONSTRUCTION and correctly so: it never runs at import
+    ///   (`ScreenTier::unanswered_refuses`), so its registry details name `income answer` truthfully.
+    #[test]
+    fn no_refusal_in_the_import_tier_prescribes_income_answer() {
+        let mut named: Vec<&str> = Vec::new();
+        for (name, r) in param_free_fixtures() {
+            let detail = screen_param_free(&r)
+                .unwrap_or_else(|| panic!("{name} must refuse on its own fixture"))
+                .detail;
+            if detail.contains("income answer") {
+                named.push(name);
+            }
+        }
+        assert!(
+            named.is_empty(),
+            "these import-tier refusals prescribe `income answer`, which a refused import cannot \
+             reach: {named:?}"
+        );
     }
 
     /// The other side of the tier: a rule that reads the year's package fires at commit and is

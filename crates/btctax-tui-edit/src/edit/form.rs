@@ -211,6 +211,11 @@ pub struct TaxInputsFormState {
     /// state the flow renders ONLY the stale-parked message + an 'X' to discard (Task 8) / Esc to back
     /// out — NOT a normal editing form — so the undiscardable parked draft becomes discardable in-app.
     pub discard_offered: bool,
+    /// ★★ T4 fold, seam review M-1 — WHICH refusal opened the discard-only screen, so its chrome
+    /// tells the truth. `true` = a stale PARKED draft (a return the filer WITHDREW); `false` = a
+    /// stale WIP draft holding work this build cannot read (T4/C-1), which is not parked and must
+    /// not be called parked — "parked" has a specific meaning in this product.
+    pub discard_is_parked: bool,
     /// ★ Task 8: the cached `active source: …` label shown in the status line — `"full return"` /
     /// `"tax-profile"` / `"(none)"`, mapped by [`active_source_label`] from `input_form_store::active_source`
     /// (via the `edit::persist::form_active_source` seam). Set at OPEN and refreshed after the one store
@@ -346,6 +351,7 @@ impl TaxInputsFormState {
             stale_note: None,
             year_gate: btctax_cli::year_readiness::EntryStates::package_only(year),
             discard_offered: false,
+            discard_is_parked: false,
             active_source_label: active_source_label(
                 &btctax_cli::input_form_store::ActiveSource::Neither,
             ),

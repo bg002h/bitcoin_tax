@@ -624,3 +624,290 @@ fn write_raw_draft(
         .unwrap();
     s.save().unwrap();
 }
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// ★★★ **FOLD — seam review C-1: the disposable predicate is STRUCTURAL, never a category list.**
+//
+// The shipped `draft_holdings` enumerated four categories (`answer_log`, census document rows,
+// dependents, a Schedule A) and anything outside them made a draft *disposable*, i.e. destroyable on
+// a note. `ReturnInputs.broker_reporting` — which `input_form_store.rs` itself calls *"the primary
+// authoring path on a params-less year"* — is outside them, and so are `schedule_c`, `schedule_1a`,
+// `sch1`, the carryovers, `qbi` and the header identity. A TY2026 draft holding the Form 1099-DA
+// answers therefore read as EMPTY and was destroyed, unconfirmed, by all four deleting paths.
+//
+// The fix compares the draft against the YEAR'S FRESH SEED instead. A field added to `ReturnInputs`
+// is protected the day it is added, which is the direction the rest of this build takes everywhere.
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// The reviewer's plant, as a fixture: a TY2026 draft holding two providers' Form 1099-DA answers
+/// and a Schedule C — and NOTHING the four counted categories can see.
+fn broker_and_schedule_c_draft() -> btctax_core::tax::return_inputs::ReturnInputs {
+    use btctax_core::forms::{BrokerReported, CohortAnswers};
+    let mut ri = btctax_core::tax::return_inputs::ReturnInputs {
+        tax_year: NO_PACKAGE_YEAR,
+        filing_status: btctax_core::FilingStatus::Single,
+        ..Default::default()
+    };
+    for provider in ["coinbase", "gemini"] {
+        ri.broker_reporting.0.insert(
+            provider.to_string(),
+            CohortAnswers {
+                covered: Some(BrokerReported::BasisMatches),
+                noncovered: Some(BrokerReported::NotReported),
+            },
+        );
+    }
+    ri.schedule_c = Some(btctax_core::tax::return_inputs::ScheduleCInputs {
+        business_description: "consulting".into(),
+        ..Default::default()
+    });
+    // The four counted categories are all empty — that is the whole point of the fixture.
+    let held = btctax_cli::input_form_store::draft_holdings(&ri);
+    assert!(
+        held.is_empty(),
+        "premise: the counted categories see NOTHING here — {held:?}"
+    );
+    ri
+}
+
+fn seed_draft(vault: &std::path::Path, ri: &btctax_core::tax::return_inputs::ReturnInputs) {
+    let mut s = Session::open(vault, &pp()).unwrap();
+    btctax_cli::input_form_store::save_draft(&mut s, NO_PACKAGE_YEAR, ri).unwrap();
+}
+
+/// ★★★ **C-1 (a) — `income import` must REFUSE over a broker-answers draft, and it must survive.**
+#[test]
+fn import_over_a_broker_answers_draft_refuses_and_the_draft_survives_byte_identical() {
+    let (dir, vault) = fresh_vault();
+    seed_draft(&vault, &broker_and_schedule_c_draft());
+    let before = raw_draft_json(&vault, NO_PACKAGE_YEAR);
+
+    let toml = write_toml(&dir, "over-broker.toml", "filing_status = \"Single\"\n");
+    let err = cmd::tax::import_return_inputs(&vault, &pp(), NO_PACKAGE_YEAR, &toml, false, false)
+        .expect_err("a draft holding the 1099-DA answers is not superseded on a note");
+    assert!(
+        err.to_string().contains("--discard-draft"),
+        "the refusal names the remedy: {err}"
+    );
+    assert_eq!(
+        raw_draft_json(&vault, NO_PACKAGE_YEAR),
+        before,
+        "the draft must survive byte-identical"
+    );
+    assert_eq!(
+        cmd::tax::show_return_inputs(&vault, &pp(), NO_PACKAGE_YEAR).unwrap(),
+        None
+    );
+}
+
+/// ★★★ **C-1 (b) — `income clear` must REFUSE over the same draft.**
+#[test]
+fn income_clear_over_a_broker_answers_draft_refuses_and_the_draft_survives_byte_identical() {
+    let (_dir, vault) = fresh_vault();
+    seed_draft(&vault, &broker_and_schedule_c_draft());
+    let before = raw_draft_json(&vault, NO_PACKAGE_YEAR);
+
+    let err = cmd::tax::clear_return_inputs(&vault, &pp(), NO_PACKAGE_YEAR, false)
+        .expect_err("`income clear` must not destroy the 1099-DA answers on a note");
+    assert!(err.to_string().contains("--discard-draft"), "{err}");
+    assert_eq!(raw_draft_json(&vault, NO_PACKAGE_YEAR), before);
+}
+
+/// ★★★ **C-1 (c) — `load`'s §6.3 stale-WIP discard must REFUSE over the same draft.**
+#[test]
+fn a_stale_broker_answers_draft_is_refused_not_discarded() {
+    use btctax_cli::input_form_store;
+    let (_dir, vault) = fresh_vault();
+    write_raw_draft(
+        &vault,
+        NO_PACKAGE_YEAR,
+        &broker_and_schedule_c_draft(),
+        1,
+        false,
+    );
+    let before = raw_draft_json(&vault, NO_PACKAGE_YEAR);
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    match input_form_store::load(s.conn(), NO_PACKAGE_YEAR) {
+        Err(e) => assert!(
+            e.to_string().contains("NOT discarded"),
+            "the refusal says the draft was kept: {e}"
+        ),
+        Ok(_) => panic!("the §6.3 stale-WIP discard destroyed a draft holding the 1099-DA answers"),
+    }
+    assert!(input_form_store::draft_exists(s.conn(), NO_PACKAGE_YEAR).unwrap());
+    drop(s);
+    assert_eq!(raw_draft_json(&vault, NO_PACKAGE_YEAR), before);
+}
+
+/// **C-1 (d) — `report --write-carryover` shares the predicate, asserted rather than assumed.**
+///
+/// It reaches `coherence_clear_or_refuse` on **year N+1**, so the same draft on year N+1 raises the
+/// same refusal. Driving the whole write-back needs a computable year N and a committed year N+1
+/// row; what is load-bearing here is the PREDICATE, so this asserts the shared entry point directly
+/// on the year the command targets.
+#[test]
+fn the_carryover_write_back_shares_the_same_predicate_on_year_n_plus_1() {
+    use btctax_cli::input_form_store;
+    let (_dir, vault) = fresh_vault();
+    seed_draft(&vault, &broker_and_schedule_c_draft());
+    let s = Session::open(&vault, &pp()).unwrap();
+    // `write_back_carryover(.., year = 2025, .., discard_draft = false)` calls exactly this.
+    let err = input_form_store::coherence_clear_or_refuse(s.conn(), NO_PACKAGE_YEAR, false)
+        .expect_err("the write-back's own guard must refuse the same draft");
+    assert!(
+        matches!(
+            err,
+            btctax_cli::CliError::NonTrivialDraftBlocksWrite {
+                year: NO_PACKAGE_YEAR,
+                ..
+            }
+        ),
+        "{err:?}"
+    );
+    assert!(input_form_store::draft_exists(s.conn(), NO_PACKAGE_YEAR).unwrap());
+}
+
+/// ★★★ **C-1 (e) — THE STRUCTURAL KILL, stated without naming any category.**
+///
+/// A draft differing from the year's fresh seed in exactly ONE uncounted scalar is non-disposable.
+/// This is what makes the predicate fail CLOSED: it is written so that a field added to
+/// `ReturnInputs` tomorrow is protected the day it is added, and it names no category list — so it
+/// cannot be satisfied by extending one.
+#[test]
+fn a_draft_differing_from_the_seed_in_one_uncounted_field_is_not_disposable() {
+    use btctax_cli::input_form_store::draft_is_disposable;
+    use btctax_core::tax::return_inputs::ReturnInputs;
+
+    let seed = ReturnInputs {
+        tax_year: NO_PACKAGE_YEAR,
+        filing_status: btctax_core::FilingStatus::Mfj,
+        ..Default::default()
+    };
+    assert!(
+        draft_is_disposable(&seed),
+        "the year's fresh seed — a tax year and a filing status — is not work"
+    );
+
+    // One scalar, in none of the four counted categories.
+    let mut one_field = seed.clone();
+    one_field.sch1.state_refund_taxable = rust_decimal_macros::dec!(1);
+    assert!(
+        !draft_is_disposable(&one_field),
+        "a draft that differs from the seed AT ALL holds work"
+    );
+    assert!(
+        btctax_cli::input_form_store::draft_holdings(&one_field).is_empty(),
+        "and the counted categories still see nothing — which is exactly why the DECISION must not \
+         read them"
+    );
+
+    // The message must not then tell the filer "nothing".
+    let clause = btctax_cli::input_form_store::describe_draft(&one_field);
+    assert!(
+        !clause.contains("nothing"),
+        "a non-disposable draft is never described as holding nothing: {clause}"
+    );
+    assert!(
+        clause.contains("work not otherwise itemised"),
+        "the fallback clause names the unitemised work: {clause}"
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// FOLD — seam review M-3: a read-only surface CONTINUES on an unreadable draft; a writer refuses.
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// ★★★ **M-3.** `load` fails closed on a stale draft holding work, which is right for a writer and
+/// wrong for a reader: it would turn *"your draft is unreadable"* into *"you cannot look at this
+/// year at all"* on `report`, `income show-broker-answers`, `export-irs-pdf`'s broker path and
+/// `income scrub` — a new class of hard failure, reachable the first time `SCHEMA_VERSION` moves.
+///
+/// The read seam skips the draft (KEEPING it), falls through to the committed row, and returns the
+/// note. The write seam is unchanged.
+#[test]
+fn a_read_only_surface_continues_past_an_unreadable_draft_while_a_writer_still_refuses() {
+    use btctax_cli::input_form_store;
+    let (dir, vault) = fresh_vault();
+
+    // A committed row stands behind a stale draft this build cannot read.
+    let committed = {
+        let mut ri = btctax_core::tax::return_inputs::ReturnInputs {
+            tax_year: NO_PACKAGE_YEAR,
+            filing_status: btctax_core::FilingStatus::Single,
+            ..Default::default()
+        };
+        ri.sch1.state_refund_taxable = rust_decimal_macros::dec!(7);
+        ri
+    };
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::set(s.conn(), NO_PACKAGE_YEAR, &committed).unwrap();
+        s.save().unwrap();
+    }
+    write_raw_draft(
+        &vault,
+        NO_PACKAGE_YEAR,
+        &broker_and_schedule_c_draft(),
+        1,
+        false,
+    );
+    let before = raw_draft_json(&vault, NO_PACKAGE_YEAR);
+
+    // READ: continues, on the committed row, with the note — and the note says KEPT.
+    {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (working, note) = input_form_store::working_return(s.conn(), NO_PACKAGE_YEAR)
+            .expect("a reader continues");
+        assert_eq!(
+            working.as_ref().map(|r| r.sch1.state_refund_taxable),
+            Some(rust_decimal_macros::dec!(7)),
+            "the committed row behind the skipped draft is what a reader sees"
+        );
+        let note = note.expect("and it is told the draft was skipped");
+        assert!(note.kept_holdings.is_some(), "{note}");
+        assert!(
+            note.to_string().contains("KEPT") && note.to_string().contains("not deleted"),
+            "{note}"
+        );
+        // The projection every read-only broker surface goes through resolves too.
+        input_form_store::broker_answers(s.conn(), NO_PACKAGE_YEAR)
+            .expect("`income show-broker-answers` / `report` / the export broker path all resolve");
+    }
+
+    // WRITE: still refuses, and the draft is still there, byte-identical.
+    let toml = write_toml(&dir, "m3.toml", "filing_status = \"Single\"\n");
+    cmd::tax::import_return_inputs(&vault, &pp(), NO_PACKAGE_YEAR, &toml, false, false)
+        .expect_err("a WRITER still fails closed on a draft it cannot read");
+    assert_eq!(raw_draft_json(&vault, NO_PACKAGE_YEAR), before);
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// FOLD — seam review N-1. (M-2's grep-KAT lives beside the tier's own fixtures, in
+// `btctax-core::tax::return_refuse::param_free_tier`.)
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// ★★★ **N-1 — the two new refusal messages read as sentences.** These are what a filer sees at the
+/// moment months of work is at stake, and on the TUI discard screen the first is also the payload of
+/// the confirmation.
+#[test]
+fn the_two_new_refusal_messages_carry_no_collapsed_line_breaks() {
+    for e in [
+        btctax_cli::CliError::NonTrivialDraftBlocksWrite {
+            year: NO_PACKAGE_YEAR,
+            holdings: "3 recorded answer(s)".into(),
+        },
+        btctax_cli::CliError::StaleDraftHoldsInterview {
+            year: NO_PACKAGE_YEAR,
+            found: 1,
+            expected: 3,
+            holdings: "3 recorded answer(s)".into(),
+        },
+    ] {
+        let msg = e.to_string();
+        assert!(
+            !msg.contains("  "),
+            "a missing `\\` continuation collapses into a run of spaces: {msg:?}"
+        );
+    }
+}

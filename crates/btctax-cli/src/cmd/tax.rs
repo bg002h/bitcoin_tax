@@ -367,7 +367,10 @@ pub fn scrub_return_inputs(
     //
     //     ★ A PARKED draft is the sole copy of a screened return, so it must be scrubbed for the same
     //       reason, and more so: there is no committed row behind it to fall back to.
-    let (loaded, stale) = crate::input_form_store::load(s.conn(), year)?;
+    // ★ T4 fold, M-3: `income scrub` writes nothing (it never calls `s.save()`), so it resolves
+    //   through the READ-ONLY seam — an unreadable stale draft is skipped and KEPT, and the note
+    //   below (already worded "skipped … Nothing was deleted") is what says so.
+    let (loaded, stale) = crate::input_form_store::load_for_read(s.conn(), year)?;
     // ★ Every other caller of `load` surfaces this; scrub was the only one discarding it. A filer
     //   whose WIP draft was schema-stale gets the COMMITTED row scrubbed, and without this they are
     //   not told the draft they were editing was skipped — the soft form of "emits a return the
