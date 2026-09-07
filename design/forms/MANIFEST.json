@@ -486,6 +486,15 @@
     "extract": "design/forms/extract/f8995--2025.txt"
   },
   {
+    "path": "design/forms/2025/f8995a--2025.pdf",
+    "kind": "form",
+    "storage": "note",
+    "sha256": "3362db81b8ef60cfaa93354858c6c92bac16e63984be0805c6479d272a6ec9aa",
+    "bytes": 117129,
+    "url": "https://www.irs.gov/pub/irs-prior/f8995a--2025.pdf",
+    "extract": "design/forms/extract/f8995a--2025.txt"
+  },
+  {
     "path": "design/forms/2025/i1040gi--2025.pdf",
     "kind": "instructions",
     "storage": "note",

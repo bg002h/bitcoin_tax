@@ -60,5 +60,15 @@ Archived ≠ extracted ≠ conformance-tested. These PDFs are step 1 of three:
 3. **conformance-tested** — label census from the extract, decisions derived from each line's own text.
    Done for Schedule 1-A only.
 
-`cite_check::AUTHORITY_NOT_YET_ARCHIVED` therefore stays as it is until a form reaches step 3. Shrinking
-it on step 1 would be exactly the false-completeness this archive exists to prevent.
+`cite_check::AUTHORITY_NOT_YET_ARCHIVED` shrinks when a form reaches **step 2**, not step 1 and not
+step 3 — and that is the ratchet's own definition rather than a choice: `archived_form_years()`
+counts a `(form, year)` as covered exactly when a `FORMS` row names it AND both committed fixtures
+are on disk, so `authority_coverage_may_only_improve` REDS on an excuse for a pair whose extract
+exists. Shrinking it on **step 1** would be the false-completeness this archive exists to prevent —
+an archived PDF nothing can check against. Step 3 has its own instruments (the label census, the
+derive-the-decision-from-the-line tests), and a form sitting at step 2 is honestly described by this
+list as extracted-but-not-yet-conformance-tested.
+
+★ Corrected 2026-09-06 (residue sweep 1, item 3), when `f4868` and `f1040v` reached step 2 for both
+bundled years: this paragraph said "stays as it is until a form reaches step 3", which the ratchet
+makes impossible — adding the fixtures turns the excuse stale and fails the test.

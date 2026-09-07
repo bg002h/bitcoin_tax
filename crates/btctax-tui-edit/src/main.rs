@@ -1401,7 +1401,7 @@ fn commit_tax_inputs(app: &mut EditorApp) {
             }
             // Kept ≤ ~104 chars so the whole line — including the "finalize" clause — is visible on the
             // no-wrap NOTICE line at the flow's design width (r1-M1).
-            app.status = Some(if saved {
+            let first = if saved {
                 format!(
                     "{year} has no full-return tables yet (v1: TY2024) — inputs SAVED as a draft; \
                      finalize when tables publish."
@@ -1411,7 +1411,40 @@ fn commit_tax_inputs(app: &mut EditorApp) {
                     "{year} has no full-return tables yet (v1: TY2024); DRAFT SAVE FAILED — retry to \
                      keep your inputs."
                 )
-            });
+            };
+            // ★★★ FR-63 (spec 1099-DA R6 D-1) — **THE SLICE CLAUSE, as a SECOND notice line.**
+            //
+            // The line above is a tested ≤104-char no-wrap NOTICE (r1-M1), and the shortest wording
+            // that carries this fact as well measured 120 — so appending would have clipped the
+            // "finalize" reassurance the r1-M1 kill exists to hold. The NOTICE surface therefore
+            // takes `\n`-separated lines and draws one row each (`draw_edit::draw_tax_inputs_status`),
+            // which is what makes this additive rather than a trade against the existing guarantee.
+            //
+            // ★ The PREDICATE is `year_readiness::slice_prints_from_answers` — the same one
+            // `report`'s NOT-COMPUTABLE sentence and `income import`'s note use — so the three
+            // surfaces cannot disagree about whether the artifact exists. Both of its terms matter
+            // here: with no answers on file the sentence would assert answers this vault does not
+            // hold, and without the year's own Form 8949 / Schedule D templates it would promise a
+            // slice `export-irs-pdf` refuses to write (TY2026 is exactly that year). The
+            // no-parameters half of the question is already answered: this IS the `NoTables` arm.
+            //
+            // The answers come from the working return being committed rather than from a store
+            // read — after `form_save_draft` they are the same bytes, and a fallible read here
+            // could only make the notice less true.
+            let answers_stored = !ri.broker_reporting.0.is_empty();
+            app.status = Some(
+                if saved
+                    && btctax_cli::year_readiness::slice_prints_from_answers(year, answers_stored)
+                {
+                    // Also ≤104 chars: it is a NOTICE row exactly like the first.
+                    format!(
+                        "{first}\nForm 1099-DA answers are held in the draft; \
+                         `export-irs-pdf --tax-year {year}` fills the slice from them."
+                    )
+                } else {
+                    first
+                },
+            );
         }
         Err(e) => {
             if let Some(form) = app.tax_inputs_form.as_mut() {
@@ -10777,6 +10810,118 @@ mod tests {
             rendered.contains("SAVED as a draft") && rendered.contains("finalize"),
             "the full reassurance (saved as a draft … finalize) must render, not clip off the no-wrap line"
         );
+    }
+
+    /// ★★★ **FR-63 — THE SLICE CLAUSE ON THE COMMIT NOTICE**, and the two ways it must stay silent.
+    ///
+    /// A filer who authors a params-less year in the input form and presses `s` is told the inputs
+    /// are saved as a draft. What R6 D-1 says they must ALSO be told is that their Form 1099-DA
+    /// answers are held there and that `export-irs-pdf --tax-year <y>` prints the crypto slice from
+    /// them — otherwise the year reads as dead, and the one artifact it CAN produce is invisible at
+    /// the only moment the filer is looking.
+    ///
+    /// **Three fixtures, one variable each, because the predicate is a conjunction:**
+    ///
+    /// | year | answers | expect | why |
+    /// |---|---|---|---|
+    /// | 2025 | seeded | clause | params-less, Form 8949 + Schedule D templates bundled |
+    /// | 2025 | none | silent | no answers on file — the sentence would assert what this vault lacks |
+    /// | 2099 | seeded | silent | no templates: `export-irs-pdf` would refuse (the R6 I-1 defect) |
+    ///
+    /// **And the r1-M1 invariant survives**: both notice rows are asserted ≤ 104 characters and the
+    /// first row still carries "SAVED as a draft" and "finalize". The clause is a SECOND row, which
+    /// is the whole reason FR-63 was not just a longer string — the shortest single-line wording
+    /// measured 120 characters and would have clipped the finalize clause off the no-wrap line.
+    #[test]
+    fn tax_inputs_notables_notice_carries_the_slice_clause_only_when_the_slice_would_print() {
+        use btctax_core::forms::{BrokerReported, CohortAnswers};
+        use btctax_core::tax::return_inputs::ReturnInputs;
+        use btctax_core::tax::testonly::{answer_all_live_declarations, not_a_dependent};
+        use btctax_core::tax::types::FilingStatus;
+
+        // premise: TY2025 is params-less (so `s` lands in the NoTables arm) AND can print a slice,
+        // while TY2099 is params-less and cannot. Both read off the build, not assumed.
+        assert!(
+            btctax_cli::year_readiness::slice_can_print(2025),
+            "premise: TY2025 has the Form 8949 + Schedule D templates the slice needs"
+        );
+        assert!(
+            !btctax_cli::year_readiness::slice_can_print(2099),
+            "premise: TY2099 has no templates, so a promised slice would be refused"
+        );
+
+        let notice_lines = |year: i32, seed_answers: bool| -> Vec<String> {
+            let (mut app, _dir) = unlocked_app_on_empty_vault(year);
+            let mut ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                header: not_a_dependent(),
+                ..Default::default()
+            };
+            answer_all_live_declarations(&mut ri);
+            if seed_answers {
+                ri.broker_reporting.0.insert(
+                    "coinbase".to_string(),
+                    CohortAnswers {
+                        covered: None,
+                        noncovered: Some(BrokerReported::ProceedsOnly),
+                    },
+                );
+            }
+            let mut form = crate::edit::form::TaxInputsFormState::fresh(year);
+            form.working = Some(ri);
+            app.tax_inputs_form = Some(form);
+
+            handle_key(&mut app, press(KeyCode::Char('s')));
+            handle_key(&mut app, press(KeyCode::Enter)); // NoTables
+            let status = app
+                .status
+                .as_deref()
+                .expect("the NoTables commit always sets a status")
+                .to_string();
+            // the rendered buffer is what the filer SEES; the status is what was built. Both are
+            // checked, because a status nothing draws is the failure this test's sibling exists for.
+            let rendered = render_editor(&mut app);
+            for line in status.lines() {
+                assert!(
+                    rendered.contains(line),
+                    "★ every NOTICE row must reach the rendered buffer, not just `app.status`:\n{line}"
+                );
+                assert!(
+                    line.chars().count() <= 104,
+                    "★ r1-M1: a NOTICE row is no-wrap and must stay ≤ 104 chars ({} here):\n{line}",
+                    line.chars().count()
+                );
+            }
+            status.lines().map(str::to_string).collect()
+        };
+
+        const CLAUSE: &str = "Form 1099-DA answers are held in the draft";
+
+        // ★ THE ROW: params-less, templates bundled, answers on file → the clause renders, on its
+        //   OWN second line, with the first line's r1-M1 reassurance intact.
+        let live = notice_lines(2025, true);
+        assert_eq!(live.len(), 2, "the notice is two rows here: {live:?}");
+        assert!(
+            live[0].contains("SAVED as a draft") && live[0].contains("finalize"),
+            "the r1-M1 reassurance is untouched and still FIRST: {live:?}"
+        );
+        assert!(
+            live[1].contains(CLAUSE) && live[1].contains("export-irs-pdf --tax-year 2025"),
+            "the second row names the answers and the command that prints from them: {live:?}"
+        );
+
+        // ★ CONJUNCT 1 falsified — same year, no answers stored. Saying "answers are held in the
+        //   draft" would assert something this vault does not hold.
+        let no_answers = notice_lines(2025, false);
+        assert_eq!(no_answers.len(), 1, "one row only: {no_answers:?}");
+        assert!(!no_answers[0].contains(CLAUSE));
+
+        // ★ CONJUNCT 2 falsified — answers stored, but TY2099 has no Form 8949 / Schedule D
+        //   templates, so `export-irs-pdf` would refuse. Promising the artifact anyway is the exact
+        //   R6 I-1 defect `slice_can_print` was added for.
+        let cannot_print = notice_lines(2099, true);
+        assert_eq!(cannot_print.len(), 1, "one row only: {cannot_print:?}");
+        assert!(!cannot_print[0].contains(CLAUSE));
     }
 
     /// ★ I-3: `q` must NOT close the flow when the final flush FAILS (that would drop the in-memory edits —

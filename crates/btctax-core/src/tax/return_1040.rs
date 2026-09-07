@@ -3732,6 +3732,60 @@ mod tests {
         )])
     }
 
+    /// An itemizing TY2024 single filer who donated `claimed` of long-term crypto, screened with
+    /// `answer` to the Form 8283 restriction question — the shared premise of both §G-21 tests
+    /// below, so the DECLARED arm and the UNANSWERED arm cannot drift onto two different fixtures.
+    ///
+    /// The AGI is $200,000, so the §170(b)(1)(C) 30% ceiling ($60,000) never bites: Schedule A
+    /// **line 12** — the figure the gate actually reads — equals `claimed` at every amount used here.
+    fn screened_restriction(claimed: Usd, answer: Option<bool>) -> Option<RefuseReason> {
+        screened_restriction_at(dec!(200000), claimed, answer)
+    }
+
+    /// As [`screened_restriction`], with the wage figure — and therefore the AGI, and therefore the
+    /// §170(b)(1)(C) 30% ceiling — under the caller's control.
+    ///
+    /// ★ That knob is what lets the gate's two Section-B conjuncts be falsified INDEPENDENTLY: the
+    /// ceiling can hold Schedule A line 12 at or below $500 while the year's donation aggregate is
+    /// far above $5,000, which is the only shape in which `claimed_noncash > FORM_8283_THRESHOLD`
+    /// is false and `donated > QUALIFIED_APPRAISAL_THRESHOLD` is true. Without it a test can only
+    /// move both terms together, and a gate keyed on either one alone passes.
+    fn screened_restriction_at(
+        wages: Usd,
+        claimed: Usd,
+        answer: Option<bool>,
+    ) -> Option<RefuseReason> {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            donations_had_restrictions: answer,
+            // §170(f)(8) answered NEUTRAL so these tests keep testing the §G-21 RESTRICTION
+            // question. The donation here is well over $250, so the CWA gate is genuinely live.
+            charitable_cwa_obtained: Some(true),
+            // Force the itemized election so the §170 deduction is genuinely claimed.
+            schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
+                salt_state_estimated_payments: dec!(10000),
+                mortgage_interest_1098: dec!(20000),
+                ..Default::default()
+            }),
+            w2s: vec![w2(Owner::Taxpayer, wages, wages.min(dec!(168600)), wages)],
+            ..Default::default()
+        };
+        let st = donation_state(claimed);
+        let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+        assert!(ar.deduction_is_itemized, "the fixture must itemize");
+        screen_absolute(
+            &ri,
+            &ar,
+            &p,
+            &st,
+            2024,
+            crate::forms::InformationReturnRegime::NONE,
+        )
+        .map(|r| r.reason)
+    }
+
     /// ★★★ **r3 I-2 — the gate was TOO NARROW, and the gap was an UNDERSTATEMENT.**
     ///
     /// The refusal was keyed on `year_donation_deduction > $5,000`, the Form 8283 SECTION split. But
@@ -3745,42 +3799,7 @@ mod tests {
     /// arm reds the sub-threshold row.
     #[test]
     fn a_declared_restriction_refuses_at_any_amount_not_just_over_5000() {
-        let p = ty2024_params();
-        let table = synthetic_table(2024);
-        let screened = |claimed: Usd, answer: Option<bool>| {
-            let ri = ReturnInputs {
-                filing_status: FilingStatus::Single,
-                donations_had_restrictions: answer,
-                // §170(f)(8) answered NEUTRAL so this test keeps testing the §G-21 RESTRICTION
-                // question. The donation here is well over $250, so the CWA gate is genuinely live.
-                charitable_cwa_obtained: Some(true),
-                // Force the itemized election so the §170 deduction is genuinely claimed.
-                schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
-                    salt_state_estimated_payments: dec!(10000),
-                    mortgage_interest_1098: dec!(20000),
-                    ..Default::default()
-                }),
-                w2s: vec![w2(
-                    Owner::Taxpayer,
-                    dec!(200000),
-                    dec!(168600),
-                    dec!(200000),
-                )],
-                ..Default::default()
-            };
-            let st = donation_state(claimed);
-            let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
-            assert!(ar.deduction_is_itemized, "the fixture must itemize");
-            screen_absolute(
-                &ri,
-                &ar,
-                &p,
-                &st,
-                2024,
-                crate::forms::InformationReturnRegime::NONE,
-            )
-            .map(|r| r.reason)
-        };
+        let screened = screened_restriction;
 
         // ★ THE DEFECT: a declared restriction under $5,000 sailed through and deducted full FMV.
         assert_eq!(
@@ -3810,6 +3829,84 @@ mod tests {
         // And an explicit No files at both sizes.
         assert_eq!(screened(dec!(4000), Some(false)), None);
         assert_eq!(screened(dec!(9000), Some(false)), None);
+    }
+
+    /// ★★★ **THE UNANSWERED SECTION-B ROW, named for the row it holds** —
+    /// `donations_had_restrictions == None` on a year that files a Form 8283 **Section B** is
+    /// `RefuseReason::DonationRestrictionsUnresolved`, and on a Section A year it is not.
+    ///
+    /// ★ Why this exists when the sibling above already touches the same rows: that test is named,
+    /// documented and scoped for the **DECLARED** arm (r3 I-2), and its unanswered assertions ride
+    /// along. A row whose only coverage is incidental to another row's test is a row nobody is
+    /// watching — rename or re-scope the sibling and the guarantee leaves with it, silently. So the
+    /// unanswered arm gets its own name, and both of its premises are isolated here.
+    ///
+    /// **The gate's Section-B premise is a CONJUNCTION** (`return_1040.rs`, the
+    /// `donation_restriction_gate` call): Schedule A **line 12** over
+    /// `FORM_8283_THRESHOLD` ($500 — the sentence Form 8283 itself prints, *"Attach one or more
+    /// Forms 8283 to your tax return if you claimed a total deduction of over $500 for all
+    /// contributed property"*) **and** the year's donation aggregate over
+    /// `QUALIFIED_APPRAISAL_THRESHOLD` ($5,000 — §170(f)(11)(C), the Section A / Section B split).
+    /// Each conjunct is falsified on its own below, because a gate keyed on either one alone passes
+    /// the both-true row.
+    ///
+    /// **Why silence may not be filed on a Section B year.** Lines 5a/5b/5c ask whether any donated
+    /// property carried a restriction or a retained right. They are printed, and an entry is sworn
+    /// testimony: btctax answering "No" for a filer who was never asked would fabricate it, and
+    /// deducting full fair market value under Reg §1.170A-7 while holding no answer risks an
+    /// overstatement. On a Section A year the boxes are not printed at all, so silence forgoes
+    /// nothing and asserts nothing — which is why the Section A row must NOT refuse.
+    #[test]
+    fn an_unanswered_restriction_question_refuses_on_a_section_b_year_only() {
+        // premise check: the two thresholds this row is keyed on are what the test assumes.
+        assert_eq!(crate::tax::printed::FORM_8283_THRESHOLD, dec!(500));
+        assert_eq!(
+            crate::tax::tables::QUALIFIED_APPRAISAL_THRESHOLD,
+            dec!(5000)
+        );
+
+        // ★ THE ROW: unanswered, Section-B-sized (line 12 = $9,000 > $500, aggregate $9,000 >
+        //   $5,000) → refuse.
+        assert_eq!(
+            screened_restriction(dec!(9000), None),
+            Some(RefuseReason::DonationRestrictionsUnresolved),
+            "a Section B year PRINTS 5a/5b/5c and btctax holds no answer — it may not file the year"
+        );
+
+        // ★ CONJUNCT 1 falsified — over $500, NOT over $5,000. Section A: the boxes are never
+        //   printed, so the same silence is the correct return.
+        assert_eq!(
+            screened_restriction(dec!(4000), None),
+            None,
+            "a Section A year never poses the question — silence forgoes nothing"
+        );
+
+        // ★ CONJUNCT 2 falsified — and it can ONLY be falsified through the §170(b)(1)(C) ceiling,
+        //   because the two terms otherwise move together. AGI $1,600 gives a 30% ceiling of $480,
+        //   so Schedule A line 12 is $480 (≤ $500 — no 8283 attaches over the threshold, so
+        //   5a/5b/5c are never printed) while the year's aggregate is $50,000 (far over $5,000).
+        //   A gate keyed on the aggregate alone refuses here; the real one must not.
+        assert_eq!(
+            screened_restriction_at(dec!(1600), dec!(50000), None),
+            None,
+            "the ceiling held line 12 at $480: no 8283 over $500, so nothing asks the filer"
+        );
+
+        // ★ THE ANSWER IS WHAT LIFTS IT, not the size: the same Section-B-sized year with an
+        //   explicit "No" files. Without this row the test would pass on a gate that refused every
+        //   Section B year regardless of the answer.
+        assert_eq!(
+            screened_restriction(dec!(9000), Some(false)),
+            None,
+            "answered No on a Section B year — the filer's own testimony, so the return files"
+        );
+        // …and the DECLARED arm on the same fixture still refuses, so the ternary is complete here
+        // and not merely two thirds of it.
+        assert_eq!(
+            screened_restriction(dec!(9000), Some(true)),
+            Some(RefuseReason::DonationRestrictionsUnresolved),
+            "answered Yes — Reg §1.170A-7 reduces or denies the deduction btctax would compute"
+        );
     }
 
     /// ★★★ **r3 I-3 — the gate was TOO WIDE, and it BLOCKED a correct return.**

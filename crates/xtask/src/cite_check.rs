@@ -735,15 +735,53 @@ pub struct FormAuthority {
     pub extract_stem: &'static str,
 }
 
-/// ★ Registry state as of 2026-07-29. Deliberately honest: only Schedule 1-A is fully wired, and the
-/// `authority_coverage_may_only_improve` test below makes that visible instead of implicit.
-pub const FORMS: &[FormAuthority] = &[FormAuthority {
-    form: "f1040s1a",
-    year: 2025,
-    instructions: "i1040gi",
-    instr_pages: Some((101, 110)),
-    extract_stem: "schedule_1a_2025",
-}];
+/// ★ Registry state as of **2026-09-06** (residue sweep 1, item 3). Deliberately honest: five of the
+/// emitted form-years are wired, every other one is an explicit admission in
+/// [`AUTHORITY_NOT_YET_ARCHIVED`], and `authority_coverage_may_only_improve` makes the split visible
+/// instead of implicit.
+///
+/// ★ **Form 4868 and Form 1040-V are their own instructions documents** — the IRS publishes no
+/// `i4868` and no `i1040v`, so `instructions` names the form itself and `instr_pages` is the range
+/// each map row MEASURED from its extract's form-feed page breaks ([1,4] and [1,2]).
+/// `the_forms_const_row_agrees_with_its_map_row` holds these five rows to those declarations, so a
+/// page range cannot drift here without reddening.
+pub const FORMS: &[FormAuthority] = &[
+    FormAuthority {
+        form: "f1040s1a",
+        year: 2025,
+        instructions: "i1040gi",
+        instr_pages: Some((101, 110)),
+        extract_stem: "schedule_1a_2025",
+    },
+    FormAuthority {
+        form: "f1040v",
+        year: 2024,
+        instructions: "f1040v",
+        instr_pages: Some((1, 2)),
+        extract_stem: "f1040v_2024",
+    },
+    FormAuthority {
+        form: "f1040v",
+        year: 2025,
+        instructions: "f1040v",
+        instr_pages: Some((1, 2)),
+        extract_stem: "f1040v_2025",
+    },
+    FormAuthority {
+        form: "f4868",
+        year: 2024,
+        instructions: "f4868",
+        instr_pages: Some((1, 4)),
+        extract_stem: "f4868_2024",
+    },
+    FormAuthority {
+        form: "f4868",
+        year: 2025,
+        instructions: "f4868",
+        instr_pages: Some((1, 4)),
+        extract_stem: "f4868_2025",
+    },
+];
 
 // ── The emitting surface: (form, YEAR), derived — never a hand-list ───────────────────────────────
 
@@ -893,15 +931,12 @@ pub const AUTHORITY_NOT_YET_ARCHIVED: &[(&str, &[i32])] = &[
     ("f1040sc", &[2024, 2025]),
     ("f1040sd", &[2024, 2025]),
     ("f1040sse", &[2024, 2025]),
-    // ★ 2026-09-06, spec 4868/1040-V T1. Both revisions of each ARE archived under design/forms/ —
-    //   note, MANIFEST entry, `-layout` extract and geometry fixture — which is what the map rows'
-    //   `template_sha256` joins and what the label walk reads. What is NOT yet on disk is the pair
-    //   of `crates/btctax-core/src/tax/fixtures/<stem>_{form,instructions}.txt` cite-check fixtures
-    //   this ratchet counts as coverage, so they are excused here exactly like every other bundled
-    //   form-year but `f1040s1a/2025`. `instructions` is the form ITSELF for both (the IRS publishes
-    //   no i4868 / i1040v), so closing these is a `FORMS` row plus an extract, not an archive hunt.
-    ("f1040v", &[2024, 2025]),
-    ("f4868", &[2024, 2025]),
+    // ★ CLOSED 2026-09-06 (residue sweep 1, item 3): `f1040v` and `f4868`, both years, left this
+    //   list. They were excused here for exactly one reason — the
+    //   `crates/btctax-core/src/tax/fixtures/<stem>_{form,instructions}.txt` pairs this ratchet
+    //   counts as coverage were not on disk — and closing them was, as the note said, "a `FORMS` row
+    //   plus an extract, not an archive hunt". Four `FORMS` rows and four fixture pairs now exist,
+    //   so the excuse would be a STALE one and `authority_coverage_may_only_improve` reds on it.
     ("f6251", &[2024, 2025]),
     ("f8275", &[2024]),
     ("f8283", &[2024, 2025]),
@@ -1098,6 +1133,88 @@ mod tests {
             verdict.phantom_excuses.is_empty(),
             "[{}] are excused but have no template on disk for that year",
             render(&verdict.phantom_excuses)
+        );
+    }
+
+    /// ★★ **THE RATCHET MAY ONLY SHRINK — planted on the REAL sets, one pair at a time.**
+    ///
+    /// `authority_coverage_may_only_improve`'s first assertion is that nothing is both archived and
+    /// excused. That assertion is what stops a closed gap from silently reopening: re-adding a
+    /// `(form, year)` to [`AUTHORITY_NOT_YET_ARCHIVED`] after its fixtures land would otherwise be a
+    /// green edit that quietly withdraws the coverage.
+    ///
+    /// It had **no kill**. The sibling below plants on synthetic sets and exercises `unaccounted`
+    /// and `phantom_excuses`; the `stale_excuses` arm was asserted by the ratchet and observed by
+    /// nothing — an instrument nobody had watched discriminate (B1). Written 2026-09-06 with the
+    /// four Form 4868 / Form 1040-V pairs that just left the list, which is exactly the class of
+    /// edit it has to catch.
+    ///
+    /// ★ Both directions, and the plant is enumerated FROM [`FORMS`] rather than hand-listed, so it
+    /// covers whatever is archived at the time and cannot rot into naming a row that no longer
+    /// exists.
+    #[test]
+    fn re_excusing_an_archived_pair_reds_the_ratchet() {
+        let emitted = emitted_form_years().expect("the emitting surface must be derivable");
+        let (archived, broken) = archived_form_years();
+        assert!(
+            broken.is_empty(),
+            "premise: every registry row is on disk: {broken:?}"
+        );
+        let excused = excused_form_years();
+
+        // CONTROL: today's real sets have no stale excuse. Without this half a checker that
+        // reported everything as stale would pass the plants below.
+        assert!(
+            adjudicate_coverage(&emitted, &archived, &excused)
+                .stale_excuses
+                .is_empty(),
+            "premise: nothing is currently both archived and excused"
+        );
+
+        // …and the four pairs this test was written for really are on the archived side now.
+        for pair in [
+            ("f4868".to_string(), 2024),
+            ("f4868".to_string(), 2025),
+            ("f1040v".to_string(), 2024),
+            ("f1040v".to_string(), 2025),
+        ] {
+            assert!(
+                archived.contains(&pair),
+                "premise: {pair:?} has a FORMS row and both fixtures on disk"
+            );
+            assert!(
+                !excused.contains(&pair),
+                "premise: {pair:?} left AUTHORITY_NOT_YET_ARCHIVED"
+            );
+        }
+
+        // PLANT, one archived pair at a time: re-excuse it and the ratchet must NAME it.
+        let mut planted = 0usize;
+        for f in FORMS {
+            if f.extract_stem.is_empty() {
+                continue;
+            }
+            let pair = (f.form.to_string(), f.year);
+            let mut widened = excused.clone();
+            widened.insert(pair.clone());
+            let verdict = adjudicate_coverage(&emitted, &archived, &widened);
+            assert_eq!(
+                verdict.stale_excuses,
+                vec![pair.clone()],
+                "re-excusing {pair:?} — which HAS an archived, extracted authority — must be \
+                 reported as a stale excuse; the ratchet may only shrink"
+            );
+            // and re-excusing it may not be laundered as some other verdict
+            assert!(
+                verdict.unaccounted.is_empty() && verdict.phantom_excuses.is_empty(),
+                "{pair:?}: the stale-excuse arm is the one that must fire, not another: {verdict:?}"
+            );
+            planted += 1;
+        }
+        assert_eq!(
+            planted, 5,
+            "guard the guard: every archived FORMS row must have been planted — a loop that ran \
+             zero times would pass every assertion inside it"
         );
     }
 

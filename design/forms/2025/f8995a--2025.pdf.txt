@@ -1,0 +1,24 @@
+https://www.irs.gov/pub/irs-prior/f8995a--2025.pdf
+
+# f8995a--2025.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  3362db81b8ef60cfaa93354858c6c92bac16e63984be0805c6479d272a6ec9aa
+# bytes   117129
+#
+# Fetch:    curl -sL -o f8995a--2025.pdf https://www.irs.gov/pub/irs-prior/f8995a--2025.pdf
+# Verify:   sha256sum f8995a--2025.pdf   # must equal the sha256 above
+#
+# ★ A DIFFERENT hash does not mean a corrupt download — it means the IRS REVISED this
+# document. That is a change to the authority: review it, never silently absorb it.
+#
+# Archived 2026-09-06 (residue sweep 1, item 6) as EVIDENCE ONLY — no map, no filler, no bundled
+# template. The TY2025 revision closes the prior side of the f8995a row: the tree already held
+# f8995a--2024 (the bundled TY2024 template's authority) and f8995a--2026-DRAFT, with the year
+# actually filed now missing between them.
+#
+# ★ The year is read off the DOCUMENT, never assumed from the filename: the masthead of page 1 of
+# this file prints "8995-A … Qualified Business Income Deduction … 2025", and the Part I threshold
+# sentence reads "above $197,300 ($394,600 if married filing jointly)" — the TY2025 figures
+# (TY2024: $191,950 / $383,900). Verified in design/forms/extract/f8995a--2025.txt.
+#
+# The committed text layer is design/forms/extract/f8995a--2025.txt — that is what the
+# conformance tests read, so they run with no PDF and no network.

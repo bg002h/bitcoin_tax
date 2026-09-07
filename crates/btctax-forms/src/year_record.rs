@@ -186,26 +186,151 @@ impl YearRecord {
 /// shall be considered timely if it is performed on the next succeeding day which is not a Saturday,
 /// Sunday, or a legal holiday."*
 ///
-/// This models the WEEKEND half only, and that is a decision rather than an oversight. §7503's
-/// holiday half turns on District of Columbia legal holidays (the reason a return due April 15 moves
-/// when DC's Emancipation Day, April 16, falls beside it — TY2017's `return_due` of **2018-04-17**
-/// was exactly that shift, already applied, back when this build committed a TY2017 record), and
-/// this build does not carry a DC holiday calendar.
+/// **Treas. Reg. §301.7503-1(b)** settles WHOSE holidays count, and the answer is the reason this
+/// calendar is District of Columbia law rather than the filer's: *"the term 'legal holiday' includes
+/// only a legal holiday in the District of Columbia"* for a return filed with the Service in
+/// Washington — and §7503's own definition (§7503, last sentence) carries the same rule for every
+/// filer, with a State holiday counting only additionally where the return goes to a local office.
+/// So DC Emancipation Day moves April 15 for a filer in Anchorage exactly as it does for one in
+/// Georgetown.
 ///
-/// ★ Its ONE caller is safe against that gap by construction, not by luck: it shifts **June 15**, the
-/// out-of-country extension date the form itself names. No District of Columbia legal holiday falls
-/// on June 15 in any year — Juneteenth National Independence Day is June 19, and DC's Emancipation
-/// Day is April 16 — so on that date the weekend rule IS §7503, exactly. Every OTHER due date this
-/// build knows comes from [`YearRecord::return_due`], where the shift is already baked into the
-/// committed date and must not be applied a second time.
+/// **Both halves are modelled here** — the weekend half and the legal-holiday half. Until
+/// 2026-09-06 only the weekend half existed, and the omission was recorded rather than hidden: the
+/// one caller shifted **June 15**, a date no DC legal holiday can fall on, so the gap could not
+/// produce a wrong date. It can now, because the same function derives April dates.
 ///
-/// A due date on a Saturday moves to the following Monday (+2 days); a Sunday to the following Monday
-/// (+1); a weekday stands.
+/// The holidays, transcribed from **5 U.S.C. §6103** rather than compressed into a closed form:
+///
+/// - **§6103(a)**, the eleven federal legal public holidays — New Year's Day (January 1); Birthday
+///   of Martin Luther King, Jr. (third Monday in January); Washington's Birthday (third Monday in
+///   February); Memorial Day (last Monday in May); Juneteenth National Independence Day (June 19);
+///   Independence Day (July 4); Labor Day (first Monday in September); Columbus Day (second Monday
+///   in October); Veterans Day (November 11); Thanksgiving Day (fourth Thursday in November);
+///   Christmas Day (December 25).
+/// - **§6103(b)**, the observance rule for the fixed-date ones: a holiday falling on a **Saturday**
+///   is observed the preceding **Friday**, one falling on a **Sunday** the following **Monday**.
+///   (The floating ones are Mondays or a Thursday by construction and never move.)
+/// - **§6103(c)**, **Inauguration Day** — January 20 of each fourth year after 1965, a legal public
+///   holiday in the District of Columbia and its neighbouring counties. It gets **no Saturday
+///   in-lieu day** (the statute grants one only for Sunday, when the observance moves to January
+///   21), so it is modelled exactly that way and not through the §6103(b) rule.
+/// - **D.C. Code §1-612.02(a)(10)**, **Emancipation Day** — April 16, the District's own holiday,
+///   observed the preceding Friday when it falls on a Saturday and the following Monday when it
+///   falls on a Sunday. **This is the holiday that moves April 15**, and the reason TY2017's return
+///   was due 2018-04-17.
+///
+/// The result is the FIRST day on or after `d` that is neither a Saturday, nor a Sunday, nor a DC
+/// legal holiday — §7503's "next succeeding day" read literally, applied repeatedly because a
+/// holiday can abut a weekend (Christmas 2022 fell on a Sunday, was observed Monday the 26th, and
+/// the next available day was Tuesday the 27th).
+///
+/// ★ Idempotent by construction: its output is a day the predicate does not block, so shifting an
+/// already-shifted date returns it unchanged. That is what makes it safe to apply to a date whose
+/// provenance is unknown.
 pub fn section_7503_shift(d: time::Date) -> time::Date {
-    let days = match d.weekday() {
-        time::Weekday::Saturday => 2,
-        time::Weekday::Sunday => 1,
-        _ => 0,
+    let mut out = d;
+    // Bounded because a real calendar can never block a long run (the longest is a Christmas or New
+    // Year's Day landing beside a weekend — four days). A run this long means the calendar below is
+    // broken, and a broken calendar silently returning a still-blocked due date is the worse
+    // outcome: a filer would be told a deadline the IRS does not recognise.
+    for _ in 0..30 {
+        if !is_weekend(out) && !is_dc_legal_holiday(out) {
+            return out;
+        }
+        out = out.saturating_add(time::Duration::days(1));
+    }
+    panic!(
+        "§7503: no non-holiday weekday within 30 days of {d} — the DC holiday calendar is broken"
+    );
+}
+
+fn is_weekend(d: time::Date) -> bool {
+    matches!(d.weekday(), time::Weekday::Saturday | time::Weekday::Sunday)
+}
+
+/// The `n`th `weekday` of `month` in `year` (n = 1 is the first).
+fn nth_weekday_of(year: i32, month: time::Month, weekday: time::Weekday, n: i64) -> time::Date {
+    let first =
+        time::Date::from_calendar_date(year, month, 1).expect("day 1 exists in every month");
+    let offset = (i64::from(weekday.number_days_from_sunday())
+        - i64::from(first.weekday().number_days_from_sunday()))
+    .rem_euclid(7);
+    first.saturating_add(time::Duration::days(offset + 7 * (n - 1)))
+}
+
+/// The LAST `weekday` of `month` in `year` — walked forward rather than computed from the month
+/// length, so no month-length table can be wrong.
+fn last_weekday_of(year: i32, month: time::Month, weekday: time::Weekday) -> time::Date {
+    let mut d = nth_weekday_of(year, month, weekday, 1);
+    loop {
+        let next = d.saturating_add(time::Duration::days(7));
+        if next.month() != month {
+            return d;
+        }
+        d = next;
+    }
+}
+
+/// **5 U.S.C. §6103(b)** — a legal public holiday falling on a Saturday is observed the preceding
+/// Friday; one falling on a Sunday, the following Monday.
+fn observed(d: time::Date) -> time::Date {
+    match d.weekday() {
+        time::Weekday::Saturday => d.saturating_sub(time::Duration::days(1)),
+        time::Weekday::Sunday => d.saturating_add(time::Duration::days(1)),
+        _ => d,
+    }
+}
+
+/// Every day OBSERVED as a District of Columbia legal holiday because of a holiday whose statutory
+/// date falls in `year`.
+///
+/// ★ Returned as observed dates rather than statutory ones because the observance rule can carry a
+/// holiday across a year boundary: New Year's Day 2022 fell on a Saturday and was observed **Friday
+/// 2021-12-31**. A predicate that only ever consulted its own argument's year would have missed it.
+fn dc_legal_holidays_observed_from(year: i32) -> Vec<time::Date> {
+    use time::Month::*;
+    use time::Weekday::*;
+    let fixed = |m: time::Month, day: u8| {
+        observed(time::Date::from_calendar_date(year, m, day).expect("a real calendar date"))
     };
-    d.saturating_add(time::Duration::days(days))
+    let mut out = vec![
+        // ── 5 U.S.C. §6103(a), in the statute's own order ───────────────────────────────────────
+        fixed(January, 1),                           // New Year's Day
+        nth_weekday_of(year, January, Monday, 3),    // Birthday of Martin Luther King, Jr.
+        nth_weekday_of(year, February, Monday, 3),   // Washington's Birthday
+        last_weekday_of(year, May, Monday),          // Memorial Day
+        fixed(June, 19),                             // Juneteenth National Independence Day
+        fixed(July, 4),                              // Independence Day
+        nth_weekday_of(year, September, Monday, 1),  // Labor Day
+        nth_weekday_of(year, October, Monday, 2),    // Columbus Day
+        fixed(November, 11),                         // Veterans Day
+        nth_weekday_of(year, November, Thursday, 4), // Thanksgiving Day
+        fixed(December, 25),                         // Christmas Day
+        // ── D.C. Code §1-612.02(a)(10) — Emancipation Day, the one that moves April 15 ──────────
+        fixed(April, 16),
+    ];
+    // ── 5 U.S.C. §6103(c) — Inauguration Day, "January 20 of each fourth year after 1965" ───────
+    // No Saturday in-lieu day: the statute grants an alternate day only for Sunday, when the
+    // observance moves to the 21st. So this deliberately does NOT go through `observed`.
+    if year > 1965 && (year - 1965) % 4 == 0 {
+        let jan20 = time::Date::from_calendar_date(year, January, 20).expect("January 20 exists");
+        match jan20.weekday() {
+            Saturday => {}
+            Sunday => out.push(jan20.saturating_add(time::Duration::days(1))),
+            _ => out.push(jan20),
+        }
+    }
+    out
+}
+
+/// Is `d` a District of Columbia legal holiday, as **26 U.S.C. §7503** and **Treas. Reg.
+/// §301.7503-1(b)** mean it?
+///
+/// Three statutory years are consulted, not one, because §6103(b) observance moves a holiday off
+/// its own year: `d`'s year for the ordinary case, `d.year() - 1` for a New Year's Day observed on
+/// the preceding December 31, and `d.year() + 1` for the symmetric case a future calendar could
+/// produce.
+pub fn is_dc_legal_holiday(d: time::Date) -> bool {
+    let y = d.year();
+    (y - 1..=y + 1).any(|y| dc_legal_holidays_observed_from(y).contains(&d))
 }

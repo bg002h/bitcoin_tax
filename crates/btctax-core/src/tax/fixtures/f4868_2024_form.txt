@@ -1,0 +1,329 @@
+# GENERATED — do not hand-edit. THE MANUAL, as a checkable fixture.
+#
+# Source: design/forms/2024/f4868--2024.pdf  sha256:8d1a031a…
+# Command: pdftotext -layout <pdf> -
+#
+# ★ Extracted from the TEXT LAYER, never a rendered page: a rendered 12 and 22 differ by a
+# few pixels, and that exact confusion once put "Subtract line 32 from line 12" where
+# Form 6251 says line 22, inflating a tentative minimum tax by $200,000.
+#   cargo run -p xtask -- extract-schedule-1a
+#
+Form   4868                                 Application for Automatic Extension of Time
+                                             To File U.S. Individual Income Tax Return
+                                                                                                                                                   OMB No. 1545-0074
+
+
+Department of the Treasury
+Internal Revenue Service
+                                                       Go to www.irs.gov/Form4868 for the latest information.                                       2024
+There are three ways to request an automatic extension of time to
+file a U.S. individual income tax return.                                                           Pay Electronically
+   1. You can pay all or part of your estimated income tax due and
+      indicate that the payment is for an extension using your bank                      You don’t need to file Form 4868 if you make a payment using our
+      account; a digital wallet such as Click to Pay, PayPal, and                        electronic payment options. The IRS will automatically process an
+      Venmo; cash; or a credit or debit card. See How To Make a                          extension of time to file when you pay part or all of your estimated
+      Payment, later, and www.irs.gov/Payments for more                                  income tax electronically. You can pay online or by phone. See
+      information.                                                                       Making Payments Electronically, later.
+   2. You can file Form 4868 electronically by accessing IRS e-file                                 E-file Using Your Tax Software
+      using your tax software or by using a tax professional who
+      uses e-file.
+                                                                                                    or Through a Tax Professional
+   3. You can file a paper Form 4868 and enclose payment of your                         Refer to your tax software package or tax preparer for ways to file
+      estimate of tax due (optional).                                                    electronically. Be sure to have a copy of your 2023 tax return—
+                                                                                         you’ll be asked to provide information from the return for taxpayer
+                                         It’s Convenient,                                verification. If you wish to make a payment, you can pay by
+                                         Safe, and Secure                                electronic funds withdrawal or send your check or money order to
+                                                                                         the address shown in the middle column under Where To File a
+IRS e-file is the IRS’s electronic filing program. You can get an                        Paper Form 4868, later.
+automatic extension of time to file your tax return by filing Form 4868
+electronically. You’ll receive an electronic acknowledgment once you
+complete the transaction. Keep it with your records. Don’t mail in
+                                                                                                    File a Paper Form 4868
+Form 4868 if you file electronically, unless you’re making a payment
+with a check or money order. See Pay by Check or Money Order, later.                     If you wish to file on paper instead of electronically, complete the
+                                                                                         Form 4868 below and mail it to the address shown under Where To
+   Complete Form 4868 to use as a worksheet. If you think you may                        File a Paper Form 4868, later.
+owe tax when you file your return, you’ll need to estimate your total
+                                                                                            For information on using a private delivery service, see Private
+tax liability and subtract how much you’ve already paid (lines 4, 5,
+                                                                                         Delivery Services, later.
+and 6 below).
+                                                                                         Note: If you’re a fiscal year taxpayer, you must file a paper
+   Several companies offer free e-filing of Form 4868 through the
+                                                                                         Form 4868.
+Free File Program. For more details, go to www.irs.gov/FreeFile.
+
+                                                                 General Instructions
+Purpose of Form                                                                             1. Properly estimate your 2024 tax liability using the information
+                                                                                         available to you,
+Use Form 4868 to apply for 6 more months (4 if “out of the
+country” (defined later under Taxpayers who are out of the country)                         2. Enter your total tax liability on line 4 of Form 4868, and
+and a U.S. citizen or resident) to file Form 1040, 1040-SR, 1040-NR,                        3. File Form 4868 by the regular due date of your return.
+or 1040-SS.                                                                                        Although you aren’t required to make a payment of the tax
+Gift and generation-skipping transfer (GST) tax return (Form 709
+or 709-NA). An extension of time to file your 2024 calendar year
+                                                                                         ▲
+                                                                                         !
+                                                                                         CAUTION
+                                                                                                   you estimate as due, Form 4868 doesn’t extend the time to
+                                                                                                   pay taxes. If you don’t pay the amount due by the regular
+income tax return also extends the time to file Form 709 or 709-NA                       due date, you’ll owe interest. You may also be charged penalties.
+for 2024. However, it doesn’t extend the time to pay any gift and                        For more details, see Interest and Late Payment Penalty, later. Any
+GST tax you may owe for 2024. To make a payment of gift and GST                          remittance you make with your application for extension will be
+tax, see Form 8892. If you don’t pay the amount due by the regular                       treated as a payment of tax.
+due date for Form 709 or 709-NA, you’ll owe interest and may also                           You don’t have to explain why you’re asking for the extension.
+be charged penalties. If the donor died during 2024, see the                             We’ll contact you only if your request is denied.
+instructions for Forms 709 or 709-NA, and 8892.                                             Don’t file Form 4868 if you want the IRS to figure your tax or
+                                                                                         you’re under a court order to file your return by the regular due date.
+Qualifying for the Extension
+To get the extra time, you must:
+                                                                             DETACH HERE
+
+
+
+
+Form   4868                                 Application for Automatic Extension of Time
+                                             To File U.S. Individual Income Tax Return
+                                                                                                                                                   OMB No. 1545-0074
+
+
+
+Department of the Treasury
+Internal Revenue Service         For calendar year 2024, or other tax year beginning            , 2024, and ending            , 20         .
+                                                                                                                                                    2024
+ Part I      Identification                                                            Part II Individual Income Tax
+ 1 Your name(s) (see instructions)                                                      4 Estimate of total tax liability for 2024 .   .       $
+                                                                                        5 Total 2024 payments . . . . .                .
+    Address (see instructions)                                                          6 Balance due. Subtract line 5 from line 4.
+                                                                                          See instructions . . . . . . . .
+                                                                                        7 Amount you’re paying (see instructions) .
+    City, town, or post office                          State     ZIP code              8 Check here if you’re “out of the country” and a U.S. citizen
+                                                                                          or resident. See instructions . . . . . . . . .
+                                                                                        9 Check here if you file Form 1040-NR and didn’t receive
+ 2 Your social security number               3 Spouse’s social security number
+                                                                                          wages as an employee subject to U.S. income tax
+                                                                                          withholding . . . . . . . . . . . . . .
+For Privacy Act and Paperwork Reduction Act Notice, see page 4.                                           Cat. No. 13141W                             Form 4868 (2024)
+Form 4868 (2024)                                                                                                                                  Page 2
+
+When To File Form 4868                                                        Interest
+File Form 4868 by April 15, 2025. Fiscal year taxpayers file Form             You’ll owe interest on any tax not paid by the regular due date of
+4868 by the original due date of the fiscal year return.                      your return, even if you qualify for the 2-month extension because
+Taxpayers who are out of the country. If, on the regular due date             you were out of the country. The interest runs until you pay the tax.
+of your return, you’re out of the country (as defined below) and a            Even if you had a good reason for not paying on time, you will still
+U.S. citizen or resident, you’re allowed 2 extra months to file your          owe interest.
+return and pay any amount due without requesting an extension.                Late Payment Penalty
+Interest will still be charged, however, on payments made after the           The late payment penalty is usually ½ of 1% of any tax (other than
+regular due date, without regard to the extension. If you’re out of           estimated tax) not paid by the regular due date of your return, which
+the country and file a calendar year income tax return, you can pay           is April 15, 2025, for most people. It’s charged for each month or
+the tax and file your return or this form by June 16, 2025. File this         part of a month the tax is unpaid. The maximum penalty is 25%.
+form and be sure to check the box on line 8 if you need an
+                                                                                 The late payment penalty won’t be charged if you can show
+additional 4 months to file your return.
+                                                                              reasonable cause for not paying on time. Attach a statement to your
+   If you’re out of the country and a U.S. citizen or resident, you may       return fully explaining the reason. Don’t attach the statement to
+qualify for special tax treatment if you meet the bona fide residence         Form 4868.
+or physical presence test. If you don’t expect to meet either of
+                                                                                 You’re considered to have reasonable cause for the period
+those tests by the due date of your return, request an extension to a
+                                                                              covered by this automatic extension if both of the following
+date after you expect to meet the tests by filing Form 2350,
+                                                                              requirements have been met.
+Application for Extension of Time To File U.S. Income Tax Return.
+                                                                                 1. At least 90% of the total tax on your 2024 return is paid on or
+   You’re out of the country if:
+                                                                              before the regular due date of your return through withholding,
+• You live outside the United States and Puerto Rico and your main            estimated tax payments, or payments made with Form 4868.
+place of work is outside the United States and Puerto Rico, or
+                                                                                 2. The remaining balance is paid with your return.
+• You’re in military or naval service on duty outside the United
+States and Puerto Rico.                                                       Late Filing Penalty
+   If you qualify as being out of the country, you’ll still be eligible for   A late filing penalty is usually charged if your return is filed after the
+the extension even if you’re physically present in the United States          due date (including extensions). The penalty is usually 5% of the
+or Puerto Rico on the regular due date of the return.                         amount due for each month or part of a month your return is late.
+   For more information on extensions for taxpayers out of the                The maximum penalty is 25%. If your return is more than 60 days
+country, see Pub. 54, Tax Guide for U.S. Citizens and Resident                late, the minimum penalty is $510 (adjusted for inflation) or the
+Aliens Abroad.                                                                balance of the tax due on your return, whichever is smaller. You
+Form 1040-NR filers. If you can’t file your return by the due date,           might not owe the penalty if you have a reasonable explanation for
+you should file Form 4868. You must file Form 4868 by the regular             filing late. Attach a statement to your return fully explaining your
+due date of the return.                                                       reason for filing late. Don’t attach the statement to Form 4868.
+   If you didn’t receive wages as an employee subject to U.S.                 How To Claim Credit for Payment Made With This
+income tax withholding, and your return is due June 16, 2025,                 Form
+check the box on line 9.                                                      When you file your 2024 return, include the amount of any payment
+   For more information on extensions for nonresident filers, see             you made with Form 4868 on the appropriate line of your tax return.
+Pub. 519, U.S. Tax Guide for Aliens.                                             The instructions for the following line of your tax return will tell
+                                                                              you how to report the payment.
+Total Time Allowed
+                                                                              • Form 1040, 1040-SR, or 1040-NR, Schedule 3, line 10.
+Generally, we can’t extend the due date of your return for more than
+6 months (October 15, 2025, for most calendar year taxpayers).                • Form 1040-SS, Part I, line 11b.
+However, there may be an exception if you’re living out of the                   If you and your spouse each filed a separate Form 4868 but later
+country. See Pub. 54 for more information.                                    file a joint return for 2024, enter the total paid with both Forms 4868
+                                                                              on the appropriate line of your joint return.
+Filing Your Tax Return                                                           If you and your spouse jointly file Form 4868 but later file separate
+You can file your tax return any time before the extension expires.           returns for 2024, you can enter the total amount paid with Form
+Don’t attach a copy of Form 4868 to your return.                              4868 on either of your separate returns. Or you and your spouse
+                                                                              can divide the payment in any agreed amounts.
+Form 4868 (2024)                                                                                                                                 Page 3
+
+                                                         Specific Instructions
+How To Complete Form 4868                                                    Line 4—Estimate of Total Tax Liability for 2024
+                                                                             Enter on line 4 the total tax liability you expect to report on your
+Part I—Identification                                                        2024:
+Enter your name(s) and address. If you plan to file a joint return,          • Form 1040, 1040-SR, or 1040-NR, line 24; or
+include both spouses’ names in the order in which they will appear
+on the return.                                                               • Form 1040-SS, Part I, line 7.
+   If you want correspondence regarding this extension to be sent to           If you expect this amount to be zero, enter -0-.
+                                                                                       Make your estimate as accurate as you can with the
+you at an address other than your own, enter that address. If you
+want the correspondence sent to an agent acting for you, include
+the agent’s name (as well as your own) and the agent’s address.
+                                                                             ▲
+                                                                             !
+                                                                             CAUTION
+                                                                                       information you have. If we later find that the estimate
+                                                                                       wasn’t reasonable, the extension will be null and void.
+   If you changed your name after you filed your last return because         Line 5—Estimate of Total Payments for 2024
+of marriage, divorce, etc., be sure to report this to the Social             Enter on line 5 the total payments you expect to report on your
+Security Administration before filing Form 4868. This prevents               2024:
+delays in processing your extension request.                                 • Form 1040, 1040-SR, or 1040-NR, line 33 (excluding Schedule 3,
+   If you changed your mailing address after you filed your last             line 10); or
+return, you should use Form 8822, Change of Address, to notify the           • Form 1040-SS, Part I, line 12 (excluding Part I, line 11b).
+IRS of the change. Showing a new address on Form 4868 won’t
+                                                                                        Don’t include on line 5 the amount you’re paying with this
+update your record. You can download or order IRS forms at
+www.irs.gov/FormsPubs.                                                       ▲
+                                                                             !
+                                                                             CAUTION
+                                                                                        Form 4868.
+   If you plan to file a joint return, enter on line 2 the social security
+number (SSN) that you’ll show first on your return. Enter on line 3          Line 6—Balance Due
+the other SSN to be shown on the joint return. If you’re filing Form         Subtract line 5 from line 4. If line 5 is more than line 4, enter -0-.
+1040-NR as an estate or trust, enter your employer identification            Line 7—Amount You’re Paying
+number (EIN) instead of an SSN on line 2. In the left margin, next to
+the EIN, write “estate” or “trust.”                                          If you find you can’t pay the amount shown on line 6, you can still
+                                                                             get the extension. But you should pay as much as you can to limit
+IRS individual taxpayer identification numbers (ITINs) for aliens.           the amount of interest you’ll owe. Also, you may be charged a late
+If you’re a nonresident or resident alien and you don’t have and             payment penalty on the unpaid tax from the regular due date of
+aren’t eligible to get an SSN, you must apply for an ITIN. Although          your return. See Late Payment Penalty, earlier.
+an ITIN isn’t required to file Form 4868, you’ll need one to file your
+income tax return. For details on how to apply for an ITIN, see Form         Line 8—Out of the Country
+W-7 and its instructions. If you already have an ITIN, enter it              If you’re out of the country on the regular due date of your return,
+wherever an SSN is requested. If you don’t have an ITIN, enter “ITIN         check the box on line 8. “Out of the country” is defined under
+TO BE REQUESTED” wherever an SSN is requested.                               Taxpayers who are out of the country, earlier.
+           An ITIN is for tax use only. It doesn’t entitle you to social
+▲
+!CAUTION
+           security benefits or change your employment or
+           immigration status under U.S. law.
+                                                                             Line 9—Form 1040-NR Filers
+                                                                             If you didn’t receive wages subject to U.S. income tax withholding,
+                                                                             and your return is due June 16, 2025, check the box on line 9.
+Part II—Individual Income Tax
+Rounding off to whole dollars. You can round off cents to whole
+dollars on Form 4868. If you do round to whole dollars, you must
+round all amounts. To round, drop amounts under 50 cents and
+increase amounts from 50 to 99 cents to the next dollar. For
+example, $1.39 becomes $1 and $2.50 becomes $3. If you have to
+add two or more amounts to figure the amount to enter on a line,
+include cents when adding the amounts and only round off the total.
+
+                                                     How To Make a Payment
+Making Payments Electronically                                               • Write your SSN, daytime phone number, and “2024 Form 4868”
+                                                                             on your check or money order.
+You can pay online with a direct transfer from your bank account
+using Direct Pay; Online Account; the Electronic Federal Tax                 • Don’t staple or attach your payment to Form 4868.
+Payment System (EFTPS); a digital wallet such as Click to Pay,               Note: If you e-file Form 4868 and mail a check or money order to
+PayPal, and Venmo; cash; or a debit or credit card. You can also             the IRS for payment, use a completed paper Form 4868 as a
+pay by phone using EFTPS or by debit or credit card. For more                voucher. Please note with your payment that your extension request
+information, go to www.irs.gov/Payments.                                     was originally filed electronically.
+Confirmation number. You’ll receive a confirmation number when               Notice to taxpayers presenting checks. When you provide a
+you pay online or by phone. Enter the confirmation number below              check as payment, you authorize us either to use information from
+and keep it for your records.                                                your check to make a one-time electronic fund transfer from your
+Enter confirmation number here:                                              account or to process the payment as a check transaction. When
+                                                                             we use information from your check to make an electronic fund
+Note: If you use an electronic payment method and indicate the               transfer, funds may be withdrawn from your account as soon as the
+payment is for an extension, you don’t have to file Form 4868. You           same day we receive your payment, and you will not receive your
+should pay the entire estimated tax owed or you could be subject to          check back from your financial institution.
+a penalty. Your extension will be automatically processed when you
+                                                                             No checks of $100 million or more accepted. The IRS can’t
+pay part or all of your estimated income tax electronically.
+                                                                             accept a single check (including a cashier’s check) for amounts of
+Pay by Check or Money Order                                                  $100,000,000 ($100 million) or more. If you’re sending $100 million
+• When paying by check or money order with Form 4868, use the                or more by check, you’ll need to spread the payment over two or
+appropriate address in the middle column under Where To File a               more checks with each check made out for an amount less than
+Paper Form 4868, later.                                                      $100 million. The $100 million or more amount limit doesn’t apply
+                                                                             to other methods of payment (such as electronic payments). Please
+• Make your check or money order payable to “United States                   consider a method of payment other than check if the amount of the
+Treasury.” Don’t send cash.                                                  payment is $100 million or more.
+Form 4868 (2024)                                                                                                                                  Page 4
+
+                                                   Where To File a Paper Form 4868
+                                                                                                                      And you’re not making a payment,
+                                                                  And you’re making a payment,                                       send Form 4868 to
+                                                                  send Form 4868 with your payment to                       Department of the Treasury,
+If you live in:                                                   Internal Revenue Service:                            Internal Revenue Service Center:
+Alabama, Florida, Georgia, Louisiana, Mississippi, North
+                                                                  P.O. Box 1302, Charlotte, NC 28201-1302                          Austin, TX 73301-0045
+Carolina, South Carolina, Tennessee, Texas
+Arizona, New Mexico                                               P.O. Box 802503, Cincinnati, OH 45280-2503                       Austin, TX 73301-0045
+
+Connecticut, Delaware, District of Columbia, Illinois, Indiana,
+Iowa, Kentucky, Maine, Maryland, Massachusetts, Minnesota,        P.O. Box 931300, Louisville, KY 40293-1300                 Kansas City, MO 64999-0045
+Missouri, New Hampshire, New Jersey, New York, Rhode
+Island, Vermont, Virginia, West Virginia, Wisconsin
+
+Alaska, California, Colorado, Hawaii, Idaho, Kansas, Michigan,
+Montana, Nebraska, Nevada, North Dakota, Ohio, Oregon,            P.O. Box 802503, Cincinnati, OH 45280-2503                      Ogden, UT 84201-0045
+South Dakota, Utah, Washington, Wyoming
+Arkansas, Oklahoma                                                P.O. Box 931300, Louisville, KY 40293-1300                       Austin, TX 73301-0045
+Pennsylvania                                                      P.O. Box 802503, Cincinnati, OH 45280-2503                 Kansas City, MO 64999-0045
+A foreign country, American Samoa, or Puerto Rico, or are
+excluding income under Internal Revenue Code section 933,
+or use an APO or FPO address, or file Form 2555 or 4563,          P.O. Box 1303, Charlotte, NC 28201-1303 USA                 Austin, TX 73301-0215 USA
+or are a dual-status alien, or nonpermanent resident of Guam or
+the U.S. Virgin Islands
+All foreign estate and trust Form 1040-NR filers                  P.O. Box 1303, Charlotte, NC 28201-1303 USA           Kansas City, MO 64999-0045 USA
+All other Form 1040-NR and 1040-SS filers                         P.O. Box 1303, Charlotte, NC 28201-1303 USA                 Austin, TX 73301-0215 USA
+
+Private Delivery Services                                                       Privacy Act and Paperwork Reduction Act Notice. We ask for the
+                                                                                information on this form to carry out the Internal Revenue laws of
+You can use certain private delivery services designated by the IRS
+                                                                                the United States. We need this information so that our records will
+to meet the “timely mailing as timely filing/paying” rule for tax
+                                                                                reflect your intention to file your individual income tax return within 6
+returns and payments. These private delivery services include only
+                                                                                months after the regular due date. If you choose to apply for an
+the following.
+                                                                                automatic extension of time to file, you’re required by Internal
+• Federal Express (FedEx): FedEx First Overnight, FedEx Priority                Revenue Code section 6081 to provide the information requested
+Overnight, FedEx Standard Overnight, FedEx 2 Day, FedEx                         on this form. Under Internal Revenue Code section 6109, you must
+International Next Flight Out, FedEx International Priority, FedEx              disclose your social security number or individual taxpayer
+International First, and FedEx International Economy.                           identification number. Routine uses of this information include
+• DHL Express: DHL Express 9:00, DHL Express 10:30, DHL                         giving it to the Department of Justice for civil and criminal litigation,
+Express 12:00, DHL Express Worldwide, DHL Express Envelope,                     and to cities, states, the District of Columbia, and U.S.
+DHL Import Express 10:30, DHL Import Express 12:00, and DHL                     commonwealths and territories for use in administering their tax
+Import Express Worldwide.                                                       laws. We may also disclose this information to other countries under
+• United Parcel Service (UPS): UPS Next Day Air Early AM, UPS                   a tax treaty, to federal and state agencies to enforce federal nontax
+Next Day Air, UPS Next Day Air Saver, UPS 2nd Day Air, UPS 2nd                  criminal laws, or to federal law enforcement and intelligence
+Day Air A.M., UPS Worldwide Express Plus, and UPS Worldwide                     agencies to combat terrorism. If you fail to provide this information
+Express.                                                                        in a timely manner or provide incomplete or false information, you
+   To check for any updates to the list of designated private delivery          may be liable for penalties.
+services, go to www.irs.gov/PDS. For the IRS mailing address to                    You aren’t required to provide the information requested on a
+use if you’re using a private delivery service, go to                           form that is subject to the Paperwork Reduction Act unless the form
+www.irs.gov/PDSStreetAddresses.                                                 displays a valid OMB control number. Books or records relating to a
+   The private delivery service can tell you how to get written proof           form or its instructions must be retained as long as their contents
+of the mailing date.                                                            may become material in the administration of any Internal Revenue
+          Private delivery services can’t deliver items to P.O. boxes.          law. Generally, tax returns and return information are confidential,
+▲
+!CAUTION
+          You must use the U.S. Postal Service to mail any item to
+          an IRS P.O. box address.
+                                                                                as required by Internal Revenue Code section 6103.
+                                                                                   The average time and expenses required to complete and file this
+                                                                                form will vary depending on individual circumstances. For the
+                                                                                estimated averages, see the instructions for your income tax return.
+                                                                                   If you have suggestions for making this form simpler, we would
+                                                                                be happy to hear from you. See the instructions for your income tax
+                                                                                return.
+

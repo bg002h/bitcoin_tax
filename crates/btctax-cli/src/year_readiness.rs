@@ -180,11 +180,29 @@ pub fn slice_can_print(year: i32) -> bool {
         && btctax_forms::ScheduleDMap::for_year(year).is_ok()
 }
 
-/// ★ spec 1099-DA R6 fold (I-1 + M-4) — the slice clause the two readiness sentences carry, with the
-/// predicate the EXPORT actually applies: the answers are stored AND the year's templates are
-/// bundled. Empty when either half fails — saying nothing beats promising an artifact that refuses.
+/// ★★★ spec 1099-DA R6 fold (I-1 + M-4) — **THE predicate for "tell this filer about the crypto
+/// slice", shared by every surface that says so**, so no two of them can disagree about whether the
+/// artifact exists: the answers are stored AND the year's own Form 8949 / Schedule D templates are
+/// bundled.
+///
+/// Both terms are load-bearing and each was once missing. Without `answers_stored` (M-4) the
+/// sentence asserted "from the stored answers" on a year holding none; without [`slice_can_print`]
+/// (I-1) it promised an artifact `export-irs-pdf` would refuse — TY2026 is exactly that year.
+///
+/// ★ It deliberately does NOT re-check that the year's full-return parameters are absent. Every
+/// caller is already inside a params-less branch by construction — [`uncomputable_sentence`] runs
+/// only when the return did not compute, [`import_note`] returns early when `r.params`, and the TUI
+/// input form's `CommitOutcome::NoTables` arm IS the no-parameters outcome. Re-deriving it here
+/// would be a second answer to a question the caller has already answered.
+pub fn slice_prints_from_answers(year: i32, answers_stored: bool) -> bool {
+    answers_stored && slice_can_print(year)
+}
+
+/// ★ spec 1099-DA R6 fold (I-1 + M-4) — the slice clause the two readiness sentences carry, under
+/// [`slice_prints_from_answers`]. Empty when the predicate is false — saying nothing beats promising
+/// an artifact that refuses.
 fn slice_clause(year: i32, answers_stored: bool) -> String {
-    if answers_stored && slice_can_print(year) {
+    if slice_prints_from_answers(year, answers_stored) {
         format!(
             "`export-irs-pdf --tax-year {year}` still prints the crypto slice from the stored answers. "
         )

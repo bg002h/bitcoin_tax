@@ -248,7 +248,10 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
         "Tab/Shift-Tab: tab   ←/→ h/l: column   s: sort   [/]: year   ↑/↓ j/k: scroll   \
          g/G: top/bottom   p: profile   ?: help   q/Esc: quit   [EDITOR]";
     let footer_text = if let Some(status) = app.status.as_deref() {
-        status.to_string()
+        // ★ FR-63: `app.status` may be multi-line (the input form's NOTICE surface draws one row per
+        // segment). This footer is a single centred row, so the segments are JOINED — nothing is
+        // dropped, and the clipping behaviour is the one this footer already has.
+        status.lines().collect::<Vec<_>>().join(" · ")
     } else {
         keybindings_hint.to_string()
     };
@@ -2003,9 +2006,15 @@ fn draw_tax_inputs_form(
     // 3 regions: [left section list | right field pane] over a bottom status block. The block is 5 rows
     // (border + 3 content lines): active-source/screen-status, the key legend, and a NOTICE line that
     // surfaces `app.status`/the stale-WIP note inside the flow (I-2 — the overlay clears the Browse footer).
+    //
+    // ★ FR-63: the NOTICE takes as many rows as `app.status` has `\n`-separated lines, so a two-line
+    // notice is DRAWN rather than silently cut off at the block's edge. The floor stays 5, which is
+    // what keeps every one-line state pixel-identical to before.
+    let notice_rows = u16::try_from(status.map_or(0, |s| s.lines().count())).unwrap_or(1);
+    let status_h = 5.max(4 + notice_rows);
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(5)])
+        .constraints([Constraint::Min(1), Constraint::Length(status_h)])
         .split(area);
     let cols = Layout::default()
         .direction(Direction::Horizontal)
@@ -2224,10 +2233,13 @@ fn draw_tax_inputs_discard(
     // ★ I-2: a discard refusal / save error in this P2-a state routes to `app.status`; the full-frame Clear
     // hides the Browse footer, so surface it HERE (else the `X` failure looks identical to a success).
     if let Some(s) = status {
-        v.push(Line::from(Span::styled(
-            s.to_string(),
-            Style::default().fg(Color::Yellow),
-        )));
+        // one Line per `\n` segment (FR-63): a multi-line status must not render as a literal `\n`
+        for seg in s.lines() {
+            v.push(Line::from(Span::styled(
+                seg.to_string(),
+                Style::default().fg(Color::Yellow),
+            )));
+        }
         v.push(Line::from(""));
     }
     v.push(Line::from(
@@ -2295,11 +2307,18 @@ fn draw_tax_inputs_status(
     ];
     // ★ I-2: the NOTICE line — `app.status` (every in-flow refusal/error/outcome routed there stays VISIBLE)
     // takes precedence over the one-time §6.3 stale-WIP note, which shows only when there is no live status.
+    //
+    // ★★ FR-63: the NOTICE is a MULTI-LINE surface. `app.status` may carry `\n`, and each segment
+    // draws as its own row — the lines do NOT wrap, so a fact that will not fit in the ≤104-char
+    // first line is added BESIDE it rather than by lengthening it. `notice_rows` below sizes the
+    // block from the same split, so a second line cannot be written and then clipped away unseen.
     if let Some(s) = status {
-        lines.push(Line::from(Span::styled(
-            format!("  {s}"),
-            Style::default().fg(Color::Cyan),
-        )));
+        for seg in s.lines() {
+            lines.push(Line::from(Span::styled(
+                format!("  {seg}"),
+                Style::default().fg(Color::Cyan),
+            )));
+        }
     } else if let Some(note) = form.stale_note.as_ref() {
         lines.push(Line::from(Span::styled(
             format!("  {note}"),

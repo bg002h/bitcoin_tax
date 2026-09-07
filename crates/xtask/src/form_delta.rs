@@ -688,8 +688,29 @@ mod tests {
         );
         // ★ isolates the `claims_no_new` conjunct (r3 R2): the pair does not compute (no prior
         //   PDF), the prior claim is true, and ONLY the draft-on-disk conjunct can red it.
-        let (_, _, wrong) =
-            dflt("| `f8995a` | yes | **NO PRIOR SIDE** | **NO DRAFT** — planted | — |\n");
+        //
+        // ★ 2026-09-06 (residue sweep 1, item 6) — the PRIOR TAG here is `2017`, not the document's
+        //   `2025`. This plant needs a stem whose prior side is absent while its DRAFT is archived,
+        //   and `f8995a` was the last one: archiving `f8995a--2025` as an authority gave it a prior
+        //   side, so under the committed tags the row now computes a pair and reds for the WRONG
+        //   reason ("excused as having no pair, but form-delta computes one"), which would have kept
+        //   `wrong.len() == 1` green while testing nothing. TY2017 was dropped whole (S9), so
+        //   `f8995a--2017` is absent by construction rather than by which years happen to be
+        //   archived — asserted below, not assumed.
+        assert!(
+            super::pdf_for("f8995a--2017").is_none()
+                && super::pdf_for("f8995a--2026-DRAFT").is_some(),
+            "the plant assumes f8995a has NO 2017 prior side and a 2026 draft"
+        );
+        assert!(
+            super::compute("f8995a--2017", "f8995a--2026-DRAFT").is_err(),
+            "…so the pair cannot compute, which is what puts the row in the excused arm"
+        );
+        let (_, _, wrong) = check_work_list_with(
+            "| `f8995a` | yes | **NO PRIOR SIDE** | **NO DRAFT** — planted | — |\n",
+            "2017",
+            "2026-DRAFT",
+        );
         assert_eq!(
             wrong.len(),
             1,
@@ -725,18 +746,25 @@ mod tests {
                 && super::pdf_for("f8995a--2026").is_none(),
             "the plant below assumes f8995a has a draft and no final"
         );
+        // ★ prior tag `2017` for the same reason as the plant above: `f8995a--2025` is archived now,
+        //   so under the document's own tags this row would compute a pair and leave the excused arm.
         let (_, excused, wrong) = check_work_list_with(
             "| `f8995a` | yes | **NO PRIOR SIDE** | **NO FINAL** — planted | — |\n",
-            "2025",
+            "2017",
             "2026",
         );
         assert!(
             wrong.is_empty() && excused == ["f8995a"],
             "NO FINAL is TRUE for f8995a today (a draft is not a final): {wrong:?}"
         );
-        // and the false direction, on the archive itself: a NO DRAFT claim while the draft exists
-        let (_, _, wrong) =
-            dflt("| `f8995a` | yes | **NO PRIOR SIDE** | **NO DRAFT** — planted | — |\n");
+        // and the false direction, on the archive itself: a NO DRAFT claim while the draft exists.
+        // The ONLY difference from the excused row just above is the new-side tag — DRAFT against
+        // final — so the opposite verdict isolates exactly the draft/final distinction.
+        let (_, _, wrong) = check_work_list_with(
+            "| `f8995a` | yes | **NO PRIOR SIDE** | **NO DRAFT** — planted | — |\n",
+            "2017",
+            "2026-DRAFT",
+        );
         assert_eq!(
             wrong.len(),
             1,
@@ -772,13 +800,15 @@ mod tests {
         // ★ the tags line is LOAD-BEARING end to end (r4 N6): the same row is excused under a document
         //   declaring the final tag and wrong under one declaring the draft tag, through
         //   check_work_list itself; a document with no tags line is wrong
+        // ★ prior tag `2017` (residue sweep 1, item 6): `f8995a--2025` is archived, so `2025` here
+        //   would compute a pair and the row would leave the excused arm the tags line is testing.
         let row = "| `f8995a` | yes | **NO PRIOR SIDE** | **NO FINAL** — planted | — |\n";
-        let (_, excused, wrong) = check_work_list(&format!("<!-- tags: 2025 2026 -->\n{row}"));
+        let (_, excused, wrong) = check_work_list(&format!("<!-- tags: 2017 2026 -->\n{row}"));
         assert!(
             wrong.is_empty() && excused == ["f8995a"],
             "declared final tag: {wrong:?}"
         );
-        let (_, _, wrong) = check_work_list(&format!("<!-- tags: 2025 2026-DRAFT -->\n{row}"));
+        let (_, _, wrong) = check_work_list(&format!("<!-- tags: 2017 2026-DRAFT -->\n{row}"));
         assert_eq!(
             wrong.len(),
             1,

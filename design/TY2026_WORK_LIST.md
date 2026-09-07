@@ -43,6 +43,7 @@ added, removed or moved with labels compared, **port** otherwise.
 | `f8959` | 26 | 0 | 0 | 0 | unchanged |
 | `f8960` | 38 | 0 | 0 | 0 | unchanged |
 | `f8995` | 22 | 14 | 11 | 8 | **REBUILT** |
+| `f8995a` | 111 | 3 | 0 | 0 | port |
 
 ## Not listed — stated PER CELL, never omitted (Fable plan review I8)
 
@@ -59,7 +60,13 @@ hand-maintained — only the numeric table above is pasted verbatim, and the tes
 | `f1040v` | yes — the payment voucher, written BESIDE the packet and enclosed loose (spec 4868/1040-V R4) | `f1040v--2025` | **NO DRAFT** — the IRS posts no TY2026 Form 1040-V draft; the revision arrives with the January 2027 package | **NO DRAFT** |
 | `f8283` | yes — `packet.rs:223` | `f8283--2025` (Rev. 12-2025, periodic) | **NO DRAFT** — the draft URL served a 2025 document; archiver refused | **NO DRAFT** |
 | `f8275` | yes — `packet.rs:218` | **NO PRIOR SIDE** for the `--2025` tag — `f8275--2024` (Rev. 10-2024, periodic) is aliased by hash for 2025 | **NO DRAFT** — the draft URL served a 2024 document; archiver refused | **NO DRAFT** — periodic; a new revision would be a hash change, not a year |
-| `f8995a` | yes — `packet.rs:194` | **NO PRIOR SIDE** — bundled for 2024 only; no `f8995a--2025` authority or extract archived (the port report §5d's "keep" was a to-do, not a fact) | draft archived (`f8995a--2026-DRAFT`) | **NO PRIOR SIDE** → archive `f8995a--2025` + `i8995a--2025`, then diff |
+
+★ **2026-09-06 (residue sweep 1, item 6): `f8995a` moved OUT of this table and INTO the numeric one.**
+Its cell used to read *"**NO PRIOR SIDE** — bundled for 2024 only; no `f8995a--2025` authority or
+extract archived"*; the TY2025 revision is now archived as evidence (note, `-layout` extract,
+geometry — no map, no filler, no bundled template), so the pair computes and the row is
+`| f8995a | 111 | 3 | 0 | 0 | port |`. That is the only row that moved: the numeric table went 14
+rows → 15 and the excused table 6 → 5.
 
 Re-run the archiver when the two periodic forms post a 2026 revision; regenerate this list from the
 emitting surface, not from `design/forms/geometry/` pairs.

@@ -284,7 +284,8 @@ pub enum Command {
         /// Check Form 4868 line 8: you are "out of the country" and a U.S. citizen or resident. This
         /// is an assertion about YOU that only you can make, so it is never inferred — leaving it off
         /// simply forgoes the extra two months and claims nothing. With it, the due date this command
-        /// warns against becomes June 15 of the following year (shifted off a weekend under §7503).
+        /// warns against becomes June 15 of the following year (shifted off a weekend or a District
+        /// of Columbia legal holiday under §7503).
         #[arg(long)]
         out_of_country: bool,
         /// Attestation phrase required while the ledger is PSEUDO-RECONCILED (a synthetic default

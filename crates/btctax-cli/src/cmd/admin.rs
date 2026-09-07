@@ -1959,9 +1959,15 @@ pub fn extension_due_date(
     out_of_country: bool,
 ) -> time::Date {
     if !out_of_country {
-        // The committed `return_due` has §7503 already applied — shifting it again would move a
-        // correct date.
-        return return_due;
+        // ★ 2026-09-06 (residue sweep 1, item 2): the committed `return_due` already has §7503
+        //   applied, and the shifter is now IDEMPOTENT — it returns the first day that is neither a
+        //   weekend nor a District of Columbia legal holiday, which an already-shifted date is. So
+        //   applying it here cannot move a correct date, and it makes the April date DERIVED rather
+        //   than merely trusted: a `YEAR.toml` that declared a blocked day would print the date the
+        //   IRS recognises instead of the one a human typed. `year_record.rs`'s
+        //   `ty2017s_committed_return_due_is_derived_by_the_dc_holiday_calendar` holds every bundled
+        //   record to that fixed point, so this line is a no-op on every year the build carries.
+        return btctax_forms::year_record::section_7503_shift(return_due);
     }
     let june_15 = time::Date::from_calendar_date(tax_year + 1, time::Month::June, 15)
         .expect("June 15 exists in every year");
@@ -2259,10 +2265,6 @@ mod tests {
     }
 }
 
-/// ★ spec 1099-DA R1 — the crypto-slice arm's Form 1099-DA refusal, as a pure predicate so it can be
-/// planted red in every direction (B1): `Some` iff the question is LIVE for these rows (the year's
-/// regime reports basis AND ≥ 1 row was disposed on an exchange). The answers are not consulted —
-/// they live on `ReturnInputs`, which this arm has by construction not got.
 /// ★★★ spec 1099-DA R6 (I-1/I-7) — **THE FORM-LEVEL GATE for the crypto slice's answer-filed arm.**
 ///
 /// A year is ported form by form. `SUPPORTED_YEARS` answers a YEAR-level question — *does any form
@@ -2361,6 +2363,10 @@ fn first_unresolved_map(
     )))
 }
 
+/// ★ spec 1099-DA R1 — the crypto-slice arm's Form 1099-DA refusal, as a pure predicate so it can be
+/// planted red in every direction (B1): `Some` iff the question is LIVE for these rows (the year's
+/// regime reports basis AND ≥ 1 row was disposed on an exchange). The answers are not consulted —
+/// they live on `ReturnInputs`, which this arm has by construction not got.
 pub fn slice_broker_refusal(
     tax_year: i32,
     regime: btctax_core::InformationReturnRegime,

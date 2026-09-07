@@ -8,7 +8,9 @@
 //!    hand-list of filenames that would rot. A signed-ready extension application produced by a year
 //!    that refuses is the worst outcome available here.
 //! 2. **The due date is never a hardcoded month/day.** TY2017's `return_due` was **2018-04-17**
-//!    (the Emancipation Day shift), so any test that pinned `04-15` would be asserting a bug. The
+//!    (the Emancipation Day shift — since 2026-09-06 that shift is DERIVED by the §7503 calendar in
+//!    `btctax-forms::year_record`, not merely read off the record), so any test that pinned `04-15`
+//!    would be asserting a bug. The
 //!    pure `extension_due_date` is exercised on a TY2017-SHAPED record precisely because TY2017
 //!    itself could never reach this command (no full-return tables) — the refusal comes first. Since
 //!    S9 dropped the TY2017 package (2026-09-06) that record is BUILT here, from the committed
@@ -371,6 +373,15 @@ fn a_pseudo_ledger_is_refused_without_the_phrase_and_watermarked_with_it() {
 /// ★ KILL — §7503: a due date on a Saturday moves to the following Monday, a Sunday to the following
 /// Monday, and a weekday stands. The three cases in one test, because a shifter that moved
 /// everything, or nothing, passes any one of them alone.
+///
+/// ★ These are the JUNE dates this command actually shifts, and they are pinned here — in the crate
+/// that calls the shifter — so a change to the calendar cannot move the out-of-country date without
+/// reddening the command's own test. The HOLIDAY half of §7503 (District of Columbia legal
+/// holidays, added 2026-09-06) is killed where it lives, in
+/// `btctax-forms/tests/year_record.rs`: `the_section_7503_shifter_walks_past_weekends_and_dc_legal_holidays`,
+/// `the_dc_legal_holiday_predicate_names_the_right_days`, and the 140-year first-free-day sweep.
+/// No DC legal holiday falls in the June 14-17 window, which is why every value below is unchanged
+/// by that addition.
 #[test]
 fn the_section_7503_shifter_moves_a_weekend_to_monday_and_leaves_a_weekday_alone() {
     use btctax_forms::year_record::section_7503_shift;
