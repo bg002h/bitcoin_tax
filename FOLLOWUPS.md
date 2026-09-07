@@ -6263,6 +6263,18 @@ build, each with an owning phase.
   stay `Understates` (T3 seam review M4). Owning task: interview T5.** Conservative today (a `Yes`
   refuses where a forgo would do); derive the second sentence shape from the form's text the way the
   first is, never from the `★ PAREN` marker alone.
+- **FR-69 — a draft that is exactly a fresh opener seed is reported as work (T4b build `44ca7075`).
+  Owning phase: the interview build (T5–T12 residue).** Re-running `income open-next-year` on a year
+  whose draft is untouched since the opener refuses naming the seeded rows as holdings; truthful and
+  fail-closed, but a filer who opened the year by accident must pass `--discard-draft`. The honest
+  widening is a COMPARISON against the seed the opener would produce for that year, never a list;
+  deliberately not attempted in T4b (widening a disposability exemption is never the safe edit).
+- **FR-70 — a seeded dependent's identity prompt has no answer surface until T7 (T4b build
+  `44ca7075`). Owning task: interview T7.** `Identity.answer` is `None` by construction for a
+  dependent and the pre-named row is simply pending; T7's `DEPENDENT_GATES` make the `Dependent`
+  literal in `open_next_year::seed` fail to compile (every field named, no `..Default` tail), which is
+  the forcing function — T7 decides identity-vs-declaration per field and gives the prompt its
+  surface. The T4b seam review checks whether a seeded row can reach a commit un-asked.
   Owner-driven; the assistant prepares the walk (a checklist of moments from `SPEC_interview.md` §6)
   and records the findings verbatim.
 - **FR-47 — `AmtParams` / `FullReturnParams` TY2026 is a NOW item, not a post-finals one.**
