@@ -10352,10 +10352,11 @@ mod tests {
         }
         assert_eq!(
             app.tax_inputs_form.as_ref().unwrap().section_idx,
-            10,
-            "section cursor clamps at the last live section (11 on Single: Spouse hidden, \
+            11,
+            "section cursor clamps at the last live section (12 on Single: Spouse hidden, \
              box12/charitable nested). ★ +1 for the §G-22 Carryforwards section — the two QBI loss \
-             carryforwards were import-only, and omitting them UNDERSTATES tax."
+             carryforwards were import-only, and omitting them UNDERSTATES tax. ★ +1 again for R3's \
+             DocumentCensus section — eighteen tri-states, one per document TYPE."
         );
         // Left past the start clamps at 0.
         for _ in 0..50 {

@@ -128,6 +128,27 @@ charitable_carryover_in = []
 long = "0"
 short = "0"
 
+# ★★★ R3 / §5.1 — THE DOCUMENT CENSUS. One tri-state per document TYPE; an unanswered row refuses,
+# because "none" and "nobody asked" are the same blank on the printed page and are not the same
+# testimony. This household holds two W-2s and nothing else.
+[documents]
+w2 = true
+int_1099 = false
+div_1099 = false
+b_1099 = false
+g_1099 = false
+r_1099 = false
+ssa_1099 = false
+nec_misc_k_1099 = false
+k1 = false
+schedule_e_rental = false
+s_1099 = false
+oid_1099 = false
+w2g = false
+c_1099 = false
+a_1095 = false
+t_1098 = false
+
 [header]
 address_street = "88 Larkspur Way"
 address_city = "Boulder"

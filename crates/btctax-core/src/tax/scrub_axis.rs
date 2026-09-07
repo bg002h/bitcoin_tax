@@ -268,7 +268,7 @@ pub fn maximal_sentinel() -> ReturnInputs {
         basis_reported_and_no_adjustments: Some(true),
     };
 
-    ReturnInputs {
+    let mut ri = ReturnInputs {
         // ★ Sch 1-A carries a free-text vehicle description, so the axis fixture must exercise it
         //   or the scrub guarantee is asserted over a field nothing populates.
         schedule_1a: crate::tax::return_inputs::Schedule1aInputs {
@@ -279,6 +279,25 @@ pub fn maximal_sentinel() -> ReturnInputs {
             ..Default::default()
         },
         tax_year: 2024,
+        // ★ R3 — the census carries no identity, so the axis fixture answers it the way a real
+        //   W-2 household would: yes to the W-2 it transcribes, no to everything else.
+        documents: {
+            // ★ Every row answered `false` — "I received none" — then the rows this fixture
+            //   actually transcribes flipped to `true`. Derived from `transcribed_rows` rather
+            //   than hand-listed, so a row that gains a section later is answered here for free.
+            //
+            // ★★ RECORDED TENSION (T3, controller's decision): `int_1099` / `div_1099` /
+            //    `g_1099` / `b_1099` are NOT countable yet — T5 builds their screens — so this
+            //    fixture's imported 1099 rows sit beside a census `false`. That state cannot be
+            //    refused today because there is no row count to refuse it against; T5 makes
+            //    `transcribed_rows` return `Some(n)` for them and this fixture then answers
+            //    `true` with no edit here.
+            let mut c = crate::tax::document_census::DocumentCensus::default();
+            for row in crate::tax::document_census::DocumentRow::ALL {
+                c.set(*row, Some(false));
+            }
+            c
+        },
         filing_status: FilingStatus::Mfj,
         header: HouseholdHeader {
             taxpayer: person("taxpayer"),
@@ -467,7 +486,21 @@ pub fn maximal_sentinel() -> ReturnInputs {
                 state: AnswerState::Given,
             },
         )],
+    };
+    // ★★★ R3 — THE DOCUMENT CENSUS, answered from the fixture's own rows. Done here rather than in
+    //     the literal above because the answer for a countable row IS the row count, which the
+    //     literal cannot see while it is still being built.
+    //
+    // ★★ RECORDED TENSION (T3, the controller's decision): `int_1099` / `div_1099` / `g_1099` /
+    //    `b_1099` are not COUNTABLE yet — T5 builds their screens, and `transcribed_rows` says
+    //    `None` for them — so this fixture's imported 1099 rows sit beside a census `false`. There
+    //    is no row count today to refuse that against; T5 makes them countable and this loop then
+    //    answers `true` for them with no edit here.
+    for row in crate::tax::document_census::DocumentRow::ALL {
+        let has = crate::tax::document_census::transcribed_rows(&ri, *row).is_some_and(|n| n > 0);
+        ri.documents.set(*row, Some(has));
     }
+    ri
 }
 
 #[cfg(test)]

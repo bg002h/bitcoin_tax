@@ -95,6 +95,7 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         tax_year: _,
         filing_status,
         header,
+        documents,
         w2s,
         int_1099,
         div_1099,
@@ -240,6 +241,7 @@ pub fn classify(ri: &ReturnInputs) -> Census {
          assertion and not a forgone benefit; §63(e) `ForceItemize` is opt-in",
     );
     classify_header(&mut c, header);
+    classify_document_census(&mut c, documents);
     for w in w2s {
         classify_w2(&mut c, w);
     }
@@ -886,6 +888,55 @@ fn classify_qbi(c: &mut Census, q: &QbiInputs) {
         Class::NoTaxDirection,
         "§2.8: CarryProvenance (Form 8995 line 3) — no print, no tax direction",
     );
+}
+
+/// ★★★ **R3 / R14 — the DOCUMENT CENSUS is class (A), every row.**
+///
+/// Eighteen `Option<bool>` leaves, each a [`FORM_QUESTIONS`] declaration, destructured with **no
+/// `..` and no `_`** — so a nineteenth row does not compile until a human classifies it. That is the
+/// whole point of the census: its own answered-ness must be structural, or it merely relocates the
+/// trap it exists to close.
+///
+/// [`FORM_QUESTIONS`]: crate::tax::questions::FORM_QUESTIONS
+fn classify_document_census(c: &mut Census, d: &crate::tax::document_census::DocumentCensus) {
+    let crate::tax::document_census::DocumentCensus {
+        w2,
+        int_1099,
+        div_1099,
+        b_1099,
+        g_1099,
+        form_1098,
+        form_1098e,
+        r_1099,
+        ssa_1099,
+        nec_misc_k_1099,
+        k1,
+        schedule_e_rental,
+        s_1099,
+        oid_1099,
+        w2g,
+        c_1099,
+        a_1095,
+        t_1098,
+    } = d;
+    c.declaration(w2, QuestionId::DocW2);
+    c.declaration(int_1099, QuestionId::DocInt1099);
+    c.declaration(div_1099, QuestionId::DocDiv1099);
+    c.declaration(b_1099, QuestionId::DocB1099);
+    c.declaration(g_1099, QuestionId::DocG1099);
+    c.declaration(form_1098, QuestionId::DocForm1098);
+    c.declaration(form_1098e, QuestionId::DocForm1098e);
+    c.declaration(r_1099, QuestionId::DocR1099);
+    c.declaration(ssa_1099, QuestionId::DocSsa1099);
+    c.declaration(nec_misc_k_1099, QuestionId::DocNecMiscK1099);
+    c.declaration(k1, QuestionId::DocK1);
+    c.declaration(schedule_e_rental, QuestionId::DocScheduleERental);
+    c.declaration(s_1099, QuestionId::DocS1099);
+    c.declaration(oid_1099, QuestionId::DocOid1099);
+    c.declaration(w2g, QuestionId::DocW2g);
+    c.declaration(c_1099, QuestionId::DocC1099);
+    c.declaration(a_1095, QuestionId::DocA1095);
+    c.declaration(t_1098, QuestionId::DocT1098);
 }
 
 #[cfg(test)]

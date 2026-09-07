@@ -111,6 +111,22 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::CooperativePatron
         | R::SstbInPhaseInRange
         | R::QbiCarryforwardNeedsSchedule8995AC => vec![],
+        // ── ★★★ R3 / §5.1 — THE DOCUMENT CENSUS's four refusals. ────────────────────────────────
+        //
+        // All four point at the census row's OWN field, resolved through `question_to_field` so the
+        // anchor cannot drift from the registry.
+        //
+        // ★★ NONE is `NotInForm`, including the two that are not "unanswered". An anchor claiming a
+        //    refusal has no form field is a FALSEHOOD when one exists (the `QbiAboveThreshold` note
+        //    below), and every one of these IS clearable in the form: `Unanswered` by answering,
+        //    `Contradicted` by removing the rows or flipping the answer, `NotTranscribed` by
+        //    entering the document or answering "no", and `Unsupported` by correcting a mistaken
+        //    "yes" — a filer who answered it truthfully is told the exit by the refusal's TEXT,
+        //    which is the refusal's job and not the anchor's.
+        R::DocumentCensusUnanswered { kind }
+        | R::DocumentCensusContradicted { kind }
+        | R::DocumentDeclaredNotTranscribed { kind }
+        | R::DocumentTypeUnsupported { kind } => vec![decl(kind.question_id())],
         R::AmtCarryoverDeclarationUnanswered => vec![decl(QuestionId::AmtCarryoverSameAsRegular)],
         R::AmtDepreciationDeclarationUnanswered => {
             vec![decl(QuestionId::AmtDepreciationSameAsRegular)]

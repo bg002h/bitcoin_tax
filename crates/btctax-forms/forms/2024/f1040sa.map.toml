@@ -88,18 +88,35 @@ ssn  = "topmostSubform[0].Page1[0].f1_2[0]"
 # btctax itemizes MEDICAL (line 1), SALT (5a–5e), MORTGAGE INTEREST reported on Form 1098 (8a) and
 # CHARITABLE gifts (11–14). Everything below is a deduction the filer FORGOES by using btctax — the
 # safe direction: omitting a deduction can only OVERSTATE tax, never understate it.
+
+# ★★★ R2.2 — THE `[direction]` TABLE. Each block's `caption` is asserted VERBATIM against
+#     design/forms/extract/f1040sa--2024.txt at `extract_line` BEFORE the join uses it, so this table
+#     is a READING of the form and a re-parted revision REDS rather than drifting. A census entry
+#     is placed by its own line number into the block whose [first_line, last_line] range contains
+#     it; an entry with no printed line number carries `part = "<caption>"`. An entry no block
+#     places REDS — it is never defaulted to Overstates.
+#
+#     Understates = a blank here omits income or an addition to tax (the direction in which a blank
+#     is a false statement, so an Advisory may never cover it). Overstates = a blank forgoes a
+#     deduction, credit or payment lawfully. NoDollar = the cell carries no dollar at all.
+[[direction]]
+caption      = "Itemized Deductions"
+extract_line = 5
+direction    = "Overstates"
+first_line   = "1"
+last_line    = "18"
 [census]
 
 # ── Line 6: other taxes (write-in) ───────────────────────────────────────────────────────────────
-"topmostSubform[0].Page1[0].f1_12[0]" = { line = "6", rule = "unmodeled", reason = "\"Other taxes. List type and amount\" — write-in description. btctax collects only the enumerated SALT categories (5a–5c)." }
-"topmostSubform[0].Page1[0].f1_13[0]" = { line = "6", rule = "unmodeled", reason = "Second write-in description line for line 6 — same reason." }
-"topmostSubform[0].Page1[0].f1_14[0]" = { line = "6", rule = "unmodeled", reason = "Line 6 amount — same reason; line 7 therefore equals line 5e." }
+"topmostSubform[0].Page1[0].f1_12[0]" = { line = "6", rule = "unmodeled", reason = "\"Other taxes. List type and amount\" — write-in description. btctax collects only the enumerated SALT categories (5a–5c).", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page1[0].f1_13[0]" = { line = "6", rule = "unmodeled", reason = "Second write-in description line for line 6 — same reason.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page1[0].f1_14[0]" = { line = "6", rule = "unmodeled", reason = "Line 6 amount — same reason; line 7 therefore equals line 5e.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
 
 # ── Lines 8b/8c: mortgage interest and points NOT on a Form 1098 ─────────────────────────────────
-"topmostSubform[0].Page1[0].f1_17[0]" = { line = "8b", rule = "unmodeled", reason = "\"Home mortgage interest not reported to you on Form 1098\" — description. btctax collects `mortgage_interest_1098` only, i.e. interest that IS on a 1098." }
-"topmostSubform[0].Page1[0].f1_19[0]" = { line = "8b", rule = "unmodeled", reason = "Line 8b amount — same reason." }
-"topmostSubform[0].Page1[0].f1_18[0]" = { line = "8c", rule = "unmodeled", reason = "\"Points not reported to you on Form 1098\" — description. Not collected." }
-"topmostSubform[0].Page1[0].f1_20[0]" = { line = "8c", rule = "unmodeled", reason = "Line 8c amount — same reason." }
+"topmostSubform[0].Page1[0].f1_17[0]" = { line = "8b", rule = "unmodeled", reason = "\"Home mortgage interest not reported to you on Form 1098\" — description. btctax collects `mortgage_interest_1098` only, i.e. interest that IS on a 1098.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page1[0].f1_19[0]" = { line = "8b", rule = "unmodeled", reason = "Line 8b amount — same reason.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page1[0].f1_18[0]" = { line = "8c", rule = "unmodeled", reason = "\"Points not reported to you on Form 1098\" — description. Not collected.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page1[0].f1_20[0]" = { line = "8c", rule = "unmodeled", reason = "Line 8c amount — same reason.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
 
 # ── Line 8d: the FORM reserves it ────────────────────────────────────────────────────────────────
 "topmostSubform[0].Page1[0].f1_21[0]" = { line = "8d", rule = "artifact", reason = "The form's own text is \"Reserved for future use\" — the IRS ships a fillable box for a line it has explicitly reserved. No decision is encodable, by the form's own statement." }
@@ -109,8 +126,8 @@ ssn  = "topmostSubform[0].Page1[0].f1_2[0]"
 #   `schedule_a.investment_interest` and prints it, gated by the Schedule D line 20 / Form 4952
 #   declaration — `RefuseReason::Form4952Required` refuses the return when Form 4952 is actually
 #   required, so the amount printed is always one deductible in full under i4952's own exception.
-"topmostSubform[0].Page1[0].f1_29[0]" = { line = "15", rule = "unmodeled", reason = "\"Casualty and theft loss(es) from a federally declared disaster … Attach Form 4684\" — btctax models no Form 4684." }
-"topmostSubform[0].Page1[0].f1_30[0]" = { line = "16", rule = "unmodeled", reason = "\"Other—from list in instructions. List type and amount\" — write-in description. btctax offers no write-in itemized deduction." }
-"topmostSubform[0].Page1[0].f1_31[0]" = { line = "16", rule = "unmodeled", reason = "Second write-in description line for line 16 — same reason." }
-"topmostSubform[0].Page1[0].f1_32[0]" = { line = "16", rule = "unmodeled", reason = "Third write-in description line for line 16 — same reason." }
-"topmostSubform[0].Page1[0].f1_33[0]" = { line = "16", rule = "unmodeled", reason = "Line 16 amount — same reason." }
+"topmostSubform[0].Page1[0].f1_29[0]" = { line = "15", rule = "unmodeled", reason = "\"Casualty and theft loss(es) from a federally declared disaster … Attach Form 4684\" — btctax models no Form 4684.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page1[0].f1_30[0]" = { line = "16", rule = "unmodeled", reason = "\"Other—from list in instructions. List type and amount\" — write-in description. btctax offers no write-in itemized deduction.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page1[0].f1_31[0]" = { line = "16", rule = "unmodeled", reason = "Second write-in description line for line 16 — same reason.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page1[0].f1_32[0]" = { line = "16", rule = "unmodeled", reason = "Third write-in description line for line 16 — same reason.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page1[0].f1_33[0]" = { line = "16", rule = "unmodeled", reason = "Line 16 amount — same reason.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }

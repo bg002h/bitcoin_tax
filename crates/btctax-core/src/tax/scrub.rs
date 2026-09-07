@@ -588,6 +588,9 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
         tax_year: _,
         filing_status: _,
         header,
+        // ★ R3 — eighteen tri-states about DOCUMENT TYPES, never about a person: no identity to
+        //   scrub. (Payer identity lives on the transcribed rows, which are handled below.)
+        documents: _,
         w2s: _,
         int_1099: _,
         div_1099: _,

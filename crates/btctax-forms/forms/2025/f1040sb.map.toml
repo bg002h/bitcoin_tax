@@ -226,8 +226,25 @@ ssn  = "topmostSubform[0].Page1[0].f1_02[0]"
 # ★★★ THE FIELD CENSUS (§G-13). Every AcroForm field accounted for exactly once: mapped above, or
 # named here with the rule saying why not. See f8959.map.toml for the rule vocabulary.
 # 72 fields on the PDF = 70 mapped + 2 censused. Neither censused field is a `gap`.
+
+# ★★★ R2.2 — THE `[direction]` TABLE. Each block's `caption` is asserted VERBATIM against
+#     design/forms/extract/f1040sb--2025.txt at `extract_line` BEFORE the join uses it, so this table
+#     is a READING of the form and a re-parted revision REDS rather than drifting. A census entry
+#     is placed by its own line number into the block whose [first_line, last_line] range contains
+#     it; an entry with no printed line number carries `part = "<caption>"`. An entry no block
+#     places REDS — it is never defaulted to Overstates.
+#
+#     Understates = a blank here omits income or an addition to tax (the direction in which a blank
+#     is a false statement, so an Advisory may never cover it). Overstates = a blank forgoes a
+#     deduction, credit or payment lawfully. NoDollar = the cell carries no dollar at all.
+[[direction]]
+caption      = "Interest and Ordinary Dividends"
+extract_line = 6
+direction    = "Understates"
+first_line   = "1"
+last_line    = "8"
 [census]
-"topmostSubform[0].Page1[0].f1_32[0]" = { line = "3", rule = "unmodeled", reason = "Excludable interest on series EE and I U.S. savings bonds issued after 1989 (attach Form 8815) — btctax models no Form 8815, so line 4 = line 2. Unchanged for TY2025: the printed line 3 wording is identical to TY2024 (the text-layer diff on that line is trailing gutter whitespace only)." }
+"topmostSubform[0].Page1[0].f1_32[0]" = { line = "3", rule = "unmodeled", reason = "Excludable interest on series EE and I U.S. savings bonds issued after 1989 (attach Form 8815) — btctax models no Form 8815, so line 4 = line 2. Unchanged for TY2025: the printed line 3 wording is identical to TY2024 (the text-layer diff on that line is trailing gutter whitespace only).", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "8815" }
 # ★★ CORRECTED vs the TY2024 map, which said of this field: "Not a silent truncation: an over-long
 #    value FAILS CLOSED at verify.rs:516, so a list needing two lines refuses rather than clipping."
 #    BOTH halves of that are false on this PDF and were false on the 2024 one. (a) verify.rs:516 is
@@ -236,4 +253,4 @@ ssn  = "topmostSubform[0].Page1[0].f1_02[0]"
 #    dump-fields` reports exactly ONE /MaxLen on this entire form — the SSN cell f1_02, maxlen=11 —
 #    so neither 7b cell can reach FormsError::CellOverflow, and no other leg checks text width.
 #    The reason below states what is actually true instead of carrying the claim forward.
-"topmostSubform[0].Page1[0].f1_66[0]" = { line = "7b", rule = "unmodeled", reason = "SECOND printed line of the 7b foreign-country list. btctax writes the filer's whole collected country list into the FIRST cell (f1_65) and never uses this continuation cell, so it is blank by construction rather than by the inputs. Neither 7b cell declares /MaxLen on this PDF (dump-fields shows the form's only /MaxLen is the SSN cell, 11 chars), so the verify_flat leg-5 CellOverflow guard cannot fire here: a list too long for one printed line is a rendering risk, not a refusal. Recorded, not claimed closed." }
+"topmostSubform[0].Page1[0].f1_66[0]" = { line = "7b", rule = "unmodeled", reason = "SECOND printed line of the 7b foreign-country list. btctax writes the filer's whole collected country list into the FIRST cell (f1_65) and never uses this continuation cell, so it is blank by construction rather than by the inputs. Neither 7b cell declares /MaxLen on this PDF (dump-fields shows the form's only /MaxLen is the SSN cell, 11 chars), so the verify_flat leg-5 CellOverflow guard cannot fire here: a list too long for one printed line is a rendering risk, not a refusal. Recorded, not claimed closed.", covered_by = "RefuseReason::ScheduleBForeignCountryMissing" }

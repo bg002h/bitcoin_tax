@@ -82,6 +82,37 @@ ssn  = "topmostSubform[0].Page1[0].f1_02[0]"
 #
 # ★ Schedule D's whole unmapped surface is TWO decisions, both already load-bearing elsewhere in the
 #   codebase — the 8949 box choice and the absence of any non-BTC capital-gain source.
+
+# ★★★ R2.2 — THE `[direction]` TABLE. Each block's `caption` is asserted VERBATIM against
+#     design/forms/extract/f1040sd--2024.txt at `extract_line` BEFORE the join uses it, so this table
+#     is a READING of the form and a re-parted revision REDS rather than drifting. A census entry
+#     is placed by its own line number into the block whose [first_line, last_line] range contains
+#     it; an entry with no printed line number carries `part = "<caption>"`. An entry no block
+#     places REDS — it is never defaulted to Overstates.
+#
+#     Understates = a blank here omits income or an addition to tax (the direction in which a blank
+#     is a false statement, so an Advisory may never cover it). Overstates = a blank forgoes a
+#     deduction, credit or payment lawfully. NoDollar = the cell carries no dollar at all.
+[[direction]]
+caption      = "Part I        Short-Term Capital Gains and Losses"
+extract_line = 21
+direction    = "Understates"
+first_line   = "1a"
+last_line    = "7"
+
+[[direction]]
+caption      = "Part II       Long-Term Capital Gains and Losses"
+extract_line = 46
+direction    = "Understates"
+first_line   = "8a"
+last_line    = "15"
+
+[[direction]]
+caption      = "Part III      Summary"
+extract_line = 76
+direction    = "Understates"
+first_line   = "16"
+last_line    = "22"
 [census]
 
 # ── Lines 1a/1b/2 and 8a/8b/9 — the 8949 Box A/B/D/E aggregate rows ──────────────────────────────
@@ -100,8 +131,8 @@ ssn  = "topmostSubform[0].Page1[0].f1_02[0]"
 # Line 1a is additionally the only row that reports transactions NOT listed on Form 8949 at all (the
 # "basis reported, no adjustments" shortcut). btctax always lists every disposition, so 1a is unused
 # by construction, not merely unpopulated.
-"topmostSubform[0].Page1[0].Table_PartI[0].Row1a[0].f1_05_RO[0]" = { line = "1a(g)", rule = "unmodeled", reason = "§G-28/B4 — line 1a IS now filled, but column (g) never is: \"no adjustments\" is a CONDITION of using line 1a at all, so a filer needing one is refused (Form1099BNeedsForm8949) rather than filed here. `_RO` besides — the form's own JavaScript owns the cell." }
-"topmostSubform[0].Page1[0].Table_PartII[0].Row8a[0].f1_25_RO[0]" = { line = "8a(g)", rule = "unmodeled", reason = "§G-28/B4 — same as line 1a(g): the cell can never carry a value, because needing an adjustment is exactly what disqualifies a transaction from line 8a." }
+"topmostSubform[0].Page1[0].Table_PartI[0].Row1a[0].f1_05_RO[0]" = { line = "1a(g)", rule = "unmodeled", reason = "§G-28/B4 — line 1a IS now filled, but column (g) never is: \"no adjustments\" is a CONDITION of using line 1a at all, so a filer needing one is refused (Form1099BNeedsForm8949) rather than filed here. `_RO` besides — the form's own JavaScript owns the cell.", covered_by = "RefuseReason::Form1099BNeedsForm8949" }
+"topmostSubform[0].Page1[0].Table_PartII[0].Row8a[0].f1_25_RO[0]" = { line = "8a(g)", rule = "unmodeled", reason = "§G-28/B4 — same as line 1a(g): the cell can never carry a value, because needing an adjustment is exactly what disqualifies a transaction from line 8a.", covered_by = "RefuseReason::Form1099BNeedsForm8949" }
 
 # ── Lines 4/5 and 11/12 — capital gains from other forms and pass-through entities ───────────────
 # btctax's only disposition source is the BTC ledger. It models no installment sales (6252), casualties
@@ -113,7 +144,7 @@ ssn  = "topmostSubform[0].Page1[0].f1_02[0]"
 #   is: a filer who actually has one of these forms has capital-gain sources btctax cannot see, and the
 #   return is incomplete rather than merely conservative. That is a scope boundary of the product, not a
 #   defect in this map — btctax emits a BTC return.
-"topmostSubform[0].Page1[0].f1_19[0]" = { line = "4",  rule = "unmodeled", reason = "Short-term gain from Form 6252 and ST gain/(loss) from Forms 4684, 6781, 8824 — none of those forms are modelled." }
-"topmostSubform[0].Page1[0].f1_20[0]" = { line = "5",  rule = "unmodeled", reason = "Net short-term gain/(loss) from partnerships, S corporations, estates and trusts (Schedule K-1) — btctax models no pass-through entities." }
-"topmostSubform[0].Page1[0].f1_39[0]" = { line = "11", rule = "unmodeled", reason = "Gain from Form 4797 Part I; LT gain from Forms 2439 and 6252; LT gain/(loss) from Forms 4684, 6781, 8824 — none modelled." }
-"topmostSubform[0].Page1[0].f1_40[0]" = { line = "12", rule = "unmodeled", reason = "Net long-term gain/(loss) from partnerships, S corporations, estates and trusts (Schedule K-1) — not modelled." }
+"topmostSubform[0].Page1[0].f1_19[0]" = { line = "4",  rule = "unmodeled", reason = "Short-term gain from Form 6252 and ST gain/(loss) from Forms 4684, 6781, 8824 — none of those forms are modelled.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "6252" }
+"topmostSubform[0].Page1[0].f1_20[0]" = { line = "5",  rule = "unmodeled", reason = "Net short-term gain/(loss) from partnerships, S corporations, estates and trusts (Schedule K-1) — btctax models no pass-through entities.", covered_by = "RefuseReason::DocumentTypeUnsupported" }
+"topmostSubform[0].Page1[0].f1_39[0]" = { line = "11", rule = "unmodeled", reason = "Gain from Form 4797 Part I; LT gain from Forms 2439 and 6252; LT gain/(loss) from Forms 4684, 6781, 8824 — none modelled.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "4797" }
+"topmostSubform[0].Page1[0].f1_40[0]" = { line = "12", rule = "unmodeled", reason = "Net long-term gain/(loss) from partnerships, S corporations, estates and trusts (Schedule K-1) — not modelled.", covered_by = "RefuseReason::DocumentTypeUnsupported" }

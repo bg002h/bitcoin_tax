@@ -133,6 +133,10 @@ fn full_return_vault(
         };
         btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
         shape(&mut ri);
+        // ★ R3 — reconcile the census AFTER the shape (the answer for a countable row IS the row
+        //   count). Deliberately NOT a second `answer_all_live_declarations`: a shape that BLANKS a
+        //   declaration to prove the screen refuses must keep its blank.
+        btctax_core::tax::testonly::reconcile_document_census(&mut ri);
         return_inputs::set(s.conn(), 2024, &ri).unwrap();
         s.save().unwrap();
     }

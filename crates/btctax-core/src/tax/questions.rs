@@ -110,6 +110,51 @@ pub enum QuestionId {
     /// **Capital Loss Carryover Worksheet header / §108(b)(2)(G)** — did the filer exclude canceled
     /// debt from income, requiring attribute reduction? ★ APPENDED AT THE END, same reason.
     ExcludedCanceledDebt,
+    // ── ★★★ R3 / §5.1 — THE DOCUMENT CENSUS, one tri-state per document type. ───────────────────
+    //
+    // ★ ALL EIGHTEEN APPENDED AT THE END, and it is not cosmetic: `decl_tristate!`
+    //   (`btctax-input-form/src/spec/registries.rs`) couples to this array's INDEX, so a mid-array
+    //   insert silently repoints every later question at the wrong leaf.
+    //
+    // ★ Each carries its `DocumentRow` in its own name rather than a payload, because `QuestionId`
+    //   is the key of an `AnswerKey` and a payload-carrying key would not be `Copy`-cheap to store
+    //   or stable to parse back off the wire.
+    /// **§5.1 document census** — did the filer receive one or more Form W-2?
+    DocW2,
+    /// **§5.1 document census** — did the filer receive one or more Form 1099-INT?
+    DocInt1099,
+    /// **§5.1 document census** — did the filer receive one or more Form 1099-DIV?
+    DocDiv1099,
+    /// **§5.1 document census** — did the filer receive one or more Form 1099-B?
+    DocB1099,
+    /// **§5.1 document census** — did the filer receive one or more Form 1099-G?
+    DocG1099,
+    /// **§5.1 document census** — did the filer receive one or more Form 1098?
+    DocForm1098,
+    /// **§5.1 document census** — did the filer receive one or more Form 1098-E?
+    DocForm1098e,
+    /// **§5.1 document census** — did the filer receive one or more Form 1099-R?
+    DocR1099,
+    /// **§5.1 document census** — did the filer receive one or more Form SSA-1099 / RRB-1099?
+    DocSsa1099,
+    /// **§5.1 document census** — did the filer receive one or more Form 1099-NEC / 1099-MISC / 1099-K?
+    DocNecMiscK1099,
+    /// **§5.1 document census** — did the filer receive one or more Schedule K-1?
+    DocK1,
+    /// **§5.1 document census** — did the filer receive one or more rental real estate / royalties (Schedule E)?
+    DocScheduleERental,
+    /// **§5.1 document census** — did the filer receive one or more Form 1099-S?
+    DocS1099,
+    /// **§5.1 document census** — did the filer receive one or more Form 1099-OID?
+    DocOid1099,
+    /// **§5.1 document census** — did the filer receive one or more Form W-2G?
+    DocW2g,
+    /// **§5.1 document census** — did the filer receive one or more Form 1099-C?
+    DocC1099,
+    /// **§5.1 document census** — did the filer receive one or more Form 1095-A?
+    DocA1095,
+    /// **§5.1 document census** — did the filer receive one or more Form 1098-T?
+    DocT1098,
 }
 
 impl QuestionId {
@@ -131,6 +176,24 @@ impl QuestionId {
         QuestionId::FilingForm4952,
         QuestionId::CarryoverIncludesSpousesJointLoss,
         QuestionId::ExcludedCanceledDebt,
+        QuestionId::DocW2,
+        QuestionId::DocInt1099,
+        QuestionId::DocDiv1099,
+        QuestionId::DocB1099,
+        QuestionId::DocG1099,
+        QuestionId::DocForm1098,
+        QuestionId::DocForm1098e,
+        QuestionId::DocR1099,
+        QuestionId::DocSsa1099,
+        QuestionId::DocNecMiscK1099,
+        QuestionId::DocK1,
+        QuestionId::DocScheduleERental,
+        QuestionId::DocS1099,
+        QuestionId::DocOid1099,
+        QuestionId::DocW2g,
+        QuestionId::DocC1099,
+        QuestionId::DocA1095,
+        QuestionId::DocT1098,
     ];
 }
 
@@ -283,6 +346,16 @@ fn mortgage_question_live(ri: &ReturnInputs) -> bool {
 /// ★ THE REGISTRY. Eleven declarations; the liveness lifted from the shipped refusals EXCEPT the two P9
 /// corrections — `DependentSpouse` widened to `Mfj || spouse.is_some()` (= P8a I1) and the two foreign
 /// questions made live ALWAYS (= §2.9, the circular-liveness bug in shipped code).
+/// ★ The refusal DETAIL every census row shares. It is one constant rather than eighteen because the
+/// remedy and the reason are identical for all of them; the row's own identity travels in the
+/// [`RefuseReason::DocumentCensusUnanswered`] payload, and `screen_inputs` names the document there.
+///
+/// [`RefuseReason::DocumentCensusUnanswered`]: crate::tax::return_refuse::RefuseReason::DocumentCensusUnanswered
+const DOC_CENSUS_UNANSWERED_DETAIL: &str =
+    "a document type must be ANSWERED, not merely absent: \"none\" and \"nobody asked\" are the same \
+     blank on the printed page and are not the same testimony. A broker that has not mailed yours yet \
+     is UNANSWERED, never \"none\" — run `btctax income answer`";
+
 pub const FORM_QUESTIONS: &[FormQuestion] = &[
     FormQuestion {
         id: QuestionId::DependentTaxpayer,
@@ -550,7 +623,27 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
                  SOCIAL SECURITY or railroad retirement benefits (Form SSA-1099 or RRB-1099), rent \
                  or royalties, a farm, a partnership, S corporation, estate or trust (any Schedule \
                  K-1), unreported tips, gambling winnings, alimony, a business this tool did not \
-                 capture, or anything else it never asked about. (b) You \
+                 capture, or anything else it never asked about. EACH OF THESE IS ITS OWN LINE OF \
+                 THE RETURN, in the form's own words, and this question is the only thing that asks \
+                 about any of them: Household employee wages not reported on a Form W-2; Tip income \
+                 not reported on line 1a; Medicaid waiver payments; wages from Form 8919 for work \
+                 an employer treated as non-employee; Other earned income; a Nontaxable combat pay \
+                 election; Alimony received, and the date of the divorce or separation agreement; \
+                 other gains or losses from a sale of business property (Form 4797); Farm income; a \
+                 Net operating loss carried in; the foreign earned income exclusion (Form 2555); \
+                 income from an Archer MSA or a long-term-care contract (Form 8853); Alaska \
+                 Permanent Fund dividends; Jury duty pay; Prizes and awards; Activity not engaged \
+                 in for profit income; Stock options; income from the rental of personal property; \
+                 Olympic and Paralympic medals and USOC prize money; a section 951(a) or 951A(a) \
+                 inclusion from a foreign corporation; a taxable distribution from an ABLE account; \
+                 Scholarship and fellowship grants not reported on a Form W-2; a pension or annuity \
+                 from a nonqualified deferred compensation or section 457 plan; Wages earned while \
+                 incarcerated; or anything you would enter as an 8z write-in on Schedule 1. It also \
+                 covers a capital transaction this tool never asked about — an installment sale \
+                 (Form 6252), a casualty or theft loss (Form 4684), a section 1256 contract or \
+                 straddle (Form 6781), a like-kind exchange (Form 8824), or an undistributed \
+                 capital gain (Form 2439) — each of which puts a figure on Schedule D that btctax \
+                 cannot see. (b) You \
                  EXERCISED AN INCENTIVE STOCK OPTION (ISO) and still held the stock at the end of the \
                  year — you would have a Form 3921. (c) You had any other item this tool never asked \
                  about that changes your ALTERNATIVE MINIMUM TAX — depletion, a tax-shelter farm \
@@ -559,7 +652,31 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
                  other tax-favored account (Form 5329), HOUSEHOLD EMPLOYMENT TAXES for someone you \
                  paid to work in your home (Schedule H), repayment of an excess advance premium tax \
                  credit from a Marketplace health plan (Form 8962), or recapture of a federal \
-                 mortgage subsidy.",
+                 mortgage subsidy. IT ALSO COVERS, EACH ITS OWN LINE OF SCHEDULE 2: a repayment of \
+                 a clean vehicle credit you transferred to a dealer (Form 8936); an excessive \
+                 payment or recapture reported on Form 4255; Social Security and Medicare tax on \
+                 tips you did not report to your employer (Form 4137), or uncollected on wages \
+                 (Form 8919); repayment of the first-time homebuyer credit (Form 5405); interest on \
+                 tax due on an installment sale; recapture of the low-income housing credit (Form \
+                 8611); a Recapture of other credits write-in; recapture of a charitable deduction \
+                 for a fractional interest in tangible personal property; income from a section \
+                 409A or a section 457A nonqualified deferred compensation plan; a section 72(m)(5) \
+                 excess benefits tax; tax on an accumulation distribution of a trust (Form 4970); \
+                 an excise tax on insider stock compensation from an expatriated corporation; \
+                 look-back interest (Form 8697 or Form 8866); interest from Form 8621 on a passive \
+                 foreign investment company; a section 965 installment (Form 965-A); an estimated \
+                 tax penalty you want to figure yourself rather than be billed for (Form 2210); and \
+                 any other write-in taxes. It also covers an EXEMPTION from self-employment tax you \
+                 hold IRS approval for — Form 4361 (a minister, member of a religious order, or \
+                 Christian Science practitioner) or Form 4029 (a member of a recognised religious \
+                 sect) — and the write-in exemption cases beside them, a notary public's fees among \
+                 them. (e) Your tax for the year comes from a form this tool does not fill — the \
+                 parent's election to report a child's interest and dividends (Form 8814), the tax \
+                 on a lump-sum distribution (Form 4972), or any other alternative form whose amount \
+                 belongs on Form 1040 line 16. (f) You can exclude interest on series EE or I U.S. \
+                 savings bonds you cashed to pay higher-education expenses (Form 8815) — btctax \
+                 cannot compute that exclusion and would report the whole amount as taxable \
+                 interest.",
         unanswered: RefuseReason::OtherIncomeUnanswered,
         unanswered_detail:
             "btctax asks about HSA activity, dual-status alien status and foreign accounts, and a \
@@ -777,6 +894,378 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         // ★ §G-15 — PER-YEAR: a debt exclusion is an event of one tax year.
         durability: Durability::PerYear,
         // ★ NOT neutral at true: a YES is the ADVERSE answer and refuses.
+        neutral: false,
+    },
+    // ── ★★★ R3 / §5.1 — THE DOCUMENT CENSUS. Eighteen rows, indices 17..=34. ────────────────────
+    //
+    // ★ Every row's `prompt` and `unanswered_detail` come from [`DocumentRow`] itself, so the words
+    //   the filer reads, the words the refusal names and the words `income answer` prints are ONE
+    //   string — the `prompt_hash` would otherwise disagree with itself across surfaces.
+    //
+    // ★ `neutral: false` on every row: "no, I received none" is the answer that needs no section and
+    //   forgoes nothing. It is still an ANSWER — the whole point of the census is that a `false` and
+    //   an absence are different testimony.
+    //
+    // ★ APPENDED AT THE END for the `decl_tristate!` array-index reason recorded above.
+
+    FormQuestion {
+        id: QuestionId::DocW2,
+        prompt: crate::tax::document_census::DocumentRow::W2.prompt(),
+        unanswered: RefuseReason::DocumentCensusUnanswered {
+            kind: crate::tax::document_census::DocumentRow::W2,
+        },
+        unanswered_detail: DOC_CENSUS_UNANSWERED_DETAIL,
+        live: |ri| {
+            crate::tax::document_census::row_is_live(
+                ri,
+                crate::tax::document_census::DocumentRow::W2,
+            )
+        },
+        get: |ri| ri.documents.w2,
+        set: |ri, v| ri.documents.w2 = Some(v),
+        // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
+        //   year's shoebox is not testimony for this one.
+        durability: Durability::PerYear,
+        neutral: false,
+    },
+    FormQuestion {
+        id: QuestionId::DocInt1099,
+        prompt: crate::tax::document_census::DocumentRow::Int1099.prompt(),
+        unanswered: RefuseReason::DocumentCensusUnanswered {
+            kind: crate::tax::document_census::DocumentRow::Int1099,
+        },
+        unanswered_detail: DOC_CENSUS_UNANSWERED_DETAIL,
+        live: |ri| {
+            crate::tax::document_census::row_is_live(
+                ri,
+                crate::tax::document_census::DocumentRow::Int1099,
+            )
+        },
+        get: |ri| ri.documents.int_1099,
+        set: |ri, v| ri.documents.int_1099 = Some(v),
+        // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
+        //   year's shoebox is not testimony for this one.
+        durability: Durability::PerYear,
+        neutral: false,
+    },
+    FormQuestion {
+        id: QuestionId::DocDiv1099,
+        prompt: crate::tax::document_census::DocumentRow::Div1099.prompt(),
+        unanswered: RefuseReason::DocumentCensusUnanswered {
+            kind: crate::tax::document_census::DocumentRow::Div1099,
+        },
+        unanswered_detail: DOC_CENSUS_UNANSWERED_DETAIL,
+        live: |ri| {
+            crate::tax::document_census::row_is_live(
+                ri,
+                crate::tax::document_census::DocumentRow::Div1099,
+            )
+        },
+        get: |ri| ri.documents.div_1099,
+        set: |ri, v| ri.documents.div_1099 = Some(v),
+        // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
+        //   year's shoebox is not testimony for this one.
+        durability: Durability::PerYear,
+        neutral: false,
+    },
+    FormQuestion {
+        id: QuestionId::DocB1099,
+        prompt: crate::tax::document_census::DocumentRow::B1099.prompt(),
+        unanswered: RefuseReason::DocumentCensusUnanswered {
+            kind: crate::tax::document_census::DocumentRow::B1099,
+        },
+        unanswered_detail: DOC_CENSUS_UNANSWERED_DETAIL,
+        live: |ri| {
+            crate::tax::document_census::row_is_live(
+                ri,
+                crate::tax::document_census::DocumentRow::B1099,
+            )
+        },
+        get: |ri| ri.documents.b_1099,
+        set: |ri, v| ri.documents.b_1099 = Some(v),
+        // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
+        //   year's shoebox is not testimony for this one.
+        durability: Durability::PerYear,
+        neutral: false,
+    },
+    FormQuestion {
+        id: QuestionId::DocG1099,
+        prompt: crate::tax::document_census::DocumentRow::G1099.prompt(),
+        unanswered: RefuseReason::DocumentCensusUnanswered {
+            kind: crate::tax::document_census::DocumentRow::G1099,
+        },
+        unanswered_detail: DOC_CENSUS_UNANSWERED_DETAIL,
+        live: |ri| {
+            crate::tax::document_census::row_is_live(
+                ri,
+                crate::tax::document_census::DocumentRow::G1099,
+            )
+        },
+        get: |ri| ri.documents.g_1099,
+        set: |ri, v| ri.documents.g_1099 = Some(v),
+        // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
+        //   year's shoebox is not testimony for this one.
+        durability: Durability::PerYear,
+        neutral: false,
+    },
+    FormQuestion {
+        id: QuestionId::DocForm1098,
+        prompt: crate::tax::document_census::DocumentRow::Form1098.prompt(),
+        unanswered: RefuseReason::DocumentCensusUnanswered {
+            kind: crate::tax::document_census::DocumentRow::Form1098,
+        },
+        unanswered_detail: DOC_CENSUS_UNANSWERED_DETAIL,
+        live: |ri| {
+            crate::tax::document_census::row_is_live(
+                ri,
+                crate::tax::document_census::DocumentRow::Form1098,
+            )
+        },
+        get: |ri| ri.documents.form_1098,
+        set: |ri, v| ri.documents.form_1098 = Some(v),
+        // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
+        //   year's shoebox is not testimony for this one.
+        durability: Durability::PerYear,
+        neutral: false,
+    },
+    FormQuestion {
+        id: QuestionId::DocForm1098e,
+        prompt: crate::tax::document_census::DocumentRow::Form1098e.prompt(),
+        unanswered: RefuseReason::DocumentCensusUnanswered {
+            kind: crate::tax::document_census::DocumentRow::Form1098e,
+        },
+        unanswered_detail: DOC_CENSUS_UNANSWERED_DETAIL,
+        live: |ri| {
+            crate::tax::document_census::row_is_live(
+                ri,
+                crate::tax::document_census::DocumentRow::Form1098e,
+            )
+        },
+        get: |ri| ri.documents.form_1098e,
+        set: |ri, v| ri.documents.form_1098e = Some(v),
+        // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
+        //   year's shoebox is not testimony for this one.
+        durability: Durability::PerYear,
+        neutral: false,
+    },
+    FormQuestion {
+        id: QuestionId::DocR1099,
+        prompt: crate::tax::document_census::DocumentRow::R1099.prompt(),
+        unanswered: RefuseReason::DocumentCensusUnanswered {
+            kind: crate::tax::document_census::DocumentRow::R1099,
+        },
+        unanswered_detail: DOC_CENSUS_UNANSWERED_DETAIL,
+        live: |ri| {
+            crate::tax::document_census::row_is_live(
+                ri,
+                crate::tax::document_census::DocumentRow::R1099,
+            )
+        },
+        get: |ri| ri.documents.r_1099,
+        set: |ri, v| ri.documents.r_1099 = Some(v),
+        // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
+        //   year's shoebox is not testimony for this one.
+        durability: Durability::PerYear,
+        neutral: false,
+    },
+    FormQuestion {
+        id: QuestionId::DocSsa1099,
+        prompt: crate::tax::document_census::DocumentRow::Ssa1099.prompt(),
+        unanswered: RefuseReason::DocumentCensusUnanswered {
+            kind: crate::tax::document_census::DocumentRow::Ssa1099,
+        },
+        unanswered_detail: DOC_CENSUS_UNANSWERED_DETAIL,
+        live: |ri| {
+            crate::tax::document_census::row_is_live(
+                ri,
+                crate::tax::document_census::DocumentRow::Ssa1099,
+            )
+        },
+        get: |ri| ri.documents.ssa_1099,
+        set: |ri, v| ri.documents.ssa_1099 = Some(v),
+        // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
+        //   year's shoebox is not testimony for this one.
+        durability: Durability::PerYear,
+        neutral: false,
+    },
+    FormQuestion {
+        id: QuestionId::DocNecMiscK1099,
+        prompt: crate::tax::document_census::DocumentRow::NecMiscK1099.prompt(),
+        unanswered: RefuseReason::DocumentCensusUnanswered {
+            kind: crate::tax::document_census::DocumentRow::NecMiscK1099,
+        },
+        unanswered_detail: DOC_CENSUS_UNANSWERED_DETAIL,
+        live: |ri| {
+            crate::tax::document_census::row_is_live(
+                ri,
+                crate::tax::document_census::DocumentRow::NecMiscK1099,
+            )
+        },
+        get: |ri| ri.documents.nec_misc_k_1099,
+        set: |ri, v| ri.documents.nec_misc_k_1099 = Some(v),
+        // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
+        //   year's shoebox is not testimony for this one.
+        durability: Durability::PerYear,
+        neutral: false,
+    },
+    FormQuestion {
+        id: QuestionId::DocK1,
+        prompt: crate::tax::document_census::DocumentRow::K1.prompt(),
+        unanswered: RefuseReason::DocumentCensusUnanswered {
+            kind: crate::tax::document_census::DocumentRow::K1,
+        },
+        unanswered_detail: DOC_CENSUS_UNANSWERED_DETAIL,
+        live: |ri| {
+            crate::tax::document_census::row_is_live(
+                ri,
+                crate::tax::document_census::DocumentRow::K1,
+            )
+        },
+        get: |ri| ri.documents.k1,
+        set: |ri, v| ri.documents.k1 = Some(v),
+        // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
+        //   year's shoebox is not testimony for this one.
+        durability: Durability::PerYear,
+        neutral: false,
+    },
+    FormQuestion {
+        id: QuestionId::DocScheduleERental,
+        prompt: crate::tax::document_census::DocumentRow::ScheduleERental.prompt(),
+        unanswered: RefuseReason::DocumentCensusUnanswered {
+            kind: crate::tax::document_census::DocumentRow::ScheduleERental,
+        },
+        unanswered_detail: DOC_CENSUS_UNANSWERED_DETAIL,
+        live: |ri| {
+            crate::tax::document_census::row_is_live(
+                ri,
+                crate::tax::document_census::DocumentRow::ScheduleERental,
+            )
+        },
+        get: |ri| ri.documents.schedule_e_rental,
+        set: |ri, v| ri.documents.schedule_e_rental = Some(v),
+        // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
+        //   year's shoebox is not testimony for this one.
+        durability: Durability::PerYear,
+        neutral: false,
+    },
+    FormQuestion {
+        id: QuestionId::DocS1099,
+        prompt: crate::tax::document_census::DocumentRow::S1099.prompt(),
+        unanswered: RefuseReason::DocumentCensusUnanswered {
+            kind: crate::tax::document_census::DocumentRow::S1099,
+        },
+        unanswered_detail: DOC_CENSUS_UNANSWERED_DETAIL,
+        live: |ri| {
+            crate::tax::document_census::row_is_live(
+                ri,
+                crate::tax::document_census::DocumentRow::S1099,
+            )
+        },
+        get: |ri| ri.documents.s_1099,
+        set: |ri, v| ri.documents.s_1099 = Some(v),
+        // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
+        //   year's shoebox is not testimony for this one.
+        durability: Durability::PerYear,
+        neutral: false,
+    },
+    FormQuestion {
+        id: QuestionId::DocOid1099,
+        prompt: crate::tax::document_census::DocumentRow::Oid1099.prompt(),
+        unanswered: RefuseReason::DocumentCensusUnanswered {
+            kind: crate::tax::document_census::DocumentRow::Oid1099,
+        },
+        unanswered_detail: DOC_CENSUS_UNANSWERED_DETAIL,
+        live: |ri| {
+            crate::tax::document_census::row_is_live(
+                ri,
+                crate::tax::document_census::DocumentRow::Oid1099,
+            )
+        },
+        get: |ri| ri.documents.oid_1099,
+        set: |ri, v| ri.documents.oid_1099 = Some(v),
+        // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
+        //   year's shoebox is not testimony for this one.
+        durability: Durability::PerYear,
+        neutral: false,
+    },
+    FormQuestion {
+        id: QuestionId::DocW2g,
+        prompt: crate::tax::document_census::DocumentRow::W2g.prompt(),
+        unanswered: RefuseReason::DocumentCensusUnanswered {
+            kind: crate::tax::document_census::DocumentRow::W2g,
+        },
+        unanswered_detail: DOC_CENSUS_UNANSWERED_DETAIL,
+        live: |ri| {
+            crate::tax::document_census::row_is_live(
+                ri,
+                crate::tax::document_census::DocumentRow::W2g,
+            )
+        },
+        get: |ri| ri.documents.w2g,
+        set: |ri, v| ri.documents.w2g = Some(v),
+        // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
+        //   year's shoebox is not testimony for this one.
+        durability: Durability::PerYear,
+        neutral: false,
+    },
+    FormQuestion {
+        id: QuestionId::DocC1099,
+        prompt: crate::tax::document_census::DocumentRow::C1099.prompt(),
+        unanswered: RefuseReason::DocumentCensusUnanswered {
+            kind: crate::tax::document_census::DocumentRow::C1099,
+        },
+        unanswered_detail: DOC_CENSUS_UNANSWERED_DETAIL,
+        live: |ri| {
+            crate::tax::document_census::row_is_live(
+                ri,
+                crate::tax::document_census::DocumentRow::C1099,
+            )
+        },
+        get: |ri| ri.documents.c_1099,
+        set: |ri, v| ri.documents.c_1099 = Some(v),
+        // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
+        //   year's shoebox is not testimony for this one.
+        durability: Durability::PerYear,
+        neutral: false,
+    },
+    FormQuestion {
+        id: QuestionId::DocA1095,
+        prompt: crate::tax::document_census::DocumentRow::A1095.prompt(),
+        unanswered: RefuseReason::DocumentCensusUnanswered {
+            kind: crate::tax::document_census::DocumentRow::A1095,
+        },
+        unanswered_detail: DOC_CENSUS_UNANSWERED_DETAIL,
+        live: |ri| {
+            crate::tax::document_census::row_is_live(
+                ri,
+                crate::tax::document_census::DocumentRow::A1095,
+            )
+        },
+        get: |ri| ri.documents.a_1095,
+        set: |ri, v| ri.documents.a_1095 = Some(v),
+        // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
+        //   year's shoebox is not testimony for this one.
+        durability: Durability::PerYear,
+        neutral: false,
+    },
+    FormQuestion {
+        id: QuestionId::DocT1098,
+        prompt: crate::tax::document_census::DocumentRow::T1098.prompt(),
+        unanswered: RefuseReason::DocumentCensusUnanswered {
+            kind: crate::tax::document_census::DocumentRow::T1098,
+        },
+        unanswered_detail: DOC_CENSUS_UNANSWERED_DETAIL,
+        live: |ri| {
+            crate::tax::document_census::row_is_live(
+                ri,
+                crate::tax::document_census::DocumentRow::T1098,
+            )
+        },
+        get: |ri| ri.documents.t_1098,
+        set: |ri, v| ri.documents.t_1098 = Some(v),
+        // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
+        //   year's shoebox is not testimony for this one.
+        durability: Durability::PerYear,
         neutral: false,
     },
 ];
@@ -1671,6 +2160,25 @@ mod tests {
                 QuestionId::FilingForm4952 => 14,
                 QuestionId::CarryoverIncludesSpousesJointLoss => 15,
                 QuestionId::ExcludedCanceledDebt => 16,
+                // ★ R3 / §5.1 — the eighteen document-census rows, indices 17..=34.
+                QuestionId::DocW2 => 17,
+                QuestionId::DocInt1099 => 18,
+                QuestionId::DocDiv1099 => 19,
+                QuestionId::DocB1099 => 20,
+                QuestionId::DocG1099 => 21,
+                QuestionId::DocForm1098 => 22,
+                QuestionId::DocForm1098e => 23,
+                QuestionId::DocR1099 => 24,
+                QuestionId::DocSsa1099 => 25,
+                QuestionId::DocNecMiscK1099 => 26,
+                QuestionId::DocK1 => 27,
+                QuestionId::DocScheduleERental => 28,
+                QuestionId::DocS1099 => 29,
+                QuestionId::DocOid1099 => 30,
+                QuestionId::DocW2g => 31,
+                QuestionId::DocC1099 => 32,
+                QuestionId::DocA1095 => 33,
+                QuestionId::DocT1098 => 34,
             };
             assert_eq!(idx, i, "QuestionId::ALL is out of order / missing {id:?}");
             assert_eq!(
@@ -1679,8 +2187,12 @@ mod tests {
                 "exactly one FORM_QUESTIONS entry for {id:?}"
             );
         }
-        assert_eq!(QuestionId::ALL.len(), 17, "there are 17 declarations");
-        assert_eq!(FORM_QUESTIONS.len(), 17, "one entry per declaration");
+        assert_eq!(
+            QuestionId::ALL.len(),
+            35,
+            "17 declarations + the 18 R3 document-census rows"
+        );
+        assert_eq!(FORM_QUESTIONS.len(), 35, "one entry per declaration");
     }
 
     /// ★★★ §G-6/ISO — THE OUT-OF-SCOPE QUESTION MUST NAME THE ISO EXERCISE, WHICH IS NOT INCOME.

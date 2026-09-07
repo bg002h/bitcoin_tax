@@ -20,7 +20,7 @@
 //! ★ `serde_json::Value` walking is permitted HERE ONLY — the §4 veto is on get/set/production paths, not a
 //! test. No accessor in this crate walks `Value`.
 
-use super::form_spec;
+use super::{field_to_question, form_spec};
 use crate::seam::{
     Field, FieldId, FieldKind, FieldValue, RowAddr, SecretView, SectionId, SetError,
 };
@@ -299,6 +299,19 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
 
             let s = sentinel(field);
             let base = fixture_for(field, &fixture);
+            // ★★ R3 — a Field that CANNOT be live on any return is skipped, and the skip is DERIVED
+            //    from the census's own liveness predicate rather than from a name list. Two census
+            //    rows are shadowed by a scalar today (`form_1098` → T9, `form_1098e` → T5), so
+            //    their `set` correctly answers `NoSuchRow` and the mutate-and-diff has nothing to
+            //    observe; their leaves are EXEMPT below, with the task that removes the exemption
+            //    named. The moment T9/T5 flips `row_is_live`, the Field re-enters this loop and the
+            //    exemption goes stale — which assertion (l) then reds on.
+            let census_row = field_to_question(field.id)
+                .and_then(btctax_core::tax::document_census::row_of_question);
+            if census_row.is_some_and(|r| !btctax_core::tax::document_census::row_is_live(&base, r))
+            {
+                continue;
+            }
             let before = leaf_map(&base); // shadows the outer baseline — see `fixture_for`
             let mut ri = base.clone();
             (field.set)(&mut ri, &addr, s.clone()).unwrap_or_else(|e| {
@@ -433,6 +446,19 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
         //   guessing — but this exemption is the reason it still fires for anyone who wants the boxes.
         "header.spouse_had_no_income",
         "header.spouse_not_filing_a_return",
+        // ★★★ **R3 — the two census rows shadowed by a scalar, exempt with the task that removes
+        //     the exemption named.** Both HAVE a `DocumentCensus` Field; neither is live, because
+        //     the amount is collected today by a scalar — `schedule_a.mortgage_interest_1098` and
+        //     `sch1.student_loan_interest_paid`. A `No` on the row would contradict a figure already
+        //     entered, and a `Yes` would demand a transcription section that does not exist, so the
+        //     row is deliberately unaskable until its section lands.
+        //
+        //     REMOVE `documents.form_1098` when **T9** replaces the mortgage scalar with a `Form1098`
+        //     section; REMOVE `documents.form_1098e` when **T5** replaces the student-loan scalar.
+        //     Assertion (l) below already reds on a stale entry, and the mutate-and-diff skip that
+        //     pairs with these is derived from `row_is_live`, so neither half can go stale silently.
+        "documents.form_1098",
+        "documents.form_1098e",
         "capital_loss_carryforward_in_provenance",
         "charitable_carryover_in_provenance",
         "qbi.reit_ptp_carryforward_in_provenance",
@@ -529,14 +555,16 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     // change happened to keep the sets balanced.
     let field_count: usize = form_spec().iter().map(|s| s.fields.len()).sum();
     assert_eq!(
-        field_count, 98,
-        "expected 98 Fields (one per §5.8 in-scope leaf) — 93 + FR-29's Form 8615 trio + spec \
-         1099-DA T6's two broker-reporting slots"
+        field_count, 116,
+        "expected 116 Fields — 98 + R3's eighteen document-census rows"
     );
     assert_eq!(
         covered.len(),
-        98,
-        "expected 98 distinctly-covered in-scope leaves — 93 + FR-29's Form 8615 trio + spec 1099-DA T6's two broker-reporting slots"
+        114,
+        "expected 114 distinctly-covered in-scope leaves — 98 + SIXTEEN of R3's eighteen census \
+         rows. The other two (`form_1098` → T9, `form_1098e` → T5) have a Field but are shadowed by \
+         a scalar and so are not live; they are EXEMPT above, and this number rises to 116 when \
+         their sections land."
     );
 
     // ── 5. ★ I-6: PIN the observed FieldId → leaf-path map against a literal (kills TRANSPOSITION). ──
@@ -776,6 +804,24 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
         "broker_reporting.coinbase.noncovered",
     ),
     (FieldId::ForeignCountryNames, "foreign_country_names"),
+    // ★ R3 / §5.1 — the sixteen LIVE document-census rows (the two scalar-shadowed ones are
+    //   EXEMPT above, so the mutate-and-diff never observes them).
+    (FieldId::DocW2, "documents.w2"),
+    (FieldId::DocInt1099, "documents.int_1099"),
+    (FieldId::DocDiv1099, "documents.div_1099"),
+    (FieldId::DocB1099, "documents.b_1099"),
+    (FieldId::DocG1099, "documents.g_1099"),
+    (FieldId::DocR1099, "documents.r_1099"),
+    (FieldId::DocSsa1099, "documents.ssa_1099"),
+    (FieldId::DocNecMiscK1099, "documents.nec_misc_k_1099"),
+    (FieldId::DocK1, "documents.k1"),
+    (FieldId::DocScheduleERental, "documents.schedule_e_rental"),
+    (FieldId::DocS1099, "documents.s_1099"),
+    (FieldId::DocOid1099, "documents.oid_1099"),
+    (FieldId::DocW2g, "documents.w2g"),
+    (FieldId::DocC1099, "documents.c_1099"),
+    (FieldId::DocA1095, "documents.a_1095"),
+    (FieldId::DocT1098, "documents.t_1098"),
     (FieldId::BlindTaxpayer, "header.taxpayer.blind"),
     (FieldId::BlindSpouse, "header.spouse.blind"),
     (FieldId::DobTaxpayer, "header.taxpayer.date_of_birth"),

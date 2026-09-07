@@ -10,11 +10,13 @@ pub mod charitable;
 pub mod classifier;
 pub mod compute;
 pub mod dependents_statement;
+pub mod document_census;
 /// Form 8275 (Disclosure Statement) content — Part I (auto, promoted 8949 disposal legs) + Part II
 /// (the filer's stored narrative) + the BG-D10 penalty-risk copy. See module doc.
 pub mod form6251;
 pub mod form8275;
 pub mod frozen_guard;
+pub mod interview_state;
 pub mod line_coverage;
 pub mod method;
 /// Test-support (§6.2): reproduces btctax's §3.1 printed chain on an independent oracle's figures for

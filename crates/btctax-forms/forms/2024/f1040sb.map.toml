@@ -170,7 +170,24 @@ ssn  = "topmostSubform[0].Page1[0].f1_02[0]"
 # ─────────────────────────────────────────────────────────────────────────────────────────────────
 # ★★★ THE FIELD CENSUS (§G-13). Every AcroForm field accounted for exactly once: mapped above, or
 # named here with the rule saying why not. See f8959.map.toml for the rule vocabulary.
+
+# ★★★ R2.2 — THE `[direction]` TABLE. Each block's `caption` is asserted VERBATIM against
+#     design/forms/extract/f1040sb--2024.txt at `extract_line` BEFORE the join uses it, so this table
+#     is a READING of the form and a re-parted revision REDS rather than drifting. A census entry
+#     is placed by its own line number into the block whose [first_line, last_line] range contains
+#     it; an entry with no printed line number carries `part = "<caption>"`. An entry no block
+#     places REDS — it is never defaulted to Overstates.
+#
+#     Understates = a blank here omits income or an addition to tax (the direction in which a blank
+#     is a false statement, so an Advisory may never cover it). Overstates = a blank forgoes a
+#     deduction, credit or payment lawfully. NoDollar = the cell carries no dollar at all.
+[[direction]]
+caption      = "Interest and Ordinary Dividends"
+extract_line = 6
+direction    = "Understates"
+first_line   = "1"
+last_line    = "8"
 [census]
-"topmostSubform[0].Page1[0].f1_32[0]" = { line = "3", rule = "unmodeled", reason = "Excludable interest on series EE and I U.S. savings bonds issued after 1989 (attach Form 8815) — btctax models no Form 8815, so line 4 = line 2." }
-"topmostSubform[0].Page1[0].f1_66[0]" = { line = "7b", rule = "unmodeled", reason = "SECOND line of the 7b foreign-country list; btctax writes only the first (f1_65). Not a silent truncation: an over-long value FAILS CLOSED at verify.rs:516, so a list needing two lines refuses rather than clipping." }
+"topmostSubform[0].Page1[0].f1_32[0]" = { line = "3", rule = "unmodeled", reason = "Excludable interest on series EE and I U.S. savings bonds issued after 1989 (attach Form 8815) — btctax models no Form 8815, so line 4 = line 2.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "8815" }
+"topmostSubform[0].Page1[0].f1_66[0]" = { line = "7b", rule = "unmodeled", reason = "SECOND line of the 7b foreign-country list; btctax writes only the first (f1_65). Not a silent truncation: an over-long value FAILS CLOSED at verify.rs:516, so a list needing two lines refuses rather than clipping.", covered_by = "RefuseReason::ScheduleBForeignCountryMissing" }
 

@@ -972,6 +972,20 @@ pub struct ReturnInputs {
     pub filing_status: FilingStatus,
     #[serde(default)]
     pub header: HouseholdHeader,
+    /// ★★★ **R3 / §5.1 — THE DOCUMENT CENSUS.** One tri-state per document type, each a
+    /// class-(A) [`crate::tax::questions::FormQuestion`].
+    ///
+    /// **Why it is a field and not a derivation.** `w2s` empty means either *no W-2* or *never
+    /// asked* — the answered-ness trap at the money level, and the two are the same blank on the
+    /// printed page. The census row makes them distinct, and `screen_inputs` then refuses each of
+    /// the three incoherent states: a live `None` (never asked), a `Some(false)` beside a
+    /// transcribed row (a "no" the data contradicts), and a `Some(true)` with nothing transcribed
+    /// (a declared document that was never entered).
+    ///
+    /// ★ An UNSUPPORTED type's row exists too, and refuses on `Some(true)` with §2.2's own exit
+    /// sentence — *"a filer cannot answer no to a category they were never shown"*.
+    #[serde(default)]
+    pub documents: crate::tax::document_census::DocumentCensus,
     #[serde(default)]
     pub w2s: Vec<W2>,
     #[serde(default)]
@@ -1418,6 +1432,9 @@ impl Default for ReturnInputs {
             form_4563_line15: Usd::ZERO,
             filing_status: FilingStatus::Single,
             header: HouseholdHeader::default(),
+            // ★ R3 — all-`None`: a fresh return has been asked about no document type. A
+            //   defaulted `Some(false)` would be the exact laundering the census exists to end.
+            documents: crate::tax::document_census::DocumentCensus::default(),
             w2s: Vec::new(),
             int_1099: Vec::new(),
             div_1099: Vec::new(),

@@ -805,7 +805,7 @@ fn report_tax_year_derives_and_computes_from_ty2024_return_inputs() {
     let toml = _dir.path().join("inputs.toml");
     std::fs::write(
         &toml,
-        "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\nfiling_form_4952 = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"90000\"\nbox2_fed_withheld = \"12000\"\nbox5_medicare_wages = \"90000\"\n",
+        "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\nfiling_form_4952 = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"90000\"\nbox2_fed_withheld = \"12000\"\nbox5_medicare_wages = \"90000\"\n\n\n# R3 — the document census: this household holds a W-2 and nothing else.\n[documents]\nw2 = true\nint_1099 = false\ndiv_1099 = false\nb_1099 = false\ng_1099 = false\nr_1099 = false\nssa_1099 = false\nnec_misc_k_1099 = false\nk1 = false\nschedule_e_rental = false\ns_1099 = false\noid_1099 = false\nw2g = false\nc_1099 = false\na_1095 = false\nt_1098 = false\n",
     )
     .unwrap();
     // The CSV disposal is in 2025, but v1 full-return tables are TY2024-only; import for 2024 to exercise
@@ -856,7 +856,7 @@ fn report_tax_year_refuses_business_income_without_schedule_c() {
 
     // Full-return inputs for 2024 with NO Schedule C.
     let toml = _dir.path().join("inputs.toml");
-    std::fs::write(&toml, "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\nfiling_form_4952 = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n").unwrap();
+    std::fs::write(&toml, "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\nfiling_form_4952 = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n\n# R3 — the document census: this crypto-only household received no information return.\n[documents]\nw2 = false\nint_1099 = false\ndiv_1099 = false\nb_1099 = false\ng_1099 = false\nr_1099 = false\nssa_1099 = false\nnec_misc_k_1099 = false\nk1 = false\nschedule_e_rental = false\ns_1099 = false\noid_1099 = false\nw2g = false\nc_1099 = false\na_1095 = false\nt_1098 = false\n").unwrap();
     cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap();
 
     let err = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap_err();
@@ -2905,10 +2905,16 @@ fn a_pre_d8_vault_refuses_until_answered_and_income_answer_is_the_way_out() {
     //   ladder step 1 — the two answers are never demanded. A household with the same money in
     //   capital gains would refuse until they were given.
     //
-    // ★ Seven "n" then bare Enters — the exact count is deliberate. A script that runs out fails with
-    // "input ended before every question was answered", which is how this test noticed the interview
-    // had grown at all.
-    let mut keystrokes: &[u8] = b"n\nn\nn\nn\nn\nn\nn\n\n\n\n\n\n\n\n";
+    // ★ Seven "n" for the pre-census declarations, then SIXTEEN more for R3's live document-census
+    // rows (eighteen §5.1 rows less `form_1098`/`form_1098e`, which are shadowed by a scalar until
+    // T9/T5 and so are not live), then bare Enters for the skippables. The exact count is deliberate:
+    // a script that runs out fails with "input ended before every question was answered", which is
+    // how this test noticed the interview had grown at all.
+    // ★ R3 — the ninth answer is "y": this household HOLDS a Form W-2 (imported above), and a "no"
+    // beside a transcribed row is `DocumentCensusContradicted` — the census refusing a "no" the data
+    // contradicts, which is exactly the state it exists to make visible.
+    let mut keystrokes: &[u8] =
+        b"n\nn\nn\nn\nn\nn\nn\ny\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\n\n\n\n\n\n\n\n";
     let mut screen: Vec<u8> = Vec::new();
     cmd::answer::answer_return_inputs(
         &vault,
@@ -2923,6 +2929,21 @@ fn a_pre_d8_vault_refuses_until_answered_and_income_answer_is_the_way_out() {
     assert!(
         screen.contains("claim YOU as a dependent"),
         "it must actually ASK the question: {screen}"
+    );
+    // ★★★ R12 / §4.2 — THE PANEL, printed BEFORE the first question and AFTER the last. Asserted on
+    //     the real `income answer` run, not on the renderer in isolation: a test that called
+    //     `write_panel` itself would stay green with both calls deleted from the command.
+    assert!(
+        screen.contains("The answer panel (before)"),
+        "the panel must be printed before the first question: {screen}"
+    );
+    assert!(
+        screen.contains("The answer panel (after)"),
+        "…and again after the last: {screen}"
+    );
+    assert!(
+        screen.contains("BLOCKING"),
+        "a return with nothing answered opens with a BLOCKING list: {screen}"
     );
     assert!(
         !screen.contains("SPOUSE"),
@@ -2984,7 +3005,7 @@ fn the_editor_and_income_answer_write_the_same_answer_record() {
     )
     .unwrap();
     cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap();
-    let mut keystrokes: &[u8] = b"n\nn\nn\nn\nn\nn\nn\n\n\n\n\n\n\n\n\n\n\n\n";
+    let mut keystrokes: &[u8] = b"n\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\n\n\n\n\n\n\n\n\n\n\n\n";
     let mut screen: Vec<u8> = Vec::new();
     cmd::answer::answer_return_inputs(&vault, &pp(), 2024, NOW, &mut keystrokes, &mut screen)
         .unwrap();
@@ -3162,7 +3183,7 @@ fn a_re_import_keeps_every_answer_record_already_on_the_row() {
     )
     .unwrap();
     cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap();
-    let mut keystrokes: &[u8] = b"n\nn\nn\nn\nn\nn\nn\n\n\n\n\n\n\n\n\n\n\n\n";
+    let mut keystrokes: &[u8] = b"n\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\n\n\n\n\n\n\n\n\n\n\n\n";
     let mut screen: Vec<u8> = Vec::new();
     cmd::answer::answer_return_inputs(
         &vault,
@@ -3186,8 +3207,8 @@ fn a_re_import_keeps_every_answer_record_already_on_the_row() {
     //   passes for the wrong reason, which is the whole failure class this file exists to catch.
     assert_eq!(
         before.len(),
-        14,
-        "the interview wrote {} records, not the 14 this kill was measured against — if the \
+        30,
+        "the interview wrote {} records, not the 30 this kill was measured against — if the \
          registry grew, update the number; if it SHRANK, the keystroke script is under-answering \
          and the survival assertion below has stopped meaning anything",
         before.len()
@@ -3264,7 +3285,7 @@ fn re_answering_at_the_keyboard_moves_the_stale_record_into_history_by_itself() 
     }
 
     // NOVEMBER: the filer re-answers at the keyboard. No sweep is called anywhere.
-    let mut keystrokes: &[u8] = b"n\nn\nn\nn\nn\nn\nn\n\n\n\n\n\n\n\n\n\n\n\n";
+    let mut keystrokes: &[u8] = b"n\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\n\n\n\n\n\n\n\n\n\n\n\n";
     let mut screen: Vec<u8> = Vec::new();
     cmd::answer::answer_return_inputs(&vault, &pp(), 2024, NOV, &mut keystrokes, &mut screen)
         .unwrap();

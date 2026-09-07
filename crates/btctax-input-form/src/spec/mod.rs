@@ -13,9 +13,13 @@ pub use registries::{
 
 use crate::seam::Section;
 
-/// The v1 `FormSpec`: the thirteen sections a renderer walks, in spec §9A render order — the ten
-/// header/W-2/Schedule-A/... sections (the `sections` module), then the two synthetic registry-driven
-/// sections (`Declarations` + `Skippables`), so the tail is `… Payments → Declarations → Skippables`.
+/// The v1 `FormSpec`: the sections a renderer walks, in spec §9A render order — the
+/// header/W-2/Schedule-A/... sections (the `sections` module), then the synthetic registry-driven
+/// sections, so the tail is `… Payments → Declarations → DocumentCensus → Skippables`.
+///
+/// ★ R3 — `DocumentCensus` sits beside `Declarations` (its rows ARE class-(A) declarations) rather
+/// than at the top where the interview asks it, because §9A's render order is the seam's contract
+/// and re-ordering it is a renderer change, not a spec change.
 pub fn form_spec() -> &'static [Section] {
     const SECTIONS: &[Section] = &[
         sections::RETURN_OPTIONS,
@@ -32,6 +36,7 @@ pub fn form_spec() -> &'static [Section] {
         sections::QBI_LIMITATION,
         sections::BROKER_REPORTING,
         registries::DECLARATIONS,
+        registries::DOCUMENT_CENSUS,
         registries::INCOME_EXCLUSIONS,
         registries::SKIPPABLES,
     ];
@@ -87,6 +92,7 @@ mod tests {
     fn declarations_section_delegates_every_decl_and_the_question_map_is_total() {
         let decls = section(SectionId::Declarations);
         let sched_a = section(SectionId::ScheduleA);
+        let census = section(SectionId::DocumentCensus);
 
         // ★ The DEDUP set is DERIVED, never hand-listed. A declaration is deduped exactly when
         //   `question_to_field` does not resolve to a Field of this section — so a third Schedule-A
@@ -97,6 +103,27 @@ mod tests {
         let mut deduped: Vec<QuestionId> = Vec::new();
         for q in FORM_QUESTIONS {
             let fid = question_to_field(q.id);
+            // ★★ R3 — the eighteen DOCUMENT CENSUS rows are declarations too, but they are owned by
+            //    their own `DocumentCensus` section (their `set` carries the I-10 rows guard, which
+            //    no other declaration has). Their membership is checked below, on the same shape as
+            //    the Schedule-A dedup: the section that owns them must have exactly one Field each,
+            //    and `Declarations` must not ALSO carry one, or the filer is asked twice.
+            if btctax_core::tax::document_census::row_of_question(q.id).is_some() {
+                assert!(
+                    census.fields.iter().any(|f| f.id == fid),
+                    "census declaration {:?} must be a DocumentCensus Field",
+                    q.id
+                );
+                assert!(
+                    !decls
+                        .fields
+                        .iter()
+                        .any(|f| field_to_question(f.id) == Some(q.id)),
+                    "the census declaration {:?} must not also appear in Declarations",
+                    q.id
+                );
+                continue;
+            }
             if !decls.fields.iter().any(|f| f.id == fid) {
                 // A deduped declaration must be OWNED by the section that prints its line…
                 assert!(
@@ -152,7 +179,25 @@ mod tests {
             .iter()
             .any(|f| f.id == FieldId::ForeignCountryNames));
 
-        // TOTAL, both directions, over all 17 QuestionIds — the mortgage one resolves to SaMortgageAllUsed.
+        // ★ R3 — every census row is a Field of its own section, and the section holds nothing else.
+        assert_eq!(
+            census.fields.len(),
+            btctax_core::tax::document_census::DocumentRow::ALL.len(),
+            "one DocumentCensus Field per §5.1 row, and nothing else in the section"
+        );
+        for row in btctax_core::tax::document_census::DocumentRow::ALL {
+            assert_eq!(
+                census
+                    .fields
+                    .iter()
+                    .filter(|f| field_to_question(f.id) == Some(row.question_id()))
+                    .count(),
+                1,
+                "census row {row:?} must map to exactly one DocumentCensus Field"
+            );
+        }
+
+        // TOTAL, both directions, over every QuestionId — the mortgage one resolves to SaMortgageAllUsed.
         for q in QuestionId::ALL {
             assert_eq!(
                 field_to_question(question_to_field(*q)),

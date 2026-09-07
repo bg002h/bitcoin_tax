@@ -50,6 +50,24 @@ box7_foreign_tax = "50"
 payer = "Broker LLC"
 payer_tin = ""
 
+[documents]
+a_1095 = false
+b_1099 = false
+c_1099 = false
+div_1099 = false
+g_1099 = false
+int_1099 = false
+k1 = false
+nec_misc_k_1099 = false
+oid_1099 = false
+r_1099 = false
+s_1099 = false
+schedule_e_rental = false
+ssa_1099 = false
+t_1098 = false
+w2 = true
+w2g = false
+
 [[g_1099]]
 box1_unemployment = "1000"
 box4_fed_withheld = "0"

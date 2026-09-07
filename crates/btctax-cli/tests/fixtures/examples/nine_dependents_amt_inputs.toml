@@ -70,6 +70,32 @@ charitable_carryover_in = []
 charitable_carryover_in_provenance = "user"
 capital_loss_carryforward_in_provenance = "user"
 
+# ── R3 / §5.1 — THE DOCUMENT CENSUS. Every type ANSWERED: "none" and "nobody asked" are the same
+#    blank on the printed page and are not the same testimony, so an unanswered row refuses.
+#
+# ★★ RECORDED TENSION (T3, the controller's decision). This household DOES hold a Form 1099-INT and
+#    a Form 1099-B — they are imported above — and the rows are nevertheless answered `false`.
+#    That is forced: T3's decision makes `int_1099` / `div_1099` / `b_1099` / `g_1099` refuse
+#    UNSUPPORTED on a `true` until **T5** builds their screens, so a `true` here would make this
+#    fixture unfileable. T5 flips both the refusal and these two lines together.
+[documents]
+w2 = false
+int_1099 = false
+div_1099 = false
+b_1099 = false
+g_1099 = false
+r_1099 = false
+ssa_1099 = false
+nec_misc_k_1099 = false
+k1 = false
+schedule_e_rental = false
+s_1099 = false
+oid_1099 = false
+w2g = false
+c_1099 = false
+a_1095 = false
+t_1098 = false
+
 [capital_loss_carryforward_in]
 long = "0"
 short = "0"

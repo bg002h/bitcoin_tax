@@ -139,6 +139,83 @@ fn skippable_state(sk: &SkippableQuestion, ri: &ReturnInputs) -> AnswerState {
     }
 }
 
+/// ★★★ **R12 / §4.2 — THE ANSWER PANEL, rendered.** `income answer` prints it BEFORE the first
+/// question and AFTER the last.
+///
+/// **Why both ends.** Before, so the filer sees the whole shape of what is open rather than meeting
+/// it one prompt at a time; after, so they see what their answers left — a forgone benefit, a
+/// refusing answer, or a prompt still waiting on the year's package. The second print is what makes
+/// the session's OUTCOME visible: a run that answers everything and still cannot commit must say so
+/// while the filer is at the keyboard, not at export.
+///
+/// ★ No progress bar and no "N of M" (R15): the panel lists ITEMS, and a count of items is not a
+/// measure of how far through anything the filer is.
+pub fn write_panel(
+    out: &mut impl Write,
+    st: &btctax_core::tax::interview_state::InterviewState,
+    when: &str,
+) -> std::io::Result<()> {
+    writeln!(out, "\n── The answer panel ({when}) ──")?;
+    if st.open_items() == 0 {
+        writeln!(
+            out,
+            "  nothing is open: every live question is answered, nothing is forgone, and no answer \
+             refuses."
+        )?;
+    }
+    if !st.blocking.is_empty() {
+        writeln!(
+            out,
+            "  BLOCKING ({}) — commit waits on these:",
+            st.blocking.len()
+        )?;
+        for b in &st.blocking {
+            writeln!(out, "    • {} [{}]", b.prompt, b.reason)?;
+        }
+    }
+    if !st.refusing.is_empty() {
+        writeln!(
+            out,
+            "  REFUSING ({}) — an answer already given that stops the return:",
+            st.refusing.len()
+        )?;
+        for r in &st.refusing {
+            writeln!(out, "    • {}", r.exit)?;
+        }
+    }
+    if !st.forgoing.is_empty() {
+        writeln!(
+            out,
+            "  FORGOING ({}) — lawful to skip; each one costs YOU, not the Treasury:",
+            st.forgoing.len()
+        )?;
+        for f in &st.forgoing {
+            let mark = if f.declined { " (declined)" } else { "" };
+            // ★ Plain `$N` rather than `advisories::fmt_usd`, which is `pub(crate)` to core.
+            let size = f
+                .size
+                .map_or_else(String::new, |s| format!(" — up to ${s}"));
+            writeln!(out, "    • {}{mark}{size}", f.prompt)?;
+        }
+    }
+    if !st.waiting.is_empty() {
+        writeln!(
+            out,
+            "  WAITING ({}) — these cannot be asked until a year package arrives:",
+            st.waiting.len()
+        )?;
+        for w in &st.waiting {
+            writeln!(out, "    • {} [waiting on {}]", w.prompt, w.waiting_on)?;
+        }
+    }
+    writeln!(
+        out,
+        "  ({} answered, {} not applicable to this return)",
+        st.answered, st.not_live
+    )?;
+    Ok(())
+}
+
 pub fn answer_return_inputs(
     vault: &Path,
     pp: &Passphrase,
@@ -162,6 +239,13 @@ pub fn answer_return_inputs(
     // ★ r3 NIT-2 — the questions say "in this tax year" but the registry prompts are `&'static str` and
     // cannot interpolate the year; a one-line banner anchors them so the filer need not hold it in their head.
     writeln!(out, "Answering full-return questions for tax year {year}:")?;
+
+    // ★★★ R12 / §4.2 — THE PANEL, BEFORE the first question.
+    write_panel(
+        out,
+        &btctax_core::tax::interview_state::interview_state(&ri),
+        "before",
+    )?;
 
     for ask in live_questions(&ri) {
         match ask {
@@ -323,6 +407,14 @@ pub fn answer_return_inputs(
         }
     }
 
+    // ★★★ R12 / §4.2 — THE PANEL, AFTER the last question. Printed BEFORE the write, so a filer
+    //     whose session ends in a refusing answer sees it while they are still at the keyboard.
+    write_panel(
+        out,
+        &btctax_core::tax::interview_state::interview_state(&ri),
+        "after",
+    )?;
+
     return_inputs::set(s.conn(), year, &ri)?;
     s.save()?;
     Ok(())
@@ -422,6 +514,28 @@ mod tests {
                 // whether the filer borrowed to invest. It reaches the $0-income household too, which
                 // is the population the plan measured this defect on.
                 QuestionId::FilingForm4952,
+                // ★★★ R3 / §5.1 — THE DOCUMENT CENSUS. Sixteen of the eighteen rows are live for
+                // every filer: a document type must be ANSWERED, and "a filer cannot answer no to
+                // a category they were never shown". The two missing ones are `DocForm1098` and
+                // `DocForm1098e`, whose amount is collected today by a scalar — they open with T9
+                // and T5 respectively, and until then a `No` on the row would contradict a figure
+                // the filer already entered.
+                QuestionId::DocW2,
+                QuestionId::DocInt1099,
+                QuestionId::DocDiv1099,
+                QuestionId::DocB1099,
+                QuestionId::DocG1099,
+                QuestionId::DocR1099,
+                QuestionId::DocSsa1099,
+                QuestionId::DocNecMiscK1099,
+                QuestionId::DocK1,
+                QuestionId::DocScheduleERental,
+                QuestionId::DocS1099,
+                QuestionId::DocOid1099,
+                QuestionId::DocW2g,
+                QuestionId::DocC1099,
+                QuestionId::DocA1095,
+                QuestionId::DocT1098,
             ]
         );
         assert!(!has_spouse_dob(&single()), "no spouse ⇒ no spouse DOB");
@@ -528,6 +642,103 @@ mod tests {
         r
     }
 
+    /// ★★★ **R12 — THE NO-BRICK PROPERTY, EXTENDED TO THE PANEL.**
+    ///
+    /// The registry-derived version above proves every live declaration is ASKED. This proves the
+    /// other half: answering every blocking item **through its own setter** empties `blocking`, and
+    /// `refusing` is empty before `screen_inputs` passes. Without the second clause a return could
+    /// have nothing left to answer and still be unfileable — which is exactly the brick the panel
+    /// exists to make visible while the filer is at the keyboard.
+    #[test]
+    fn answering_every_blocking_item_empties_the_panel_and_refusing_is_empty_before_the_screen_passes(
+    ) {
+        use btctax_core::tax::interview_state::interview_state;
+        use btctax_core::tax::provenance::AnswerKey;
+
+        // A fresh Single return: nothing answered at all, so `blocking` is the whole live class-(A)
+        // set — including R3's census rows.
+        let mut ri = ReturnInputs {
+            tax_year: 2024,
+            filing_status: btctax_core::FilingStatus::Single,
+            ..Default::default()
+        };
+        let before = interview_state(&ri);
+        assert!(
+            before.blocking.len() >= 20,
+            "a fresh return blocks on every live declaration (got {})",
+            before.blocking.len()
+        );
+
+        // Answer each blocking item through the registry's OWN setter — the same call `income
+        // answer` makes — at its neutral. Loop to a fixpoint: answering one question can make
+        // another live (liveness is a predicate over the return).
+        for _ in 0..8 {
+            let st = interview_state(&ri);
+            if st.blocking.is_empty() {
+                break;
+            }
+            for b in &st.blocking {
+                let AnswerKey::Question(id) = b.item else {
+                    continue;
+                };
+                let q = FORM_QUESTIONS
+                    .iter()
+                    .find(|q| q.id == id)
+                    .expect("a blocking item names a registry question");
+                (q.set)(&mut ri, q.neutral);
+            }
+        }
+
+        let after = interview_state(&ri);
+        assert!(
+            after.blocking.is_empty(),
+            "answering every blocking item through its own setter must empty `blocking`: {:#?}",
+            after.blocking.iter().map(|b| &b.item).collect::<Vec<_>>()
+        );
+        assert!(
+            after.refusing.is_empty(),
+            "★ and nothing may be left REFUSING — a return with nothing to answer and no way to \
+             file is the brick: {:#?}",
+            after.refusing.iter().map(|r| &r.exit).collect::<Vec<_>>()
+        );
+        assert!(after.is_committable());
+
+        // …and the screen agrees. The panel is derived from the registries and the screen is not,
+        // so this is a real cross-check rather than a restatement.
+        assert!(
+            btctax_core::tax::return_refuse::screen_inputs(
+                &ri,
+                &btctax_core::tax::testonly::ty2024_table(),
+                &btctax_core::tax::testonly::ty2024_params(),
+            )
+            .is_none(),
+            "with the panel empty, `screen_inputs` must report no UNANSWERED-class refusal"
+        );
+    }
+
+    /// ★ §4.2 — the panel is printed BEFORE the first question and AFTER the last.
+    ///
+    /// Mutation: delete either `write_panel` call in `answer_return_inputs` and this reds.
+    #[test]
+    fn income_answer_prints_the_panel_first_and_last() {
+        let mut screen: Vec<u8> = Vec::new();
+        let st = btctax_core::tax::interview_state::interview_state(&single());
+        write_panel(&mut screen, &st, "before").unwrap();
+        let rendered = String::from_utf8(screen).unwrap();
+        assert!(
+            rendered.contains("The answer panel (before)"),
+            "the panel names which end it is: {rendered}"
+        );
+        assert!(
+            rendered.contains("BLOCKING"),
+            "a fresh Single return has blocking items: {rendered}"
+        );
+        assert!(
+            !rendered.contains('%') && !rendered.to_lowercase().contains("progress"),
+            "R15 — no progress bar, ever: {rendered}"
+        );
+    }
+
     /// ★ THE no-brick property, registry-DERIVED (§3.5 assertion 3 / r4 I-3 / IMPL r1 I-1). For EVERY
     /// registry entry: on a return where it is live, `income answer` must ASK it. Held by identity today,
     /// but the spec mandated this assertion by name after it went red three revisions running — and a
@@ -538,6 +749,23 @@ mod tests {
     fn income_answer_asks_every_live_declaration() {
         for q in FORM_QUESTIONS {
             let ri = scenario_for(q.id);
+            // ★★ R3 — two census rows are DELIBERATELY not live yet (`form_1098` → T9,
+            //    `form_1098e` → T5: their amount is collected today by a scalar). A never-live
+            //    question cannot be exercised by this property; the skip is DERIVED from the
+            //    census's own liveness predicate, not from a name list, so the moment T9/T5 flips
+            //    `row_is_live` the row re-enters this loop with no edit here.
+            if !(q.live)(&ri) {
+                let row = btctax_core::tax::document_census::row_of_question(q.id);
+                assert!(
+                    row.is_some_and(|row| !btctax_core::tax::document_census::row_is_live(
+                        &ri, row
+                    )),
+                    "{:?} is not live in its own scenario and is not a census row awaiting its \
+                     screen (T5/T9)",
+                    q.id
+                );
+                continue;
+            }
             assert!(
                 (q.live)(&ri),
                 "{:?} must be live in its own scenario (test bug otherwise)",

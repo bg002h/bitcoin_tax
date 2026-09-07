@@ -436,6 +436,46 @@ pub enum RefuseReason {
     /// `Some(false)` for a return to be produced at all, so they have affirmatively sworn there was
     /// no such income and 14b is genuinely blank rather than laundered.
     Schedule1aOvertimeFromTradeOrBusiness,
+    // ── ★★★ R3 / §5.1 — THE DOCUMENT CENSUS's four refusals. ────────────────────────────────────
+    //
+    // Each carries the ROW, never a string, so the message table lives in one place
+    // (`document_census.rs`) and a new row is a compile error there rather than a missing case here.
+    /// ★★★ **A live census row is `None`** — the document type was never asked about.
+    ///
+    /// UNANSWERED class. *"None"* and *"nobody asked"* are the same blank on the printed page and
+    /// are not the same testimony; a broker that has not mailed by February is **unanswered**.
+    /// Raised by the [`crate::tax::questions::FORM_QUESTIONS`] loop, like every other class-(A)
+    /// declaration — one registry entry, not a new tier.
+    DocumentCensusUnanswered {
+        kind: crate::tax::document_census::DocumentRow,
+    },
+    /// ★★★ **`Some(false)` with rows transcribed** — a "no" the data contradicts.
+    ///
+    /// INVALID class. The filer says they received none and the return carries transcribed rows of
+    /// exactly that document. One of the two is wrong and btctax cannot know which, so it refuses
+    /// rather than pick; `apply` refuses the `SetField(No)` while rows exist (the
+    /// `DeleteSection(ScheduleA)` I-10 precedent), so the renderer removes the rows first with a
+    /// payload-confirm and nothing is ever silently deleted.
+    DocumentCensusContradicted {
+        kind: crate::tax::document_census::DocumentRow,
+    },
+    /// ★★★ **`Some(true)` with zero rows transcribed** — a declared document that was never entered.
+    ///
+    /// UNANSWERED class: this is precisely *"nothing ever populated it"*, the defect
+    /// `blank-is-the-normal-case` names — invisible in the emitted PDF, invisible to both oracles,
+    /// and invisible to any test that checks the value.
+    DocumentDeclaredNotTranscribed {
+        kind: crate::tax::document_census::DocumentRow,
+    },
+    /// ★★★ **`Some(true)` on a type btctax cannot take** — §2.2's excluded families, plus the four
+    /// whose screen is task T5.
+    ///
+    /// UNSUPPORTED class: the data is true, btctax's scope is short, nothing is stored. The detail
+    /// carries that family's own **exit sentence verbatim** and names the document, so the filer is
+    /// never under-filed silently and always has somewhere to go.
+    DocumentTypeUnsupported {
+        kind: crate::tax::document_census::DocumentRow,
+    },
 }
 
 /// A fail-closed refusal: the reason + a human-readable detail (surfaced to the user).
@@ -485,6 +525,9 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         // §G-22/B11 — a declaration; the registry screens unanswered, and a dedicated gate screens
         // `Some(true)`. Nothing to negative-screen here: it is a yes/no, not a money field.
         other_out_of_scope_income: _,
+        // ★ R3 — the document census is eighteen tri-states, no money. Its own three value rules
+        //   live in `screen_document_census`; there is nothing here to negative-screen.
+        documents: _,
         filing_status: _,
         // PII only — no money today. This `_` is the ONE header waiver; its exhaustiveness (a future field
         // in HouseholdHeader/Person/Dependent) is now compiler-forced by the P9 §3.3 CLASSIFIER, which
@@ -1052,6 +1095,73 @@ pub fn screen_broker_reporting(
     None
 }
 
+/// ★★★ **R3 — THE DOCUMENT CENSUS's three VALUE rules**, in one place.
+///
+/// The fourth rule — a live row that is `None` — is not here: it is the
+/// [`crate::tax::questions::FORM_QUESTIONS`] registry loop, so the census is one registry entry per
+/// row rather than a new tier of screen (R3).
+///
+/// Each rule is gated on the row's own liveness, the [`crate::tax::questions::question_is_live`]
+/// precedent: an ungated value-refusal is an exit-less brick, because a stale answer on a row that
+/// is no longer asked cannot be cleared by the filer.
+///
+/// Returns the FIRST refusal in [`DocumentRow::ALL`] order, so the message is deterministic.
+pub fn screen_document_census(ri: &ReturnInputs) -> Option<Refusal> {
+    use crate::tax::document_census::{row_is_live, transcribed_rows, DocumentRow};
+    for row in DocumentRow::ALL {
+        let row = *row;
+        if !row_is_live(ri, row) {
+            continue;
+        }
+        let doc = row.designation();
+        match ri.documents.get(row) {
+            // The unanswered half belongs to the registry loop (R3: one registry entry, not a tier).
+            None => continue,
+            Some(true) => {
+                // ★ §2.2 first: a type btctax cannot take refuses whatever its row count, because
+                //   the exit is the whole answer and a row count would only distract from it.
+                if let Some(exit) = row.exit_sentence() {
+                    return refuse(
+                        RefuseReason::DocumentTypeUnsupported { kind: row },
+                        format!(
+                            "you answered that you received one or more {doc}. {exit} Nothing was \
+                             stored and no forms were written."
+                        ),
+                    );
+                }
+                if transcribed_rows(ri, row) == Some(0) {
+                    return refuse(
+                        RefuseReason::DocumentDeclaredNotTranscribed { kind: row },
+                        format!(
+                            "you answered that you received one or more {doc}, and none is \
+                             transcribed on this return. A declared document with no transcription \
+                             is exactly \"nothing ever populated it\" — the blank that looks \
+                             identical to a correct one on the printed page. Enter the document, or \
+                             change the answer to \"no\" if you received none."
+                        ),
+                    );
+                }
+            }
+            Some(false) => {
+                if let Some(n) = transcribed_rows(ri, row) {
+                    if n > 0 {
+                        return refuse(
+                            RefuseReason::DocumentCensusContradicted { kind: row },
+                            format!(
+                                "you answered that you received NO {doc}, and this return carries \
+                                 {n} transcribed row(s) of exactly that document. btctax cannot know \
+                                 which of the two is wrong, so it refuses rather than choose: remove \
+                                 the row(s) and keep the \"no\", or change the answer to \"yes\"."
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Screen the **input-screenable** refuse-guard rows (SPEC §4.10). Returns the FIRST [`Refusal`] found,
 /// or `None` if nothing input-screenable trips (the compute/ledger-dependent rows are checked later).
 pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) -> Option<Refusal> {
@@ -1160,6 +1270,14 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
         {
             return refuse(q.unanswered.clone(), WORDING_CHANGED_DETAIL);
         }
+    }
+
+    // ★★★ R3 — THE DOCUMENT CENSUS's three VALUE rules, immediately after the registry loop that
+    //     owns its unanswered half. Placed here so a census answer is screened before every
+    //     value-dependent rule below: a filer holding a Form 1099-R is told so, rather than meeting
+    //     a §402(g) or SALT message about a return that was never fileable.
+    if let Some(r) = screen_document_census(ri) {
+        return Some(r);
     }
 
     // ★★★ THE CAPITAL LOSS CARRYOVER WORKSHEET'S TWO HEADER CONDITIONS, ANSWERED ADVERSELY.
@@ -1718,10 +1836,205 @@ mod tests {
         // skippables now — see `the_death_gates_do_not_block_a_return`), but kept so that every fixture
         // below claims the age-65 box the way a real filer would, and no existing figure moves.
         ri.header.taxpayer_died_during_year = Some(false);
+        // ★★★ R3 — THE DOCUMENT CENSUS, answered. Eighteen class-(A) declarations, so an unanswered
+        //     one refuses exactly like every other; a fixture that left them blank would be
+        //     re-asserting the silence the census exists to break. `false` on every row is the
+        //     starting shape — "I received none" — and `reason()` below keeps it COHERENT as a test
+        //     adds transcribed rows.
+        for row in crate::tax::document_census::DocumentRow::ALL {
+            ri.documents.set(*row, Some(false));
+        }
         ri
     }
+    /// ★ R3 — screen a fixture, first making its census COHERENT with the rows it carries.
+    ///
+    /// Only one direction is corrected, and only one: a row answered `false` beside transcribed rows
+    /// of that document becomes `true`. Every other state passes through untouched — in particular an
+    /// UNANSWERED row still refuses, which is what
+    /// [`every_live_unanswered_declaration_refuses_with_its_own_reason`] measures over the census.
+    ///
+    /// Without this, every fixture in this module that adds a W-2 after [`ri`] would report
+    /// `DocumentCensusContradicted` instead of the rule it was written to exercise. The census's own
+    /// three value rules are measured by [`the_document_census_refuses_each_incoherent_state`], which
+    /// calls `screen_inputs` directly and so cannot be masked by this helper.
     fn reason(ri: &ReturnInputs) -> Option<RefuseReason> {
-        screen_inputs(ri, &tbl(), &params()).map(|r| r.reason)
+        let mut ri = ri.clone();
+        for row in crate::tax::document_census::DocumentRow::ALL {
+            let has_rows =
+                crate::tax::document_census::transcribed_rows(&ri, *row).is_some_and(|n| n > 0);
+            if has_rows && ri.documents.get(*row) == Some(false) {
+                ri.documents.set(*row, Some(true));
+            }
+        }
+        screen_inputs(&ri, &tbl(), &params()).map(|r| r.reason)
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════════════════════
+    // ★★★ R3 — THE DOCUMENT CENSUS. Kills (a)–(e), each measured against `screen_inputs` directly
+    //     so the `reason()` coherence helper above cannot mask one.
+    // ════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// A fixture with EVERY declaration answered and EVERY census row answered `false` — the
+    /// starting shape each kill below perturbs in exactly one way.
+    fn censused() -> ReturnInputs {
+        ri() // `ri()` already answers all eighteen rows `Some(false)`
+    }
+
+    fn raw(r: &ReturnInputs) -> Option<RefuseReason> {
+        screen_inputs(r, &tbl(), &params()).map(|x| x.reason)
+    }
+
+    /// ★★★ **R3 kills (a), (b) and (c) — the three incoherent states, each refusing with its own
+    ///     reason.** The census exists to make these three distinguishable from a correct blank, so
+    ///     a test that only checked "it refuses" would not measure it.
+    #[test]
+    fn the_document_census_refuses_each_incoherent_state() {
+        use crate::tax::document_census::DocumentRow;
+        use crate::tax::return_inputs::{Owner, W2};
+
+        // (a) UNANSWERED — a live row left `None` blocks, through the registry loop.
+        let mut a = censused();
+        a.documents.int_1099 = None;
+        assert_eq!(
+            raw(&a),
+            Some(RefuseReason::DocumentCensusUnanswered {
+                kind: DocumentRow::Int1099
+            }),
+            "a live census row left unanswered must refuse: \"none\" and \"nobody asked\" are the \
+             same blank on the page and are not the same testimony"
+        );
+
+        // (b) DECLARED, NOT TRANSCRIBED — `Some(true)` on a countable row with zero rows.
+        let mut b = censused();
+        b.documents.w2 = Some(true);
+        assert!(b.w2s.is_empty(), "the fixture starts with no W-2");
+        assert_eq!(
+            raw(&b),
+            Some(RefuseReason::DocumentDeclaredNotTranscribed {
+                kind: DocumentRow::W2
+            }),
+            "a declared document with nothing transcribed is exactly \"nothing ever populated it\""
+        );
+
+        // (c) CONTRADICTED — `Some(false)` beside a transcribed row.
+        let mut c = censused();
+        c.w2s = vec![W2 {
+            owner: Owner::Taxpayer,
+            employer: "ACME".into(),
+            box1_wages: dec!(1000),
+            box3_ss_wages: dec!(1000),
+            box5_medicare_wages: dec!(1000),
+            ..Default::default()
+        }];
+        assert_eq!(c.documents.w2, Some(false));
+        assert_eq!(
+            raw(&c),
+            Some(RefuseReason::DocumentCensusContradicted {
+                kind: DocumentRow::W2
+            }),
+            "a \"no\" beside a transcribed row of that document must refuse rather than be picked \
+             between"
+        );
+
+        // …and the coherent pair does NOT refuse — without this the three reds above could all be
+        // one blanket refusal.
+        let mut ok = c.clone();
+        ok.documents.w2 = Some(true);
+        assert_eq!(raw(&ok), None, "a coherent census must not refuse");
+    }
+
+    /// ★★★ **R3 kill (d) — every refusing row's `Some(true)` carries §2.2's own exit sentence,
+    ///     VERBATIM, and names the document the filer answered about.**
+    ///
+    /// Both halves matter. Without the verbatim check a refusal could be a paraphrase that drops
+    /// the exit; without the designation check the two §2.2 sentences that name no form at all
+    /// (SSA-1099, W-2G) would leave the filer unable to tell WHICH answer produced the refusal.
+    #[test]
+    fn every_unsupported_census_row_refuses_with_its_own_exit_sentence() {
+        use crate::tax::document_census::DocumentRow;
+        let mut refused = 0usize;
+        for row in DocumentRow::ALL {
+            let mut r = censused();
+            r.documents.set(*row, Some(true));
+            let Some(exit) = row.exit_sentence() else {
+                // W2 (transcribable) and the two scalar-shadowed rows have no exit.
+                continue;
+            };
+            let refusal = screen_inputs(&r, &tbl(), &params())
+                .unwrap_or_else(|| panic!("{row:?} = Yes must refuse — its exit is: {exit}"));
+            assert_eq!(
+                refusal.reason,
+                RefuseReason::DocumentTypeUnsupported { kind: *row },
+                "{row:?} = Yes must refuse as UNSUPPORTED"
+            );
+            assert!(
+                refusal.detail.contains(exit),
+                "{row:?}'s refusal must carry §2.2's sentence VERBATIM.\n  want: {exit}\n  got:  {}",
+                refusal.detail
+            );
+            assert!(
+                refusal.detail.contains(row.designation()),
+                "{row:?}'s refusal must name the document the filer answered about ({}): {}",
+                row.designation(),
+                refusal.detail
+            );
+            refused += 1;
+        }
+        assert_eq!(
+            refused, 15,
+            "fifteen rows refuse on Yes — a shrinking count means a family stopped being announced"
+        );
+    }
+
+    /// ★★ **The controller's T3 decision, made executable.** The four supported-by-§5.1 rows whose
+    /// SCREEN is task T5 refuse on `Yes` and NAME T5, rather than accepting a document there is no
+    /// surface to transcribe. A filer with interest today is refused rather than under-filed.
+    #[test]
+    fn the_four_t5_rows_refuse_naming_their_task() {
+        use crate::tax::document_census::DocumentRow;
+        for row in [
+            DocumentRow::Int1099,
+            DocumentRow::Div1099,
+            DocumentRow::B1099,
+            DocumentRow::G1099,
+        ] {
+            let mut r = censused();
+            r.documents.set(row, Some(true));
+            let refusal = screen_inputs(&r, &tbl(), &params())
+                .unwrap_or_else(|| panic!("{row:?} = Yes must refuse until T5 builds its screen"));
+            assert_eq!(
+                refusal.reason,
+                RefuseReason::DocumentTypeUnsupported { kind: row }
+            );
+            assert!(
+                refusal.detail.contains("(T5)"),
+                "{row:?}'s refusal must name the task that opens it: {}",
+                refusal.detail
+            );
+        }
+    }
+
+    /// ★★ **The two scalar-shadowed rows are NOT LIVE: answering them asks nothing and refuses
+    ///     nothing** — on any fixture, at any value.
+    ///
+    /// Their amount is collected today by a scalar, so a `No` would contradict a figure already
+    /// entered and a `Yes` would demand a section that does not exist. The kill runs BOTH values,
+    /// because a liveness bug that let only one through would otherwise pass.
+    #[test]
+    fn the_scalar_shadowed_census_rows_are_not_live_and_never_refuse() {
+        use crate::tax::document_census::DocumentRow;
+        for row in [DocumentRow::Form1098, DocumentRow::Form1098e] {
+            for answer in [None, Some(true), Some(false)] {
+                let mut r = censused();
+                r.documents.set(row, answer);
+                assert_eq!(
+                    raw(&r),
+                    None,
+                    "{row:?} = {answer:?} must neither block nor refuse until T9/T5 replaces its \
+                     scalar"
+                );
+            }
+        }
     }
 
     /// ★★★ The ABSOLUTE screen — the one that can see the §63(e) election. Two of the phase-2
@@ -1932,6 +2245,24 @@ mod tests {
                 if other.id != q.id && (other.live)(&r) && (other.get)(&r).is_none() {
                     (other.set)(&mut r, other.neutral);
                 }
+            }
+            // ★★ R3 — TWO CENSUS ROWS ARE DELIBERATELY NOT LIVE YET (Form 1098 → T9, Form 1098-E
+            //    → T5). Their amount is collected today by a scalar, so a `No` on the row would
+            //    contradict a figure already entered and a `Yes` would demand a transcription
+            //    section that does not exist. A never-live entry cannot be exercised by this
+            //    property — but the skip is DERIVED from the census's own liveness predicate, not
+            //    from a name list, so the moment T9/T5 flips `row_is_live` the entry re-enters this
+            //    loop with no edit here. Anything else that is not live in its own scenario is a
+            //    scenario bug and still fails.
+            if !(q.live)(&r) {
+                let row = crate::tax::document_census::row_of_question(q.id);
+                assert!(
+                    row.is_some_and(|row| !crate::tax::document_census::row_is_live(&r, row)),
+                    "{:?} is not live in its own scenario and is not a census row awaiting its \
+                     screen (T5/T9)",
+                    q.id
+                );
+                continue;
             }
             assert!((q.live)(&r), "{:?} must be live in its own scenario", q.id);
             assert!((q.get)(&r).is_none(), "{:?} must start blank", q.id);
@@ -2495,6 +2826,10 @@ mod tests {
             r.other_out_of_scope_income = Some(false); // §G-22/B11
             r.filing_form_4952 = Some(false); // Schedule D line 20 / Schedule A line 9
             r.header.taxpayer_died_during_year = Some(false); // §G-9
+                                                              // ★ R3 — and the eighteen document-census rows, for the same reason.
+            for row in crate::tax::document_census::DocumentRow::ALL {
+                r.documents.set(*row, Some(false));
+            }
             r
         };
         // I4: box 1b (qualified) > box 1a (ordinary) on a form ⇒ refuse (phantom preferential income).
@@ -2841,6 +3176,24 @@ mod tests {
                 if (other.live)(&r) && (other.get)(&r).is_none() {
                     (other.set)(&mut r, other.neutral);
                 }
+            }
+            // ★★ R3 — TWO CENSUS ROWS ARE DELIBERATELY NOT LIVE YET (Form 1098 → T9, Form 1098-E
+            //    → T5). Their amount is collected today by a scalar, so a `No` on the row would
+            //    contradict a figure already entered and a `Yes` would demand a transcription
+            //    section that does not exist. A never-live entry cannot be exercised by this
+            //    property — but the skip is DERIVED from the census's own liveness predicate, not
+            //    from a name list, so the moment T9/T5 flips `row_is_live` the entry re-enters this
+            //    loop with no edit here. Anything else that is not live in its own scenario is a
+            //    scenario bug and still fails.
+            if !(q.live)(&r) {
+                let row = crate::tax::document_census::row_of_question(q.id);
+                assert!(
+                    row.is_some_and(|row| !crate::tax::document_census::row_is_live(&r, row)),
+                    "{:?} is not live in its own scenario and is not a census row awaiting its \
+                     screen (T5/T9)",
+                    q.id
+                );
+                continue;
             }
             assert!((q.live)(&r), "{:?} must be live in its own scenario", q.id);
             assert_eq!(

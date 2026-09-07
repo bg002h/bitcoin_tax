@@ -163,13 +163,37 @@ ssn  = "form1[0].Page1[0].f1_02[0]"
 #
 #    Everything else on this form is a tax on income or an account btctax does not model at all, so
 #    there is no value it could have carried.
+
+# ★★★ R2.2 — THE `[direction]` TABLE. Each block's `caption` is asserted VERBATIM against
+#     design/forms/extract/f1040s2--2025.txt at `extract_line` BEFORE the join uses it, so this table
+#     is a READING of the form and a re-parted revision REDS rather than drifting. A census entry
+#     is placed by its own line number into the block whose [first_line, last_line] range contains
+#     it; an entry with no printed line number carries `part = "<caption>"`. An entry no block
+#     places REDS — it is never defaulted to Overstates.
+#
+#     Understates = a blank here omits income or an addition to tax (the direction in which a blank
+#     is a false statement, so an Advisory may never cover it). Overstates = a blank forgoes a
+#     deduction, credit or payment lawfully. NoDollar = the cell carries no dollar at all.
+[[direction]]
+caption      = "Part I       Tax"
+extract_line = 15
+direction    = "Understates"
+first_line   = "1"
+last_line    = "3"
+
+[[direction]]
+caption      = "Part II      Other Taxes"
+extract_line = 45
+direction    = "Understates"
+first_line   = "4"
+last_line    = "21"
 [census]
 
 # ── Part I lines 1a-1f: additions to tax from forms btctax does not emit ─────────────────────────
-"form1[0].Page1[0].Line1a_ReadOrder[0].f1_03[0]" = { line = "1a", rule = "unmodeled", reason = "\"Excess advance premium tax credit repayment. Attach Form 8962\" — btctax collects no Form 1095-A, so no marketplace APTC can exist to repay." }
-"form1[0].Page1[0].f1_04[0]" = { line = "1b", rule = "unmodeled", reason = "\"Repayment of new clean vehicle credit(s) transferred to a registered dealer from Schedule A (Form 8936), Part II\" — no vehicle credits modelled." }
-"form1[0].Page1[0].f1_05[0]" = { line = "1c", rule = "unmodeled", reason = "\"Repayment of previously owned clean vehicle credit(s) transferred to a registered dealer from Schedule A (Form 8936), Part IV\" — same." }
-"form1[0].Page1[0].f1_06[0]" = { line = "1d", rule = "unmodeled", reason = "\"Recapture of net EPE from Form 4255, line 2a, column (l)\" — btctax emits no Form 4255 (elective payment / credit transfer)." }
+"form1[0].Page1[0].Line1a_ReadOrder[0].f1_03[0]" = { line = "1a", rule = "unmodeled", reason = "\"Excess advance premium tax credit repayment. Attach Form 8962\" — btctax collects no Form 1095-A, so no marketplace APTC can exist to repay.", covered_by = "RefuseReason::DocumentTypeUnsupported" }
+"form1[0].Page1[0].f1_04[0]" = { line = "1b", rule = "unmodeled", reason = "\"Repayment of new clean vehicle credit(s) transferred to a registered dealer from Schedule A (Form 8936), Part II\" — no vehicle credits modelled.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "8936" }
+"form1[0].Page1[0].f1_05[0]" = { line = "1c", rule = "unmodeled", reason = "\"Repayment of previously owned clean vehicle credit(s) transferred to a registered dealer from Schedule A (Form 8936), Part IV\" — same.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "8936" }
+"form1[0].Page1[0].f1_06[0]" = { line = "1d", rule = "unmodeled", reason = "\"Recapture of net EPE from Form 4255, line 2a, column (l)\" — btctax emits no Form 4255 (elective payment / credit transfer).", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "4255" }
 
 # Line 1e — "Excessive payments (EPs) on gross EPE from Form 4255. Check applicable box and enter
 # amount. See instructions." The four checkboxes are (i) Line 1a, (ii) Line 1c, (iii) Line 1d,
@@ -178,22 +202,22 @@ ssn  = "form1[0].Page1[0].f1_02[0]"
 # x 64.8 with its box at 86.4 and (ii) at x 180.0 with its box at 201.6, both on the upper row
 # (y 494-502); (iii)/(iv) repeat the pattern on the lower row (y 482-490).
 # ★ TY2025 dropped the ", column (n)" qualifier each of these four references carried in TY2024.
-"form1[0].Page1[0].Line1e_ReadOrder[0].c1_1[0]" = { line = "1e(i)",   rule = "unmodeled", reason = "Form 4255 excessive-payment source checkbox, (i) Line 1a — no Form 4255 is modelled, so no box can be checked." }
-"form1[0].Page1[0].Line1e_ReadOrder[0].c1_1[1]" = { line = "1e(ii)",  rule = "unmodeled", reason = "Same — (ii) Line 1c." }
-"form1[0].Page1[0].Line1e_ReadOrder[0].c1_1[2]" = { line = "1e(iii)", rule = "unmodeled", reason = "Same — (iii) Line 1d." }
-"form1[0].Page1[0].Line1e_ReadOrder[0].c1_1[3]" = { line = "1e(iv)",  rule = "unmodeled", reason = "Same — (iv) Line 2a." }
-"form1[0].Page1[0].f1_07[0]"                    = { line = "1e",      rule = "unmodeled", reason = "Excessive-payments amount — no Form 4255." }
-"form1[0].Page1[0].Line1f_ReadOrder[0].c1_2[0]" = { line = "1f(i)",   rule = "unmodeled", reason = "\"20% EP from Form 4255\" source checkbox, (i) Line 1a — no Form 4255." }
-"form1[0].Page1[0].Line1f_ReadOrder[0].c1_2[1]" = { line = "1f(ii)",  rule = "unmodeled", reason = "Same — (ii) Line 1c." }
-"form1[0].Page1[0].Line1f_ReadOrder[0].c1_2[2]" = { line = "1f(iii)", rule = "unmodeled", reason = "Same — (iii) Line 1d." }
-"form1[0].Page1[0].Line1f_ReadOrder[0].c1_2[3]" = { line = "1f(iv)",  rule = "unmodeled", reason = "Same — (iv) Line 2a." }
-"form1[0].Page1[0].f1_08[0]"                    = { line = "1f",      rule = "unmodeled", reason = "20% excessive-payment amount — no Form 4255." }
+"form1[0].Page1[0].Line1e_ReadOrder[0].c1_1[0]" = { line = "1e(i)",   rule = "unmodeled", reason = "Form 4255 excessive-payment source checkbox, (i) Line 1a — no Form 4255 is modelled, so no box can be checked.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "4255" }
+"form1[0].Page1[0].Line1e_ReadOrder[0].c1_1[1]" = { line = "1e(ii)",  rule = "unmodeled", reason = "Same — (ii) Line 1c. (Form 4255.)", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "4255" }
+"form1[0].Page1[0].Line1e_ReadOrder[0].c1_1[2]" = { line = "1e(iii)", rule = "unmodeled", reason = "Same — (iii) Line 1d. (Form 4255.)", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "4255" }
+"form1[0].Page1[0].Line1e_ReadOrder[0].c1_1[3]" = { line = "1e(iv)",  rule = "unmodeled", reason = "Same — (iv) Line 2a. (Form 4255.)", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "4255" }
+"form1[0].Page1[0].f1_07[0]"                    = { line = "1e",      rule = "unmodeled", reason = "Excessive-payments amount — no Form 4255.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "4255" }
+"form1[0].Page1[0].Line1f_ReadOrder[0].c1_2[0]" = { line = "1f(i)",   rule = "unmodeled", reason = "\"20% EP from Form 4255\" source checkbox, (i) Line 1a — no Form 4255.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "4255" }
+"form1[0].Page1[0].Line1f_ReadOrder[0].c1_2[1]" = { line = "1f(ii)",  rule = "unmodeled", reason = "Same — (ii) Line 1c. (Form 4255.)", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "4255" }
+"form1[0].Page1[0].Line1f_ReadOrder[0].c1_2[2]" = { line = "1f(iii)", rule = "unmodeled", reason = "Same — (iii) Line 1d. (Form 4255.)", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "4255" }
+"form1[0].Page1[0].Line1f_ReadOrder[0].c1_2[3]" = { line = "1f(iv)",  rule = "unmodeled", reason = "Same — (iv) Line 2a. (Form 4255.)", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "4255" }
+"form1[0].Page1[0].f1_08[0]"                    = { line = "1f",      rule = "unmodeled", reason = "20% excessive-payment amount — no Form 4255.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "4255" }
 
 # Line 1y is a write-in. btctax asserts no free-text additional tax, for the same reason it writes no
 # free-text credit on Schedule 3: an unnamed, uncomputed amount is testimony it cannot substantiate.
-"form1[0].Page1[0].f1_09[0]" = { line = "1y type",   rule = "unmodeled", reason = "\"Other additions to tax (see instructions)\" free-text description cell (x 230.4-381.6) — btctax writes no write-in taxes." }
-"form1[0].Page1[0].f1_10[0]" = { line = "1y amount", rule = "unmodeled", reason = "Amount for the 1y write-in (MID column, x 410.4-481.6) — same." }
-"form1[0].Page1[0].f1_11[0]" = { line = "1z",        rule = "unmodeled", reason = "\"Add lines 1a through 1y\" — dead with every line 1 item blank." }
+"form1[0].Page1[0].f1_09[0]" = { line = "1y type",   rule = "unmodeled", reason = "\"Other additions to tax (see instructions)\" free-text description cell (x 230.4-381.6) — btctax writes no write-in taxes.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "write-in taxes" }
+"form1[0].Page1[0].f1_10[0]" = { line = "1y amount", rule = "unmodeled", reason = "Amount for the 1y write-in (MID column, x 410.4-481.6) — same. btctax writes no write-in taxes.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "write-in taxes" }
+"form1[0].Page1[0].f1_11[0]" = { line = "1z",        rule = "unmodeled", reason = "\"Add lines 1a through 1y\" — dead with every line 1 item blank.", covered_by = "RefuseReason::DocumentTypeUnsupported" }
 
 # ── Line 2 — Alternative minimum tax ★ MAPPED above, and populated. Not censused. ────────────────
 
@@ -211,52 +235,52 @@ ssn  = "form1[0].Page1[0].f1_02[0]"
 #   reasoning already stands on Schedule SE line A, whose census entry records clergy
 #   self-employment as out of scope — corroborated in `crates/btctax-cli/LIMITATIONS.md:321`,
 #   "Clergy self-employment is OUT OF SCOPE ... Use a preparer."
-"form1[0].Page1[0].Line4_ReadOrder[0].c1_3[0]" = { line = "4 box 1", rule = "unmodeled", reason = "\"Check if any exemption from ... 1 ☐ 4361\" — the approved Form 4361 minister / religious-order / Christian Science practitioner exemption. btctax models no clergy concept at all (no Form 4361 input, no way to print the required notation), matching Schedule SE line A's census entry and LIMITATIONS.md. Leaving it blank charges the full SE tax, which overstates rather than understates." }
-"form1[0].Page1[0].Line4_ReadOrder[0].c1_4[0]" = { line = "4 box 2", rule = "unmodeled", reason = "\"2 ☐ 4029\" — the approved Form 4029 religious-sect exemption (i1040gi 2025, Line 4: \"If you filed Form 4029 and received IRS approval, check box 2\"). Same out-of-scope archetype, same safe direction." }
-"form1[0].Page1[0].Line4_ReadOrder[0].c1_5[0]" = { line = "4 box 3", rule = "unmodeled", reason = "\"3 ☐\" — the write-in exemption case: EAS (citizen abroad covered by a foreign social-security system), ECI (community income the filer did not earn), or EN (notary-public fees). btctax collects none of these facts; computing SE tax in full overstates for such a filer." }
-"form1[0].Page1[0].Line4_ReadOrder[0].f1_14[0]" = { line = "4 box 3 entry", rule = "unmodeled", reason = "The entry space next to box 3 (x 252.0-324.0, MID-left of the amount column) where i1040gi 2025 directs the filer to write \"EAS\", \"ECI\" or \"EN\" (and, for a notary with $400+ of other SE earnings, the Schedule C net profit). Dead while box 3 is unchecked. ★ THIS FIELD IS `f1_14`, the name TY2024 used for line 4's AMOUNT — see the header note." }
+"form1[0].Page1[0].Line4_ReadOrder[0].c1_3[0]" = { line = "4 box 1", rule = "unmodeled", reason = "\"Check if any exemption from ... 1 ☐ 4361\" — the approved Form 4361 minister / religious-order / Christian Science practitioner exemption. btctax models no clergy concept at all (no Form 4361 input, no way to print the required notation), matching Schedule SE line A's census entry and LIMITATIONS.md. Leaving it blank charges the full SE tax, which overstates rather than understates.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "4361" }
+"form1[0].Page1[0].Line4_ReadOrder[0].c1_4[0]" = { line = "4 box 2", rule = "unmodeled", reason = "\"2 ☐ 4029\" — the approved Form 4029 religious-sect exemption (i1040gi 2025, Line 4: \"If you filed Form 4029 and received IRS approval, check box 2\"). Same out-of-scope archetype, same safe direction.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "4029" }
+"form1[0].Page1[0].Line4_ReadOrder[0].c1_5[0]" = { line = "4 box 3", rule = "unmodeled", reason = "\"3 ☐\" — the write-in exemption case: EAS (citizen abroad covered by a foreign social-security system), ECI (community income the filer did not earn), or EN (notary-public fees). btctax collects none of these facts; computing SE tax in full overstates for such a filer.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "write-in exemption" }
+"form1[0].Page1[0].Line4_ReadOrder[0].f1_14[0]" = { line = "4 box 3 entry", rule = "unmodeled", reason = "The entry space next to box 3 (x 252.0-324.0, MID-left of the amount column) where i1040gi 2025 directs the filer to write \"EAS\", \"ECI\" or \"EN\" (and, for a notary with $400+ of other SE earnings, the Schedule C net profit). Dead while box 3 is unchecked. ★ THIS FIELD IS `f1_14`, the name TY2024 used for line 4's AMOUNT — see the header note.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "notary" }
 
 # ── Part II lines 5-10: other taxes ──────────────────────────────────────────────────────────────
 # ★ TY2024 called this cell `Line5_ReadOrder[0].f1_15[0]` — wrapper gone, name shifted.
-"form1[0].Page1[0].f1_16[0]" = { line = "5",  rule = "unmodeled", reason = "\"Social security and Medicare tax on unreported tip income. Attach Form 4137\". btctax collects W-2 box 7 (tips already reported to the employer) and REFUSES on box 8 allocated tips (`return_refuse.rs:1208`, RefuseReason::AllocatedTips); it never asks about tips withheld from the employer, and models no Form 4137. ★ The filer-facing question lives on Form 1040 line 1c (tip income not reported on line 1a) — see that form's census. ★ TY2024 named this field Line5_ReadOrder.f1_15 (see the comment above); the wrapper subform is gone and the name is now bare f1_16." }
-"form1[0].Page1[0].f1_17[0]" = { line = "6",  rule = "unmodeled", reason = "\"Uncollected social security and Medicare tax on wages. Attach Form 8919\" — the worker-misclassification case, which turns on an SS-8 determination btctax cannot make. ★ Direction is safe: such income reaches btctax as self-employment income and pays BOTH halves through Schedule SE (line 4), so not filing Form 8919 overstates rather than understates." }
-"form1[0].Page1[0].f1_18[0]" = { line = "7",  rule = "unmodeled", reason = "\"Total additional social security and Medicare tax. Add lines 5 and 6\" — dead with both blank." }
-"form1[0].Page1[0].f1_19[0]" = { line = "8",  rule = "unmodeled", reason = "\"Additional tax on IRAs or other tax-favored accounts. Attach Form 5329 if required\" — btctax models no IRA, HSA, MSA, Coverdell or ABLE account." }
+"form1[0].Page1[0].f1_16[0]" = { line = "5",  rule = "unmodeled", reason = "\"Social security and Medicare tax on unreported tip income. Attach Form 4137\". btctax collects W-2 box 7 (tips already reported to the employer) and REFUSES on box 8 allocated tips (`return_refuse.rs:1208`, RefuseReason::AllocatedTips); it never asks about tips withheld from the employer, and models no Form 4137. ★ The filer-facing question lives on Form 1040 line 1c (tip income not reported on line 1a) — see that form's census. ★ TY2024 named this field Line5_ReadOrder.f1_15 (see the comment above); the wrapper subform is gone and the name is now bare f1_16.", covered_by = "RefuseReason::AllocatedTips" }
+"form1[0].Page1[0].f1_17[0]" = { line = "6",  rule = "unmodeled", reason = "\"Uncollected social security and Medicare tax on wages. Attach Form 8919\" — the worker-misclassification case, which turns on an SS-8 determination btctax cannot make. ★ Direction is safe: such income reaches btctax as self-employment income and pays BOTH halves through Schedule SE (line 4), so not filing Form 8919 overstates rather than understates.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "8919" }
+"form1[0].Page1[0].f1_18[0]" = { line = "7",  rule = "unmodeled", reason = "\"Total additional social security and Medicare tax. Add lines 5 and 6\" — dead with both blank.", covered_by = "RefuseReason::AllocatedTips" }
+"form1[0].Page1[0].f1_19[0]" = { line = "8",  rule = "unmodeled", reason = "\"Additional tax on IRAs or other tax-favored accounts. Attach Form 5329 if required\" — btctax models no IRA, HSA, MSA, Coverdell or ABLE account.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "5329" }
 # ★ TY2024 called this widget `Line8_ReadOrder[0].c1_3[0]` — line 4 took c1_3/c1_4/c1_5.
-"form1[0].Page1[0].Line8_ReadOrder[0].c1_6[0]" = { line = "8 checkbox", rule = "unmodeled", reason = "\"If not required, check here\" — the checkbox presupposes an amount on line 8, which is structurally blank. Checking it would assert a tax-favored-account distribution the filer never reported. ★ TY2024 named this widget Line8_ReadOrder.c1_3 (see the comment above); line 4's three new boxes took c1_3/c1_4/c1_5, so it is now c1_6." }
-"form1[0].Page1[0].f1_20[0]" = { line = "9",  rule = "unmodeled", reason = "\"Household employment taxes. Attach Schedule H\" — btctax models no household employees." }
+"form1[0].Page1[0].Line8_ReadOrder[0].c1_6[0]" = { line = "8 checkbox", rule = "unmodeled", reason = "\"If not required, check here\" — the checkbox presupposes an amount on line 8, which is structurally blank. Checking it would assert a tax-favored-account distribution the filer never reported. ★ TY2024 named this widget Line8_ReadOrder.c1_3 (see the comment above); line 4's three new boxes took c1_3/c1_4/c1_5, so it is now c1_6.", covered_by = "RefuseReason::IraDeductionClaimed" }
+"form1[0].Page1[0].f1_20[0]" = { line = "9",  rule = "unmodeled", reason = "\"Household employment taxes. Attach Schedule H\" — btctax models no household employees.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "Schedule H" }
 "form1[0].Page1[0].f1_21[0]" = { line = "10", rule = "artifact",  reason = "The form's own text is \"Reserved for future use.\" — TY2025 RETIRED this line; TY2024 printed \"Repayment of first-time homebuyer credit. Attach Form 5405 if required\" in the same position. The IRS still ships a widget for a line that now takes no entry from anyone, so no decision is encodable, by the form's own statement. Same shape as Schedule 3 line 6e, Form 1040 line 30 and Schedule 1 line 22. Line 21 sums \"lines 4, 7 through 16\", so a blank line 10 contributes nothing." }
 
 # ── Part II lines 13-16 ──────────────────────────────────────────────────────────────────────────
-"form1[0].Page1[0].f1_24[0]" = { line = "13", rule = "unmodeled", reason = "\"Uncollected social security and Medicare or RRTA tax on tips or group-term life insurance from Form W-2, box 12.\" ★ FAIL-CLOSED: box 12 codes A/B/M/N are absent from `INERT_BOX12_CODES` (`return_refuse.rs:29`), so a W-2 carrying one refuses the return (UnsupportedBox12Code) rather than printing this line blank." }
-"form1[0].Page1[0].f1_25[0]" = { line = "14", rule = "unmodeled", reason = "\"Interest on tax due on installment income from the sale of certain residential lots and timeshares\" — no installment sales modelled." }
-"form1[0].Page1[0].f1_26[0]" = { line = "15", rule = "unmodeled", reason = "\"Interest on the deferred tax on gain from certain installment sales with a sales price over $150,000\" — same." }
-"form1[0].Page1[0].f1_27[0]" = { line = "16", rule = "unmodeled", reason = "\"Recapture of low-income housing credit. Attach Form 8611\" — not modelled." }
+"form1[0].Page1[0].f1_24[0]" = { line = "13", rule = "unmodeled", reason = "\"Uncollected social security and Medicare or RRTA tax on tips or group-term life insurance from Form W-2, box 12.\" ★ FAIL-CLOSED: box 12 codes A/B/M/N are absent from `INERT_BOX12_CODES` (`return_refuse.rs:29`), so a W-2 carrying one refuses the return (UnsupportedBox12Code) rather than printing this line blank.", covered_by = "RefuseReason::UnsupportedBox12Code" }
+"form1[0].Page1[0].f1_25[0]" = { line = "14", rule = "unmodeled", reason = "\"Interest on tax due on installment income from the sale of certain residential lots and timeshares\" — no installment sales modelled.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "installment" }
+"form1[0].Page1[0].f1_26[0]" = { line = "15", rule = "unmodeled", reason = "\"Interest on the deferred tax on gain from certain installment sales with a sales price over $150,000\" — same.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "installment" }
+"form1[0].Page1[0].f1_27[0]" = { line = "16", rule = "unmodeled", reason = "\"Recapture of low-income housing credit. Attach Form 8611\" — not modelled.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "8611" }
 
 # ── Page 2, lines 17a-17z: the other-additional-tax menu ─────────────────────────────────────────
-"form1[0].Page2[0].Line17a_ReadOrder[0].Line17_ReadOrder[0].f2_01[0]" = { line = "17a type",   rule = "unmodeled", reason = "\"Recapture of other credits. List type, form number, and amount\" — btctax claims no credit that could be recaptured, and writes no write-in taxes." }
-"form1[0].Page2[0].Line17a_ReadOrder[0].f2_02[0]"                     = { line = "17a amount", rule = "unmodeled", reason = "Amount for the 17a write-in — same." }
-"form1[0].Page2[0].f2_03[0]" = { line = "17b", rule = "unmodeled", reason = "\"Recapture of federal mortgage subsidy. If you sold your home, see instructions\" — btctax models no home sale or subsidised mortgage." }
-"form1[0].Page2[0].f2_04[0]" = { line = "17c", rule = "unmodeled", reason = "\"Additional tax on HSA distributions. Attach Form 8889\" — no HSA modelled." }
-"form1[0].Page2[0].f2_05[0]" = { line = "17d", rule = "unmodeled", reason = "\"Additional tax on an HSA because you didn't remain an eligible individual. Attach Form 8889\" — same." }
-"form1[0].Page2[0].f2_06[0]" = { line = "17e", rule = "unmodeled", reason = "\"Additional tax on Archer MSA distributions. Attach Form 8853\" — no MSA modelled." }
-"form1[0].Page2[0].f2_07[0]" = { line = "17f", rule = "unmodeled", reason = "\"Additional tax on Medicare Advantage MSA distributions. Attach Form 8853\" — same." }
-"form1[0].Page2[0].f2_08[0]" = { line = "17g", rule = "unmodeled", reason = "\"Recapture of a charitable contribution deduction related to a fractional interest in tangible personal property.\" ★ btctax DOES model charitable gifts, but only of BTC and cash — a fractional interest in tangible personal property is a different §170(o) regime it neither collects nor deducts, so there is no prior deduction of this kind to recapture." }
-"form1[0].Page2[0].f2_09[0]" = { line = "17h", rule = "unmodeled", reason = "\"Income you received from a nonqualified deferred compensation plan that fails to meet the requirements of section 409A\" — not modelled (and would arrive in W-2 box 12 code Z, which the allowlist refuses)." }
-"form1[0].Page2[0].f2_10[0]" = { line = "17i", rule = "unmodeled", reason = "\"Compensation you received from a nonqualified deferred compensation plan described in section 457A\" — not modelled." }
-"form1[0].Page2[0].f2_11[0]" = { line = "17j", rule = "unmodeled", reason = "\"Section 72(m)(5) excess benefits tax\" — no qualified plan modelled." }
-"form1[0].Page2[0].f2_12[0]" = { line = "17k", rule = "unmodeled", reason = "\"Golden parachute payments\" — not modelled (would arrive in W-2 box 12 code K, refused by the allowlist)." }
-"form1[0].Page2[0].f2_13[0]" = { line = "17l", rule = "unmodeled", reason = "\"Tax on accumulation distribution of trusts\" (Form 4970) — btctax models no trusts." }
-"form1[0].Page2[0].f2_14[0]" = { line = "17m", rule = "unmodeled", reason = "\"Excise tax on insider stock compensation from an expatriated corporation\" — not modelled." }
-"form1[0].Page2[0].f2_15[0]" = { line = "17n", rule = "unmodeled", reason = "\"Look-back interest under section 167(g) or 460(b) from Form 8697 or 8866\" — no long-term contracts modelled." }
-"form1[0].Page2[0].f2_16[0]" = { line = "17o", rule = "unmodeled", reason = "\"Tax on non-effectively connected income for any part of the year you were a nonresident alien from Form 1040-NR\" — btctax emits a Form 1040 for a full-year resident filer only." }
-"form1[0].Page2[0].f2_17[0]" = { line = "17p", rule = "unmodeled", reason = "\"Any interest from Form 8621, line 16f, relating to distributions from, and dispositions of, stock of a section 1291 fund\" — btctax models no PFIC, matching Form 8960's §1411-10(g) census entry." }
-"form1[0].Page2[0].f2_18[0]" = { line = "17q", rule = "unmodeled", reason = "\"Any interest from Form 8621, line 24\" — same." }
-"form1[0].Page2[0].Line17z_ReadOrder[0].f2_19[0]" = { line = "17z type",   rule = "unmodeled", reason = "\"Any other taxes. List type and amount\" free-text description — btctax writes no write-in taxes. ★ TY2025 CONSOLIDATED TY2024's two description cells (f2_19 + f2_20) into this one 24pt-tall cell (x 64.8-381.6, y 282-306); everything after it on page 2 shifted down one name." }
-"form1[0].Page2[0].f2_20[0]"                      = { line = "17z amount", rule = "unmodeled", reason = "Amount for the 17z write-in (MID column) — same. ★ TY2024 called this cell `f2_21`." }
+"form1[0].Page2[0].Line17a_ReadOrder[0].Line17_ReadOrder[0].f2_01[0]" = { line = "17a type",   rule = "unmodeled", reason = "\"Recapture of other credits. List type, form number, and amount\" — btctax claims no credit that could be recaptured, and writes no write-in taxes.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "Recapture of other credits" }
+"form1[0].Page2[0].Line17a_ReadOrder[0].f2_02[0]"                     = { line = "17a amount", rule = "unmodeled", reason = "Amount for the 17a write-in — same. Recapture of other credits.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "Recapture of other credits" }
+"form1[0].Page2[0].f2_03[0]" = { line = "17b", rule = "unmodeled", reason = "\"Recapture of federal mortgage subsidy. If you sold your home, see instructions\" — btctax models no home sale or subsidised mortgage.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "federal mortgage subsidy" }
+"form1[0].Page2[0].f2_04[0]" = { line = "17c", rule = "unmodeled", reason = "\"Additional tax on HSA distributions. Attach Form 8889\" — no HSA modelled.", covered_by = "RefuseReason::HsaActivityUnsupported" }
+"form1[0].Page2[0].f2_05[0]" = { line = "17d", rule = "unmodeled", reason = "\"Additional tax on an HSA because you didn't remain an eligible individual. Attach Form 8889\" — same.", covered_by = "RefuseReason::HsaActivityUnsupported" }
+"form1[0].Page2[0].f2_06[0]" = { line = "17e", rule = "unmodeled", reason = "\"Additional tax on Archer MSA distributions. Attach Form 8853\" — no MSA modelled.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "8853" }
+"form1[0].Page2[0].f2_07[0]" = { line = "17f", rule = "unmodeled", reason = "\"Additional tax on Medicare Advantage MSA distributions. Attach Form 8853\" — same.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "8853" }
+"form1[0].Page2[0].f2_08[0]" = { line = "17g", rule = "unmodeled", reason = "\"Recapture of a charitable contribution deduction related to a fractional interest in tangible personal property.\" ★ btctax DOES model charitable gifts, but only of BTC and cash — a fractional interest in tangible personal property is a different §170(o) regime it neither collects nor deducts, so there is no prior deduction of this kind to recapture.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "fractional interest" }
+"form1[0].Page2[0].f2_09[0]" = { line = "17h", rule = "unmodeled", reason = "\"Income you received from a nonqualified deferred compensation plan that fails to meet the requirements of section 409A\" — not modelled (and would arrive in W-2 box 12 code Z, which the allowlist refuses).", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "409A" }
+"form1[0].Page2[0].f2_10[0]" = { line = "17i", rule = "unmodeled", reason = "\"Compensation you received from a nonqualified deferred compensation plan described in section 457A\" — not modelled.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "457A" }
+"form1[0].Page2[0].f2_11[0]" = { line = "17j", rule = "unmodeled", reason = "\"Section 72(m)(5) excess benefits tax\" — no qualified plan modelled.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "72(m)(5)" }
+"form1[0].Page2[0].f2_12[0]" = { line = "17k", rule = "unmodeled", reason = "\"Golden parachute payments\" — not modelled (would arrive in W-2 box 12 code K, refused by the allowlist).", covered_by = "RefuseReason::UnsupportedBox12Code" }
+"form1[0].Page2[0].f2_13[0]" = { line = "17l", rule = "unmodeled", reason = "\"Tax on accumulation distribution of trusts\" (Form 4970) — btctax models no trusts.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "4970" }
+"form1[0].Page2[0].f2_14[0]" = { line = "17m", rule = "unmodeled", reason = "\"Excise tax on insider stock compensation from an expatriated corporation\" — not modelled.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "insider stock compensation" }
+"form1[0].Page2[0].f2_15[0]" = { line = "17n", rule = "unmodeled", reason = "\"Look-back interest under section 167(g) or 460(b) from Form 8697 or 8866\" — no long-term contracts modelled.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "8697" }
+"form1[0].Page2[0].f2_16[0]" = { line = "17o", rule = "unmodeled", reason = "\"Tax on non-effectively connected income for any part of the year you were a nonresident alien from Form 1040-NR\" — btctax emits a Form 1040 for a full-year resident filer only.", covered_by = "RefuseReason::DualStatusAlienUnsupported" }
+"form1[0].Page2[0].f2_17[0]" = { line = "17p", rule = "unmodeled", reason = "\"Any interest from Form 8621, line 16f, relating to distributions from, and dispositions of, stock of a section 1291 fund\" — btctax models no PFIC, matching Form 8960's §1411-10(g) census entry.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "8621" }
+"form1[0].Page2[0].f2_18[0]" = { line = "17q", rule = "unmodeled", reason = "\"Any interest from Form 8621, line 24\" — same.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "8621" }
+"form1[0].Page2[0].Line17z_ReadOrder[0].f2_19[0]" = { line = "17z type",   rule = "unmodeled", reason = "\"Any other taxes. List type and amount\" free-text description — btctax writes no write-in taxes. ★ TY2025 CONSOLIDATED TY2024's two description cells (f2_19 + f2_20) into this one 24pt-tall cell (x 64.8-381.6, y 282-306); everything after it on page 2 shifted down one name.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "write-in taxes" }
+"form1[0].Page2[0].f2_20[0]"                      = { line = "17z amount", rule = "unmodeled", reason = "Amount for the 17z write-in (MID column) — same. ★ TY2024 called this cell `f2_21`. btctax writes no write-in taxes.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "write-in taxes" }
 
 # ── Page 2 totals and the remaining Part II lines ────────────────────────────────────────────────
-"form1[0].Page2[0].f2_21[0]" = { line = "18", rule = "unmodeled", reason = "\"Total additional taxes. Add lines 17a through 17z\" — dead with all of line 17 blank. Line 21 (mapped) sums lines 4, 7 through 16, 18 and 19, so a blank line 18 contributes nothing. ★ TY2024 called this cell `f2_22`." }
-"form1[0].Page2[0].f2_22[0]" = { line = "19", rule = "unmodeled", reason = "\"Recapture of net EPE from Form 4255, line 1d, column (l)\" — no Form 4255 modelled. ★ TY2024 called this cell `f2_23`." }
+"form1[0].Page2[0].f2_21[0]" = { line = "18", rule = "unmodeled", reason = "\"Total additional taxes. Add lines 17a through 17z\" — dead with all of line 17 blank. Line 21 (mapped) sums lines 4, 7 through 16, 18 and 19, so a blank line 18 contributes nothing. ★ TY2024 called this cell `f2_22`.", covered_by = "RefuseReason::HsaActivityUnsupported" }
+"form1[0].Page2[0].f2_22[0]" = { line = "19", rule = "unmodeled", reason = "\"Recapture of net EPE from Form 4255, line 1d, column (l)\" — no Form 4255 modelled. ★ TY2024 called this cell `f2_23`.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "4255" }
 # ★ TY2024 called this cell `Line20_ReadOrder[0].f2_24[0]` — wrapper gone, name shifted down one.
-"form1[0].Page2[0].f2_23[0]" = { line = "20", rule = "unmodeled", reason = "\"Section 965 net tax liability installment from Form 965-A\" — no §965 transition tax modelled. ★ Note line 20 is informational and is NOT summed into line 21, so it sits in the MID column (x 410.4-481.6), not the amount column. ★ TY2024 called this cell Line20_ReadOrder.f2_24 (see the comment above); the wrapper subform is gone." }
+"form1[0].Page2[0].f2_23[0]" = { line = "20", rule = "unmodeled", reason = "\"Section 965 net tax liability installment from Form 965-A\" — no §965 transition tax modelled. ★ Note line 20 is informational and is NOT summed into line 21, so it sits in the MID column (x 410.4-481.6), not the amount column. ★ TY2024 called this cell Line20_ReadOrder.f2_24 (see the comment above); the wrapper subform is gone.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "965-A" }

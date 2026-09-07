@@ -167,6 +167,31 @@ pub enum Advisory {
     /// Unconditional on a computed full return: v1 captures no input that would let it decide
     /// eligibility, so it cannot know whether the filer qualifies — only that it did not try.
     OtherCreditsOmitted,
+    /// ★★★ **R2.2 — the DEDUCTION side of [`Advisory::OtherCreditsOmitted`].**
+    ///
+    /// Every Schedule 1 Part II adjustment and every Schedule A line btctax does not model is a
+    /// deduction the return leaves blank. A blank there forgoes money LAWFULLY and can only
+    /// OVERSTATE the tax — the *"announced, never silent"* half of R2.2's direction rule — but until
+    /// now nothing said so: `OtherCreditsOmitted` names CREDITS, and no advisory named the
+    /// adjustments or the itemized lines at all. So most of Schedule 1 Part II and Schedule A had no
+    /// honest cover, and the census join would have had to borrow the credits advisory to claim one.
+    ///
+    /// **Unconditional on a computed full return**, exactly like its credits sibling and for the same
+    /// reason: v1 captures no input that could establish whether the filer has any of these, only
+    /// that it did not try. Purely taxpayer-favourable, so it advises and never refuses.
+    UnmodeledDeductionsOmitted,
+    /// ★★★ **R2.2 — the NO-DOLLAR side: return OPTIONS btctax never offers.**
+    ///
+    /// A third of the Form 1040's unmodelled cells carry no dollar at all — a fiscal year, a foreign
+    /// address, the §6013(g)/(h) nonresident-alien-spouse election, the third-party designee block,
+    /// applying an overpayment to next year, the spouse's Identity Protection PIN, a phone number,
+    /// an email address. None of them can over- or understate the tax, so no existing advisory
+    /// covers them and none should refuse — but R2.2's rule is *announced OR refused, never
+    /// silent*, and before this they were silent.
+    ///
+    /// **Unconditional on a computed full return**, like its two siblings above: these are things
+    /// btctax does not OFFER, so there is no input that could make the notice conditional.
+    UnmodeledReturnOptionsOmitted,
     /// §3.4 / SPEC §9.2 conservative omission: v1 never fills the 1040 direct-deposit block (L35b–d),
     /// so a refund arrives as a **paper check**. Fires only when the return is actually due a refund.
     RefundByPaperCheck { refund: Usd },
@@ -474,6 +499,30 @@ impl Advisory {
                  (Form 5695) or adoption (Form 8839) credits: the foreign tax credit is the only \
                  nonrefundable credit that ever reaches Schedule 3 Part I. If you qualify for any of \
                  them your tax is OVERSTATED — claim them yourself."
+                    .to_string(),
+            Advisory::UnmodeledDeductionsOmitted =>
+                "DEDUCTIONS NOT COMPUTED — v1 models none of the Schedule 1 Part II adjustments to \
+                 income (educator expenses, the self-employed health insurance deduction and \
+                 retirement plans, HSA and IRA contributions, moving expenses for the Armed Forces, \
+                 alimony paid, the Archer MSA deduction, or any of the line-24 write-ins), and on \
+                 Schedule A it models no other taxes write-in (line 6), no home mortgage interest \
+                 not reported to you on Form 1098 (line 8b), no points not reported to you on Form \
+                 1098 (line 8c), no casualty or theft loss from a federally declared disaster \
+                 (line 15, Form 4684) and no other itemized deduction write-in (line 16). Each one \
+                 it leaves blank is a deduction you may be entitled to: if you have any of them \
+                 your tax is OVERSTATED — claim them yourself, or with a preparer."
+                    .to_string(),
+            Advisory::UnmodeledReturnOptionsOmitted =>
+                "RETURN OPTIONS NOT OFFERED — v1 fills a calendar-year Form 1040 for a filer with a \
+                 domestic address, and it offers none of the following: a FISCAL YEAR (the \
+                 \"For the year Jan. 1–Dec. 31\" line stays as printed), a FOREIGN ADDRESS \
+                 (country, province, postal code), the §6013(g)/(h) election to treat a \
+                 NONRESIDENT-ALIEN SPOUSE as a U.S. resident, a THIRD-PARTY DESIGNEE (the \
+                 \"Do you want to allow another person to discuss this return with the IRS?\" \
+                 block), applying an overpayment to NEXT YEAR'S ESTIMATED TAX (line 36), your \
+                 SPOUSE'S IDENTITY PROTECTION PIN, and your phone number or email address. None of \
+                 these changes your tax; each is a choice the printed return leaves blank because \
+                 btctax never asked. If you want any of them, mark the form by hand before signing."
                     .to_string(),
             Advisory::RefundByPaperCheck { refund } => format!(
                 "REFUND BY PAPER CHECK — your return is due a refund of {}, but v1 never fills the \
@@ -1076,6 +1125,15 @@ pub fn advisories(
     // advisory; before this, two of the four rows fired nothing at all.
     out.push(Advisory::OtherCreditsOmitted);
 
+    // ★★ R2.2 — the DEDUCTION side of the same omission, and unconditional for the same reason.
+    //    Every Schedule 1 Part II adjustment and unmodelled Schedule A line is a blank that can only
+    //    OVERSTATE the tax; before this, none of them was announced anywhere the filer would see.
+    out.push(Advisory::UnmodeledDeductionsOmitted);
+
+    // ★★ R2.2 — the NO-DOLLAR side: the return OPTIONS btctax never offers. Unconditional, because
+    //    there is no input that could make "we never asked" conditional.
+    out.push(Advisory::UnmodeledReturnOptionsOmitted);
+
     // [★ P5-I2] SPEC §9.2 — no direct-deposit block is ever filled. Only actionable on a refund.
     if refund > Usd::ZERO {
         out.push(Advisory::RefundByPaperCheck { refund });
@@ -1602,7 +1660,12 @@ mod tests {
             got,
             vec![
                 Advisory::OtherCreditsOmitted,
-                // ★ §G-20a — the SECOND unconditional member; see this test's docs for why broad
+                // ★ R2.2 — the DEDUCTION side of the same omission, unconditional for the same
+                // reason: v1 captures no input that could establish whether the filer has any of
+                // the Schedule 1 Part II adjustments or the unmodelled Schedule A lines.
+                Advisory::UnmodeledDeductionsOmitted,
+                Advisory::UnmodeledReturnOptionsOmitted,
+                // ★ §G-20a — the FOURTH unconditional member; see this test's docs for why broad
                 // firing is correct here and what would make it worth reconsidering.
                 Advisory::BenefitCarryoversNotStated {
                     capital_loss: true,
@@ -1644,6 +1707,8 @@ mod tests {
                 },
                 Advisory::EicOmitted,
                 Advisory::OtherCreditsOmitted,
+                Advisory::UnmodeledDeductionsOmitted,
+                Advisory::UnmodeledReturnOptionsOmitted,
                 Advisory::AgedBoxForfeitedNoDob {
                     per_box: dec!(1950)
                 },

@@ -121,29 +121,53 @@ ssn  = "topmostSubform[0].Page1[0].f1_02[0]"
 #   increases the refund, so each blank is a class (B) forgone benefit: lawful silence that can only
 #   OVERSTATE the tax. There is no understatement risk anywhere on Schedule 3. Recording that once here
 #   is why the per-line reasons below stay short.
+
+# ★★★ R2.2 — THE `[direction]` TABLE. Each block's `caption` is asserted VERBATIM against
+#     design/forms/extract/f1040s3--2025.txt at `extract_line` BEFORE the join uses it, so this table
+#     is a READING of the form and a re-parted revision REDS rather than drifting. A census entry
+#     is placed by its own line number into the block whose [first_line, last_line] range contains
+#     it; an entry with no printed line number carries `part = "<caption>"`. An entry no block
+#     places REDS — it is never defaulted to Overstates.
+#
+#     Understates = a blank here omits income or an addition to tax (the direction in which a blank
+#     is a false statement, so an Advisory may never cover it). Overstates = a blank forgoes a
+#     deduction, credit or payment lawfully. NoDollar = the cell carries no dollar at all.
+[[direction]]
+caption      = "Part I       Nonrefundable Credits"
+extract_line = 15
+direction    = "Overstates"
+first_line   = "1"
+last_line    = "8"
+
+[[direction]]
+caption      = "Part II      Other Payments and Refundable Credits"
+extract_line = 41
+direction    = "Overstates"
+first_line   = "9"
+last_line    = "15"
 [census]
 
 # ── Part I lines 2–5b: nonrefundable credits from forms btctax does not emit ─────────────────────
-"topmostSubform[0].Page1[0].f1_04[0]" = { line = "2",  rule = "unmodeled", reason = "Credit for child and dependent care expenses from Form 2441, line 11 — btctax collects no care expenses and emits no 2441." }
-"topmostSubform[0].Page1[0].f1_05[0]" = { line = "3",  rule = "unmodeled", reason = "Education credits from Form 8863, line 19 — no education expenses collected." }
-"topmostSubform[0].Page1[0].f1_06[0]" = { line = "4",  rule = "unmodeled", reason = "Retirement savings contributions credit (Form 8880) — no retirement contributions collected." }
-"topmostSubform[0].Page1[0].f1_07[0]" = { line = "5a", rule = "unmodeled", reason = "Residential clean energy credit from Form 5695, line 15 — not modelled." }
-"topmostSubform[0].Page1[0].f1_08[0]" = { line = "5b", rule = "unmodeled", reason = "Energy efficient home improvement credit from Form 5695, line 32 — not modelled." }
+"topmostSubform[0].Page1[0].f1_04[0]" = { line = "2",  rule = "unmodeled", reason = "Credit for child and dependent care expenses from Form 2441, line 11 — btctax collects no care expenses and emits no 2441.", covered_by = "Advisory::OtherCreditsOmitted" }
+"topmostSubform[0].Page1[0].f1_05[0]" = { line = "3",  rule = "unmodeled", reason = "Education credits from Form 8863, line 19 — no education expenses collected.", covered_by = "RefuseReason::DocumentTypeUnsupported" }
+"topmostSubform[0].Page1[0].f1_06[0]" = { line = "4",  rule = "unmodeled", reason = "Retirement savings contributions credit (Form 8880) — no retirement contributions collected.", covered_by = "Advisory::OtherCreditsOmitted" }
+"topmostSubform[0].Page1[0].f1_07[0]" = { line = "5a", rule = "unmodeled", reason = "Residential clean energy credit from Form 5695, line 15 — not modelled.", covered_by = "Advisory::OtherCreditsOmitted" }
+"topmostSubform[0].Page1[0].f1_08[0]" = { line = "5b", rule = "unmodeled", reason = "Energy efficient home improvement credit from Form 5695, line 32 — not modelled.", covered_by = "Advisory::OtherCreditsOmitted" }
 
 # ── Line 6a–6m: the other-nonrefundable-credit menu ──────────────────────────────────────────────
-"topmostSubform[0].Page1[0].Line6a_ReadOrder[0].f1_09[0]" = { line = "6a", rule = "unmodeled", reason = "General business credit (Form 3800) — not modelled." }
-"topmostSubform[0].Page1[0].f1_10[0]" = { line = "6b", rule = "unmodeled", reason = "Credit for prior year minimum tax (Form 8801). ★ The one line on this form adjacent to modelled behaviour: btctax computes CURRENT-year AMT (Form 6251) and so can create the very deferral that generates this credit in a later year, but it carries no AMT credit forward and emits no 8801. Already recorded as a known-uncaptured item at btctax-core/src/tax/amt.rs. A forgone credit — it can only overstate the tax — but a real one, and it becomes a gap the moment a prior-year AMT input is collected." }
-"topmostSubform[0].Page1[0].f1_11[0]" = { line = "6c", rule = "unmodeled", reason = "Adoption credit (Form 8839) — not modelled." }
-"topmostSubform[0].Page1[0].f1_12[0]" = { line = "6d", rule = "unmodeled", reason = "Credit for the elderly or disabled (Schedule R) — not modelled." }
+"topmostSubform[0].Page1[0].Line6a_ReadOrder[0].f1_09[0]" = { line = "6a", rule = "unmodeled", reason = "General business credit (Form 3800) — not modelled.", covered_by = "Advisory::OtherCreditsOmitted" }
+"topmostSubform[0].Page1[0].f1_10[0]" = { line = "6b", rule = "unmodeled", reason = "Credit for prior year minimum tax (Form 8801). ★ The one line on this form adjacent to modelled behaviour: btctax computes CURRENT-year AMT (Form 6251) and so can create the very deferral that generates this credit in a later year, but it carries no AMT credit forward and emits no 8801. Already recorded as a known-uncaptured item at btctax-core/src/tax/amt.rs. A forgone credit — it can only overstate the tax — but a real one, and it becomes a gap the moment a prior-year AMT input is collected.", covered_by = "Advisory::OtherCreditsOmitted" }
+"topmostSubform[0].Page1[0].f1_11[0]" = { line = "6c", rule = "unmodeled", reason = "Adoption credit (Form 8839) — not modelled.", covered_by = "Advisory::OtherCreditsOmitted" }
+"topmostSubform[0].Page1[0].f1_12[0]" = { line = "6d", rule = "unmodeled", reason = "Credit for the elderly or disabled (Schedule R) — not modelled.", covered_by = "Advisory::OtherCreditsOmitted" }
 "topmostSubform[0].Page1[0].f1_13[0]" = { line = "6e", rule = "artifact",  reason = "\"Reserved for future use.\" The IRS prints a box on a line that takes no entry from anyone; there is nothing to model. Verified still ReadOnly on the TY2025 PDF (/Ff 8388609 — the only ReadOnly field on the form)." }
-"topmostSubform[0].Page1[0].f1_14[0]" = { line = "6f", rule = "unmodeled", reason = "Clean vehicle credit (Form 8936) — not modelled." }
-"topmostSubform[0].Page1[0].f1_15[0]" = { line = "6g", rule = "unmodeled", reason = "Mortgage interest credit (Form 8396) — not modelled." }
-"topmostSubform[0].Page1[0].f1_16[0]" = { line = "6h", rule = "unmodeled", reason = "District of Columbia first-time homebuyer credit (Form 8859) — not modelled." }
-"topmostSubform[0].Page1[0].f1_17[0]" = { line = "6i", rule = "unmodeled", reason = "Qualified electric vehicle credit (Form 8834) — not modelled." }
-"topmostSubform[0].Page1[0].f1_18[0]" = { line = "6j", rule = "unmodeled", reason = "Alternative fuel vehicle refueling property credit (Form 8911) — not modelled." }
-"topmostSubform[0].Page1[0].f1_19[0]" = { line = "6k", rule = "unmodeled", reason = "Credit to holders of tax credit bonds (Form 8912) — not modelled." }
-"topmostSubform[0].Page1[0].f1_20[0]" = { line = "6l", rule = "unmodeled", reason = "Amount on Form 8978, line 14 (partnership audit adjustments) — btctax models no pass-through entities." }
-"topmostSubform[0].Page1[0].f1_21[0]" = { line = "6m", rule = "unmodeled", reason = "Credit for previously owned clean vehicles (Form 8936) — not modelled." }
+"topmostSubform[0].Page1[0].f1_14[0]" = { line = "6f", rule = "unmodeled", reason = "Clean vehicle credit (Form 8936) — not modelled.", covered_by = "Advisory::OtherCreditsOmitted" }
+"topmostSubform[0].Page1[0].f1_15[0]" = { line = "6g", rule = "unmodeled", reason = "Mortgage interest credit (Form 8396) — not modelled.", covered_by = "Advisory::OtherCreditsOmitted" }
+"topmostSubform[0].Page1[0].f1_16[0]" = { line = "6h", rule = "unmodeled", reason = "District of Columbia first-time homebuyer credit (Form 8859) — not modelled.", covered_by = "Advisory::OtherCreditsOmitted" }
+"topmostSubform[0].Page1[0].f1_17[0]" = { line = "6i", rule = "unmodeled", reason = "Qualified electric vehicle credit (Form 8834) — not modelled.", covered_by = "Advisory::OtherCreditsOmitted" }
+"topmostSubform[0].Page1[0].f1_18[0]" = { line = "6j", rule = "unmodeled", reason = "Alternative fuel vehicle refueling property credit (Form 8911) — not modelled.", covered_by = "Advisory::OtherCreditsOmitted" }
+"topmostSubform[0].Page1[0].f1_19[0]" = { line = "6k", rule = "unmodeled", reason = "Credit to holders of tax credit bonds (Form 8912) — not modelled.", covered_by = "Advisory::OtherCreditsOmitted" }
+"topmostSubform[0].Page1[0].f1_20[0]" = { line = "6l", rule = "unmodeled", reason = "Amount on Form 8978, line 14 (partnership audit adjustments) — btctax models no pass-through entities.", covered_by = "Advisory::OtherCreditsOmitted" }
+"topmostSubform[0].Page1[0].f1_21[0]" = { line = "6m", rule = "unmodeled", reason = "Credit for previously owned clean vehicles (Form 8936) — not modelled.", covered_by = "Advisory::OtherCreditsOmitted" }
 
 # ── Line 6z / 13z — the free-text "list type and amount" escape hatches ───────────────────────────
 # ★ These are the only WRITE-IN lines on the form. TY2025 replaced TY2024's PAIR of single-line
@@ -152,22 +176,22 @@ ssn  = "topmostSubform[0].Page1[0].f1_02[0]"
 #   writes a free-text credit onto a return. That is deliberate, not an omission: a write-in is
 #   unstructured testimony the software cannot substantiate, and the product's posture is that anything
 #   it cannot name and compute does not get asserted under §6065.
-"topmostSubform[0].Page1[0].Line6z_ReadOrder[0].f2_22[0]" = { line = "6z type",   rule = "unmodeled", reason = "Free-text description cell for an other nonrefundable credit (Multiline; TY2024's f1_22 + f2_23 pair merged into this one box) — btctax writes no write-in credits." }
-"topmostSubform[0].Page1[0].f1_23[0]"                     = { line = "6z amount", rule = "unmodeled", reason = "Amount for the 6z write-in — same decision. MID column, y-centre 402.0, joined to the printed 6z gutter label." }
+"topmostSubform[0].Page1[0].Line6z_ReadOrder[0].f2_22[0]" = { line = "6z type",   rule = "unmodeled", reason = "Free-text description cell for an other nonrefundable credit (Multiline; TY2024's f1_22 + f2_23 pair merged into this one box) — btctax writes no write-in credits.", covered_by = "Advisory::OtherCreditsOmitted" }
+"topmostSubform[0].Page1[0].f1_23[0]"                     = { line = "6z amount", rule = "unmodeled", reason = "Amount for the 6z write-in — same decision. MID column, y-centre 402.0, joined to the printed 6z gutter label.", covered_by = "Advisory::OtherCreditsOmitted" }
 
 # ── Derived totals whose every input is blank ────────────────────────────────────────────────────
 # Lines 7 and 14 sum only lines btctax never populates, so each is a computed zero over an all-blank
 # set. IRS convention leaves such a sum blank; the mapped totals (line 8, line 15) are correct without
 # it because line 8 = lines 1-4 + 5a + 5b + 7 and line 7 contributes nothing.
-"topmostSubform[0].Page1[0].f1_24[0]" = { line = "7",  rule = "unmodeled", reason = "\"Total other nonrefundable credits. Add lines 6a through 6z\" — dead with all of 6a-6z blank." }
-"topmostSubform[0].Page1[0].f1_36[0]" = { line = "14", rule = "unmodeled", reason = "\"Total other payments or refundable credits. Add lines 13a through 13z\" — dead with all of 13a-13z blank." }
+"topmostSubform[0].Page1[0].f1_24[0]" = { line = "7",  rule = "unmodeled", reason = "\"Total other nonrefundable credits. Add lines 6a through 6z\" — dead with all of 6a-6z blank.", covered_by = "Advisory::OtherCreditsOmitted" }
+"topmostSubform[0].Page1[0].f1_36[0]" = { line = "14", rule = "unmodeled", reason = "\"Total other payments or refundable credits. Add lines 13a through 13z\" — dead with all of 13a-13z blank.", covered_by = "Advisory::OtherCreditsOmitted" }
 
 # ── Part II lines 9, 12, 13a–13z: other payments and refundable credits ──────────────────────────
-"topmostSubform[0].Page1[0].f1_26[0]" = { line = "9",   rule = "unmodeled", reason = "Net premium tax credit (Form 8962) — btctax collects no marketplace-insurance 1095-A. ★ This is the box a blind TY2024 port would have written line 8 into." }
-"topmostSubform[0].Page1[0].f1_29[0]" = { line = "12",  rule = "unmodeled", reason = "Credit for federal tax on fuels (Form 4136) — not modelled." }
-"topmostSubform[0].Page1[0].Line13_ReadOrder[0].f1_30[0]" = { line = "13a", rule = "unmodeled", reason = "Form 2439 (undistributed long-term capital gains of a RIC/REIT) — btctax's only disposition source is the BTC ledger; no 2439 is modelled (matching Schedule D line 11)." }
-"topmostSubform[0].Page1[0].f1_31[0]" = { line = "13b", rule = "unmodeled", reason = "Section 1341 credit for repayment of amounts included in income from earlier years — btctax models no claim-of-right repayment." }
-"topmostSubform[0].Page1[0].f1_32[0]" = { line = "13c", rule = "unmodeled", reason = "Net elective payment election amount from Form 3800, Part III, line 6, column (j) — not modelled." }
-"topmostSubform[0].Page1[0].f1_33[0]" = { line = "13d", rule = "unmodeled", reason = "Deferred amount of net 965 tax liability — btctax models no §965 transition tax." }
-"topmostSubform[0].Page1[0].Line13z_ReadOrder[0].f1_34[0]" = { line = "13z type",   rule = "unmodeled", reason = "Free-text description cell for an other refundable credit (Multiline; TY2024's f1_35 + f1_36 pair merged into this one box) — btctax writes no write-in credits." }
-"topmostSubform[0].Page1[0].f1_35[0]"                      = { line = "13z amount", rule = "unmodeled", reason = "Amount for the 13z write-in — same decision. MID column, y-centre 210.0, joined to the printed 13z gutter label." }
+"topmostSubform[0].Page1[0].f1_26[0]" = { line = "9",   rule = "unmodeled", reason = "Net premium tax credit (Form 8962) — btctax collects no marketplace-insurance 1095-A. ★ This is the box a blind TY2024 port would have written line 8 into.", covered_by = "RefuseReason::DocumentTypeUnsupported" }
+"topmostSubform[0].Page1[0].f1_29[0]" = { line = "12",  rule = "unmodeled", reason = "Credit for federal tax on fuels (Form 4136) — not modelled.", covered_by = "Advisory::OtherCreditsOmitted" }
+"topmostSubform[0].Page1[0].Line13_ReadOrder[0].f1_30[0]" = { line = "13a", rule = "unmodeled", reason = "Form 2439 (undistributed long-term capital gains of a RIC/REIT) — btctax's only disposition source is the BTC ledger; no 2439 is modelled (matching Schedule D line 11).", covered_by = "Advisory::OtherCreditsOmitted" }
+"topmostSubform[0].Page1[0].f1_31[0]" = { line = "13b", rule = "unmodeled", reason = "Section 1341 credit for repayment of amounts included in income from earlier years — btctax models no claim-of-right repayment.", covered_by = "Advisory::OtherCreditsOmitted" }
+"topmostSubform[0].Page1[0].f1_32[0]" = { line = "13c", rule = "unmodeled", reason = "Net elective payment election amount from Form 3800, Part III, line 6, column (j) — not modelled.", covered_by = "Advisory::OtherCreditsOmitted" }
+"topmostSubform[0].Page1[0].f1_33[0]" = { line = "13d", rule = "unmodeled", reason = "Deferred amount of net 965 tax liability — btctax models no §965 transition tax.", covered_by = "Advisory::OtherCreditsOmitted" }
+"topmostSubform[0].Page1[0].Line13z_ReadOrder[0].f1_34[0]" = { line = "13z type",   rule = "unmodeled", reason = "Free-text description cell for an other refundable credit (Multiline; TY2024's f1_35 + f1_36 pair merged into this one box) — btctax writes no write-in credits.", covered_by = "Advisory::OtherCreditsOmitted" }
+"topmostSubform[0].Page1[0].f1_35[0]"                      = { line = "13z amount", rule = "unmodeled", reason = "Amount for the 13z write-in — same decision. MID column, y-centre 210.0, joined to the printed 13z gutter label.", covered_by = "Advisory::OtherCreditsOmitted" }

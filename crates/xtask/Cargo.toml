@@ -27,5 +27,8 @@ tempfile = "3"
 # Already in the workspace lockfile via btctax-core/btctax-forms — no new third-party surface, and
 # xtask is `publish = false` so this never reaches a shipped crate.
 serde = { version = "1", features = ["derive"] }
+# R2.2 — `census_join` reads the committed `*.map.toml` files (their `[census]` and `[direction]`
+# tables) against the archived form extracts. xtask is `publish = false`, so this never ships.
+toml = "0.8"
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"

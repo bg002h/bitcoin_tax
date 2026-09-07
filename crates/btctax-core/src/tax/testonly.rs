@@ -32,9 +32,46 @@ use rust_decimal_macros::dec;
 /// "yes" is what keeps line 8a full and the box unchecked (a "no" would zero 8a — §2.7). A deliberate
 /// answer already set by the caller is preserved (the loop only fills `None`).
 pub fn answer_all_live_declarations(ri: &mut ReturnInputs) {
+    // ★★★ R3 — THE DOCUMENT CENSUS FIRST, and its answer is READ OFF THE FIXTURE'S OWN ROWS.
+    //
+    // The generic loop below would answer every census row at its neutral (`false` — "I received
+    // none"), which on a fixture that transcribes a W-2 is exactly the `DocumentCensusContradicted`
+    // state: a "no" the data contradicts. So each countable row is answered from what the fixture
+    // actually carries — `Some(true)` where a row exists, and the neutral `false` otherwise.
+    //
+    // ★ This is legitimate for a FIXTURE helper and would not be for a product surface: the helper
+    //   is not the filer, and it is deriving a fixture's intent from the fixture's own data, not
+    //   answering for a human. It is also what makes §5.7's *"TY2024 fixtures gain
+    //   `documents.w2 = Some(true)`"* true with zero per-fixture edits.
+    reconcile_document_census(ri);
     for q in FORM_QUESTIONS {
         if (q.live)(ri) && (q.get)(ri).is_none() {
             (q.set)(ri, q.neutral); // ★ declared per question — see FormQuestion::neutral
+        }
+    }
+}
+
+/// ★★★ **R3 — make a fixture's document census COHERENT with the rows the fixture carries.**
+///
+/// Flips a COUNTABLE row to `Some(true)` when the return holds rows of that document, whether the row
+/// was unanswered or was answered `Some(false)` by an earlier
+/// [`answer_all_live_declarations`] pass. Nothing else is touched: a `Some(true)` stays, and a row
+/// with no section (`transcribed_rows` = `None`) is left to the caller.
+///
+/// **Why it is separate and re-runnable.** Fixture builders answer the declarations and THEN shape
+/// the return, so the answering pass cannot see the rows the shape is about to add — and a `false`
+/// beside a transcribed W-2 is exactly `RefuseReason::DocumentCensusContradicted`. Calling this after
+/// the shape fixes that without re-answering anything the shape deliberately BLANKED, which is the
+/// property several fixtures depend on (they un-answer one declaration to prove the screen refuses).
+///
+/// ★ Legitimate for a fixture helper and not for a product surface: it derives a fixture's intent
+/// from the fixture's own data; it never answers for a human.
+pub fn reconcile_document_census(ri: &mut ReturnInputs) {
+    for row in crate::tax::document_census::DocumentRow::ALL {
+        if crate::tax::document_census::transcribed_rows(ri, *row).is_some_and(|n| n > 0)
+            && ri.documents.get(*row) != Some(true)
+        {
+            ri.documents.set(*row, Some(true));
         }
     }
 }

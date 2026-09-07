@@ -16,6 +16,7 @@
 use crate::seam::{
     Field, FieldId, FieldKind, FieldValue, Section, SectionId, SectionKind, SetError,
 };
+use btctax_core::tax::document_census::DocumentRow;
 use btctax_core::tax::questions::{
     QuestionId, SkippableId, FORM_QUESTIONS, PARENT_ALIVE_CHOICES, SKIPPABLE_QUESTIONS,
 };
@@ -292,6 +293,97 @@ pub(crate) const INCOME_EXCLUSIONS: Section = Section {
     fields: super::sections::INCOME_EXCLUSION_FIELDS,
 };
 
+// ── ★★★ R3 / §5.1 — THE DOCUMENT CENSUS section ──────────────────────────────────────────────────
+
+/// A census row → a `TriState` `Field` over `FORM_QUESTIONS[$idx]`, **plus the I-10 guard**.
+///
+/// Identical to [`decl_tristate!`] except for one thing, and that thing is the point: a `No` while
+/// rows of that document are transcribed is REFUSED
+/// ([`SetError::ContradictsTranscribedRows`]) instead of being stored. Storing it would leave the
+/// return in `RefuseReason::DocumentCensusContradicted` with no in-form remedy; deleting the rows to
+/// make the answer true would destroy transcribed testimony on one keystroke. The renderer's exit is
+/// *remove N rows and answer No*, with a payload-confirm — the `DeleteSection(ScheduleA)` precedent.
+///
+/// ★ The guard is on `No` ONLY. A `Yes` never contradicts anything, and clearing the row back to
+/// unanswered is always allowed: un-answering asserts nothing.
+macro_rules! census_tristate {
+    ($idx:literal, $fid:expr, $row:expr) => {
+        Field {
+            id: $fid,
+            label: FORM_QUESTIONS[$idx].prompt,
+            help: FORM_QUESTIONS[$idx].unanswered_detail,
+            kind: FieldKind::TriState,
+            live: FORM_QUESTIONS[$idx].live,
+            get: |ri, _| {
+                if !(FORM_QUESTIONS[$idx].live)(ri) {
+                    return None;
+                }
+                Some(FieldValue::TriState((FORM_QUESTIONS[$idx].get)(ri)))
+            },
+            set: |ri, _, v| {
+                if !(FORM_QUESTIONS[$idx].live)(ri) {
+                    return Err(SetError::NoSuchRow);
+                }
+                let FieldValue::TriState(Some(b)) = v else {
+                    return Err(SetError::WrongKind);
+                };
+                if !b {
+                    if let Some(rows) =
+                        btctax_core::tax::document_census::transcribed_rows(ri, $row)
+                    {
+                        if rows > 0 {
+                            return Err(SetError::ContradictsTranscribedRows { rows });
+                        }
+                    }
+                }
+                (FORM_QUESTIONS[$idx].set)(ri, b);
+                Ok(())
+            },
+            clear: Some(|ri, _| {
+                ri.documents.set($row, None);
+                Ok(())
+            }),
+        }
+    };
+}
+
+/// The eighteen census rows, `FORM_QUESTIONS` indices 17..=34 in `QuestionId::ALL` order.
+///
+/// ★ The indices are literals because `Field`'s accessors must be `const`/`&'static`, never built by
+/// a runtime loop — the same constraint every other registry adapter here lives under. They are
+/// pinned by `census_section_delegates_every_row_in_registry_order`.
+const DOC_CENSUS_FIELDS: &[Field] = &[
+    census_tristate!(17, FieldId::DocW2, DocumentRow::W2),
+    census_tristate!(18, FieldId::DocInt1099, DocumentRow::Int1099),
+    census_tristate!(19, FieldId::DocDiv1099, DocumentRow::Div1099),
+    census_tristate!(20, FieldId::DocB1099, DocumentRow::B1099),
+    census_tristate!(21, FieldId::DocG1099, DocumentRow::G1099),
+    census_tristate!(22, FieldId::DocForm1098, DocumentRow::Form1098),
+    census_tristate!(23, FieldId::DocForm1098e, DocumentRow::Form1098e),
+    census_tristate!(24, FieldId::DocR1099, DocumentRow::R1099),
+    census_tristate!(25, FieldId::DocSsa1099, DocumentRow::Ssa1099),
+    census_tristate!(26, FieldId::DocNecMiscK1099, DocumentRow::NecMiscK1099),
+    census_tristate!(27, FieldId::DocK1, DocumentRow::K1),
+    census_tristate!(
+        28,
+        FieldId::DocScheduleERental,
+        DocumentRow::ScheduleERental
+    ),
+    census_tristate!(29, FieldId::DocS1099, DocumentRow::S1099),
+    census_tristate!(30, FieldId::DocOid1099, DocumentRow::Oid1099),
+    census_tristate!(31, FieldId::DocW2g, DocumentRow::W2g),
+    census_tristate!(32, FieldId::DocC1099, DocumentRow::C1099),
+    census_tristate!(33, FieldId::DocA1095, DocumentRow::A1095),
+    census_tristate!(34, FieldId::DocT1098, DocumentRow::T1098),
+];
+
+pub(crate) const DOCUMENT_CENSUS: Section = Section {
+    id: SectionId::DocumentCensus,
+    title: "Documents received",
+    kind: SectionKind::Singleton,
+    fields: DOC_CENSUS_FIELDS,
+};
+
 // ── The Skippables section ────────────────────────────────────────────────────────────────────────────────
 
 /// The delegating skippables — indices 0, 1, 3..11 of `SKIPPABLE_QUESTIONS` (index 2, the SALT
@@ -463,6 +555,25 @@ pub fn field_to_question(id: FieldId) -> Option<QuestionId> {
             QuestionId::CarryoverIncludesSpousesJointLoss
         }
         FieldId::DeclExcludedCanceledDebt => QuestionId::ExcludedCanceledDebt,
+        // ★ R3 — the census rows' reverse direction.
+        FieldId::DocW2 => QuestionId::DocW2,
+        FieldId::DocInt1099 => QuestionId::DocInt1099,
+        FieldId::DocDiv1099 => QuestionId::DocDiv1099,
+        FieldId::DocB1099 => QuestionId::DocB1099,
+        FieldId::DocG1099 => QuestionId::DocG1099,
+        FieldId::DocForm1098 => QuestionId::DocForm1098,
+        FieldId::DocForm1098e => QuestionId::DocForm1098e,
+        FieldId::DocR1099 => QuestionId::DocR1099,
+        FieldId::DocSsa1099 => QuestionId::DocSsa1099,
+        FieldId::DocNecMiscK1099 => QuestionId::DocNecMiscK1099,
+        FieldId::DocK1 => QuestionId::DocK1,
+        FieldId::DocScheduleERental => QuestionId::DocScheduleERental,
+        FieldId::DocS1099 => QuestionId::DocS1099,
+        FieldId::DocOid1099 => QuestionId::DocOid1099,
+        FieldId::DocW2g => QuestionId::DocW2g,
+        FieldId::DocC1099 => QuestionId::DocC1099,
+        FieldId::DocA1095 => QuestionId::DocA1095,
+        FieldId::DocT1098 => QuestionId::DocT1098,
         _ => return None,
     })
 }
@@ -499,6 +610,28 @@ pub fn question_to_field(id: QuestionId) -> FieldId {
             FieldId::DeclCarryoverIncludesSpousesJointLoss
         }
         QuestionId::ExcludedCanceledDebt => FieldId::DeclExcludedCanceledDebt,
+        // ★ R3 / §5.1 — the eighteen census rows, each its own leaf in the `DocumentCensus`
+        //   section. Nothing to dedup: no other section carries a document-type answer.
+        //   DERIVED, not hand-listed — `DocumentRow::question_id` is the one direction and this is
+        //   its inverse, so the two cannot drift.
+        QuestionId::DocW2 => FieldId::DocW2,
+        QuestionId::DocInt1099 => FieldId::DocInt1099,
+        QuestionId::DocDiv1099 => FieldId::DocDiv1099,
+        QuestionId::DocB1099 => FieldId::DocB1099,
+        QuestionId::DocG1099 => FieldId::DocG1099,
+        QuestionId::DocForm1098 => FieldId::DocForm1098,
+        QuestionId::DocForm1098e => FieldId::DocForm1098e,
+        QuestionId::DocR1099 => FieldId::DocR1099,
+        QuestionId::DocSsa1099 => FieldId::DocSsa1099,
+        QuestionId::DocNecMiscK1099 => FieldId::DocNecMiscK1099,
+        QuestionId::DocK1 => FieldId::DocK1,
+        QuestionId::DocScheduleERental => FieldId::DocScheduleERental,
+        QuestionId::DocS1099 => FieldId::DocS1099,
+        QuestionId::DocOid1099 => FieldId::DocOid1099,
+        QuestionId::DocW2g => FieldId::DocW2g,
+        QuestionId::DocC1099 => FieldId::DocC1099,
+        QuestionId::DocA1095 => FieldId::DocA1095,
+        QuestionId::DocT1098 => FieldId::DocT1098,
     }
 }
 

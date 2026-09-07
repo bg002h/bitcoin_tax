@@ -34,6 +34,10 @@ pub enum SectionId {
     ///   key no row reads refuses as unread.
     BrokerReporting,
     Declarations,
+    /// ★★★ R3 / §5.1 — THE DOCUMENT CENSUS: one tri-state per document type. Its own section rather
+    /// than more `Declarations` leaves, because the filer answers it FIRST — it is the question
+    /// *"what is in the shoebox?"*, and every document section's liveness hangs off it.
+    DocumentCensus,
     IncomeExclusions,
     Skippables,
 }
@@ -188,6 +192,45 @@ pub enum FieldId {
     BrokerCovered,
     /// The answer for the provider's NONCOVERED lots (everything else the venue sold for the filer).
     BrokerNoncovered,
+    // ── ★★★ R3 / §5.1 — the eighteen DOCUMENT CENSUS rows. One `FieldId` per document TYPE.
+    //    Each delegates to its `FORM_QUESTIONS` entry, so the prompt, the liveness and the refusal
+    //    are the registry's and are written exactly once.
+    /// Census: did the filer receive one or more Form W-2?
+    DocW2,
+    /// Census: did the filer receive one or more Form 1099-INT?
+    DocInt1099,
+    /// Census: did the filer receive one or more Form 1099-DIV?
+    DocDiv1099,
+    /// Census: did the filer receive one or more Form 1099-B?
+    DocB1099,
+    /// Census: did the filer receive one or more Form 1099-G?
+    DocG1099,
+    /// Census: did the filer receive one or more Form 1098?
+    DocForm1098,
+    /// Census: did the filer receive one or more Form 1098-E?
+    DocForm1098e,
+    /// Census: did the filer receive one or more Form 1099-R?
+    DocR1099,
+    /// Census: did the filer receive one or more Form SSA-1099 / RRB-1099?
+    DocSsa1099,
+    /// Census: did the filer receive one or more Form 1099-NEC / 1099-MISC / 1099-K?
+    DocNecMiscK1099,
+    /// Census: did the filer receive one or more Schedule K-1?
+    DocK1,
+    /// Census: did the filer receive one or more rental real estate / royalties (Schedule E)?
+    DocScheduleERental,
+    /// Census: did the filer receive one or more Form 1099-S?
+    DocS1099,
+    /// Census: did the filer receive one or more Form 1099-OID?
+    DocOid1099,
+    /// Census: did the filer receive one or more Form W-2G?
+    DocW2g,
+    /// Census: did the filer receive one or more Form 1099-C?
+    DocC1099,
+    /// Census: did the filer receive one or more Form 1095-A?
+    DocA1095,
+    /// Census: did the filer receive one or more Form 1098-T?
+    DocT1098,
 }
 
 /// The value shape of a field.
@@ -339,6 +382,17 @@ pub enum SetError {
     WrongKind,
     NoSuchRow,
     Immutable,
+    /// ★★★ R3 — **a census row answered `No` while rows of that document are transcribed.**
+    ///
+    /// The `DeleteSection(ScheduleA)` I-10 precedent: the write is refused, the rows are NOT silently
+    /// deleted, and the renderer offers *remove N rows and answer No* with a payload-confirm. A
+    /// silent delete here would destroy transcribed testimony on one keystroke, and a silent accept
+    /// would leave the return in the `DocumentCensusContradicted` state — a "no" the data
+    /// contradicts — which commit then refuses with no in-form remedy.
+    ContradictsTranscribedRows {
+        /// How many rows of that document the return carries.
+        rows: usize,
+    },
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseError {

@@ -11,9 +11,9 @@
   9││  … Carryforwards from last year││                                                                                    │
  10││  … §199A limitation (only if yo││                                                                                    │
  11││  ✓ Declarations                ││                                                                                    │
- 12││  … Income exclusions (§911/931/││                                                                                    │
- 13││  … Skippables                  ││                                                                                    │
- 14││                                ││                                                                                    │
+ 12││  ✓ Documents received          ││                                                                                    │
+ 13││  … Income exclusions (§911/931/││                                                                                    │
+ 14││  … Skippables                  ││                                                                                    │
  15││                                ││                                                                                    │
  16││                                ││                                                                                    │
  17││                                ││                                                                                    │

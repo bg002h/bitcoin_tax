@@ -545,6 +545,26 @@ $ btctax --vault v.pgp income show --year 2024
     "form8615_condition4_parent_alive": null,
     "form8615_parent_identity_unobtainable": null
   },
+  "documents": {
+    "w2": true,
+    "int_1099": false,
+    "div_1099": false,
+    "b_1099": false,
+    "g_1099": false,
+    "form_1098": null,
+    "form_1098e": null,
+    "r_1099": false,
+    "ssa_1099": false,
+    "nec_misc_k_1099": false,
+    "k1": false,
+    "schedule_e_rental": false,
+    "s_1099": false,
+    "oid_1099": false,
+    "w2g": false,
+    "c_1099": false,
+    "a_1095": false,
+    "t_1098": false
+  },
   "w2s": [
     {
       "owner": "taxpayer",
@@ -755,7 +775,7 @@ Check what this feature actually produced: open the Form 8275 PDF and confirm th
 ⚠ 2 mark(s) on this packet are YOURS to make by hand and are deliberately blank — see the "COMPLETE BY HAND" section at the foot of irs/manifest.txt.
 ⚠ a Section B Form 8283 is NOT filing-ready without a signed Part IV (appraiser) and Part V (donee acknowledgement) — obtain both before filing.
 
-  ── ADVISORIES (11) ──
+  ── ADVISORIES (13) ──
   • CTC/ODC NOT COMPUTED — you captured 1 dependent(s), but v1 does not compute the Child
     Tax Credit or the Credit for Other Dependents, so 1040 line 19 is LEFT BLANK for you to
     fill in. Your tax is OVERSTATED by up to $2,000 per qualifying child / $500 per other
@@ -765,6 +785,25 @@ Check what this feature actually produced: open the Form 8275 PDF and confirm th
     (Form 5695) or adoption (Form 8839) credits: the foreign tax credit is the only
     nonrefundable credit that ever reaches Schedule 3 Part I. If you qualify for any of them
     your tax is OVERSTATED — claim them yourself.
+  • DEDUCTIONS NOT COMPUTED — v1 models none of the Schedule 1 Part II adjustments to income
+    (educator expenses, the self-employed health insurance deduction and retirement plans,
+    HSA and IRA contributions, moving expenses for the Armed Forces, alimony paid, the
+    Archer MSA deduction, or any of the line-24 write-ins), and on Schedule A it models no
+    other taxes write-in (line 6), no home mortgage interest not reported to you on Form
+    1098 (line 8b), no points not reported to you on Form 1098 (line 8c), no casualty or
+    theft loss from a federally declared disaster (line 15, Form 4684) and no other itemized
+    deduction write-in (line 16). Each one it leaves blank is a deduction you may be
+    entitled to: if you have any of them your tax is OVERSTATED — claim them yourself, or
+    with a preparer.
+  • RETURN OPTIONS NOT OFFERED — v1 fills a calendar-year Form 1040 for a filer with a
+    domestic address, and it offers none of the following: a FISCAL YEAR (the "For the year
+    Jan. 1–Dec. 31" line stays as printed), a FOREIGN ADDRESS (country, province, postal
+    code), the §6013(g)/(h) election to treat a NONRESIDENT-ALIEN SPOUSE as a U.S. resident,
+    a THIRD-PARTY DESIGNEE (the "Do you want to allow another person to discuss this return
+    with the IRS?" block), applying an overpayment to NEXT YEAR'S ESTIMATED TAX (line 36),
+    your SPOUSE'S IDENTITY PROTECTION PIN, and your phone number or email address. None of
+    these changes your tax; each is a choice the printed return leaves blank because btctax
+    never asked. If you want any of them, mark the form by hand before signing.
   • REFUND BY PAPER CHECK — your return is due a refund of $8,954.20, but v1 never fills the
     direct-deposit block (1040 lines 35b–35d). As filed, the IRS will mail a check. Add your
     routing and account numbers by hand if you want it deposited.
@@ -1101,12 +1140,31 @@ Schedule D (raw pre-netting part totals) — tax year 2024
   The delta's implied deduction is fixed at derivation time (non-crypto AGI), so it is APPROXIMATE where a
   deduction is AGI-sensitive (e.g. the 7.5% medical floor); the two do NOT reconcile to the dollar.
 
-  ── ADVISORIES (4) ──
+  ── ADVISORIES (6) ──
   • OTHER CREDITS NOT COMPUTED — v1 does not compute the education (Form 8863),
     dependent-care (Form 2441), retirement-savings/saver's (Form 8880), residential-energy
     (Form 5695) or adoption (Form 8839) credits: the foreign tax credit is the only
     nonrefundable credit that ever reaches Schedule 3 Part I. If you qualify for any of them
     your tax is OVERSTATED — claim them yourself.
+  • DEDUCTIONS NOT COMPUTED — v1 models none of the Schedule 1 Part II adjustments to income
+    (educator expenses, the self-employed health insurance deduction and retirement plans,
+    HSA and IRA contributions, moving expenses for the Armed Forces, alimony paid, the
+    Archer MSA deduction, or any of the line-24 write-ins), and on Schedule A it models no
+    other taxes write-in (line 6), no home mortgage interest not reported to you on Form
+    1098 (line 8b), no points not reported to you on Form 1098 (line 8c), no casualty or
+    theft loss from a federally declared disaster (line 15, Form 4684) and no other itemized
+    deduction write-in (line 16). Each one it leaves blank is a deduction you may be
+    entitled to: if you have any of them your tax is OVERSTATED — claim them yourself, or
+    with a preparer.
+  • RETURN OPTIONS NOT OFFERED — v1 fills a calendar-year Form 1040 for a filer with a
+    domestic address, and it offers none of the following: a FISCAL YEAR (the "For the year
+    Jan. 1–Dec. 31" line stays as printed), a FOREIGN ADDRESS (country, province, postal
+    code), the §6013(g)/(h) election to treat a NONRESIDENT-ALIEN SPOUSE as a U.S. resident,
+    a THIRD-PARTY DESIGNEE (the "Do you want to allow another person to discuss this return
+    with the IRS?" block), applying an overpayment to NEXT YEAR'S ESTIMATED TAX (line 36),
+    your SPOUSE'S IDENTITY PROTECTION PIN, and your phone number or email address. None of
+    these changes your tax; each is a choice the printed return leaves blank because btctax
+    never asked. If you want any of them, mark the form by hand before signing.
   • DATE OF BIRTH NOT ON FILE — the §63(f) additional standard deduction for age 65+ ($1,550
     per box) was NOT granted, because v1 never assumes a birthdate. If you (or your spouse)
     are 65 or older, enter the date of birth and re-run: your tax is currently OVERSTATED.

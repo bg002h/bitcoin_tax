@@ -20,6 +20,7 @@ mod box_census;
 /// in the suite, where `make check` asks it on every commit rather than when someone remembers to.
 #[cfg(test)]
 mod capital_loss_carryover_check;
+mod census_join;
 mod check_isolation;
 mod cite_check;
 mod docs;
@@ -32,6 +33,7 @@ mod label_reader;
 mod line_coverage_check;
 mod package_check;
 mod prompt_check;
+mod r15_stop_list;
 /// Half 1a of the Schedule 1-A conformance KAT — the 48 entry labels, adjudicated by `label_reader`'s
 /// two witnesses over the committed geometry and compared to `Schedule1A`'s own leaves.
 ///
@@ -240,6 +242,31 @@ fn main() {
                 }
             }
         }
+        Some("census-join") => {
+            // ★★★ SPEC_interview R2.2 / T3: every `unmodeled` census entry on the seven forms the
+            //   interview reaches is ANNOUNCED or REFUSED, never silent — with the DIRECTION rule
+            //   (no Advisory may cover a line whose omission understates tax) and the REACH check
+            //   (a covering question's prompt must NAME the line).
+            match census_join::run() {
+                Ok(msg) => println!("{msg}"),
+                Err(e) => {
+                    eprintln!("xtask census-join: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        Some("stop-list") => {
+            // ★★★ SPEC_interview R15: the stop list as executable requirements — no `serde_json`
+            //   reflection in the typed seam, no progress/remaining field, no ledger question in a
+            //   return registry.
+            match r15_stop_list::run() {
+                Ok(msg) => println!("{msg}"),
+                Err(e) => {
+                    eprintln!("xtask stop-list: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
         Some("box-census") => {
             // ★ SPEC_interview R4/I2: every box an archived information return PRINTS carries exactly
             //   one recorded decision, the caption checked verbatim against design/forms/extract/.
@@ -267,7 +294,7 @@ fn main() {
         _ => {
             eprintln!(
                 "usage: cargo run -p xtask -- <docs [--pdf] | examples | subcommand-coverage | \
-                 check-isolation | line-coverage | box-census | cite-check | prompt-check | authority-conflicts | harness-check | archive-check | authority-manifest [--regen] | authority-refresh --check | extract-geometry <stem> | label-census <stem> | label-proof <stem> | label-boxes <stem> | \
+                 check-isolation | line-coverage | census-join | stop-list | box-census | cite-check | prompt-check | authority-conflicts | harness-check | archive-check | authority-manifest [--regen] | authority-refresh --check | extract-geometry <stem> | label-census <stem> | label-proof <stem> | label-boxes <stem> | \
                  classify-path <path> | \
                  extract-schedule-1a | dump-fields <pdf> | form-delta <old> <new> | \
                  port-status <prior-tag> <new-tag>>"

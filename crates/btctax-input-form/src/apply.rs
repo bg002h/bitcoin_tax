@@ -181,6 +181,9 @@ fn row_depth(id: SectionId) -> usize {
         | SectionId::Carryforwards
         | SectionId::QbiLimitation
         | SectionId::Declarations
+        // ★ R3 — the census is a SINGLETON: one tri-state per document TYPE, not per document. The
+        //   per-document rows live in the document sections (`W2s`, and T5's 1099 sections).
+        | SectionId::DocumentCensus
         | SectionId::IncomeExclusions
         | SectionId::Skippables => 0,
     }
@@ -414,6 +417,80 @@ mod tests {
             w.is_none(),
             "no return may materialize from an unparseable filing-status choice"
         );
+    }
+
+    /// ★★★ **R3 — a census `No` over transcribed rows is REFUSED, not stored and not silently
+    ///     destructive** (the `DeleteSection(ScheduleA)` I-10 precedent).
+    ///
+    /// Three states, and all three matter:
+    ///   1. `No` with a W-2 on the return ⇒ `ContradictsTranscribedRows { rows: 1 }`, and the leaf is
+    ///      UNCHANGED — a store would leave the return in `DocumentCensusContradicted` with no
+    ///      in-form remedy, and a delete would destroy transcribed testimony on one keystroke;
+    ///   2. `Yes` is always accepted — a yes contradicts nothing;
+    ///   3. `No` once the rows are gone is accepted — the refusal is a guard, not a one-way door.
+    #[test]
+    fn a_census_no_over_transcribed_rows_is_refused_and_stores_nothing() {
+        let now = time::macros::date!(2026 - 09 - 01);
+        let mut w: Working = None;
+        materialize(&mut w, FilingStatus::Single);
+        apply(
+            &mut w,
+            Edit::AddRow {
+                section: SectionId::W2s,
+                parent: RowAddr::default(),
+            },
+            now,
+        )
+        .unwrap();
+        assert_eq!(w.as_ref().unwrap().w2s.len(), 1);
+
+        let set_w2_census = |w: &mut Working, v: bool| {
+            apply(
+                w,
+                Edit::SetField {
+                    id: FieldId::DocW2,
+                    addr: RowAddr::default(),
+                    value: FieldValue::TriState(Some(v)),
+                },
+                now,
+            )
+        };
+
+        // (1) "No" over a transcribed row: refused, and NOTHING is written.
+        assert_eq!(
+            set_w2_census(&mut w, false),
+            Err(ApplyError::SetError(SetError::ContradictsTranscribedRows {
+                rows: 1
+            })),
+            "a census No beside a transcribed W-2 must be refused with the count"
+        );
+        assert_eq!(
+            w.as_ref().unwrap().documents.w2,
+            None,
+            "the refused write must store nothing — a stored No is the contradicted state"
+        );
+        assert_eq!(
+            w.as_ref().unwrap().w2s.len(),
+            1,
+            "★ and it must NOT delete the row to make the answer true"
+        );
+
+        // (2) "Yes" is accepted — the guard is on No alone.
+        set_w2_census(&mut w, true).unwrap();
+        assert_eq!(w.as_ref().unwrap().documents.w2, Some(true));
+
+        // (3) Remove the row, and "No" is then accepted — a guard, not a one-way door.
+        apply(
+            &mut w,
+            Edit::RemoveRow {
+                section: SectionId::W2s,
+                addr: RowAddr(vec![0]),
+            },
+            now,
+        )
+        .unwrap();
+        set_w2_census(&mut w, false).unwrap();
+        assert_eq!(w.as_ref().unwrap().documents.w2, Some(false));
     }
 
     /// I-10 (spec §10): a `ForceItemize` + `DeleteSection(ScheduleA)` leaves `itemize_election == Auto` — a

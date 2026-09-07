@@ -161,19 +161,36 @@ ssn  = "form1[0].Page1[0].f1_2[0]"
 # btctax itemizes MEDICAL (line 1), SALT (5a–5e), MORTGAGE INTEREST reported on Form 1098 (8a) and
 # CHARITABLE gifts (11–14). Everything below is a deduction the filer FORGOES by using btctax — the
 # safe direction: omitting a deduction can only OVERSTATE tax, never understate it.
+
+# ★★★ R2.2 — THE `[direction]` TABLE. Each block's `caption` is asserted VERBATIM against
+#     design/forms/extract/f1040sa--2025.txt at `extract_line` BEFORE the join uses it, so this table
+#     is a READING of the form and a re-parted revision REDS rather than drifting. A census entry
+#     is placed by its own line number into the block whose [first_line, last_line] range contains
+#     it; an entry with no printed line number carries `part = "<caption>"`. An entry no block
+#     places REDS — it is never defaulted to Overstates.
+#
+#     Understates = a blank here omits income or an addition to tax (the direction in which a blank
+#     is a false statement, so an Advisory may never cover it). Overstates = a blank forgoes a
+#     deduction, credit or payment lawfully. NoDollar = the cell carries no dollar at all.
+[[direction]]
+caption      = "Itemized Deductions"
+extract_line = 5
+direction    = "Overstates"
+first_line   = "1"
+last_line    = "18"
 [census]
 
 # ── Line 6: other taxes (write-in) ───────────────────────────────────────────────────────────────
-"form1[0].Page1[0].f1_12[0]" = { line = "6", rule = "unmodeled", reason = "\"Other taxes. List type and amount:\" — the write-in DESCRIPTION block, one 24pt-tall box in 2025 where TY2024 had two single rows. btctax collects only the enumerated SALT categories, lines 5a through 5c." }
-"form1[0].Page1[0].f1_13[0]" = { line = "6", rule = "unmodeled", reason = "Line 6 amount — same reason; line 7 therefore equals line 5e." }
+"form1[0].Page1[0].f1_12[0]" = { line = "6", rule = "unmodeled", reason = "\"Other taxes. List type and amount:\" — the write-in DESCRIPTION block, one 24pt-tall box in 2025 where TY2024 had two single rows. btctax collects only the enumerated SALT categories, lines 5a through 5c.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"form1[0].Page1[0].f1_13[0]" = { line = "6", rule = "unmodeled", reason = "Line 6 amount — same reason; line 7 therefore equals line 5e.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
 
 # ── Line 8b: mortgage interest NOT reported on a Form 1098, and its payee block ──────────────────
 # ★ Note the inversion recorded in the header: the AMOUNT (f1_17) sits ABOVE the payee block (f1_16).
-"form1[0].Page1[0].f1_17[0]" = { line = "8b", rule = "unmodeled", reason = "Line 8b AMOUNT — \"Home mortgage interest not reported to you on Form 1098.\" btctax collects mortgage_interest_1098 only, i.e. interest that IS on a 1098." }
-"form1[0].Page1[0].Line8b_ReadOrder[0].f1_16[0]" = { line = "8b", rule = "unmodeled", reason = "The 8b payee block — \"If paid to the person from whom you bought the home, see instructions and show that person's name, identifying no., and address.\" Free text, one 24pt-tall box in 2025 where TY2024 had two single rows. Nothing to write while 8b itself is unmodeled." }
+"form1[0].Page1[0].f1_17[0]" = { line = "8b", rule = "unmodeled", reason = "Line 8b AMOUNT — \"Home mortgage interest not reported to you on Form 1098.\" btctax collects mortgage_interest_1098 only, i.e. interest that IS on a 1098.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"form1[0].Page1[0].Line8b_ReadOrder[0].f1_16[0]" = { line = "8b", rule = "unmodeled", reason = "The 8b payee block — \"If paid to the person from whom you bought the home, see instructions and show that person's name, identifying no., and address.\" Free text, one 24pt-tall box in 2025 where TY2024 had two single rows. Nothing to write while 8b itself is unmodeled.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
 
 # ── Line 8c: points not reported on a Form 1098 ──────────────────────────────────────────────────
-"form1[0].Page1[0].f1_18[0]" = { line = "8c", rule = "unmodeled", reason = "\"Points not reported to you on Form 1098. See instructions for special rules.\" Not collected." }
+"form1[0].Page1[0].f1_18[0]" = { line = "8c", rule = "unmodeled", reason = "\"Points not reported to you on Form 1098. See instructions for special rules.\" Not collected.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
 
 # ── Line 8d: the FORM reserves it ────────────────────────────────────────────────────────────────
 "form1[0].Page1[0].f1_19[0]" = { line = "8d", rule = "artifact", reason = "The form's own text is \"Reserved for future use\" — the IRS ships a live fillable box for a line it has explicitly reserved. No decision is encodable, by the form's own statement." }
@@ -183,6 +200,6 @@ ssn  = "form1[0].Page1[0].f1_2[0]"
 #   schedule_a.investment_interest and prints it, gated by the Schedule D line 20 / Form 4952
 #   declaration — RefuseReason::Form4952Required refuses the return when Form 4952 is actually
 #   required, so the amount printed is always one deductible in full under i4952's own exception.
-"form1[0].Page1[0].f1_27[0]" = { line = "15", rule = "unmodeled", reason = "\"Casualty and theft loss(es) from a federally declared disaster (other than net qualified disaster losses). Attach Form 4684 and enter the amount from line 18 of that form.\" btctax models no Form 4684. Text unchanged from TY2024." }
-"form1[0].Page1[0].f1_28[0]" = { line = "16", rule = "unmodeled", reason = "\"Other—from list in instructions. List type and amount:\" — the write-in DESCRIPTION block, one 24pt-tall box in 2025 where TY2024 had three single rows. btctax offers no write-in itemized deduction." }
-"form1[0].Page1[0].f1_29[0]" = { line = "16", rule = "unmodeled", reason = "Line 16 amount — same reason." }
+"form1[0].Page1[0].f1_27[0]" = { line = "15", rule = "unmodeled", reason = "\"Casualty and theft loss(es) from a federally declared disaster (other than net qualified disaster losses). Attach Form 4684 and enter the amount from line 18 of that form.\" btctax models no Form 4684. Text unchanged from TY2024.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"form1[0].Page1[0].f1_28[0]" = { line = "16", rule = "unmodeled", reason = "\"Other—from list in instructions. List type and amount:\" — the write-in DESCRIPTION block, one 24pt-tall box in 2025 where TY2024 had three single rows. btctax offers no write-in itemized deduction.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"form1[0].Page1[0].f1_29[0]" = { line = "16", rule = "unmodeled", reason = "Line 16 amount — same reason.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }

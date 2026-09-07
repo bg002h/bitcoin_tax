@@ -890,6 +890,13 @@ fn apply_error_msg(e: ApplyError) -> String {
         ApplyError::SetError(SetError::WrongKind) => "wrong value for this field".to_string(),
         ApplyError::SetError(SetError::NoSuchRow) => "no such row".to_string(),
         ApplyError::SetError(SetError::Immutable) => "this field cannot be cleared".to_string(),
+        // ★★★ R3 — the census "No" over transcribed rows. The message names the COUNT and the exit,
+        //     because the filer's next act is a decision (remove the rows, or leave the answer
+        //     alone), not a retry.
+        ApplyError::SetError(SetError::ContradictsTranscribedRows { rows }) => format!(
+            "this return carries {rows} transcribed row(s) of that document — remove them first, or \
+             leave the answer as \"yes\""
+        ),
     }
 }
 

@@ -57,6 +57,67 @@ pub struct CensusDecision {
     pub rule: String,
     /// Why the field is left blank, in the words of whoever decided it.
     pub reason: String,
+    /// ★★★ **R2.2 — WHAT TELLS THE FILER about this line**: `"Advisory::X"`, `"RefuseReason::Y"` or
+    /// `"QuestionId::Z"`.
+    ///
+    /// *"A line btctax cannot take is thereby either **announced** or **refused**, never silent."*
+    /// Required on every `rule = "unmodeled"` entry of the seven forms the interview reaches;
+    /// `None` elsewhere. The join that checks it — including the DIRECTION rule, under which an
+    /// `Advisory` may never cover an entry whose omission understates tax — is
+    /// `xtask::census_join`.
+    #[serde(default)]
+    pub covered_by: Option<String>,
+    /// ★★ The line's own caption KEYWORD, when the entry's `reason` opens with words the covering
+    /// question's prompt does not use. Only meaningful with a `QuestionId` cover, whose join is a
+    /// REACH check: the prompt must contain this. It must itself appear in `reason`, so it is a
+    /// keyword OF THE LINE and not a token chosen to satisfy the checker.
+    #[serde(default)]
+    pub names: Option<String>,
+    /// ★★ The `[[direction]]` block this entry belongs to, for an entry whose `line` carries no
+    /// printed line number (a header date, a designee cell, the unnumbered 1099-K reconciliation
+    /// line). An entry that DOES carry a line number is placed by that number alone and may not
+    /// name a part — otherwise a numbered income line could be moved into a no-dollar bucket.
+    #[serde(default)]
+    pub part: Option<String>,
+}
+
+/// Which way a wrongly-blank line moves the tax (R2.2's DIRECTION RULE).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub enum Direction {
+    /// Income, or an addition to tax. A blank here is a FALSE STATEMENT, so an `Advisory` may never
+    /// cover it — only a `QuestionId` the filer actually reads or a `RefuseReason` that stops the
+    /// return.
+    Understates,
+    /// A deduction, credit or payment. A blank forgoes money lawfully, and a sentence saying btctax
+    /// did not try is an honest cover.
+    Overstates,
+    /// The cell carries no dollar at all — a date, a name, a checkbox, an election btctax does not
+    /// offer. It can move the tax in neither direction.
+    NoDollar,
+}
+
+/// ★★★ **R2.2 — one block of a form's `[direction]` table.**
+///
+/// A block is a caption the form actually prints, read off the archived text layer at
+/// `extract_line`, plus the range of the form's own line numbers it heads. The direction is thereby
+/// a READING OF THE FORM rather than a hand-list: a re-parted revision moves the caption, the
+/// verbatim assertion reds, and nothing silently defaults.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DirectionBlock {
+    /// The caption, verbatim. Asserted against `design/forms/extract/<stem>--<year>.txt`.
+    pub caption: String,
+    /// The 1-based line of that extract on which the caption is printed.
+    pub extract_line: usize,
+    /// Which way a blank moves the tax inside this block.
+    pub direction: Direction,
+    /// The first form line number this block heads (e.g. `"1"`, `"1a"`, `"8a"`). Absent on a block
+    /// that heads no numbered line — it then places only entries that name it explicitly.
+    #[serde(default)]
+    pub first_line: Option<String>,
+    /// The last form line number this block heads.
+    #[serde(default)]
+    pub last_line: Option<String>,
 }
 
 /// The 4 monetary "amount" columns of a Form 8949 / Schedule D totals row: (d) proceeds, (e) cost,
@@ -212,6 +273,11 @@ pub struct Form6251Map {
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
     #[serde(default)]
     pub census: std::collections::BTreeMap<String, CensusDecision>,
+    /// ★★★ R2.2 — the `[direction]` table: this form's own part headings, each asserted verbatim
+    /// against the archived extract, mapped to the direction a blank moves the tax in. Empty on a
+    /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
+    #[serde(default)]
+    pub direction: Vec<DirectionBlock>,
     pub line1: MoneyCell,
     pub line2a: MoneyCell,
     pub line2b: MoneyCell,
@@ -336,8 +402,10 @@ impl Form6251Map {
             instr_pages: _,
             line_set: _,
             attachment_sequence: _,
-            census: _,   // provenance for the fields we do NOT fill; never a money cell
-            identity: _, // not money
+            census: _,
+            // R2.2 — the direction table is provenance about the census, never a money cell.
+            direction: _, // provenance for the fields we do NOT fill; never a money cell
+            identity: _,  // not money
             line1: _,
             line2a: _,
             line2b: _,
@@ -535,6 +603,11 @@ pub struct Form8949Map {
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
     #[serde(default)]
     pub census: std::collections::BTreeMap<String, CensusDecision>,
+    /// ★★★ R2.2 — the `[direction]` table: this form's own part headings, each asserted verbatim
+    /// against the archived extract, mapped to the direction a blank moves the tax in. Empty on a
+    /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
+    #[serde(default)]
+    pub direction: Vec<DirectionBlock>,
     /// "Name(s) shown on return" + SSN — on **both pages** (the 8949 is a two-page detail attachment, and
     /// each page carries the header). `Option`: the crypto slice never writes it, and the 2017/2025 maps
     /// have no verified FQNs. The FULL-return filler refuses on `None` — an unnamed 8949 is not filable
@@ -776,6 +849,11 @@ pub struct Form1040Map {
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
     #[serde(default)]
     pub census: std::collections::BTreeMap<String, CensusDecision>,
+    /// ★★★ R2.2 — the `[direction]` table: this form's own part headings, each asserted verbatim
+    /// against the archived extract, mapped to the direction a blank moves the tax in. Empty on a
+    /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
+    #[serde(default)]
+    pub direction: Vec<DirectionBlock>,
     /// The full-return identity BLOCK (P6.2). The 1040's header is not two cells like a schedule's: it
     /// is names + SSNs + address + the §63(f) aged/blind checkboxes + the dependents table. `Option`
     /// because this map is SHARED with the crypto slice, whose 2017/2025 editions have no verified
@@ -1128,6 +1206,11 @@ pub struct Form8283Map {
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
     #[serde(default)]
     pub census: std::collections::BTreeMap<String, CensusDecision>,
+    /// ★★★ R2.2 — the `[direction]` table: this form's own part headings, each asserted verbatim
+    /// against the archived extract, mapped to the direction a blank moves the tax in. Empty on a
+    /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
+    #[serde(default)]
+    pub direction: Vec<DirectionBlock>,
     /// The FILER's identity — "Name(s) shown on your income tax return" + identifying number. `Option`
     /// because the crypto slice never writes it (its 8283 rides beside a return btctax did not produce)
     /// and the 2017/2025 maps have no verified FQNs; the FULL-return filler refuses on `None`.
@@ -1313,6 +1396,11 @@ pub struct Form8275Map {
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
     #[serde(default)]
     pub census: std::collections::BTreeMap<String, CensusDecision>,
+    /// ★★★ R2.2 — the `[direction]` table: this form's own part headings, each asserted verbatim
+    /// against the archived extract, mapped to the direction a blank moves the tax in. Empty on a
+    /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
+    #[serde(default)]
+    pub direction: Vec<DirectionBlock>,
     /// The FILER's identity — "Name(s) shown on return" + "Identifying number shown on return". The map
     /// always DECLARES these cells (unlike Form 8283, whose 2017 revision structurally lacks an identity
     /// block), but Task 16's crypto-slice fill (`fill_form_8275_slice`) leaves them unwritten — mirroring
@@ -1501,6 +1589,11 @@ pub struct ScheduleDMap {
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
     #[serde(default)]
     pub census: std::collections::BTreeMap<String, CensusDecision>,
+    /// ★★★ R2.2 — the `[direction]` table: this form's own part headings, each asserted verbatim
+    /// against the archived extract, mapped to the direction a blank moves the tax in. Empty on a
+    /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
+    #[serde(default)]
+    pub direction: Vec<DirectionBlock>,
     /// The name + SSN header cells (P6.2). `Option` because this map is SHARED with the crypto-slice
     /// path, whose 2017/2025 editions have no verified identity FQNs and no `ReturnInputs` to source an
     /// identity from. The FULL-return filler refuses on `None` — it may not emit an unnamed form.
@@ -1672,6 +1765,11 @@ pub struct Form8959Map {
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
     #[serde(default)]
     pub census: std::collections::BTreeMap<String, CensusDecision>,
+    /// ★★★ R2.2 — the `[direction]` table: this form's own part headings, each asserted verbatim
+    /// against the archived extract, mapped to the direction a blank moves the tax in. Empty on a
+    /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
+    #[serde(default)]
+    pub direction: Vec<DirectionBlock>,
     /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
     /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
     pub identity: IdentityCells,
@@ -1839,6 +1937,11 @@ pub struct Form4868Map {
     /// fill, mapped to the [`CensusDecision`] that leaves it blank.
     #[serde(default)]
     pub census: std::collections::BTreeMap<String, CensusDecision>,
+    /// ★★★ R2.2 — the `[direction]` table: this form's own part headings, each asserted verbatim
+    /// against the archived extract, mapped to the direction a blank moves the tax in. Empty on a
+    /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
+    #[serde(default)]
+    pub direction: Vec<DirectionBlock>,
     /// L1 — "Your name(s) (see instructions)". Bound by NAME after the Rust field
     /// `ReturnHeader.name_line` it is filled from (see the struct's deviation note).
     pub name_line: String,
@@ -1994,6 +2097,11 @@ pub struct Form1040VMap {
     /// fill, mapped to the [`CensusDecision`] that leaves it blank.
     #[serde(default)]
     pub census: std::collections::BTreeMap<String, CensusDecision>,
+    /// ★★★ R2.2 — the `[direction]` table: this form's own part headings, each asserted verbatim
+    /// against the archived extract, mapped to the direction a blank moves the tax in. Empty on a
+    /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
+    #[serde(default)]
+    pub direction: Vec<DirectionBlock>,
     /// Box 1 — "Your social security number (SSN)" / "(if a joint return, SSN shown first on your
     /// return)". `/MaxLen` 11 ⇒ hyphenated.
     pub box1_ssn: String,
@@ -2139,6 +2247,11 @@ pub struct Form8960Map {
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
     #[serde(default)]
     pub census: std::collections::BTreeMap<String, CensusDecision>,
+    /// ★★★ R2.2 — the `[direction]` table: this form's own part headings, each asserted verbatim
+    /// against the archived extract, mapped to the direction a blank moves the tax in. Empty on a
+    /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
+    #[serde(default)]
+    pub direction: Vec<DirectionBlock>,
     /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
     /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
     pub identity: IdentityCells,
@@ -2286,6 +2399,11 @@ pub struct Form8995AMap {
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
     #[serde(default)]
     pub census: std::collections::BTreeMap<String, CensusDecision>,
+    /// ★★★ R2.2 — the `[direction]` table: this form's own part headings, each asserted verbatim
+    /// against the archived extract, mapped to the direction a blank moves the tax in. Empty on a
+    /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
+    #[serde(default)]
+    pub direction: Vec<DirectionBlock>,
     /// Name + SSN. REQUIRED — a schedule that does not name its taxpayer is not filable.
     pub identity: IdentityCells,
     /// Part IV lines 27-40, in the form's own numbering. See `forms/2024/f8995a.map.toml` for how the
@@ -2460,6 +2578,11 @@ pub struct Form8995Map {
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
     #[serde(default)]
     pub census: std::collections::BTreeMap<String, CensusDecision>,
+    /// ★★★ R2.2 — the `[direction]` table: this form's own part headings, each asserted verbatim
+    /// against the archived extract, mapped to the direction a blank moves the tax in. Empty on a
+    /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
+    #[serde(default)]
+    pub direction: Vec<DirectionBlock>,
     /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
     /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
     pub identity: IdentityCells,
@@ -2611,6 +2734,11 @@ pub struct Schedule2Map {
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
     #[serde(default)]
     pub census: std::collections::BTreeMap<String, CensusDecision>,
+    /// ★★★ R2.2 — the `[direction]` table: this form's own part headings, each asserted verbatim
+    /// against the archived extract, mapped to the direction a blank moves the tax in. Empty on a
+    /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
+    #[serde(default)]
+    pub direction: Vec<DirectionBlock>,
     /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
     /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
     pub identity: IdentityCells,
@@ -2727,6 +2855,11 @@ pub struct Schedule3Map {
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
     #[serde(default)]
     pub census: std::collections::BTreeMap<String, CensusDecision>,
+    /// ★★★ R2.2 — the `[direction]` table: this form's own part headings, each asserted verbatim
+    /// against the archived extract, mapped to the direction a blank moves the tax in. Empty on a
+    /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
+    #[serde(default)]
+    pub direction: Vec<DirectionBlock>,
     /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
     /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
     pub identity: IdentityCells,
@@ -2843,6 +2976,11 @@ pub struct ScheduleAMap {
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
     #[serde(default)]
     pub census: std::collections::BTreeMap<String, CensusDecision>,
+    /// ★★★ R2.2 — the `[direction]` table: this form's own part headings, each asserted verbatim
+    /// against the archived extract, mapped to the direction a blank moves the tax in. Empty on a
+    /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
+    #[serde(default)]
+    pub direction: Vec<DirectionBlock>,
     /// L5a's §164(b)(5) sales-tax election checkbox — the election core already honours in the
     /// arithmetic, which the filed form never showed (ARCH-P6.3a Q7 item 3).
     pub check_5a_sales_tax: CheckChoice,
@@ -3008,6 +3146,11 @@ pub struct Schedule1Map {
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
     #[serde(default)]
     pub census: std::collections::BTreeMap<String, CensusDecision>,
+    /// ★★★ R2.2 — the `[direction]` table: this form's own part headings, each asserted verbatim
+    /// against the archived extract, mapped to the direction a blank moves the tax in. Empty on a
+    /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
+    #[serde(default)]
+    pub direction: Vec<DirectionBlock>,
     /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
     /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
     pub identity: IdentityCells,
@@ -3138,6 +3281,11 @@ pub struct ScheduleCMap {
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
     #[serde(default)]
     pub census: std::collections::BTreeMap<String, CensusDecision>,
+    /// ★★★ R2.2 — the `[direction]` table: this form's own part headings, each asserted verbatim
+    /// against the archived extract, mapped to the direction a blank moves the tax in. Empty on a
+    /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
+    #[serde(default)]
+    pub direction: Vec<DirectionBlock>,
     /// Line A — "Principal business or profession".
     pub line_a_business: String,
     /// Line B — the NAICS code (a 6-character comb).
@@ -3299,6 +3447,11 @@ pub struct ScheduleBMap {
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
     #[serde(default)]
     pub census: std::collections::BTreeMap<String, CensusDecision>,
+    /// ★★★ R2.2 — the `[direction]` table: this form's own part headings, each asserted verbatim
+    /// against the archived extract, mapped to the direction a blank moves the tax in. Empty on a
+    /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
+    #[serde(default)]
+    pub direction: Vec<DirectionBlock>,
     /// L7b — the foreign-country list. It IS a captured input; the claim that v1 had none was false
     /// (ARCH-P6.3a Q7 item 7).
     pub line7b_countries: String,
@@ -3406,6 +3559,11 @@ pub struct ScheduleSeMap {
     /// [`CensusDecision`] for why a modelled key is what lets `deny_unknown_fields` be switched on.
     #[serde(default)]
     pub census: std::collections::BTreeMap<String, CensusDecision>,
+    /// ★★★ R2.2 — the `[direction]` table: this form's own part headings, each asserted verbatim
+    /// against the archived extract, mapped to the direction a blank moves the tax in. Empty on a
+    /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
+    #[serde(default)]
+    pub direction: Vec<DirectionBlock>,
     /// The identity header — "Name of person **with self-employment income**" + THAT person's SSN, i.e.
     /// the PROPRIETOR, not the return's joint name line. `Option` because this map is shared with the
     /// crypto slice (whose 2017/2025 editions have no verified identity FQNs and write no identity at

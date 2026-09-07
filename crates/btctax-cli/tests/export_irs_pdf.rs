@@ -197,8 +197,10 @@ fn a_dependents_statement_is_marked_draft_only_on_a_pseudo_ledger() {
             ssn: "123456789".into(),
             ..Default::default()
         };
-        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
         nine(&mut ri);
+        // ★ R3 — AFTER the shape: the census answer for a countable row IS the row count, so
+        //   the helper must see the rows this fixture carries (it fills only what is unanswered).
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
         return_inputs::set(s.conn(), 2024, &ri).unwrap();
         s.save().unwrap();
     }
@@ -253,8 +255,10 @@ fn a_dependents_statement_is_marked_draft_only_on_a_pseudo_ledger() {
             ssn: "123456789".into(),
             ..Default::default()
         };
-        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
         nine(&mut ri);
+        // ★ R3 — AFTER the shape: the census answer for a countable row IS the row count, so
+        //   the helper must see the rows this fixture carries (it fills only what is unanswered).
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
         return_inputs::set(s.conn(), 2024, &ri).unwrap();
         s.save().unwrap();
     }
@@ -1390,6 +1394,10 @@ fn full_return_vault(
         };
         btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
         shape(&mut ri);
+        // ★ R3 — reconcile the census AFTER the shape (the answer for a countable row IS the row
+        //   count). Deliberately NOT a second `answer_all_live_declarations`: a shape that BLANKS a
+        //   declaration to prove the screen refuses must keep its blank.
+        btctax_core::tax::testonly::reconcile_document_census(&mut ri);
         return_inputs::set(s.conn(), 2024, &ri).unwrap();
         s.save().unwrap();
     }
@@ -2684,7 +2692,6 @@ fn a_pseudo_voucher_is_gated_and_watermarked_like_the_packet() {
             ssn: "222-33-4444".into(),
             ..Default::default()
         };
-        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
         ri.w2s = vec![W2 {
             owner: Owner::Taxpayer,
             employer: "ACME".into(),
@@ -2695,6 +2702,9 @@ fn a_pseudo_voucher_is_gated_and_watermarked_like_the_packet() {
             box5_medicare_wages: dec!(250000),
             ..Default::default()
         }];
+        // ★ R3 — AFTER the shape: the census answer for a countable row IS the row count, so
+        //   the helper must see the rows this fixture carries (it fills only what is unanswered).
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
         btctax_cli::return_inputs::set(s.conn(), 2024, &ri).unwrap();
         s.save().unwrap();
     }
