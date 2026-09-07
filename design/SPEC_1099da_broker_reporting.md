@@ -299,8 +299,14 @@ DISPATCH (P6.5)") becomes three-way. The predicate is a function call, never a d
    stored answer no row reads, refuses with the SAME `Refusal` reason/detail in the SLICE's own
    sentence — never "the return is not computable", which is false here (M-1)); and the Form 8283
    restriction row in its slice form — `ri.donations_had_restrictions == Some(true)` AND the year
-   emits an 8283 → refuse, no `form_8283.pdf`. It does NOT run `screen_inputs` or
-   `screen_compute_dependent`: neither reaches a figure the slice prints. The `--forms full-return`
+   emits an 8283 → refuse, no `form_8283.pdf`. It does NOT run `screen_inputs`, and of
+   `screen_compute_dependent` it runs exactly ONE rule — the Digital Assets cross-check (interview
+   R9, T6): since 2026-09-07 the box on the slice's Form 1040 page 1 is printed from the filer's
+   ANSWER (`digital_asset_activity`), never from the ledger — `Some(true)` → Yes, `Some(false)` → No,
+   `None` → neither, named in the slice note as unanswered — so a contradicted `No` refuses the export
+   naming the first qualifying event and an unwitnessed `Yes` prints with the off-ledger advisory.
+   (Amended by the controller on the T6 seam review's C-1: the earlier sentence *"neither reaches a
+   figure the slice prints"* stopped being true the moment the box became an answer.) The `--forms full-return`
    and `--pay-by-check` refusals stand on this arm (there is no Form 1040 line 37), RE-WORDED for it:
    both name the real reason — the year's full-return parameters are not bundled in this build — never
    "no full-return inputs … author them first", which a filer on this arm has already done (M-10).

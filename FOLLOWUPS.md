@@ -6319,6 +6319,16 @@ build, each with an owning phase.
   owner accepts the refusal and compares the other eight forms by hand. The filed return itself is
   the third witness for the simulated run — a real return beside the two oracles — and never enters
   the repo (owner-local comparison only).
+- **FR-77 — a standing order recorded the DAY OF a sale, after it, governs that sale (T6 seam review
+  M-2). Owning phase: the method-election track, before the TY2026 filing.** `resolve_election`
+  (`project/resolve.rs`) applies `effective_from <= date` on a day-granular `TaxDate`, so an election
+  entered six hours after a 12:00 sale is treated as in force for it — and this decides the FILED
+  BASIS through `disposal_compliance`, not only the Step 0 warning. Notice 2026-20 §4.02(2) requires
+  the order be *"entered into the taxpayer's books and records before the units covered by the order
+  are sold"*; §4.02(1) is the *"no later than the date and time"* rule. T6's fold documents the
+  same-day case honestly (*"on or before"*) and adds the fixture; the fix — a timestamped
+  `effective_from` or an "after the last same-day sale" rule read off the Notice — needs its own
+  spec sentence and a kill on the filed basis.
   Owner-driven; the assistant prepares the walk (a checklist of moments from `SPEC_interview.md` §6)
   and records the findings verbatim.
 - **FR-47 — `AmtParams` / `FullReturnParams` TY2026 is a NOW item, not a post-finals one.**
