@@ -126,6 +126,183 @@ fn prefix_matches(prefix: &str, path: &str) -> bool {
         || path.starts_with(&format!("{prefix}["))
 }
 
+/// ★★★ **THE LEAF WALK — test scaffolding, in the library on purpose.**
+///
+/// [`money_leaves`] is the type-driven money detector the [`LEAF_SOURCE`] KAT is built on, and
+/// **T4b's kill needs the same walk from another crate**: *"no `Usd` leaf of the year-N+1 seed is
+/// non-zero except the carryforwards"* is exactly this question asked of a different fixture, and
+/// the whole point of R10.4's kill is that it reads no hand-list of fields. A second copy in
+/// `btctax-cli` would be a second thing to keep true — so this lives here, `#[doc(hidden)]`, for
+/// the same reason [`crate::tax::testonly`] does: one walk, one detector, two callers.
+///
+/// It contains no tax logic and nothing production reads it.
+#[doc(hidden)]
+pub mod leaf_walk {
+    use super::ReturnInputs;
+    use crate::conventions::Usd;
+    use serde_json::Value;
+    use std::collections::{BTreeMap, BTreeSet};
+
+    // ─────────────────────────────────────────────────────────────────────────────────────────────
+    // The leaf walk — the sibling of `btctax-input-form`'s coverage walk, with the same rules: a
+    // leaf is a scalar, or an all-scalar array (a serialized `time::Date` is ONE leaf, not two).
+    // ─────────────────────────────────────────────────────────────────────────────────────────────
+    pub fn walk(v: &Value, prefix: &str, out: &mut Vec<String>) {
+        match v {
+            Value::Object(map) => {
+                for (k, child) in map {
+                    let p = if prefix.is_empty() {
+                        k.clone()
+                    } else {
+                        format!("{prefix}.{k}")
+                    };
+                    walk(child, &p, out);
+                }
+            }
+            Value::Array(arr) if arr.iter().any(|e| e.is_object() || e.is_array()) => {
+                for (i, child) in arr.iter().enumerate() {
+                    walk(child, &format!("{prefix}[{i}]"), out);
+                }
+            }
+            _ => out.push(prefix.to_string()),
+        }
+    }
+
+    /// Replace the value at one walked leaf path. Returns `false` if the path does not resolve.
+    pub fn set_at(v: &mut Value, path: &str, new: Value) -> bool {
+        let mut cur = v;
+        let mut rest = path;
+        loop {
+            // A segment is `name` (after an optional leading '.') or `[i]`.
+            if let Some(after) = rest.strip_prefix('[') {
+                let Some((idx, tail)) = after.split_once(']') else {
+                    return false;
+                };
+                let Ok(i) = idx.parse::<usize>() else {
+                    return false;
+                };
+                let Some(next) = cur.get_mut(i) else {
+                    return false;
+                };
+                if tail.is_empty() {
+                    *next = new;
+                    return true;
+                }
+                cur = next;
+                rest = tail.strip_prefix('.').unwrap_or(tail);
+                continue;
+            }
+            let end = rest.find(['.', '[']).unwrap_or(rest.len());
+            let (name, tail) = rest.split_at(end);
+            let Some(next) = cur.get_mut(name) else {
+                return false;
+            };
+            if tail.is_empty() {
+                *next = new;
+                return true;
+            }
+            cur = next;
+            rest = tail.strip_prefix('.').unwrap_or(tail);
+        }
+    }
+
+    /// ★★★ **MONEY LEAVES, DETECTED BY TYPE — never by a hand-list and never by a value.**
+    ///
+    /// For each leaf: write a decimal-shaped string, then a non-numeric one, and deserialize the whole
+    /// blob back into [`ReturnInputs`] each time. A leaf that ACCEPTS `"1234.56"` and REJECTS `"zzz"`
+    /// is a `Usd` / `Option<Usd>`; a `String` accepts both, a `bool` / `Date` / enum rejects both.
+    ///
+    /// ★ That is what makes this drift-proof in the direction that matters: a newly added money field
+    /// on any reachable struct is detected the moment the fixture realizes it, with nobody having
+    /// remembered to list it. It is `Decimal`'s own deserializer doing the classifying.
+    ///
+    /// ★★ **Its honest limits, stated rather than hidden — and MEASURED, because a wrong stated limit
+    /// is worse than none** (seam review M4). It can only classify a leaf that appears in the
+    /// serialized JSON at all, so there are exactly two blind spots, neither of them the one this
+    /// comment used to name:
+    ///
+    /// 1. **A field that is not serialized.** `#[serde(skip_serializing_if = "Option::is_none")]`
+    ///    (used in `forms.rs:293-295`) removes the key entirely when it is `None`, so [`walk`] never
+    ///    emits a leaf for it and no probe is ever written. Nothing here can see a leaf that is not
+    ///    in the document.
+    /// 2. **The elements of an EMPTY `Vec`.** `walk` descends an array only when some element is
+    ///    itself an object or array, so `[]` is pushed as one leaf at the vec's own path — and that
+    ///    leaf rejects both probes (a string is not a `Vec`). Every money box on the element type is
+    ///    therefore unwalked. This is why [`maximal_sentinel`] realizes two rows of every `Vec`.
+    ///
+    /// ★ A new `Option<Usd>` left `None` is **NOT** a blind spot, contrary to what this comment said
+    ///   before it was checked: it serializes as `null`, `walk` emits it, `set_at` replaces the whole
+    ///   value with the probe string, and the `Option<Usd>` deserializer then classifies it correctly.
+    ///   Planted and observed — the KAT reds on such a field.
+    ///
+    /// ★ The second net either way is the classifier, which forbids `_` on an `Option<Usd>` leaf
+    ///   (`no_option_money_leaf_is_bound_with_underscore`), so a money leaf cannot be added without a
+    ///   human naming it.
+    pub fn money_leaves(ri: &ReturnInputs) -> BTreeSet<String> {
+        let base = serde_json::to_value(ri).expect("ReturnInputs serializes");
+        serde_json::from_value::<ReturnInputs>(base.clone())
+            .expect("the fixture must round-trip before any leaf is probed");
+        let mut leaves = Vec::new();
+        walk(&base, "", &mut leaves);
+        let accepts = |path: &str, probe: &str| {
+            let mut v = base.clone();
+            assert!(
+                set_at(&mut v, path, Value::String(probe.into())),
+                "unreachable leaf {path}"
+            );
+            serde_json::from_value::<ReturnInputs>(v).is_ok()
+        };
+        leaves
+            .into_iter()
+            .filter(|p| accepts(p, "1234.56") && !accepts(p, "zzz"))
+            .collect()
+    }
+
+    /// The money leaves of `ri` that are NOT zero, path → amount.
+    ///
+    /// ★ Built on [`money_leaves`], so it inherits the type-driven detector rather than naming any
+    ///   field: a money box added tomorrow is examined the day the fixture realizes it. The value is
+    ///   read back out of the same serialized document the detector classified, never off a struct
+    ///   field, so a leaf cannot be examined under one name and reported under another.
+    pub fn nonzero_money_leaves(ri: &ReturnInputs) -> BTreeMap<String, Usd> {
+        let doc = serde_json::to_value(ri).expect("ReturnInputs serializes");
+        money_leaves(ri)
+            .into_iter()
+            .filter_map(|path| {
+                let v = at(&doc, &path)?;
+                // `Usd` serializes as a decimal STRING (`serde-str`); an `Option<Usd>` left `None`
+                // is `null`, which is not a figure and cannot be non-zero.
+                let amount: Usd = v.as_str()?.parse().ok()?;
+                (amount != Usd::ZERO).then_some((path, amount))
+            })
+            .collect()
+    }
+
+    /// Read the value at one walked leaf path — the read counterpart of [`set_at`].
+    pub fn at<'a>(v: &'a Value, path: &str) -> Option<&'a Value> {
+        let mut cur = v;
+        let mut rest = path;
+        loop {
+            if let Some(after) = rest.strip_prefix('[') {
+                let (idx, tail) = after.split_once(']')?;
+                cur = cur.get(idx.parse::<usize>().ok()?)?;
+                if tail.is_empty() {
+                    return Some(cur);
+                }
+                rest = tail.strip_prefix('.').unwrap_or(tail);
+                continue;
+            }
+            let end = rest.find(['.', '[']).unwrap_or(rest.len());
+            let (name, tail) = rest.split_at(end);
+            cur = cur.get(name)?;
+            if tail.is_empty() {
+                return Some(cur);
+            }
+            rest = tail.strip_prefix('.').unwrap_or(tail);
+        }
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 // 3. Per answer — the answer log
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -509,127 +686,12 @@ pub fn supersede_dependent_identity(ri: &mut ReturnInputs, old_ssn: &str, new_ss
 
 #[cfg(test)]
 mod tests {
+    use super::leaf_walk::{money_leaves, walk};
     use super::*;
     use crate::tax::return_inputs::CarryProvenance;
     use crate::tax::scrub_axis::maximal_sentinel;
-    use serde_json::Value;
     use std::collections::BTreeSet;
     use time::macros::date;
-
-    // ─────────────────────────────────────────────────────────────────────────────────────────────
-    // The leaf walk — the sibling of `btctax-input-form`'s coverage walk, with the same rules: a
-    // leaf is a scalar, or an all-scalar array (a serialized `time::Date` is ONE leaf, not two).
-    // ─────────────────────────────────────────────────────────────────────────────────────────────
-    fn walk(v: &Value, prefix: &str, out: &mut Vec<String>) {
-        match v {
-            Value::Object(map) => {
-                for (k, child) in map {
-                    let p = if prefix.is_empty() {
-                        k.clone()
-                    } else {
-                        format!("{prefix}.{k}")
-                    };
-                    walk(child, &p, out);
-                }
-            }
-            Value::Array(arr) if arr.iter().any(|e| e.is_object() || e.is_array()) => {
-                for (i, child) in arr.iter().enumerate() {
-                    walk(child, &format!("{prefix}[{i}]"), out);
-                }
-            }
-            _ => out.push(prefix.to_string()),
-        }
-    }
-
-    /// Replace the value at one walked leaf path. Returns `false` if the path does not resolve.
-    fn set_at(v: &mut Value, path: &str, new: Value) -> bool {
-        let mut cur = v;
-        let mut rest = path;
-        loop {
-            // A segment is `name` (after an optional leading '.') or `[i]`.
-            if let Some(after) = rest.strip_prefix('[') {
-                let Some((idx, tail)) = after.split_once(']') else {
-                    return false;
-                };
-                let Ok(i) = idx.parse::<usize>() else {
-                    return false;
-                };
-                let Some(next) = cur.get_mut(i) else {
-                    return false;
-                };
-                if tail.is_empty() {
-                    *next = new;
-                    return true;
-                }
-                cur = next;
-                rest = tail.strip_prefix('.').unwrap_or(tail);
-                continue;
-            }
-            let end = rest.find(['.', '[']).unwrap_or(rest.len());
-            let (name, tail) = rest.split_at(end);
-            let Some(next) = cur.get_mut(name) else {
-                return false;
-            };
-            if tail.is_empty() {
-                *next = new;
-                return true;
-            }
-            cur = next;
-            rest = tail.strip_prefix('.').unwrap_or(tail);
-        }
-    }
-
-    /// ★★★ **MONEY LEAVES, DETECTED BY TYPE — never by a hand-list and never by a value.**
-    ///
-    /// For each leaf: write a decimal-shaped string, then a non-numeric one, and deserialize the whole
-    /// blob back into [`ReturnInputs`] each time. A leaf that ACCEPTS `"1234.56"` and REJECTS `"zzz"`
-    /// is a `Usd` / `Option<Usd>`; a `String` accepts both, a `bool` / `Date` / enum rejects both.
-    ///
-    /// ★ That is what makes this drift-proof in the direction that matters: a newly added money field
-    /// on any reachable struct is detected the moment the fixture realizes it, with nobody having
-    /// remembered to list it. It is `Decimal`'s own deserializer doing the classifying.
-    ///
-    /// ★★ **Its honest limits, stated rather than hidden — and MEASURED, because a wrong stated limit
-    /// is worse than none** (seam review M4). It can only classify a leaf that appears in the
-    /// serialized JSON at all, so there are exactly two blind spots, neither of them the one this
-    /// comment used to name:
-    ///
-    /// 1. **A field that is not serialized.** `#[serde(skip_serializing_if = "Option::is_none")]`
-    ///    (used in `forms.rs:293-295`) removes the key entirely when it is `None`, so [`walk`] never
-    ///    emits a leaf for it and no probe is ever written. Nothing here can see a leaf that is not
-    ///    in the document.
-    /// 2. **The elements of an EMPTY `Vec`.** `walk` descends an array only when some element is
-    ///    itself an object or array, so `[]` is pushed as one leaf at the vec's own path — and that
-    ///    leaf rejects both probes (a string is not a `Vec`). Every money box on the element type is
-    ///    therefore unwalked. This is why [`maximal_sentinel`] realizes two rows of every `Vec`.
-    ///
-    /// ★ A new `Option<Usd>` left `None` is **NOT** a blind spot, contrary to what this comment said
-    ///   before it was checked: it serializes as `null`, `walk` emits it, `set_at` replaces the whole
-    ///   value with the probe string, and the `Option<Usd>` deserializer then classifies it correctly.
-    ///   Planted and observed — the KAT reds on such a field.
-    ///
-    /// ★ The second net either way is the classifier, which forbids `_` on an `Option<Usd>` leaf
-    ///   (`no_option_money_leaf_is_bound_with_underscore`), so a money leaf cannot be added without a
-    ///   human naming it.
-    fn money_leaves(ri: &ReturnInputs) -> BTreeSet<String> {
-        let base = serde_json::to_value(ri).expect("ReturnInputs serializes");
-        serde_json::from_value::<ReturnInputs>(base.clone())
-            .expect("the fixture must round-trip before any leaf is probed");
-        let mut leaves = Vec::new();
-        walk(&base, "", &mut leaves);
-        let accepts = |path: &str, probe: &str| {
-            let mut v = base.clone();
-            assert!(
-                set_at(&mut v, path, Value::String(probe.into())),
-                "unreachable leaf {path}"
-            );
-            serde_json::from_value::<ReturnInputs>(v).is_ok()
-        };
-        leaves
-            .into_iter()
-            .filter(|p| accepts(p, "1234.56") && !accepts(p, "zzz"))
-            .collect()
-    }
 
     /// What a [`LEAF_SOURCE`] audit found. Empty on every count = the guarantee holds.
     #[derive(Debug, Default, PartialEq, Eq)]

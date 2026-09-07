@@ -566,6 +566,35 @@ pub enum IncomeCmd {
         #[arg(long)]
         discard_draft: bool,
     },
+    /// Open NEXT year from this one: seed year N+1's draft with year N's identities — each W-2
+    /// employer, each 1099 payer, each dependent, each exchange — every box blank, every question
+    /// unanswered, and the computed carryforwards carried as data.
+    ///
+    /// Nothing about last year's answers comes with them. A prior year's "no" is not testimony for
+    /// this year, so each identity is printed as its own question for you to confirm, and every
+    /// figure except the carryforwards starts blank. Dates of birth are SHOWN (they cannot change)
+    /// and still take the same keystroke a fresh answer takes.
+    ///
+    /// The carryforwards — §1212(b) capital loss, §170(d)(1) charitable, and the two QBI ones — are
+    /// read off year N's computed RETURN, not off what you typed into it, and are stamped as
+    /// computed from that year so a later reader can tell them from a figure you entered. If year N
+    /// cannot be computed, none is written and the command says so.
+    ///
+    /// It writes year N+1's DRAFT (`btctax income answer --year N+1` continues there), never a
+    /// committed return, and it changes nothing about year N.
+    OpenNextYear {
+        /// The year to open FROM (e.g. 2027 opens 2028). It must have stored full-return inputs.
+        #[arg(long)]
+        from: i32,
+        /// Discard a work-in-progress tax-inputs DRAFT for the year being opened that holds an
+        /// interview — recorded answers, transcribed documents, dependents or a Schedule A.
+        ///
+        /// Without this, the open is REFUSED and nothing is stored: on a year whose package has not
+        /// arrived the draft is where the interview lives for months, and its recorded answers
+        /// cannot be re-created by re-typing. A draft holding none of that is superseded silently.
+        #[arg(long)]
+        discard_draft: bool,
+    },
     /// Answer the return's fail-loud questions interactively — the yes/no boxes that have no safe
     /// default (can someone claim you as a dependent? Schedule B's foreign-account and foreign-trust
     /// lines) plus the optional dates of birth.

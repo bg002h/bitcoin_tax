@@ -116,6 +116,10 @@ pub struct EditorApp {
     /// with the other flow gates (modals → flows → this → Browse), so `q`/Esc never fall through
     /// to a quit arm while it is blocking. At most one flow is `Some` at a time (the invariant).
     pub tax_inputs_form: Option<TaxInputsFormState>,
+    /// ★★★ **T4b — the year picker's "open TY(N+1) from TY(N)" action.** `Some` while the
+    /// confirmation is on screen. Dispatched with the flows (modals → flows → this → Browse) so
+    /// `q`/Esc never fall through to a quit arm while it blocks.
+    pub open_next_year: Option<OpenNextYearState>,
     /// The per-mutation confirmation modal. `Some` while awaiting Enter/Esc.
     ///
     /// Modal dispatch precedes form and screen dispatch (the R0-M4 lesson —
@@ -285,6 +289,25 @@ pub struct EditorApp {
     pub clock: btctax_tui::clock::Clock,
 }
 
+/// ★★★ **T4b / `SPEC_interview.md` R10.4 — the year-N+1 opener's TUI state.**
+///
+/// The picker offers it on a year that has nothing yet whose predecessor has a committed return
+/// (`edit::persist::form_open_next_year_offered`). Enter opens; Esc cancels; and when the year being
+/// opened holds a work-in-progress draft that holds work, the open REFUSES exactly as the CLI does
+/// and this becomes the payload-confirm — `X`, naming what would be lost — because T4's rule
+/// (*"a WIP draft holding an interview is discarded only on confirmation"*) does not stop applying
+/// because the write is a seed.
+pub struct OpenNextYearState {
+    /// Year N — where the identities and carryforwards come from.
+    pub from: i32,
+    /// Year N+1 — the year whose draft this seeds.
+    pub to: i32,
+    /// `Some(what the draft holds)` once the open has refused on T4's rule: the payload-confirm.
+    pub blocked_by_draft: Option<String>,
+    /// The opener's own report, once it has run — the identity questions to confirm.
+    pub done: Option<String>,
+}
+
 impl EditorApp {
     pub fn new(vault_path: PathBuf) -> Self {
         EditorApp {
@@ -311,6 +334,7 @@ impl EditorApp {
             forms_state: TableState::default(),
             profile_form: None,
             tax_inputs_form: None,
+            open_next_year: None,
             mutation_modal: None,
             classify_inbound_flow: None,
             classify_inbound_modal: None,

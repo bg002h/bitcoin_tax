@@ -957,26 +957,39 @@ fn m4_authority(
     }
 }
 
-/// §4 R3-M6 carryover write-back — persist year `year`'s computed charitable, QBI business-loss,
-/// QBI-REIT/PTP and §1212(b) capital-loss carryover-OUTs
-/// as year (`year+1`)'s carryover-IN in the side-table. Only for a `ReturnInputs`-provenance full-return
-/// year (else there is no absolute return). Errors if the absolute return refuses (`screen_absolute`) or if
-/// a user-entered next-year carryover would be overwritten without `force`. Returns a human summary.
-pub fn write_back_carryover(
-    vault: &Path,
-    pp: &Passphrase,
+/// ★★★ **THE CARRYFORWARD CHAIN — year `year`'s COMPUTED carryover-OUTs, stamped onto a destination
+/// row, with every gate that decides whether btctax may hand a figure across a year boundary.**
+///
+/// Extracted from [`write_back_carryover`] when T4b's year-N+1 opener needed the *same* chain: R10.4
+/// says the opener's carryforwards are read *"from year N's committed **return** (the carryforward-out
+/// chain), never from year N's inputs"*, and that is exactly this computation. Two callers, one
+/// definition — a second copy would be a second place for the pseudo / not-computable / §170(f)(8) /
+/// restriction gates to be forgotten, and each of those exists because it was forgotten once.
+///
+/// ★ `destination` is a CLOSURE, not a value, so the ORDER in which refusals are raised is
+///   unchanged: `write_back_carryover` fetches year+1's committed row at the point it always did —
+///   after `screen_absolute`, not before the pseudo gate — while the opener hands over a fresh seed.
+///
+/// Returns the destination row with the carryovers written, alongside year `year`'s frozen return and
+/// its inputs, because the SUMMARY has to ask [`btctax_core::capital_loss_roll_is_grounded`] the same
+/// question the write asked.
+pub(crate) struct RolledCarryover {
+    /// The destination row, with year `year`'s carryover-OUTs stamped on (provenance `Computed`).
+    pub updated: btctax_core::tax::return_inputs::ReturnInputs,
+    /// Year `year`'s FROZEN return — what every figure above was read off.
+    pub ar: btctax_core::AbsoluteReturn,
+    /// Year `year`'s committed inputs.
+    pub ri: btctax_core::tax::return_inputs::ReturnInputs,
+}
+
+pub(crate) fn roll_carryover_onto(
+    s: &Session,
     year: i32,
+    destination: impl FnOnce(
+        &Session,
+    ) -> Result<btctax_core::tax::return_inputs::ReturnInputs, CliError>,
     force: bool,
-    discard_draft: bool,
-) -> Result<String, CliError> {
-    let mut s = Session::open(vault, pp)?;
-    // ★ §6.2 (M-1): write-back reads AND writes the year+1 committed row, so it reconciles the year+1
-    // draft here — before the year+1 read below, which early-returns on an absent row (a parked year has
-    // none) and would otherwise shadow the parked-refuse remedy.
-    // ★ T4/R11: `discard_draft` is `--discard-draft`, and it is scoped to YEAR+1's draft — the year
-    //   this command writes onto. It is separate from `force`, which overrides the write-back's own
-    //   guard on a user-entered carryover and says nothing about a draft.
-    crate::input_form_store::coherence_clear_or_refuse(s.conn(), year + 1, discard_draft)?;
+) -> Result<RolledCarryover, CliError> {
     let (events, state, cfg) = s.load_events_and_project()?;
     let tables = BundledTaxTables::load();
     let fr_tables = BundledFullReturnTables::load();
@@ -1048,23 +1061,60 @@ pub fn write_back_carryover(
             refusal.reason, refusal.detail
         )));
     }
-    // SPEC §4 R3-M6 writes the carryover "as year (Y+1)'s `*_carryover_in` **on that row**" — the row must
-    // ALREADY exist. Fabricating one would put a `ReturnInputs` row at the TOP of the §4.12 precedence
-    // ladder for a year v1 has no full-return tables for (Y+1 is always 2025 in v1), which fails closed and
-    // would make that year uncomputable — shadowing a stored `TaxProfile` the user was planning with, and
-    // blocking `tax-profile --year Y+1` via the D-4 guard (Fable P4.9 r1 I1).
-    let next = crate::return_inputs::get(s.conn(), year + 1)?.ok_or_else(|| {
-        CliError::Usage(format!(
-            "year {next} has no full-return inputs yet — the carryover is written onto that row, so import \
-             it first (`income import --year {next} --file <toml>`) and then re-run `--write-carryover`. \
-             (Creating the row here would shadow any stored tax-profile for {next} and make it uncomputable \
-             in this version, which supports full returns for TY2024 only.)",
-            next = year + 1
-        ))
-    })?;
-    let next_original = next.clone();
+    let next = destination(s)?;
     let updated = btctax_core::apply_carryover_writeback(&ar, &ri, &state, year, next, force)
         .map_err(CliError::Usage)?;
+    Ok(RolledCarryover { updated, ar, ri })
+}
+
+/// §4 R3-M6 carryover write-back — persist year `year`'s computed charitable, QBI business-loss,
+/// QBI-REIT/PTP and §1212(b) capital-loss carryover-OUTs
+/// as year (`year+1`)'s carryover-IN in the side-table. Only for a `ReturnInputs`-provenance full-return
+/// year (else there is no absolute return). Errors if the absolute return refuses (`screen_absolute`) or if
+/// a user-entered next-year carryover would be overwritten without `force`. Returns a human summary.
+pub fn write_back_carryover(
+    vault: &Path,
+    pp: &Passphrase,
+    year: i32,
+    force: bool,
+    discard_draft: bool,
+) -> Result<String, CliError> {
+    let mut s = Session::open(vault, pp)?;
+    // ★ §6.2 (M-1): write-back reads AND writes the year+1 committed row, so it reconciles the year+1
+    // draft here — before the year+1 read below, which early-returns on an absent row (a parked year has
+    // none) and would otherwise shadow the parked-refuse remedy.
+    // ★ T4/R11: `discard_draft` is `--discard-draft`, and it is scoped to YEAR+1's draft — the year
+    //   this command writes onto. It is separate from `force`, which overrides the write-back's own
+    //   guard on a user-entered carryover and says nothing about a draft.
+    crate::input_form_store::coherence_clear_or_refuse(s.conn(), year + 1, discard_draft)?;
+    // ★★★ THE CHAIN, shared with T4b's year-N+1 opener — see [`roll_carryover_onto`]. The `next`
+    //     row is fetched inside it, at the point it always was, by the closure below.
+    let mut next_original = None;
+    let rolled = roll_carryover_onto(
+        &s,
+        year,
+        |s| {
+            // SPEC §4 R3-M6 writes the carryover "as year (Y+1)'s `*_carryover_in` **on that row**" — the row must
+            // ALREADY exist. Fabricating one would put a `ReturnInputs` row at the TOP of the §4.12 precedence
+            // ladder for a year v1 has no full-return tables for (Y+1 is always 2025 in v1), which fails closed and
+            // would make that year uncomputable — shadowing a stored `TaxProfile` the user was planning with, and
+            // blocking `tax-profile --year Y+1` via the D-4 guard (Fable P4.9 r1 I1).
+            let next = crate::return_inputs::get(s.conn(), year + 1)?.ok_or_else(|| {
+            CliError::Usage(format!(
+                "year {next} has no full-return inputs yet — the carryover is written onto that row, so import \
+                 it first (`income import --year {next} --file <toml>`) and then re-run `--write-carryover`. \
+                 (Creating the row here would shadow any stored tax-profile for {next} and make it uncomputable \
+                 in this version, which supports full returns for TY2024 only.)",
+                next = year + 1
+            ))
+        })?;
+            next_original = Some(next.clone());
+            Ok(next)
+        },
+        force,
+    )?;
+    let RolledCarryover { updated, ar, ri } = rolled;
+    let next_original = next_original.expect("the destination closure ran, or the roll errored");
     crate::return_inputs::set(s.conn(), year + 1, &updated)?;
     s.save()?;
 
@@ -1084,8 +1134,19 @@ pub fn write_back_carryover(
     //    there is no year-Y+1 authority to screen against — but both sides of the comparison use the
     //    same authority, so any difference between them is attributable to THE WRITE and to nothing
     //    else. A refusal the row already had is not reported; only one this command created is.
-    let before = btctax_core::tax::return_refuse::screen_inputs(&next_original, table, params);
-    let after = btctax_core::tax::return_refuse::screen_inputs(&updated, table, params);
+    // ★ The tables are re-loaded rather than carried out of [`roll_carryover_onto`]: `table_for`
+    //   borrows from the loader, and the loader is that function's local. The `else` arm cannot be
+    //   reached — the roll refuses year `year` outright without both — and it yields no note rather
+    //   than a wrong one.
+    let tables = BundledTaxTables::load();
+    let fr_tables = BundledFullReturnTables::load();
+    let (before, after) = match (fr_tables.full_return_for(year), tables.table_for(year)) {
+        (Some(params), Some(table)) => (
+            btctax_core::tax::return_refuse::screen_inputs(&next_original, table, params),
+            btctax_core::tax::return_refuse::screen_inputs(&updated, table, params),
+        ),
+        _ => (None, None),
+    };
     let newly_unfilable = match (&before, &after) {
         (None, Some(r)) => Some(format!(
             "\n★ NOTE: {next} now needs an answer it did not need before. Writing a capital-loss \

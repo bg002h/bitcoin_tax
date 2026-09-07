@@ -359,6 +359,11 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
         handle_optimize_accept_flow_key(app, key);
         return;
     }
+    // ── T4b: the year-N+1 opener's confirmation — a blocking surface like the flows ──
+    if app.open_next_year.is_some() {
+        handle_open_next_year_key(app, key);
+        return;
+    }
     // ── Tax-inputs flow dispatch — BEFORE form + screen dispatch ──────────────
     // A flow like the others: `q`/Esc must never fall through to a Browse quit arm while it blocks.
     if app.tax_inputs_form.is_some() {
@@ -432,6 +437,8 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                 KeyCode::Char('p') => open_profile_form(app),
                 // Tax-inputs editing flow (the btctax-input-form engine over input_form_store).
                 KeyCode::Char('T') => open_tax_inputs_form(app),
+                // T4b: open the SELECTED year from the year before it (the year picker's action).
+                KeyCode::Char('n') => open_open_next_year(app),
                 KeyCode::Char('c') => open_classify_inbound_flow(app),
                 KeyCode::Char('o') => open_reclassify_outflow_flow(app),
                 KeyCode::Char('r') => open_reclassify_income_flow(app),
@@ -957,6 +964,102 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
         crate::edit::form::seed_broker_rows(ri, &form.broker_census, regime);
     }
     app.tax_inputs_form = Some(form);
+}
+
+/// ★★★ **T4b — the year picker's "open TY(N+1) from TY(N)" action** (`SPEC_interview.md` R10.4).
+///
+/// The picker is on year N+1; the action seeds it from year N. It is OFFERED only where
+/// [`edit::persist::form_open_next_year_offered`] holds — nothing stored for this year, a committed
+/// return for the year before — and pressing the key anywhere else says which of the three facts is
+/// false rather than silently doing nothing.
+///
+/// ★ The offer predicate and the refusal are the SAME question asked of the store: the CLI's own
+///   refusals still run inside `open_next_year`, so a race between the offer and the keystroke
+///   cannot produce a write the CLI would have refused.
+fn open_open_next_year(app: &mut EditorApp) {
+    if let Some(s) = app.residue_latch_status() {
+        app.status = Some(s);
+        return;
+    }
+    let Some(session) = app.session.as_ref() else {
+        return;
+    };
+    let to = app.selected_year;
+    match edit::persist::form_open_next_year_offered(session, to) {
+        Ok(true) => {
+            app.open_next_year = Some(editor::OpenNextYearState {
+                from: to - 1,
+                to,
+                blocked_by_draft: None,
+                done: None,
+            });
+        }
+        Ok(false) => {
+            app.status = Some(format!(
+                "nothing to open: {to} is opened from {from} only when {from} has a stored return \
+                 and {to} has neither a return nor a draft.",
+                from = to - 1
+            ));
+        }
+        Err(e) => app.status = Some(format!("could not check {to}: {e}")),
+    }
+}
+
+/// Run the open, routing T4's non-trivial-draft refusal into the payload-confirm rather than to the
+/// status line — the refusal names what would be lost, and `X` is the confirmation.
+fn run_open_next_year(app: &mut EditorApp, discard_draft: bool) {
+    let Some(st) = app.open_next_year.as_ref() else {
+        return;
+    };
+    let from = st.from;
+    let outcome = {
+        let Some(session) = app.session.as_mut() else {
+            return;
+        };
+        edit::persist::form_open_next_year(session, from, discard_draft)
+    };
+    match outcome {
+        Ok(opened) => {
+            let report = opened.render();
+            if let Some(st) = app.open_next_year.as_mut() {
+                st.blocked_by_draft = None;
+                st.done = Some(report);
+            }
+        }
+        Err(btctax_cli::CliError::NonTrivialDraftBlocksWrite { holdings, .. }) => {
+            if let Some(st) = app.open_next_year.as_mut() {
+                st.blocked_by_draft = Some(holdings);
+            }
+        }
+        Err(e) => {
+            app.open_next_year = None;
+            app.status = Some(e.to_string());
+        }
+    }
+}
+
+/// Keys for the T4b confirmation. Enter opens (or, once opened, closes); `X` confirms the discard of
+/// a draft holding work; Esc closes without writing. Every other key is swallowed — this is a
+/// blocking surface, so `q` must not quit through it.
+fn handle_open_next_year_key(app: &mut EditorApp, key: KeyEvent) {
+    let done = app
+        .open_next_year
+        .as_ref()
+        .is_some_and(|st| st.done.is_some());
+    match key.code {
+        KeyCode::Enter if !done => run_open_next_year(app, false),
+        KeyCode::Char('X') => {
+            if app
+                .open_next_year
+                .as_ref()
+                .is_some_and(|st| st.blocked_by_draft.is_some())
+            {
+                run_open_next_year(app, true);
+            }
+        }
+        KeyCode::Enter | KeyCode::Esc => app.open_next_year = None,
+        _ => {}
+    }
 }
 
 /// Flush the in-progress tax-inputs working return to the draft table via [`edit::persist::form_save_draft`]
@@ -10248,6 +10351,156 @@ mod tests {
         );
         app.selected_year = year; // ★ M9: override the 2025 default
         (app, dir)
+    }
+
+    // ── T4b — the year picker's "open TY(N+1) from TY(N)" action ─────────────
+
+    /// A committed year-N return in an otherwise-empty vault, with the app parked on year N+1 (the
+    /// year the picker offers to open).
+    fn app_on_year_to_open(with_year_n: bool) -> (EditorApp, tempfile::TempDir) {
+        let (mut app, dir) = unlocked_app_on_empty_vault(2025);
+        if with_year_n {
+            let ri = btctax_core::tax::testonly::answered(
+                btctax_core::tax::return_inputs::ReturnInputs {
+                    tax_year: 2024,
+                    filing_status: btctax_core::FilingStatus::Single,
+                    ..Default::default()
+                },
+            );
+            let session = app.session.as_mut().unwrap();
+            crate::edit::persist::store_return_inputs_for_test(session, 2024, &ri).unwrap();
+        }
+        (app, dir)
+    }
+
+    /// ★★★ **T4b: the action is ABSENT when year N has no committed row** — there is nothing to open
+    ///     from, and an offer that cannot be honoured is worse than none.
+    #[test]
+    fn the_open_next_year_action_is_absent_when_year_n_has_no_committed_row() {
+        let (mut app, _dir) = app_on_year_to_open(false);
+        handle_key(&mut app, press(KeyCode::Char('n')));
+        assert!(
+            app.open_next_year.is_none(),
+            "no year 2024 return ⇒ no confirmation opens"
+        );
+        let status = app.status.clone().unwrap_or_default();
+        assert!(
+            status.contains("2025 is opened from 2024"),
+            "and the filer is told the condition rather than met with silence: {status}"
+        );
+    }
+
+    /// The paired half: with year N committed, the action IS offered and Enter performs the open —
+    /// seeding year N+1's DRAFT and nothing else.
+    #[test]
+    fn the_open_next_year_action_is_offered_and_enter_seeds_the_draft() {
+        let (mut app, _dir) = app_on_year_to_open(true);
+        handle_key(&mut app, press(KeyCode::Char('n')));
+        let st = app
+            .open_next_year
+            .as_ref()
+            .expect("year 2024 is committed and 2025 is empty ⇒ the action is offered");
+        assert_eq!((st.from, st.to), (2024, 2025));
+        assert!(st.done.is_none(), "nothing is written until Enter");
+
+        handle_key(&mut app, press(KeyCode::Enter));
+        let report = app
+            .open_next_year
+            .as_ref()
+            .and_then(|st| st.done.clone())
+            .expect("Enter opens the year");
+        assert!(
+            report.contains("Opened TY2025 from TY2024"),
+            "the report names both years: {report}"
+        );
+        let session = app.session.as_ref().unwrap();
+        assert!(
+            crate::edit::persist::draft_exists_for_test(session, 2025).unwrap(),
+            "the seed lands in the DRAFT"
+        );
+        assert!(
+            !crate::edit::persist::form_open_next_year_offered(session, 2025).unwrap(),
+            "and the offer is gone once the year has a draft"
+        );
+        handle_key(&mut app, press(KeyCode::Esc));
+        assert!(app.open_next_year.is_none(), "Esc closes the surface");
+    }
+
+    /// ★★★ **T4's rule binds this surface too: a WIP draft holding work is discarded only on a
+    ///     payload-confirm that NAMES what would be lost.**
+    #[test]
+    fn a_draft_holding_an_interview_becomes_a_payload_confirm_and_x_confirms_it() {
+        use btctax_core::tax::provenance::{record_answer, AnswerKey, AnswerState};
+        use btctax_core::tax::questions::FORM_QUESTIONS;
+        let (mut app, _dir) = app_on_year_to_open(true);
+        // 2025 holds a draft with a RECORDED answer — the unreproducible part.
+        {
+            let mut ri = btctax_core::tax::return_inputs::ReturnInputs {
+                tax_year: 2025,
+                filing_status: btctax_core::FilingStatus::Single,
+                ..Default::default()
+            };
+            let q = FORM_QUESTIONS
+                .iter()
+                .find(|q| q.id == btctax_core::tax::document_census::DocumentRow::K1.question_id())
+                .unwrap();
+            (q.set)(&mut ri, false);
+            record_answer(
+                &mut ri,
+                AnswerKey::Question(q.id),
+                q.prompt,
+                time::macros::date!(2025 - 09 - 01),
+                AnswerState::Given,
+            );
+            let session = app.session.as_mut().unwrap();
+            crate::edit::persist::form_save_draft(session, 2025, &ri).unwrap();
+        }
+        // The offer is correctly absent — but the ACTION, reached anyway, refuses like the CLI.
+        app.open_next_year = Some(crate::editor::OpenNextYearState {
+            from: 2024,
+            to: 2025,
+            blocked_by_draft: None,
+            done: None,
+        });
+        handle_key(&mut app, press(KeyCode::Enter));
+        let held = app
+            .open_next_year
+            .as_ref()
+            .and_then(|st| st.blocked_by_draft.clone())
+            .expect("a draft holding an interview refuses the open");
+        assert!(
+            held.contains("recorded answer(s)"),
+            "the confirm NAMES what would be lost: {held}"
+        );
+        let session = app.session.as_ref().unwrap();
+        match crate::edit::persist::load_return_inputs(session, 2025)
+            .unwrap()
+            .0
+        {
+            btctax_cli::input_form_store::Loaded::Draft { ri, .. } => assert_eq!(
+                ri.answer_log.len(),
+                1,
+                "the draft still holds its record while the confirm stands — nothing is written yet"
+            ),
+            _ => panic!("the draft must survive the refusal"),
+        }
+
+        handle_key(&mut app, press(KeyCode::Char('X')));
+        assert!(
+            app.open_next_year
+                .as_ref()
+                .and_then(|st| st.done.as_ref())
+                .is_some(),
+            "X is the confirmation, and the open then runs"
+        );
+        let session = app.session.as_ref().unwrap();
+        let (loaded, _) = crate::edit::persist::load_return_inputs(session, 2025).unwrap();
+        match loaded {
+            btctax_cli::input_form_store::Loaded::Draft { ri, .. } => {
+                assert!(ri.answer_log.is_empty(), "the seed carries no record");
+            }
+            _ => panic!("the seeded draft is the working return"),
+        }
     }
 
     /// `flush_tax_inputs_draft` is a real `Session::save` fired from the IDLE TICK (`run`'s poll-timeout

@@ -338,6 +338,16 @@ fn run() -> Result<ExitCode, CliError> {
                 )?;
                 println!("Answered the full-return questions for tax year {year}.");
             }
+            IncomeCmd::OpenNextYear {
+                from,
+                discard_draft,
+            } => {
+                let pp = passphrase(false)?;
+                let mut s = btctax_cli::Session::open(vault, &pp)?;
+                let opened =
+                    btctax_cli::open_next_year::open_next_year(&mut s, from, discard_draft)?;
+                print!("{}", opened.render());
+            }
             IncomeCmd::Scrub { year, out } => {
                 let pp = passphrase(false)?;
                 match cmd::tax::scrub_return_inputs(vault, &pp, year)? {

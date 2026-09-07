@@ -273,6 +273,9 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
     if let Some(modal) = app.mutation_modal.as_ref() {
         draw_mutation_modal(frame, area, modal);
     }
+    if let Some(st) = app.open_next_year.as_ref() {
+        draw_open_next_year(frame, area, st);
+    }
     // Classify-inbound flow overlay.
     if app.classify_inbound_flow.is_some() {
         let is_list = matches!(
@@ -2825,13 +2828,98 @@ fn help_overlay_lines() -> Vec<Line<'static>> {
         Line::from("  P approve pseudo-reconcile defaults (when the [PSEUDO] banner shows)"),
         Line::from(""),
         hdr("App"),
-        Line::from("  p profile   T tax-inputs   ? help   q/Esc close"),
+        Line::from("  p profile   T tax-inputs   n open next year from the one before it"),
+        Line::from("  ? help   q/Esc close"),
         Line::from(""),
         Line::from(Span::styled(
             "  ? · Esc · q  to close",
             Style::default().fg(Color::DarkGray),
         )),
     ]
+}
+
+/// ★★★ **T4b — the year-N+1 opener's confirmation** (`SPEC_interview.md` R10.4).
+///
+/// Three states, one surface: the OFFER (what the open will and will not carry), the PAYLOAD-CONFIRM
+/// when the year holds a draft that holds work (T4's rule — naming what would be lost, `X` to
+/// confirm), and the REPORT, which is the identity questions the filer now has to confirm.
+///
+/// ★ The offer says *"every box blank"* before the filer presses anything, because the surprise this
+///   surface could produce is a filer expecting last year's return to be copied.
+pub fn draw_open_next_year(frame: &mut Frame, area: Rect, st: &crate::editor::OpenNextYearState) {
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    if let Some(report) = st.done.as_deref() {
+        for l in report.lines() {
+            lines.push(Line::from(l.to_string()));
+        }
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "  Enter · Esc  to close",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else if let Some(holdings) = st.blocked_by_draft.as_deref() {
+        lines.push(Line::from(Span::styled(
+            format!("TY{} already holds a work-in-progress draft.", st.to),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(format!("It holds {holdings}.")));
+        lines.push(Line::from(
+            "Opening the year replaces it. Recorded answers cannot be re-created by re-typing —"
+                .to_string(),
+        ));
+        lines.push(Line::from(
+            "btctax records WHEN it asked and in WHAT WORDS, and that is what would be lost."
+                .to_string(),
+        ));
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "  X  discard it and open    Esc  keep the draft",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            format!("Open TY{} from TY{}?", st.to, st.from),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(""));
+        lines.push(Line::from(format!(
+            "TY{}'s employers, payers, dependents and exchanges are carried over as NAMES, each",
+            st.from
+        )));
+        lines.push(Line::from(
+            "one a question for you to confirm. Every box arrives blank and every question"
+                .to_string(),
+        ));
+        lines.push(Line::from(
+            "unanswered: last year's answer is not testimony for this year.".to_string(),
+        ));
+        lines.push(Line::from(""));
+        lines.push(Line::from(format!(
+            "The only figures carried are TY{}'s computed carryforwards, marked as computed",
+            st.from
+        )));
+        lines.push(Line::from("from that year's return.".to_string()));
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "  Enter  open    Esc  cancel",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+    let width: u16 = 78;
+    let height: u16 = lines.len() as u16 + 2;
+    let rect = centered_rect(width, height, area);
+    frame.render_widget(Clear, rect);
+    let p = Paragraph::new(lines).block(
+        Block::default()
+            .title(" Open next year ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan)),
+    );
+    frame.render_widget(p, rect);
 }
 
 fn draw_help_overlay(frame: &mut Frame, area: Rect) {

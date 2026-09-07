@@ -922,7 +922,16 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
             )
         },
         get: |ri| ri.documents.w2,
-        set: |ri, v| ri.documents.w2 = Some(v),
+        // ★★★ R10.4 / T4b — THE ONE WRITER of a census answer. A `No` also removes the
+        //     opener's PRE-NAMED rows, so a filer who says the document did not arrive is
+        //     never left holding a row they did not type beside the contradiction refusal.
+        set: |ri, v| {
+            crate::tax::document_census::answer_row(
+                ri,
+                crate::tax::document_census::DocumentRow::W2,
+                v,
+            );
+        },
         // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
         //   year's shoebox is not testimony for this one.
         durability: Durability::PerYear,
@@ -942,7 +951,16 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
             )
         },
         get: |ri| ri.documents.int_1099,
-        set: |ri, v| ri.documents.int_1099 = Some(v),
+        // ★★★ R10.4 / T4b — THE ONE WRITER of a census answer. A `No` also removes the
+        //     opener's PRE-NAMED rows, so a filer who says the document did not arrive is
+        //     never left holding a row they did not type beside the contradiction refusal.
+        set: |ri, v| {
+            crate::tax::document_census::answer_row(
+                ri,
+                crate::tax::document_census::DocumentRow::Int1099,
+                v,
+            );
+        },
         // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
         //   year's shoebox is not testimony for this one.
         durability: Durability::PerYear,
@@ -962,7 +980,16 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
             )
         },
         get: |ri| ri.documents.div_1099,
-        set: |ri, v| ri.documents.div_1099 = Some(v),
+        // ★★★ R10.4 / T4b — THE ONE WRITER of a census answer. A `No` also removes the
+        //     opener's PRE-NAMED rows, so a filer who says the document did not arrive is
+        //     never left holding a row they did not type beside the contradiction refusal.
+        set: |ri, v| {
+            crate::tax::document_census::answer_row(
+                ri,
+                crate::tax::document_census::DocumentRow::Div1099,
+                v,
+            );
+        },
         // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
         //   year's shoebox is not testimony for this one.
         durability: Durability::PerYear,
@@ -982,7 +1009,16 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
             )
         },
         get: |ri| ri.documents.b_1099,
-        set: |ri, v| ri.documents.b_1099 = Some(v),
+        // ★★★ R10.4 / T4b — THE ONE WRITER of a census answer. A `No` also removes the
+        //     opener's PRE-NAMED rows, so a filer who says the document did not arrive is
+        //     never left holding a row they did not type beside the contradiction refusal.
+        set: |ri, v| {
+            crate::tax::document_census::answer_row(
+                ri,
+                crate::tax::document_census::DocumentRow::B1099,
+                v,
+            );
+        },
         // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
         //   year's shoebox is not testimony for this one.
         durability: Durability::PerYear,
@@ -1002,7 +1038,16 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
             )
         },
         get: |ri| ri.documents.g_1099,
-        set: |ri, v| ri.documents.g_1099 = Some(v),
+        // ★★★ R10.4 / T4b — THE ONE WRITER of a census answer. A `No` also removes the
+        //     opener's PRE-NAMED rows, so a filer who says the document did not arrive is
+        //     never left holding a row they did not type beside the contradiction refusal.
+        set: |ri, v| {
+            crate::tax::document_census::answer_row(
+                ri,
+                crate::tax::document_census::DocumentRow::G1099,
+                v,
+            );
+        },
         // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
         //   year's shoebox is not testimony for this one.
         durability: Durability::PerYear,
@@ -1022,7 +1067,16 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
             )
         },
         get: |ri| ri.documents.form_1098,
-        set: |ri, v| ri.documents.form_1098 = Some(v),
+        // ★★★ R10.4 / T4b — THE ONE WRITER of a census answer. A `No` also removes the
+        //     opener's PRE-NAMED rows, so a filer who says the document did not arrive is
+        //     never left holding a row they did not type beside the contradiction refusal.
+        set: |ri, v| {
+            crate::tax::document_census::answer_row(
+                ri,
+                crate::tax::document_census::DocumentRow::Form1098,
+                v,
+            );
+        },
         // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
         //   year's shoebox is not testimony for this one.
         durability: Durability::PerYear,
@@ -1042,7 +1096,16 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
             )
         },
         get: |ri| ri.documents.form_1098e,
-        set: |ri, v| ri.documents.form_1098e = Some(v),
+        // ★★★ R10.4 / T4b — THE ONE WRITER of a census answer. A `No` also removes the
+        //     opener's PRE-NAMED rows, so a filer who says the document did not arrive is
+        //     never left holding a row they did not type beside the contradiction refusal.
+        set: |ri, v| {
+            crate::tax::document_census::answer_row(
+                ri,
+                crate::tax::document_census::DocumentRow::Form1098e,
+                v,
+            );
+        },
         // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
         //   year's shoebox is not testimony for this one.
         durability: Durability::PerYear,
@@ -1062,7 +1125,16 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
             )
         },
         get: |ri| ri.documents.r_1099,
-        set: |ri, v| ri.documents.r_1099 = Some(v),
+        // ★★★ R10.4 / T4b — THE ONE WRITER of a census answer. A `No` also removes the
+        //     opener's PRE-NAMED rows, so a filer who says the document did not arrive is
+        //     never left holding a row they did not type beside the contradiction refusal.
+        set: |ri, v| {
+            crate::tax::document_census::answer_row(
+                ri,
+                crate::tax::document_census::DocumentRow::R1099,
+                v,
+            );
+        },
         // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
         //   year's shoebox is not testimony for this one.
         durability: Durability::PerYear,
@@ -1082,7 +1154,16 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
             )
         },
         get: |ri| ri.documents.ssa_1099,
-        set: |ri, v| ri.documents.ssa_1099 = Some(v),
+        // ★★★ R10.4 / T4b — THE ONE WRITER of a census answer. A `No` also removes the
+        //     opener's PRE-NAMED rows, so a filer who says the document did not arrive is
+        //     never left holding a row they did not type beside the contradiction refusal.
+        set: |ri, v| {
+            crate::tax::document_census::answer_row(
+                ri,
+                crate::tax::document_census::DocumentRow::Ssa1099,
+                v,
+            );
+        },
         // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
         //   year's shoebox is not testimony for this one.
         durability: Durability::PerYear,
@@ -1102,7 +1183,16 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
             )
         },
         get: |ri| ri.documents.nec_misc_k_1099,
-        set: |ri, v| ri.documents.nec_misc_k_1099 = Some(v),
+        // ★★★ R10.4 / T4b — THE ONE WRITER of a census answer. A `No` also removes the
+        //     opener's PRE-NAMED rows, so a filer who says the document did not arrive is
+        //     never left holding a row they did not type beside the contradiction refusal.
+        set: |ri, v| {
+            crate::tax::document_census::answer_row(
+                ri,
+                crate::tax::document_census::DocumentRow::NecMiscK1099,
+                v,
+            );
+        },
         // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
         //   year's shoebox is not testimony for this one.
         durability: Durability::PerYear,
@@ -1122,7 +1212,16 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
             )
         },
         get: |ri| ri.documents.k1,
-        set: |ri, v| ri.documents.k1 = Some(v),
+        // ★★★ R10.4 / T4b — THE ONE WRITER of a census answer. A `No` also removes the
+        //     opener's PRE-NAMED rows, so a filer who says the document did not arrive is
+        //     never left holding a row they did not type beside the contradiction refusal.
+        set: |ri, v| {
+            crate::tax::document_census::answer_row(
+                ri,
+                crate::tax::document_census::DocumentRow::K1,
+                v,
+            );
+        },
         // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
         //   year's shoebox is not testimony for this one.
         durability: Durability::PerYear,
@@ -1142,7 +1241,16 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
             )
         },
         get: |ri| ri.documents.schedule_e_rental,
-        set: |ri, v| ri.documents.schedule_e_rental = Some(v),
+        // ★★★ R10.4 / T4b — THE ONE WRITER of a census answer. A `No` also removes the
+        //     opener's PRE-NAMED rows, so a filer who says the document did not arrive is
+        //     never left holding a row they did not type beside the contradiction refusal.
+        set: |ri, v| {
+            crate::tax::document_census::answer_row(
+                ri,
+                crate::tax::document_census::DocumentRow::ScheduleERental,
+                v,
+            );
+        },
         // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
         //   year's shoebox is not testimony for this one.
         durability: Durability::PerYear,
@@ -1162,7 +1270,16 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
             )
         },
         get: |ri| ri.documents.s_1099,
-        set: |ri, v| ri.documents.s_1099 = Some(v),
+        // ★★★ R10.4 / T4b — THE ONE WRITER of a census answer. A `No` also removes the
+        //     opener's PRE-NAMED rows, so a filer who says the document did not arrive is
+        //     never left holding a row they did not type beside the contradiction refusal.
+        set: |ri, v| {
+            crate::tax::document_census::answer_row(
+                ri,
+                crate::tax::document_census::DocumentRow::S1099,
+                v,
+            );
+        },
         // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
         //   year's shoebox is not testimony for this one.
         durability: Durability::PerYear,
@@ -1182,7 +1299,16 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
             )
         },
         get: |ri| ri.documents.oid_1099,
-        set: |ri, v| ri.documents.oid_1099 = Some(v),
+        // ★★★ R10.4 / T4b — THE ONE WRITER of a census answer. A `No` also removes the
+        //     opener's PRE-NAMED rows, so a filer who says the document did not arrive is
+        //     never left holding a row they did not type beside the contradiction refusal.
+        set: |ri, v| {
+            crate::tax::document_census::answer_row(
+                ri,
+                crate::tax::document_census::DocumentRow::Oid1099,
+                v,
+            );
+        },
         // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
         //   year's shoebox is not testimony for this one.
         durability: Durability::PerYear,
@@ -1202,7 +1328,16 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
             )
         },
         get: |ri| ri.documents.w2g,
-        set: |ri, v| ri.documents.w2g = Some(v),
+        // ★★★ R10.4 / T4b — THE ONE WRITER of a census answer. A `No` also removes the
+        //     opener's PRE-NAMED rows, so a filer who says the document did not arrive is
+        //     never left holding a row they did not type beside the contradiction refusal.
+        set: |ri, v| {
+            crate::tax::document_census::answer_row(
+                ri,
+                crate::tax::document_census::DocumentRow::W2g,
+                v,
+            );
+        },
         // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
         //   year's shoebox is not testimony for this one.
         durability: Durability::PerYear,
@@ -1222,7 +1357,16 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
             )
         },
         get: |ri| ri.documents.c_1099,
-        set: |ri, v| ri.documents.c_1099 = Some(v),
+        // ★★★ R10.4 / T4b — THE ONE WRITER of a census answer. A `No` also removes the
+        //     opener's PRE-NAMED rows, so a filer who says the document did not arrive is
+        //     never left holding a row they did not type beside the contradiction refusal.
+        set: |ri, v| {
+            crate::tax::document_census::answer_row(
+                ri,
+                crate::tax::document_census::DocumentRow::C1099,
+                v,
+            );
+        },
         // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
         //   year's shoebox is not testimony for this one.
         durability: Durability::PerYear,
@@ -1242,7 +1386,16 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
             )
         },
         get: |ri| ri.documents.a_1095,
-        set: |ri, v| ri.documents.a_1095 = Some(v),
+        // ★★★ R10.4 / T4b — THE ONE WRITER of a census answer. A `No` also removes the
+        //     opener's PRE-NAMED rows, so a filer who says the document did not arrive is
+        //     never left holding a row they did not type beside the contradiction refusal.
+        set: |ri, v| {
+            crate::tax::document_census::answer_row(
+                ri,
+                crate::tax::document_census::DocumentRow::A1095,
+                v,
+            );
+        },
         // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
         //   year's shoebox is not testimony for this one.
         durability: Durability::PerYear,
@@ -1262,7 +1415,16 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
             )
         },
         get: |ri| ri.documents.t_1098,
-        set: |ri, v| ri.documents.t_1098 = Some(v),
+        // ★★★ R10.4 / T4b — THE ONE WRITER of a census answer. A `No` also removes the
+        //     opener's PRE-NAMED rows, so a filer who says the document did not arrive is
+        //     never left holding a row they did not type beside the contradiction refusal.
+        set: |ri, v| {
+            crate::tax::document_census::answer_row(
+                ri,
+                crate::tax::document_census::DocumentRow::T1098,
+                v,
+            );
+        },
         // ★ §G-15 — PER-YEAR: which documents arrived is a fact about ONE tax year, and last
         //   year's shoebox is not testimony for this one.
         durability: Durability::PerYear,

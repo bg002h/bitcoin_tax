@@ -209,6 +209,68 @@ pub fn form_discard_blocked_draft(
     btctax_cli::input_form_store::discard_blocked_draft(session, year)
 }
 
+/// ★★★ **T4b — is the "open TY(N+1) from TY(N)" action OFFERED for this year?**
+///
+/// True when the year the picker is on has NOTHING yet — no committed row and no draft — and the
+/// year before it has a committed return to carry identities and carryforwards from. All three are
+/// facts about the store, so the predicate lives beside the other reads rather than in the key
+/// handler, and there is exactly one copy of it: the offer the filer sees and the refusal they would
+/// otherwise meet are the same question.
+///
+/// Lives HERE for the same reason as [`load_return_inputs`]: `Session::conn()` is confined to this
+/// module by the KAT-G1 gate. A pure READ — `&Session`, no `save()`.
+pub fn form_open_next_year_offered(
+    session: &btctax_cli::Session,
+    to: i32,
+) -> Result<bool, btctax_cli::CliError> {
+    Ok(
+        btctax_cli::return_inputs::get(session.conn(), to - 1)?.is_some()
+            && btctax_cli::return_inputs::get(session.conn(), to)?.is_none()
+            && !btctax_cli::input_form_store::draft_exists(session.conn(), to)?,
+    )
+}
+
+/// ★★★ **T4b — perform the open.** A thin wrapper over
+/// [`btctax_cli::open_next_year::open_next_year`], which seeds year `from + 1`'s DRAFT and refuses
+/// (writing nothing) on every state the CLI refuses on — including T4's non-trivial-draft rule,
+/// whose `discard_draft` confirmation is the TUI's payload-confirm.
+///
+/// Lives HERE, alongside [`form_save_draft`], because the mutation surface (`Session::conn()` /
+/// `Session::save()`) is confined to this module (the KAT-G1 gate).
+///
+/// Returns [`btctax_cli::CliError`], NOT [`PersistError`], for the same reason
+/// [`form_save_draft`] does: the write is `save_draft`, not an append-with-rollback, and its `Err`
+/// is routed to `app.status` directly.
+pub fn form_open_next_year(
+    session: &mut btctax_cli::Session,
+    from: i32,
+    discard_draft: bool,
+) -> Result<btctax_cli::open_next_year::Opened, btctax_cli::CliError> {
+    btctax_cli::open_next_year::open_next_year(session, from, discard_draft)
+}
+
+/// Test-only reads/writes the crate's own tests need and the KAT-G1 gate would otherwise forbid
+/// them from naming: the gate confines `Session::conn()` to this module, so a fixture that has to
+/// PLANT a committed row or ASSERT a draft exists reaches it here, `#[cfg(test)]`, beside the
+/// production wrappers.
+#[cfg(test)]
+pub fn store_return_inputs_for_test(
+    session: &mut btctax_cli::Session,
+    year: i32,
+    ri: &btctax_core::tax::return_inputs::ReturnInputs,
+) -> Result<(), btctax_cli::CliError> {
+    btctax_cli::return_inputs::set(session.conn(), year, ri)?;
+    session.save()
+}
+
+#[cfg(test)]
+pub fn draft_exists_for_test(
+    session: &btctax_cli::Session,
+    year: i32,
+) -> Result<bool, btctax_cli::CliError> {
+    btctax_cli::input_form_store::draft_exists(session.conn(), year)
+}
+
 /// Revert the in-memory DB to `pre` after a mutation-committing step failed, mapping the error:
 /// `RolledBack` if the revert succeeds, `ResidueLive` if the revert ALSO fails (residue is live).
 fn rollback(

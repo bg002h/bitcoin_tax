@@ -608,10 +608,270 @@ pub fn row_is_live(_ri: &crate::tax::return_inputs::ReturnInputs, row: DocumentR
     !matches!(row, DocumentRow::Form1098 | DocumentRow::Form1098e)
 }
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// R10.4 / T4b — PRE-NAMED rows, and what answering a census row NO does to them
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+/// ★★★ **A PRE-NAMED row is an IDENTITY the year-N+1 opener carried, never testimony.**
+///
+/// `open_next_year` (T4b) seeds each of year N's payers as a row with the identity fields set — the
+/// employer and its EIN, the payer and its TIN — and **every box default**, because R10.4's
+/// sentence is *"Last year Acme (EIN 12-3456789) issued you a W-2. Did Acme issue one for 2027?"*
+/// and the answer to it is not a figure.
+///
+/// The test is a **comparison against the row's own identity-only seed**, never a list of boxes to
+/// check for zero, for exactly the reason [`crate::tax::return_inputs::ReturnInputs`]'s draft
+/// predicate is one (`input_form_store::draft_is_disposable`): a box added to `W2` tomorrow is
+/// covered the day it is added, with no edit here. And the direction is **fail-CLOSED** — anything
+/// the filer has typed, including a `transcribed_on` date, makes the row unequal to its seed, so it
+/// is KEPT and the contradiction refusal still fires. Nothing [`drop_pre_named_rows`] removes was
+/// ever testimony.
+#[must_use]
+pub fn row_is_pre_named(
+    ri: &crate::tax::return_inputs::ReturnInputs,
+    row: DocumentRow,
+    i: usize,
+) -> bool {
+    use crate::tax::return_inputs::{Form1099B, Form1099Div, Form1099G, Form1099Int, W2};
+    match row {
+        DocumentRow::W2 => ri.w2s.get(i).is_some_and(|w| {
+            *w == W2 {
+                owner: w.owner,
+                employer: w.employer.clone(),
+                ein: w.ein.clone(),
+                ..Default::default()
+            }
+        }),
+        DocumentRow::Int1099 => ri.int_1099.get(i).is_some_and(|r| {
+            *r == Form1099Int {
+                payer: r.payer.clone(),
+                payer_tin: r.payer_tin.clone(),
+                ..Default::default()
+            }
+        }),
+        DocumentRow::Div1099 => ri.div_1099.get(i).is_some_and(|r| {
+            *r == Form1099Div {
+                payer: r.payer.clone(),
+                payer_tin: r.payer_tin.clone(),
+                ..Default::default()
+            }
+        }),
+        DocumentRow::G1099 => ri.g_1099.get(i).is_some_and(|r| {
+            *r == Form1099G {
+                payer: r.payer.clone(),
+                payer_tin: r.payer_tin.clone(),
+                ..Default::default()
+            }
+        }),
+        DocumentRow::B1099 => ri.b_1099.get(i).is_some_and(|r| {
+            *r == Form1099B {
+                payer: r.payer.clone(),
+                payer_tin: r.payer_tin.clone(),
+                ..Default::default()
+            }
+        }),
+        // No section exists, so there is no row to be pre-named — the same seventeen-vs-five split
+        // [`declared_rows`] draws, and it is a `match` so a kind that GAINS a section reds here.
+        DocumentRow::Form1098
+        | DocumentRow::Form1098e
+        | DocumentRow::R1099
+        | DocumentRow::Ssa1099
+        | DocumentRow::NecMiscK1099
+        | DocumentRow::K1
+        | DocumentRow::ScheduleERental
+        | DocumentRow::S1099
+        | DocumentRow::Oid1099
+        | DocumentRow::W2g
+        | DocumentRow::C1099
+        | DocumentRow::A1095
+        | DocumentRow::T1098 => false,
+    }
+}
+
+/// Remove every [`row_is_pre_named`] row of `row`'s kind, keeping every row that carries anything.
+/// Returns how many were removed.
+/// `Vec::retain` driven by a positional keep-list — one helper because a single closure cannot
+/// be inferred at five element types.
+fn retain_by<T>(v: &mut Vec<T>, keep: &[bool]) {
+    let mut i = 0usize;
+    v.retain(|_| {
+        let k = keep.get(i).copied().unwrap_or(true);
+        i += 1;
+        k
+    });
+}
+
+/// Remove every [`row_is_pre_named`] row of `row`'s kind, keeping every row that carries anything.
+/// Returns how many were removed.
+pub fn drop_pre_named_rows(
+    ri: &mut crate::tax::return_inputs::ReturnInputs,
+    row: DocumentRow,
+) -> usize {
+    let before = declared_rows(ri, row).unwrap_or(0);
+    let keep: Vec<bool> = (0..before).map(|i| !row_is_pre_named(ri, row, i)).collect();
+    match row {
+        DocumentRow::W2 => retain_by(&mut ri.w2s, &keep),
+        DocumentRow::Int1099 => retain_by(&mut ri.int_1099, &keep),
+        DocumentRow::Div1099 => retain_by(&mut ri.div_1099, &keep),
+        DocumentRow::G1099 => retain_by(&mut ri.g_1099, &keep),
+        DocumentRow::B1099 => retain_by(&mut ri.b_1099, &keep),
+        DocumentRow::Form1098
+        | DocumentRow::Form1098e
+        | DocumentRow::R1099
+        | DocumentRow::Ssa1099
+        | DocumentRow::NecMiscK1099
+        | DocumentRow::K1
+        | DocumentRow::ScheduleERental
+        | DocumentRow::S1099
+        | DocumentRow::Oid1099
+        | DocumentRow::W2g
+        | DocumentRow::C1099
+        | DocumentRow::A1095
+        | DocumentRow::T1098 => {}
+    }
+    before - declared_rows(ri, row).unwrap_or(0)
+}
+
+/// ★★★ **THE ONE WRITER of a census answer** — every census [`crate::tax::questions::FormQuestion`]'s
+/// `set` delegates here, so `income answer`, the input form and any future surface share one rule.
+///
+/// Writing the tri-state is all it did before T4b. What it adds is R10.4's *"a No removes the
+/// pre-named row"*: the opener seeds identities the filer has not confirmed, and a filer who says
+/// *"no, Acme sent me nothing this year"* must not be left holding a row they never typed, beside a
+/// refusal (`Some(false)` + rows) that `income answer` offers no way to clear. A row carrying
+/// anything at all is KEPT — see [`row_is_pre_named`] for why that direction is the safe one.
+pub fn answer_row(ri: &mut crate::tax::return_inputs::ReturnInputs, row: DocumentRow, v: bool) {
+    ri.documents.set(row, Some(v));
+    if !v {
+        drop_pre_named_rows(ri, row);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
+
+    /// ★★★ **R10.4 / T4b — a `No` removes the opener's PRE-NAMED rows and NOTHING else.**
+    ///
+    /// The opener seeds year N's payers as identity-only rows. If answering *"no, none arrived this
+    /// year"* left them behind, the filer would meet the census contradiction refusal (`Some(false)`
+    /// beside transcribed rows) on rows they never typed — and `income answer` has no delete.
+    /// Equally, a row carrying ANY figure is testimony and survives, so the refusal still fires for
+    /// the filer who really did transcribe one and then answered no.
+    #[test]
+    fn answering_a_census_row_no_drops_the_pre_named_rows_and_keeps_a_transcribed_one() {
+        use crate::tax::return_inputs::{ReturnInputs, W2};
+        use rust_decimal_macros::dec;
+        let mut ri = ReturnInputs {
+            w2s: vec![
+                // pre-named by the opener: identity only
+                W2 {
+                    employer: "Acme".into(),
+                    ein: Some("12-3456789".into()),
+                    ..Default::default()
+                },
+                // typed by the filer: a box carries a figure
+                W2 {
+                    employer: "Beta".into(),
+                    box1_wages: dec!(1),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        answer_row(&mut ri, DocumentRow::W2, false);
+        assert_eq!(ri.documents.w2, Some(false), "the answer is written");
+        assert_eq!(
+            ri.w2s
+                .iter()
+                .map(|w| w.employer.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Beta"],
+            "the pre-named row goes; the transcribed one is testimony and stays"
+        );
+    }
+
+    /// The other direction: a `Yes` touches no row (the filer is about to transcribe into them).
+    #[test]
+    fn answering_yes_keeps_every_pre_named_row() {
+        use crate::tax::return_inputs::{Form1099Int, ReturnInputs};
+        let mut ri = ReturnInputs {
+            int_1099: vec![Form1099Int {
+                payer: "Big Bank".into(),
+                payer_tin: "99-9999999".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        answer_row(&mut ri, DocumentRow::Int1099, true);
+        assert_eq!(ri.int_1099.len(), 1);
+    }
+
+    /// ★ **The predicate FAILS CLOSED, and here is the smallest thing that proves it**: a row whose
+    /// only mark is a `transcribed_on` date — no figure at all — is still the filer's, and is kept.
+    /// A predicate written as *"every money box is zero"* would delete it.
+    #[test]
+    fn a_row_marked_only_with_a_transcription_date_is_not_pre_named() {
+        use crate::tax::return_inputs::{Form1099Div, ReturnInputs};
+        let mut ri = ReturnInputs {
+            div_1099: vec![Form1099Div {
+                payer: "Fund".into(),
+                payer_tin: "11-1111111".into(),
+                transcribed_on: Some(time::macros::date!(2027 - 02 - 01)),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        assert!(!row_is_pre_named(&ri, DocumentRow::Div1099, 0));
+        answer_row(&mut ri, DocumentRow::Div1099, false);
+        assert_eq!(ri.div_1099.len(), 1, "a marked row is never dropped");
+    }
+
+    /// Every kind with a section is reachable through the one writer — derived from
+    /// [`declared_rows`], never a hand-list of five.
+    #[test]
+    fn every_kind_with_a_section_drops_its_pre_named_rows() {
+        use crate::tax::return_inputs::{
+            Form1099B, Form1099Div, Form1099G, Form1099Int, ReturnInputs, W2,
+        };
+        for row in DocumentRow::ALL {
+            let mut ri = ReturnInputs::default();
+            if declared_rows(&ri, *row).is_none() {
+                continue; // no section: nothing could be pre-named
+            }
+            match row {
+                DocumentRow::W2 => ri.w2s.push(W2 {
+                    employer: "E".into(),
+                    ..Default::default()
+                }),
+                DocumentRow::Int1099 => ri.int_1099.push(Form1099Int {
+                    payer: "P".into(),
+                    ..Default::default()
+                }),
+                DocumentRow::Div1099 => ri.div_1099.push(Form1099Div {
+                    payer: "P".into(),
+                    ..Default::default()
+                }),
+                DocumentRow::G1099 => ri.g_1099.push(Form1099G {
+                    payer: "P".into(),
+                    ..Default::default()
+                }),
+                DocumentRow::B1099 => ri.b_1099.push(Form1099B {
+                    payer: "P".into(),
+                    ..Default::default()
+                }),
+                other => panic!("{other:?} gained a section — give it a pre-named seed here"),
+            }
+            assert_eq!(declared_rows(&ri, *row), Some(1));
+            answer_row(&mut ri, *row, false);
+            assert_eq!(
+                declared_rows(&ri, *row),
+                Some(0),
+                "{row:?}: the pre-named row must be dropped by the one writer"
+            );
+        }
+    }
 
     /// Every row round-trips through `get`/`set`, and `ALL` is complete (the exhaustive `match`es
     /// make a new variant a compile error; this pins that `ALL` lists it too).
