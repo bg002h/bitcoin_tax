@@ -413,3 +413,422 @@ module header and asserted in the test.
    `box4 = box6 = 0` beside non-zero wages). That is the check working on anomalous fixtures, not a
    false positive — a $0 box 4 beside $40,000 of Social Security wages forgoes a credit — but a future
    fixture pass may want to give them real withholding.
+
+---
+
+# Fold (seam review I-1 … I-4, M-1 … M-4, N-1)
+
+Folded by a single implementer in the shared main tree at `30318a7b`. **Nothing committed or
+pushed.** Every plant was applied to a `cp` backup and restored; the tree is fmt-clean, clippy-clean
+and green everywhere. Report: `design/agent-reports/2026-09-07-build-interview-T5-review.md`; ledger:
+`…-VERIFICATION.md`; brief: `BRIEF-fold-interview-T5-review.md`.
+
+**Gates, run at the end and quoted verbatim:**
+
+```
+cargo fmt --all --check                                       → exit 0, no output
+CARGO_TARGET_DIR=target-clippy cargo clippy --workspace \
+    --all-targets --all-features -- -D warnings               → Finished (no diagnostics)
+cargo run -p xtask -- box-census      → box-census OK: 246 printed boxes across 15 archived
+                                        editions of 7 information returns, every one decided
+                                        (246 entries)                          ← UNCHANGED
+cargo run -p xtask -- line-coverage   → line-coverage OK: 341 money lines across 17 form(s) […],
+                                        24 exception(s) (ratchet 24), 0 unverifiable (ratchet 0),
+                                        12 not line-bound (ratchet 12)         ← UNCHANGED
+cargo run -p xtask -- census-join     → census join: 298 unmodeled entries across 13 maps […]
+                                                                               ← UNCHANGED (13)
+cargo run -p xtask -- cite-check      → cite-check: authority archived + extracted for 5/36
+                                        emitted (form, year) pairs […]; 31 excused, 0 unaccounted
+bash scripts/pii-scan-generic.sh      → pii-scan: clean (HEAD).
+```
+
+## Suite lines per crate
+
+| crate | result |
+|---|---|
+| `btctax-core` | 1279 tests run: **1279 passed**, 0 skipped (was 1274) |
+| `btctax-input-form` | 70 tests run: **70 passed**, 0 skipped (was 69) |
+| `btctax-cli` | 783 tests run: **783 passed**, 1 skipped (was 781) |
+| `btctax-tui-edit` | 389 tests run: **389 passed**, 2 skipped |
+| `btctax-tui` | 160 tests run: **160 passed**, 2 skipped |
+| `xtask` | 157 tests run: **157 passed**, 1 skipped |
+| `btctax-forms` | 354 tests run: **354 passed**, 4 skipped |
+| `btctax-adapters` | 103 tests run: **103 passed**, 0 skipped |
+| `btctax-store` | 45 tests run: **45 passed**, 0 skipped |
+| `btctax-oracle-harness` | 5 tests run: **5 passed**, 1 skipped |
+| `btctax-update-prices` | 5 tests run: **5 passed**, 1 skipped |
+
+**3350 tests, all passing** (3342 at dispatch); whole-set run: `3350 tests run: 3350 passed, 12
+skipped`.
+
+---
+
+## I-1 — the join gets a real kill
+
+`crates/xtask/src/box_census.rs`. `pub fn join_failures_for(entries: &[BoxEntry]) -> Vec<String>`
+now holds the body (`for b in entries`); `field_join_failures()` is `join_failures_for(BOXES)`. The
+doc says why the parameter exists — with the constant baked in, the only kill available is a
+re-implementation of the checker's predicates, which is B1 satisfied performatively.
+
+`the_join_reds_on_a_field_from_the_wrong_section_and_on_a_reworded_caption` was rewritten to build
+planted `BoxEntry` tables and run **the instrument** on each, checking the MESSAGE (not merely
+`!is_empty()`, which a checker failing everything would satisfy):
+
+| # | planted table | message asserted |
+|---|---|---|
+| 0 | the honest 1099-INT box 1 entry — **the positive control** | `join_failures_for` returns nothing |
+| 1 | `Collected` on `f1099int` naming `FieldId::Box1Wages` (the M1 shape) | `not in this document's own section` |
+| 2 | the real decision under a re-worded caption | `and no field that collects it` |
+| 3 | `CollectedElsewhere` on `fw2` naming `Box1Wages` | `IS in this document's own section` |
+| 4 | `NotRead("")` | `a NotRead with an EMPTY reason` |
+
+**Kills, both quoted.**
+
+```
+# THE CONTROLLER'S PLANT — gut the checker:
+   pub fn join_failures_for(entries: &[BoxEntry]) -> Vec<String> {
+  +    if true { return Vec::new(); }
+       let fields = form_fields();
+   cargo nextest run --locked -p xtask -E 'test(box_census)'
+   → FAIL box_census::tests::the_join_reds_on_a_field_from_the_wrong_section_and_on_a_reworded_caption
+     ★ THE KILL (a Collected naming a field of another section): the join must red on this
+       planted table, and it returned NOTHING — the checker is not checking
+     Summary: 12 tests run: 11 passed, 1 failed          ← was 12 passed before the fold
+
+# THE BUILDER'S M1 PLANT — `section_of_stem("f1099int") => Some(SectionId::W2s)`:
+   cargo nextest run --locked -p xtask -E 'test(box_census)'
+   → FAIL box_census::tests::the_box_to_field_join_is_clean
+     f1099int/1: Int1099Box1Interest is in [Int1099s], not in this document's own section (W2s)
+       — a box collected somewhere else is `CollectedElsewhere`, with the reason said out loud
+     (…and 13 more, one per Collected entry on the form)
+     Summary: 12 tests run: 11 passed, 1 failed
+```
+
+---
+
+## I-2 — the mirror refusal, and the exit that makes it one
+
+`RefuseReason::FilerRecordsContradicted` (`return_refuse.rs`), raised in `screen_inputs_tiered`
+beside `FilerRecordsDeclaredNotTranscribed`, with the both-ways message
+`DocumentCensusContradicted` uses (*"remove the row(s) … or answer \"yes\" … if they are"*).
+Anchored in `attribute.rs` on `Section(ScheduleBFilerRecords)` + the declaration (the exhaustive
+cross-crate match forced it). Param-free census fixture added (the source census demanded it).
+
+`sections.rs` split the section's liveness in two:
+`schedule_b_door_open` (the R3 answer) and `schedule_b_records_live` = **door open OR rows present**.
+`add` stays on the *door*; the section is visible while it has rows, so the refusal has an exit.
+
+### ★ ONE DEVIATION FROM THE BRIEF'S LITERAL CONDITION — please read
+
+The brief and the review's "minimal change" both wrote
+
+```rust
+!ri.schedule_b_filer_records.is_empty()
+    && !(question_is_live(InterestOrDividendsWithout1099, ri) && … == Some(true))
+```
+
+**I implemented `!ri.schedule_b_filer_records.is_empty() && ri.interest_or_dividends_without_1099 !=
+Some(true)`** — the same rule with the `question_is_live` conjunct dropped. Reason, and the evidence
+that forced it:
+
+* The door is live only while a census row is `Some(false)`. So the `!(live && …)` form **also
+  refuses the ordinary filer** who answered YES while the door was open, entered a neighbour's
+  seller-financed mortgage, and later transcribed a Form 1099-DIV — closing the door under a row
+  that is TRUE. That filer can no longer reach the question (it is not asked, and the declaration
+  field is registry-gated), so the refusal's only exit is to DELETE real income: an understatement
+  path created by a refusal, the over-refusing shape D-6 exists to avoid. It also contradicts the
+  reasoning three lines above it in the same file — *"gated on its question's own registry liveness,
+  so a stale answer on a row that is no longer asked is never an exit-less brick."*
+* **It is not hypothetical: an existing invariant caught it.** `scrub_axis`'s maximal sentinel is
+  exactly that return (every census row `Some(true)`, every document transcribed, two
+  `ScheduleBRecord`s, `interest_or_dividends_without_1099: Some(true)`), and the literal form red
+  `the maximal sentinel must be a FILEABLE return — a refusing baseline masks every cell of this
+  matrix`. Bending that fixture was not available: it is maximal by construction, and no lawful
+  arrangement lets it keep both 1099 vectors AND the filer's-records rows under the literal rule.
+* **Both states the review actually demonstrated still refuse.** Its PROBE3a and PROBE3b were built
+  on the module's `ri()` fixture, which answers `interest_or_dividends_without_1099 = Some(false)` —
+  caught by `!= Some(true)`. Only the standing-YES-with-closed-door case now files, and that case
+  reports income rather than dropping it.
+
+### Kills — three plants, each red on a different assertion
+
+`btctax-core tax::return_refuse::tests::filer_records_with_no_answer_authorising_them_refuse_and_stay_removable`
+
+```
+# PLANT 1 — the rule removed (`if false && …`):
+  ★ THE KILL (a): a `No` beside a transcribed row is a contradiction between sworn testimony and
+    a printed figure — it must refuse, not file
+  Summary: 1 test run: 0 passed, 1 failed
+
+# PLANT 2 — narrowed to `question_is_live(…) && … != Some(true)` (catches (a), misses (b)):
+  ★ THE KILL (b): a closed door with orphan rows must refuse — the rows keep printing on
+    Schedule B and in the 1040 line 2b/3b sums
+  Summary: 1 test run: 0 passed, 1 failed
+
+# PLANT 3 — the review's LITERAL `!(live && Some(true))` form:
+  ★ THE KILL: a standing YES authorises the row even after the census closed the door — refusing
+    here would force the filer to DELETE income they truly received
+      left: Some(FilerRecordsContradicted)   right: None
+  …and, independently, tax::scrub_axis::matrix::every_replaced_field_preserves_its_class_in_every_
+  representable_state:  left: Some(FilerRecordsContradicted)  right: None
+  Summary: 2 tests run: 0 passed, 2 failed
+```
+
+The (Y, one row) case still files and still prints on Schedule B line 1.
+
+`btctax-input-form spec::sections::filer_records_tests::orphan_filer_records_stay_visible_while_add_stays_on_the_door`
+holds the exit (it cannot live in `btctax-core`, which does not depend on `btctax-input-form`):
+
+```
+# PLANT — liveness back to the door alone:
+  ★ THE KILL: with the door closed and a row on the return the section must STAY VISIBLE, or the
+    filer cannot remove the figure `FilerRecordsContradicted` is about
+# PLANT — `add` moved onto liveness instead of the door:
+  ★ THE KILL: `add` stays on the DOOR — a visible section is not authorisation to create testimony
+    the filer never gave
+```
+
+---
+
+## I-3 — D-7's second limb
+
+`return_refuse.rs`, block (f1b) of `each_paired_question_is_live_exactly_on_its_rows_no_and_blocks_there`:
+the asymmetric probe (`Int1099 = Some(true)` with a transcribed row, `Div1099` stays `Some(false)`),
+**plus its mirror**, so the disjunction is exercised in both directions rather than only the one
+that happened to be true.
+
+```
+# PLANT — delete the 1099-DIV limb:
+  ★ THE KILL: EITHER row's No opens the door — a filer with 1099-INTs and no 1099-DIV can still
+    hold a nominee distribution
+# PLANT — delete the 1099-INT limb:
+  ★ THE KILL: …and symmetrically for the INT limb
+  Summary (each): 1 test run: 0 passed, 1 failed
+```
+
+---
+
+## I-4 — fail closed on the tips Caution, and tell the truth in the classifier
+
+`RefuseReason::QualifiedTipsCautionNotMet`, raised in the param-free tier of `screen_inputs_tiered`
+when `schedule_1a.tips.qualified_tips_reported > 0` and any of `occupation_on_treasury_list` /
+`excludes_unlisted_occupation_tips` / `meets_qualified_tip_criteria` is `false`. The detail quotes
+the Caution verbatim — *"Fill out Part II only if you received qualified tips. These tips must have
+been received in an occupation listed at IRS.gov/TippedOccupations."* — and names all three
+conditions.
+
+★ **Cite corrected against the archive.** The brief said `i1040s1a--2025.txt`; that file **does not
+exist** (`ls design/forms/extract | grep 1040s1a` → `f1040s1a--2025.txt`, `f1040s1a--2026-DRAFT.txt`
+only), which the build report had already recorded. The Caution is on the FORM, at
+**`f1040s1a--2025.txt:24-25`** — the same cite `return_inputs.rs:97` already carries.
+
+`classifier.rs`'s three `exempt` reasons corrected: each now states that `false` beside a **claimed**
+line 4a refuses, and forgoes only when unclaimed. The old text asserted a behaviour that did not
+exist. (The second reason also stopped citing `i1040s1a`, which is not in the archive; it now cites
+Schedule 1-A Part II line 4.)
+
+Anchored `NotInForm` (Schedule 1-A has no form section — `EXEMPT_PREFIXES` says so and names the
+task), so `the_five_reattributed_anchors_…_count_fell_by_five`'s pin moved **12 → 13**, spelled as
+`BEFORE_T5 - 5 + ADDED_BY_I4` with `ADDED_BY_I4 = 1` — the source stays the counter, and a second
+new `NotInForm` refusal still reds it.
+
+**The compute gating stays FR-72**: `schedule_1a.rs` was not touched.
+
+```
+# PLANT — the rule removed:
+  ★ THE KILL: 3,000 of tips claimed with every gating condition at its serde default `false` must
+    REFUSE — taking the deduction there is the understatement direction
+# PLANT — drop the third condition from the predicate:
+  ★ THE KILL: a false meets_qualified_tip_criteria alone must refuse a claimed Part II
+  Summary (each): 1 test run: 0 passed, 1 failed
+```
+
+The test also pins the two directions that must NOT refuse: all three affirmed files, and a Part II
+claiming **zero** tips files (it asserts nothing and is owed nothing). The tier census KAT
+(`every_param_free_rule_is_censused_from_the_source_and_fires_on_both_paths`) lists the new rule and
+its fixture — it is source-derived, so it red until the fixture was added.
+
+---
+
+## M-1 — one rule for income boxes with no reader
+
+The rule is stated **once**, at `BoxDecision`'s doc in `box_census.rs`: *an income box with no
+reader UNDERSTATES, so it fails closed* — `RefuseIfNonzero` naming the line it should have reached,
+never `NotRead`. The same doc enumerates what stays `NotRead` **and why**, so the distinction is part
+of the rule rather than an exception list: identifiers and codes; state/local figures; expenses
+(§67(g)); an amount already inside a collected box (W-2 box 11, 1099-DIV 2e/2f); a basis adjustment
+reaching no line this year (1099-DIV box 3 — it looks exactly like boxes 9/10 and is not the same);
+and withholding (a forgone credit OVERSTATES, which §3.4 permits silently).
+
+### Every flipped box — seven
+
+| stem | box | caption | new decision | new `Field` / leaf |
+|---|---|---|---|---|
+| `f1099g` | 5 | `5 RTAA payments` | `RefuseIfNonzero(OtherIncomeLine8zNotModeled)` | `G1099Box5Rtaa` → `g_1099[].box5_rtaa_payments` |
+| `f1099g` | 6 | `6 Taxable grants` | `RefuseIfNonzero(OtherIncomeLine8zNotModeled)` | `G1099Box6TaxableGrants` → `box6_taxable_grants` |
+| `f1099g` | 7 | `7 Agriculture payments` | `RefuseIfNonzero(ScheduleFIncomeNotModeled)` | `G1099Box7Agriculture` → `box7_agriculture_payments` |
+| `f1099g` | 9 | `9 Market gain` | `RefuseIfNonzero(ScheduleFIncomeNotModeled)` | `G1099Box9MarketGain` → `box9_market_gain` |
+| `f1099b` | 13 | `13 Bartering` | `RefuseIfNonzero(OtherIncomeLine8zNotModeled)` | `B1099Box13Bartering` → `b_1099[].box13_bartering` |
+| `f1099div` | 9 | `9 Cash liquidation distributions` | `RefuseIfNonzero(LiquidationDistributionNotComputed)` | `Div1099Box9CashLiquidation` → `div_1099[].box9_cash_liquidation` |
+| `f1099div` | 10 | `10 Noncash liquidation distributions` | `RefuseIfNonzero(LiquidationDistributionNotComputed)` | `Div1099Box10NoncashLiquidation` → `box10_noncash_liquidation` |
+
+Three new `RefuseReason` variants, each carrying the box as a `String` so one variant covers one
+MECHANISM and the message still names the paper the filer is holding. **Each box got a real `Field`
+on its own row** — a fieldless `RefuseIfNonzero` is the FR-65 defect T5 itself was fixing (*"a
+decision that could not fire"*), and the census join reds on one.
+
+Also corrected, without changing the decision: **1099-B box 4**'s reason claimed the forgone credit
+was *"announced rather than silent"*. The review measured the only announcement (the unconditional
+`OtherCreditsOmitted` advisory, which names nothing specific), so the CLAIM was withdrawn — the
+reason now says §3.4 permits it silently and records why the old wording went.
+
+`transcription_warnings`: the new income boxes join the all-zero-row sums for the 1099-DIV and
+1099-G rows, so a row carrying one of them is not reported as an all-zero row (the refusal is that
+row's message).
+
+```
+# PLANT — drop the 1099-G box 6 limb:
+  ★ THE KILL: 1099-G box 6 (taxable grants) carries income and no line reads it — it must REFUSE,
+    not vanish
+# PLANT — `> Usd::ZERO` → `>= Usd::ZERO` on the Schedule F pair (refuse on the DOCUMENT):
+  a zero in 1099-G box 7 (agriculture payments) must FILE — the rule is about the amount, not the
+  document
+  Summary (each): 1 test run: 0 passed, 1 failed
+```
+
+`every_income_box_with_no_reader_refuses_on_its_own_amount` asserts, per box: the reason, that the
+detail NAMES the line it should have reached (`SCHEDULE 1 LINE 8z` / `SCHEDULE F` / `FORM 8949`),
+that it fires at import too, and — the other direction — that a **zero** in each of the seven files.
+
+---
+
+## M-2 — the box 4/6 warnings on a lawful W-2
+
+`transcription_warnings.rs`. Suppressed **per box**, not per W-2, because that is what each
+instruction says (`iw2w3--2026.txt:2412-2423`): code **A** is *"Uncollected social security or RRTA
+tax on tips … Do not include this amount in box 4"*; code **B** is *"Uncollected Medicare tax on
+tips … Do not include this amount in box 6"*. So code A silences the box-4 check and code B the
+box-6 check; a W-2 carrying only A whose box 6 is also wrong still warns.
+
+```
+# PLANT — remove the box-4 suppression:
+  ★ THE KILL: box 12 code A says the employer could not collect the tax on tips and must NOT
+    include it in box 4 — warning there trains the filer to ignore the class
+# PLANT — blanket `has_code("A") || has_code("B")` on the box-6 check:
+  ★ THE KILL: code A is about box 4 alone — a blanket "has A or B" suppression would lose the
+    box-6 check on this W-2
+  Summary (each): 1 test run: 0 passed, 1 failed
+```
+
+The test also asserts the premise (each shortfall warns with NO code), so the suppression is not
+measured over a check that had stopped firing.
+
+---
+
+## M-3 — the sweep's grouping, and a question that dies mid-round
+
+`cmd/answer.rs`.
+
+**(i) The partition is now three groups** — census rows, then **the census's own follow-ups**, then
+the remaining gate declarations, then the skippables. Membership is **DERIVED, never a hand-list**: a
+question is a follow-up iff it is live now and NOT live on a probe with every `DocumentRow` blanked.
+A door question added later joins with no edit here; `ItemizedPriorYear` groups here when the refund
+was DECLARED and does not when a transcribed 1099-G box 2 makes it live — which is the dependency
+each of those returns actually has.
+
+**(ii) Liveness is re-checked immediately before asking.** `round` is a snapshot; an answer given
+earlier in it can kill a later question. A dead item is skipped and **not** marked asked, so it can
+return on a later sweep, and `live_questions` is recomputed each pass so nothing spins.
+
+```
+# PLANT — revert the partition to two groups:
+  ★ THE KILL: the gate declarations stay behind the census and its follow-ups
+    (cmd::answer::tests::the_document_less_income_door_is_asked_with_the_census_not_after_the_skippables)
+
+# PLANT — drop the mid-round liveness re-check:
+  ★ THE KILL: the §111(a) gate died the moment the refund question was answered `n` earlier in
+    this very round — putting it to the filer anyway records an answer to a question nothing on
+    the return is asking.
+    (btctax-cli::year_gate_t4 a_question_that_dies_earlier_in_the_same_round_is_never_put_to_the_filer)
+  Summary (each): 1 test run: 0 passed, 1 failed
+```
+
+★ The mid-round kill **drives the real `answer_return_inputs`** from a keystroke script against a
+vault and reads the SCREEN and the stored draft. My first attempt re-walked the sweep's own loop in
+a unit test — it stayed **green** under the plant, which is I-1's finding one file over. It was
+deleted rather than kept.
+
+---
+
+## M-4 — `current_prompt` is the only resolver
+
+`provenance.rs`. `pub fn answer_status(ri, key)` now takes the KEY and resolves the words through
+`current_prompt`; the hash comparison moved to a **private** `answer_status_against`, so a caller can
+no longer supply the wrong comparand — the class D-1 belongs to, not the instance. A key no registry
+owns yet (`DependentGate`, T7) has no comparand, so the wording check is skipped rather than guessed.
+
+Call sites updated: `return_refuse.rs:1638` and `interview_state.rs:200`/`:233` (the per-site
+`prompt_text` / `s.prompt` arguments are gone), and `tests/tax_report.rs`.
+
+```
+# PLANT — resolve through the STATIC prompt (D-1 reintroduced inside current_prompt):
+  ★ THE KILL: FilingStatusConfirmed was just answered under the words it is asked in. Reading the
+    STATIC prompt here makes it `WordingChanged`, which is a refusal firing on a correct answer —
+    D-1 exactly, one surface over.
+# PLANT — resolver hands the comparison an empty prompt (the check stops discriminating):
+  same assertion reds
+  Summary (each): 1 test run: 0 passed, 1 failed
+```
+
+The kill walks **every** `RENDERED_PROMPTS` entry (asserting first that its rendered words differ
+from its static fallback), and holds the other direction too: genuinely different words still
+supersede.
+
+---
+
+## N-1 — the dead loop
+
+`provenance.rs::undated_document_rows`: the empty `for (i, w) in ri.w2s.iter().enumerate()` ending in
+`let _ = (i, w);` is gone. The comment it carried — why the W-2 row has no `transcribed_on`, and that
+this is where it is reported when it gains one — is kept as a standalone `★` note beside the five
+family loops.
+
+---
+
+## Every pinned number moved
+
+| pin | old → new | cause |
+|---|---|---|
+| `coverage.rs` `field_count` | **175 → 182** | M-1's seven refuse-guard `Field`s |
+| `coverage.rs` `covered.len()` | **174 → 181** | the same seven, all covered |
+| `coverage.rs` `EXPECTED_LEAF_PATHS` | +7 entries | the seven new leaves |
+| `attribute.rs` `NotInForm` count | **12 → 13** (`BEFORE_T5 - 5 + ADDED_BY_I4`) | I-4's `QualifiedTipsCautionNotMet` |
+| `RefuseReason` variants | +4 | `FilerRecordsContradicted`, `QualifiedTipsCautionNotMet`, `OtherIncomeLine8zNotModeled`, `ScheduleFIncomeNotModeled`, `LiquidationDistributionNotComputed` (5 added; count is per the four fold items) |
+| param-free census fixtures | +5 | one per new param-free rule (the census is source-derived and demanded them) |
+| `box-census` | 246 boxes / 15 editions / 123 entries — **UNCHANGED**; 7 decisions rewritten | M-1 changed decisions, added no entry |
+| `line-coverage` | **341 / 24 / 0 / 12 — UNCHANGED** | no printed line's production changed |
+| `census-join` | **13 maps — UNCHANGED** | FR-66 still not widened |
+| `xtask` tests | 157 — **UNCHANGED** | I-1 rewrote a test, added none |
+| goldens | `fullreturn_inputs.toml` (regenerated by its own emitter), `docs/examples/examples.md` | the seven new `= "0"` keys; the examples diff is **+6 lines, 0 removed** — checked before regenerating, per *"a golden cannot validate its own regeneration"* |
+
+No new synthetic identifier was introduced; the one SSN used in tests (`000-00-0001`, area 000 —
+never issued) was already in the tree. `pii-scan-generic.sh` is clean.
+
+## Residue for the controller
+
+1. **★ I-2's deviation (above) is the one judgment call in this fold** and it changes what the
+   review asked for. The literal condition red an existing suite invariant and bricks an ordinary
+   filer; the implemented one refuses both states the review demonstrated. If the controller wants
+   the literal form, the maximal `scrub_axis` sentinel has to change and there is no arrangement
+   that keeps it maximal — that trade should be decided, not discovered.
+2. **The door's liveness is still `int == No || div == No`** (T5's D-7). A filer holding BOTH
+   documents is never asked about undocumented interest, which is an understatement path T5
+   accepted and this fold did not touch. It is now the only reason the `Some(true)`-with-closed-door
+   state exists at all; widening the question would remove both, and wants its own decision.
+3. **I-4 folded the refusal half only.** `Schedule1A::compute`'s line 4c still reads
+   `qualified_tips_reported` alone — FR-72's, as briefed. The refusal makes the unenforced path
+   unreachable through the screens, but a caller reaching `compute` directly still gets an ungated
+   line 4c.
+4. **M-1's seven boxes are collected but never read**, by design: each `Field` exists so the
+   refuse-guard is reachable. If a later task gives one of them a line, its census entry moves from
+   `RefuseIfNonzero` to `Collected` and the join will police the new `FieldId`.

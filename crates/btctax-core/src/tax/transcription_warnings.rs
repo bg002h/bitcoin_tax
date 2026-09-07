@@ -120,9 +120,28 @@ pub fn transcription_warnings(
         } else {
             format!("the Form W-2 from {}", w.employer.trim())
         };
+        // ★★★ SEAM REVIEW M-2 — THE ONE LAWFUL W-2 THESE TWO CHECKS FIRE ON, SUPPRESSED.
+        //
+        //     An employee whose wages were too small to withhold the Social Security / Medicare tax
+        //     due on their reported TIPS gets a W-2 with box 4 below 6.2% of box 3 and/or box 6
+        //     below 1.45% of box 5 — and the shortfall recorded in box 12 as code A or code B. The
+        //     employer's own instructions say so in terms (`iw2w3--2026.txt:2412-2423`): code A is
+        //     *"Uncollected social security or RRTA tax on tips … Do not include this amount in
+        //     box 4"*, code B is *"Uncollected Medicare tax on tips … Do not include this amount in
+        //     box 6"*. So the arithmetic is SUPPOSED to fall short by exactly that code's amount,
+        //     and warning here trains the filer to ignore the class.
+        //
+        //     ★ Per BOX, not per W-2: code A excuses box 4 and code B excuses box 6, because that is
+        //       what each instruction says. A W-2 with only code A whose box 6 is also wrong still
+        //       warns about box 6 — a blanket "has A or B" suppression would lose that.
+        let has_code = |c: &str| {
+            w.box12
+                .iter()
+                .any(|e| e.code.trim().eq_ignore_ascii_case(c))
+        };
         // ── box 4 ≈ 6.2% × box 3 ──────────────────────────────────────────────────────────────
         let expected4 = w.box3_ss_wages * OASDI_RATE;
-        if (w.box4_ss_withheld - expected4).abs() > tolerance(expected4) {
+        if !has_code("A") && (w.box4_ss_withheld - expected4).abs() > tolerance(expected4) {
             warn(
                 WarnedDocument::W2,
                 i,
@@ -140,8 +159,9 @@ pub fn transcription_warnings(
         // ── box 6 between 1.45% and 2.35% of box 5 ────────────────────────────────────────────
         let low = w.box5_medicare_wages * MEDICARE_RATE;
         let high = w.box5_medicare_wages * MEDICARE_PLUS_SURTAX_RATE;
-        if w.box6_medicare_withheld < low - tolerance(low)
-            || w.box6_medicare_withheld > high + tolerance(high)
+        if !has_code("B")
+            && (w.box6_medicare_withheld < low - tolerance(low)
+                || w.box6_medicare_withheld > high + tolerance(high))
         {
             warn(
                 WarnedDocument::W2,
@@ -198,7 +218,14 @@ pub fn transcription_warnings(
         }
     }
     for (i, r) in ri.div_1099.iter().enumerate() {
-        let income = r.box1a_ordinary + r.box2a_capgain_distr + r.box12_exempt_interest_dividends;
+        // ★ Seam review M-1: boxes 9 and 10 are income on this row too (they refuse rather than
+        //   reach a line, but a row carrying one is NOT an all-zero row), so the "nothing here"
+        //   warning must not fire on it — the refusal is the message that row gets.
+        let income = r.box1a_ordinary
+            + r.box2a_capgain_distr
+            + r.box12_exempt_interest_dividends
+            + r.box9_cash_liquidation
+            + r.box10_noncash_liquidation;
         if income == Usd::ZERO {
             warn(
                 WarnedDocument::Form1099Div,
@@ -213,7 +240,15 @@ pub fn transcription_warnings(
         }
     }
     for (i, r) in ri.g_1099.iter().enumerate() {
-        let income = r.box1_unemployment + r.box2_state_refund + r.box10_family_leave_benefits;
+        // ★ Seam review M-1: boxes 5, 6, 7 and 9 join the income sum for the same reason as the
+        //   1099-DIV row above — a row carrying one of them is not an all-zero row.
+        let income = r.box1_unemployment
+            + r.box2_state_refund
+            + r.box5_rtaa_payments
+            + r.box6_taxable_grants
+            + r.box7_agriculture_payments
+            + r.box9_market_gain
+            + r.box10_family_leave_benefits;
         if income == Usd::ZERO {
             warn(
                 WarnedDocument::Form1099G,
@@ -282,6 +317,81 @@ mod tests {
         };
         f(&mut w);
         w
+    }
+
+    /// ★★★ **SEAM REVIEW M-2's KILL — THE ONE LAWFUL W-2 THAT USED TO WARN.**
+    ///
+    /// An employee whose wages could not cover the Social Security / Medicare tax due on their
+    /// reported TIPS receives a W-2 with box 4 and/or box 6 short by exactly that shortfall, and
+    /// the shortfall is recorded in box 12 as code A or code B — *"Do not include this amount in
+    /// box 4"* / *"… in box 6"* (`iw2w3--2026.txt:2412-2423`). Both checks fired on it. It is the
+    /// one genuine false positive R4's "every one of these has an edge case" anticipated, and it is
+    /// named on the form itself.
+    ///
+    /// ★ The kill has BOTH halves: the code silences the check, and the SAME W-2 without the code
+    ///   still warns — otherwise the suppression could be a check that stopped checking.
+    #[test]
+    fn uncollected_tax_on_tips_silences_its_own_box_and_nothing_else() {
+        use crate::tax::return_inputs::Box12Entry;
+        let code = |c: &str| Box12Entry {
+            code: c.to_string(),
+            amount: dec!(310),
+        };
+        let short_box4 = |w: &mut W2| w.box4_ss_withheld = dec!(5890); // 6.2% would be 6,200
+        let short_box6 = |w: &mut W2| w.box6_medicare_withheld = dec!(1140); // 1.45% ⇒ 1,450
+
+        // (1) THE PREMISE — without the code, each shortfall warns. If this stops holding, the
+        //     suppression below is asserted over nothing.
+        for (what, mutate) in [
+            ("box 4", &short_box4 as &dyn Fn(&mut W2)),
+            ("box 6", &short_box6),
+        ] {
+            let ri = ReturnInputs {
+                w2s: vec![w2(|w| mutate(w))],
+                ..Default::default()
+            };
+            assert_eq!(
+                transcription_warnings(&ri, Some(dec!(168600))).len(),
+                1,
+                "the premise: a short {what} with NO box-12 code warns"
+            );
+        }
+
+        // (2) THE KILL — code A silences box 4, code B silences box 6.
+        for (what, mutate, c) in [
+            ("box 4", &short_box4 as &dyn Fn(&mut W2), "A"),
+            ("box 6", &short_box6, "B"),
+        ] {
+            let ri = ReturnInputs {
+                w2s: vec![w2(|w| {
+                    mutate(w);
+                    w.box12 = vec![code(c)];
+                })],
+                ..Default::default()
+            };
+            assert_eq!(
+                transcription_warnings(&ri, Some(dec!(168600))),
+                Vec::new(),
+                "★ THE KILL: box 12 code {c} says the employer could not collect the tax on tips \
+                 and must NOT include it in {what} — warning there trains the filer to ignore the \
+                 class"
+            );
+        }
+
+        // (3) PER BOX, not per W-2: code A does not excuse a wrong box 6.
+        let ri = ReturnInputs {
+            w2s: vec![w2(|w| {
+                short_box6(w);
+                w.box12 = vec![code("A")];
+            })],
+            ..Default::default()
+        };
+        assert_eq!(
+            transcription_warnings(&ri, Some(dec!(168600))).len(),
+            1,
+            "★ THE KILL: code A is about box 4 alone — a blanket \"has A or B\" suppression would \
+             lose the box-6 check on this W-2"
+        );
     }
 
     /// A correctly transcribed W-2 raises nothing — or every other assertion here is vacuous.

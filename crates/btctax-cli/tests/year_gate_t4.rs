@@ -911,3 +911,123 @@ fn the_two_new_refusal_messages_carry_no_collapsed_line_breaks() {
         );
     }
 }
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// ★★★ SEAM REVIEW M-3's KILL (ii) — A QUESTION THAT DIES MID-ROUND IS NOT ASKED
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// **It drives the REAL `answer_return_inputs` from a keystroke script and reads the SCREEN**, not a
+/// re-implementation of its loop. That distinction is I-1's whole finding one file over: a test that
+/// re-walks the sweep's own predicates stays green when the sweep stops re-checking them.
+///
+/// The state: the census says no Form 1099-G, so `StateRefundWithout1099g` is live and answered
+/// `Some(true)` in the draft — which makes the §111(a) gate `ItemizedPriorYear` live. Both are
+/// therefore in the SAME round's snapshot, the refund question first. The filer then answers the
+/// refund question `n` at the keyboard. The gate is dead from that instant, and asking it anyway
+/// would put a question to the filer that nothing on the return is asking, and `record_answer`
+/// would store the reply.
+#[test]
+fn a_question_that_dies_earlier_in_the_same_round_is_never_put_to_the_filer() {
+    let (_dir, vault) = fresh_vault();
+    let mut ri = btctax_core::tax::return_inputs::ReturnInputs {
+        tax_year: NO_PACKAGE_YEAR,
+        filing_status: btctax_core::FilingStatus::Single,
+        ..Default::default()
+    };
+    btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+    // The 1099-G row is `No`, so the refund door is live; `Some(true)` there makes the §111(a) gate
+    // live too — and the gate is left UNANSWERED, which is what would be asked.
+    ri.documents.set(
+        btctax_core::tax::document_census::DocumentRow::G1099,
+        Some(false),
+    );
+    ri.state_refund_without_1099g = Some(true);
+    ri.itemized_prior_year = None;
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::input_form_store::save_draft(&mut s, NO_PACKAGE_YEAR, &ri).unwrap();
+    }
+
+    // THE PREMISE — both questions are in one round's snapshot, the refund question first.
+    let asks = btctax_cli::cmd::answer::live_questions(&ri);
+    let ids: Vec<btctax_core::tax::questions::QuestionId> = asks
+        .iter()
+        .filter_map(btctax_cli::cmd::answer::Ask::declaration_id)
+        .collect();
+    let refund = ids
+        .iter()
+        .position(|id| *id == btctax_core::tax::questions::QuestionId::StateRefundWithout1099g)
+        .expect("the refund door is live");
+    let gate = ids
+        .iter()
+        .position(|id| *id == btctax_core::tax::questions::QuestionId::ItemizedPriorYear)
+        .expect("the premise: the §111(a) gate is in THIS round's snapshot");
+    assert!(
+        refund < gate,
+        "the premise: the answer that kills the gate is asked BEFORE it"
+    );
+
+    // Every declaration `n` (the census is all-No on a return with no rows, which is coherent), a
+    // bare Enter for each skippable. The refund question's `n` is what kills the gate.
+    let declarations = asks.iter().filter(|a| !a.is_skippable()).count();
+    let script = "n\n".repeat(declarations) + &"\n".repeat(asks.len() - declarations);
+    let mut keystrokes = script.as_bytes();
+    let mut screen: Vec<u8> = Vec::new();
+    cmd::answer::answer_return_inputs(
+        &vault,
+        &pp(),
+        NO_PACKAGE_YEAR,
+        time::macros::date!(2026 - 09 - 02),
+        &mut keystrokes,
+        &mut screen,
+        false,
+    )
+    .expect("a draft-only year is answerable");
+    let screen = String::from_utf8(screen).unwrap();
+
+    // The gate's own prompt, from the registry — never a paraphrase.
+    let gate_prompt = btctax_core::tax::questions::FORM_QUESTIONS
+        .iter()
+        .find(|q| q.id == btctax_core::tax::questions::QuestionId::ItemizedPriorYear)
+        .expect("the gate is a registry question")
+        .prompt_text(&ri)
+        .into_owned();
+    // ★ The ASK line, not the bare prompt: the "before" panel lists every live question by its own
+    //   words too, and matching that would make this assertion about the panel rather than the
+    //   sweep. An ask is `"{prompt} [y/n…]: "`.
+    let asked_line = format!("{gate_prompt} [y/n");
+    assert!(
+        screen.contains(&format!(
+            "{} [y/n",
+            btctax_core::tax::questions::FORM_QUESTIONS
+                .iter()
+                .find(|q| q.id == btctax_core::tax::questions::QuestionId::StateRefundWithout1099g)
+                .expect("the refund question is a registry question")
+                .prompt_text(&ri)
+        )),
+        "the premise: the refund question WAS put to the filer, and this is how an ask looks"
+    );
+    assert!(
+        !screen.contains(&asked_line),
+        "★ THE KILL: the §111(a) gate died the moment the refund question was answered `n` earlier \
+         in this very round — putting it to the filer anyway records an answer to a question \
+         nothing on the return is asking.\n\nscreen:\n{screen}"
+    );
+
+    // …and the answer log carries no record of it, which is the half that outlives the session.
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (loaded, _) = btctax_cli::input_form_store::load(s.conn(), NO_PACKAGE_YEAR).unwrap();
+    let stored = match loaded {
+        btctax_cli::input_form_store::Loaded::Draft { ri, .. } => ri,
+        _ => panic!("the draft is the working return on a params-less year"),
+    };
+    assert_eq!(
+        stored.state_refund_without_1099g,
+        Some(false),
+        "the premise: the keyboard `n` really landed on the refund question"
+    );
+    assert_eq!(
+        stored.itemized_prior_year, None,
+        "★ THE KILL: nothing may be STORED for a question that was never lawfully asked"
+    );
+}

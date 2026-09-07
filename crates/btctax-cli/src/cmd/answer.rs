@@ -65,12 +65,34 @@ pub fn live_questions(ri: &ReturnInputs) -> Vec<Ask> {
     //     runs before the `OtherOutOfScopeIncome` refusal either way — so this is a journey fix, and
     //     it is a stable partition, never a sort.
     let live = || FORM_QUESTIONS.iter().filter(|q| (q.live)(ri));
+    // ★★★ SEAM REVIEW M-3 — R3's DOOR QUESTIONS GROUP WITH THE CENSUS, because they ARE the
+    //     census's own follow-ups: each is live only *because* a census row was answered, and a
+    //     filer who has just said "no Form W-2" should be asked "did you have wages anyway?" next —
+    //     not after all nineteen skippables (the DOBs, the blindness pair, the sales-tax election).
+    //
+    // ★★★ **DERIVED, never a hand-list**, and that is the whole point: a question belongs to this
+    //     group iff it is live NOW and would NOT be live with every census row blanked. So a door
+    //     question added later joins the group with no edit here, and one whose liveness stops
+    //     depending on the census leaves it — the same rule the census's own `row_of_question`
+    //     membership follows. (`ItemizedPriorYear` is the interesting case: it groups here when the
+    //     refund was DECLARED, and does not when a transcribed 1099-G box 2 makes it live, which is
+    //     exactly the dependency each of those returns actually has.)
+    let census_blanked = {
+        let mut probe = ri.clone();
+        for row in btctax_core::tax::document_census::DocumentRow::ALL {
+            probe.documents.set(*row, None);
+        }
+        probe
+    };
     let is_census = |q: &&'static FormQuestion| {
         btctax_core::tax::document_census::row_of_question(q.id).is_some()
     };
+    let is_census_followup =
+        |q: &&'static FormQuestion| !is_census(q) && !(q.live)(&census_blanked);
     let mut asks: Vec<Ask> = live()
         .filter(is_census)
-        .chain(live().filter(|q| !is_census(q)))
+        .chain(live().filter(is_census_followup))
+        .chain(live().filter(|q| !is_census(q) && !is_census_followup(q)))
         .map(Ask::Declaration)
         .collect();
     // ★ P9 §2.2 class-(B) skippables — DERIVED from the core [`SKIPPABLE_QUESTIONS`] registry (the DOBs, the
@@ -385,6 +407,24 @@ pub fn answer_return_inputs(
             ));
         }
         for ask in round {
+            // ★★★ SEAM REVIEW M-3 — LIVENESS IS RE-CHECKED IMMEDIATELY BEFORE ASKING, not once per
+            //     sweep. `round` is a snapshot, and an answer given EARLIER IN THIS ROUND can kill a
+            //     question later in it: flip `state_refund_without_1099g` to `n` and the §111(a)
+            //     gate `ItemizedPriorYear` dies, yet the snapshot would still put it to the filer
+            //     and `record_answer` would write an answer to a question nobody is asking. The
+            //     stored answer is harmless today only because the refusal that reads it is itself
+            //     liveness-gated — which is a second guarantee holding this one up, not a reason.
+            //
+            // ★ It is NOT marked asked: a question that died here may legitimately come back to
+            //   life on a later sweep (the filer changes the answer that killed it), and the sweep
+            //   loop recomputes `live_questions` each pass, so nothing can spin.
+            let still_live = match &ask {
+                Ask::Declaration(q) => (q.live)(&ri),
+                Ask::Skippable(s) => (s.live)(&ri),
+            };
+            if !still_live {
+                continue;
+            }
             asked.insert(key_of(&ask));
             match ask {
                 // A MANDATORY declaration — silence with nothing on file is refused, never accepted (D-8).
@@ -773,6 +813,68 @@ mod tests {
         let ids = declaration_ids(&single()); // no interest at all — well below $1,500
         assert!(ids.contains(&QuestionId::ForeignAccounts));
         assert!(ids.contains(&QuestionId::ForeignTrust));
+    }
+
+    /// ★★★ **SEAM REVIEW M-3's KILL (i) — R3's DOOR QUESTIONS SIT WITH THE CENSUS.**
+    ///
+    /// They are the census's own follow-ups — live only because a census row was answered — and the
+    /// old partition put them in the "other declarations" group, so a filer who had just answered
+    /// *"no Form W-2"* met all nineteen skippables (both DOBs, the blindness pair, the sales-tax
+    /// election) before being asked *"did you receive wages from an employer who issued no Form
+    /// W-2?"*.
+    ///
+    /// ★ The assertion is a POSITION, not a membership: "is asked" was already true and is exactly
+    ///   what could not see this.
+    #[test]
+    fn the_document_less_income_door_is_asked_with_the_census_not_after_the_skippables() {
+        use btctax_core::tax::document_census::DocumentRow;
+        let mut ri = single();
+        for row in DocumentRow::ALL {
+            ri.documents.set(*row, Some(false));
+        }
+        let asks = live_questions(&ri);
+        let pos = |id: QuestionId| {
+            asks.iter()
+                .position(|a| a.declaration_id() == Some(id))
+                .unwrap_or_else(|| panic!("{id:?} must be asked on an all-No census"))
+        };
+        let first_skippable = asks
+            .iter()
+            .position(|a| matches!(a, Ask::Skippable(_)))
+            .expect("the skippables are asked");
+        let last_census = asks
+            .iter()
+            .rposition(|a| {
+                a.declaration_id().is_some_and(|id| {
+                    btctax_core::tax::document_census::row_of_question(id).is_some()
+                })
+            })
+            .expect("the census is asked");
+
+        for door in [
+            QuestionId::WagesWithoutW2Question,
+            QuestionId::InterestOrDividendsWithout1099,
+            QuestionId::StateRefundWithout1099g,
+        ] {
+            assert!(
+                pos(door) > last_census,
+                "★ {door:?} must come AFTER the census rows that make it live"
+            );
+            assert!(
+                pos(door) < first_skippable,
+                "★ THE KILL: {door:?} is the census's own follow-up and must be asked with it — \
+                 at index {}, before the first skippable at {first_skippable}. It used to land \
+                 after all nineteen.",
+                pos(door)
+            );
+        }
+
+        // …and an ordinary gate declaration still comes after the door, so the group is a real
+        // third partition rather than "everything moved up".
+        assert!(
+            pos(QuestionId::DependentTaxpayer) > pos(QuestionId::WagesWithoutW2Question),
+            "★ THE KILL: the gate declarations stay behind the census and its follow-ups"
+        );
     }
 
     #[test]

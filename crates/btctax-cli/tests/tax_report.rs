@@ -3452,7 +3452,7 @@ fn a_record_whose_words_changed_still_reads_as_wording_changed_after_a_load() {
     use btctax_core::tax::provenance::{
         answer_status, prompt_hash, AnswerKey, AnswerRecord, AnswerState, AnswerStatus,
     };
-    use btctax_core::tax::questions::{QuestionId, FORM_QUESTIONS};
+    use btctax_core::tax::questions::QuestionId;
 
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_lt_sell_2025(csv_dir.path());
@@ -3487,18 +3487,23 @@ fn a_record_whose_words_changed_still_reads_as_wording_changed_after_a_load() {
     let loaded = btctax_cli::return_inputs::get(s.conn(), 2024)
         .unwrap()
         .unwrap();
-    let prompt = FORM_QUESTIONS
-        .iter()
-        .find(|q| q.id == QuestionId::ForeignTrust)
-        .unwrap()
-        .prompt;
+    // ★ Seam review M-4: `answer_status` resolves the words itself, through
+    //   `provenance::current_prompt` — the comparand is no longer something a caller can get wrong.
+    //   `ForeignTrust` has no rendered prompt, so it resolves to exactly the static `prompt` this
+    //   test used to pass in, and the assertion below is unchanged.
+    assert!(
+        !btctax_core::tax::questions::RENDERED_PROMPTS
+            .iter()
+            .any(|(id, _)| *id == QuestionId::ForeignTrust),
+        "the premise: this question's words are static, so `current_prompt` returns them"
+    );
     assert_eq!(
-        answer_status(&loaded, &key, prompt),
+        answer_status(&loaded, &key),
         AnswerStatus::WordingChanged,
         "the read boundary superseded the record on load: it now reads {:?}, so `screen_inputs` sees \
          no mismatch and `foreign_trust` = {:?} stands as testimony under words the filer was never \
          shown. Supersession belongs at the RE-ANSWER (`record_answer`), never at a load.",
-        answer_status(&loaded, &key, prompt),
+        answer_status(&loaded, &key),
         loaded.foreign_trust
     );
     assert!(

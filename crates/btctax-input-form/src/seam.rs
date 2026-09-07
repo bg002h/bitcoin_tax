@@ -316,6 +316,10 @@ pub enum FieldId {
     Div1099Box5Section199a,
     /// Box 7 — *Foreign tax paid* → the §904(j) election.
     Div1099Box7ForeignTax,
+    /// Box 9 — *Cash liquidation distributions* — a refuse-guard (seam review M-1).
+    Div1099Box9CashLiquidation,
+    /// Box 10 — *Noncash liquidation distributions* — a refuse-guard (seam review M-1).
+    Div1099Box10NoncashLiquidation,
     /// Box 12 — *Exempt-interest dividends* → 1040 line 2a.
     Div1099Box12ExemptInterest,
     /// Box 13 — *Specified private activity bond interest dividends* — a refuse-guard.
@@ -332,6 +336,8 @@ pub enum FieldId {
     B1099LongTermProceeds,
     /// Schedule D line 8a(e) — long-term cost or other basis (box 1e, long-term).
     B1099LongTermBasis,
+    /// Box 13 — *Bartering* — a refuse-guard (seam review M-1).
+    B1099Box13Bartering,
     /// ★★★ THE GATE — box 12 checked AND no adjustments, both limbs named in the prompt.
     B1099BasisReportedNoAdjustments,
     // ── ★★★ R4 / T5 — Form 1099-G (per row). ────────────────────────────────────────────────────
@@ -345,6 +351,14 @@ pub enum FieldId {
     G1099Box2StateRefund,
     /// Box 4 — *Federal income tax withheld* → 1040 line 25b.
     G1099Box4FedWithheld,
+    /// Box 5 — *RTAA payments* — a refuse-guard (seam review M-1).
+    G1099Box5Rtaa,
+    /// Box 6 — *Taxable grants* — a refuse-guard (seam review M-1).
+    G1099Box6TaxableGrants,
+    /// Box 7 — *Agriculture payments* — a refuse-guard (seam review M-1).
+    G1099Box7Agriculture,
+    /// Box 9 — *Market gain* — a refuse-guard (seam review M-1).
+    G1099Box9MarketGain,
     /// Box 10 — *Family leave benefits* (Rev. December 2026) — a refuse-guard.
     G1099Box10FamilyLeave,
     // ── ★★★ R4 / T5 — Form 1098-E (per row). ────────────────────────────────────────────────────

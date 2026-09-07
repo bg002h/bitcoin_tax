@@ -637,6 +637,8 @@ $ btctax --vault v.pgp income show --year 2024
       "box4_fed_withheld": "0",
       "box5_section_199a": "1200",
       "box7_foreign_tax": "50",
+      "box9_cash_liquidation": "0",
+      "box10_noncash_liquidation": "0",
       "box12_exempt_interest_dividends": "0",
       "box13_private_activity_amt": "0"
     }
@@ -649,6 +651,10 @@ $ btctax --vault v.pgp income show --year 2024
       "box1_unemployment": "1000",
       "box2_state_refund": "0",
       "box4_fed_withheld": "0",
+      "box5_rtaa_payments": "0",
+      "box6_taxable_grants": "0",
+      "box7_agriculture_payments": "0",
+      "box9_market_gain": "0",
       "box10_family_leave_benefits": "0"
     }
   ],

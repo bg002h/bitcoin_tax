@@ -802,6 +802,8 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
             box4_fed_withheld: _,
             box5_section_199a: _,
             box7_foreign_tax: _,
+            box9_cash_liquidation: _,
+            box10_noncash_liquidation: _,
             box12_exempt_interest_dividends: _,
             box13_private_activity_amt: _,
             payer_tin: _,      // R10.2 — mapped below (see the 1099-INT loop)
@@ -817,6 +819,7 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
             short_term_basis: _,
             long_term_proceeds: _,
             long_term_basis: _,
+            box13_bartering: _,
             basis_reported_and_no_adjustments: _,
             payer_tin: _,      // R10.2 — mapped below (see the 1099-INT loop)
             transcribed_on: _, // R10.2 — KEPT (see the 1099-INT loop)
@@ -830,6 +833,10 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
             box1_unemployment: _,
             box2_state_refund: _,
             box4_fed_withheld: _,
+            box5_rtaa_payments: _,
+            box6_taxable_grants: _,
+            box7_agriculture_payments: _,
+            box9_market_gain: _,
             box10_family_leave_benefits: _,
             payer_tin: _,      // R10.2 — mapped below (see the 1099-INT loop)
             transcribed_on: _, // R10.2 — KEPT (see the 1099-INT loop)

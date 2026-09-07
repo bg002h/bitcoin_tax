@@ -2104,6 +2104,10 @@ const DIV_1099_FIELDS: &[Field] = &[
         "Box 5 \u{201c}Section 199A dividends\u{201d} \u{2014} the REIT/PTP slice of box 1a that feeds the \u{a7}199A qualified business income deduction (Form 8995 line 6).", box5_section_199a),
     doc_money!(FieldId::Div1099Box7ForeignTax, div_1099, "7 Foreign tax paid",
         "Box 7 \u{201c}Foreign tax paid\u{201d} \u{2014} the \u{a7}904(j) no-Form-1116 foreign tax credit on Schedule 3 line 1.", box7_foreign_tax),
+    doc_money!(FieldId::Div1099Box9CashLiquidation, div_1099, "9 Cash liquidation distributions",
+        "Box 9 \u{201c}Cash liquidation distributions\u{201d} \u{2014} NOT a dividend: a liquidating distribution is treated as full payment in exchange for your stock, so it is a sale reported on Form 8949 and Schedule D in the year received, and the gain is the distribution less your basis. btctax holds no basis for that stock and builds no Form 8949 row for it, so any amount refuses rather than vanish.", box9_cash_liquidation),
+    doc_money!(FieldId::Div1099Box10NoncashLiquidation, div_1099, "10 Noncash liquidation distributions",
+        "Box 10 \u{201c}Noncash liquidation distributions\u{201d} \u{2014} as box 9, paid in kind rather than in cash: the same exchange treatment, the same missing basis, so any amount refuses.", box10_noncash_liquidation),
     doc_money!(FieldId::Div1099Box12ExemptInterest, div_1099, "12 Exempt-interest dividends",
         "Box 12 \u{201c}Exempt-interest dividends\u{201d} \u{2014} Form 1040 line 2a. Reported, never taxed.", box12_exempt_interest_dividends),
     doc_money!(FieldId::Div1099Box13PrivateActivity, div_1099, "13 Specified private activity bond interest dividends",
@@ -2132,6 +2136,8 @@ const B_1099_FIELDS: &[Field] = &[
         "The LONG-TERM total of box 1d \u{201c}Proceeds\u{201d} \u{2014} Schedule D line 8a, column (d). Box 2 \u{201c}Short-term gain or loss\u{201d} on the form is what tells you which total a transaction joins.", long_term_proceeds),
     doc_money!(FieldId::B1099LongTermBasis, b_1099, "Long-term total: 1e Cost or other basis",
         "The LONG-TERM total of box 1e \u{201c}Cost or other basis\u{201d} \u{2014} Schedule D line 8a, column (e).", long_term_basis),
+    doc_money!(FieldId::B1099Box13Bartering, b_1099, "13 Bartering",
+        "Box 13 \u{201c}Bartering\u{201d} \u{2014} the fair market value of what a barter exchange arranged for you. It is income, and it reaches Schedule 1 line 8z \u{201c}Other income. List type and amount\u{201d}, or Schedule C if the bartering was in a trade or business. btctax fills line 8z from nothing and will not route income to a Schedule C you did not declare, so any amount refuses.", box13_bartering),
     Field {
         id: FieldId::B1099BasisReportedNoAdjustments,
         clear: Some(|ri, a| {
@@ -2187,6 +2193,14 @@ const G_1099_FIELDS: &[Field] = &[
         "Box 2 \u{201c}State or local income tax refunds, credits, or offsets\u{201d} \u{2014} Schedule 1 line 1, but ONLY if you itemized on the return for the year you paid that tax (\u{a7}111(a)'s tax-benefit rule). btctax asks that question once for the return, because you owe the same answer whether or not a Form 1099-G arrived.", box2_state_refund),
     doc_money!(FieldId::G1099Box4FedWithheld, g_1099, "4 Federal income tax withheld",
         "Box 4 \u{201c}Federal income tax withheld\u{201d} \u{2014} Form 1040 line 25b.", box4_fed_withheld),
+    doc_money!(FieldId::G1099Box5Rtaa, g_1099, "5 RTAA payments",
+        "Box 5 \u{201c}RTAA payments\u{201d} \u{2014} Reemployment Trade Adjustment Assistance, which is income reaching Schedule 1 line 8z \u{201c}Other income. List type and amount\u{201d}. btctax fills line 8z from nothing, so any amount refuses rather than vanish.", box5_rtaa_payments),
+    doc_money!(FieldId::G1099Box6TaxableGrants, g_1099, "6 Taxable grants",
+        "Box 6 \u{201c}Taxable grants\u{201d} \u{2014} income reaching Schedule 1 line 8z, which btctax fills from nothing, so any amount refuses.", box6_taxable_grants),
+    doc_money!(FieldId::G1099Box7Agriculture, g_1099, "7 Agriculture payments",
+        "Box 7 \u{201c}Agriculture payments\u{201d} \u{2014} farm income, which reaches Schedule F. btctax does not produce a Schedule F, and its document census announces that exclusion only when you say you hold a farm document \u{2014} this figure arrives on a Form 1099-G instead, so any amount refuses rather than vanish unannounced.", box7_agriculture_payments),
+    doc_money!(FieldId::G1099Box9MarketGain, g_1099, "9 Market gain",
+        "Box 9 \u{201c}Market gain\u{201d} \u{2014} gain on the repayment of a Commodity Credit Corporation loan, which is farm income on Schedule F. As box 7, any amount refuses.", box9_market_gain),
     doc_money!(FieldId::G1099Box10FamilyLeave, g_1099, "10 Family leave benefits",
         "Box 10 \u{201c}Family leave benefits\u{201d} \u{2014} new on the December 2026 revision, for a state paid family and medical leave program (Rev. Rul. 2025-4). The benefits are income and reach Schedule 1 line 8z, which btctax fills from nothing, so any amount here refuses rather than vanish.", box10_family_leave_benefits),
 ];
@@ -2220,12 +2234,25 @@ pub(crate) const FORM_1098ES: Section = Section {
 // LIVE only when the filer has said such income exists, so nobody is shown a section for income
 // they do not have; non-empty is then REQUIRED (`FilerRecordsDeclaredNotTranscribed`).
 
-/// The section's liveness — the R3 door, in one place.
-fn schedule_b_records_live(ri: &btctax_core::tax::return_inputs::ReturnInputs) -> bool {
+/// **The R3 door itself** — the answer that AUTHORISES a new row, in one place. `add` is the only
+/// caller: creating a row the filer never opened the door for would be testimony they never gave.
+fn schedule_b_door_open(ri: &btctax_core::tax::return_inputs::ReturnInputs) -> bool {
     btctax_core::tax::questions::question_is_live(
         btctax_core::tax::questions::QuestionId::InterestOrDividendsWithout1099,
         ri,
     ) && ri.interest_or_dividends_without_1099 == Some(true)
+}
+
+/// The section's liveness — the door open **OR** rows already present.
+///
+/// ★★★ Seam review I-2. Liveness used to be the door alone, which made a closed door with rows
+/// behind it unreachable: all five `Field`s went dead, `add` refused, and the orphan rows kept
+/// printing on Schedule B and in the 1040 line 2b/3b sums — a figure on the filer's own return that
+/// no surface could show, edit or withdraw. The return now refuses in that state
+/// ([`btctax_core::tax::return_refuse::RefuseReason::FilerRecordsContradicted`]), and the refusal
+/// has to have an exit, so the rows stay VISIBLE and removable while they exist.
+fn schedule_b_records_live(ri: &btctax_core::tax::return_inputs::ReturnInputs) -> bool {
+    schedule_b_door_open(ri) || !ri.schedule_b_filer_records.is_empty()
 }
 
 const SB_RECORD_FIELDS: &[Field] = &[
@@ -2354,10 +2381,11 @@ pub(crate) const SCHEDULE_B_FILER_RECORDS: Section = Section {
     title: "Interest and dividends from your own records",
     kind: SectionKind::Repeating {
         len: |ri, _| ri.schedule_b_filer_records.len(),
-        // ★ The section is LIVE only behind the R3 door, so `add` refuses on a return that has not
-        //   opened it — a row nobody could see would be testimony the filer never gave.
+        // ★ `add` stays on the DOOR — not on the section's liveness, which is now also true while
+        //   orphan rows exist (I-2). Adding a row to a return that has not opened the door would be
+        //   testimony the filer never gave; removing one that is already there is the exit.
         add: |ri, _| {
-            if !schedule_b_records_live(ri) {
+            if !schedule_b_door_open(ri) {
                 return Err(SetError::NoSuchRow);
             }
             ri.schedule_b_filer_records
@@ -2375,3 +2403,68 @@ pub(crate) const SCHEDULE_B_FILER_RECORDS: Section = Section {
     },
     fields: SB_RECORD_FIELDS,
 };
+
+#[cfg(test)]
+mod filer_records_tests {
+    use super::*;
+    use crate::seam::RowAddr;
+    use btctax_core::tax::document_census::DocumentRow;
+    use btctax_core::tax::questions::{question_is_live, QuestionId};
+    use btctax_core::tax::return_inputs::{
+        Form1099Div, Form1099Int, ReturnInputs, ScheduleBRecord,
+    };
+
+    /// ★★★ **SEAM REVIEW I-2's OTHER HALF — the refusal's EXIT.**
+    ///
+    /// `FilerRecordsContradicted` refuses a return whose filer's-records rows no answer authorises.
+    /// A refusal with no exit is a brick, and the exit is the section: while rows exist they must
+    /// stay VISIBLE so the filer can remove them — even with the door shut. `add` is the one thing
+    /// that stays on the door, because creating a row nobody opened the door for would be testimony
+    /// the filer never gave.
+    #[test]
+    fn orphan_filer_records_stay_visible_while_add_stays_on_the_door() {
+        // The door shut the hard way: the filer now says they hold BOTH documents.
+        let mut ri = ReturnInputs::default();
+        for row in [DocumentRow::Int1099, DocumentRow::Div1099] {
+            ri.documents.set(row, Some(true));
+        }
+        ri.int_1099.push(Form1099Int::default());
+        ri.div_1099.push(Form1099Div::default());
+        ri.interest_or_dividends_without_1099 = Some(true);
+        assert!(
+            !question_is_live(QuestionId::InterestOrDividendsWithout1099, &ri),
+            "the probe's premise: holding both documents closes the door"
+        );
+
+        // With no rows the section is dead — nobody is shown a section for income they do not have.
+        assert!(
+            SB_RECORD_FIELDS.iter().all(|f| !(f.live)(&ri)),
+            "a closed door with NO rows must leave the section invisible"
+        );
+        assert!(
+            matches!(SCHEDULE_B_FILER_RECORDS.kind, SectionKind::Repeating { add, .. }
+                     if add(&mut ri.clone(), &RowAddr(vec![])).is_err()),
+            "…and `add` must refuse there"
+        );
+
+        // One orphan row, and the section comes back — that is the exit the refusal needs.
+        ri.schedule_b_filer_records.push(ScheduleBRecord::default());
+        assert!(
+            SB_RECORD_FIELDS.iter().all(|f| (f.live)(&ri)),
+            "★ THE KILL: with the door closed and a row on the return the section must STAY \
+             VISIBLE, or the filer cannot remove the figure `FilerRecordsContradicted` is about"
+        );
+        let SectionKind::Repeating { add, remove, .. } = SCHEDULE_B_FILER_RECORDS.kind else {
+            panic!("the filer's-records section is repeating");
+        };
+        assert!(
+            add(&mut ri.clone(), &RowAddr(vec![])).is_err(),
+            "★ THE KILL: `add` stays on the DOOR — a visible section is not authorisation to \
+             create testimony the filer never gave"
+        );
+        assert!(
+            remove(&mut ri, &RowAddr(vec![0])).is_ok() && ri.schedule_b_filer_records.is_empty(),
+            "…and `remove` is the exit, so the return becomes fileable again"
+        );
+    }
+}

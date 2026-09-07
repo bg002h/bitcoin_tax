@@ -6422,6 +6422,7 @@ mod tests {
                 short_term_basis: dec!(1000000), // +50,000 short-term
                 long_term_proceeds: dec!(400000),
                 long_term_basis: dec!(450000), // −50,000 long-term
+                box13_bartering: Usd::ZERO,
                 basis_reported_and_no_adjustments: Some(true),
             }],
             ..Default::default()
@@ -6526,6 +6527,7 @@ mod tests {
                 short_term_basis: dec!(10000), // +20,000 short-term
                 long_term_proceeds: dec!(2500000),
                 long_term_basis: dec!(500000), // +2,000,000 long-term
+                box13_bartering: Usd::ZERO,
                 basis_reported_and_no_adjustments: Some(true),
             }],
             schedule_c: Some(ScheduleCInputs {
@@ -6761,6 +6763,7 @@ mod tests {
                 short_term_basis: dec!(120000),
                 long_term_proceeds: dec!(2500000),
                 long_term_basis: dec!(500000),
+                box13_bartering: Usd::ZERO,
                 basis_reported_and_no_adjustments: Some(true),
             }],
             ..Default::default()

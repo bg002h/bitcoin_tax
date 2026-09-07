@@ -278,6 +278,13 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
             Anchor::Section(SectionId::ScheduleBFilerRecords),
             decl(QuestionId::InterestOrDividendsWithout1099),
         ],
+        // ★ The mirror (I-2). Same two anchors, and both are REACHABLE by construction: the
+        //   section is live while it has rows precisely so this refusal has an exit, and the
+        //   declaration is the other half of the both-ways message.
+        R::FilerRecordsContradicted => vec![
+            Anchor::Section(SectionId::ScheduleBFilerRecords),
+            decl(QuestionId::InterestOrDividendsWithout1099),
+        ],
         R::StateRefundWithout1099gUnanswered => {
             vec![decl(QuestionId::StateRefundWithout1099g)]
         }
@@ -292,6 +299,22 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         ],
         R::StatutoryEmployeeW2 => vec![Anchor::Field(FieldId::W2Box13StatutoryEmployee)],
         R::FamilyLeaveBenefits => vec![Anchor::Field(FieldId::G1099Box10FamilyLeave)],
+        // ★★★ Seam review M-1 — the three "income box with no reader" reasons. Each carries the box
+        //   in its payload for the MESSAGE, and anchors on every box that raises it, the same shape
+        //   as `AmortizableBondPremiumNotComputed`'s three: the filer's remedy is the box itself.
+        R::OtherIncomeLine8zNotModeled(_) => vec![
+            Anchor::Field(FieldId::G1099Box5Rtaa),
+            Anchor::Field(FieldId::G1099Box6TaxableGrants),
+            Anchor::Field(FieldId::B1099Box13Bartering),
+        ],
+        R::ScheduleFIncomeNotModeled(_) => vec![
+            Anchor::Field(FieldId::G1099Box7Agriculture),
+            Anchor::Field(FieldId::G1099Box9MarketGain),
+        ],
+        R::LiquidationDistributionNotComputed(_) => vec![
+            Anchor::Field(FieldId::Div1099Box9CashLiquidation),
+            Anchor::Field(FieldId::Div1099Box10NoncashLiquidation),
+        ],
         R::IraDeductionClaimed => vec![Anchor::NotInForm {
             note: "the Schedule 1 IRA deduction is not a v1 form field — entered via TOML import",
         }],
@@ -322,6 +345,14 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         }],
         R::Schedule1aOvertimeFromTradeOrBusiness => vec![Anchor::NotInForm {
             note: "Schedule 1-A line 14b needs a 1099-NEC / 1099-MISC input surface, which btctax does not have; remove the Schedule C or do not claim Part III",
+        }],
+        // ★ Seam review I-4. `NotInForm` for the SAME expiring reason the two above carry: the
+        //   Schedule 1-A section is not built yet (`EXEMPT_PREFIXES` says so, and names the task),
+        //   so the three conditions live only on the TOML import surface today. Unlike those two,
+        //   this one's cure IS a Schedule 1-A field — it becomes `Anchor::Field` when the section
+        //   lands, and the coverage KAT will police it then.
+        R::QualifiedTipsCautionNotMet => vec![Anchor::NotInForm {
+            note: "the Schedule 1-A Part II conditions (occupation_on_treasury_list, excludes_unlisted_occupation_tips, meets_qualified_tip_criteria) are TOML-only until the Sch 1-A form section lands — set them under `[schedule_1a.tips]`, or remove the claim",
         }],
         R::KiddieTax => vec![Anchor::NotInForm {
             note: "the §1(g) kiddie-tax screen is computed at `report`, not a v1 form field",
@@ -658,14 +689,20 @@ mod tests {
             .find("#[cfg(test)]")
             .expect("the test module follows it")
             + start;
+        // ★ The seam review's I-4 fold ADDED one — `QualifiedTipsCautionNotMet`, whose three
+        //   conditions are TOML-only until the Schedule 1-A section lands. The pin moves
+        //   DELIBERATELY and says by how much, so the source stays the counter: a sixth
+        //   re-attribution, or a second new `NotInForm` refusal, still reds this.
+        const ADDED_BY_I4: usize = 1;
         let now = src[start..end].matches("Anchor::NotInForm {").count();
         assert_eq!(
             now,
-            BEFORE_T5 - 5,
+            BEFORE_T5 - 5 + ADDED_BY_I4,
             "T5 re-attributed exactly five anchors (PrivateActivityBondAmt, \
              UnrecapturedOrSpecialRateGain, InconsistentDividendSubset, ForeignTaxOverCeiling, \
-             Form1099BNeedsForm8949); the source now has {now} `NotInForm` anchors, not {}",
-            BEFORE_T5 - 5
+             Form1099BNeedsForm8949) and the I-4 fold added one (QualifiedTipsCautionNotMet); the \
+             source now has {now} `NotInForm` anchors, not {}",
+            BEFORE_T5 - 5 + ADDED_BY_I4
         );
 
         // The five, and every anchor each yields must be a real Field or Section of `form_spec()`.

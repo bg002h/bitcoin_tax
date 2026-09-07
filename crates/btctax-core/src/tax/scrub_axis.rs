@@ -260,6 +260,10 @@ pub fn maximal_sentinel() -> ReturnInputs {
         box4_fed_withheld: dec!(2),
         box5_section_199a: dec!(3),
         box7_foreign_tax: dec!(4),
+        // ★ ZERO on purpose, like `box11_bond_premium` above: > 0 refuses
+        //   `LiquidationDistributionNotComputed` and would mask every other cell of the matrix.
+        box9_cash_liquidation: dec!(0),
+        box10_noncash_liquidation: dec!(0),
         box12_exempt_interest_dividends: dec!(5),
         box13_private_activity_amt: dec!(0),
     };
@@ -272,7 +276,13 @@ pub fn maximal_sentinel() -> ReturnInputs {
         //   `Some(false)` in the literal below, the §111(a) neutral, so no refusal masks the matrix.
         box2_state_refund: dec!(7),
         box4_fed_withheld: dec!(3),
-        // ★ ZERO on purpose: > 0 refuses `FamilyLeaveBenefits` and would mask every other cell.
+        // ★ ZERO on purpose, all five: each refuses on > 0 and would mask every other cell —
+        //   boxes 5/6 `OtherIncomeLine8zNotModeled`, boxes 7/9 `ScheduleFIncomeNotModeled`,
+        //   box 10 `FamilyLeaveBenefits`.
+        box5_rtaa_payments: dec!(0),
+        box6_taxable_grants: dec!(0),
+        box7_agriculture_payments: dec!(0),
+        box9_market_gain: dec!(0),
         box10_family_leave_benefits: dec!(0),
     };
     let b_1099 = |tag: &str, tin: &str| Form1099B {
@@ -283,6 +293,8 @@ pub fn maximal_sentinel() -> ReturnInputs {
         short_term_basis: dec!(40),
         long_term_proceeds: dec!(51),
         long_term_basis: dec!(50),
+        // ★ ZERO on purpose: > 0 refuses `OtherIncomeLine8zNotModeled`.
+        box13_bartering: dec!(0),
         basis_reported_and_no_adjustments: Some(true),
     };
     // ★ R4 / T5 — Form 1098-E: a LENDER NAME and a lender TIN, the same identity class as a 1099

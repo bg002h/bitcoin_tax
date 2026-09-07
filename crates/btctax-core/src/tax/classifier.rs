@@ -588,6 +588,8 @@ fn classify_1099div(_c: &mut Census, d: &Form1099Div) {
         box4_fed_withheld: _,
         box5_section_199a: _,
         box7_foreign_tax: _,
+        box9_cash_liquidation: _,
+        box10_noncash_liquidation: _,
         box12_exempt_interest_dividends: _,
         box13_private_activity_amt: _,
         // R10.2 document identity — scalar leaves; see `classify_1099int`.
@@ -602,6 +604,10 @@ fn classify_1099g(_c: &mut Census, g: &Form1099G) {
         box1_unemployment: _,
         box2_state_refund: _,
         box4_fed_withheld: _,
+        box5_rtaa_payments: _,
+        box6_taxable_grants: _,
+        box7_agriculture_payments: _,
+        box9_market_gain: _,
         box10_family_leave_benefits: _,
         // R10.2 document identity — scalar leaves; see `classify_1099int`.
         payer_tin: _,
@@ -648,6 +654,7 @@ fn classify_1099b(c: &mut Census, b: &crate::tax::return_inputs::Form1099B) {
         short_term_basis: _,
         long_term_proceeds: _,
         long_term_basis: _,
+        box13_bartering: _,
         // R10.2 document identity — scalar leaves; see `classify_1099int`.
         payer_tin: _,
         transcribed_on: _,
@@ -692,17 +699,17 @@ fn classify_schedule_1a(c: &mut Census, s1a: &Schedule1aInputs) {
         c.exempt(
             occupation_on_treasury_list,
             Class::BenefitClaim,
-            "§224 / Sch 1-A Part II Caution — tips must be received in an occupation listed at              IRS.gov/TippedOccupations; `false` forgoes the deduction and cannot overstate it",
+            "§224 / Sch 1-A Part II Caution — tips must be received in an occupation listed at              IRS.gov/TippedOccupations. `false` no longer merely forgoes: a claimed Part II              (line 4a > 0) with this or either sibling condition false REFUSES              (`RefuseReason::QualifiedTipsCautionNotMet`), because the three are              `#[serde(default)] bool` and a silent default would take the deduction with the              Caution unmet. Unclaimed, `false` still forgoes and cannot overstate.",
         );
         c.exempt(
             excludes_unlisted_occupation_tips,
             Class::BenefitClaim,
-            "i1040s1a Part II — \"Do not include tips received in occupations that are not              included on this list in line 4a, 4b, or 4c\"",
+            "Sch 1-A Part II line 4 — \"Do not include tips received in occupations that are              not included on this list in line 4a, 4b, or 4c\". `false` beside a claimed              line 4a refuses (`RefuseReason::QualifiedTipsCautionNotMet`); unclaimed, it              forgoes.",
         );
         c.exempt(
             meets_qualified_tip_criteria,
             Class::BenefitClaim,
-            "§224(d) — cash medium, voluntary, unnegotiated, customer-determined; service charges              and automatic gratuities are not qualified tips",
+            "§224(d) — cash medium, voluntary, unnegotiated, customer-determined; service charges              and automatic gratuities are not qualified tips. `false` beside a claimed line 4a              refuses (`RefuseReason::QualifiedTipsCautionNotMet`); unclaimed, it forgoes.",
         );
     }
     if let Some(o) = overtime {

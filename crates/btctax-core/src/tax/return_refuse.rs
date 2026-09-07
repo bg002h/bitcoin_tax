@@ -451,6 +451,22 @@ pub enum RefuseReason {
     /// `Some(false)` for a return to be produced at all, so they have affirmatively sworn there was
     /// no such income and 14b is genuinely blank rather than laundered.
     Schedule1aOvertimeFromTradeOrBusiness,
+    /// ★★★ **Seam review I-4 — the Part II Caution is CLAIMED and not met.**
+    ///
+    /// UNANSWERED class. `Schedule1aTips`'s three YES-conditions —
+    /// [`crate::tax::return_inputs::Schedule1aTips::occupation_on_treasury_list`],
+    /// `excludes_unlisted_occupation_tips` and `meets_qualified_tip_criteria` — were collected and
+    /// read by NOTHING: no refusal, no gate, no compute path. Each carries `#[serde(default)]` and
+    /// defaults to `false`, so a TOML author who wrote only
+    /// `[schedule_1a.tips] qualified_tips_reported = "3000"` took the full §224 deduction with
+    /// every gating condition silently `false` — the UNDERSTATEMENT direction, laundered as a
+    /// lawful default. `false` is *"never asked"* here, not *"answered no"*, and the two are the
+    /// same blank on the printed page.
+    ///
+    /// So a claim with any condition unmet fails closed. ★ The refusal is the fold's half; GATING
+    /// THE COMPUTE (line 4c reading the three inside
+    /// [`crate::tax::schedule_1a::Schedule1A::compute`]) stays **FR-72**, Schedule 1-A's own track.
+    QualifiedTipsCautionNotMet,
     // ── ★★★ R3 / §5.1 — THE DOCUMENT CENSUS's four refusals. ────────────────────────────────────
     //
     // Each carries the ROW, never a string, so the message table lives in one place
@@ -509,6 +525,22 @@ pub enum RefuseReason {
     /// below the document census. Schedule B lines 1 and 5 take exactly what a
     /// [`crate::tax::return_inputs::ScheduleBRecord`] carries.
     FilerRecordsDeclaredNotTranscribed,
+    /// ★★★ **Filer's-records rows with no answer that authorises them** — the MIRROR of
+    /// [`Self::FilerRecordsDeclaredNotTranscribed`], and the exact analogue of
+    /// [`Self::DocumentCensusContradicted`] one level down.
+    ///
+    /// INVALID class. Two reachable states, both a contradiction between sworn testimony and a
+    /// printed figure:
+    /// - the door is live and answered **`Some(false)`** — the filer's own class-(A) answer says
+    ///   this income does not exist, and Schedule B line 1 names a payer and an amount anyway;
+    /// - the door **closed** (both census rows flipped to `Some(true)`) with rows left behind — the
+    ///   rows keep printing on Schedule B and in the 1040 line 2b/3b sums.
+    ///
+    /// btctax cannot know which of the two is wrong, so it refuses rather than choose. ★ The
+    /// section's liveness is therefore *door open **OR** rows present*, so the orphan rows stay
+    /// visible and removable in the form; only `add` stays on the door, since a new row still needs
+    /// the answer that authorises it.
+    FilerRecordsContradicted,
     /// **A live `state_refund_without_1099g` is `None`** — UNANSWERED class.
     StateRefundWithout1099gUnanswered,
     /// **A live `itemized_prior_year` is `None`** — UNANSWERED class.
@@ -545,6 +577,38 @@ pub enum RefuseReason {
     /// (*"Other income. List type and amount"*), for which btctax models no inflow. An income box
     /// with no reader UNDERSTATES, so it fails closed.
     FamilyLeaveBenefits,
+    // ── ★★★ SEAM REVIEW M-1 — ONE RULE FOR AN INCOME BOX WITH NO READER. ────────────────────────
+    //
+    // FR-65 made 1099-G box 10 refuse with the sentence *"an income box with no reader understates,
+    // so it fails closed"*, and then four boxes on the same form and three on two others still said
+    // `NotRead` on verbatim the same argument. The asymmetry is what these three variants remove:
+    // the census now answers that question the same way everywhere, and the mechanism — not the
+    // list of boxes that happened to be noticed — decides.
+    //
+    // ★ Each carries the BOX as a `String` so one variant covers every box with that mechanism and
+    //   the message still names the paper the filer is holding. See `BoxDecision`'s doc for the
+    //   rule and the boxes that stay `NotRead` (identifiers, state figures, expenses, and figures
+    //   already inside a collected box).
+    /// ★★★ **An income box whose only home is Schedule 1 line 8z, which btctax fills from nothing.**
+    ///
+    /// *"Other income. List type and amount"* — Form 1099-G box 5 (RTAA payments), box 6 (taxable
+    /// grants) and Form 1099-B box 13 (bartering) all land there. The payload is the box.
+    OtherIncomeLine8zNotModeled(String),
+    /// ★★★ **An income box whose home is Schedule F**, an excluded family (§2.2) — Form 1099-G box 7
+    /// (agriculture payments) and box 9 (CCC loan market gain).
+    ///
+    /// ★ The document census announces the exclusion when the filer holds a FARM document. These two
+    /// boxes deliver farm income on a document btctax admits, so on this row the census says
+    /// nothing and the figure would vanish silently. The payload is the box.
+    ScheduleFIncomeNotModeled(String),
+    /// ★★★ **A liquidating distribution — Form 1099-DIV boxes 9 and 10.**
+    ///
+    /// Treated as full payment in exchange for the stock, so it is a DISPOSITION on Form 8949 and
+    /// Schedule D in the year received, not a dividend. btctax holds no basis for the stock and
+    /// models no Form 8949 row, so the gain has no reader. ★ Distinct from box 3 (nondividend
+    /// distributions), which stays `NotRead` because it is a BASIS ADJUSTMENT and reaches no line
+    /// this year at all — the two look alike and are not the same. The payload is the box.
+    LiquidationDistributionNotComputed(String),
 }
 
 /// A fail-closed refusal: the reason + a human-readable detail (surfaced to the user).
@@ -797,6 +861,8 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             box4_fed_withheld,
             box5_section_199a,
             box7_foreign_tax,
+            box9_cash_liquidation,
+            box10_noncash_liquidation,
             box12_exempt_interest_dividends,
             box13_private_activity_amt,
             // R10.2 document identity — not money leaves, so no negative screen applies.
@@ -836,6 +902,12 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         if neg(*box13_private_activity_amt) {
             return Some("1099-DIV box 13 private-activity-bond dividends");
         }
+        if neg(*box9_cash_liquidation) {
+            return Some("1099-DIV box 9 cash liquidation distributions");
+        }
+        if neg(*box10_noncash_liquidation) {
+            return Some("1099-DIV box 10 noncash liquidation distributions");
+        }
     }
     for g in g_1099 {
         let Form1099G {
@@ -843,6 +915,10 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             box1_unemployment,
             box2_state_refund,
             box4_fed_withheld,
+            box5_rtaa_payments,
+            box6_taxable_grants,
+            box7_agriculture_payments,
+            box9_market_gain,
             box10_family_leave_benefits,
             // R10.2 document identity — not money leaves, so no negative screen applies.
             payer_tin: _,
@@ -859,6 +935,18 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         }
         if neg(*box10_family_leave_benefits) {
             return Some("1099-G box 10 family leave benefits");
+        }
+        if neg(*box5_rtaa_payments) {
+            return Some("1099-G box 5 RTAA payments");
+        }
+        if neg(*box6_taxable_grants) {
+            return Some("1099-G box 6 taxable grants");
+        }
+        if neg(*box7_agriculture_payments) {
+            return Some("1099-G box 7 agriculture payments");
+        }
+        if neg(*box9_market_gain) {
+            return Some("1099-G box 9 market gain");
         }
     }
     // R4 / §5.2 — Form 1098-E box 1, the §221 chain's only figure.
@@ -1419,7 +1507,62 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
         }
     }
 
+    // ★★★ Seam review I-4 — SCHEDULE 1-A PART II's CAUTION, FAILING CLOSED.
+    //
+    //     The Caution is printed on the form itself: *"Fill out Part II only if you received
+    //     qualified tips. These tips must have been received in an occupation listed at
+    //     IRS.gov/TippedOccupations."* (`f1040s1a--2025.txt:24-25`.) Its three conditions were
+    //     collected and read by nothing, and every one of them is `#[serde(default)] bool` — so a
+    //     TOML author who wrote `qualified_tips_reported` alone took the whole §224 deduction with
+    //     the Caution unmet and unasked. `false` here is *"nobody answered"*, not *"answered no"*.
+    //
+    //     ★ Gated on an AMOUNT being claimed, like the negative screens above: a Part II with no
+    //       tips claims nothing, and demanding three confirmations for it would refuse a filer who
+    //       is owed no deduction at all.
+    if ri.schedule_1a.tips.as_ref().is_some_and(|t| {
+        t.qualified_tips_reported > Usd::ZERO
+            && !(t.occupation_on_treasury_list
+                && t.excludes_unlisted_occupation_tips
+                && t.meets_qualified_tip_criteria)
+    }) {
+        return refuse(
+            RefuseReason::QualifiedTipsCautionNotMet,
+            "this return claims the §224 deduction on Schedule 1-A Part II, and the Caution the \
+             form prints above line 4 is not met. \"Fill out Part II only if you received \
+             qualified tips. These tips must have been received in an occupation listed at \
+             IRS.gov/TippedOccupations.\" All three of the following must be affirmatively true, \
+             and each is left FALSE unless you say otherwise — which on a claimed deduction is \
+             \"nobody asked\", not \"no\": (1) `occupation_on_treasury_list` — the tips were \
+             received in an occupation on the Treasury list, one that customarily and regularly \
+             received tips on or before December 31, 2024; (2) `excludes_unlisted_occupation_tips` \
+             — the figure already excludes tips received in occupations NOT on that list (\"Do not \
+             include tips received in occupations that are not included on this list in line 4a, \
+             4b, or 4c\"); and (3) `meets_qualified_tip_criteria` — the tips were paid in cash, \
+             voluntarily, without negotiation and in an amount the customer determined, so service \
+             charges and automatic gratuities are excluded. Set the ones that are true under \
+             `[schedule_1a.tips]`, or remove the claim.",
+        );
+    }
+
     for b in &ri.b_1099 {
+        // ★★★ Seam review M-1 — box 13, BARTERING. The same rule as 1099-G boxes 5/6: income whose
+        //     only home on this return is Schedule 1 line 8z, which btctax fills from nothing.
+        //     (Schedule C is the other home, and routing it there would need a trade or business
+        //     the filer never declared.)
+        if b.box13_bartering > Usd::ZERO {
+            return refuse(
+                RefuseReason::OtherIncomeLine8zNotModeled(
+                    "Form 1099-B box 13 (bartering)".to_string(),
+                ),
+                "a Form 1099-B reports BARTERING income in box 13 — the fair market value of what \
+                 a barter exchange arranged for you. That is income, and it reaches SCHEDULE 1 \
+                 LINE 8z, \"Other income. List type and amount\", or Schedule C if the bartering \
+                 was in a trade or business. btctax fills line 8z from nothing, and it will not \
+                 route income to a Schedule C you did not declare — so the amount would simply \
+                 vanish and understate your tax. It refuses instead. File with a preparer, who \
+                 will report it on line 8z or on Schedule C",
+            );
+        }
         let carries_totals = b.short_term_proceeds > Usd::ZERO
             || b.short_term_basis > Usd::ZERO
             || b.long_term_proceeds > Usd::ZERO
@@ -1492,7 +1635,7 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
             //     wording-changed the instant it was answered — a refusal that fires on a correct
             //     answer. It was latent until T5 gave two more questions rendered prompts.
             let key = crate::tax::provenance::AnswerKey::Question(q.id);
-            if crate::tax::provenance::answer_status(ri, &key, &q.prompt_text(ri))
+            if crate::tax::provenance::answer_status(ri, &key)
                 == crate::tax::provenance::AnswerStatus::WordingChanged
             {
                 return refuse(q.unanswered.clone(), WORDING_CHANGED_DETAIL);
@@ -1544,6 +1687,40 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
              Enter them as `[[schedule_b_filer_records]]` tables through `btctax income import`, or \
              in the \"Interest and dividends from your own records\" section of the tax-inputs \
              form — or change the answer to \"no\" if there were none.",
+        );
+    }
+    // ★★★ Seam review I-2 — THE MIRROR, and it is the same rule `screen_document_census` applies to
+    //     a declared document: rows on the return that NO answer authorises. Either the filer
+    //     answered "no" and Schedule B line 1 names a payer anyway, or the census moved under the
+    //     rows and left them orphaned — printing into 1040 lines 2b/3b on a return signed under
+    //     §6065. btctax cannot know which of the two is wrong, so it refuses rather than choose.
+    //
+    // ★★★ **It reads the ANSWER, deliberately NOT `question_is_live`.** The review's minimal change
+    //     wrote `!(live && Some(true))`, which also refuses the ordinary filer who answered YES
+    //     while the door was open, entered a neighbour's seller-financed mortgage, and later
+    //     transcribed a Form 1099-DIV — closing the door under a row that is TRUE. That filer can
+    //     no longer reach the question (it is not asked), so the refusal's only exit is to delete
+    //     real income: an understatement path created by a refusal, which is the over-refusing
+    //     shape D-6 exists to avoid. It is not hypothetical — `scrub_axis`'s maximal sentinel is
+    //     exactly that return, and the `!(live && …)` form red its "the baseline must FILE"
+    //     assertion. Both states the review actually demonstrated (its PROBE3a and PROBE3b, which
+    //     both carry `interest_or_dividends_without_1099 = Some(false)`) refuse here; what does not
+    //     refuse is a row the filer's own standing YES authorises.
+    if !ri.schedule_b_filer_records.is_empty()
+        && ri.interest_or_dividends_without_1099 != Some(true)
+    {
+        let n = ri.schedule_b_filer_records.len();
+        return refuse(
+            RefuseReason::FilerRecordsContradicted,
+            format!(
+                "this return carries {n} interest or dividend row(s) from your own records, and \
+                 no answer on it authorises them — you did not answer \"yes\" to the question that \
+                 opens that section. Those rows still print on Schedule B lines 1 and 5 and in the \
+                 Form 1040 line 2b/3b totals, on a return you sign under §6065. btctax cannot know \
+                 which of the two is wrong, so it refuses rather than choose: remove the row(s) \
+                 from the \"Interest and dividends from your own records\" section if they are not \
+                 income you received, or answer \"yes\" to the question that opens it if they are."
+            ),
         );
     }
     // ★★★ R3/I1 + R4 — the STATE AND LOCAL INCOME TAX REFUND WORKSHEET, reached identically from a
@@ -2065,12 +2242,80 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
                 "1099-DIV box 13 (private-activity-bond dividends) is an AMT preference — out of scope",
             );
         }
+        // ★★★ Seam review M-1 — boxes 9 and 10, LIQUIDATING DISTRIBUTIONS. Full payment in
+        //     exchange for the stock: a Form 8949 / Schedule D disposition in the year received,
+        //     for which btctax holds no basis and models no row.
+        for (label, amount) in [
+            (
+                "box 9 (cash liquidation distributions)",
+                div.box9_cash_liquidation,
+            ),
+            (
+                "box 10 (noncash liquidation distributions)",
+                div.box10_noncash_liquidation,
+            ),
+        ] {
+            if amount > Usd::ZERO {
+                return refuse(
+                    RefuseReason::LiquidationDistributionNotComputed(format!(
+                        "Form 1099-DIV {label}"
+                    )),
+                    format!(
+                        "a Form 1099-DIV reports a LIQUIDATING DISTRIBUTION in {label}. A \
+                         liquidating distribution is not a dividend: it is treated as full payment \
+                         in exchange for your stock, so it is a SALE reported on FORM 8949 and \
+                         SCHEDULE D in the year you received it, and the gain is the distribution \
+                         less your basis in the stock. btctax holds no basis for that stock and \
+                         builds no Form 8949 row for it, so the gain has no reader and would \
+                         simply vanish — understating your tax. It refuses instead. File with a \
+                         preparer, who will compute the gain on Form 8949"
+                    ),
+                );
+            }
+        }
         foreign_tax += div.box7_foreign_tax;
     }
     // ★★★ R4 / FR-65 — Form 1099-G box 10 *Family leave benefits*, NEW on the Rev. December 2026
     //     grid. Rev. Rul. 2025-4 makes a state paid family and medical leave program report them,
     //     and they are gross income reaching SCHEDULE 1 LINE 8z, for which btctax models no inflow.
     for g in &ri.g_1099 {
+        // ★★★ Seam review M-1 — boxes 5, 6, 7 and 9, decided by the SAME rule box 10 is decided by.
+        for (label, amount) in [
+            ("box 5 (RTAA payments)", g.box5_rtaa_payments),
+            ("box 6 (taxable grants)", g.box6_taxable_grants),
+        ] {
+            if amount > Usd::ZERO {
+                return refuse(
+                    RefuseReason::OtherIncomeLine8zNotModeled(format!("Form 1099-G {label}")),
+                    format!(
+                        "a Form 1099-G reports an amount in {label}. That is income, and its only \
+                         home on this return is SCHEDULE 1 LINE 8z, \"Other income. List type and \
+                         amount\" — a line btctax fills from nothing, so the amount would simply \
+                         vanish and understate your tax. It refuses instead. File with a preparer, \
+                         who will list it on line 8z"
+                    ),
+                );
+            }
+        }
+        for (label, amount) in [
+            ("box 7 (agriculture payments)", g.box7_agriculture_payments),
+            ("box 9 (market gain on a CCC loan)", g.box9_market_gain),
+        ] {
+            if amount > Usd::ZERO {
+                return refuse(
+                    RefuseReason::ScheduleFIncomeNotModeled(format!("Form 1099-G {label}")),
+                    format!(
+                        "a Form 1099-G reports an amount in {label}. That is farm income, and it \
+                         reaches SCHEDULE F, which btctax does not produce — farm income is an \
+                         excluded family. btctax's document census announces that exclusion when \
+                         you say you hold a farm document, but this figure arrives on a Form 1099-G, \
+                         which btctax DOES accept, so nothing would announce it and the income \
+                         would simply vanish. It refuses instead. File with a preparer, who will \
+                         report it on Schedule F"
+                    ),
+                );
+            }
+        }
         if g.box10_family_leave_benefits > Usd::ZERO {
             return refuse(
                 RefuseReason::FamilyLeaveBenefits,
@@ -2123,6 +2368,18 @@ mod tests {
     };
     use crate::tax::tables::SaltLimitation;
     use crate::LedgerState;
+
+    /// One filer's-records row for Schedule B line 1 — a seller-financed mortgage, so the SSN and
+    /// address columns carry something. The SSN is from the never-issued area 000.
+    pub(super) fn sb_record() -> crate::tax::return_inputs::ScheduleBRecord {
+        crate::tax::return_inputs::ScheduleBRecord {
+            payer_name: "Neighbour, on a seller-financed mortgage".into(),
+            payer_ssn: "000-00-0001".into(),
+            payer_address: "1 Example St".into(),
+            amount: dec!(1200),
+            kind: crate::tax::return_inputs::ScheduleBRecordKind::Interest,
+        }
+    }
 
     // A synthetic TY2024 FullReturnParams + a table with the real SS wage base for the excess-SS MAX.
     pub(super) fn params() -> FullReturnParams {
@@ -2563,6 +2820,49 @@ mod tests {
             assert_ne!(raw(&blank).as_ref(), Some(&entry.unanswered));
         }
 
+        // ── ★★★ (f1b) SEAM REVIEW I-3 — D-7's SECOND LIMB, ASYMMETRICALLY. ─────────────────────
+        //
+        // The loop above probes only `DocumentRow::Int1099`, and its `Some(true)` probe closes BOTH
+        // rows — so the 1099-DIV limb of `InterestOrDividendsWithout1099.live` is never exercised
+        // in either direction, and deleting it changes nothing any test can see. By this repo's own
+        // rule the guarantee then does not exist, and what is lost is an understatement path: a
+        // filer holding 1099-INTs and no 1099-DIV silently loses the door for a nominee
+        // distribution or an undocumented dividend.
+        let mut div_only = censused();
+        div_only.documents.set(DocumentRow::Int1099, Some(true)); // Div1099 stays `Some(false)`
+        div_only
+            .int_1099
+            .push(crate::tax::return_inputs::Form1099Int {
+                payer: "First Bank".into(),
+                box1_interest: dec!(2000),
+                ..Default::default()
+            });
+        assert_eq!(
+            div_only.documents.get(DocumentRow::Div1099),
+            Some(false),
+            "the probe's premise: only the INT row flipped"
+        );
+        assert!(
+            question_is_live(QuestionId::InterestOrDividendsWithout1099, &div_only),
+            "★ THE KILL: EITHER row's No opens the door — a filer with 1099-INTs and no 1099-DIV \
+             can still hold a nominee distribution"
+        );
+        // …and the mirror, so the limb is exercised in BOTH directions rather than only the one
+        // that happens to be true: the INT row alone answered No, with the DIV row Yes.
+        let mut int_only = censused();
+        int_only.documents.set(DocumentRow::Div1099, Some(true));
+        int_only
+            .div_1099
+            .push(crate::tax::return_inputs::Form1099Div {
+                payer: "A Fund".into(),
+                box1a_ordinary: dec!(300),
+                ..Default::default()
+            });
+        assert!(
+            question_is_live(QuestionId::InterestOrDividendsWithout1099, &int_only),
+            "★ THE KILL: …and symmetrically for the INT limb"
+        );
+
         // ── (f2) `Yes` on the WAGE question refuses, naming Form 1040 line 1a. ──────────────────
         let mut wages = censused();
         wages.w2_wages_without_w2 = Some(true);
@@ -2622,17 +2922,134 @@ mod tests {
             r.detail
         );
         let mut with_row = door.clone();
-        with_row.schedule_b_filer_records = vec![crate::tax::return_inputs::ScheduleBRecord {
-            payer_name: "Neighbour, on a seller-financed mortgage".into(),
-            payer_ssn: "000-00-0001".into(),
-            payer_address: "1 Example St".into(),
-            amount: dec!(1200),
-            kind: crate::tax::return_inputs::ScheduleBRecordKind::Interest,
-        }];
+        with_row.schedule_b_filer_records = vec![sb_record()];
         assert_eq!(
             raw(&with_row),
             None,
             "one filer's-records row is the whole remedy — the return must file"
+        );
+    }
+
+    /// ★★★ **SEAM REVIEW I-2's KILL — the MIRROR of (f4), in both of its reachable states.**
+    ///
+    /// R5's rows were gated by an answer in ONE direction only: a `Yes` with no rows refused, and a
+    /// row with no `Yes` printed on Schedule B and into the 1040 line 2b/3b totals with nothing
+    /// saying so. The exact analogue for documents —
+    /// [`RefuseReason::DocumentCensusContradicted`] — sat thirty lines above and was never carried
+    /// across to the door.
+    ///
+    /// ★ (b) also checks the EXIT: with the door closed, the section must still be LIVE while it
+    ///   holds rows, or the refusal is a brick — a figure on the filer's own return that no surface
+    ///   can show, edit or withdraw.
+    #[test]
+    fn filer_records_with_no_answer_authorising_them_refuse_and_stay_removable() {
+        // ── (a) the door is LIVE and answered `No`, with a row on the return. ───────────────────
+        let mut said_no = censused();
+        assert_eq!(
+            said_no.interest_or_dividends_without_1099,
+            Some(false),
+            "the probe's premise: the fixture answers the door No"
+        );
+        assert!(
+            crate::tax::questions::question_is_live(
+                crate::tax::questions::QuestionId::InterestOrDividendsWithout1099,
+                &said_no,
+            ),
+            "…and the question IS asked, so the No is real testimony"
+        );
+        said_no.schedule_b_filer_records = vec![sb_record()];
+        let r = screen_inputs(&said_no, &tbl(), &params()).expect(
+            "★ THE KILL (a): a `No` beside a transcribed row is a contradiction between \
+                     sworn testimony and a printed figure — it must refuse, not file",
+        );
+        assert_eq!(r.reason, RefuseReason::FilerRecordsContradicted);
+        assert!(
+            r.detail.contains("remove the row(s)") && r.detail.contains("answer \"yes\""),
+            "the message must be BOTH ways, like DocumentCensusContradicted's: {}",
+            r.detail
+        );
+
+        // ── (b) the door CLOSES under the rows — both census rows flip to `Yes`. ────────────────
+        //
+        // ★ The answer stays `Some(false)` — this is the review's own PROBE3b, and it is the state
+        //   the rule must catch WITHOUT `question_is_live`: the door is shut, so the liveness gate
+        //   the other door rules use would let it through.
+        let mut closed = said_no.clone();
+        use crate::tax::document_census::DocumentRow;
+        closed.documents.set(DocumentRow::Int1099, Some(true));
+        closed.documents.set(DocumentRow::Div1099, Some(true));
+        closed
+            .int_1099
+            .push(crate::tax::return_inputs::Form1099Int {
+                payer: "First Bank".into(),
+                box1_interest: dec!(2000),
+                ..Default::default()
+            });
+        closed
+            .div_1099
+            .push(crate::tax::return_inputs::Form1099Div {
+                payer: "A Fund".into(),
+                box1a_ordinary: dec!(300),
+                ..Default::default()
+            });
+        assert!(
+            !crate::tax::questions::question_is_live(
+                crate::tax::questions::QuestionId::InterestOrDividendsWithout1099,
+                &closed,
+            ),
+            "the probe's premise: holding BOTH documents closes the door"
+        );
+        let r = screen_inputs(&closed, &tbl(), &params()).expect(
+            "★ THE KILL (b): a closed door with orphan rows must refuse — the rows keep printing \
+             on Schedule B and in the 1040 line 2b/3b sums",
+        );
+        assert_eq!(r.reason, RefuseReason::FilerRecordsContradicted);
+
+        // ★ …and the rows the refusal is about are still PRINTING, which is what makes it a
+        //   contradiction rather than a formality. (That they stay REACHABLE in the form is the
+        //   other half of the exit, and is held one crate up in
+        //   `btctax-input-form`'s `orphan_filer_records_stay_visible_while_add_stays_on_the_door`.)
+        assert!(
+            crate::tax::printed::schedule_b_lines(&closed)
+                .is_some_and(|b| b.part1_rows.iter().any(|x| x.amount == dec!(1200))),
+            "the probe's premise: the orphan row is on the printed Schedule B"
+        );
+
+        // ── ★★★ THE LAWFUL CLOSED-DOOR CASE MUST STILL FILE. ──────────────────────────────────
+        //
+        // Same shape as (b) — both documents held, both transcribed, the door shut — except that
+        // the filer's standing answer is YES: they opened the door, entered a neighbour's
+        // seller-financed mortgage, and later transcribed a 1099-DIV. The interest is real, and a
+        // refusal here has no exit but deleting it, because the question is no longer asked. This
+        // is `scrub_axis`'s maximal sentinel, and it is why the rule reads the ANSWER rather than
+        // the question's liveness.
+        let mut still_yes = closed.clone();
+        still_yes.interest_or_dividends_without_1099 = Some(true);
+        assert_eq!(
+            raw(&still_yes),
+            None,
+            "★ THE KILL: a standing YES authorises the row even after the census closed the door \
+             — refusing here would force the filer to DELETE income they truly received"
+        );
+
+        // ── (Y, one row) still files — the rule may not swallow the lawful case. ───────────────
+        let mut yes = censused();
+        yes.interest_or_dividends_without_1099 = Some(true);
+        yes.schedule_b_filer_records = vec![sb_record()];
+        assert_eq!(
+            raw(&yes),
+            None,
+            "a `Yes` with a row is the whole point of R5 — it must still file"
+        );
+        // …and the row still prints. (Schedule B files above $1,500 of interest, so the lawful
+        // probe carries an amount over the threshold — the point is the row, not the threshold.)
+        let mut yes_big = yes.clone();
+        yes_big.schedule_b_filer_records[0].amount = dec!(2000);
+        assert_eq!(raw(&yes_big), None);
+        assert!(
+            crate::tax::printed::schedule_b_lines(&yes_big)
+                .is_some_and(|b| b.part1_rows.iter().any(|x| x.amount == dec!(2000))),
+            "…and the lawful row still prints on Schedule B line 1"
         );
     }
 
@@ -5213,6 +5630,255 @@ mod tests {
         );
     }
 
+    /// ★★★ **SEAM REVIEW I-4's KILL — the Part II Caution now has a reader, and it fails CLOSED.**
+    ///
+    /// `occupation_on_treasury_list`, `excludes_unlisted_occupation_tips` and
+    /// `meets_qualified_tip_criteria` were collected and read by nothing: a full-file grep found
+    /// them only in the struct, the classifier's `exempt` calls and test fixtures. Every one is
+    /// `#[serde(default)] bool`, so a TOML author who wrote
+    /// `[schedule_1a.tips] qualified_tips_reported = "3000"` took the whole §224 deduction with all
+    /// three silently `false` — the understatement direction, laundered as a lawful default. The
+    /// classifier meanwhile recorded an exemption reason asserting a behaviour that did not exist.
+    ///
+    /// ★ This is the REFUSAL half only. Gating the compute (line 4c reading the three) stays FR-72.
+    #[test]
+    fn a_claimed_part_ii_with_any_caution_condition_false_refuses_and_quotes_the_caution() {
+        // The review's own probe fixture: the whole claim, none of the conditions.
+        let mut bare = ri();
+        bare.schedule_1a.tips = Some(Schedule1aTips {
+            qualified_tips_reported: dec!(3000),
+            ..Default::default()
+        });
+        let r = screen_inputs(&bare, &tbl(), &params()).expect(
+            "★ THE KILL: 3,000 of tips claimed with every gating condition at its serde default \
+             `false` must REFUSE — taking the deduction there is the understatement direction",
+        );
+        assert_eq!(r.reason, RefuseReason::QualifiedTipsCautionNotMet);
+        assert!(
+            r.detail.contains(
+                "These tips must have been received in an occupation listed at \
+                 IRS.gov/TippedOccupations."
+            ),
+            "the refusal must quote the form's own Caution (f1040s1a--2025.txt:24-25): {}",
+            r.detail
+        );
+        for cond in [
+            "occupation_on_treasury_list",
+            "excludes_unlisted_occupation_tips",
+            "meets_qualified_tip_criteria",
+        ] {
+            assert!(
+                r.detail.contains(cond),
+                "the refusal must name {cond}, the condition the filer has to set: {}",
+                r.detail
+            );
+        }
+
+        // ★ EACH condition alone is enough to refuse — not just the all-false case, or two of the
+        //   three could be dropped from the predicate and nothing would notice.
+        for (what, drop) in [
+            ("occupation_on_treasury_list", 0usize),
+            ("excludes_unlisted_occupation_tips", 1),
+            ("meets_qualified_tip_criteria", 2),
+        ] {
+            let mut t = claiming_tips();
+            match drop {
+                0 => t.occupation_on_treasury_list = false,
+                1 => t.excludes_unlisted_occupation_tips = false,
+                _ => t.meets_qualified_tip_criteria = false,
+            }
+            let mut r0 = ri();
+            r0.schedule_1a.tips = Some(t);
+            assert_eq!(
+                screen_inputs(&r0, &tbl(), &params()).map(|x| x.reason),
+                Some(RefuseReason::QualifiedTipsCautionNotMet),
+                "★ THE KILL: a false {what} alone must refuse a claimed Part II"
+            );
+        }
+
+        // ── The two directions that must NOT refuse. ────────────────────────────────────────────
+        // (i) All three affirmed — the return files and line 4c is unchanged (FR-72 keeps the
+        //     compute; this fold only added the gate).
+        let mut ok = ri();
+        ok.schedule_1a.tips = Some(claiming_tips());
+        assert_eq!(
+            screen_inputs(&ok, &tbl(), &params()).map(|x| x.reason),
+            None,
+            "an affirmed Part II must still file"
+        );
+        // (ii) A Part II present but claiming NOTHING asserts nothing and is owed nothing, so
+        //      demanding three confirmations for it would be a refusal with no purpose.
+        let mut nothing = ri();
+        nothing.schedule_1a.tips = Some(Schedule1aTips::default());
+        assert_eq!(
+            screen_inputs(&nothing, &tbl(), &params()).map(|x| x.reason),
+            None,
+            "a Part II claiming zero tips must not refuse"
+        );
+    }
+
+    /// ★★★ **SEAM REVIEW M-1's KILL — SEVEN INCOME BOXES THAT HAD NO READER NOW FAIL CLOSED.**
+    ///
+    /// FR-65 decided 1099-G box 10 with the sentence *"an income box with no reader understates, so
+    /// it fails closed"*, and then four boxes on the same form and three on two others still said
+    /// `NotRead` on verbatim the same argument — one census answering one question two ways. Each of
+    /// these was a figure printed on the filer's own paper that btctax would accept the document for
+    /// and then silently drop.
+    ///
+    /// ★ The refusal is only half; the census join (`xtask box-census`) holds the other half — a
+    ///   `RefuseIfNonzero` naming a `FieldId` that is not on the document's own row REDS there,
+    ///   which is what stops one of these becoming the fieldless decision box 10 was at T2, *"a
+    ///   decision that could not fire"*.
+    #[test]
+    fn every_income_box_with_no_reader_refuses_on_its_own_amount() {
+        use crate::tax::document_census::DocumentRow;
+        let g = |f: fn(&mut crate::tax::return_inputs::Form1099G)| {
+            let mut r = ri();
+            r.documents.set(DocumentRow::G1099, Some(true));
+            let mut row = crate::tax::return_inputs::Form1099G {
+                payer: "State of Example".into(),
+                ..Default::default()
+            };
+            f(&mut row);
+            r.g_1099.push(row);
+            r
+        };
+        let d = |f: fn(&mut Form1099Div)| {
+            let mut r = ri();
+            r.documents.set(DocumentRow::Div1099, Some(true));
+            let mut row = Form1099Div {
+                payer: "A Fund".into(),
+                ..Default::default()
+            };
+            f(&mut row);
+            r.div_1099.push(row);
+            r
+        };
+        let b = |f: fn(&mut crate::tax::return_inputs::Form1099B)| {
+            let mut r = ri();
+            r.documents.set(DocumentRow::B1099, Some(true));
+            let mut row = crate::tax::return_inputs::Form1099B {
+                payer: "Broker LLC".into(),
+                basis_reported_and_no_adjustments: Some(true),
+                ..Default::default()
+            };
+            f(&mut row);
+            r.b_1099.push(row);
+            r
+        };
+
+        let cases: Vec<(&str, ReturnInputs, RefuseReason, &str)> = vec![
+            (
+                "1099-G box 5 (RTAA payments)",
+                g(|r| r.box5_rtaa_payments = dec!(900)),
+                RefuseReason::OtherIncomeLine8zNotModeled(
+                    "Form 1099-G box 5 (RTAA payments)".into(),
+                ),
+                "SCHEDULE 1 LINE 8z",
+            ),
+            (
+                "1099-G box 6 (taxable grants)",
+                g(|r| r.box6_taxable_grants = dec!(900)),
+                RefuseReason::OtherIncomeLine8zNotModeled(
+                    "Form 1099-G box 6 (taxable grants)".into(),
+                ),
+                "SCHEDULE 1 LINE 8z",
+            ),
+            (
+                "1099-G box 7 (agriculture payments)",
+                g(|r| r.box7_agriculture_payments = dec!(900)),
+                RefuseReason::ScheduleFIncomeNotModeled(
+                    "Form 1099-G box 7 (agriculture payments)".into(),
+                ),
+                "SCHEDULE F",
+            ),
+            (
+                "1099-G box 9 (market gain)",
+                g(|r| r.box9_market_gain = dec!(900)),
+                RefuseReason::ScheduleFIncomeNotModeled(
+                    "Form 1099-G box 9 (market gain on a CCC loan)".into(),
+                ),
+                "SCHEDULE F",
+            ),
+            (
+                "1099-DIV box 9 (cash liquidation)",
+                d(|r| r.box9_cash_liquidation = dec!(4000)),
+                RefuseReason::LiquidationDistributionNotComputed(
+                    "Form 1099-DIV box 9 (cash liquidation distributions)".into(),
+                ),
+                "FORM 8949",
+            ),
+            (
+                "1099-DIV box 10 (noncash liquidation)",
+                d(|r| r.box10_noncash_liquidation = dec!(4000)),
+                RefuseReason::LiquidationDistributionNotComputed(
+                    "Form 1099-DIV box 10 (noncash liquidation distributions)".into(),
+                ),
+                "FORM 8949",
+            ),
+            (
+                "1099-B box 13 (bartering)",
+                b(|r| r.box13_bartering = dec!(2500)),
+                RefuseReason::OtherIncomeLine8zNotModeled("Form 1099-B box 13 (bartering)".into()),
+                "SCHEDULE 1 LINE 8z",
+            ),
+        ];
+        assert_eq!(cases.len(), 7, "M-1 flipped exactly seven boxes");
+
+        for (what, r, expect, must_name) in &cases {
+            let got = screen_inputs(r, &tbl(), &params()).unwrap_or_else(|| {
+                panic!(
+                    "★ THE KILL: {what} carries income and no line reads it \
+                                           — it must REFUSE, not vanish"
+                )
+            });
+            assert_eq!(&got.reason, expect, "{what} refused with the wrong reason");
+            assert!(
+                got.detail.contains(must_name),
+                "{what}'s refusal must name {must_name}, the line it should have reached: {}",
+                got.detail
+            );
+            // ★ …and it fires at IMPORT too, before the figure is ever written — same as every
+            //   other box screen. (The param-free census asserts this for every rule; named here
+            //   so a reader of this test sees which tier these seven land in.)
+            assert_eq!(
+                screen_param_free(r).map(|x| x.reason),
+                Some(expect.clone()),
+                "{what} must refuse on a year with no package"
+            );
+        }
+
+        // ── THE OTHER DIRECTION: a ZERO in each of the seven files. ─────────────────────────────
+        // Without this the rule could be `refuse whenever the document is present`, which would
+        // brick every 1099-G and 1099-DIV on the ordinary return.
+        for (what, mut r, _, _) in cases {
+            for row in &mut r.g_1099 {
+                *row = crate::tax::return_inputs::Form1099G {
+                    payer: row.payer.clone(),
+                    box1_unemployment: dec!(1000),
+                    ..Default::default()
+                };
+            }
+            for row in &mut r.div_1099 {
+                *row = Form1099Div {
+                    payer: row.payer.clone(),
+                    box1a_ordinary: dec!(1000),
+                    ..Default::default()
+                };
+            }
+            for row in &mut r.b_1099 {
+                row.box13_bartering = Usd::ZERO;
+                row.short_term_proceeds = dec!(1000);
+                row.short_term_basis = dec!(900);
+            }
+            assert_eq!(
+                raw(&r),
+                None,
+                "a zero in {what} must FILE — the rule is about the amount, not the document"
+            );
+        }
+    }
+
     /// The negative-money screen reaches all three Schedule 1-A leaves. An unscreened money field is
     /// a silent fail-open, and these three are new.
     #[test]
@@ -5265,7 +5931,7 @@ mod tests {
 // ════════════════════════════════════════════════════════════════════════════════════════════════
 #[cfg(test)]
 mod param_free_tier {
-    use super::tests::{params, ri, tbl};
+    use super::tests::{params, ri, sb_record, tbl};
     use super::*;
     use crate::tax::document_census::DocumentRow;
     use crate::tax::return_inputs::{
@@ -5411,6 +6077,15 @@ mod param_free_tier {
             r.schedule_c = Some(sched_c());
             r.schedule_1a.tips = Some(Schedule1aTips {
                 qualified_tips_reported: dec!(1000),
+                ..Default::default()
+            });
+        });
+        // ★ Seam review I-4 — the review's own probe fixture: 3,000 of tips claimed with every
+        //   gating condition at its `#[serde(default)]` FALSE, which is what a TOML author writing
+        //   only `qualified_tips_reported = "3000"` produces.
+        add("QualifiedTipsCautionNotMet", &|r| {
+            r.schedule_1a.tips = Some(Schedule1aTips {
+                qualified_tips_reported: dec!(3000),
                 ..Default::default()
             });
         });
@@ -5586,6 +6261,11 @@ mod param_free_tier {
             r.interest_or_dividends_without_1099 = Some(true);
             r.schedule_b_filer_records.clear();
         });
+        add("FilerRecordsContradicted", &|r| {
+            // ★ `ri()` answers the door `Some(false)`; the row is the contradiction.
+            r.interest_or_dividends_without_1099 = Some(false);
+            r.schedule_b_filer_records.push(sb_record());
+        });
         add("StateAndLocalRefundWorksheetNotComputed", &|r| {
             r.state_refund_without_1099g = Some(true);
             r.itemized_prior_year = Some(true);
@@ -5602,6 +6282,31 @@ mod param_free_tier {
         add("StatutoryEmployeeW2", &|r| {
             r.documents.set(DocumentRow::W2, Some(true));
             r.w2s.push(w2(|w| w.box13_statutory_employee = true));
+        });
+        // ★ Seam review M-1 — the three "income box with no reader" rules, each on its own box.
+        add("OtherIncomeLine8zNotModeled", &|r| {
+            r.documents.set(DocumentRow::G1099, Some(true));
+            r.g_1099.push(crate::tax::return_inputs::Form1099G {
+                payer: "State of Example".into(),
+                box5_rtaa_payments: dec!(900),
+                ..Default::default()
+            });
+        });
+        add("ScheduleFIncomeNotModeled", &|r| {
+            r.documents.set(DocumentRow::G1099, Some(true));
+            r.g_1099.push(crate::tax::return_inputs::Form1099G {
+                payer: "State of Example".into(),
+                box7_agriculture_payments: dec!(1500),
+                ..Default::default()
+            });
+        });
+        add("LiquidationDistributionNotComputed", &|r| {
+            r.documents.set(DocumentRow::Div1099, Some(true));
+            r.div_1099.push(Form1099Div {
+                payer: "A Fund".into(),
+                box9_cash_liquidation: dec!(4000),
+                ..Default::default()
+            });
         });
         add("FamilyLeaveBenefits", &|r| {
             r.documents.set(DocumentRow::G1099, Some(true));

@@ -470,6 +470,32 @@ pub fn revision_in_force(stem: &str, tax_year: u32) -> Option<&'static str> {
 /// - and the box's own printed CAPTION must appear in the field's label or help, so a box whose
 ///   wording moved between revisions cannot keep pointing at a field that says something else.
 ///
+/// ★★★ **ONE RULE FOR AN INCOME BOX WITH NO READER, and it is stated here rather than re-argued per
+/// box.** *An income box with no reader UNDERSTATES, so it fails closed* — if a box carries an amount
+/// the Form 1040 chain calls income, and no `Field` holds it and no printed line reads it, the entry
+/// is [`Self::RefuseIfNonzero`] naming the line it should have reached, never [`Self::NotRead`].
+///
+/// FR-65 decided 1099-G box 10 by that sentence and then four boxes on the same form and three on two
+/// others still said `NotRead` on verbatim the same argument (seam review M-1). One census may not
+/// answer one question two ways, so the seven were flipped together: **1099-G boxes 5, 6, 7 and 9,
+/// 1099-B box 13, and 1099-DIV boxes 9 and 10.**
+///
+/// ★ What stays `NotRead` is everything that is NOT income with no reader, and the distinction is the
+/// point of the rule rather than an exception to it:
+/// - **identifiers and codes** — a state's two-letter code, a payer's state ID, a CUSIP, a country
+///   name, a control number, a FATCA checkbox: no amount, so nothing to understate;
+/// - **state and local figures** — no federal line reads a state wage or a state withholding;
+/// - **expenses, not income** — 1099-INT box 5 / 1099-DIV box 6 investment expenses, suspended by
+///   §67(g);
+/// - **an amount already INSIDE a collected box** — W-2 box 11 (in box 1), 1099-DIV boxes 2e/2f (in
+///   1a/2a for a U.S. filer): the reader exists, it is the box that contains it;
+/// - **a basis adjustment that reaches no line THIS year** — 1099-DIV box 3 nondividend
+///   distributions. ★ It looks exactly like boxes 9/10 and is not the same: a liquidating
+///   distribution IS a disposition in the year received, box 3 is a return of capital that only
+///   changes basis;
+/// - **withholding** — 1099-B box 4, 1099-INT box 17, 1099-DIV box 16, 1099-G boxes 11/12: a forgone
+///   CREDIT overstates the tax, the direction §3.4 permits silently, so it is not this class.
+///
 /// ★ The prose survives as `note`, because the field name alone does not say WHICH LINE the box
 ///   reaches, and that sentence is the whole reason a reader can audit the table.
 /// ★ NO `PartialEq`. [`Self::RefuseIfNonzero`] carries a `fn` pointer, and Rust's own
@@ -698,9 +724,9 @@ pub const BOXES: &[BoxEntry] = &[
     BoxEntry { stem: "f1099div", editions: &["2024"], label: "8", caption: "8 Foreign country or U.S. possession",
         decision: BoxDecision::NotRead("the country's name; the §904(j) election reads the AMOUNT in box 7") },
     BoxEntry { stem: "f1099div", editions: &["2024"], label: "9", caption: "9 Cash liquidation distributions",
-        decision: BoxDecision::NotRead("a liquidating distribution is a return of capital and then a Form 8949 disposition of the stock; no chain of this return reads the box") },
+        decision: BoxDecision::RefuseIfNonzero { field: FieldId::Div1099Box9CashLiquidation, reason: || RefuseReason::LiquidationDistributionNotComputed("Form 1099-DIV box 9 (cash liquidation distributions)".to_string()), note: "a liquidating distribution is treated as full payment in EXCHANGE for the stock — a Form 8949 / Schedule D disposition in the year received, not a dividend. btctax holds no basis for that stock and builds no Form 8949 row for it, so the gain has no reader: > 0 REFUSES. ★ Distinct from box 3, which stays NotRead because it is a BASIS ADJUSTMENT reaching no line this year"} },
     BoxEntry { stem: "f1099div", editions: &["2024"], label: "10", caption: "10 Noncash liquidation distributions",
-        decision: BoxDecision::NotRead("as box 9 — a liquidating distribution, reached through basis and Form 8949, not through a 1099-DIV field") },
+        decision: BoxDecision::RefuseIfNonzero { field: FieldId::Div1099Box10NoncashLiquidation, reason: || RefuseReason::LiquidationDistributionNotComputed("Form 1099-DIV box 10 (noncash liquidation distributions)".to_string()), note: "as box 9, paid in kind rather than in cash — the same exchange treatment, the same missing basis, so > 0 REFUSES"} },
     BoxEntry { stem: "f1099div", editions: &["2024"], label: "11", caption: "11 FATCA filing",
         decision: BoxDecision::NotRead("the FATCA filing requirement checkbox — a chapter 4 obligation of the PAYER; no line of the filer's return reads it") },
     BoxEntry { stem: "f1099div", editions: &["2024"], label: "12", caption: "12 Exempt-interest dividends",
@@ -724,15 +750,15 @@ pub const BOXES: &[BoxEntry] = &[
     BoxEntry { stem: "f1099g", editions: &["2024", "2026"], label: "4", caption: "4 Federal income tax withheld",
         decision: BoxDecision::Collected { fields: &[FieldId::G1099Box4FedWithheld], note: "Form1099G.box4_fed_withheld → 1040 line 25b" } },
     BoxEntry { stem: "f1099g", editions: &["2024", "2026"], label: "5", caption: "5 RTAA payments",
-        decision: BoxDecision::NotRead("Reemployment Trade Adjustment Assistance, Schedule 1 line 8z; btctax models no line 8z inflow and the residual scope attestation names what it cannot take") },
+        decision: BoxDecision::RefuseIfNonzero { field: FieldId::G1099Box5Rtaa, reason: || RefuseReason::OtherIncomeLine8zNotModeled("Form 1099-G box 5 (RTAA payments)".to_string()), note: "Reemployment Trade Adjustment Assistance — INCOME whose only home is Schedule 1 line 8z, for which btctax models no inflow, so > 0 REFUSES. (It said NotRead until the seam review's M-1: box 10 six lines down refused on verbatim this argument, and one census may not answer one question two ways)"} },
     BoxEntry { stem: "f1099g", editions: &["2024", "2026"], label: "6", caption: "6 Taxable grants",
-        decision: BoxDecision::NotRead("a taxable grant reaches Schedule 1 line 8z; btctax models no line 8z inflow") },
+        decision: BoxDecision::RefuseIfNonzero { field: FieldId::G1099Box6TaxableGrants, reason: || RefuseReason::OtherIncomeLine8zNotModeled("Form 1099-G box 6 (taxable grants)".to_string()), note: "a taxable grant is INCOME reaching Schedule 1 line 8z, which btctax fills from nothing, so > 0 REFUSES (seam review M-1)"} },
     BoxEntry { stem: "f1099g", editions: &["2024", "2026"], label: "7", caption: "7 Agriculture payments",
-        decision: BoxDecision::NotRead("Schedule F income; farm income is an excluded family (§2.2) and its census row refuses") },
+        decision: BoxDecision::RefuseIfNonzero { field: FieldId::G1099Box7Agriculture, reason: || RefuseReason::ScheduleFIncomeNotModeled("Form 1099-G box 7 (agriculture payments)".to_string()), note: "agriculture program payments are Schedule F INCOME, an excluded family (§2.2). ★ The document census announces that exclusion on a FARM document; this figure arrives on a 1099-G, which btctax admits, so nothing announces it — > 0 REFUSES (seam review M-1)"} },
     BoxEntry { stem: "f1099g", editions: &["2024", "2026"], label: "8", caption: "8 Check if box 2 is",
         decision: BoxDecision::NotRead("the checkbox saying box 2's refund is of a tax on TRADE OR BUSINESS income. It qualifies box 2 — which btctax collects — but the qualification only matters to a filer with a Schedule C whose state tax was a business expense, and btctax takes Schedule C expenses as a flat total it never itemizes. The §111(a) gate reads the AMOUNT in box 2, never this box") },
     BoxEntry { stem: "f1099g", editions: &["2024", "2026"], label: "9", caption: "9 Market gain",
-        decision: BoxDecision::NotRead("CCC loan market gain, Schedule F; farm income is an excluded family (§2.2)") },
+        decision: BoxDecision::RefuseIfNonzero { field: FieldId::G1099Box9MarketGain, reason: || RefuseReason::ScheduleFIncomeNotModeled("Form 1099-G box 9 (market gain on a CCC loan)".to_string()), note: "gain on the repayment of a Commodity Credit Corporation loan — Schedule F INCOME on an admitted document, as box 7, so > 0 REFUSES (seam review M-1)"} },
     BoxEntry { stem: "f1099g", editions: &["2026"], label: "10", caption: "10 Family leave benefits",
         decision: BoxDecision::RefuseIfNonzero { field: FieldId::G1099Box10FamilyLeave, reason: || RefuseReason::FamilyLeaveBenefits, note: "T5: paid family leave benefits — an INCOME box the Rev. December 2026 grid added, reportable on Schedule 1. No field holds it and no line reads it, so > 0 REFUSES until T5 decides the line: an income box with no reader understates, and this fails closed instead" } },
     BoxEntry { stem: "f1099g", editions: &["2024"], label: "10a", caption: "10a State",
@@ -767,7 +793,7 @@ pub const BOXES: &[BoxEntry] = &[
     BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "3", caption: "3 Check if proceeds from:",
         decision: BoxDecision::NotRead("collectibles or QOF proceeds; either is an adjustment case the gate refuses to Form 8949") },
     BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "4", caption: "4 Federal income tax withheld",
-        decision: BoxDecision::NotRead("backup withholding on broker proceeds would reach 1040 line 25b; no Form1099B field holds it, so a filer with backup withholding forgoes a credit — the OVERSTATEMENT direction, announced rather than silent") },
+        decision: BoxDecision::NotRead("backup withholding on broker proceeds would reach 1040 line 25b; no Form1099B field holds it, so a filer with backup withholding forgoes a credit — the OVERSTATEMENT direction, which §3.4 permits SILENTLY. ★ This reason used to claim the forgone credit was 'announced rather than silent'; the seam review's M-1 measured the only announcement (the unconditional OtherCreditsOmitted advisory, which names nothing specific) and the claim was withdrawn rather than the decision changed — §3.4 requires no announcement in this direction") },
     BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "5", caption: "5 Check if noncovered",
         decision: BoxDecision::NotRead("a noncovered security has no basis reported to the IRS, so the row fails the 1a/8a gate and is refused to Form 8949") },
     BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "6", caption: "6 Reported to IRS:",
@@ -787,7 +813,7 @@ pub const BOXES: &[BoxEntry] = &[
     BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "12", caption: "12 Check if basis reported to",
         decision: BoxDecision::Collected { fields: &[FieldId::B1099BasisReportedNoAdjustments], note: "Form1099B.basis_reported_and_no_adjustments — the first half of the gate Schedule D lines 1a/8a require" } },
     BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "13", caption: "13 Bartering",
-        decision: BoxDecision::NotRead("barter exchange income, which reaches Schedule 1 line 8z or Schedule C; btctax models no line 8z inflow") },
+        decision: BoxDecision::RefuseIfNonzero { field: FieldId::B1099Box13Bartering, reason: || RefuseReason::OtherIncomeLine8zNotModeled("Form 1099-B box 13 (bartering)".to_string()), note: "barter exchange INCOME, reaching Schedule 1 line 8z or Schedule C. btctax fills line 8z from nothing and will not route income to a Schedule C the filer never declared, so > 0 REFUSES (seam review M-1)"} },
     BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "14", caption: "14 State name",
         decision: BoxDecision::NotRead("the state's name; the federal return prints none") },
     BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "15", caption: "15 State identification no.",
@@ -1272,8 +1298,20 @@ pub fn caption_words(entry: &BoxEntry) -> Option<String> {
 /// ★ It runs inside [`run`] rather than only in a test, because `xtask box-census` is what a human
 ///   types when they change a form, and a check that only the suite performs is a check they meet a
 ///   round late.
+///
+/// ★★★ **It takes the entries rather than reading [`BOXES`] directly, and that is B1, not style.**
+/// A negative test can only *run the instrument* on a planted table if the instrument accepts one;
+/// with the constant baked in, the only kill available is a re-implementation of the checker's own
+/// predicates — which stays green when the checker is deleted, and is therefore not a kill at all.
+/// See [`tests::the_join_reds_on_a_field_from_the_wrong_section_and_on_a_reworded_caption`].
 #[must_use]
 pub fn field_join_failures() -> Vec<String> {
+    join_failures_for(BOXES)
+}
+
+/// [`field_join_failures`] over an arbitrary entry table — the form the kill test drives.
+#[must_use]
+pub fn join_failures_for(entries: &[BoxEntry]) -> Vec<String> {
     let fields = form_fields();
     let sections_of = |id: FieldId| -> Vec<SectionId> {
         fields
@@ -1283,7 +1321,7 @@ pub fn field_join_failures() -> Vec<String> {
             .collect()
     };
     let mut bad = Vec::new();
-    for b in BOXES {
+    for b in entries {
         let own = section_of_stem(b.stem);
         let words = caption_words(b);
         // The fields that must carry the box's own printed words, if any.
@@ -1849,56 +1887,109 @@ mod tests {
         );
     }
 
-    /// ★★★ **B1 — THE JOIN, SEEN RED ON PLANTED DEFECTS.** Three, one per mechanism, each asserted
-    ///     against the SAME predicates the tests above run, so a checker that stopped checking
-    ///     cannot pass this either.
+    /// ★★★ **B1 — THE JOIN, SEEN RED ON PLANTED DEFECTS.** Four planted tables, one per mechanism,
+    /// each **run through [`join_failures_for`] itself** — plus the honest table through the same
+    /// door, so the test measures the checker DISCRIMINATING rather than merely complaining.
+    ///
+    /// ★★★ **It calls the instrument on purpose.** The version this replaces re-derived
+    /// [`form_fields`] / [`field_words`] / [`normalize`] / [`caption_words`] and asserted that
+    /// those *predicates* behave — every one of which stays green with [`field_join_failures`]
+    /// gutted to `Vec::new()`, so the answer to B1's one reviewable sentence (*"which test reds
+    /// when this checker is removed?"*) was **none**. It also disarmed the M1 plant: with the
+    /// checker blind, 14 `Collected` entries naming another document's fields passed the whole
+    /// suite. A kill that re-implements a checker's reasoning is B1 satisfied performatively.
     #[test]
     fn the_join_reds_on_a_field_from_the_wrong_section_and_on_a_reworded_caption() {
-        let fields = form_fields();
-        let in_section = |id: FieldId, sec: SectionId| fields.contains(&(sec, id));
-
-        // (1) A `Collected` naming a field of ANOTHER section. `Box1Wages` is a W-2 field; the
-        //     1099-INT's own section is `Int1099s`.
-        assert!(
-            !in_section(FieldId::Box1Wages, SectionId::Int1099s),
-            "the plant's premise: a W-2 field is not a 1099-INT field"
-        );
-        assert!(
-            in_section(FieldId::Int1099Box1Interest, SectionId::Int1099s),
-            "…and the real one is"
-        );
-
-        // (2) A caption the field's words do not carry. The real 1099-INT box 1 caption is
-        //     "1 Interest income", which `Int1099Box1Interest` says; a revision that renamed it
-        //     must not pass.
         let real = BOXES
             .iter()
             .find(|b| b.stem == "f1099int" && b.label == "1")
             .expect("1099-INT box 1 is censused");
-        let words = field_words(FieldId::Int1099Box1Interest).expect("the field exists");
-        assert!(
-            normalize(&words).contains(caption_words(real).unwrap().as_str()),
-            "premise: the real caption IS in the field's words"
-        );
-        let planted = BoxEntry {
-            stem: "f1099int",
+        let entry = |stem, label, caption, decision| BoxEntry {
+            stem,
             editions: &["2024"],
-            label: "1",
-            caption: "1 Interest income from a source nobody wrote down",
-            decision: real.decision,
+            label,
+            caption,
+            decision,
         };
+        // Every plant is asserted by MESSAGE, not merely by count: a checker that returned one
+        // failure for everything would satisfy `!is_empty()` and diagnose nothing.
+        let reds = |planted: &[BoxEntry], needle: &str, what: &str| {
+            let bad = join_failures_for(planted);
+            assert!(
+                !bad.is_empty(),
+                "★ THE KILL ({what}): the join must red on this planted table, and it returned \
+                 NOTHING — the checker is not checking"
+            );
+            assert!(
+                bad.iter().any(|m| m.contains(needle)),
+                "★ THE KILL ({what}): no failure said {needle:?}; got:\n  {}",
+                bad.join("\n  ")
+            );
+        };
+
+        // (0) THE POSITIVE CONTROL — the honest entry, through the same door, is silent.
         assert!(
-            !normalize(&words).contains(caption_words(&planted).unwrap().as_str()),
-            "★ THE KILL: a re-worded caption must NOT be found in the field's words — if this \
-             passes, the caption check is a no-op"
+            join_failures_for(&[entry("f1099int", "1", "1 Interest income", real.decision)])
+                .is_empty(),
+            "premise: the real 1099-INT box 1 entry passes the join — without this the three \
+             plants below would be satisfied by a checker that fails everything"
+        );
+
+        // (1) A `Collected` naming a field of ANOTHER section. `Box1Wages` is a W-2 field; the
+        //     1099-INT's own section is `Int1099s`. (This is the M1 plant's shape, one entry wide.)
+        reds(
+            &[entry(
+                "f1099int",
+                "1",
+                "1 Interest income",
+                BoxDecision::Collected {
+                    fields: &[FieldId::Box1Wages],
+                    note: "planted: a W-2 field claimed as the 1099-INT's own",
+                },
+            )],
+            "not in this document's own section",
+            "a Collected naming a field of another section",
+        );
+
+        // (2) A caption the collecting field's words do not carry — the revision-drift case. The
+        //     real caption "1 Interest income" IS in `Int1099Box1Interest`'s words (0 proves it).
+        reds(
+            &[entry(
+                "f1099int",
+                "1",
+                "1 Interest income from a source nobody wrote down",
+                real.decision,
+            )],
+            "and no field that collects it",
+            "a re-worded caption",
         );
 
         // (3) A `CollectedElsewhere` whose field IS on the document's own row. `Box1Wages` is a
         //     `W2s` field, so claiming it is collected "elsewhere" than the W-2 row is the defect.
-        assert!(
-            in_section(FieldId::Box1Wages, SectionId::W2s),
-            "★ THE KILL: `CollectedElsewhere` on this field would be false, and the join above \
-             asserts exactly that"
+        reds(
+            &[entry(
+                "fw2",
+                "1",
+                "1 Wages, tips, other compensation",
+                BoxDecision::CollectedElsewhere {
+                    fields: &[FieldId::Box1Wages],
+                    note: "planted: the document's OWN field claimed as elsewhere",
+                },
+            )],
+            "IS in this document's own section",
+            "a CollectedElsewhere naming the row's own field",
+        );
+
+        // (4) A `NotRead` with an empty reason — "we forgot this box" with extra steps.
+        reds(
+            &[entry(
+                "f1099int",
+                "1",
+                "1 Interest income",
+                BoxDecision::NotRead(""),
+            )],
+            "a NotRead with an EMPTY reason",
+            "an empty NotRead reason",
         );
     }
 }

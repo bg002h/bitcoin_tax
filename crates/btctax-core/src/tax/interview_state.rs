@@ -197,7 +197,7 @@ fn interview_state_with(
                 // ★★★ R10.3 — an answer given under EARLIER words does not stand under later ones.
                 // ★ R10.4 — hashed against the words RENDERED for this return, so a question that
                 //   quotes a value (the carried filing status) is re-asked when the value changes.
-                if answer_status(ri, &item, &q.prompt_text(ri)) == AnswerStatus::WordingChanged {
+                if answer_status(ri, &item) == AnswerStatus::WordingChanged {
                     st.blocking.push(Blocking {
                         item,
                         prompt: q.prompt_text(ri),
@@ -230,7 +230,7 @@ fn interview_state_with(
         }
         let item = AnswerKey::Skippable(s.id);
         let has_value = skippable_has_value(s, ri);
-        let status = answer_status(ri, &item, s.prompt);
+        let status = answer_status(ri, &item);
         match status {
             AnswerStatus::WordingChanged => st.forgoing.push(Forgo {
                 item,

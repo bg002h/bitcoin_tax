@@ -180,6 +180,20 @@ pub struct Form1099Div {
     pub box5_section_199a: Usd, // → QBI (§4.5)
     #[serde(default)]
     pub box7_foreign_tax: Usd, // → §904(j) FTC
+    /// **Box 9 — *Cash liquidation distributions*.** ★★★ A refuse-guard (seam review M-1).
+    ///
+    /// A liquidating distribution is treated as full payment in exchange for the stock, so it is a
+    /// DISPOSITION reported on Form 8949 and Schedule D in the year received — not a dividend, and
+    /// not a mere basis adjustment like box 3, whose own reason says in terms that it *"does not
+    /// reach a line this year"*. btctax holds no basis for the stock and models no Form 8949 row for
+    /// it, so the gain has no reader. **An income box with no reader understates, so it fails
+    /// closed** ([`super::return_refuse::RefuseReason::LiquidationDistributionNotComputed`]).
+    #[serde(default)]
+    pub box9_cash_liquidation: Usd,
+    /// **Box 10 — *Noncash liquidation distributions*.** As box 9, in kind rather than in cash: the
+    /// same exchange treatment and the same missing reader. ★★★ A refuse-guard.
+    #[serde(default)]
+    pub box10_noncash_liquidation: Usd,
     #[serde(default)]
     pub box12_exempt_interest_dividends: Usd, // → 1040 2a
     #[serde(default)]
@@ -212,6 +226,31 @@ pub struct Form1099G {
     pub box2_state_refund: Usd,
     #[serde(default)]
     pub box4_fed_withheld: Usd, // → 1040 25b
+    /// **Box 5 — *RTAA payments*.** ★★★ A refuse-guard (seam review M-1).
+    ///
+    /// Reemployment Trade Adjustment Assistance is includible in gross income and reaches
+    /// **Schedule 1 line 8z** (*"Other income. List type and amount"*), for which btctax models no
+    /// inflow. **An income box with no reader understates, so it fails closed**
+    /// ([`super::return_refuse::RefuseReason::OtherIncomeLine8zNotModeled`]).
+    #[serde(default)]
+    pub box5_rtaa_payments: Usd,
+    /// **Box 6 — *Taxable grants*.** ★★★ A refuse-guard, the same mechanism as box 5: a taxable
+    /// grant is income reaching **Schedule 1 line 8z**, which btctax fills from nothing.
+    #[serde(default)]
+    pub box6_taxable_grants: Usd,
+    /// **Box 7 — *Agriculture payments*.** ★★★ A refuse-guard.
+    ///
+    /// Agriculture program payments are **Schedule F** income, and farm income is an excluded family
+    /// (§2.2). That exclusion is announced by the DOCUMENT census when the filer holds a farm
+    /// document — but box 7 delivers the same income through a document btctax ADMITS, so on this
+    /// row nothing announces it. **An income box with no reader understates, so it fails closed**
+    /// ([`super::return_refuse::RefuseReason::ScheduleFIncomeNotModeled`]).
+    #[serde(default)]
+    pub box7_agriculture_payments: Usd,
+    /// **Box 9 — *Market gain*.** ★★★ A refuse-guard, the same mechanism as box 7: gain on the
+    /// repayment of a CCC loan is **Schedule F** income, reached through an admitted document.
+    #[serde(default)]
+    pub box9_market_gain: Usd,
     /// **Box 10 — *Family leave benefits*** — NEW on the Rev. December 2026 grid, which also
     /// renumbered the state boxes `10a/10b/11 → 11a/11b/12` (`i1099g--2026.txt:17-25`).
     ///
@@ -329,6 +368,14 @@ pub struct Form1099B {
     /// **Schedule D line 8a, column (e)** — *"Cost (or other basis)"*, long-term.
     #[serde(default)]
     pub long_term_basis: Usd,
+    /// **Box 13 — *Bartering*.** ★★★ A refuse-guard (seam review M-1).
+    ///
+    /// Barter-exchange income reaches **Schedule 1 line 8z** or **Schedule C**, and btctax models no
+    /// line 8z inflow; routing it to Schedule C would need a trade or business the filer never
+    /// declared. **An income box with no reader understates, so it fails closed**
+    /// ([`super::return_refuse::RefuseReason::OtherIncomeLine8zNotModeled`]).
+    #[serde(default)]
+    pub box13_bartering: Usd,
     /// ★★★ THE GATE. Lines 1a/8a are available ONLY for transactions where **basis was reported to the
     /// IRS** *and* **there are no adjustments**. Anything else belongs on Form 8949 with Box B, C, E or
     /// F checked and PER-TRANSACTION detail — which is exactly the lot-level engine btctax will not

@@ -654,18 +654,22 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     // change happened to keep the sets balanced.
     let field_count: usize = form_spec().iter().map(|s| s.fields.len()).sum();
     assert_eq!(
-        field_count, 175,
-        "expected 175 Fields — 117 before T5, plus its FIFTY-EIGHT: the four document-less income \
+        field_count, 182,
+        "expected 182 Fields — 117 before T5, plus its FIFTY-EIGHT: the four document-less income \
          declarations (R3), W-2 boxes 13 and 14b, and the six document sections (1099-INT 14, \
-         1099-DIV 14, 1099-B 8, 1099-G 7, 1098-E 4, and R5's five filer's-records leaves)"
+         1099-DIV 14, 1099-B 8, 1099-G 7, 1098-E 4, and R5's five filer's-records leaves) — plus \
+         the SEVEN the seam review's M-1 added, one per income box that had no reader and now \
+         refuses (1099-G 5/6/7/9, 1099-B 13, 1099-DIV 9/10). A refuse-guard needs a Field on the \
+         document's own row or the guard is a brick the filer cannot reach, which is the FR-65 \
+         defect T5 itself was fixing."
     );
     assert_eq!(
         covered.len(),
-        174,
-        "expected 174 distinctly-covered in-scope leaves — every one of the 175 Fields but \
+        181,
+        "expected 181 distinctly-covered in-scope leaves — every one of the 182 Fields but \
          `DocForm1098`, whose row is still shadowed by the `schedule_a.mortgage_interest_1098` \
-         scalar (T9) and so is never live. It was 115 of 117 before T5; `documents.form_1098e` \
-         joined the covered set when its section landed."
+         scalar (T9) and so is never live. It was 115 of 117 before T5, then 174 of 175; the seven \
+         M-1 refuse-guards are all covered."
     );
 
     // ── 5. ★ I-6: PIN the observed FieldId → leaf-path map against a literal (kills TRANSPOSITION). ──
@@ -1036,6 +1040,14 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
         "div_1099[0].box7_foreign_tax",
     ),
     (
+        FieldId::Div1099Box9CashLiquidation,
+        "div_1099[0].box9_cash_liquidation",
+    ),
+    (
+        FieldId::Div1099Box10NoncashLiquidation,
+        "div_1099[0].box10_noncash_liquidation",
+    ),
+    (
         FieldId::Div1099Box12ExemptInterest,
         "div_1099[0].box12_exempt_interest_dividends",
     ),
@@ -1057,6 +1069,7 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
         "b_1099[0].long_term_proceeds",
     ),
     (FieldId::B1099LongTermBasis, "b_1099[0].long_term_basis"),
+    (FieldId::B1099Box13Bartering, "b_1099[0].box13_bartering"),
     (
         FieldId::B1099BasisReportedNoAdjustments,
         "b_1099[0].basis_reported_and_no_adjustments",
@@ -1071,6 +1084,16 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
     ),
     (FieldId::G1099Box2StateRefund, "g_1099[0].box2_state_refund"),
     (FieldId::G1099Box4FedWithheld, "g_1099[0].box4_fed_withheld"),
+    (FieldId::G1099Box5Rtaa, "g_1099[0].box5_rtaa_payments"),
+    (
+        FieldId::G1099Box6TaxableGrants,
+        "g_1099[0].box6_taxable_grants",
+    ),
+    (
+        FieldId::G1099Box7Agriculture,
+        "g_1099[0].box7_agriculture_payments",
+    ),
+    (FieldId::G1099Box9MarketGain, "g_1099[0].box9_market_gain"),
     (
         FieldId::G1099Box10FamilyLeave,
         "g_1099[0].box10_family_leave_benefits",

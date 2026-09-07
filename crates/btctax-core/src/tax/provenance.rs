@@ -149,12 +149,11 @@ pub fn undated_document_rows(ri: &ReturnInputs) -> Vec<String> {
             i + 1
         ));
     };
-    for (i, w) in ri.w2s.iter().enumerate() {
-        // ★ The W-2 row carries no `transcribed_on` of its own (R10.2 gave it to the 1099 families
-        //   and the 1098-E, whose rows arrive by TOML). Named here in a comment rather than left to
-        //   a reader's inference: when the W-2 gains one, this loop is where it is reported.
-        let _ = (i, w);
-    }
+    // ★ NO W-2 LOOP, and the absence is deliberate: the W-2 row carries no `transcribed_on` of its
+    //   own (R10.2 gave it to the 1099 families and the 1098-E, whose rows arrive by TOML). When the
+    //   W-2 gains one, it is reported here, beside the five families below. (Seam review N-1: this
+    //   used to be an empty `for` loop ending in `let _ = (i, w);` — the comment was worth keeping,
+    //   the loop was not.)
     for (i, r) in ri.int_1099.iter().enumerate() {
         add("Form 1099-INT", i, &r.payer, r.transcribed_on.is_some());
     }
@@ -670,8 +669,37 @@ pub enum AnswerStatus {
 /// detail names. One constant so the panel, the refusal and the test cannot drift apart.
 pub const WORDING_CHANGED_REASON: &str = "the wording of this question changed since you answered";
 
-/// Read one key's [`AnswerStatus`] against the words currently asked.
-pub fn answer_status(ri: &ReturnInputs, key: &AnswerKey, current_prompt: &str) -> AnswerStatus {
+/// Read one key's [`AnswerStatus`] against the words currently asked, **resolved here**.
+///
+/// ★★★ **SEAM REVIEW M-4 — IT TAKES THE KEY, NOT A PROMPT, AND THAT REMOVES A CLASS.** D-1 was a
+/// caller passing the STATIC `prompt` where the log holds a hash of the RENDERED one, so every
+/// question with a rendered prompt reported `WordingChanged` the instant it was answered — a
+/// refusal firing on a correct answer. It was fixed at each site, which leaves the next surface
+/// free to make the identical mistake. [`current_prompt`] is the one place that knows which words a
+/// key is asked in, so it is the only thing that resolves them now, and the wrong comparand is no
+/// longer something a caller can supply.
+///
+/// A key no registry owns yet ([`AnswerKey::DependentGate`], task T7) has no current prompt to
+/// compare against, so the wording check is SKIPPED rather than guessed — the same reasoning
+/// `current_prompt`'s own `None` arm records.
+#[must_use]
+pub fn answer_status(ri: &ReturnInputs, key: &AnswerKey) -> AnswerStatus {
+    match current_prompt(key, ri) {
+        Some(p) => answer_status_against(ri, key, &p),
+        None => match ri.answer_log.get(key) {
+            None => AnswerStatus::NeverAsked,
+            Some(r) => match r.state {
+                AnswerState::Given => AnswerStatus::Given,
+                AnswerState::Declined => AnswerStatus::Declined,
+            },
+        },
+    }
+}
+
+/// The hash comparison itself. ★ PRIVATE on purpose (M-4): exposing it would hand a caller back the
+/// ability to pass the wrong comparand, which is the whole class [`answer_status`] closes. The
+/// module's own tests drive it directly, because the thing they test IS the comparison.
+fn answer_status_against(ri: &ReturnInputs, key: &AnswerKey, current_prompt: &str) -> AnswerStatus {
     match ri.answer_log.get(key) {
         None => AnswerStatus::NeverAsked,
         Some(r) if r.prompt_hash != prompt_hash(current_prompt) => AnswerStatus::WordingChanged,
@@ -989,16 +1017,16 @@ mod tests {
             AnswerState::Declined,
         );
         assert_eq!(
-            answer_status(&r, &declined, "prompt A"),
+            answer_status_against(&r, &declined, "prompt A"),
             AnswerStatus::Declined
         );
         assert_eq!(
-            answer_status(&r, &untouched, "prompt B"),
+            answer_status_against(&r, &untouched, "prompt B"),
             AnswerStatus::NeverAsked
         );
         assert_ne!(
-            answer_status(&r, &declined, "prompt A"),
-            answer_status(&r, &untouched, "prompt B"),
+            answer_status_against(&r, &declined, "prompt A"),
+            answer_status_against(&r, &untouched, "prompt B"),
             "declined and never-asked must not be the same state — they are the same BLANK"
         );
     }
@@ -1032,14 +1060,14 @@ mod tests {
 
         // Same words: still an answer.
         assert_eq!(
-            answer_status(&r, &k, "the ORIGINAL words"),
+            answer_status_against(&r, &k, "the ORIGINAL words"),
             AnswerStatus::Given
         );
 
         // Changed words: reported as unanswered, with the reason R12's panel prints — and the record
         // is still IN the log, which is what `screen_inputs` needs to refuse it as such.
         assert_eq!(
-            answer_status(&r, &k, "the ORIGINAL words?"),
+            answer_status_against(&r, &k, "the ORIGINAL words?"),
             AnswerStatus::WordingChanged,
             "one added character must be enough — {WORDING_CHANGED_REASON}"
         );
@@ -1072,7 +1100,7 @@ mod tests {
             "…and the CURRENT record is the fresh one"
         );
         assert_eq!(
-            answer_status(&r, &k, "the ORIGINAL words?"),
+            answer_status_against(&r, &k, "the ORIGINAL words?"),
             AnswerStatus::Given
         );
 
@@ -1187,8 +1215,75 @@ mod tests {
         let k = AnswerKey::Question(QuestionId::ForeignTrust);
         record_answer(&mut r, k.clone(), "p", D1, AnswerState::Given);
         forget_answer(&mut r, &k);
-        assert_eq!(answer_status(&r, &k, "p"), AnswerStatus::NeverAsked);
+        assert_eq!(answer_status_against(&r, &k, "p"), AnswerStatus::NeverAsked);
         assert!(r.answer_log_history.is_empty());
+    }
+
+    /// ★★★ **SEAM REVIEW M-4's KILL — `answer_status` RESOLVES THE PROMPT ITSELF.**
+    ///
+    /// D-1 was a caller comparing against the STATIC `prompt` where `record_answer` had hashed the
+    /// RENDERED one, so every question with a rendered prompt reported `WordingChanged` the instant
+    /// it was answered — a refusal that fires on a correct answer. The fix was spelled out at each
+    /// site, which left a third surface free to make the identical mistake.
+    ///
+    /// ★ THE KILL IS THE SIGNATURE: `answer_status` no longer accepts a prompt, so this test can
+    ///   only ask it for the answer and compare against BOTH candidates. It reds if the resolution
+    ///   ever moves back to the static prompt — that is `AnswerStatus::WordingChanged` here, on a
+    ///   question that was just correctly answered.
+    #[test]
+    fn a_rendered_prompt_is_given_not_wording_changed_after_it_is_answered() {
+        use crate::tax::questions::{QuestionId, FORM_QUESTIONS, RENDERED_PROMPTS};
+        assert!(
+            !RENDERED_PROMPTS.is_empty(),
+            "the premise: some question's words are rendered from the return — without one, this \
+             test cannot tell the two comparands apart"
+        );
+        for (id, _) in RENDERED_PROMPTS {
+            let mut r = ReturnInputs {
+                tax_year: 2025,
+                filing_status: crate::FilingStatus::Single,
+                ..Default::default()
+            };
+            let q = FORM_QUESTIONS
+                .iter()
+                .find(|q| q.id == *id)
+                .expect("a rendered prompt names a registry question");
+            let rendered = q.prompt_text(&r).into_owned();
+            assert_ne!(
+                rendered, q.prompt,
+                "the premise: {:?}'s rendered words differ from its static fallback",
+                q.id
+            );
+            let key = AnswerKey::Question(q.id);
+            // Answered exactly as every production surface answers it — through `record_answer`,
+            // hashing the words shown.
+            record_answer(&mut r, key.clone(), &rendered, D1, AnswerState::Given);
+            assert_eq!(
+                answer_status(&r, &key),
+                AnswerStatus::Given,
+                "★ THE KILL: {:?} was just answered under the words it is asked in. Reading the \
+                 STATIC prompt here makes it `WordingChanged`, which is a refusal firing on a \
+                 correct answer — D-1 exactly, one surface over.",
+                q.id
+            );
+        }
+        // …and the other direction: genuinely different words DO supersede, so the check above is
+        // not passing because the comparison stopped happening.
+        let mut r = ReturnInputs::default();
+        let key = AnswerKey::Question(QuestionId::ForeignTrust);
+        record_answer(
+            &mut r,
+            key.clone(),
+            "words nobody is asked",
+            D1,
+            AnswerState::Given,
+        );
+        assert_eq!(
+            answer_status(&r, &key),
+            AnswerStatus::WordingChanged,
+            "★ THE KILL: the wording check must still FIRE — a resolver that returned the recorded \
+             prompt would make every record look current"
+        );
     }
 
     /// ★★ **The FORBIDDEN shapes** (R10.3 / `FIELD_PROVENANCE.md:400-403`): no progress, no position,
