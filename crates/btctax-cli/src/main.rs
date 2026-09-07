@@ -920,6 +920,22 @@ fn run() -> Result<ExitCode, CliError> {
             if let Some(note) = &report.slice_attachment_note {
                 eprintln!("note: {note}");
             }
+            // ★★★ (T6 seam review C-1) THE SLICE'S OWN HAND MARK, and it needs no manifest because
+            //     it prints the sentence itself. `form_1040_capgains.pdf` writes Form 1040 page 1's
+            //     Digital Assets box from the filer's ANSWER since the C-1 fold — and when the year
+            //     records no answer it writes NEITHER member of the pair, which on the printed page
+            //     is indistinguishable from a *No* the filer chose. So the blank is named out loud:
+            //     a list of marks nothing reads would be the same defect one level up.
+            if report.full_return_manifest.is_none() && !report.hand_marks.is_empty() {
+                eprintln!(
+                    "\n⚠ {n} mark(s) on this worksheet are YOURS to make by hand and are \
+                     deliberately blank:",
+                    n = report.hand_marks.len()
+                );
+                for mark in &report.hand_marks {
+                    eprintln!("  • {mark}");
+                }
+            }
             // ★ NO-AUTHORISATION NOTICE. Printed on EVERY form export, unconditionally — this is
             // the one moment the user is holding fillable IRS forms this tool produced, and it is
             // where the disclaimer has to land. See NOTICE / `btctax limitations`. It disclaims
@@ -972,6 +988,10 @@ fn run() -> Result<ExitCode, CliError> {
                     // block). Each blank is correct — btctax must not answer for the filer — but until
                     // now nothing in the product's output said they existed. The text lives in the
                     // manifest (one source, decision 13); this is the pointer at it.
+                    //
+                    // ★ The CRYPTO SLICE has no manifest to point AT, so its own marks are printed
+                    //   in full further up — see the `full_return_manifest.is_none()` block beside
+                    //   the slice note.
                     if !report.hand_marks.is_empty() {
                         eprintln!(
                             "⚠ {n} mark(s) on this packet are YOURS to make by hand and are \

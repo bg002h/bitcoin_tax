@@ -17,6 +17,7 @@ use btctax_core::forms::{BrokerReported, CohortAnswers, InformationReturnRegime}
 use btctax_core::identity::*;
 use btctax_core::tax::return_inputs::ReturnInputs;
 use btctax_forms::testonly::*;
+use btctax_forms::Form1040Map;
 use btctax_store::Passphrase;
 use rust_decimal_macros::dec;
 use std::path::{Path, PathBuf};
@@ -1413,5 +1414,195 @@ fn report_does_not_promise_the_slice_on_a_year_with_no_bundled_templates() {
     assert!(
         rep.broker_answers.is_some_and(|b| b.contains("cb")),
         "the Form 1099-DA answers block still prints from the draft"
+    );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// ★★★ THE DIGITAL ASSETS BOX ON THE SLICE'S FORM 1040 (T6 seam review C-1)
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// The two Digital Assets checkboxes as the emitted `form_1040_capgains.pdf` actually carries them:
+/// `(yes_on, no_on)`, read back through `Form1040Map::ty2025()` — the map the fill wrote from, so a
+/// Yes/No swap in the map cannot make this test agree with itself.
+fn da_boxes(dir: &Path) -> (Option<String>, Option<String>) {
+    let map = Form1040Map::ty2025();
+    let doc = load(&std::fs::read(dir.join("form_1040_capgains.pdf")).unwrap()).unwrap();
+    let idx = index(&collect_fields(&doc).unwrap());
+    let yes = map
+        .da_yes
+        .as_ref()
+        .expect("TY2025's 1040 carries the Yes box");
+    let no = map
+        .da_no
+        .as_ref()
+        .expect("TY2025's 1040 carries the No box");
+    (
+        checkbox_on(&doc, idx[yes.field.as_str()].id),
+        checkbox_on(&doc, idx[no.field.as_str()].id),
+    )
+}
+
+/// A `ReturnInputs` carrying the Form 1099-DA answers AND an explicit Digital Assets answer.
+fn answers_with_da(pairs: &[(&str, BrokerReported)], da: Option<bool>) -> ReturnInputs {
+    let mut ri = answers(pairs);
+    ri.digital_asset_activity = da;
+    ri
+}
+
+/// ★★★ **THE C-1 KILL — the slice's Form 1040 page 1 prints the FILER'S ANSWER, or nothing.**
+///
+/// Until 2026-09-07 this page's Digital Assets box was decided by a LEDGER PREDICATE
+/// (`!rows.is_empty() || income || removals`) on every arm, so on TY2025 — the only year this build
+/// can print for, and R6 arm (2) — a filer who had answered **No** got a page with **Yes** checked,
+/// and a filer who had never been asked got one too. That is btctax swearing a §6065 declaration for
+/// a human, on a page the filer transcribes onto the return they sign.
+///
+/// Both observable states are measured here off the EMITTED BYTES, not off the inputs:
+/// `Some(true)` → the Yes box alone; `None` → **neither**, plus the hand mark that names the blank.
+/// (`Some(false)` on a ledger with a disposal is the REFUSAL below — it can never print here,
+/// because the page is produced only when the ledger has activity, and activity is what contradicts
+/// a `No`.)
+#[test]
+fn the_slice_prints_the_digital_asset_answer_and_never_the_ledger() {
+    for (answer, want_yes, want_no, want_marks) in [
+        (Some(true), Some("1"), None, 0usize),
+        (None, None, None, 1usize),
+    ] {
+        let (_d, vault) = make_vault(&one_provider());
+        save_draft(
+            &vault,
+            2025,
+            &answers_with_da(&[("cb", BrokerReported::BasisMatches)], answer),
+        );
+        let out = tempfile::tempdir().unwrap();
+        let dir = out.path().join("slice");
+        let rep = testonly::export_irs_pdf_with_regime(
+            &vault,
+            &pp(),
+            &dir,
+            2025,
+            &[],
+            None,
+            Default::default(),
+            LIVE,
+        )
+        .unwrap_or_else(|e| panic!("answer {answer:?}: the slice must print — {e}"));
+        assert!(
+            rep.form_1040_path.is_some(),
+            "premise: this ledger HAS reportable activity, so the page is produced whatever the \
+             answer is — produce/skip is the ledger's question and the box is the filer's"
+        );
+        let (yes, no) = da_boxes(&dir);
+        assert_eq!(
+            yes.as_deref(),
+            want_yes,
+            "answer {answer:?}: the Yes box on the emitted PDF"
+        );
+        assert_eq!(
+            no.as_deref(),
+            want_no,
+            "answer {answer:?}: the No box on the emitted PDF"
+        );
+        assert_eq!(
+            rep.hand_marks.len(),
+            want_marks,
+            "answer {answer:?}: an UNANSWERED box is named and an answered one is not — a mark \
+             that always fires signals nothing: {:?}",
+            rep.hand_marks
+        );
+        if want_marks == 1 {
+            assert!(
+                rep.hand_marks[0].contains("Digital Asset question")
+                    && rep.hand_marks[0].contains("MANDATORY"),
+                "{:?}",
+                rep.hand_marks
+            );
+        }
+    }
+}
+
+/// ★★★ **THE CROSS-CHECK RUNS ON THE SLICE, BEFORE ANY BYTE** (spec 1099-DA R6 as amended
+/// 2026-09-07: of `screen_compute_dependent` the slice runs exactly this one rule).
+///
+/// A `No` this ledger contradicts REFUSES and names the first qualifying event — the same
+/// `RefuseReason::DigitalAssetAnswerContradictsLedger` the full return raises, from the same
+/// function, so a filer's slice and their full return cannot disagree about their own answer.
+#[test]
+fn a_contradicted_no_refuses_the_slice_and_writes_nothing() {
+    let (_d, vault) = make_vault(&one_provider());
+    save_draft(
+        &vault,
+        2025,
+        &answers_with_da(&[("cb", BrokerReported::BasisMatches)], Some(false)),
+    );
+    let out = tempfile::tempdir().unwrap();
+    let dir = out.path().join("slice");
+    let msg = testonly::export_irs_pdf_with_regime(
+        &vault,
+        &pp(),
+        &dir,
+        2025,
+        &[],
+        None,
+        Default::default(),
+        LIVE,
+    )
+    .expect_err("a `No` the ledger contradicts must refuse")
+    .to_string();
+    for needle in [
+        "DigitalAssetAnswerContradictsLedger",
+        "2025-06-15",
+        "cb",
+        "a disposition",
+        "No forms were written",
+    ] {
+        assert!(msg.contains(needle), "the refusal names {needle:?}: {msg}");
+    }
+    assert!(wrote_nothing(&dir), "…and it refused BEFORE any byte");
+}
+
+/// ★★★ **THE MIRROR, ON THE SLICE: an unwitnessed `Yes` PRINTS, with the off-ledger warning.**
+///
+/// The asymmetry is the whole rule (R9): the ledger is not complete by construction — no
+/// self-custody wallet is importable — so refusing a truthful `Yes` would leave `No` as the only way
+/// through the gate. The slice's report carried `advisories: Vec::new()`, which made the asymmetry
+/// ARM-DEPENDENT: the refusal reached this path and its mirror did not.
+#[test]
+fn an_off_ledger_yes_prints_the_slice_with_the_advisory() {
+    // A 2024 round-trip: TY2025 has NO qualifying event, so a `Yes` for 2025 is off-ledger.
+    let mut events = round_trip("cb");
+    for e in &mut events {
+        e.utc_timestamp -= time::Duration::days(365);
+    }
+    let (_d, vault) = make_vault(&events);
+    save_draft(&vault, 2025, &answers_with_da(&[], Some(true)));
+    {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (state, _) = s.project().unwrap();
+        assert!(
+            btctax_core::form_8949(&state, 2025).is_empty(),
+            "premise: nothing happened in 2025 on this ledger"
+        );
+    }
+    let out = tempfile::tempdir().unwrap();
+    let dir = out.path().join("slice");
+    let rep = testonly::export_irs_pdf_with_regime(
+        &vault,
+        &pp(),
+        &dir,
+        2025,
+        &[],
+        None,
+        Default::default(),
+        LIVE,
+    )
+    .expect("an off-ledger `Yes` is ACCEPTED — it may never refuse");
+    assert!(
+        rep.advisories.iter().any(|a| matches!(
+            a,
+            btctax_core::tax::advisories::Advisory::DigitalAssetYesNotOnLedger { year: 2025 }
+        )),
+        "…and it is WARNED: {:?}",
+        rep.advisories
     );
 }

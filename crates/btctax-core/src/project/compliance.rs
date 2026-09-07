@@ -179,28 +179,6 @@ fn collect_elections(events: &[LedgerEvent], voided: &BTreeSet<EventId>) -> Vec<
     out
 }
 
-/// Compute per-disposal compliance status for all post-2025 realized disposals and removals.
-///
-/// **Scope boundary — `SelfTransfer` is intentionally excluded.**
-/// This function flags the §1.1012-1(j) adequacy of identification at a **taxable disposition**
-/// (Dispose / GiftOut / Donate).  A `SelfTransfer` is a non-taxable positioning move — the
-/// taxpayer may choose which lots to relocate via `LotSelection` (§A.3 lists it as
-/// method-honoring), but there is no recognized gain/loss and no §1.1012-1(j) identification
-/// obligation at the self-transfer itself.  Accordingly, a `SelfTransfer` never produces a
-/// `Disposal` or `Removal` record in `LedgerState`, and this function (which iterates only
-/// `state.disposals` / `state.removals`) is **correctly out of scope for self-transfers by
-/// design**.
-///
-/// Note: §A.3 of the spec lists `SelfTransfer` as method-honoring because the lot-routing
-/// choice affects future per-wallet HIFO/LIFO positioning; that is about the *selection
-/// mechanism*, not about compliance-flagging the non-taxable transfer itself.
-///
-/// **NFR4 determinism:** `sel_made` is built by iterating `LotSelection` decisions in ascending
-/// `decision_seq` order (R0-plan M1).  When a disposal has more than one `LotSelection` (a
-/// `DecisionConflict` handled separately by `resolve`), the highest-seq made-date wins — stable
-/// and load-order-independent.  Output is sorted by `disposal` (`EventId: Ord`).
-///
-/// **Read-only:** no events are appended; the function is a pure function of its inputs.
 /// The decisions a `VoidDecisionEvent` has retracted. Factored out so [`disposal_compliance`] and
 /// [`standing_order_in_force`] cannot disagree about which elections are still live.
 fn voided_set(events: &[LedgerEvent]) -> BTreeSet<EventId> {
@@ -250,6 +228,28 @@ pub fn standing_order_in_force(
     resolve_election(date, wallet, &elections).map(|e| e.effective_from)
 }
 
+/// Compute per-disposal compliance status for all post-2025 realized disposals and removals.
+///
+/// **Scope boundary — `SelfTransfer` is intentionally excluded.**
+/// This function flags the §1.1012-1(j) adequacy of identification at a **taxable disposition**
+/// (Dispose / GiftOut / Donate).  A `SelfTransfer` is a non-taxable positioning move — the
+/// taxpayer may choose which lots to relocate via `LotSelection` (§A.3 lists it as
+/// method-honoring), but there is no recognized gain/loss and no §1.1012-1(j) identification
+/// obligation at the self-transfer itself.  Accordingly, a `SelfTransfer` never produces a
+/// `Disposal` or `Removal` record in `LedgerState`, and this function (which iterates only
+/// `state.disposals` / `state.removals`) is **correctly out of scope for self-transfers by
+/// design**.
+///
+/// Note: §A.3 of the spec lists `SelfTransfer` as method-honoring because the lot-routing
+/// choice affects future per-wallet HIFO/LIFO positioning; that is about the *selection
+/// mechanism*, not about compliance-flagging the non-taxable transfer itself.
+///
+/// **NFR4 determinism:** `sel_made` is built by iterating `LotSelection` decisions in ascending
+/// `decision_seq` order (R0-plan M1).  When a disposal has more than one `LotSelection` (a
+/// `DecisionConflict` handled separately by `resolve`), the highest-seq made-date wins — stable
+/// and load-order-independent.  Output is sorted by `disposal` (`EventId: Ord`).
+///
+/// **Read-only:** no events are appended; the function is a pure function of its inputs.
 pub fn disposal_compliance(events: &[LedgerEvent], state: &LedgerState) -> Vec<DisposalCompliance> {
     // ── 1. Build the voided set ──────────────────────────────────────────────────────────────────
     let voided = voided_set(events);

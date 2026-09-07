@@ -138,10 +138,10 @@ fn itemized_prior_year_prompt(ri: &ReturnInputs) -> String {
 ///
 /// The sentence is transcribed from the printed line (`design/forms/extract/f1040--2025.txt:36-37`)
 /// with the year taken off the return, and the instruction's two carve-outs are quoted after it
-/// (`i1040gi--2025.txt:1385-1394`) — *"The following actions or transactions in 2025, alone,
-/// generally don't require you to check 'Yes': … Purchasing digital assets using U.S. or other real
-/// currency"* — because those are exactly the two states a btctax ledger is FULL of. A filer who
-/// bought monthly on Swan and moved coins to their own wallet answers **No**, and without the
+/// (`i1040gi--2025.txt:1382-1391` + `:1395-1396`) — *"The following actions or transactions in
+/// 2025, alone, generally don't require you to check 'Yes': … Purchasing digital assets using U.S.
+/// or other real currency"* — because those are exactly the two states a btctax ledger is FULL of.
+/// A filer who bought monthly on Swan and moved coins to their own wallet answers **No**, and without the
 /// carve-outs in front of them the ledger they can see would push them to answer **Yes**.
 ///
 /// ★ The wallet-to-wallet carve-out is stated as the instruction states it — *"one wallet or
@@ -311,7 +311,7 @@ pub enum QuestionId {
     ItemizedPriorYear,
     /// ★★★ **R9 / T6 — the Form 1040 page-1 DIGITAL ASSETS question.** ALWAYS live: the form prints
     /// it on every return and the instruction says *"You must answer the digital asset question on
-    /// Form 1040 whether or not you received a Form 1099-DA"* (`i1040gi--2025.txt:1398-1400`).
+    /// Form 1040 whether or not you received a Form 1099-DA"* (`i1040gi--2025.txt:1399-1401`).
     /// APPENDED AT THE END for the `decl_tristate!` array-index reason recorded above.
     DigitalAssetActivity,
 }

@@ -137,7 +137,7 @@ Step 0 (2026): 1 blocker kind(s) · 2 venue(s) needing a Form 1099-DA answer · 
 
 | # | ledger | answer | measured outcome |
 |---|---|---|---|
-| 1 | a 2026-06-15 Coinbase disposal | `No` | **REFUSE** `DigitalAssetAnswerContradictsLedger { date: "2024-06-15", venue: "exchange:coinbase:default", kind: "a disposition" }`; the message contains all three |
+| 1 | a 2024-06-15 Coinbase disposal | `No` | **REFUSE** `DigitalAssetAnswerContradictsLedger { date: "2024-06-15", venue: "exchange:coinbase:default", kind: "a disposition" }`; the message contains all three |
 | 2 | same | `Yes` | no refusal; printed box = `Some(true)`; **no** off-ledger advisory |
 | 3 | empty | `No` | no refusal; printed box = **`Some(false)`** |
 | 4 | empty | `Yes` | **no refusal**; printed box = `Some(true)`; `Advisory::DigitalAssetYesNotOnLedger` present, and its message names *8v* and *8949* |
@@ -414,7 +414,9 @@ btctax-adapters         Summary [ 0.025s]  103 tests run:  103 passed, 0 skipped
 btctax-store            Summary [ 0.988s]   45 tests run:   45 passed, 0 skipped
 ```
 
-3,358 tests, 0 failures. `cargo fmt --all --check` → clean.
+**3,358 tests** across the ten crates listed above — a SUB-TOTAL, not the workspace total: the
+workspace is twelve crates and measured **3,363 run / 12 skipped** at this commit. 0 failures.
+`cargo fmt --all --check` → clean.
 `CARGO_TARGET_DIR=target-clippy cargo clippy --workspace --all-targets --all-features -- -D warnings`
 → `Finished`, no diagnostics. `scripts/pii-scan-generic.sh` → `pii-scan: clean (HEAD)`; every
 PII-shaped token in the files this task touched (`222-33-4444`, `123-45-6789`, `987-65-4321`,
@@ -431,3 +433,382 @@ token-exact allow list, and no new identifier was minted.
 - **FR — the Step 0 panel is computed per `income answer` invocation and per TUI open**, and it
   re-projects the ledger. That is cheap today; if a very large vault makes it noticeable, the TUI
   already caches it and the CLI could too.
+
+---
+
+## Fold (seam review C-1, I-1, M-1 … M-4, N-1 … N-4)
+
+**Folded by** the single implementer in the shared main tree `/scratch/code/bitcoin_tax` on `main`,
+from HEAD `2363a44c`. Brief: `design/agent-reports/BRIEF-fold-interview-T6-review.md`; review:
+`2026-09-07-build-interview-T6-review.md`; ledger: `…-review-VERIFICATION.md`. Nothing committed or
+pushed, no subagents, no `git checkout`/`restore`/`stash` — every plant was reverted from a `cp`
+backup. `CONTINUITY.md`, `FOLLOWUPS.md`, `design/ROADMAP_STATUS.md` and `design/SPEC_interview.md`
+carry uncommitted controller edits and were left untouched.
+
+**All nine findings folded.** M-2 is FR-77's; what landed here is its fixture and an honest label.
+
+---
+
+### C-1 — the slice prints the ANSWER, never the ledger
+
+**`btctax-forms`.** `Form1040Inputs.da_yes: bool` → **two fields**:
+`digital_asset_answer: Option<bool>` (the filer's testimony) and `reportable_activity: bool` (the
+ledger's produce/skip question). They were one `bool`, which is exactly how *"the ledger says nothing
+happened"* and *"the filer said No"* became the same fact. `fill_form_1040_capgains` now writes the
+`da_yes` cell on `Some(true)`, the **`da_no` cell on `Some(false)`**, and **neither on `None`**; the
+produce/skip branch reads `reportable_activity`. The map-independent adjacency guard resolves BOTH
+members itself now — with `None` neither field is touched by the write pass, so the old
+`expect("checked above")` would have panicked instead of failing loud. `map.rs`'s `da_present` doc
+comment (*"the fill answers it 'Yes'"*) corrected.
+
+**`btctax-cli`.** On the slice path (`export_irs_pdf_from_session_with_regime`):
+
+- `let da_answer = working.as_ref().and_then(|ri| ri.digital_asset_activity);` — the working return
+  the arm already resolved at `admin.rs:783`, read once and used by every gate below it.
+- **The cross-check runs before any byte**, calling
+  `btctax_core::tax::return_1040::screen_digital_asset_answer` — the SAME function
+  `screen_compute_dependent` runs first (extracted for this, so the slice and the full return cannot
+  disagree about whether a filer's own `No` is contradicted). A contradicted `No` refuses in the
+  slice's own sentence, naming the reason and the detail; `wrote_nothing` is asserted.
+- **The mirror**: `advisories: Vec::new()` is gone. The arm raises
+  `Advisory::DigitalAssetYesNotOnLedger` when
+  `return_1040::digital_asset_yes_is_off_ledger(ri, state, year)` — the predicate `advisories()`
+  itself now calls, so the asymmetry stopped being arm-dependent.
+- **The hand mark**: the slice's `hand_marks` carries one entry when the page was written and the
+  answer is `None`. The sentence is a shared `const DIGITAL_ASSET_HAND_MARK` (the full-return
+  packet's `hand_marks` uses the same string), so the two surfaces cannot describe one blank cell
+  two ways. `main.rs` gained the reader it needed: the pointer at `manifest.txt` stays on the
+  full-return path, and on the slice — which writes no manifest — the sentences are printed
+  themselves. Without that the list would have been a figure with no reader.
+
+**Deviation from the brief, recorded.** The brief and spec R6 scope the cross-check to **arm (2)**;
+the fold gates it on the **answer** instead (`if let Some(ri) = working.as_ref()`), so it also
+covers arm (3). Reason: since this fold the box is printed from `da_answer` on *every* arm this
+function reaches, and a params-bundled year whose only return is a DRAFT falls to arm (3) with the
+answer present and readable — gating on the arm would leave the identical defect standing one branch
+over. It is a widening of a refusal, never of an exemption, and it fails closed.
+
+**The full-return path is unchanged**: `assemble_absolute` → `packet.rs` → `form1040_full.rs` were
+not touched, and `the_1040_digital_asset_box_prints_the_filers_answer_including_no` stays green.
+
+#### PDF read-back — the slice's box, off the emitted `form_1040_capgains.pdf`
+
+Read through `Form1040Map::ty2025()` (the map the fill wrote from), TY2025 templates with the LIVE
+regime injected — the review's own method. Measured:
+
+| stored answer | ledger | outcome | `da_yes` | `da_no` | `hand_marks` |
+|---|---|---|---|---|---|
+| `Some(true)` | a 2025 `cb` round-trip | prints | **`Some("1")`** | `None` | 0 |
+| `None` | a 2025 `cb` round-trip | prints | **`None`** | **`None`** | **1** (names the box) |
+| `Some(false)` | a 2025 `cb` round-trip | **REFUSES**, `wrote_nothing` | — | — | — |
+| `Some(true)` | nothing in 2025 (events shifted to 2024) | prints, **`Advisory::DigitalAssetYesNotOnLedger { year: 2025 }`** | — | — | — |
+| `Some(false)` / `Some(true)` / `None` | (emitter direct, `reportable_activity: true`) | `Some("1")`/`None` · `None`/`Some("2")` · `None`/`None` | | | |
+
+Before the fold every one of the first three printed **`da_yes = Some("1")`**.
+
+★ **`Some(false)` cannot print on this path, and that is sound, not a gap.** The page is produced
+only when the ledger has reportable activity, and every disjunct of `reportable_activity` is a
+disjunct of `digital_asset_activity` — so a printable `No` is always a contradicted `No`, and it
+refuses. The `Some(false)` → `da_no` join is therefore measured at the emitter
+(`btctax-forms::sp2`), where the premise can be held.
+
+**Two committed fixtures moved, and the move IS the defect made visible.**
+`export_irs_pdf::ty2024_real_ledger_fills_box_c_f_and_line7_and_da` and
+`sp2_packet_writes_schedule_se_and_1040_capgains` both export a vault holding a ledger and **no
+`ReturnInputs` at all** — nobody has answered — and both asserted `Digital-Asset question = YES`.
+They now assert **neither box** (both members read, because *"the Yes box is off"* and *"neither box
+is on"* are different facts) plus the hand mark that names the blank.
+
+---
+
+### I-1 — the venue list obeys the year's Form 1099-DA regime
+
+`step0_panel(state, events, ri, year, regime: Option<InformationReturnRegime>)`. The `venues` list is
+built only when `broker_question_is_live(&rows, regime)` — `screen_broker_reporting`'s own gate,
+**called**, not re-implemented. An unknown regime (no bundled record) is treated as not live: a panel
+that guessed would name venues on a year whose question may not exist.
+
+On a non-live year with exchange rows the panel is not silent either — it emits ONE row, **with no
+exit**, stating the fact that decides it, following `screen_broker_reporting`'s wording
+(*"TY2024's Form 1099-DA regime reports nothing (no Form 1099-DA is issued for this year) — no Form
+1099-DA question is asked for this year and an answer would be refused as unread, so your disposals
+on coinbase are boxed by mechanism, not by an answer"*).
+
+**Callers.** `cmd/answer.rs` uses `year_readiness::regime_for` — **not** `regime_or_refuse` as the
+brief said: a status panel may not refuse, and `None` is the honest unknown it states. (The brief
+named `admin.rs` as a caller; `admin.rs` does not call `step0_panel` — the two call sites are
+`cmd/answer.rs:379` and `tui-edit/src/main.rs`, where `regime` was already joined and only needed
+moving above the `step0_of` closure.)
+
+**The commit modal's false gate is gone by construction.** `commit_summary_with_step0` lists exactly
+the venue rows WITH an exit, so on a non-live year the heading *"VENUES WITH NO FORM 1099-DA ANSWER
+(commit is not blocked by this; the EXPORT is)"* — which asserted a gate that does not exist there —
+never prints. Pinned from both sides: the panel side in `btctax-cli`, the modal side in
+`btctax-tui-edit::draw_edit`.
+
+**The TY2024 walkthrough goldens are the proof.** `docs/examples-tui-walkthrough/j6/` is a **TY2024**
+journey, and all three files carried the defect: the entry screen said *"river … a venue you disposed
+on is not accounted for"* and the commit modal said *"the EXPORT is"*. Regenerated by
+`emit_btctax_tui_edit_walkthrough_goldens`; both are gone, and the diffs were read before being
+accepted.
+
+---
+
+### M-1 — the standing-order row obeys Notice 2026-20's relief period
+
+`RELIEF_PERIOD_FIRST_YEAR = 2025` / `RELIEF_PERIOD_LAST_YEAR = 2026` and a three-way
+`ReliefPeriod::{Before, Within, After}`, cited to §3.03 at
+`legal/text/irs-guidance/Notice_2026-20.txt:299-301` (the sentence ends on `:301`, not `:300`),
+§4.01 at `:305-309` and §5 at `:388-394`.
+
+- **Within** — the row is byte-identical to before; the citation and the exit stand.
+- **Before** (pre-2025) — the row keeps its substance and states *"Notice 2026-20's relief period
+  BEGINS 2025-01-01 (§3.03), so §4.02(2)'s standing-order relief does not reach this sale, and
+  btctax refuses an election effective before that date as back-dated"*, and its handoff is the
+  `Pre2025MethodNote` exit taken **from `blocker_handoff(BlockerKind::Pre2025MethodNote)`** — the
+  exhaustive match, not a second literal. The old row named `--set-forward-method`, which
+  `method_election_is_forward` refuses outright on such a year.
+- **After** (post-2026) — *"the relief period ENDED 2026-12-31 (§3.03), and §5 says taxpayers may
+  not rely on §4.02's relief for sales made after it"*; the forward-election exit stands.
+
+**Whole-surface sweep — the heading was a second copy of the same claim.** `write_step0`'s section
+title AND the TUI commit modal's *"NO STANDING ORDER (Notice 2026-20 §4.02(2))"* both asserted the
+authority. They now read `Step0Panel::standing_orders_authority()` — one derivation, each surface
+keeping its own grammar. The TY2024 golden shows the modal correcting itself.
+
+---
+
+### M-2 — the same-day fixture, honestly labelled (the rest is FR-77)
+
+`the_standing_order_row_fires_with_no_election_and_is_silent_with_one_effective_the_day_before` →
+`…_on_or_before_the_sale`, with a new **part (d)**: the election MADE at `2026-03-10 18:00 UTC` and
+effective `2026-03-10`, six hours AFTER the 12:00 sale. Measured: **SILENT**, and the assertion says
+why — `resolve_election` compares `effective_from <= disposed_at` on a day-granular `TaxDate`, so
+the last day of §4.02(2)'s window fails OPEN. `resolve_election` was **not** touched: it decides the
+filed basis through `disposal_compliance`, and that is FR-77's, on the method-election track. The
+doc comment now says *"on or before"* and names FR-77 and the §4.02(1)-vs-(2) distinction.
+
+---
+
+### M-3 — the granularity negative test reads the RENDERED prompts
+
+`no_registry_question_asks_about_venue_or_account_granularity` now chains `RENDERED_PROMPTS`,
+rendered against a probe carrying the fixture's year, alongside the two static registries — and
+labels each prompt by its registry identity so a hit names the surface that said it. Two
+anti-vacuity assertions: the walk scanned > 50 prompts, and **every** rendered prompt is in the
+scanned set (dropping the chain leaves a smaller set that still clears the floor — the exact way the
+checker went blind before).
+
+---
+
+### M-4 — Step 0 surfaces a contradicted `No`; the commit gate is unchanged, by decision
+
+`Step0Panel` gains `contradictions: Vec<Step0Row>`, built by calling
+`screen_digital_asset_answer` — the rule the export refuses on, so the panel cannot say "clean"
+while the export refuses. Printed first after the blockers under **`YOUR ANSWERS vs THE LEDGER`**,
+and it leads the TUI's named rows. The row names the event and says what will happen
+(*"commit is not blocked by this, but `report` and `export-irs-pdf` REFUSE until one of the two is
+corrected"*) — more precise than "commit will be refused", because commit is exactly what is NOT
+refused.
+
+The tier boundary is recorded **in the code at the commit site** (`input_form_store::commit`): that
+site holds no `LedgerState`, and projecting the vault there would make committing depend on a ledger
+R9 promises may still be unresolved. *"The gate did not move; the silence did."*
+
+---
+
+### N-1 … N-4
+
+- **N-1** — `disposal_compliance`'s ~25-line doc block (the `SelfTransfer` scope boundary, the NFR4
+  determinism note, *"Read-only"*) moved back above `disposal_compliance`; `voided_set` keeps its own
+  four-line comment. No `#[must_use]` was added (it would red every caller that drops the result).
+- **N-2** — folded into this report above: the five-row table's row 1 now reads
+  **`a 2024-06-15 Coinbase disposal`** (matching the fixture and the quoted payload), and *"3,358
+  tests"* is presented as the ten-crate **sub-total** with the workspace figure named beside it.
+- **N-3** — measured against the extract and corrected everywhere the strings appear
+  (`questions.rs`, `return_refuse.rs`, and the KAT's module doc — the same citations, so the same
+  defect):
+  - the mandatory-answer sentence `i1040gi--2025.txt:1398-1400` → **`:1399-1401`** (it begins on
+    `:1399` — *"send you Form 1099-DA. You must answer…"* — and ends on `:1401`).
+  - the carve-outs `:1385-1394` → **`:1382-1391` + `:1395-1396`** (the *"The following actions or
+    transactions…"* sentence is `:1382-1384`; `:1392-1394` are a blank line, the page number `16`,
+    and another blank; the third bullet continues at `:1395-1396`).
+- **N-4** — the KAT now **tests what it said**. It kept the same `LedgerState` and screened an EMPTY
+  one under a comment claiming the year had been moved. It now moves the year off both events
+  (disposal → `2023-12-31`, income → `2025-01-01`) with a premise assertion that the events are still
+  there, asserts no refusal and `printed_box == Some(false)`, and keeps the empty-ledger case
+  separately as the different measurement it is.
+
+---
+
+## Kills, each seen RED once, RUNNING the instrument (verbatim)
+
+Plants applied to the working tree and reverted from `cp` backups. (File:line as captured, before the
+final `cargo fmt`.)
+
+**F1 — the emitter's box goes back to "always Yes"** (`digital_asset_answer` → `Some(true)`):
+```
+thread 'form_1040_digital_asset_box_is_the_answer_yes_no_or_neither' panicked at
+crates/btctax-forms/tests/sp2.rs:414:9:
+assertion `left == right` failed: answer Some(false): the Yes box
+  left: Some("1")
+ right: None
+```
+
+**F2 — the SLICE's box goes back to the ledger predicate** (`digital_asset_answer: Some(reportable_activity)`):
+```
+thread 'the_slice_prints_the_digital_asset_answer_and_never_the_ledger' panicked at
+crates/btctax-cli/tests/slice_from_answers.rs:1490:9:
+assertion `left == right` failed: answer None: the Yes box on the emitted PDF
+  left: Some("1")
+ right: None
+```
+
+**F3 — delete the slice's DA cross-check** (the arm-(2)/(3) gate never runs):
+```
+thread 'a_contradicted_no_refuses_the_slice_and_writes_nothing' panicked at
+crates/btctax-cli/tests/slice_from_answers.rs:1544:6:
+a `No` the ledger contradicts must refuse: IrsPdfReport { … form_1040_path:
+Some("/tmp/.tmpILCNSc/slice/form_1040_capgains.pdf") … advisories: [], … hand_marks: [] }
+```
+
+**F4 — the slice's `advisories` goes back to `Vec::new()`:**
+```
+thread 'an_off_ledger_yes_prints_the_slice_with_the_advisory' panicked at
+crates/btctax-cli/tests/slice_from_answers.rs:1594:5:
+…and it is WARNED: []
+```
+
+**F5 — drop the Step 0 regime gate** (`let live = true`):
+```
+thread 'the_venue_row_fires_only_on_a_year_whose_form_1099da_question_is_live' panicked at
+crates/btctax-cli/tests/step0_panel.rs:475:13:
+TY2024 asks no Form 1099-DA question, so no venue can be 'not accounted for' and no row may hand the
+filer to a block that would refuse them: [Step0Row { what: "coinbase has 1 noncovered row(s) on this
+year's Form 8949 and NO Form 1099-DA answer on file — a venue you disposed on is not accounted for",
+handoff: "btctax income answer --year 2024  (the Form 1099-DA block)" }]
+```
+
+**F6 — the relief period is always `Within`:**
+```
+thread 'the_standing_order_row_cites_the_notice_only_inside_its_relief_period' panicked at
+crates/btctax-cli/tests/step0_panel.rs:544:9:
+assertion `left == right` failed: TY2024: §4.02(2) is asserted as the authority only inside its
+relief period: …
+  left: true
+ right: false
+```
+
+**F7 — the Step 0 contradiction row is never emitted:**
+```
+thread 'the_step0_panel_names_a_digital_asset_answer_the_ledger_contradicts' panicked at
+crates/btctax-cli/tests/step0_panel.rs:630:5:
+assertion `left == right` failed: []
+  left: 0
+ right: 1
+```
+
+**F8 — a banned phrase planted inside a RENDERED prompt** (invisible to the pre-fold static scan —
+`digital_asset_prompt` only, the static fallback untouched):
+```
+thread 'no_registry_question_asks_about_venue_or_account_granularity' panicked at
+crates/btctax-cli/tests/step0_panel.rs:1035:9:
+R9: account granularity is documented, not asked — this prompt asks it: RENDERED_PROMPTS
+DigitalAssetActivity: which account? at any time during 2026, did you: (a) receive …
+```
+
+**F9 — drop the `RENDERED_PROMPTS` chain from that test** (the anti-vacuity half):
+```
+thread 'no_registry_question_asks_about_venue_or_account_granularity' panicked at
+crates/btctax-cli/tests/step0_panel.rs:1020:5:
+assertion `left == right` failed: every RENDERED prompt must be IN the scanned set — the words a
+filer is SHOWN are the ones this check exists to read
+  left: 0
+ right: 4
+```
+
+**F10 — the DA event finder loses its year filter** (`.year() == year` → `.year() >= 1900`), the N-4
+guarantee:
+```
+thread 'the_refusal_names_the_earliest_qualifying_event_and_fires_exactly_when_one_exists' panicked at
+crates/btctax-core/tests/kat_digital_asset_question.rs:407:5:
+assertion `left == right` failed: a 2023-12-31 disposal and a 2025-01-01 receipt are not 2024 events
+— the cross-check reads the event's own date, and a `No` for 2024 is truthful about 2024
+  left: Some(DigitalAssetAnswerContradictsLedger { date: "2023-12-31", venue:
+"exchange:coinbase:default", kind: "a disposition" })
+ right: None
+```
+
+---
+
+## Pinned numbers moved
+
+| pin | old → new | cause |
+|---|---|---|
+| workspace test total | **3,363 / 12 skipped → 3,371 / 12 skipped** | eight tests added by this fold (1 `btctax-forms`, 6 `btctax-cli`, 1 `btctax-tui-edit`) |
+| `btctax-core` | 1281 → **1281** | N-4 rewrote a test in place; no count change |
+| `btctax-cli` | 791 → **797** | +6 (`the_slice_prints_the_digital_asset_answer_and_never_the_ledger`, `a_contradicted_no_refuses_the_slice_and_writes_nothing`, `an_off_ledger_yes_prints_the_slice_with_the_advisory`, `the_venue_row_fires_only_on_a_year_whose_form_1099da_question_is_live`, `the_standing_order_row_cites_the_notice_only_inside_its_relief_period`, `the_step0_panel_names_a_digital_asset_answer_the_ledger_contradicts`) |
+| `btctax-forms` | 355 → **356** | +1 (`form_1040_digital_asset_box_is_the_answer_yes_no_or_neither`) |
+| `btctax-tui-edit` | 391 → **392** | +1 (`the_commit_modal_names_no_unanswered_venue_when_the_row_carries_no_exit`) |
+
+No production constant, threshold or census count moved. `xtask stop-list` still reports
+**8 / 4 / 64** (unchanged: no registry prompt was added or removed).
+
+---
+
+## Goldens regenerated (by their own committed generators, diffs read before acceptance)
+
+- `docs/examples-tui-walkthrough/j6/{01-tax-inputs-sections,02-tax-inputs-w2,03-tax-inputs-commit}.txt`
+  — `emit_btctax_tui_edit_walkthrough_goldens`. Content change: the false TY2024 venue row and the
+  modal's *"the EXPORT is"* claim are gone; the standing-order row and the modal heading follow the
+  relief period; the summary line gains the contradictions count. `regen == committed` re-asserted.
+- `docs/examples/examples.md` — **unchanged**, and checked rather than assumed: no journey prints a
+  Step 0 panel (`grep -c "Step 0" → 0`), and the hand-mark line at `:799` is the full-return path's,
+  which this fold did not touch. `examples_golden_matches_committed` green without regeneration.
+
+---
+
+## Validation
+
+`cargo nextest run --locked --no-fail-fast -p <crate>`, one crate at a time (never `cargo test`,
+never `--release`, never a whole-workspace run):
+
+```
+btctax-core             Summary [ 0.532s] 1281 tests run: 1281 passed, 0 skipped
+btctax-cli              Summary [ 6.891s]  797 tests run:  797 passed, 1 skipped
+btctax-input-form       Summary [ 0.042s]   70 tests run:   70 passed, 0 skipped
+btctax-forms            Summary [ 5.159s]  356 tests run:  356 passed, 4 skipped
+btctax-tui-edit         Summary [ 2.092s]  392 tests run:  392 passed, 2 skipped
+btctax-tui              Summary [ 1.588s]  160 tests run:  160 passed, 2 skipped
+xtask                   Summary [ 6.289s]  157 tests run:  157 passed, 1 skipped
+btctax-oracle-harness   Summary [ 3.142s]    5 tests run:    5 passed, 1 skipped
+btctax-adapters         Summary [ 0.024s]  103 tests run:  103 passed, 0 skipped
+btctax-store            Summary [ 0.994s]   45 tests run:   45 passed, 0 skipped
+btctax                  Summary [ 0.000s]    0 tests run:    0 passed, 0 skipped
+btctax-update-prices    Summary [ 0.003s]    5 tests run:    5 passed, 1 skipped
+```
+
+**3,371 tests run, 0 failures, 12 skipped — the whole workspace, twelve crates.** The seven
+environment failures the review recorded (6 × `form_delta` + `harness_check`) do **not** appear in
+this tree: the PDFs are present here, so those tests ran and passed.
+
+`cargo fmt --all --check` → clean. `CARGO_TARGET_DIR=target-clippy cargo clippy --workspace
+--all-targets --all-features -- -D warnings` → `Finished`, no diagnostics.
+`cargo run -p xtask -- stop-list` → *"8 btctax-input-form sources, 4 state-bearing sources and 64
+registry prompts scanned; no forbidden shape"*. `scripts/pii-scan-generic.sh` → `pii-scan: clean
+(HEAD)`. No new identifier was minted; the fixtures reuse `222-33-4444`, already on the script's
+token-exact allow list.
+
+---
+
+## Follow-ups worth filing (not built here)
+
+- **FR — the DA prompt's quoted carve-outs are not machine-checked.** N-3 corrected two citations by
+  hand against `pdftotext` output; `xtask prompt-check`'s clause table covers only the Form 8615
+  clauses, so nothing would have red on the wrong span and nothing will red if the extract is
+  re-generated with different line breaks. The instrument exists — it needs three more rows.
+  (Owning phase: T12, the docs/consistency surface.)
+- **FR — `Step0Panel` has six lists and `write_step0`/`tui_lines` name each one by hand.** Adding a
+  seventh is not a compile error in either renderer, which is the shape `blocker_handoff`'s
+  exhaustive match exists to avoid one level down. A `#[non_exhaustive]`-style enumeration, or one
+  `sections()` accessor both renderers walk, would make an omission fail to compile.

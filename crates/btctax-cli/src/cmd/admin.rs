@@ -411,10 +411,27 @@ pub struct IrsPdfReport {
     ///
     /// Carried out so the caller can say how many there are without re-deriving the list; the text
     /// itself lives in the packet's `manifest.txt` (owner decision 13), which is the artifact the
-    /// filer is told to follow while assembling paper. Empty on the crypto-slice path, whose 1040 is
-    /// watermarked "WORKSHEET — NOT A COMPLETE FORM 1040" and is not signed or filed.
+    /// filer is told to follow while assembling paper.
+    ///
+    /// ★ On the crypto-slice path it carries at most ONE entry (T6 seam review C-1) — the Digital
+    ///   Assets box, when the year's return records no answer and the worksheet was written. That
+    ///   page has no `manifest.txt` to hold the text, so `main.rs` prints the sentences themselves
+    ///   there rather than a pointer at a file that does not exist.
     pub hand_marks: Vec<String>,
 }
+
+/// ★★★ **The Digital Assets box, left blank because nobody answered it** — ONE sentence, read by
+/// both surfaces that can print that page: the full-return packet's [`hand_marks`] and the CRYPTO
+/// SLICE's report (T6 seam review C-1).
+///
+/// It is a `const` rather than two literals because the two surfaces describe the SAME blank cell,
+/// and a filer who meets it on the worksheet and then on the packet must not be told two things.
+const DIGITAL_ASSET_HAND_MARK: &str =
+    "Form 1040 — the Digital Asset question (above line 1a): neither \"Yes\" nor \"No\" is \
+     marked, because this return does not record an answer to it. btctax will not swear \
+     either way for you — a wrong \"No\" here is sworn testimony under §6065. The question \
+     is MANDATORY: answer it (`btctax income answer`) and re-export, or mark it yourself \
+     before you sign.";
 
 /// ★ N4 — **the marks btctax deliberately leaves for the filer**, in the order they appear on the
 /// form. One string per mark; empty is impossible (the signature is every filer's).
@@ -438,14 +455,7 @@ fn hand_marks(printed: &btctax_core::tax::packet::PrintedReturn) -> Vec<String> 
     //     refuses at `screen_inputs`, and the mark is the FAIL-CLOSED backstop for a packet that
     //     somehow reaches print with no answer — it says nothing on a return that answered.
     if printed.forms.f1040.digital_asset_answer.is_none() {
-        marks.push(
-            "Form 1040 — the Digital Asset question (above line 1a): neither \"Yes\" nor \"No\" is \
-             marked, because this return does not record an answer to it. btctax will not swear \
-             either way for you — a wrong \"No\" here is sworn testimony under §6065. The question \
-             is MANDATORY: answer it (`btctax income answer`) and re-export, or mark it yourself \
-             before you sign."
-                .to_string(),
-        );
+        marks.push(DIGITAL_ASSET_HAND_MARK.to_string());
     }
     if !printed.forms.sch_d.must_file() {
         marks.push(
@@ -882,6 +892,40 @@ pub(crate) fn export_irs_pdf_from_session_with_regime(
         }
     }
 
+    // ★★★ spec 1099-DA R6 fold (T6 seam review C-1) — THE DIGITAL ASSETS ANSWER, AND ITS
+    //     CROSS-CHECK, before any byte.
+    //
+    //     The slice's `form_1040_capgains.pdf` prints Form 1040 page 1's Digital Assets box. Until
+    //     this fold it printed a LEDGER PREDICATE (`!rows.is_empty() || income || removals`) on
+    //     every arm — so a filer who had answered **No** got a page with **Yes** checked, and a
+    //     filer who had never been asked got one too. TY2025 is the year this build can print for,
+    //     and it is arm (2): this is the page a real filer transcribes onto the return they sign.
+    //     An entry is testimony; the box is now the ANSWER, or it is BLANK.
+    let da_answer = working.as_ref().and_then(|ri| ri.digital_asset_activity);
+    // ★★★ R6, as amended 2026-09-07 — of `screen_compute_dependent` the slice runs exactly ONE
+    //     rule, and this is it. It is the SAME function the full return's screen calls first
+    //     (`return_1040::screen_digital_asset_answer`), never a second copy of the predicate, so a
+    //     filer's slice and their full return can never disagree about whether their own `No` is
+    //     contradicted.
+    //
+    // ★★ **WIDER THAN THE ARM, deliberately** (recorded as a deviation): R6 scopes the rule to arm
+    //    (2), but the BOX is printed from `da_answer` on every arm this function reaches — a
+    //    params-bundled year whose only return is a DRAFT falls to arm (3) with the answer present
+    //    and readable. Gating the refusal on the arm rather than on the answer would leave the
+    //    identical defect standing one branch over, and a refusal that fails closed on more states
+    //    than the spec demands is not a widening of an exemption.
+    if let Some(ri) = working.as_ref() {
+        if let Some(r) =
+            btctax_core::tax::return_1040::screen_digital_asset_answer(ri, state, tax_year)
+        {
+            return Err(CliError::Usage(format!(
+                "TY{tax_year}: the crypto slice cannot print the Form 1040 Digital Assets box \
+                 [{:?}]: {} No forms were written.",
+                r.reason, r.detail
+            )));
+        }
+    }
+
     if files_from_answers {
         // ★ ARM (2). The boxes are ROUTED from the stored answers through EXACTLY the screen and the
         //   router the full return uses — one screen, one router, so a filer's slice and their full
@@ -1147,7 +1191,11 @@ pub(crate) fn export_irs_pdf_from_session_with_regime(
     let mut form_1040_filled_7a = false;
     let mut form_1040_loss = false;
     if wants(forms, FormArg::Form1040) {
-        let da_yes = !rows.is_empty()
+        // ★★★ (T6 seam review C-1) THE PRODUCE/SKIP QUESTION, and it is the ledger's — *is there
+        //     anything for this worksheet to say about this year?* It is NOT the answer to the
+        //     Digital Assets question, which is the filer's and is `da_answer` above. Before the
+        //     fold these were one `bool` and the box printed this predicate.
+        let reportable_activity = !rows.is_empty()
             || state
                 .income_recognized
                 .iter()
@@ -1157,7 +1205,8 @@ pub(crate) fn export_irs_pdf_from_session_with_regime(
                 .iter()
                 .any(|r| r.removed_at.year() == tax_year);
         let inputs = Form1040Inputs {
-            da_yes,
+            digital_asset_answer: da_answer,
+            reportable_activity,
             schedule_d_active: sd_part_active(&totals.st) || sd_part_active(&totals.lt),
             schedule_d_line16: totals.st.gain + totals.lt.gain,
         };
@@ -1230,13 +1279,42 @@ pub(crate) fn export_irs_pdf_from_session_with_regime(
         }),
         // The crypto slice computes no full return, so there are no full-return advisories — and no
         // Schedule A, hence no §170(d)(1) carryover either.
-        advisories: Vec::new(),
+        //
+        // ★★★ …with ONE exception since the T6 seam review (C-1): the OFF-LEDGER `Yes` warning, the
+        //     mirror of the refusal three hundred lines above. This arm prints the Digital Assets
+        //     box from the filer's answer, so it owes the filer the same two directions the full
+        //     return gives them: a contradicted `No` REFUSES, an unwitnessed `Yes` PRINTS WITH THE
+        //     WARNING. The predicate is `digital_asset_yes_is_off_ledger`, the one `advisories()`
+        //     itself calls — a `Vec::new()` here would have made the asymmetry arm-dependent.
+        advisories: match working.as_ref() {
+            Some(ri)
+                if btctax_core::tax::return_1040::digital_asset_yes_is_off_ledger(
+                    ri, state, tax_year,
+                ) =>
+            {
+                vec![btctax_core::tax::advisories::Advisory::DigitalAssetYesNotOnLedger {
+                    year: tax_year,
+                }]
+            }
+            _ => Vec::new(),
+        },
         charitable_carryover_out: Vec::new(),
         charitable_carryover_cwa_unvouched: None,
-        // N4 does not apply to the slice: its 1040 is a WORKSHEET (watermarked "NOT A COMPLETE FORM
-        // 1040"), it is never signed or filed, and the note printed for it already says every other
-        // line is the filer's.
-        hand_marks: Vec::new(),
+        // ★★★ N4 on the slice (T6 seam review C-1) — ONE mark, and only the one this arm can
+        //     actually leave blank. The worksheet's other blanks are already covered by the
+        //     watermark ("NOT A COMPLETE FORM 1040") and the note; the Digital Assets box is
+        //     different in kind, because it is the one cell on the page this product FILLS, and a
+        //     `None` answer fills NEITHER member of the pair. Two blanks look identical on paper and
+        //     are not the same thing — so the unanswered one is named, in the same sentence the
+        //     full-return packet uses (`DIGITAL_ASSET_HAND_MARK`), and never invented as a `No`.
+        //
+        // ★ Conditioned on the box being blank in THIS packet, and on the page having been written
+        //   at all: a mark named on a form the export did not produce is a mark about nothing.
+        hand_marks: if form_1040_path.is_some() && da_answer.is_none() {
+            vec![DIGITAL_ASSET_HAND_MARK.to_string()]
+        } else {
+            Vec::new()
+        },
         // The crypto slice never reaches a Form 1040 line 37, and `--pay-by-check` already refused
         // above — so there is no voucher to write.
         form_1040v_path: None,

@@ -139,13 +139,21 @@ fn vault_with(events: &[LedgerEvent]) -> (tempfile::TempDir, PathBuf) {
     (dir, vault)
 }
 
-/// The panel this vault produces for `YEAR`, with the year's stored return if there is one.
+/// The panel this vault produces for `year`, with the year's stored return if there is one and the
+/// year's REAL Form 1099-DA regime — the same join `income answer` and the TUI make
+/// (`year_readiness::regime_for`), so a fixture can never be shown a regime the product would not.
 fn panel_of(vault: &Path, year: i32) -> Step0Panel {
     let s = Session::open(vault, &pp()).unwrap();
     let (state, _) = s.project().unwrap();
     let events = btctax_core::persistence::load_all(s.conn()).unwrap();
     let ri = return_inputs::get(s.conn(), year).unwrap();
-    step0_panel(&state, &events, ri.as_ref(), year)
+    step0_panel(
+        &state,
+        &events,
+        ri.as_ref(),
+        year,
+        btctax_cli::year_readiness::regime_for(year),
+    )
 }
 
 /// ★★★ **THE STANDING-ORDER FIXTURE PAIR** (R9's kill; J-9, J-10).
@@ -157,8 +165,19 @@ fn panel_of(vault: &Path, year: i32) -> Step0Panel {
 ///
 /// **Both halves in one test, because either alone is satisfiable by a broken implementation:** a
 /// panel that always warned would pass the first, and one that never warned would pass the second.
+///
+/// ★★★ **(seam review M-2) THE BOUNDARY IS "ON OR BEFORE", NOT "BEFORE" — and part (d) says so.**
+///     §4.02(2)'s own test is *"entered into the taxpayer's books and records **before** the units
+///     covered by the order are sold"*, while §4.02(**1**) is the limb that says *"no later than the
+///     date and time"*. `standing_order_in_force` inherits `resolve_election`'s `effective_from <=
+///     date` on a DAY-granular `TaxDate`, so an order recorded the day OF the sale — hours AFTER it
+///     — is treated as in force and the row is SILENT. That is measured below rather than claimed
+///     either way, because the root is the pre-existing `<=` which also decides the FILED BASIS
+///     through `disposal_compliance`, and that belongs to **FR-77** (the method-election track),
+///     never to a panel that must mirror the engine.
 #[test]
-fn the_standing_order_row_fires_with_no_election_and_is_silent_with_one_effective_the_day_before() {
+fn the_standing_order_row_fires_with_no_election_and_is_silent_with_one_effective_on_or_before_the_sale(
+) {
     let sale = datetime!(2026-03-10 12:00:00 UTC);
 
     // ── (a) NO scoped election ⇒ the row FIRES, names the venue and the date, and states the
@@ -202,7 +221,8 @@ fn the_standing_order_row_fires_with_no_election_and_is_silent_with_one_effectiv
         row.handoff
     );
 
-    // ── (b) the SAME ledger with an election effective the day before ⇒ SILENT. ──────────────────
+    // ── (b) the SAME ledger with an election effective the day before ⇒ SILENT. (The name says
+    //    "on or before" because part (d) below measures the day-OF case, which is also silent.) ───
     let (_d2, vault2) = vault_with(&[
         buy(
             Source::Coinbase,
@@ -225,6 +245,35 @@ fn the_standing_order_row_fires_with_no_election_and_is_silent_with_one_effectiv
         "a standing order recorded the day BEFORE the sale IS the §4.02(2) identification — \
          warning here would contradict the engine's own `StandingOrder` verdict: {:?}",
         p2.standing_orders
+    );
+
+    // ── (d) THE SAME-DAY CASE — the election MADE and effective on the day OF the sale, six hours
+    //    AFTER it (M-2). Measured, not assumed: it falls SILENT, because the comparison is
+    //    day-granular and `<=`. Nothing here is changed to make it so, and nothing here changes
+    //    `resolve_election`.
+    let (_d3, vault3) = vault_with(&[
+        buy(
+            Source::Coinbase,
+            "BUY-1",
+            datetime!(2026-01-05 12:00:00 UTC),
+            coinbase(),
+            "50000.00",
+        ),
+        sell(Source::Coinbase, "SELL-1", sale, coinbase(), "60000.00"),
+    ]);
+    record_election(
+        &vault3,
+        datetime!(2026-03-10 18:00:00 UTC),
+        date!(2026 - 03 - 10),
+        Some(coinbase()),
+    );
+    assert!(
+        panel_of(&vault3, YEAR).standing_orders.is_empty(),
+        "★ FR-77 — an order recorded SIX HOURS AFTER the 12:00 sale is treated as in force: \
+         `resolve_election` compares `effective_from <= disposed_at` on a day-granular `TaxDate`, \
+         so the last day of §4.02(2)'s window fails OPEN. The panel mirrors the engine deliberately \
+         (a panel that diverged would warn a filer the fold calls compliant), so the fix is the \
+         engine's `<=` — which also decides the FILED BASIS — and it is FR-77's, not T6's."
     );
 
     // ── (c) …and the panel's verdict is the ENGINE's. `disposal_compliance` runs the same shared
@@ -356,6 +405,278 @@ fn a_venue_with_rows_and_no_broker_answer_is_named_and_an_answered_one_is_not() 
             .any(|v| v.what.starts_with("coinbase") && v.handoff.is_empty()),
         "…and the answered venue is listed as answered rather than dropped: {:?}",
         p.venues
+    );
+}
+
+/// ★★★ **(seam review I-1) THE VENUE ROW OBEYS THE YEAR'S FORM 1099-DA REGIME.**
+///
+/// The list shares `screen_broker_reporting`'s KEY derivation and used to drop its LIVENESS gate, so
+/// on **TY2024 and TY2025 — the only two years this product serves** — every filer with an exchange
+/// disposal was told a venue *"is not accounted for"* and handed to a Form 1099-DA block that is not
+/// asked for the year and whose answer, if supplied, is REFUSED (`BrokerAnswerUnread`: *"testimony
+/// it would discard is not kept"*). The committed fixture pair could not see it: both halves ran at
+/// `const YEAR = 2026`, the one year the row is right for.
+///
+/// **THE ASSERTION IS AN ABSENCE, and it is made at both non-live years and its presence at the live
+/// one** — either alone passes on a broken implementation (a panel that never names a venue passes
+/// the first two; the pre-fold panel passes the third).
+#[test]
+fn the_venue_row_fires_only_on_a_year_whose_form_1099da_question_is_live() {
+    for year in [2024, 2025, 2026] {
+        let (_d, vault) = vault_with(&[
+            buy(
+                Source::Coinbase,
+                "CB-BUY",
+                datetime!(2024-01-05 12:00:00 UTC)
+                    .replace_year(year)
+                    .unwrap(),
+                coinbase(),
+                "50000.00",
+            ),
+            sell(
+                Source::Coinbase,
+                "CB-SELL",
+                datetime!(2024-06-15 12:00:00 UTC)
+                    .replace_year(year)
+                    .unwrap(),
+                coinbase(),
+                "60000.00",
+            ),
+        ]);
+        // Premise: the year HAS a key with rows, so an absent row is the gate and not a missing
+        // fixture — and the regime is the one the product joins for the year, never a literal.
+        let regime = btctax_cli::year_readiness::regime_for(year).expect("a bundled year record");
+        {
+            let s = Session::open(&vault, &pp()).unwrap();
+            let (state, _) = s.project().unwrap();
+            let rows = btctax_core::form_8949(&state, year);
+            assert_eq!(
+                btctax_core::forms::broker_key_census(&rows).len(),
+                1,
+                "premise: TY{year} has one (provider, cohort) key with rows"
+            );
+            assert_eq!(
+                btctax_core::broker_question_is_live(&rows, regime),
+                year == 2026,
+                "premise: the Form 1099-DA question is live only from TY2026 (regime {regime:?})"
+            );
+        }
+        let p = panel_of(&vault, year);
+        let named: Vec<&str> = p
+            .venues
+            .iter()
+            .filter(|v| !v.handoff.is_empty())
+            .map(|v| v.what.as_str())
+            .collect();
+        if year == 2026 {
+            assert_eq!(
+                named.len(),
+                1,
+                "TY2026's question IS live and unanswered — the row must fire: {:?}",
+                p.venues
+            );
+            assert!(named[0].contains("not accounted for"), "{named:?}");
+        } else {
+            assert!(
+                named.is_empty(),
+                "TY{year} asks no Form 1099-DA question, so no venue can be 'not accounted for' \
+                 and no row may hand the filer to a block that would refuse them: {:?}",
+                p.venues
+            );
+            // …and the panel is not SILENT about the venues either: it states the REGIME, the fact
+            // that decides it, with no exit because there is no answer to give.
+            assert_eq!(p.venues.len(), 1, "{:?}", p.venues);
+            assert!(p.venues[0].handoff.is_empty(), "{:?}", p.venues[0]);
+            for needle in ["Form 1099-DA regime", "coinbase"] {
+                assert!(
+                    p.venues[0].what.contains(needle),
+                    "the regime row names {needle:?}: {}",
+                    p.venues[0].what
+                );
+            }
+        }
+    }
+}
+
+/// ★★★ **(seam review M-1) THE STANDING-ORDER ROW CITES §4.02(2) ONLY INSIDE THE RELIEF PERIOD.**
+///
+/// Notice 2026-20 §3.03 defines the relief period as 2025-01-01 → 2026-12-31
+/// (`legal/text/irs-guidance/Notice_2026-20.txt:299-301`), §4.01 makes §4.02's relief *"available
+/// only with respect to units … sold, disposed of, or transferred during the relief period"*, and §5
+/// forbids relying on it *"after the relief period ends"*. The row was filtered by tax year alone, so
+/// it cited §4.02(2) at a 2024 sale (before the relief existed — and where btctax's own
+/// `method_election_is_forward` refuses the election the row's exit names) and at a 2027 one.
+///
+/// The SUBSTANCE — no dated election ⇒ the broker's default — survives on every year, so this
+/// asserts the row is still THERE and that the authority and the exit changed.
+#[test]
+fn the_standing_order_row_cites_the_notice_only_inside_its_relief_period() {
+    for (year, cites_402, exit) in [
+        (2024, false, "--set-pre2025-method"),
+        (2026, true, "--set-forward-method"),
+        (2027, false, "--set-forward-method"),
+    ] {
+        let (_d, vault) = vault_with(&[
+            buy(
+                Source::Coinbase,
+                "BUY-1",
+                datetime!(2024-01-05 12:00:00 UTC)
+                    .replace_year(year)
+                    .unwrap(),
+                coinbase(),
+                "50000.00",
+            ),
+            sell(
+                Source::Coinbase,
+                "SELL-1",
+                datetime!(2024-03-10 12:00:00 UTC)
+                    .replace_year(year)
+                    .unwrap(),
+                coinbase(),
+                "60000.00",
+            ),
+        ]);
+        let p = panel_of(&vault, year);
+        assert_eq!(
+            p.standing_orders.len(),
+            1,
+            "TY{year}: the substance survives on every year — one custodial venue with no dated \
+             election: {:?}",
+            p.standing_orders
+        );
+        let row = &p.standing_orders[0];
+        let mut out = Vec::new();
+        btctax_cli::step0::write_step0(&mut out, &p).unwrap();
+        let printed = String::from_utf8(out).unwrap();
+        // The HEADING is where the row's authority is asserted, so that is what must follow the
+        // period. (Outside it the row still NAMES §4.02(2) — to say it does not reach the sale.)
+        assert_eq!(
+            printed.contains("STANDING ORDERS (Notice 2026-20 §4.02(2))"),
+            cites_402,
+            "TY{year}: §4.02(2) is asserted as the authority only inside its relief period: \
+             {printed}"
+        );
+        // …and the TUI commit modal's heading is the SAME authority, not a second literal — it
+        // asserted §4.02(2) on a TY2024 fixture whose own row said the relief had not begun.
+        assert_eq!(
+            p.standing_orders_authority() == "Notice 2026-20 §4.02(2)",
+            cites_402,
+            "TY{year}: one authority, two renderers"
+        );
+        assert_eq!(
+            row.what.contains("relief period"),
+            !cites_402,
+            "TY{year}: outside the period the row says so, and inside it there is nothing to say: \
+             {}",
+            row.what
+        );
+        assert!(
+            row.handoff.contains(exit),
+            "TY{year}: the exit is {exit} — a pre-2025 year cannot take a forward election at all \
+             (`method_election_is_forward` refuses it): {}",
+            row.handoff
+        );
+        if year == 2024 {
+            assert!(
+                row.what.contains("BEGINS 2025-01-01"),
+                "…and it says WHY: {}",
+                row.what
+            );
+        }
+        if year == 2027 {
+            assert!(
+                row.what.contains("ENDED 2026-12-31"),
+                "…and it says WHY: {}",
+                row.what
+            );
+        }
+    }
+}
+
+/// ★★★ **(seam review M-4) THE STEP 0 PRINT SURFACES A CONTRADICTED `No`.**
+///
+/// `input_form_store::commit` runs `screen_inputs` only and holds no `LedgerState`, and
+/// `interview_state(&ri)` takes no ledger — so neither the TUI commit gate nor R12's panel can see
+/// that a filer's `digital_asset_activity = Some(false)` is contradicted, and they would first meet
+/// the refusal at `report` / `export-irs-pdf`. The tier boundary stands; this surface DOES hold the
+/// ledger, and it is where the filer is told.
+///
+/// Both directions, because either alone is satisfiable by a broken panel.
+#[test]
+fn the_step0_panel_names_a_digital_asset_answer_the_ledger_contradicts() {
+    let (_d, vault) = vault_with(&[
+        buy(
+            Source::Coinbase,
+            "CB-BUY",
+            datetime!(2026-01-05 12:00:00 UTC),
+            coinbase(),
+            "50000.00",
+        ),
+        sell(
+            Source::Coinbase,
+            "CB-SELL",
+            datetime!(2026-06-15 12:00:00 UTC),
+            coinbase(),
+            "60000.00",
+        ),
+    ]);
+    let store = |answer: Option<bool>| {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        let mut ri = ReturnInputs {
+            tax_year: YEAR,
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        ri.header.taxpayer = Person {
+            first_name: "Pat".into(),
+            last_name: "Roe".into(),
+            ssn: "222-33-4444".into(),
+            date_of_birth: Some(date!(1980 - 05 - 05)),
+            ..Default::default()
+        };
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        ri.digital_asset_activity = answer;
+        return_inputs::set(s.conn(), YEAR, &ri).unwrap();
+        s.save().unwrap();
+    };
+
+    // ── `No` against a ledger that witnesses a 2026 disposal ⇒ NAMED, with the event and the exit.
+    store(Some(false));
+    let p = panel_of(&vault, YEAR);
+    assert_eq!(p.contradictions.len(), 1, "{:?}", p.contradictions);
+    let row = &p.contradictions[0];
+    for needle in [
+        "2026-06-15",
+        "exchange:coinbase:default",
+        "a disposition",
+        "REFUSE",
+    ] {
+        assert!(
+            row.what.contains(needle),
+            "the row must name the event the export will refuse on; missing {needle:?} in: {}",
+            row.what
+        );
+    }
+    assert!(
+        row.handoff.contains("btctax income answer"),
+        "…and the exit is the question: {}",
+        row.handoff
+    );
+    // …and it is PRINTED, not merely computed.
+    let mut out = Vec::new();
+    btctax_cli::step0::write_step0(&mut out, &p).unwrap();
+    let printed = String::from_utf8(out).unwrap();
+    assert!(
+        printed.contains("YOUR ANSWERS vs THE LEDGER") && printed.contains("2026-06-15"),
+        "{printed}"
+    );
+
+    // ── `Yes` on the same ledger ⇒ SILENT (the asymmetry: only the `No` direction refuses).
+    store(Some(true));
+    assert!(
+        panel_of(&vault, YEAR).contradictions.is_empty(),
+        "a `Yes` this ledger witnesses is not a contradiction — a panel that always warned would \
+         pass the half above"
     );
 }
 
@@ -681,22 +1002,60 @@ fn income_answer_prints_step_0_before_the_first_census_question() {
 /// question like *"how many accounts do you hold at Coinbase?"* would collect an answer nothing
 /// reads — a stored value with no reader, which this codebase treats as a defect. The note states
 /// the §1012(c)(1) consequence instead.
+///
+/// ★★★ **(seam review M-3) IT RENDERS THE RENDERED PROMPTS TOO.** The first version of this test
+/// walked `FORM_QUESTIONS` and `SKIPPABLE_QUESTIONS` — the STATIC `prompt` strings — and never
+/// called `RENDERED_PROMPTS`, reintroducing in the same commit the blindness the T6 stop-list
+/// extension was written to end: *"the words a filer is actually SHOWN were never read"*
+/// (`r15_stop_list.rs`). The rendered set was clean when this was written, and *"it happened to be
+/// clean"* is not the same fact as *"it is checked"* (harness B1).
 #[test]
 fn no_registry_question_asks_about_venue_or_account_granularity() {
-    use btctax_core::tax::questions::{FORM_QUESTIONS, SKIPPABLE_QUESTIONS};
-    let prompts: Vec<String> = FORM_QUESTIONS
+    use btctax_core::tax::questions::{FORM_QUESTIONS, RENDERED_PROMPTS, SKIPPABLE_QUESTIONS};
+    // A probe carrying the fixture's own year, so a renderer that interpolates one produces the
+    // words a filer of THIS year is shown.
+    let probe = ReturnInputs {
+        tax_year: YEAR,
+        filing_status: FilingStatus::Single,
+        ..Default::default()
+    };
+    let prompts: Vec<(String, String)> = FORM_QUESTIONS
         .iter()
-        .map(|q| q.prompt.to_ascii_lowercase())
+        .map(|q| (format!("FORM_QUESTIONS {:?}", q.id), q.prompt.to_string()))
+        .chain(SKIPPABLE_QUESTIONS.iter().map(|s| {
+            (
+                format!("SKIPPABLE_QUESTIONS {:?}", s.id),
+                s.prompt.to_string(),
+            )
+        }))
         .chain(
-            SKIPPABLE_QUESTIONS
+            RENDERED_PROMPTS
                 .iter()
-                .map(|s| s.prompt.to_ascii_lowercase()),
+                .map(|(id, render)| (format!("RENDERED_PROMPTS {id:?}"), render(&probe))),
         )
+        .map(|(label, text)| (label, text.to_ascii_lowercase()))
         .collect();
-    for p in &prompts {
+    // ★ ANTI-VACUITY, both halves: the walk must have found the registries AND it must have
+    //   actually rendered every rendered prompt. Without the second, dropping the `chain` above
+    //   leaves a smaller set that still clears a floor and the check goes quietly blind again.
+    assert!(
+        prompts.len() > 50,
+        "the walk scanned only {} prompts — a check that scans nothing passes by finding nothing",
+        prompts.len()
+    );
+    assert_eq!(
+        prompts
+            .iter()
+            .filter(|(label, _)| label.starts_with("RENDERED_PROMPTS "))
+            .count(),
+        RENDERED_PROMPTS.len(),
+        "every RENDERED prompt must be IN the scanned set — the words a filer is SHOWN are the \
+         ones this check exists to read"
+    );
+    for (label, p) in &prompts {
         assert!(
             !(p.contains("how many accounts") || p.contains("which account")),
-            "R9: account granularity is documented, not asked — this prompt asks it: {p}"
+            "R9: account granularity is documented, not asked — this prompt asks it: {label}: {p}"
         );
     }
     // …and the note that replaces the question exists and says what btctax models.

@@ -1422,12 +1422,12 @@ pub fn advisories(
     //     MIRROR of `RefuseReason::DigitalAssetAnswerContradictsLedger`, and deliberately the OTHER
     //     instrument: that direction refuses, this one warns and lets the return through.
     //
-    // ★ The predicate is `digital_asset_activity`, the SAME one the refusal calls — one definition
-    //   of "the ledger witnesses a qualifying event", so the two directions can never disagree
-    //   about which cell of the table a return is in.
-    if ri.digital_asset_activity == Some(true)
-        && !crate::tax::return_1040::digital_asset_activity(state, year)
-    {
+    // ★ The predicate is `digital_asset_yes_is_off_ledger`, which reads the SAME
+    //   `digital_asset_activity` the refusal calls — one definition of "the ledger witnesses a
+    //   qualifying event", so the two directions can never disagree about which cell of the table a
+    //   return is in. It is a named function because the CRYPTO SLICE raises this same warning off
+    //   its own report (T6 seam review C-1) without computing a full return.
+    if crate::tax::return_1040::digital_asset_yes_is_off_ledger(ri, state, year) {
         out.push(Advisory::DigitalAssetYesNotOnLedger { year });
     }
 

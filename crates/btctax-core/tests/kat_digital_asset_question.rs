@@ -2,7 +2,7 @@
 //!
 //! Form 1040 page 1 asks it above line 1a, and the instructions leave no room: *"You must answer the
 //! digital asset question on Form 1040 whether or not you received a Form 1099-DA"*
-//! (`i1040gi--2025.txt:1398-1400`). Until T6 btctax decided the box from a LEDGER PREDICATE, and a
+//! (`i1040gi--2025.txt:1399-1401`). Until T6 btctax decided the box from a LEDGER PREDICATE, and a
 //! predicate can only ever say *Yes* or say nothing — so a filer who bought monthly and sold nothing
 //! signed a return with a mandatory question blank.
 //!
@@ -26,9 +26,9 @@
 //!    self-transfer, rather than by hand-constructing a `LedgerState`. The instruction's own
 //!    carve-outs are *"[h]olding a digital asset"*, *"[t]ransferring a digital asset from one wallet
 //!    or account you own or control to another"* and *"[p]urchasing digital assets using U.S. or
-//!    other real currency"* (`i1040gi--2025.txt:1385-1394`) — so the claim under test is that btctax's
-//!    FOLD emits no disposal, no income and no removal for those, and a hand-built empty state would
-//!    assert that claim against itself.
+//!    other real currency"* (`i1040gi--2025.txt:1382-1391` + `:1395-1396`) — so the claim under
+//!    test is that btctax's FOLD emits no disposal, no income and no removal for those, and a
+//!    hand-built empty state would assert that claim against itself.
 //!
 //! ★ Every row CALLS the instruments it protects — `screen_compute_dependent`, `advisories`, and the
 //!   printed chain `assemble_printed_forms` — never a re-implementation of their predicates.
@@ -339,7 +339,7 @@ fn the_digital_asset_answer_table_holds_in_all_five_cells() {
         refusal(&ri, &buys_only),
         None,
         "★ a PURCHASE is not a Yes-forcing event, and neither is moving coins between wallets you \
-         own (i1040gi--2025.txt:1385-1394)"
+         own (i1040gi--2025.txt:1382-1391 + :1395-1396)"
     );
     assert_eq!(printed_box(&ri, &buys_only), Some(false));
 
@@ -388,11 +388,38 @@ fn the_refusal_names_the_earliest_qualifying_event_and_fires_exactly_when_one_ex
          look at the wrong row"
     );
 
-    // …and with the year moved off both events, the refusal is silent and the box prints `No`.
-    let mut ri2015 = filer(Some(false));
-    ri2015.tax_year = YEAR;
+    // ── …and with the YEAR MOVED OFF BOTH EVENTS, the refusal is silent. ────────────────────────
+    //
+    // ★ (seam review N-4) This used to keep the SAME state and screen an EMPTY `LedgerState`, under a
+    //   comment that said the year had been moved — two different measurements, and the one the
+    //   label described was the one not made. The year boundary is the EVENT's own date
+    //   (`first_digital_asset_event` filters on `.year() == year`), so moving it is what proves the
+    //   filter is a filter rather than a `.is_empty()` in disguise: the same two events, dated in
+    //   the year BEFORE and the year AFTER, against the same `No`.
+    let mut moved = state.clone();
+    moved.disposals[0].disposed_at = date!(2023 - 12 - 31);
+    moved.income_recognized[0].recognized_at = date!(2025 - 01 - 01);
+    assert!(
+        !moved.disposals.is_empty() && !moved.income_recognized.is_empty(),
+        "premise: the events are still THERE — only their dates moved"
+    );
+    let ri = filer(Some(false));
     assert_eq!(
-        screen_compute_dependent(&ri2015, &LedgerState::default(), YEAR, &ty2024_params())
+        refusal(&ri, &moved).map(|(r, _)| r),
+        None,
+        "a 2023-12-31 disposal and a 2025-01-01 receipt are not {YEAR} events — the cross-check \
+         reads the event's own date, and a `No` for {YEAR} is truthful about {YEAR}"
+    );
+    assert_eq!(
+        printed_box(&ri, &moved),
+        Some(false),
+        "…and the box prints the filer's `No`"
+    );
+
+    // ── An EMPTY ledger is the other half, and it is a different measurement. ────────────────────
+    let empty = filer(Some(false));
+    assert_eq!(
+        screen_compute_dependent(&empty, &LedgerState::default(), YEAR, &ty2024_params())
             .map(|r| r.reason),
         None,
         "no qualifying event ⇒ no refusal, whatever the answer says"

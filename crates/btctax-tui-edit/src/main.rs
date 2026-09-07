@@ -833,6 +833,10 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
             crate::edit::form::broker_census_by_provider(&rows)
         })
         .unwrap_or_default();
+    // ★ spec 1099-DA T0 — the year's Form 1099-DA regime, joined from its record. Read here
+    //   rather than at the `TaxInputsFormState` literals below because Step 0 needs it too (seam
+    //   review I-1): the venue-vs-answer list is built only on a year whose question is LIVE.
+    let regime = btctax_cli::year_readiness::regime_for(year);
     // ★★★ R9 / T6 — STEP 0, the interview's entry: the LEDGER's status for this year, read ONCE
     //     from the same snapshot. The SAME `step0_panel` `income answer` prints, so one ledger
     //     cannot be described two ways. `None` snapshot ⇒ an empty panel, which renders as
@@ -841,7 +845,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
         app.snapshot
             .as_ref()
             .map_or_else(btctax_cli::step0::Step0Panel::default, |snap| {
-                btctax_cli::step0::step0_panel(&snap.state, &snap.events, ri, year)
+                btctax_cli::step0::step0_panel(&snap.state, &snap.events, ri, year, regime)
             })
     };
     // ★★★ C-1 / R10.4 — year N's row, for the `Durable` date-of-birth HINT and nothing else. Read
@@ -854,7 +858,6 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
             .and_then(|n| edit::persist::committed_return_inputs(app.session.as_ref().unwrap(), n)),
         _ => None,
     };
-    let regime = btctax_cli::year_readiness::regime_for(year);
     // ★★★ R10.3 — the SESSION date every answer this flow records is stamped with, read ONCE from the
     //     `BTCTAX_NOW` seam (`app.clock`) rather than from a wall clock inside the edit loop, so a
     //     pinned clock pins the answer log too.

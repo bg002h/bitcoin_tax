@@ -263,7 +263,8 @@ const F1040_DA_NO: &str = "topmostSubform[0].Page1[0].c1_10[1]";
 fn form_1040_line7a_gain_equals_schedule_d_line16() {
     let f = btctax_forms::fill_form_1040_capgains(
         &Form1040Inputs {
-            da_yes: true,
+            digital_asset_answer: Some(true),
+            reportable_activity: true,
             schedule_d_active: true,
             schedule_d_line16: dec!(45500.50),
         },
@@ -279,14 +280,19 @@ fn form_1040_line7a_gain_equals_schedule_d_line16() {
         Some("1"),
         "DA = YES"
     );
-    assert_eq!(cb(&doc, &fields, F1040_DA_NO), None, "DA No never filled");
+    assert_eq!(
+        cb(&doc, &fields, F1040_DA_NO),
+        None,
+        "a `Yes` answer writes the Yes box and only that"
+    );
 }
 
 #[test]
 fn form_1040_line7a_active_zero_is_dash_zero() {
     let f = btctax_forms::fill_form_1040_capgains(
         &Form1040Inputs {
-            da_yes: true,
+            digital_asset_answer: Some(true),
+            reportable_activity: true,
             schedule_d_active: true,
             schedule_d_line16: Usd::ZERO,
         },
@@ -303,7 +309,8 @@ fn form_1040_line7a_active_zero_is_dash_zero() {
 fn form_1040_line7a_loss_is_blank_with_notice() {
     let f = btctax_forms::fill_form_1040_capgains(
         &Form1040Inputs {
-            da_yes: true,
+            digital_asset_answer: Some(true),
+            reportable_activity: true,
             schedule_d_active: true,
             schedule_d_line16: dec!(-3000),
         },
@@ -323,7 +330,8 @@ fn form_1040_7a_blank_when_schedule_d_inactive() {
     // (never stamp "-0-" against a blank Schedule D line 16).
     let f = btctax_forms::fill_form_1040_capgains(
         &Form1040Inputs {
-            da_yes: true,
+            digital_asset_answer: Some(true),
+            reportable_activity: true,
             schedule_d_active: false,
             schedule_d_line16: Usd::ZERO,
         },
@@ -346,11 +354,12 @@ fn form_1040_7a_blank_when_schedule_d_inactive() {
 }
 
 #[test]
-fn form_1040_da_yes_iff_reportable_activity() {
-    // No reportable activity → skip the WHOLE 1040 (never fill "No").
+fn form_1040_is_produced_iff_the_ledger_has_reportable_activity() {
+    // No reportable activity → skip the WHOLE 1040, whatever the ANSWER says.
     let none = btctax_forms::fill_form_1040_capgains(
         &Form1040Inputs {
-            da_yes: false,
+            digital_asset_answer: Some(true),
+            reportable_activity: false,
             schedule_d_active: false,
             schedule_d_line16: Usd::ZERO,
         },
@@ -359,10 +368,11 @@ fn form_1040_da_yes_iff_reportable_activity() {
     .unwrap();
     assert!(none.is_none(), "no reportable activity → no 1040 at all");
 
-    // Reportable activity → 1040 present, DA = YES.
+    // Reportable activity → 1040 present.
     let some = btctax_forms::fill_form_1040_capgains(
         &Form1040Inputs {
-            da_yes: true,
+            digital_asset_answer: Some(true),
+            reportable_activity: true,
             schedule_d_active: false,
             schedule_d_line16: Usd::ZERO,
         },
@@ -372,11 +382,57 @@ fn form_1040_da_yes_iff_reportable_activity() {
     assert!(some.is_some());
 }
 
+/// ★★★ **(T6 seam review C-1) THE SLICE'S DIGITAL ASSETS BOX IS THE FILER'S ANSWER — all three
+/// states, read back off the emitted bytes.**
+///
+/// This emitter could not express two of them before the fold: `da_yes: bool` wrote the *Yes* box or
+/// nothing, so a filer's **No** printed as **Yes** and a filer who had never been asked printed as
+/// **Yes** too. `None` writes NEITHER member of the pair, which is the only honest page for a
+/// question nobody answered — an entry is testimony, and a blank is none.
+///
+/// The produce/skip premise is held constant (`reportable_activity: true`) precisely because it used
+/// to be the same field: if the two ever merge again, the `Some(false)` case cannot even be built.
+#[test]
+fn form_1040_digital_asset_box_is_the_answer_yes_no_or_neither() {
+    for (answer, want_yes, want_no) in [
+        (Some(true), Some("1"), None),
+        (Some(false), None, Some("2")),
+        (None, None, None),
+    ] {
+        let f = btctax_forms::fill_form_1040_capgains(
+            &Form1040Inputs {
+                digital_asset_answer: answer,
+                reportable_activity: true,
+                schedule_d_active: true,
+                schedule_d_line16: dec!(1000),
+            },
+            2025,
+        )
+        .unwrap()
+        .expect("reportable activity ⇒ the page is produced whatever the answer is");
+        let (doc, fields) = fields_of(&f.pdf);
+        assert_eq!(
+            cb(&doc, &fields, F1040_DA_YES).as_deref(),
+            want_yes,
+            "answer {answer:?}: the Yes box"
+        );
+        assert_eq!(
+            cb(&doc, &fields, F1040_DA_NO).as_deref(),
+            want_no,
+            "answer {answer:?}: the No box — btctax never swears either way for a filer who did \
+             not answer, and never contradicts one who did"
+        );
+        // …and line 7a is unaffected by the answer: the two cells are independent.
+        assert_eq!(tv(&doc, &fields, F1040_7A).as_deref(), Some("1000"));
+    }
+}
+
 #[test]
 fn form_1040_7b_checkboxes_untouched() {
     let f = btctax_forms::fill_form_1040_capgains(
         &Form1040Inputs {
-            da_yes: true,
+            digital_asset_answer: Some(true),
+            reportable_activity: true,
             schedule_d_active: true,
             schedule_d_line16: dec!(1000),
         },
@@ -399,7 +455,8 @@ fn fault_injected_1040_da_yes_no_swap_is_red() {
     std::mem::swap(&mut map.da_yes, &mut map.da_no);
     let err = fill_1040_with_map(
         &Form1040Inputs {
-            da_yes: true,
+            digital_asset_answer: Some(true),
+            reportable_activity: true,
             schedule_d_active: true,
             schedule_d_line16: dec!(1000),
         },
@@ -415,7 +472,8 @@ fn fault_injected_1040_da_yes_no_swap_is_red() {
 #[test]
 fn form_1040_is_byte_deterministic() {
     let inp = Form1040Inputs {
-        da_yes: true,
+        digital_asset_answer: Some(true),
+        reportable_activity: true,
         schedule_d_active: true,
         schedule_d_line16: dec!(45500.50),
     };
@@ -1233,7 +1291,8 @@ fn sp2_outputs_have_no_xfa() {
     assert!(!pdf_has_xfa(&load(&f8283).unwrap()).unwrap());
     let f1040 = btctax_forms::fill_form_1040_capgains(
         &Form1040Inputs {
-            da_yes: true,
+            digital_asset_answer: Some(true),
+            reportable_activity: true,
             schedule_d_active: true,
             schedule_d_line16: dec!(1000),
         },
@@ -1308,7 +1367,8 @@ fn unsupported_year_rejected_for_sp2_forms() {
     assert!(matches!(
         btctax_forms::fill_form_1040_capgains(
             &Form1040Inputs {
-                da_yes: true,
+                digital_asset_answer: Some(true),
+                reportable_activity: true,
                 schedule_d_active: false,
                 schedule_d_line16: Usd::ZERO
             },

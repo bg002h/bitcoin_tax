@@ -423,15 +423,22 @@ fn sp2_packet_writes_schedule_se_and_1040_capgains() {
         "SE line 12 = ss + medicare"
     );
 
-    // Form 1040: DA question = YES; line 7a = Schedule D line 16 (gain $300).
+    // Form 1040: the DA question is BLANK (no stored answer); line 7a = Schedule D line 16 ($300).
     let f1040 = std::fs::read(out.path().join("form_1040_capgains.pdf")).unwrap();
     let doc = load(&f1040).unwrap();
     let idx = index(&collect_fields(&doc).unwrap());
+    // ★ (T6 seam review C-1) no stored return ⇒ no answer ⇒ NEITHER box, and the mark names it.
     assert_eq!(
-        checkbox_on(&doc, idx["topmostSubform[0].Page1[0].c1_10[0]"].id).as_deref(),
-        Some("1"),
-        "Digital-Asset question = YES"
+        checkbox_on(&doc, idx["topmostSubform[0].Page1[0].c1_10[0]"].id),
+        None,
+        "the Yes box is not btctax's to check for an unasked filer"
     );
+    assert_eq!(
+        checkbox_on(&doc, idx["topmostSubform[0].Page1[0].c1_10[1]"].id),
+        None,
+        "…nor the No box"
+    );
+    assert_eq!(report.hand_marks.len(), 1, "{:?}", report.hand_marks);
     assert_eq!(
         text_value(&doc, idx["topmostSubform[0].Page1[0].f1_70[0]"].id).as_deref(),
         Some("300"),
@@ -604,7 +611,7 @@ fn ty2024_real_ledger_fills_box_c_f_and_line7_and_da() {
         "Box C checked for short-term BTC on the 2024 form"
     );
 
-    // Form 1040: line 7 (Line4a-11 f1_52) = gain $300; DA question (c1_5[0]) = YES.
+    // Form 1040: line 7 (Line4a-11 f1_52) = gain $300; DA question (c1_5) BLANK — unanswered.
     let f1040 = std::fs::read(out.path().join("form_1040_capgains.pdf")).unwrap();
     let doc = load(&f1040).unwrap();
     // ★ Carried over from the deleted TY2017 twin (S9, 2026-09-06): XFA must be dropped from the
@@ -621,10 +628,36 @@ fn ty2024_real_ledger_fills_box_c_f_and_line7_and_da() {
         Some("300"),
         "1040 line 7 = Schedule D line 16"
     );
+    // ★★★ (T6 seam review C-1) THE DIGITAL ASSETS BOX IS THE FILER'S ANSWER, AND THIS VAULT HAS
+    //     NONE. This vault holds a ledger and no `ReturnInputs` at all, so nobody has answered the
+    //     question — and the box is BLANK. It printed **Yes** until the C-1 fold, off a ledger
+    //     predicate: btctax swearing a §6065 declaration for a filer it had never asked.
+    //
+    // ★ Both members of the pair are read, not just the one: "the Yes box is off" and "neither box
+    //   is on" are different facts, and only the second is the guarantee.
     assert_eq!(
-        checkbox_on(&doc, idx["topmostSubform[0].Page1[0].c1_5[0]"].id).as_deref(),
-        Some("1"),
-        "Digital-Asset question = YES (2024 c1_5, adjacency-selected)"
+        checkbox_on(&doc, idx["topmostSubform[0].Page1[0].c1_5[0]"].id),
+        None,
+        "the Yes box: nobody answered this question, so btctax may not check it"
+    );
+    assert_eq!(
+        checkbox_on(&doc, idx["topmostSubform[0].Page1[0].c1_5[1]"].id),
+        None,
+        "…and neither may it check No — a blank is no testimony, a mark is testimony"
+    );
+    // ★ …and the blank is NAMED rather than left for the filer to notice: the fail-closed backstop
+    //   now fires on this path (it read a `PrintedReturn` only the full-return arm builds).
+    assert_eq!(
+        report.hand_marks.len(),
+        1,
+        "the unanswered box is named as a hand mark: {:?}",
+        report.hand_marks
+    );
+    assert!(
+        report.hand_marks[0].contains("Digital Asset question")
+            && report.hand_marks[0].contains("MANDATORY"),
+        "{:?}",
+        report.hand_marks
     );
     // ★ Also carried over from the deleted TY2017 twin: the REPORT says the capital-gain line was
     // filled, so a caller that never opens the PDF still learns it.

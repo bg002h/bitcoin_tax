@@ -941,6 +941,65 @@ fn refusal(reason: RefuseReason, detail: &str) -> Option<Refusal> {
     })
 }
 
+/// ★★★ **R9 / T6 — THE DIGITAL ASSETS CROSS-CHECK, ALONE.** `Some(Refusal)` iff the filer answered
+/// the Form 1040 page-1 question `No` for `year` and the ledger witnesses a qualifying event in it.
+///
+/// ★★★ **ASYMMETRIC BY DESIGN, and the asymmetry is the whole rule.** A `No` the ledger
+///     contradicts refuses; a `Yes` the ledger does not witness is ACCEPTED, with
+///     [`crate::tax::advisories::Advisory::DigitalAssetYesNotOnLedger`] (see
+///     [`digital_asset_yes_is_off_ledger`]). See `RefuseReason::DigitalAssetAnswerContradictsLedger`
+///     for why the mirror may never refuse: the ledger is not complete by construction.
+///
+/// ★ `None` is NOT refused here — it is refused by the registry loop in `screen_inputs`, like
+///   every other unanswered class-(A) declaration. Two refusals for one blank would give the
+///   filer two different exits for one keystroke.
+///
+/// ★★ **Why it is public and named** (T6 seam review C-1): [`screen_compute_dependent`] runs it
+///    first, and the CRYPTO SLICE — which computes no full return and therefore runs no screen —
+///    runs exactly this one rule before any byte (spec 1099-DA R6, as amended 2026-09-07), because
+///    since T6 the slice's Form 1040 page 1 prints this box from this same answer.
+#[must_use]
+pub fn screen_digital_asset_answer(
+    ri: &ReturnInputs,
+    state: &LedgerState,
+    year: i32,
+) -> Option<Refusal> {
+    if ri.digital_asset_activity != Some(false) {
+        return None;
+    }
+    let (date, venue, kind) = first_digital_asset_event(state, year)?;
+    Some(Refusal {
+        reason: RefuseReason::DigitalAssetAnswerContradictsLedger {
+            date: date.to_string(),
+            venue: venue.clone(),
+            kind,
+        },
+        detail: format!(
+            "you answered the Form 1040 Digital Assets question \"No\" for {year}, and your \
+             ledger records {kind} on {date} at {venue}. One of the two is wrong and btctax \
+             cannot know which: check that event (`btctax report --year {year}`), then \
+             either correct the ledger or answer \"Yes\" (`btctax income answer`). Note \
+             that buying digital assets with real currency, and moving them between wallets \
+             or accounts you own, do NOT require a \"Yes\" — neither of those is what this \
+             event is."
+        ),
+    })
+}
+
+/// ★★★ **The MIRROR of [`screen_digital_asset_answer`], as a predicate**: the filer answered `Yes`
+/// and this ledger witnesses nothing in `year`.
+///
+/// It warns, it never refuses (`Advisory::DigitalAssetYesNotOnLedger`) — the ledger is not complete
+/// by construction, so refusing a truthful `Yes` would leave `No` as the only way through the gate.
+///
+/// ★ ONE definition, two readers: `advisories()` (the full return) and the crypto slice's export
+///   report. The two directions read the same `digital_asset_activity` predicate, so they can never
+///   disagree about which cell of the five-row table a return is in.
+#[must_use]
+pub fn digital_asset_yes_is_off_ledger(ri: &ReturnInputs, state: &LedgerState, year: i32) -> bool {
+    ri.digital_asset_activity == Some(true) && !digital_asset_activity(state, year)
+}
+
 /// Screen the **compute-dependent** refuse rows (SPEC §4.10) — those that need the assembled income /
 /// ledger, not just `ReturnInputs`. Returns the FIRST [`Refusal`], or `None`. Complements
 /// [`crate::tax::return_refuse::screen_inputs`] (the input-screenable rows); both must pass before a
@@ -959,33 +1018,13 @@ pub fn screen_compute_dependent(
     //     that tier is the rules an importer can honestly run with no package and no projection, and
     //     a rule that needs `state` is not one of them.
     //
-    // ★★★ **ASYMMETRIC BY DESIGN, and the asymmetry is the whole rule.** A `No` the ledger
-    //     contradicts refuses; a `Yes` the ledger does not witness is ACCEPTED, with
-    //     `Advisory::DigitalAssetYesNotOnLedger`. See `RefuseReason::DigitalAssetAnswerContradicts
-    //     Ledger` for why the mirror may never refuse: the ledger is not complete by construction.
-    //
-    // ★ `None` is NOT refused here — it is refused by the registry loop in `screen_inputs`, like
-    //   every other unanswered class-(A) declaration. Two refusals for one blank would give the
-    //   filer two different exits for one keystroke.
-    if ri.digital_asset_activity == Some(false) {
-        if let Some((date, venue, kind)) = first_digital_asset_event(state, year) {
-            return Some(Refusal {
-                reason: RefuseReason::DigitalAssetAnswerContradictsLedger {
-                    date: date.to_string(),
-                    venue: venue.clone(),
-                    kind,
-                },
-                detail: format!(
-                    "you answered the Form 1040 Digital Assets question \"No\" for {year}, and your \
-                     ledger records {kind} on {date} at {venue}. One of the two is wrong and btctax \
-                     cannot know which: check that event (`btctax report --year {year}`), then \
-                     either correct the ledger or answer \"Yes\" (`btctax income answer`). Note \
-                     that buying digital assets with real currency, and moving them between wallets \
-                     or accounts you own, do NOT require a \"Yes\" — neither of those is what this \
-                     event is."
-                ),
-            });
-        }
+    // ★★★ **(T6 seam review C-1) IT IS A NAMED FUNCTION, and that is why.** The crypto slice prints
+    //     the same box from the same field and computes no full return, so it cannot run this
+    //     screen — but spec 1099-DA R6 makes it run exactly THIS rule. A second copy of the
+    //     predicate at the slice's call site is the drift that lets a filer's slice and their full
+    //     return disagree about whether their own `No` is contradicted.
+    if let Some(r) = screen_digital_asset_answer(ri, state, year) {
+        return Some(r);
     }
 
     // ★ Non-crypto NONCASH gifts, keyed on the TOTAL noncash the return claims (Fable P6 r1 I6). The

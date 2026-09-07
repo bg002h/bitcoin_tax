@@ -28,13 +28,13 @@
  26│└────────────────────────────────┘└────────────────────────────────────────────────────────────────────────────────────┘
  27│┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
  28││  active source: full return   ·   screens clean, except what report computes                                         │
- 29││  Step 0 (2024): 2 blocker kind(s) · 1 venue(s) needing a Form 1099-DA answer · 1 venue(s) with no standing           │
- 30││      order · 0 owner action(s). `btctax verify` and `btctax income answer` print them in full.                       │
- 31││  • river has 1 noncovered row(s) on this year's Form 8949 and NO Form 1099-DA answer on file — a venue you           │
- 32││        disposed on is not accounted for                                                                              │
- 33││  • exchange:river:default: your first custodial disposition of 2024 is dated 2024-05-01, and no standing order       │
- 34││        (a dated method election) was in force for it — expect box 1g to reflect the broker's default; a              │
- 35││        `basis_differs` answer refuses; `btctax reconcile select-lots` / `import-selections` is the exit              │
+ 29││  Step 0 (2024): 2 blocker kind(s) · 0 answer(s) the ledger contradicts · 0 venue(s) needing a Form 1099-DA           │
+ 30││      answer · 1 venue(s) with no standing order · 0 owner action(s). `btctax verify` and `btctax income answer`      │
+ 31││      print them in full.                                                                                             │
+ 32││  • exchange:river:default: your first custodial disposition of 2024 is dated 2024-05-01, and no dated method         │
+ 33││        election was in force for it. Notice 2026-20's relief period BEGINS 2025-01-01 (§3.03), so §4.02(2)'s         │
+ 34││        standing-order relief does not reach this sale, and btctax refuses an election effective before that date     │
+ 35││        as back-dated — the pre-2025 method is a declaration you attest to instead                                    │
  36││  interview: complete · return: computable                                                                            │
  37││   [↑/↓] field · [←/→ or Tab] section · [s] commit · [t] source · [Esc/q] close (autosaved)                           │
  38││                                                                                                                      │
@@ -158,22 +158,22 @@
  29│ 1..108 fg=Yellow
  29│ 119..120 fg=DarkGray
  30│ 0..1 fg=DarkGray
- 30│ 1..96 fg=Yellow
+ 30│ 1..113 fg=Yellow
  30│ 119..120 fg=DarkGray
  31│ 0..1 fg=DarkGray
- 31│ 1..108 fg=Yellow
+ 31│ 1..26 fg=Yellow
  31│ 119..120 fg=DarkGray
  32│ 0..1 fg=DarkGray
- 32│ 1..41 fg=Yellow
+ 32│ 1..110 fg=Yellow
  32│ 119..120 fg=DarkGray
  33│ 0..1 fg=DarkGray
- 33│ 1..112 fg=Yellow
+ 33│ 1..110 fg=Yellow
  33│ 119..120 fg=DarkGray
  34│ 0..1 fg=DarkGray
- 34│ 1..105 fg=Yellow
+ 34│ 1..114 fg=Yellow
  34│ 119..120 fg=DarkGray
  35│ 0..1 fg=DarkGray
- 35│ 1..105 fg=Yellow
+ 35│ 1..83 fg=Yellow
  35│ 119..120 fg=DarkGray
  36│ 0..43 fg=DarkGray
  36│ 119..120 fg=DarkGray

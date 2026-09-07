@@ -741,7 +741,13 @@ pub fn commit_summary_with_step0(
         }
     }
     if !step0.standing_orders.is_empty() {
-        s.push_str("\n\nNO STANDING ORDER (Notice 2026-20 §4.02(2)):");
+        // ★ (T6 seam review M-1) the heading is the PANEL's, not a literal: Notice 2026-20 §4.02(2)
+        //   is cited only inside its relief period, and this modal asserted it on a TY2024 fixture
+        //   whose own row already said the relief had not begun.
+        s.push_str(&format!(
+            "\n\nNO STANDING ORDER ({}):",
+            step0.standing_orders_authority()
+        ));
         for so in &step0.standing_orders {
             s.push_str(&format!("\n  • {}", so.what));
         }

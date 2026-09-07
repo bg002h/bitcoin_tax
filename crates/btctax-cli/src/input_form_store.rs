@@ -650,6 +650,19 @@ pub fn commit(
         // write a committed row for a table-less `year`, poisoning it at resolve. Write nothing.
         return Ok(CommitOutcome::NoTables);
     }
+    // ★★★ **A TIER BOUNDARY, RECORDED** (T6 seam review M-4). This runs `screen_inputs` and NOT
+    //     `screen_compute_dependent`, because this site holds no `LedgerState` — the TUI's commit
+    //     path carries a `ReturnInputs` and a `Session`, and projecting the vault here to run one
+    //     more screen would make committing depend on a ledger R9 promises may still be unresolved
+    //     ("authoring proceeds in parallel with an unresolved ledger"). So a filer CAN commit
+    //     `digital_asset_activity = Some(false)` against a ledger full of disposals, and first meets
+    //     the refusal at `report` / `export-irs-pdf`.
+    //
+    // ★★ The deferral is a DECISION, not an oversight, and it is paid for on the surface that does
+    //    hold the ledger: `btctax_cli::step0::step0_panel` raises that exact contradiction as a Step
+    //    0 row — printed by `income answer` and on the TUI's tax-inputs entry screen — by calling
+    //    the SAME `screen_digital_asset_answer` the export refuses on. The gate did not move; the
+    //    silence did.
     if let Some(refusal) = screen_inputs(ri, table, params) {
         return Ok(CommitOutcome::Refused(refusal)); // fail-closed: writes nothing
     }

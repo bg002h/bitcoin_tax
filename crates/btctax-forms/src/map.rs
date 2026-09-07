@@ -894,9 +894,11 @@ pub struct Form1040Map {
     /// single field on 2024/2025; a dollars+cents [`MoneyPair`] on the 2017 form.
     pub line7a: MoneyCell,
     /// Whether this year's 1040 carries the Digital-Asset question — **per-year scaffolding**. When
-    /// `true` (2024/2025) the fill answers it "Yes" and runs the map-independent adjacency guard;
-    /// **2017 sets it `false`** (no DA question — the map omits `da_yes`/`da_no` and the fill produces
-    /// the 1040 iff there is reportable capital activity).
+    /// `true` (2024/2025) the fill writes the FILER'S ANSWER into it — Yes, No, or neither box —
+    /// and runs the map-independent adjacency guard; **2017 sets it `false`** (no DA question — the
+    /// map omits `da_yes`/`da_no` and nothing is written whatever the answer says). The
+    /// produce/skip decision is separate on every revision: the page is written iff the ledger has
+    /// reportable activity.
     #[serde(default = "default_da_present")]
     pub da_present: bool,
     /// Digital-Asset question "Yes" (LEFT member of the adjacent pair, on-state `/1`). `None` when the

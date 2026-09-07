@@ -89,13 +89,27 @@ fn f1040_clusters(year: i32) -> &'static [(f32, f32)] {
     }
 }
 
-/// The btctax-evidenced signals that drive the two Form 1040 cells.
+/// The signals that drive the two Form 1040 cells this fill writes.
 #[derive(Debug, Clone, Copy)]
 pub struct Form1040Inputs {
-    /// Digital-Asset question = YES iff there is any btctax-evidenced qualifying activity: any
-    /// `form_8949` disposal ∨ any `income_recognized` ∨ any Gift/Donate removal. When `false` there is
-    /// no reportable activity and the whole 1040 is skipped.
-    pub da_yes: bool,
+    /// ★★★ **The FILER'S ANSWER to the Digital Assets question — never a ledger reading.**
+    ///
+    /// `Some(true)` → *Yes*, `Some(false)` → *No*, `None` → **NEITHER box is written**, and the
+    /// caller names the unanswered box (`export-irs-pdf`'s hand-mark list).
+    ///
+    /// ★★★ **(T6 seam review C-1) This was a `bool` fed from a LEDGER PREDICATE**, so a filer who
+    ///     had answered `No` got a page with *Yes* checked and a filer who had never been asked got
+    ///     one too — btctax answering a §6065 declaration for a human, on the one arm the product
+    ///     can print for this filing season. An entry is testimony; a blank is no testimony; and the
+    ///     two are indistinguishable on the printed page, which is why this is an `Option` and not a
+    ///     defaulted `bool`.
+    pub digital_asset_answer: Option<bool>,
+    /// ★ The PRODUCE/SKIP decision for the whole page, and it is a separate question from the
+    /// answer: is there any btctax-evidenced reportable activity — a `form_8949` disposal ∨
+    /// recognized income ∨ a Gift/Donate removal, in the year. When `false` there is nothing for
+    /// this worksheet to say and the whole 1040 is skipped, exactly as before T6, whatever the
+    /// answer is.
+    pub reportable_activity: bool,
     /// Schedule D is ACTIVE — there are capital disposals (some ST or LT part has activity).
     pub schedule_d_active: bool,
     /// Schedule D line 16 = ST gain + LT gain (raw, pre-netting). Only consulted when active.
@@ -116,20 +130,26 @@ pub struct Form1040Fill {
     pub loss: bool,
 }
 
-/// Fill the Form 1040 capital-gains cells. Returns `Ok(None)` — skip the whole 1040 — when there is no
-/// reportable activity (`da_yes == false`). Otherwise the DA question is answered YES and line 7a is
-/// filled per the active/line-16 rules. Read back through the geometric verifier (fails closed).
+/// Fill the Form 1040 capital-gains cells. Returns `Ok(None)` — skip the whole 1040 — when there is
+/// no reportable activity ([`Form1040Inputs::reportable_activity`] `== false`). Otherwise the
+/// Digital Assets question is written FROM THE FILER'S ANSWER (`Some(true)` → the *Yes* box,
+/// `Some(false)` → the *No* box, `None` → neither) and line 7a is filled per the active/line-16
+/// rules. Read back through the geometric verifier (fails closed).
 pub fn fill_form_1040_capgains(
     inputs: &Form1040Inputs,
     map: &Form1040Map,
 ) -> Result<Option<Form1040Fill>, FormsError> {
     // Produce/skip decision, per revision:
-    //  • DA years (2024/2025): [R0-C4] produce iff there is reportable digital-asset activity (never
-    //    fill "No" — btctax cannot vouch for the filer's full digital-asset universe).
+    //  • DA years (2024/2025): produce iff there is reportable digital-asset activity.
+    //    ★★★ (T6 seam review C-1) This predicate is `reportable_activity`, its OWN field, and no
+    //        longer the answer. Before the fold the two were one `bool`, so "the ledger says
+    //        nothing happened" and "the filer said No" were the same fact — which is exactly how a
+    //        `No` came to print as *Yes*. They are different questions: what to print is the
+    //        filer's testimony, whether to print at all is the ledger's.
     //  • 2017 (no DA question): produce iff there is reportable capital activity that yields a line-13
     //    entry — a gain or an active-and-netted-to-zero "-0-". Income-only / net-loss years ⇒ skip.
     if map.da_present {
-        if !inputs.da_yes {
+        if !inputs.reportable_activity {
             return Ok(None);
         }
     } else if !(inputs.schedule_d_active && inputs.schedule_d_line16 >= Usd::ZERO) {
@@ -139,19 +159,34 @@ pub fn fill_form_1040_capgains(
     let mut writes: Vec<(String, pdf::FieldValue)> = Vec::new();
     let mut placements: Vec<FlatPlacement> = Vec::new();
 
-    // Digital-Asset question = YES — only on years whose 1040 carries it (left member of the same-y
-    // {/1,/2} pair, on-state /1). The 2017 form has none, so nothing is written.
+    // ★★★ The Digital Assets question — THE FILER'S ANSWER, on years whose 1040 carries it (the
+    //     left/right members of the same-y {/1,/2} pair, on-state /1 and /2). The 2017 form has
+    //     none, so nothing is written whatever the answer says.
+    //
+    // ★★★ `None` writes NEITHER box. That is the one state the pre-T6 `bool` could not express, and
+    //     it is not the same page as a *No*: a blank is no testimony, and btctax may not swear a
+    //     §6065 declaration a filer never made. The caller says so out loud — `export-irs-pdf`
+    //     carries the box in its hand-mark list — because a blank the filer never sees is exactly
+    //     the defect this fold closes, one step later.
     if map.da_present {
-        let da_yes = map.da_yes.as_ref().ok_or_else(|| {
-            FormsError::Structure("1040 map has da_present=true but no da_yes field".into())
-        })?;
-        writes.push((
-            da_yes.field.clone(),
-            pdf::FieldValue::Check {
-                on: da_yes.on.clone(),
-            },
-        ));
-        placements.push(FlatPlacement::check(da_yes.field.clone(), 0));
+        let field = match inputs.digital_asset_answer {
+            Some(true) => Some(map.da_yes.as_ref().ok_or_else(|| {
+                FormsError::Structure("1040 map has da_present=true but no da_yes field".into())
+            })?),
+            Some(false) => Some(map.da_no.as_ref().ok_or_else(|| {
+                FormsError::Structure("1040 map has da_present=true but no da_no field".into())
+            })?),
+            None => None,
+        };
+        if let Some(cell) = field {
+            writes.push((
+                cell.field.clone(),
+                pdf::FieldValue::Check {
+                    on: cell.on.clone(),
+                },
+            ));
+            placements.push(FlatPlacement::check(cell.field.clone(), 0));
+        }
     }
 
     // Capital-gain line (7a in 2025 / 7 in 2024 / **13 in 2017**) — only when Schedule D is ACTIVE and
@@ -201,7 +236,12 @@ pub fn fill_form_1040_capgains(
     // must BE the left/right members of the top-most horizontally-ADJACENT same-y {/1,/2} pair — a
     // Yes/No swap in the map fails closed here. The no-DA 2017 form skips it.
     if map.da_present {
-        let da_yes = map.da_yes.as_ref().expect("checked above");
+        // ★ Both members are resolved HERE, not "checked above": since the C-1 fold an unanswered
+        //   question writes NEITHER box, so neither field is necessarily touched by the write pass
+        //   — and a half-populated map must still fail LOUD rather than skip its own guard.
+        let da_yes = map.da_yes.as_ref().ok_or_else(|| {
+            FormsError::Structure("1040 map has da_present=true but no da_yes field".into())
+        })?;
         let da_no = map.da_no.as_ref().ok_or_else(|| {
             FormsError::Structure("1040 map has da_present=true but no da_no field".into())
         })?;

@@ -614,7 +614,7 @@ pub enum RefuseReason {
     /// [`crate::tax::questions::FORM_QUESTIONS`] loop like every other class-(A) declaration.
     ///
     /// The question is always live: *"You must answer the digital asset question on Form 1040
-    /// whether or not you received a Form 1099-DA"* (`i1040gi--2025.txt:1398-1400`).
+    /// whether or not you received a Form 1099-DA"* (`i1040gi--2025.txt:1399-1401`).
     DigitalAssetActivityUnanswered,
     /// ★★★ **The filer answered the Digital Assets question `No` and the LEDGER witnesses a
     /// qualifying event in the year.**

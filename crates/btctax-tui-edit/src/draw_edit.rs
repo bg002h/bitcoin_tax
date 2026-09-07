@@ -6677,6 +6677,72 @@ mod tests {
         );
     }
 
+    /// ★★★ **(T6 seam review I-1) THE MODAL STOPS ASSERTING A GATE THAT DOES NOT EXIST.**
+    ///
+    /// Its heading reads *"VENUES WITH NO FORM 1099-DA ANSWER (commit is not blocked by this; the
+    /// EXPORT is)"* — and on a year whose Form 1099-DA question is not live the export is not blocked
+    /// by it either. `step0_panel` now emits the non-live year's venue row WITHOUT an exit (it states
+    /// the regime instead), and this pins the modal's half of that contract: a row with no exit is
+    /// not an unanswered venue, so the heading — and the claim about the export — stays off the
+    /// screen entirely.
+    #[test]
+    fn the_commit_modal_names_no_unanswered_venue_when_the_row_carries_no_exit() {
+        use crate::edit::form::{TaxInputsFormState, TaxInputsModalKind, TaxInputsModalState};
+        use btctax_cli::step0::{Step0Panel, Step0Row};
+
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
+        form.working = Some(btctax_core::tax::testonly::answered(
+            btctax_core::tax::return_inputs::ReturnInputs {
+                tax_year: 2024,
+                filing_status: btctax_core::FilingStatus::Single,
+                ..Default::default()
+            },
+        ));
+        // The shape `step0_panel` emits on a NON-LIVE year: the venues are named, the regime is
+        // stated, and there is NO exit — because there is no answer to give.
+        let step0 = Step0Panel {
+            year: 2024,
+            venues: vec![Step0Row {
+                what:
+                    "TY2024's Form 1099-DA regime reports nothing (no Form 1099-DA is issued for \
+                       this year) — no Form 1099-DA question is asked for this year and an answer \
+                       would be refused as unread, so your disposals on river are boxed by \
+                       mechanism, not by an answer"
+                        .into(),
+                handoff: String::new(),
+            }],
+            ..Default::default()
+        };
+        let ri = form.working.as_ref().unwrap();
+        form.modal = Some(TaxInputsModalState {
+            kind: TaxInputsModalKind::Commit,
+            year: 2024,
+            filing_status_label: "Single".into(),
+            summary: crate::edit::tax_inputs::commit_summary_with_step0(ri, false, &step0),
+            shadows: false,
+        });
+
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .unwrap();
+        let flat: String = flatten(terminal.backend().buffer())
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            !flat.contains("VENUES WITH NO FORM 1099-DA ANSWER"),
+            "a row with no exit is not an unanswered venue, and the modal may not tell a TY2024 \
+             filer that their EXPORT is blocked by an answer nobody asked them for: {flat}"
+        );
+        assert!(
+            !flat.contains("the EXPORT is"),
+            "…and that is the clause that made it a false claim: {flat}"
+        );
+    }
+
     /// NI-2: on a `None` working copy the render shows ONLY the filing-status choice — no other
     /// section is offered until a filing status is chosen.
     #[test]

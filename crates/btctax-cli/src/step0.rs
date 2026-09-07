@@ -7,10 +7,12 @@
 //! held session, what the ledger still needs, and every row hands off to the `reconcile` command that
 //! answers it.
 //!
-//! **What it lists** (R9): blockers by kind; imports per venue; venues with dispositions in the year
-//! versus providers with a Form 1099-DA answer (J-4, J-7); venues with a custodial disposition and no
-//! standing order in force before it — Notice 2026-20 §4.02(2) — with the consequence stated now
-//! (J-9, J-10); and the owner actions with dates (J-9b).
+//! **What it lists** (R9): blockers by kind; answers this ledger CONTRADICTS (seam review M-4);
+//! imports per venue; venues with dispositions in the year versus providers with a Form 1099-DA
+//! answer (J-4, J-7) — **on a year whose regime makes that question live**, and otherwise the
+//! regime itself (seam review I-1); venues with a custodial disposition and no standing order in
+//! force before it — Notice 2026-20 §4.02(2), cited only INSIDE its relief period (seam review
+//! M-1) — with the consequence stated now (J-9, J-10); and the owner actions with dates (J-9b).
 //!
 //! **It writes NOTHING**, and it reads the ledger only. `record_answer` stays the only writer of
 //! `answer_log`; no `reconcile` question moves into a return registry (R15).
@@ -25,11 +27,18 @@
 //!   - the standing-order row calls [`btctax_core::standing_order_in_force`], which calls the SAME
 //!     `resolve_election` the fold uses to pick the filed basis;
 //!   - the venue-vs-answer rows call [`btctax_core::forms::broker_key_census`] over
-//!     [`btctax_core::form_8949`] — the same keys `screen_broker_reporting` demands answers for;
+//!     [`btctax_core::form_8949`] — the same keys `screen_broker_reporting` demands answers for —
+//!     behind [`btctax_core::forms::broker_question_is_live`], the same LIVENESS gate that screen
+//!     applies (seam review I-1: the keys were shared and the gate was not);
+//!   - the contradiction row calls
+//!     [`btctax_core::tax::return_1040::screen_digital_asset_answer`], the rule the export itself
+//!     refuses on;
 //!   - the blocker rows walk `state.blockers` and map the KIND through an exhaustive `match`, so a
 //!     new [`BlockerKind`] is a compile error here rather than a row that silently loses its exit.
 
-use btctax_core::forms::{broker_key_census, Cohort};
+use btctax_core::forms::{
+    broker_key_census, broker_question_is_live, Cohort, InformationReturnRegime,
+};
 use btctax_core::state::{BlockerKind, LedgerState, Severity};
 use btctax_core::tax::return_inputs::ReturnInputs;
 use btctax_core::{EventId, LedgerEvent, WalletId};
@@ -56,7 +65,7 @@ impl Step0Row {
     }
 }
 
-/// ★★★ The Step 0 panel: five lists, each derived from the ledger, none of them stored.
+/// ★★★ The Step 0 panel: six lists, each derived from the ledger, none of them stored.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Step0Panel {
     /// The tax year the panel was computed for.
@@ -68,8 +77,16 @@ pub struct Step0Panel {
     /// Imports per venue: how many events each source contributed. Informational.
     pub imports: Vec<Step0Row>,
     /// Venues with a Form 8949 row in the year versus providers with a Form 1099-DA answer on file.
-    /// A venue with rows and no answer is NAMED (J-4, J-7).
+    /// A venue with rows and no answer is NAMED (J-4, J-7) — **only on a year whose Form 1099-DA
+    /// regime makes the question LIVE**. On any other year the list states the regime instead, with
+    /// no exit, because there is no answer to give (seam review I-1).
     pub venues: Vec<Step0Row>,
+    /// ★★★ **Answers this LEDGER CONTRADICTS** (seam review M-4). Today: the Form 1040 page-1
+    /// Digital Assets question answered `No` against a ledger that witnesses a qualifying event —
+    /// which `export-irs-pdf` and `report` refuse on, at a site the TUI's commit gate cannot reach
+    /// (`input_form_store::commit` runs `screen_inputs` only, and holds no `LedgerState`). This
+    /// surface DOES hold the ledger, so the filer meets it here rather than at the end.
+    pub contradictions: Vec<Step0Row>,
     /// Venues with a custodial disposition in the year and NO standing order in force before it —
     /// Notice 2026-20 §4.02(2) (J-9, J-10).
     pub standing_orders: Vec<Step0Row>,
@@ -78,12 +95,28 @@ pub struct Step0Panel {
 }
 
 impl Step0Panel {
+    /// ★★★ **The AUTHORITY the standing-order rows stand on, and it follows Notice 2026-20's
+    /// RELIEF PERIOD** (seam review M-1).
+    ///
+    /// ONE derivation, two renderers: `write_step0`'s section title and the TUI commit modal's
+    /// heading (`commit_summary_with_step0`), each keeping its own grammar around it. A heading
+    /// that asserted §4.02(2) over a 2024 or a 2027 row would re-assert in the header exactly what
+    /// the row stopped claiming — and it did, in the modal, until this became a function.
+    #[must_use]
+    pub fn standing_orders_authority(&self) -> &'static str {
+        match relief_period(self.year) {
+            ReliefPeriod::Within => "Notice 2026-20 §4.02(2)",
+            _ => "§1.1012-1(j) — outside Notice 2026-20's relief period",
+        }
+    }
+
     /// How many rows the panel would print. Zero ⇒ the ledger has nothing outstanding for this year.
     #[must_use]
     pub fn rows(&self) -> usize {
         self.blockers.len()
             + self.imports.len()
             + self.venues.len()
+            + self.contradictions.len()
             + self.standing_orders.len()
             + self.owner_actions.len()
     }
@@ -160,6 +193,43 @@ fn blocker_handoff(kind: BlockerKind) -> &'static str {
 /// units sold are whatever the BROKER says they were, and §4.02's relief does not apply for
 /// §1.6045-1 information reporting anyway — so box 1g will carry the broker's own default, the
 /// filer's `basis_differs` answer will refuse, and the exit is a per-lot identification.
+/// ★★★ **Notice 2026-20's RELIEF PERIOD** — *"the period beginning on January 1, 2025, and ending
+/// on December 31, 2026"* (§3.03, `legal/text/irs-guidance/Notice_2026-20.txt:299-301`).
+///
+/// ★★★ **(seam review M-1) THE ROW IS GATED ON IT.** §4.02's relief is *"available only with
+///     respect to units … sold, disposed of, or transferred during the relief period"* (§4.01,
+///     `:305-309`), and §5 says taxpayers *"may not rely on the temporary relief … in the case of
+///     sales, dispositions and transfers made after the relief period ends"* (`:388-394`). The row
+///     was filtered by tax year alone, so it cited §4.02(2) at a 2023 or a 2027 sale. For a
+///     PRE-2025 year it was doubly inapt: `method_election_is_forward` refuses any election
+///     effective before `TRANSITION_DATE` (2025-01-01), so the exit it named could not be taken at
+///     all. The substance — no dated election ⇒ the broker's default — survives on every year; the
+///     authority and the exit are what follow the period.
+const RELIEF_PERIOD_FIRST_YEAR: i32 = 2025;
+const RELIEF_PERIOD_LAST_YEAR: i32 = 2026;
+
+/// Which side of Notice 2026-20's relief period a tax year falls on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReliefPeriod {
+    /// Before 2025-01-01: §4.02 has not begun, and an election effective in the year is refused as
+    /// back-dated. The exit is the `Pre2025MethodNote` one.
+    Before,
+    /// 2025 or 2026 — §4.02(2) applies, and the row is the one R9 specifies.
+    Within,
+    /// After 2026-12-31: §5 forbids relying on §4.02, so the row says so rather than citing it.
+    After,
+}
+
+fn relief_period(year: i32) -> ReliefPeriod {
+    if year < RELIEF_PERIOD_FIRST_YEAR {
+        ReliefPeriod::Before
+    } else if year > RELIEF_PERIOD_LAST_YEAR {
+        ReliefPeriod::After
+    } else {
+        ReliefPeriod::Within
+    }
+}
+
 const STANDING_ORDER_CONSEQUENCE: &str =
     "expect box 1g to reflect the broker's default; a `basis_differs` answer refuses; \
      `btctax reconcile select-lots` / `import-selections` is the exit";
@@ -169,12 +239,26 @@ const STANDING_ORDER_CONSEQUENCE: &str =
 /// `ri` is the year's working return when one exists — `None` on a year the filer has not started,
 /// which is a normal state at Step 0 and not an error: the venue-vs-answer list then names every
 /// venue with rows, because none of them has an answer yet.
+///
+/// ★★★ **`regime` is the YEAR's Form 1099-DA regime** (`year_readiness::regime_for`), and `None`
+///     means this build bundles no record for the year — an honest unknown, never an assumption.
+///     It is a PARAMETER because a status panel may not refuse: `regime_or_refuse` is the export's
+///     answer to a missing record, and Step 0's is a sentence.
+///
+/// ★★★ **(seam review I-1) THE VENUE LIST OBEYS IT.** The list shares `screen_broker_reporting`'s
+///     KEY derivation (`broker_key_census` over `form_8949`) and used to drop its LIVENESS gate —
+///     so on TY2024 and TY2025, the only two years this product serves, every filer with an
+///     exchange disposal was told a venue *"is not accounted for"* and handed to a Form 1099-DA
+///     block that is not asked for the year and whose answer, if supplied, is REFUSED
+///     (`RefuseReason::BrokerAnswerUnread`). Both halves of the committed fixture pair ran at
+///     TY2026, the one year the row was right for.
 #[must_use]
 pub fn step0_panel(
     state: &LedgerState,
     events: &[LedgerEvent],
     ri: Option<&ReturnInputs>,
     year: i32,
+    regime: Option<InformationReturnRegime>,
 ) -> Step0Panel {
     let mut panel = Step0Panel {
         year,
@@ -221,42 +305,118 @@ pub fn step0_panel(
     //     the panel can never name a venue the screen would not ask about, or stay quiet about one
     //     it would.
     let rows = btctax_core::form_8949(state, year);
+    // ★★★ (seam review I-1) THE LIVENESS GATE, the same one `screen_broker_reporting` applies —
+    //     `broker_question_is_live(&rows, regime)`, called, never re-implemented. A year with no
+    //     bundled record has an UNKNOWN regime and is treated as not live: guessing a regime is the
+    //     one thing `regime_or_refuse` exists to prevent, and a panel that guessed would name
+    //     venues on a year whose question may not exist.
+    let live = regime.is_some_and(|r| broker_question_is_live(&rows, r));
     let census = broker_key_census(&rows);
-    let mut unanswered: BTreeMap<String, Vec<(Cohort, usize)>> = BTreeMap::new();
-    let mut answered: BTreeSet<String> = BTreeSet::new();
-    for ((provider, cohort), n) in &census {
-        let has = ri
-            .and_then(|r| r.broker_reporting.answer(provider, *cohort))
-            .is_some();
-        if has {
-            answered.insert(provider.clone());
-        } else {
-            unanswered
-                .entry(provider.clone())
-                .or_default()
-                .push((*cohort, *n));
+    if live {
+        let mut unanswered: BTreeMap<String, Vec<(Cohort, usize)>> = BTreeMap::new();
+        let mut answered: BTreeSet<String> = BTreeSet::new();
+        for ((provider, cohort), n) in &census {
+            let has = ri
+                .and_then(|r| r.broker_reporting.answer(provider, *cohort))
+                .is_some();
+            if has {
+                answered.insert(provider.clone());
+            } else {
+                unanswered
+                    .entry(provider.clone())
+                    .or_default()
+                    .push((*cohort, *n));
+            }
         }
-    }
-    for (provider, cohorts) in &unanswered {
-        let detail: Vec<String> = cohorts
-            .iter()
-            .map(|(c, n)| format!("{n} {} row(s)", c.slot_name()))
-            .collect();
-        panel.venues.push(Step0Row::new(
-            format!(
-                "{provider} has {} on this year's Form 8949 and NO Form 1099-DA answer on file — \
-                 a venue you disposed on is not accounted for",
-                detail.join(" and ")
-            ),
-            format!("btctax income answer --year {year}  (the Form 1099-DA block)"),
-        ));
-    }
-    for provider in &answered {
-        if !unanswered.contains_key(provider) {
+        for (provider, cohorts) in &unanswered {
+            let detail: Vec<String> = cohorts
+                .iter()
+                .map(|(c, n)| format!("{n} {} row(s)", c.slot_name()))
+                .collect();
             panel.venues.push(Step0Row::new(
-                format!("{provider}: every cohort with rows this year is answered"),
-                String::new(),
+                format!(
+                    "{provider} has {} on this year's Form 8949 and NO Form 1099-DA answer on file — \
+                     a venue you disposed on is not accounted for",
+                    detail.join(" and ")
+                ),
+                format!("btctax income answer --year {year}  (the Form 1099-DA block)"),
             ));
+        }
+        for provider in &answered {
+            if !unanswered.contains_key(provider) {
+                panel.venues.push(Step0Row::new(
+                    format!("{provider}: every cohort with rows this year is answered"),
+                    String::new(),
+                ));
+            }
+        }
+    } else if !census.is_empty() {
+        // ★★★ NOT LIVE, and there ARE exchange rows — so the filer WILL wonder about their venues,
+        //     and silence would be its own defect. The row states the year's REGIME (the fact that
+        //     decides it) and carries NO exit, because there is no answer to give: an answer stored
+        //     on such a year is refused as `BrokerAnswerUnread`, *"testimony it would discard is
+        //     not kept"*. The sentence follows `screen_broker_reporting`'s own wording.
+        let venues: BTreeSet<&String> = census.keys().map(|(p, _)| p).collect();
+        let names: Vec<&str> = venues.iter().map(|p| p.as_str()).collect();
+        let what = match regime {
+            None => format!(
+                "TY{year}: this build bundles no year record, so btctax does not know whether a \
+                 Form 1099-DA is issued for it — no Form 1099-DA question is asked, and your \
+                 disposals on {} are boxed by mechanism",
+                names.join(", ")
+            ),
+            Some(r) => format!(
+                "TY{year}'s Form 1099-DA regime reports {} — no Form 1099-DA question is asked for \
+                 this year and an answer would be refused as unread, so your disposals on {} are \
+                 boxed by mechanism, not by an answer",
+                if r.proceeds {
+                    "proceeds only (no basis)"
+                } else {
+                    "nothing (no Form 1099-DA is issued for this year)"
+                },
+                names.join(", ")
+            ),
+        };
+        panel.venues.push(Step0Row::new(what, String::new()));
+    }
+
+    // ── Answers this LEDGER CONTRADICTS (seam review M-4). ──────────────────────────────────────
+    //
+    // ★★★ **THE SAME RULE THE EXPORT REFUSES ON**, called: `screen_digital_asset_answer` is the one
+    //     the full return's `screen_compute_dependent` runs first and the crypto slice runs alone.
+    //     A second predicate here would be a panel that says "clean" while the export refuses, or
+    //     the reverse.
+    //
+    // ★★ **Why it is on THIS surface and not at commit.** `input_form_store::commit` runs
+    //    `screen_inputs` only and holds no `LedgerState`, and `interview_state(&ri)` takes no
+    //    ledger — so neither the TUI commit gate nor R12's panel can see this contradiction, and a
+    //    filer could commit `digital_asset_activity = Some(false)` against a ledger full of
+    //    disposals and first meet the refusal at `export-irs-pdf`. The tier boundary stands (it is
+    //    recorded at the commit site); what changes is that the surface which DOES hold the ledger
+    //    stops being silent about it.
+    if let Some(r) = ri {
+        if let Some(refusal) =
+            btctax_core::tax::return_1040::screen_digital_asset_answer(r, state, year)
+        {
+            if let btctax_core::tax::return_refuse::RefuseReason::DigitalAssetAnswerContradictsLedger {
+                date,
+                venue,
+                kind,
+            } = &refusal.reason
+            {
+                panel.contradictions.push(Step0Row::new(
+                    format!(
+                        "you answered the Form 1040 Digital Assets question \"No\" for {year}, and \
+                         your ledger records {kind} on {date} at {venue} — commit is not blocked by \
+                         this, but `report` and `export-irs-pdf` REFUSE until one of the two is \
+                         corrected"
+                    ),
+                    format!(
+                        "btctax report --year {year}  (look at that event), then either correct the \
+                         ledger or answer \"Yes\" (`btctax income answer --year {year}`)"
+                    ),
+                ));
+            }
         }
     }
 
@@ -287,18 +447,49 @@ pub fn step0_panel(
     }
     for (label, (date, wallet)) in &first_custodial {
         if btctax_core::standing_order_in_force(events, wallet, *date).is_none() {
-            panel.standing_orders.push(Step0Row::new(
-                format!(
-                    "{label}: your first custodial disposition of {year} is dated {date}, and no \
-                     standing order (a dated method election) was in force for it — \
-                     {STANDING_ORDER_CONSEQUENCE}"
+            // ★★★ (seam review M-1) THE AUTHORITY FOLLOWS THE RELIEF PERIOD. Notice 2026-20 §4.02(2)
+            //     is cited only on a year §4.01 makes it available for; outside it the substance is
+            //     the same and the citation and the exit are not.
+            let (what, handoff) = match relief_period(year) {
+                ReliefPeriod::Within => (
+                    format!(
+                        "{label}: your first custodial disposition of {year} is dated {date}, and no \
+                         standing order (a dated method election) was in force for it — \
+                         {STANDING_ORDER_CONSEQUENCE}"
+                    ),
+                    format!(
+                        "btctax config --set-forward-method <hifo|fifo|lifo> --exchange {label} \
+                         (forward only — §1.1012-1(j) allows no post-hoc identification, so this \
+                         cannot cover the {date} sale)"
+                    ),
                 ),
-                format!(
-                    "btctax config --set-forward-method <hifo|fifo|lifo> --exchange {label} \
-                     (forward only — §1.1012-1(j) allows no post-hoc identification, so this \
-                     cannot cover the {date} sale)"
+                ReliefPeriod::Before => (
+                    format!(
+                        "{label}: your first custodial disposition of {year} is dated {date}, and no \
+                         dated method election was in force for it. Notice 2026-20's relief period \
+                         BEGINS {RELIEF_PERIOD_FIRST_YEAR}-01-01 (§3.03), so §4.02(2)'s standing-order \
+                         relief does not reach this sale, and btctax refuses an election effective \
+                         before that date as back-dated — the pre-2025 method is a declaration you \
+                         attest to instead"
+                    ),
+                    blocker_handoff(BlockerKind::Pre2025MethodNote).to_string(),
                 ),
-            ));
+                ReliefPeriod::After => (
+                    format!(
+                        "{label}: your first custodial disposition of {year} is dated {date}, and no \
+                         standing order (a dated method election) was in force for it. Notice \
+                         2026-20's relief period ENDED {RELIEF_PERIOD_LAST_YEAR}-12-31 (§3.03), and §5 \
+                         says taxpayers may not rely on §4.02's relief for sales made after it — so \
+                         {STANDING_ORDER_CONSEQUENCE}"
+                    ),
+                    format!(
+                        "btctax config --set-forward-method <hifo|fifo|lifo> --exchange {label} \
+                         (forward only — §1.1012-1(j) allows no post-hoc identification, so this \
+                         cannot cover the {date} sale)"
+                    ),
+                ),
+            };
+            panel.standing_orders.push(Step0Row::new(what, handoff));
         }
     }
 
@@ -392,19 +583,22 @@ impl Step0Panel {
                 self.year
             )];
         }
+        // ★ (seam review M-4) the contradiction leads: it is the one row here that names a
+        //   refusal already standing between this filer and their export.
         let named: Vec<&Step0Row> = self
-            .venues
+            .contradictions
             .iter()
-            .filter(|v| !v.handoff.is_empty())
+            .chain(self.venues.iter().filter(|v| !v.handoff.is_empty()))
             .chain(self.standing_orders.iter())
             .collect();
         let mut out = wrap(
             &format!(
-                "Step 0 ({}): {} blocker kind(s) · {} venue(s) needing a Form 1099-DA answer · {} \
-                 venue(s) with no standing order · {} owner action(s). `btctax verify` and `btctax \
-                 income answer` print them in full.",
+                "Step 0 ({}): {} blocker kind(s) · {} answer(s) the ledger contradicts · {} \
+                 venue(s) needing a Form 1099-DA answer · {} venue(s) with no standing order · {} \
+                 owner action(s). `btctax verify` and `btctax income answer` print them in full.",
                 self.year,
                 self.blockers.len(),
+                self.contradictions.len(),
                 self.venues.iter().filter(|v| !v.handoff.is_empty()).count(),
                 self.standing_orders.len(),
                 self.owner_actions.len()
@@ -451,10 +645,15 @@ pub fn write_step0(out: &mut impl Write, p: &Step0Panel) -> std::io::Result<()> 
         Ok(())
     };
     section("LEDGER BLOCKERS", &p.blockers, out)?;
+    // ★ (seam review M-4) FIRST after the blockers, because it is the only list here that names a
+    //   refusal the filer is already carrying.
+    section("YOUR ANSWERS vs THE LEDGER", &p.contradictions, out)?;
     section("IMPORTS BY VENUE", &p.imports, out)?;
     section("VENUES vs FORM 1099-DA ANSWERS", &p.venues, out)?;
+    // ★ (seam review M-1) the HEADING follows the relief period too — a §4.02(2) title over a 2027
+    //   row would re-assert in the header exactly what the row stopped claiming.
     section(
-        "STANDING ORDERS (Notice 2026-20 §4.02(2))",
+        &format!("STANDING ORDERS ({})", p.standing_orders_authority()),
         &p.standing_orders,
         out,
     )?;

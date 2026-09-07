@@ -376,7 +376,11 @@ pub fn answer_return_inputs(
     match s.project() {
         Ok((state, _)) => {
             let events = btctax_core::persistence::load_all(s.conn())?;
-            let panel = crate::step0::step0_panel(&state, &events, Some(&ri), year);
+            // ★ (seam review I-1) the YEAR'S Form 1099-DA regime, joined the way every other
+            //   surface joins it. `regime_for`, not `regime_or_refuse`: a status panel may not
+            //   refuse, and `None` — no bundled record — is an honest unknown the panel states.
+            let regime = crate::year_readiness::regime_for(year);
+            let panel = crate::step0::step0_panel(&state, &events, Some(&ri), year, regime);
             crate::step0::write_step0(out, &panel)?;
             if !panel.standing_orders.is_empty() {
                 writeln!(out, "  {}", crate::step0::VENUE_GRANULARITY_NOTE)?;

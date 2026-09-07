@@ -159,7 +159,8 @@ fn ty2024_1040_fills_da_and_line7() {
     // ★ Cap-gain lands on LINE 7 (2024's single field, not 7a/7b), and the DA question = YES.
     let f = btctax_forms::fill_form_1040_capgains(
         &Form1040Inputs {
-            da_yes: true,
+            digital_asset_answer: Some(true),
+            reportable_activity: true,
             schedule_d_active: true,
             schedule_d_line16: dec!(45500.50),
         },
@@ -407,7 +408,8 @@ fn fault_injected_2024_1040_da_swap_is_red() {
     std::mem::swap(&mut m.da_yes, &mut m.da_no);
     let err = fill_1040_with_map(
         &Form1040Inputs {
-            da_yes: true,
+            digital_asset_answer: Some(true),
+            reportable_activity: true,
             schedule_d_active: true,
             schedule_d_line16: dec!(1000),
         },
@@ -532,7 +534,8 @@ fn ty2024_forms_are_byte_deterministic() {
 
     let f1040 = btctax_forms::fill_form_1040_capgains(
         &Form1040Inputs {
-            da_yes: true,
+            digital_asset_answer: Some(true),
+            reportable_activity: true,
             schedule_d_active: true,
             schedule_d_line16: dec!(45500.50),
         },

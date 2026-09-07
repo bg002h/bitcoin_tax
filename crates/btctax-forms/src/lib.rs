@@ -462,11 +462,14 @@ pub fn fill_form_8283(
 }
 
 /// Fill the capital-gains cells of **Form 1040** for `year`: line 7a (only when Schedule D is ACTIVE
-/// and line 16 ≥ 0; active-and-zero → "-0-") and the Digital-Asset Yes/No question (YES iff there is
-/// btctax-evidenced qualifying activity). Returns `Ok(None)` — **skip the whole 1040** — when there is
-/// no reportable activity (the DA answer would be blank and there is no 7a value). 7b checkboxes are
-/// left untouched; a NET LOSS leaves 7a blank (the §1211 line-21 cap is the filer's). A partial-scope
-/// notice enumerating exactly what was filled is the caller's.
+/// and line 16 ≥ 0; active-and-zero → "-0-") and the Digital Assets Yes/No question — **written from
+/// the FILER'S ANSWER** ([`Form1040Inputs::digital_asset_answer`]: `Some(true)` → *Yes*,
+/// `Some(false)` → *No*, `None` → neither box), never from a ledger reading. Returns `Ok(None)` —
+/// **skip the whole 1040** — when there is no reportable activity
+/// ([`Form1040Inputs::reportable_activity`], the ledger's own question and a separate field since
+/// the T6 seam review's C-1). 7b checkboxes are left untouched; a NET LOSS leaves 7a blank (the
+/// §1211 line-21 cap is the filer's). A partial-scope notice enumerating exactly what was filled is
+/// the caller's.
 pub fn fill_form_1040_capgains(
     inputs: &Form1040Inputs,
     year: i32,
