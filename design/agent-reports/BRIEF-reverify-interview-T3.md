@@ -37,8 +37,9 @@ fresh audit; do not re-derive the ledger's dispositions; do not review design.
    (M5) the census rows are asked first in `live_questions`' output on a Single TY2024 fixture; (N1)
    `clear` on a non-live row is a no-op.
 3. **Negative claims:** `census-join` still reports 298 entries / 13 maps; `line-coverage` still
-   341 / 24 / 0 / 12; no `direction =` key remains in any map (`grep -rn 'direction *=' crates/btctax-forms/forms/`
-   → 0); the T3 build's original 19 kills and the D1/D11 kills are still green.
+   341 / 24 / 0 / 12; no `direction =` key remains in any map outside comments (`grep -rn '^[^#]*direction *='
+   crates/btctax-forms/forms/` → 0; the 11 hits of the unanchored grep are comment lines saying the key
+   is a parse error); the T3 build's original 19 kills and the D1/D11 kills are still green.
 
 ## Severity
 A kill that does not red, a review finding with no holding test, or a claim the tree contradicts is
