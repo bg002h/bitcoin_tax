@@ -27,10 +27,15 @@ I2 per-document box censuses; M6). Build AS WRITTEN; the tree's real names win; 
    `.pdf.txt` note with the measured sha256 and byte count in the existing convention, `pdftotext
    -layout` to `design/forms/extract/<stem>--2025.txt`, `cargo run -q -p xtask -- extract-geometry
    <stem>--2025`, then `cargo run -q -p xtask -- authority-manifest --regen` and `authority-manifest`
-   (must say OK). The controller measured at dispatch that every one of these URLs answers HTTP 200
-   at `https://www.irs.gov/pub/irs-prior/<stem>--2025.pdf`; if a stem's TY2025 revision is not the
-   one in force (a periodic form revised earlier), fetch the revision the instructions name and say
-   so. The year on each document is READ off its text before it goes in the note (the archiver's
+   (must say OK). The controller MEASURED the revision names at dispatch (HTTP HEAD on irs.gov):
+   `fw2--2025`, `iw2w3--2025`, `f1099b--2025`, `i1099b--2025`, `f1098--2025`, `i1098--2025`,
+   `f1098e--2025` answer 200; **`f1099int`, `f1099div`, `f1099g` and `i1099int`, `i1099div`,
+   `i1099g` answer 404 at `--2025` and 200 at `--2024`** (continuous-use forms, "Rev. January 2024" —
+   the revision in force for TY2025; also served as the current `irs-pdf/<stem>.pdf`); **the 1098-E's
+   instructions are the combined 1098-E/1098-T booklet `i1098et--2025`** (`i1098e` does not exist).
+   Archive each under the name that answers, into `design/forms/<year-of-the-revision>/` (2024 for the
+   `--2024` six), and record the revision date READ OFF the document's own text in the note; the
+   `MANIFEST.json` `instructions` join for a 1098-E row is `i1098et`. The year on each document is READ off its text before it goes in the note (the archiver's
    rule), never assumed.
 2. **`Production::Collected` gains `from: DocBox | FilerRecords { instruction_line }`** (R2.2/R5) and
    `line-coverage` checks each `DocBox` caption against the document's extract — a one-character
