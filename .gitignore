@@ -67,3 +67,5 @@ design/forms/**/*.pdf
 rustc-ice-*.txt
 # A reviewer agent's cargo target dir (worktree reviews build here, on disk, not in /tmp tmpfs).
 target-review/
+# `cargo doc` target dir used by review/sweep agents (on disk, not tmpfs).
+target-doc/
