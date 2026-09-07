@@ -6312,7 +6312,9 @@ build, each with an owning phase.
   the CLI could too if a large vault makes it noticeable.
 - **FR-76 — Form 8889 (HSA) is the one form on the owner's filed TY2024 return that btctax refuses
   (owner, 2026-09-07: the 2024 return holds Forms 1040, Schedule 2, Schedules A, B, D, Forms 8949,
-  8889, 8959, 8960). Owning phase: OWNER DECISION, then a transcription task (T16) if built.** TY2024
+  8889, 8959, 8960). ★ RULED 2026-09-07 — *"Yes, Transcribe Form 8889 as a task (T16)"* — owning
+  task: interview T16 (`BRIEF-build-interview-T16.md`), scheduled immediately after T6 closes, ahead
+  of T7, because the simulated real return on TY2024 cannot file without it.** TY2024
   has maps and templates for every other form on that list; `HsaActivityUnsupported` refuses an HSA
   outright, so the simulated real return (FR-64) on TY2024 cannot file until either Form 8889 is
   transcribed (Parts I–III per `i8889`; Schedule 1 line 13 and Schedule 2 line 17c/8 reach) or the
