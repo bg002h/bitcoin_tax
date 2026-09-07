@@ -362,6 +362,33 @@ pub fn answer_return_inputs(
     let prior_year_row = ri
         .opened_from
         .and_then(|n| return_inputs::get(s.conn(), n).ok().flatten());
+    // ★★★ **R9 / T6 — STEP 0, BEFORE THE CENSUS.**
+    //
+    //     The ledger's status comes first because it is what a filer needs in hand while they answer
+    //     the return's questions — which venue has no Form 1099-DA answer, which blocker still stops
+    //     the commit they are working toward. **Document-first order is untouched:** Step 0 is
+    //     STATUS, not a question set, so the first thing the filer is ASKED is still the shoebox.
+    //
+    // ★ A projection failure is not fatal here. The panel is a courtesy over the ledger, and a
+    //   filer whose vault cannot project must still be able to answer their W-2 boxes — R9's
+    //   "authoring proceeds in parallel with an unresolved ledger" is the whole point of the panel
+    //   being a report rather than a gate.
+    match s.project() {
+        Ok((state, _)) => {
+            let events = btctax_core::persistence::load_all(s.conn())?;
+            let panel = crate::step0::step0_panel(&state, &events, Some(&ri), year);
+            crate::step0::write_step0(out, &panel)?;
+            if !panel.standing_orders.is_empty() {
+                writeln!(out, "  {}", crate::step0::VENUE_GRANULARITY_NOTE)?;
+            }
+        }
+        Err(e) => writeln!(
+            out,
+            "
+(the Step 0 ledger panel is unavailable: {e})"
+        )?,
+    }
+
     // ★★★ R12 / §4.2 — THE PANEL, BEFORE the first question.
     write_panel(
         out,
@@ -757,6 +784,12 @@ mod tests {
                 // whether the filer borrowed to invest. It reaches the $0-income household too, which
                 // is the population the plan measured this defect on.
                 QuestionId::FilingForm4952,
+                // ★★★ R9 / T6 — Form 1040 page 1's DIGITAL ASSETS question. ALWAYS LIVE, and the
+                // instruction says why in one sentence: *"You must answer the digital asset question
+                // on Form 1040 whether or not you received a Form 1099-DA"*. It is asked of the
+                // empty-vault filer too — the question is on the FORM, not on the ledger, and
+                // scoping it to "btctax saw crypto" would be the circular liveness §2.9 records.
+                QuestionId::DigitalAssetActivity,
             ]
         );
         assert!(!has_spouse_dob(&single()), "no spouse ⇒ no spouse DOB");

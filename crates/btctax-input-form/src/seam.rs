@@ -265,6 +265,9 @@ pub enum FieldId {
     DeclStateRefundWithout1099g,
     /// §111(a) — did the PRIOR-YEAR return itemize? Return-level (R3/I1).
     DeclItemizedPriorYear,
+    /// ★★★ R9 / T6 — Form 1040 page 1's DIGITAL ASSETS question, above line 1a. Always live: the
+    ///   form prints it on every return and the box that prints is this ANSWER.
+    DeclDigitalAssetActivity,
     // ── ★★★ R4 / T5 — Form 1099-INT (per row). One Field per COLLECTED box, named for the box. ──
     /// The payer as printed on the form.
     Int1099Payer,

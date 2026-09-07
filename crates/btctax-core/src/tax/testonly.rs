@@ -76,6 +76,35 @@ pub fn reconcile_document_census(ri: &mut ReturnInputs) {
     }
 }
 
+/// ★★★ **R9 / T6 — make a fixture's Digital Assets ANSWER coherent with the LEDGER it is computed
+/// against**, exactly as [`reconcile_document_census`] does for the document rows.
+///
+/// [`answer_all_live_declarations`] answers every live declaration at its declared neutral, and the
+/// Digital Assets question's neutral is `false` — which on a fixture whose ledger holds a 2026
+/// disposal is precisely `RefuseReason::DigitalAssetAnswerContradictsLedger`, a *"No"* the data
+/// contradicts. The helper cannot see the ledger (it takes only `&mut ReturnInputs`), so the flip
+/// lives here, where the caller has both.
+///
+/// **ONE DIRECTION ONLY**, exactly like [`reconcile_document_census`]: a `None` or a `Some(false)`
+/// becomes `Some(true)` when the year's ledger witnesses a qualifying event, and nothing else is
+/// touched. The predicate is the SAME one the refusal reads, never a second copy of it.
+///
+/// ★★ **Why one direction.** The other direction would silently overwrite a fixture's deliberate
+///    `Some(true)` — and the case is real, not hypothetical: `extension.rs`'s pseudo-reconcile
+///    fixture stores its return BEFORE `pseudo_set_mode` is switched on, so the projection the
+///    helper can see holds no disposal while the projection the export computes does. A two-way
+///    flip re-answered that fixture `No` and the export then refused on the fixture instead of on
+///    the attestation gate it exists to measure.
+///
+/// ★ Legitimate for a fixture helper and not for a product surface, for the same reason
+///   `reconcile_document_census` is: it derives a fixture's intent from the fixture's own data. A
+///   product surface that did this would be answering a §6065 declaration for a human.
+pub fn reconcile_digital_asset_activity(ri: &mut ReturnInputs, state: &LedgerState, year: i32) {
+    if crate::tax::return_1040::digital_asset_activity(state, year) {
+        ri.digital_asset_activity = Some(true);
+    }
+}
+
 /// [`answer_all_live_declarations`] as a by-value wrapper, for fixtures that pass a `&ReturnInputs { ... }`
 /// temporary straight into `set` and expect it to COMPUTE: `set(conn, year, &testonly::answered(ReturnInputs { .. }))`.
 pub fn answered(mut ri: ReturnInputs) -> ReturnInputs {
@@ -444,6 +473,11 @@ pub fn kitchen_sink_household() -> (ReturnInputs, LedgerState) {
     };
 
     answer_all_live_declarations(&mut ri);
+    // ★★★ R9 / T6 — and the Digital Assets ANSWER, read off THIS fixture's own ledger. The household
+    //     disposes 1 BTC on 2024-05-01 and recognizes mining income, so its answer is `Yes`; the
+    //     neutral `No` the loop above writes would be a "no" its own ledger contradicts.
+    let y = ri.tax_year;
+    reconcile_digital_asset_activity(&mut ri, &state, y);
     (ri, state)
 }
 
@@ -953,6 +987,18 @@ pub fn build_golden_return(i: &GoldenInputs) -> (ReturnInputs, LedgerState) {
             pseudo: false,
         });
     }
+
+    // ★★★ R9 / T6 — the Digital Assets ANSWER, read off the ledger this very function just built.
+    //     `answer_all_live_declarations` above answered the neutral `No`, which is right for the
+    //     wage-only households and a "no" the data contradicts for every household that carries a
+    //     capital gain or SE income — the corpus's whole crypto side.
+    //
+    // ★ INVISIBLE TO BOTH ORACLES by construction: `GoldenInputs` models no such box, and neither
+    //   engine reads one. It moves no compared line; it only stops the return refusing.
+    //
+    // ★ 2024 is the year every leg this function pushes is dated (`date!(2024 - ..)` above), which is
+    //   the only year this corpus is swept for (`btctax-oracle-harness`'s `YEAR`).
+    reconcile_digital_asset_activity(&mut ri, &state, 2024);
 
     (ri, state)
 }

@@ -434,6 +434,10 @@ pub fn maximal_sentinel() -> ReturnInputs {
             ],
         }),
         itemize_election: ItemizeElection::Auto,
+        // ★ R9 / T6 — answered, and answered `false`, because this fixture's axis is PII and the
+        //   Digital Assets answer carries none either way. `Some` rather than `None` keeps the
+        //   fixture a return that could file.
+        digital_asset_activity: Some(false),
         mfs_spouse_itemizes: Some(false),
         sch1: Schedule1Inputs {
             state_refund_taxable: dec!(1),

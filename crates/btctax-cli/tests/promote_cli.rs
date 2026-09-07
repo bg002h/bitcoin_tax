@@ -986,6 +986,9 @@ fn plant_full_return_ri(vault: &Path, year: i32) {
     //   golden. 1980 is mid-band for 2024.
     ri.header.taxpayer.date_of_birth = Some(time::macros::date!(1980 - 05 - 05));
     btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+    // ★ R9 / T6 — the Digital Assets answer, off this vault's own ledger (it disposes crypto).
+    let (state, _) = s.project().expect("the fixture ledger projects");
+    btctax_core::tax::testonly::reconcile_digital_asset_activity(&mut ri, &state, year);
     return_inputs::set(s.conn(), year, &ri).unwrap();
     s.save().unwrap();
 }

@@ -951,6 +951,43 @@ pub fn screen_compute_dependent(
     year: i32,
     params: &FullReturnParams,
 ) -> Option<Refusal> {
+    // ★★★ **R9 / T6 — THE DIGITAL ASSETS CROSS-CHECK, and it runs FIRST.**
+    //
+    //     It is the first question on page 1 of the form, its refusal is the most actionable one on
+    //     this screen (go and look at one dated event), and it is compute-dependent for exactly one
+    //     reason: it reads the LEDGER. It is deliberately NOT in `screen_inputs`' param-free tier —
+    //     that tier is the rules an importer can honestly run with no package and no projection, and
+    //     a rule that needs `state` is not one of them.
+    //
+    // ★★★ **ASYMMETRIC BY DESIGN, and the asymmetry is the whole rule.** A `No` the ledger
+    //     contradicts refuses; a `Yes` the ledger does not witness is ACCEPTED, with
+    //     `Advisory::DigitalAssetYesNotOnLedger`. See `RefuseReason::DigitalAssetAnswerContradicts
+    //     Ledger` for why the mirror may never refuse: the ledger is not complete by construction.
+    //
+    // ★ `None` is NOT refused here — it is refused by the registry loop in `screen_inputs`, like
+    //   every other unanswered class-(A) declaration. Two refusals for one blank would give the
+    //   filer two different exits for one keystroke.
+    if ri.digital_asset_activity == Some(false) {
+        if let Some((date, venue, kind)) = first_digital_asset_event(state, year) {
+            return Some(Refusal {
+                reason: RefuseReason::DigitalAssetAnswerContradictsLedger {
+                    date: date.to_string(),
+                    venue: venue.clone(),
+                    kind,
+                },
+                detail: format!(
+                    "you answered the Form 1040 Digital Assets question \"No\" for {year}, and your \
+                     ledger records {kind} on {date} at {venue}. One of the two is wrong and btctax \
+                     cannot know which: check that event (`btctax report --year {year}`), then \
+                     either correct the ledger or answer \"Yes\" (`btctax income answer`). Note \
+                     that buying digital assets with real currency, and moving them between wallets \
+                     or accounts you own, do NOT require a \"Yes\" — neither of those is what this \
+                     event is."
+                ),
+            });
+        }
+    }
+
     // ★ Non-crypto NONCASH gifts, keyed on the TOTAL noncash the return claims (Fable P6 r1 I6). The
     // $500 trigger printed on Schedule A line 12 — and Form 8283's own "…if you claimed a total deduction
     // of over $500 for ALL contributed property" — is an AGGREGATE over every noncash gift. Keying the
@@ -1848,11 +1885,18 @@ pub struct PrintedInputs {
     /// `total_payments`, so a printed chain that drops it tells the filer, ON THE FILED RETURN, to pay it
     /// a SECOND time (L31 falls ⇒ L37 "amount you owe" rises by the whole payment).
     pub extension_payment: Usd,
-    /// 1040 page 1 — the digital-asset question. `true` iff the ledger shows digital-asset activity in
-    /// the year (a disposal, recognized income, or a removal). btctax never answers **"No"**: a "No" it
-    /// cannot vouch for is worse than leaving the question to the filer, so `false` means *unchecked*,
-    /// not *answered in the negative*.
-    pub digital_asset_activity: bool,
+    /// ★★★ **1040 page 1 — the Digital Assets question, as the FILER ANSWERED IT** (R9 / T6).
+    ///
+    /// `Some(true)` prints *Yes*, `Some(false)` prints *No*, `None` prints neither and the packet's
+    /// hand-mark list says the mandatory question is unmarked.
+    ///
+    /// ★★★ **This was `bool`, decided by `digital_asset_activity(state, year)`, and that is the
+    ///     defect T6 closes.** The predicate can only ever say *Yes* or say nothing, so a filer who
+    ///     bought monthly and sold nothing signed a return with a mandatory question blank. The
+    ///     predicate is still read — it CROSS-CHECKS the answer in [`screen_compute_dependent`] —
+    ///     but it no longer answers for the filer. A `None` cannot reach a filed full return:
+    ///     `screen_inputs`' registry loop refuses it as unanswered.
+    pub digital_asset_answer: Option<bool>,
 }
 
 /// Assemble the absolute (WITH-crypto) 1040 from income through **total tax L24** for `year` (SPEC §5
@@ -2490,7 +2534,10 @@ pub fn assemble_absolute(
             ss_wage_base: table.ss_wage_base,
             capital_loss_limit: loss_limit(status),
             extension_payment: ri.payments.extension_payment,
-            digital_asset_activity: digital_asset_activity(state, year),
+            // ★★★ R9 / T6 — THE ANSWER, not the ledger predicate. `screen_compute_dependent` has
+            //     already refused a `Some(false)` the ledger contradicts, and `screen_inputs` has
+            //     already refused a `None`, so what reaches the printed page is testimony.
+            digital_asset_answer: ri.digital_asset_activity,
         },
     }
 }
@@ -2513,6 +2560,84 @@ pub(crate) fn digital_asset_activity(state: &LedgerState, year: i32) -> bool {
             .iter()
             .any(|i| i.recognized_at.year() == year)
         || state.removals.iter().any(|r| r.removed_at.year() == year)
+}
+
+/// ★★★ **R9 / T6 — the FIRST qualifying digital-asset event of `year`: `(date, venue, what it was)`.**
+///
+/// The refusal that names it is only useful if the filer can go and LOOK at the thing — *"your
+/// ledger disagrees"* is a brick, *"a disposition on 2026-03-14 at exchange:coinbase:default"* is an
+/// errand. So the message carries a date, a venue and the instruction's own vocabulary for the kind.
+///
+/// ★★★ **It is DERIVED FROM [`digital_asset_activity`]'s three disjuncts, and the pairing is
+///     asserted rather than promised**: `the_first_event_exists_exactly_when_the_predicate_is_true`
+///     drives both over the same states. Two independent definitions of *"qualifying event"* is
+///     precisely the drift that would let a refusal fire with nothing to point at — or, worse, stay
+///     silent while the predicate says the answer is contradicted.
+///
+/// **Ordering** is `(date, event id)`, a total order — `EventId: Ord` — so the "first" event is the
+/// same one on every run and in every process (NFR4).
+///
+/// ★ The VENUE for a disposal is the disposing wallet carried on the leg (the only sound source,
+///   D1); income and removal records carry no wallet, so the venue is read off the event's own
+///   identity, which for an imported event IS the venue. A decision-sourced event has no venue at
+///   all and says so rather than naming a wallet it cannot know.
+pub(crate) fn first_digital_asset_event(
+    state: &LedgerState,
+    year: i32,
+) -> Option<(crate::conventions::TaxDate, String, &'static str)> {
+    let venue_of_event = |id: &crate::identity::EventId| -> String {
+        match id {
+            crate::identity::EventId::Import { source, .. }
+            | crate::identity::EventId::Conflict { source, .. } => source.tag().to_string(),
+            crate::identity::EventId::Decision { .. } => "a decision you recorded in btctax".into(),
+        }
+    };
+    let mut candidates: Vec<(
+        crate::conventions::TaxDate,
+        &crate::identity::EventId,
+        String,
+        &'static str,
+    )> = Vec::new();
+    for d in state
+        .disposals
+        .iter()
+        .filter(|d| d.disposed_at.year() == year)
+    {
+        let venue = d
+            .legs
+            .first()
+            .map_or_else(|| venue_of_event(&d.event), |l| l.wallet.label());
+        candidates.push((d.disposed_at, &d.event, venue, "a disposition"));
+    }
+    for i in state
+        .income_recognized
+        .iter()
+        .filter(|i| i.recognized_at.year() == year)
+    {
+        candidates.push((
+            i.recognized_at,
+            &i.event,
+            venue_of_event(&i.event),
+            "digital assets received as income",
+        ));
+    }
+    for r in state
+        .removals
+        .iter()
+        .filter(|r| r.removed_at.year() == year)
+    {
+        candidates.push((
+            r.removed_at,
+            &r.event,
+            venue_of_event(&r.event),
+            "a gift or donation of digital assets",
+        ));
+    }
+    candidates.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(b.1)));
+    candidates
+        .into_iter()
+        .next()
+        .map(|(date, _, venue, kind)| (date, venue, kind))
 }
 
 /// **Which year's Form 6251 Part I line-1 rule applies** — `None` for a year whose Part I this build
@@ -7102,6 +7227,9 @@ mod tests {
         };
         crate::tax::testonly::answer_all_live_declarations(&mut ri);
         let st = state_income(vec![mining(dec!(20000))]);
+        // ★ R9 / T6 — the fixture MINES, so its Digital Assets answer is `Yes`. Read off the
+        //   fixture's own ledger rather than typed, so the two can never disagree.
+        crate::tax::testonly::reconcile_digital_asset_activity(&mut ri, &st, 2024);
         // ★★★ `screen_compute_dependent` IS THE SCREEN THAT HOLDS THE LOSS TEST, and calling
         //     `screen_absolute` instead is why the first draft of this test let the mutation live:
         //     reverting the loss check to `ledger gross − expenses` did not red anything. A test that
@@ -7907,7 +8035,7 @@ mod tests {
                 line33: z,
                 line34: z,
                 line37: z,
-                digital_asset_yes: false,
+                digital_asset_answer: Some(false),
             },
             "the printed 1040, line by line"
         );

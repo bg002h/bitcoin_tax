@@ -1221,6 +1221,9 @@ fn the_two_pipelines_cannot_overwrite_each_others_files() {
             ..Default::default()
         };
         btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        // ★ R9 / T6 — the Digital Assets answer, off this vault's own ledger (it disposes in 2024).
+        let (state, _) = s.project().expect("the fixture ledger projects");
+        btctax_core::tax::testonly::reconcile_digital_asset_activity(&mut ri, &state, 2024);
         return_inputs::set(s.conn(), 2024, &ri).unwrap();
         s.save().unwrap();
     }
@@ -1398,6 +1401,12 @@ fn full_return_vault(
         //   count). Deliberately NOT a second `answer_all_live_declarations`: a shape that BLANKS a
         //   declaration to prove the screen refuses must keep its blank.
         btctax_core::tax::testonly::reconcile_document_census(&mut ri);
+        // ★★★ R9 / T6 — and the Digital Assets ANSWER, read off THIS vault's own ledger. These
+        //     fixtures dispose crypto in 2024, so the neutral `No` that
+        //     `answer_all_live_declarations` writes is a "no" the data contradicts — which is
+        //     exactly the refusal T6 added, firing on the fixture instead of on the rule under test.
+        let (state, _) = s.project().expect("the fixture ledger projects");
+        btctax_core::tax::testonly::reconcile_digital_asset_activity(&mut ri, &state, 2024);
         return_inputs::set(s.conn(), 2024, &ri).unwrap();
         s.save().unwrap();
     }
@@ -1815,9 +1824,15 @@ fn a_no_crypto_packet_names_the_marks_the_filer_must_make_by_hand() {
         manifest.contains("COMPLETE BY HAND"),
         "the manifest must carry a hand-marks section: {manifest}"
     );
+    // ★★★ R9 / T6 — THE MARK IS GONE, and its absence is the measurement. The Digital Assets
+    //     question used to be hand-marked on EVERY no-crypto packet: the box came from a ledger
+    //     predicate that could only say *Yes*, so a plain wage earner signed a return with page 1's
+    //     mandatory question blank and a manifest line telling them to fix it. The question is a
+    //     class-(A) declaration now, this fixture answers it `No` through the registry, and the
+    //     form PRINTS "No" — so there is nothing left for the filer to mark.
     assert!(
-        manifest.contains("Digital Asset"),
-        "…naming the Digital Asset question, which is mandatory and unanswered: {manifest}"
+        !manifest.contains("Digital Asset"),
+        "the Digital Assets question is ANSWERED and printed, so it is not a hand mark: {manifest}"
     );
     assert!(
         manifest.contains("line 7"),
@@ -1830,8 +1845,9 @@ fn a_no_crypto_packet_names_the_marks_the_filer_must_make_by_hand() {
     // The signal, never the answer.
     assert_eq!(
         rep.hand_marks.len(),
-        3,
-        "exactly the three marks this packet leaves: {:?}",
+        2,
+        "exactly the two marks this packet leaves — the line-7 box and the signature. It was THREE \
+         until R9/T6 made the Digital Assets question an answered declaration: {:?}",
         rep.hand_marks
     );
 }
@@ -1972,6 +1988,10 @@ fn the_manifest_names_the_qualified_appraisal_over_500k_and_stays_quiet_below_it
                 ..Default::default()
             };
             btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+            // ★ R9 / T6 — the Digital Assets answer, off this vault's own ledger (it DONATES BTC in
+            //   2024, which is a removal and therefore a qualifying event).
+            let (state, _) = s.project().expect("the fixture ledger projects");
+            btctax_core::tax::testonly::reconcile_digital_asset_activity(&mut ri, &state, 2024);
             return_inputs::set(s.conn(), 2024, &ri).unwrap();
             s.save().unwrap();
         }

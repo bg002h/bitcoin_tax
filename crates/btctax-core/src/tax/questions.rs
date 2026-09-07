@@ -106,6 +106,10 @@ pub const RENDERED_PROMPTS: &[RenderedPrompt] = &[
     //   tax"*. Naming the wrong year would make the question uncheckable against the filer's papers.
     (QuestionId::StateRefundWithout1099g, state_refund_prompt),
     (QuestionId::ItemizedPriorYear, itemized_prior_year_prompt),
+    // ★★★ R9 / T6 — the Digital Assets question quotes the YEAR because the form's own sentence
+    //   does (*"At any time during 2025, did you…"*), and it is the year the filer must check their
+    //   records against. Rendered, so a return whose `tax_year` changes re-asks it for free (R10.4).
+    (QuestionId::DigitalAssetActivity, digital_asset_prompt),
 ];
 
 /// *"Did you receive a refund, credit or offset of state or local income taxes in 2026? …"*
@@ -127,6 +131,31 @@ fn itemized_prior_year_prompt(ri: &ReturnInputs) -> String {
          of a state or local income tax refund is taxable if, in the year you paid the tax, you did \
          not itemize.)",
         ri.tax_year - 1
+    )
+}
+
+/// ★★★ **R9 — Form 1040 page 1's Digital Assets question, in the FORM's own words.**
+///
+/// The sentence is transcribed from the printed line (`design/forms/extract/f1040--2025.txt:36-37`)
+/// with the year taken off the return, and the instruction's two carve-outs are quoted after it
+/// (`i1040gi--2025.txt:1385-1394`) — *"The following actions or transactions in 2025, alone,
+/// generally don't require you to check 'Yes': … Purchasing digital assets using U.S. or other real
+/// currency"* — because those are exactly the two states a btctax ledger is FULL of. A filer who
+/// bought monthly on Swan and moved coins to their own wallet answers **No**, and without the
+/// carve-outs in front of them the ledger they can see would push them to answer **Yes**.
+///
+/// ★ The wallet-to-wallet carve-out is stated as the instruction states it — *"one wallet or
+///   account you own or control to another wallet or account that you own or control"* — and NOT
+///   with the word `reconcile` uses for the same movement, which R15's stop list forbids in a
+///   return-registry prompt (the ledger's question about that movement belongs to `reconcile`).
+fn digital_asset_prompt(ri: &ReturnInputs) -> String {
+    format!(
+        "At any time during {y}, did you: (a) receive (as a reward, award, or payment for property \
+         or services); or (b) sell, exchange, or otherwise dispose of a digital asset (or a \
+         financial interest in a digital asset)? (Form 1040 instructions, Digital Assets: holding a \
+         digital asset; moving one between wallets or accounts you own or control; and purchasing \
+         digital assets with U.S. or other real currency do NOT, alone, require a \"Yes\".)",
+        y = ri.tax_year
     )
 }
 
@@ -280,6 +309,11 @@ pub enum QuestionId {
     /// **R3/I1** — did the PRIOR-YEAR return itemize? Return-level, live iff
     /// `state_refund_without_1099g == Some(true)` **or** any `g_1099[].box2_state_refund > 0`.
     ItemizedPriorYear,
+    /// ★★★ **R9 / T6 — the Form 1040 page-1 DIGITAL ASSETS question.** ALWAYS live: the form prints
+    /// it on every return and the instruction says *"You must answer the digital asset question on
+    /// Form 1040 whether or not you received a Form 1099-DA"* (`i1040gi--2025.txt:1398-1400`).
+    /// APPENDED AT THE END for the `decl_tristate!` array-index reason recorded above.
+    DigitalAssetActivity,
 }
 
 impl QuestionId {
@@ -324,6 +358,7 @@ impl QuestionId {
         QuestionId::InterestOrDividendsWithout1099,
         QuestionId::StateRefundWithout1099g,
         QuestionId::ItemizedPriorYear,
+        QuestionId::DigitalAssetActivity,
     ];
 }
 
@@ -1711,6 +1746,40 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         //   not built.
         neutral: false,
     },
+    // ── ★★★ R9 / T6 — THE DIGITAL ASSETS QUESTION. Appended at the END for the `decl_tristate!`
+    //    array-index reason recorded above.
+    FormQuestion {
+        id: QuestionId::DigitalAssetActivity,
+        // ★ The STATIC fallback; the words shown quote the year (`RENDERED_PROMPTS`).
+        prompt: "At any time during this tax year, did you: (a) receive (as a reward, award, or \
+                 payment for property or services); or (b) sell, exchange, or otherwise dispose of \
+                 a digital asset (or a financial interest in a digital asset)? (Form 1040 \
+                 instructions, Digital Assets: holding a digital asset; moving one between wallets \
+                 or accounts you own or control; and purchasing digital assets with U.S. or other \
+                 real currency do NOT, alone, require a \"Yes\".)",
+        unanswered: RefuseReason::DigitalAssetActivityUnanswered,
+        unanswered_detail:
+            "Form 1040 page 1 asks the Digital Assets question above line 1a, and the instructions \
+             are explicit that it is not optional: \"You must answer the digital asset question on \
+             Form 1040 whether or not you received a Form 1099-DA\". btctax will not answer it for \
+             you — a \"No\" it cannot vouch for is sworn testimony under §6065, and a blank is a \
+             mandatory question left unanswered on a signed return. Run `btctax income answer`",
+        // ★★★ ALWAYS LIVE, and NOT scoped to "the ledger has crypto". The form prints the question
+        //     on every 1040, so a filer with an empty vault owes the same answer as one with fifty
+        //     disposals — and scoping it to the ledger would be the circular liveness §2.9 records
+        //     (the answer would be asked only where btctax already knew it).
+        live: |_ri| true,
+        get: |ri| ri.digital_asset_activity,
+        set: |ri, v| ri.digital_asset_activity = Some(v),
+        // ★ §G-15 — PER-YEAR: the question is "at any time during <year>", so last year's answer is
+        //   not testimony for this one.
+        durability: Durability::PerYear,
+        // ★ Neutral at FALSE: "no receipt and no disposition" needs no adjustment and forgoes no
+        //   benefit. The polarity is declared here rather than inferred — and note that the NEUTRAL
+        //   answer is the one the ledger can CONTRADICT, which is why the cross-check lives in
+        //   `screen_compute_dependent` and not in this registry: liveness is an input predicate.
+        neutral: false,
+    },
 ];
 
 /// The identity of each SKIPPABLE prompt (§2, class B) — the questions where silence is LAWFUL: a bare
@@ -2628,6 +2697,8 @@ mod tests {
                 QuestionId::InterestOrDividendsWithout1099 => 37,
                 QuestionId::StateRefundWithout1099g => 38,
                 QuestionId::ItemizedPriorYear => 39,
+                // ★ R9 / T6 — Form 1040 page 1's Digital Assets question, index 40.
+                QuestionId::DigitalAssetActivity => 40,
             };
             assert_eq!(idx, i, "QuestionId::ALL is out of order / missing {id:?}");
             assert_eq!(
@@ -2638,11 +2709,11 @@ mod tests {
         }
         assert_eq!(
             QuestionId::ALL.len(),
-            40,
+            41,
             "17 declarations + the 18 R3 document-census rows + R10.4's filing-status confirmation \
-             + T5's four document-less-income-door questions"
+             + T5's four document-less-income-door questions + R9/T6's Digital Assets question"
         );
-        assert_eq!(FORM_QUESTIONS.len(), 40, "one entry per declaration");
+        assert_eq!(FORM_QUESTIONS.len(), 41, "one entry per declaration");
     }
 
     /// ★★★ §G-6/ISO — THE OUT-OF-SCOPE QUESTION MUST NAME THE ISO EXERCISE, WHICH IS NOT INCOME.

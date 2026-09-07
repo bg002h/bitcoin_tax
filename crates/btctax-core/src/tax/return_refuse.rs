@@ -609,6 +609,35 @@ pub enum RefuseReason {
     /// distributions), which stays `NotRead` because it is a BASIS ADJUSTMENT and reaches no line
     /// this year at all — the two look alike and are not the same. The payload is the box.
     LiquidationDistributionNotComputed(String),
+    // ── ★★★ R9 / T6 — THE DIGITAL ASSETS QUESTION. ──────────────────────────────────────────────
+    /// **A live `digital_asset_activity` is `None`** — UNANSWERED class, raised by the
+    /// [`crate::tax::questions::FORM_QUESTIONS`] loop like every other class-(A) declaration.
+    ///
+    /// The question is always live: *"You must answer the digital asset question on Form 1040
+    /// whether or not you received a Form 1099-DA"* (`i1040gi--2025.txt:1398-1400`).
+    DigitalAssetActivityUnanswered,
+    /// ★★★ **The filer answered the Digital Assets question `No` and the LEDGER witnesses a
+    /// qualifying event in the year.**
+    ///
+    /// INVALID class, and the ONE direction of the cross-check that refuses (R9). The payload names
+    /// the FIRST qualifying event — date, venue and what it was — so the filer can go and look at
+    /// it rather than being told only that they disagree with a computer.
+    ///
+    /// ★★★ **The mirror does NOT refuse.** `!activity ∧ Yes` is accepted with
+    /// [`crate::tax::advisories::Advisory::DigitalAssetYesNotOnLedger`], because the ledger is not
+    /// complete by construction — no self-custody wallet is importable — so a filer paid in BTC to
+    /// their own wallet has no export to import, and refusing their truthful *Yes* would leave *No*
+    /// as the only way through the gate: a false answer the tool coerced into sworn testimony.
+    DigitalAssetAnswerContradictsLedger {
+        /// The tax date of the first qualifying event, `YYYY-MM-DD`.
+        date: String,
+        /// The venue it happened at — a `WalletId` label, or the import source for an event whose
+        /// record carries no wallet.
+        venue: String,
+        /// What it was, in the instruction's own vocabulary (*"a disposition"*, *"received income"*,
+        /// *"a gift or donation"*).
+        kind: &'static str,
+    },
 }
 
 /// A fail-closed refusal: the reason + a human-readable detail (surfaced to the user).
@@ -728,6 +757,9 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         //   are the registry's (unanswered) and the adverse-answer screen further down.
         opened_from: _,
         filing_status_confirmed: _,
+        // ★ R9 / T6 — a yes/no declaration. No money leaf; its refusals are the registry's
+        //   (unanswered) and `screen_compute_dependent`'s ledger cross-check.
+        digital_asset_activity: _,
     } = ri;
 
     if form_8960_line9b.is_some_and(neg) {
@@ -2482,6 +2514,12 @@ mod tests {
         ri.w2_wages_without_w2 = Some(false);
         ri.interest_or_dividends_without_1099 = Some(false);
         ri.state_refund_without_1099g = Some(false);
+        // ★★★ R9 / T6 — Form 1040 page 1's Digital Assets question, answered. ALWAYS live (the form
+        //     prints it on every return), so a fixture that left it blank would refuse on it instead
+        //     of on the rule it was written to exercise. `false` is the neutral, and these fixtures
+        //     carry no ledger at all — `screen_inputs` never sees one, and the ledger CROSS-CHECK
+        //     lives in `screen_compute_dependent`, which these tests do not call.
+        ri.digital_asset_activity = Some(false);
         ri
     }
     /// ★ R3 — screen a fixture, first making its census COHERENT with the rows it carries.
@@ -4244,6 +4282,8 @@ mod tests {
             r.w2_wages_without_w2 = Some(false);
             r.interest_or_dividends_without_1099 = Some(false);
             r.state_refund_without_1099g = Some(false);
+            // ★ R9 / T6 — Form 1040 page 1's Digital Assets question, always live (see `ri`).
+            r.digital_asset_activity = Some(false);
             r
         };
         // I4: box 1b (qualified) > box 1a (ordinary) on a form ⇒ refuse (phantom preferential income).

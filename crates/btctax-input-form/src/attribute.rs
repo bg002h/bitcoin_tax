@@ -291,6 +291,14 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::ItemizedPriorYearUnanswered | R::StateAndLocalRefundWorksheetNotComputed => {
             vec![decl(QuestionId::ItemizedPriorYear)]
         }
+        // ── ★★★ R9 / T6 — the Digital Assets question. BOTH legs anchor on the declaration, and
+        //    neither is `NotInForm`: the unanswered one is cleared by answering it, and the
+        //    CONTRADICTED one is cleared either by answering it the other way (right here) or by
+        //    correcting the ledger — and the refusal's own text names the event and that second
+        //    exit. An anchor claiming the form cannot reach this would be false. ──
+        R::DigitalAssetActivityUnanswered | R::DigitalAssetAnswerContradictsLedger { .. } => {
+            vec![decl(QuestionId::DigitalAssetActivity)]
+        }
         // ── ★★★ R4 / T5 — the box decisions that refuse. Each anchors on the BOX. ──
         R::AmortizableBondPremiumNotComputed => vec![
             Anchor::Field(FieldId::Int1099Box11BondPremium),

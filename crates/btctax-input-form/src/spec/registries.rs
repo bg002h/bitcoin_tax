@@ -303,6 +303,12 @@ const DECL_FIELDS: &[Field] = &[
         ri.itemized_prior_year = None;
         Ok(())
     }),
+    // ★★★ Index 40 — R9 / T6's DIGITAL ASSETS question, Form 1040 page 1. Appended at the END for
+    //     the array-index reason above.
+    decl_tristate!(40, FieldId::DeclDigitalAssetActivity, |ri| {
+        ri.digital_asset_activity = None;
+        Ok(())
+    }),
     FOREIGN_COUNTRY_NAMES,
 ];
 
@@ -615,6 +621,7 @@ pub fn field_to_question(id: FieldId) -> Option<QuestionId> {
         FieldId::DeclInterestOrDividendsWithout1099 => QuestionId::InterestOrDividendsWithout1099,
         FieldId::DeclStateRefundWithout1099g => QuestionId::StateRefundWithout1099g,
         FieldId::DeclItemizedPriorYear => QuestionId::ItemizedPriorYear,
+        FieldId::DeclDigitalAssetActivity => QuestionId::DigitalAssetActivity,
         _ => return None,
     })
 }
@@ -680,6 +687,10 @@ pub fn question_to_field(id: QuestionId) -> FieldId {
         QuestionId::InterestOrDividendsWithout1099 => FieldId::DeclInterestOrDividendsWithout1099,
         QuestionId::StateRefundWithout1099g => FieldId::DeclStateRefundWithout1099g,
         QuestionId::ItemizedPriorYear => FieldId::DeclItemizedPriorYear,
+        // ★ R9 / T6 — Form 1040 page 1's Digital Assets question. Not deduped anywhere: no other
+        //   section carries it, and the crypto/1099-DA block asks about BROKER REPORTING, which is
+        //   a different question with a different answer space.
+        QuestionId::DigitalAssetActivity => FieldId::DeclDigitalAssetActivity,
     }
 }
 

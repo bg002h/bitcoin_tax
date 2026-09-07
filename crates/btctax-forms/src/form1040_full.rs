@@ -361,17 +361,32 @@ pub fn fill_form_1040_full_with_map(
     ));
     placements.push(FlatPlacement::check(fs.field.clone(), 0));
 
-    // ── The Digital-Asset question. btctax answers "Yes" or leaves it to the filer — never "No". ─
-    if lines.digital_asset_yes {
-        let da = map
-            .da_yes
-            .as_ref()
-            .ok_or_else(|| FormsError::Geometry(format!("the TY{y} 1040 map has no `da_yes`")))?;
-        writes.push((
-            da.field.clone(),
-            pdf::FieldValue::Check { on: da.on.clone() },
-        ));
-        placements.push(FlatPlacement::check(da.field.clone(), 0));
+    // ── ★★★ **The Digital Assets question — THE FILER'S ANSWER** (R9 / T6). ────────────────────
+    //
+    //     `Some(true)` checks *Yes*, `Some(false)` checks *No*, `None` checks neither and
+    //     `hand_marks` tells the filer the mandatory question is unmarked. It read a `bool` fed
+    //     from a ledger predicate until T6, and a predicate can only ever say *Yes*: a filer who
+    //     bought monthly and sold nothing signed a return with page 1's mandatory question blank.
+    //
+    // ★ A year whose 1040 carries NO digital-asset question at all (2017 — the map omits both
+    //   boxes) prints neither, whatever the answer says. A map with one box and not the other is a
+    //   BROKEN map, and fails loud rather than silently dropping the answer.
+    if let Some(answer) = lines.digital_asset_answer {
+        if map.da_yes.is_some() || map.da_no.is_some() {
+            let (cell, name) = if answer {
+                (map.da_yes.as_ref(), "da_yes")
+            } else {
+                (map.da_no.as_ref(), "da_no")
+            };
+            let da = cell.ok_or_else(|| {
+                FormsError::Geometry(format!("the TY{y} 1040 map has no `{name}`"))
+            })?;
+            writes.push((
+                da.field.clone(),
+                pdf::FieldValue::Check { on: da.on.clone() },
+            ));
+            placements.push(FlatPlacement::check(da.field.clone(), 0));
+        }
     }
 
     let mut doc = pdf::load(pdf::f1040_pdf(y)?)?;

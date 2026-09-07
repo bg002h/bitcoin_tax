@@ -137,6 +137,11 @@ fn full_return_vault(
         //   count). Deliberately NOT a second `answer_all_live_declarations`: a shape that BLANKS a
         //   declaration to prove the screen refuses must keep its blank.
         btctax_core::tax::testonly::reconcile_document_census(&mut ri);
+        // ★★★ R9 / T6 — the Digital Assets ANSWER, read off this vault's own ledger. These
+        //     fixtures dispose crypto in 2024, so the neutral `No` that
+        //     `answer_all_live_declarations` writes is a "no" the data contradicts.
+        let (state, _) = s.project().expect("the fixture ledger projects");
+        btctax_core::tax::testonly::reconcile_digital_asset_activity(&mut ri, &state, 2024);
         return_inputs::set(s.conn(), 2024, &ri).unwrap();
         s.save().unwrap();
     }
@@ -313,7 +318,13 @@ fn a_negative_or_fractional_pay_is_refused_but_paying_above_line_6_is_not() {
 /// MONEY is attached to may not be the exception to this gate (spec C-2).
 #[test]
 fn a_pseudo_ledger_is_refused_without_the_phrase_and_watermarked_with_it() {
-    let (_d, vault, out) = full_return_vault(&pseudo_events_2024(), |_| {});
+    // ★ R9 / T6 — answered `Yes` explicitly, because the helper's ledger-derived answer cannot see
+    //   this one: the row is stored while pseudo mode is still OFF, so the projection the helper
+    //   reads holds no disposal while the projection the export computes does. The disposal is real
+    //   either way — pseudo defaults a BASIS, not whether coins left.
+    let (_d, vault, out) = full_return_vault(&pseudo_events_2024(), |ri| {
+        ri.digital_asset_activity = Some(true);
+    });
     cmd::reconcile::pseudo_set_mode(&vault, &pp(), true).expect("pseudo mode on");
 
     let err = cmd::admin::extension(&vault, &pp(), out.path(), 2024, None, false, None, late())

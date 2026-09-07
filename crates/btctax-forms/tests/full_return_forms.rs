@@ -1734,7 +1734,7 @@ fn f1040() -> Form1040Lines {
         line33: dec!(26215),
         line34: Usd::ZERO,
         line37: dec!(904),
-        digital_asset_yes: true,
+        digital_asset_answer: Some(true),
     }
 }
 
@@ -4107,4 +4107,57 @@ fn schedule_d_refuses_a_non_zero_per_box_total_on_an_unbound_row() {
     zeroed.line1b_h = Usd::ZERO;
     btctax_forms::testonly::fill_schedule_d_full_with_map(&zeroed, &kitchen_sink_header(), &map)
         .expect("an unbound row with nothing to print is not an error");
+}
+
+/// ★★★ **R9 / T6 — THE NEXT SURFACE: what the EMITTER does with the answer the interview wrote.**
+///
+/// `Form1040Lines.digital_asset_answer` is an `Option<bool>` now, and this is the join that turns it
+/// into ink: `Some(true)` checks the *Yes* box, `Some(false)` checks the ***No*** box, and `None`
+/// checks neither. The middle cell is the one T6 exists for — the box was decided by a ledger
+/// predicate that could only ever say *Yes*, so the ***No*** field in the map carried the comment
+/// *"never checked by btctax"* and a filer who bought and did not sell signed a return with page 1's
+/// mandatory question blank.
+///
+/// ★★ The on-STATE is asserted, not merely "something was written": the 2024 pair is `1`/`2` on ONE
+///    field (`c1_5[0]`/`c1_5[1]`), so a fill that wrote the right field with the wrong on-state
+///    renders BLANK while reading back as set — the exact defect `box_on_state` exists to catch.
+#[test]
+fn the_1040_digital_asset_box_prints_the_filers_answer_including_no() {
+    let yes_field = "topmostSubform[0].Page1[0].c1_5[0]";
+    let no_field = "topmostSubform[0].Page1[0].c1_5[1]";
+    let fill = |answer: Option<bool>| {
+        let mut l = f1040();
+        l.digital_asset_answer = answer;
+        btctax_forms::fill_form_1040_full(&l, &kitchen_sink_header(), FilingStatus::Single, 2024)
+            .unwrap()
+    };
+
+    // ── Yes ─────────────────────────────────────────────────────────────────────────────────────
+    let pdf = fill(Some(true));
+    assert_eq!(
+        box_on_state(&pdf, yes_field).as_deref(),
+        Some("1"),
+        "a `Yes` answer checks the Yes box, in the 2024 revision's own on-state"
+    );
+    assert!(
+        !box_on(&pdf, no_field),
+        "…and never both: the pair is mutually exclusive on the printed page"
+    );
+
+    // ── No — THE CELL T6 MADE REACHABLE ─────────────────────────────────────────────────────────
+    let pdf = fill(Some(false));
+    assert_eq!(
+        box_on_state(&pdf, no_field).as_deref(),
+        Some("2"),
+        "★★★ a `No` answer checks the NO box. Before T6 this box was never written by btctax, so a \
+         filer with no digital-asset activity signed a return with a MANDATORY question blank"
+    );
+    assert!(!box_on(&pdf, yes_field), "…and the Yes box stays clear");
+
+    // ── Unanswered ⇒ NEITHER. A blank is no testimony; a guessed box is fabricated testimony. ────
+    let pdf = fill(None);
+    assert!(
+        !box_on(&pdf, yes_field) && !box_on(&pdf, no_field),
+        "an unanswered question prints NEITHER box — btctax does not answer for the filer"
+    );
 }

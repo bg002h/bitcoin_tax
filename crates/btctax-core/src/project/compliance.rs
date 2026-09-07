@@ -201,15 +201,58 @@ fn collect_elections(events: &[LedgerEvent], voided: &BTreeSet<EventId>) -> Vec<
 /// and load-order-independent.  Output is sorted by `disposal` (`EventId: Ord`).
 ///
 /// **Read-only:** no events are appended; the function is a pure function of its inputs.
-pub fn disposal_compliance(events: &[LedgerEvent], state: &LedgerState) -> Vec<DisposalCompliance> {
-    // ── 1. Build the voided set ──────────────────────────────────────────────────────────────────
-    let voided: BTreeSet<EventId> = events
+/// The decisions a `VoidDecisionEvent` has retracted. Factored out so [`disposal_compliance`] and
+/// [`standing_order_in_force`] cannot disagree about which elections are still live.
+fn voided_set(events: &[LedgerEvent]) -> BTreeSet<EventId> {
+    events
         .iter()
         .filter_map(|e| match &e.payload {
             EventPayload::VoidDecisionEvent(v) => Some(v.target_event_id.clone()),
             _ => None,
         })
-        .collect();
+        .collect()
+}
+
+/// ★★★ **R9 / T6 — IS A STANDING ORDER IN FORCE for `wallet` on `date`?** `Some(effective_from)` or
+/// `None`.
+///
+/// Notice 2026-20 §4.02(2) makes an adequate identification out of *"[r]ecording a standing order on
+/// the taxpayer's books and records … entered into the taxpayer's books and records **before** the
+/// units covered by the order are sold, disposed of, or transferred"*. `MethodElection` IS that
+/// standing order in this product, and this answers the only question the interview's Step 0 panel
+/// asks about it: on the day of your first custodial disposition of the year, was one recorded?
+///
+/// ★★★ **It CALLS the shared resolver, and that is the whole design.** `resolve_election` is the
+///     SOLE method-resolution path — the fold uses it to decide the filed basis and
+///     `disposal_compliance` uses it to report the §A.5 verdict — so the panel's warning cannot
+///     disagree with the engine about whether an election governs. A second predicate here ("is
+///     there a `MethodElection` whose `effective_from <= date`?") would be a third copy of a rule
+///     that already has two callers, and it would get the two-independent-tiers precedence wrong.
+///
+/// ★★ **DEVIATION FROM R9's WORDING, recorded.** R9 says *"no `MethodElection` with `--exchange`
+///     scope effective before it"*. The resolver's tier 2 also honours a GLOBAL election, and this
+///     function does too: a filer with a global standing order recorded before the sale HAS made the
+///     §4.02(2) identification, the fold already treats that disposal as `StandingOrder`, and warning
+///     them would contradict the engine's own verdict while naming no action they have not taken
+///     (an election can never be back-dated — `MethodElectionBackdated`).
+///
+/// ★ A `LotSelection` is deliberately NOT consulted. §4.02(1) is the OTHER limb of the relief, and
+///   naming lots per-disposal does not make a standing order exist; R9's row is about the standing
+///   order, and conflating the two would silence the warning for a filer who has none.
+#[must_use]
+pub fn standing_order_in_force(
+    events: &[LedgerEvent],
+    wallet: &WalletId,
+    date: TaxDate,
+) -> Option<TaxDate> {
+    let voided = voided_set(events);
+    let elections = collect_elections(events, &voided);
+    resolve_election(date, wallet, &elections).map(|e| e.effective_from)
+}
+
+pub fn disposal_compliance(events: &[LedgerEvent], state: &LedgerState) -> Vec<DisposalCompliance> {
+    // ── 1. Build the voided set ──────────────────────────────────────────────────────────────────
+    let voided = voided_set(events);
 
     // ── 2. Collect eligible elections ───────────────────────────────────────────────────────────
     let elections = collect_elections(events, &voided);

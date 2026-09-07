@@ -715,7 +715,7 @@ pub fn assemble_printed_forms(
         status,
         ri.payments.other_withholding,
         ri.payments.estimated_tax_payments,
-        pi.digital_asset_activity,
+        pi.digital_asset_answer,
     );
 
     PrintedForms {

@@ -903,8 +903,13 @@ pub struct Form1040Map {
     /// year's 1040 has no DA question (2017).
     #[serde(default)]
     pub da_yes: Option<CheckChoice>,
-    /// Digital-Asset question "No" (right member, on-state `/2`) — never checked by btctax. `None`
-    /// when the year's 1040 has no DA question (2017).
+    /// Digital-Asset question "No" (right member, on-state `/2`). `None` when the year's 1040 has no
+    /// DA question (2017).
+    ///
+    /// ★★★ R9 / T6 — this IS checked now, when the filer answers the question `No`. It said *"never
+    /// checked by btctax"* while the box was decided by a ledger predicate that could only ever say
+    /// *Yes*; the box is the filer's ANSWER now, and a filer who bought and did not sell answers
+    /// *No*.
     #[serde(default)]
     pub da_no: Option<CheckChoice>,
 

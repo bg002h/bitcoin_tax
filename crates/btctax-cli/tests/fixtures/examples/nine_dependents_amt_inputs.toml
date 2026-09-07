@@ -80,6 +80,13 @@ w2_wages_without_w2 = false
 interest_or_dividends_without_1099 = false
 state_refund_without_1099g = false
 
+# ── R9 / T6 — FORM 1040 PAGE 1's DIGITAL ASSETS QUESTION. Mandatory on every return: "You must
+#    answer the digital asset question on Form 1040 whether or not you received a Form 1099-DA."
+#    This household holds securities, not digital assets, and has an EMPTY btctax ledger — so the
+#    truthful answer is "No", and printing it is exactly what T6 made possible (before it, btctax
+#    could only ever check "Yes" or leave a mandatory question blank on a signed return).
+digital_asset_activity = false
+
 # ── R3 / §5.1 — THE DOCUMENT CENSUS. Every type ANSWERED: "none" and "nobody asked" are the same
 #    blank on the printed page and are not the same testimony, so an unanswered row refuses.
 #

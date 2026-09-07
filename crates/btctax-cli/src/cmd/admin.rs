@@ -431,12 +431,19 @@ pub struct IrsPdfReport {
 /// correctly-filed form is worse than silence.
 fn hand_marks(printed: &btctax_core::tax::packet::PrintedReturn) -> Vec<String> {
     let mut marks = Vec::new();
-    if !printed.forms.f1040.digital_asset_yes {
+    // ★★★ R9 / T6 — the mark is now conditioned on the question being UNANSWERED, not on the box
+    //     being unchecked. Before T6 the box came from a ledger predicate that could only say
+    //     *Yes*, so this mark fired on every no-crypto return and the filer was told to hand-mark a
+    //     mandatory question the tool had simply never asked. The question is asked now, `None`
+    //     refuses at `screen_inputs`, and the mark is the FAIL-CLOSED backstop for a packet that
+    //     somehow reaches print with no answer — it says nothing on a return that answered.
+    if printed.forms.f1040.digital_asset_answer.is_none() {
         marks.push(
             "Form 1040 — the Digital Asset question (above line 1a): neither \"Yes\" nor \"No\" is \
-             marked. btctax found no digital-asset activity in this vault, but it will not swear \
-             \"No\" for a ledger it was never given — a wrong \"No\" here is sworn testimony under \
-             §6065. The question is MANDATORY: answer it yourself before you sign."
+             marked, because this return does not record an answer to it. btctax will not swear \
+             either way for you — a wrong \"No\" here is sworn testimony under §6065. The question \
+             is MANDATORY: answer it (`btctax income answer`) and re-export, or mark it yourself \
+             before you sign."
                 .to_string(),
         );
     }

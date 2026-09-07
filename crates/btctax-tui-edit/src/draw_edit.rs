@@ -2019,8 +2019,12 @@ fn draw_tax_inputs_form(
     //   (R11's sentence plus the readiness line), so the block's height reads the SAME function the
     //   renderer draws from — a layout that guessed would clip the fact it exists to state.
     let gate_rows = u16::try_from(form.year_gate_lines().len()).unwrap_or(1);
-    // border(2) + active-source(1) + gate(g) + legend(1) + notice(≥1, always reserved as before T4).
-    let status_h = 4 + gate_rows + notice_rows.max(1);
+    // ★★★ R9 / T6 — STEP 0's rows, sized from the SAME function the renderer draws from, for the
+    //     reason the year gate is: a layout that guessed would clip the venue this panel exists to
+    //     name.
+    let step0_rows = u16::try_from(form.step0_lines().len()).unwrap_or(1);
+    // border(2) + active-source(1) + Step 0(s) + gate(g) + legend(1) + notice(≥1, as before T4).
+    let status_h = 4 + step0_rows + gate_rows + notice_rows.max(1);
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(status_h)])
@@ -2167,8 +2171,19 @@ fn draw_tax_inputs_modal(frame: &mut Frame, area: Rect, form: &TaxInputsFormStat
         )),
         Line::from(""),
     ];
+    // ★★★ **R9 / T6 — PRE-WRAPPED, so the height COUNT and the rows DRAWN are the same number.**
+    //
+    //     The modal sized itself from the LOGICAL line count while the `Paragraph` word-wraps, so a
+    //     summary line longer than the modal was drawn on two rows and the box was one row short —
+    //     silently clipping whatever came last. Harmless while the summary was three short lines;
+    //     the moment T6's venue-vs-answer listing rode along, the standing-order block was the thing
+    //     that fell off the bottom. Wrapping HERE makes `lines.len()` exact and the `Wrap` below a
+    //     no-op rather than a second, uncounted layout.
+    let inner_w = usize::from(70u16.min(area.width).saturating_sub(4)).max(20);
     for s in m.summary.lines() {
-        lines.push(Line::from(format!("  {s}")));
+        for w in wrap_to(s, inner_w) {
+            lines.push(Line::from(format!("  {w}")));
+        }
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
@@ -2176,7 +2191,10 @@ fn draw_tax_inputs_modal(frame: &mut Frame, area: Rect, form: &TaxInputsFormStat
         Style::default().fg(Color::DarkGray),
     )));
 
-    let height = (lines.len() as u16 + 2).max(10);
+    let height = (u16::try_from(lines.len())
+        .unwrap_or(u16::MAX)
+        .saturating_add(2))
+    .max(10);
     let rect = centered_rect(70, height, area);
     frame.render_widget(Clear, rect);
     let p = Paragraph::new(lines)
@@ -2350,6 +2368,18 @@ fn draw_tax_inputs_status(
         Span::raw("   ·   "),
         Span::styled(screen_status, screen_style),
     ])];
+    // ★★★ **R9 / T6 — STEP 0, THE INTERVIEW'S ENTRY.** The LEDGER's status for this year, beside
+    //     the year gate rather than in front of it: authoring proceeds with an unresolved ledger, so
+    //     this reports and never blocks. Yellow only when something is outstanding — a panel that
+    //     always looked the same would signal nothing.
+    let step0_style = if form.step0.rows() == 0 {
+        Style::default().fg(Color::DarkGray)
+    } else {
+        Style::default().fg(Color::Yellow)
+    };
+    for s0 in form.step0_lines() {
+        lines.push(Line::from(Span::styled(format!("  {s0}"), step0_style)));
+    }
     for g in &gate_lines {
         lines.push(Line::from(Span::styled(format!("  {g}"), gate_style)));
     }
@@ -3060,6 +3090,40 @@ fn draw_help_overlay(frame: &mut Frame, area: Rect) {
             .border_style(Style::default().fg(Color::Yellow)),
     );
     frame.render_widget(p, rect);
+}
+
+/// Hard-wrap `text` on whitespace at `width`, continuation lines indented two spaces. A single word
+/// longer than `width` is emitted whole rather than cut — a truncated venue label is worse than a
+/// long line, and the caller sizes the box from what this returns.
+fn wrap_to(text: &str, width: usize) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        let pad = if out.is_empty() { 0 } else { 2 };
+        if !line.is_empty() && pad + line.chars().count() + 1 + word.chars().count() > width {
+            out.push(if out.is_empty() {
+                line.clone()
+            } else {
+                format!("  {line}")
+            });
+            line.clear();
+        }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(word);
+    }
+    if !line.is_empty() {
+        out.push(if out.is_empty() {
+            line
+        } else {
+            format!("  {line}")
+        });
+    }
+    if out.is_empty() {
+        out.push(String::new());
+    }
+    out
 }
 
 fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
@@ -6457,6 +6521,160 @@ mod tests {
             .iter()
             .map(|cell| cell.symbol().chars().next().unwrap_or(' '))
             .collect()
+    }
+
+    /// ★★★ **R9 / T6 — STEP 0 IS ON THE ENTRY SCREEN, AND NOTHING IT SAYS IS CLIPPED.**
+    ///
+    /// Two guarantees in one render, because either alone passes on a broken implementation: a panel
+    /// that drew nothing would satisfy "no line is cut", and one whose rows ran off the pane would
+    /// satisfy "the venue is named".
+    ///
+    /// ★★ The clipping half is not hypothetical. The status block writes each line as one `Line` and
+    ///    the terminal CUTS at the pane edge — the first draft of this panel named a venue and then
+    ///    lost the consequence sentence and the standing-order row's date, which is the defect the
+    ///    panel exists to prevent one level up.
+    #[test]
+    fn step0_is_rendered_on_the_entry_screen_and_no_line_is_clipped() {
+        use crate::edit::form::TaxInputsFormState;
+        use btctax_cli::step0::{Step0Panel, Step0Row};
+
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
+        form.working = Some(btctax_core::tax::testonly::answered(
+            btctax_core::tax::return_inputs::ReturnInputs {
+                tax_year: 2024,
+                filing_status: btctax_core::FilingStatus::Single,
+                ..Default::default()
+            },
+        ));
+        form.step0 = Step0Panel {
+            year: 2024,
+            blockers: vec![Step0Row {
+                what: "2 × UnknownBasisInbound (HARD — commit and export refuse while it stands)"
+                    .into(),
+                handoff: "btctax reconcile classify-inbound-income <event>".into(),
+            }],
+            venues: vec![Step0Row {
+                what: "river has 4 noncovered row(s) on this year's Form 8949 and NO Form 1099-DA                        answer on file — a venue you disposed on is not accounted for"
+                    .into(),
+                handoff: "btctax income answer --year 2024".into(),
+            }],
+            standing_orders: vec![Step0Row {
+                what: "exchange:river:default: your first custodial disposition of 2024 is dated                        2024-05-01, and no standing order (a dated method election) was in force                        for it — expect box 1g to reflect the broker's default"
+                    .into(),
+                handoff: "btctax config --set-forward-method hifo".into(),
+            }],
+            ..Default::default()
+        };
+
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let rows: Vec<String> = (0..buf.area.height)
+            .map(|y| {
+                (0..buf.area.width)
+                    .map(|x| buf[(x, y)].symbol().chars().next().unwrap_or(' '))
+                    .collect()
+            })
+            .collect();
+        let screen = rows.join("\n");
+
+        // (1) The panel is THERE, and it names both things R9 says it must name.
+        assert!(
+            screen.contains("Step 0 (2024)"),
+            "the Step 0 panel is the interview's entry: {screen}"
+        );
+        assert!(
+            screen.contains("river"),
+            "the venue with no Form 1099-DA answer is NAMED (J-4, J-7): {screen}"
+        );
+        assert!(
+            screen.contains("2024-05-01"),
+            "the standing-order row names the date §4.02(2) turns on: {screen}"
+        );
+
+        // (2) NOTHING IS CLIPPED. Every line the panel produced appears in full — reassembled across
+        //     its wrapped rows, so a row cut at the pane edge is a failure rather than a shrug.
+        let flat: String = screen.split_whitespace().collect::<Vec<_>>().join(" ");
+        for line in form.step0_lines() {
+            let want: String = line.split_whitespace().collect::<Vec<_>>().join(" ");
+            assert!(
+                flat.contains(&want),
+                "a Step 0 line was CLIPPED by the pane — the panel said it and the filer cannot \
+                 read it.\n  wanted: {want}\n  screen: {flat}"
+            );
+        }
+    }
+
+    /// ★★★ **R9 / T6 — the commit modal's venue-vs-answer listing is DRAWN, not just built.**
+    ///
+    /// The modal sized itself from the LOGICAL line count while its `Paragraph` word-wraps, so a
+    /// summary longer than the box was drawn on more rows than were reserved and the tail fell off
+    /// the bottom. It was harmless while the summary was three short lines; the venue listing is
+    /// what made it visible.
+    #[test]
+    fn the_commit_modal_shows_the_whole_venue_listing_including_its_last_line() {
+        use crate::edit::form::{TaxInputsFormState, TaxInputsModalKind, TaxInputsModalState};
+        use btctax_cli::step0::{Step0Panel, Step0Row};
+
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
+        form.working = Some(btctax_core::tax::testonly::answered(
+            btctax_core::tax::return_inputs::ReturnInputs {
+                tax_year: 2024,
+                filing_status: btctax_core::FilingStatus::Single,
+                ..Default::default()
+            },
+        ));
+        let step0 = Step0Panel {
+            year: 2024,
+            venues: vec![Step0Row {
+                what: "river has 4 noncovered row(s) on this year's Form 8949 and NO Form 1099-DA                        answer on file — a venue you disposed on is not accounted for"
+                    .into(),
+                handoff: "btctax income answer --year 2024".into(),
+            }],
+            standing_orders: vec![Step0Row {
+                what: "exchange:river:default: no standing order was in force for the 2024-05-01                        sale — expect box 1g to reflect the broker's default, and SENTINEL_TAIL"
+                    .into(),
+                handoff: "btctax config --set-forward-method hifo".into(),
+            }],
+            ..Default::default()
+        };
+        let ri = form.working.as_ref().unwrap();
+        form.modal = Some(TaxInputsModalState {
+            kind: TaxInputsModalKind::Commit,
+            year: 2024,
+            filing_status_label: "Single".into(),
+            summary: crate::edit::tax_inputs::commit_summary_with_step0(ri, false, &step0),
+            shadows: false,
+        });
+
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .unwrap();
+        let flat: String = flatten(terminal.backend().buffer())
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        assert!(
+            flat.contains("VENUES WITH NO FORM 1099-DA ANSWER"),
+            "the listing is in the modal: {flat}"
+        );
+        assert!(
+            flat.contains("river has 4 noncovered"),
+            "…naming the venue: {flat}"
+        );
+        assert!(
+            flat.contains("SENTINEL_TAIL"),
+            "★★★ the LAST line of the listing must be drawn — a box sized from unwrapped lines \
+             clips exactly this: {flat}"
+        );
     }
 
     /// NI-2: on a `None` working copy the render shows ONLY the filing-status choice — no other

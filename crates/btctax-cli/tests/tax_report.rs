@@ -52,6 +52,27 @@ fn pp() -> Passphrase {
     Passphrase::new("pw".into())
 }
 
+/// ★★★ **R9 / T6 — `testonly::answered`, plus the DIGITAL ASSETS answer READ OFF THIS VAULT'S OWN
+/// LEDGER.**
+///
+/// `answer_all_live_declarations` answers every live class-(A) declaration at its declared neutral,
+/// and the Digital Assets question's neutral is `No` — which on a vault that disposed BTC in `year`
+/// is a "no" the data contradicts, i.e. `RefuseReason::DigitalAssetAnswerContradictsLedger`. That
+/// refusal would then fire on every fixture in this file instead of on the rule under test.
+///
+/// ★ DERIVED, never typed: the answer comes from the same predicate the refusal reads, so a fixture
+///   can never claim activity its own ledger does not have (or deny activity it does).
+fn answered_for(
+    s: &Session,
+    year: i32,
+    ri: btctax_core::tax::return_inputs::ReturnInputs,
+) -> btctax_core::tax::return_inputs::ReturnInputs {
+    let mut ri = btctax_core::tax::testonly::answered(ri);
+    let (state, _) = s.project().expect("the fixture ledger projects");
+    btctax_core::tax::testonly::reconcile_digital_asset_activity(&mut ri, &state, year);
+    ri
+}
+
 /// ★★★ **THE KEYSTROKE SCRIPT, DERIVED FROM THE REGISTRY — never hand-counted.**
 ///
 /// Every script in this file used to be a literal `b"n\nn\nn…"` whose length was a hand-count of the
@@ -856,7 +877,7 @@ fn report_tax_year_derives_and_computes_from_ty2024_return_inputs() {
     let toml = _dir.path().join("inputs.toml");
     std::fs::write(
         &toml,
-        "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\nfiling_form_4952 = false\n# R3 / T5 — the document-less income door, answered: no undocumented wages, interest,\n# dividends or state refund.\nw2_wages_without_w2 = false\ninterest_or_dividends_without_1099 = false\nstate_refund_without_1099g = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"90000\"\nbox2_fed_withheld = \"12000\"\nbox5_medicare_wages = \"90000\"\n\n\n# R3 — the document census: this household holds a W-2 and nothing else.\n[documents]\nw2 = true\nint_1099 = false\ndiv_1099 = false\nb_1099 = false\ng_1099 = false\nr_1099 = false\nssa_1099 = false\nnec_misc_k_1099 = false\nk1 = false\nschedule_e_rental = false\ns_1099 = false\noid_1099 = false\nw2g = false\nc_1099 = false\na_1095 = false\nt_1098 = false\nform_1098e = false\n",
+        "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\nfiling_form_4952 = false\n# R3 / T5 — the document-less income door, answered: no undocumented wages, interest,\n# dividends or state refund.\nw2_wages_without_w2 = false\ninterest_or_dividends_without_1099 = false\nstate_refund_without_1099g = false\n# R9 / T6 — Form 1040 page 1's Digital Assets question. This vault's only disposal is in 2025,\n# so 2024 saw no receipt and no disposition.\ndigital_asset_activity = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"90000\"\nbox2_fed_withheld = \"12000\"\nbox5_medicare_wages = \"90000\"\n\n\n# R3 — the document census: this household holds a W-2 and nothing else.\n[documents]\nw2 = true\nint_1099 = false\ndiv_1099 = false\nb_1099 = false\ng_1099 = false\nr_1099 = false\nssa_1099 = false\nnec_misc_k_1099 = false\nk1 = false\nschedule_e_rental = false\ns_1099 = false\noid_1099 = false\nw2g = false\nc_1099 = false\na_1095 = false\nt_1098 = false\nform_1098e = false\n",
     )
     .unwrap();
     // The CSV disposal is in 2025, but v1 full-return tables are TY2024-only; import for 2024 to exercise
@@ -907,7 +928,7 @@ fn report_tax_year_refuses_business_income_without_schedule_c() {
 
     // Full-return inputs for 2024 with NO Schedule C.
     let toml = _dir.path().join("inputs.toml");
-    std::fs::write(&toml, "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\nfiling_form_4952 = false\n# R3 / T5 — the document-less income door, answered: no undocumented wages, interest,\n# dividends or state refund.\nw2_wages_without_w2 = false\ninterest_or_dividends_without_1099 = false\nstate_refund_without_1099g = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n\n# R3 — the document census: this crypto-only household received no information return.\n[documents]\nw2 = false\nint_1099 = false\ndiv_1099 = false\nb_1099 = false\ng_1099 = false\nr_1099 = false\nssa_1099 = false\nnec_misc_k_1099 = false\nk1 = false\nschedule_e_rental = false\ns_1099 = false\noid_1099 = false\nw2g = false\nc_1099 = false\na_1095 = false\nt_1098 = false\nform_1098e = false\n").unwrap();
+    std::fs::write(&toml, "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\nfiling_form_4952 = false\n# R3 / T5 — the document-less income door, answered: no undocumented wages, interest,\n# dividends or state refund.\nw2_wages_without_w2 = false\ninterest_or_dividends_without_1099 = false\nstate_refund_without_1099g = false\n# R9 / T6 — this household RECEIVED digital assets as mining income in 2024, so the Form 1040\n# page-1 question is answered YES; a NO here would be contradicted by the ledger.\ndigital_asset_activity = true\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n\n# R3 — the document census: this crypto-only household received no information return.\n[documents]\nw2 = false\nint_1099 = false\ndiv_1099 = false\nb_1099 = false\ng_1099 = false\nr_1099 = false\nssa_1099 = false\nnec_misc_k_1099 = false\nk1 = false\nschedule_e_rental = false\ns_1099 = false\noid_1099 = false\nw2g = false\nc_1099 = false\na_1095 = false\nt_1098 = false\nform_1098e = false\n").unwrap();
     cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false, false).unwrap();
 
     let err = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap_err();
@@ -1709,18 +1730,22 @@ fn dual_report_renders_absolute_return_with_section_6_labels() {
         btctax_cli::return_inputs::set(
             s.conn(),
             2024,
-            &btctax_core::tax::testonly::answered(ReturnInputs {
-                filing_status: FilingStatus::Single,
-                header: adult_filer_header(),
-                w2s: vec![W2 {
-                    owner: Owner::Taxpayer,
-                    box1_wages: dec!(80000),
-                    box3_ss_wages: dec!(80000),
-                    box5_medicare_wages: dec!(80000),
+            &answered_for(
+                &s,
+                2024,
+                ReturnInputs {
+                    filing_status: FilingStatus::Single,
+                    header: adult_filer_header(),
+                    w2s: vec![W2 {
+                        owner: Owner::Taxpayer,
+                        box1_wages: dec!(80000),
+                        box3_ss_wages: dec!(80000),
+                        box5_medicare_wages: dec!(80000),
+                        ..Default::default()
+                    }],
                     ..Default::default()
-                }],
-                ..Default::default()
-            }),
+                },
+            ),
         )
         .unwrap();
         s.save().unwrap();
@@ -1784,19 +1809,23 @@ fn an_owing_year_names_the_voucher_and_the_extension_and_a_refund_year_does_not(
             btctax_cli::return_inputs::set(
                 s.conn(),
                 2024,
-                &btctax_core::tax::testonly::answered(ReturnInputs {
-                    filing_status: FilingStatus::Single,
-                    header: adult_filer_header(),
-                    w2s: vec![W2 {
-                        owner: Owner::Taxpayer,
-                        box1_wages: dec!(80000),
-                        box2_fed_withheld: withheld,
-                        box3_ss_wages: dec!(80000),
-                        box5_medicare_wages: dec!(80000),
+                &answered_for(
+                    &s,
+                    2024,
+                    ReturnInputs {
+                        filing_status: FilingStatus::Single,
+                        header: adult_filer_header(),
+                        w2s: vec![W2 {
+                            owner: Owner::Taxpayer,
+                            box1_wages: dec!(80000),
+                            box2_fed_withheld: withheld,
+                            box3_ss_wages: dec!(80000),
+                            box5_medicare_wages: dec!(80000),
+                            ..Default::default()
+                        }],
                         ..Default::default()
-                    }],
-                    ..Default::default()
-                }),
+                    },
+                ),
             )
             .unwrap();
             s.save().unwrap();
@@ -1884,6 +1913,13 @@ fn the_prior_year_worksheet_figure_is_the_m4_authority_for_a_floor_year() {
                 long: dec!(60000),
             };
             btctax_core::tax::testonly::answer_all_live_declarations(&mut y2024);
+            // ★ R9 / T6 — the Digital Assets answer, off this vault's own ledger.
+            {
+                let (state, _) = s.project().expect("the fixture ledger projects");
+                btctax_core::tax::testonly::reconcile_digital_asset_activity(
+                    &mut y2024, &state, 2024,
+                );
+            }
             btctax_cli::return_inputs::set(s.conn(), 2024, &y2024).unwrap();
             s.save().unwrap();
         }
@@ -2014,6 +2050,11 @@ fn the_report_never_shows_two_unlabelled_carryforward_out_figures() {
             long: dec!(20000),
         };
         btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        // ★ R9 / T6 — the Digital Assets answer, off this vault's own ledger.
+        {
+            let (state, _) = s.project().expect("the fixture ledger projects");
+            btctax_core::tax::testonly::reconcile_digital_asset_activity(&mut ri, &state, 2024);
+        }
         btctax_cli::return_inputs::set(s.conn(), 2024, &ri).unwrap();
         s.save().unwrap();
     }
@@ -2050,6 +2091,11 @@ fn the_report_never_shows_two_unlabelled_carryforward_out_figures() {
             ..Default::default()
         };
         btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        // ★ R9 / T6 — the Digital Assets answer, off this vault's own ledger.
+        {
+            let (state, _) = s.project().expect("the fixture ledger projects");
+            btctax_core::tax::testonly::reconcile_digital_asset_activity(&mut ri, &state, 2024);
+        }
         btctax_cli::return_inputs::set(s.conn(), 2024, &ri).unwrap();
         s.save().unwrap();
     }
@@ -2106,6 +2152,11 @@ fn rolling_a_carryover_never_leaves_next_year_unfilable_in_silence() {
             long: dec!(60000),
         };
         btctax_core::tax::testonly::answer_all_live_declarations(&mut y2024);
+        // ★ R9 / T6 — the Digital Assets answer, off this vault's own ledger.
+        {
+            let (state, _) = s.project().expect("the fixture ledger projects");
+            btctax_core::tax::testonly::reconcile_digital_asset_activity(&mut y2024, &state, 2024);
+        }
         btctax_cli::return_inputs::set(s.conn(), 2024, &y2024).unwrap();
 
         // 2025: a plain Single row that screens CLEAN today.
@@ -2313,6 +2364,11 @@ fn the_writeback_summary_names_every_carryover_it_wrote() {
             long: dec!(60000),
         };
         btctax_core::tax::testonly::answer_all_live_declarations(&mut y2024);
+        // ★ R9 / T6 — the Digital Assets answer, off this vault's own ledger.
+        {
+            let (state, _) = s.project().expect("the fixture ledger projects");
+            btctax_core::tax::testonly::reconcile_digital_asset_activity(&mut y2024, &state, 2024);
+        }
         btctax_cli::return_inputs::set(s.conn(), 2024, &y2024).unwrap();
 
         let seed = btctax_core::tax::testonly::answered(ReturnInputs {
@@ -2404,39 +2460,47 @@ fn the_summary_does_not_claim_a_capital_loss_write_the_gate_skipped() {
         btctax_cli::return_inputs::set(
             s.conn(),
             2024,
-            &btctax_core::tax::testonly::answered(ReturnInputs {
-                filing_status: FilingStatus::Single,
-                header: adult_filer_header(),
-                charitable_cwa_obtained: Some(true),
-                w2s: vec![W2 {
-                    owner: Owner::Taxpayer,
-                    box1_wages: dec!(50000),
-                    box3_ss_wages: dec!(50000),
-                    box5_medicare_wages: dec!(50000),
-                    ..Default::default()
-                }],
-                // Overflows the 60%-of-AGI ceiling ⇒ a real CHARITABLE carryover-out, so the roll
-                // succeeds and there is a summary to be wrong.
-                schedule_a: Some(ScheduleAInputs {
-                    charitable: vec![CharitableGift {
-                        class: CharitableClass::Cash60,
-                        amount: dec!(40000),
+            &answered_for(
+                &s,
+                2024,
+                ReturnInputs {
+                    filing_status: FilingStatus::Single,
+                    header: adult_filer_header(),
+                    charitable_cwa_obtained: Some(true),
+                    w2s: vec![W2 {
+                        owner: Owner::Taxpayer,
+                        box1_wages: dec!(50000),
+                        box3_ss_wages: dec!(50000),
+                        box5_medicare_wages: dec!(50000),
+                        ..Default::default()
                     }],
+                    // Overflows the 60%-of-AGI ceiling ⇒ a real CHARITABLE carryover-out, so the roll
+                    // succeeds and there is a summary to be wrong.
+                    schedule_a: Some(ScheduleAInputs {
+                        charitable: vec![CharitableGift {
+                            class: CharitableClass::Cash60,
+                            amount: dec!(40000),
+                        }],
+                        ..Default::default()
+                    }),
                     ..Default::default()
-                }),
-                ..Default::default()
-            }),
+                },
+            ),
         )
         .unwrap();
         btctax_cli::return_inputs::set(
             s.conn(),
             2025,
-            &btctax_core::tax::testonly::answered(ReturnInputs {
-                tax_year: 2025,
-                filing_status: FilingStatus::Single,
-                header: adult_filer_header(),
-                ..Default::default()
-            }),
+            &answered_for(
+                &s,
+                2025,
+                ReturnInputs {
+                    tax_year: 2025,
+                    filing_status: FilingStatus::Single,
+                    header: adult_filer_header(),
+                    ..Default::default()
+                },
+            ),
         )
         .unwrap();
         s.save().unwrap();
@@ -2501,29 +2565,33 @@ fn carryover_write_back_round_trips_and_respects_user_precedence() {
         btctax_cli::return_inputs::set(
             s.conn(),
             2024,
-            &btctax_core::tax::testonly::answered(ReturnInputs {
-                filing_status: FilingStatus::Single,
-                header: adult_filer_header(),
-                w2s: vec![W2 {
-                    owner: Owner::Taxpayer,
-                    box1_wages: dec!(50000),
-                    box3_ss_wages: dec!(50000),
-                    box5_medicare_wages: dec!(50000),
-                    ..Default::default()
-                }],
-                // §170(f)(8): this filer holds a contemporaneous written acknowledgment for the
-                // $40,000 gift. Not covered by `answered()`, which walks the DECLARATION registry;
-                // the CWA is a class-(B) skippable made mandatory by `screen_absolute`.
-                charitable_cwa_obtained: Some(true),
-                schedule_a: Some(ScheduleAInputs {
-                    charitable: vec![CharitableGift {
-                        class: CharitableClass::Cash60,
-                        amount: dec!(40000),
+            &answered_for(
+                &s,
+                2024,
+                ReturnInputs {
+                    filing_status: FilingStatus::Single,
+                    header: adult_filer_header(),
+                    w2s: vec![W2 {
+                        owner: Owner::Taxpayer,
+                        box1_wages: dec!(50000),
+                        box3_ss_wages: dec!(50000),
+                        box5_medicare_wages: dec!(50000),
+                        ..Default::default()
                     }],
+                    // §170(f)(8): this filer holds a contemporaneous written acknowledgment for the
+                    // $40,000 gift. Not covered by `answered()`, which walks the DECLARATION registry;
+                    // the CWA is a class-(B) skippable made mandatory by `screen_absolute`.
+                    charitable_cwa_obtained: Some(true),
+                    schedule_a: Some(ScheduleAInputs {
+                        charitable: vec![CharitableGift {
+                            class: CharitableClass::Cash60,
+                            amount: dec!(40000),
+                        }],
+                        ..Default::default()
+                    }),
                     ..Default::default()
-                }),
-                ..Default::default()
-            }),
+                },
+            ),
         )
         .unwrap();
         s.save().unwrap();
@@ -2541,11 +2609,15 @@ fn carryover_write_back_round_trips_and_respects_user_precedence() {
         btctax_cli::return_inputs::set(
             s.conn(),
             2025,
-            &btctax_core::tax::testonly::answered(ReturnInputs {
-                filing_status: FilingStatus::Single,
-                header: adult_filer_header(),
-                ..Default::default()
-            }),
+            &answered_for(
+                &s,
+                2025,
+                ReturnInputs {
+                    filing_status: FilingStatus::Single,
+                    header: adult_filer_header(),
+                    ..Default::default()
+                },
+            ),
         )
         .unwrap();
         s.save().unwrap();
@@ -2580,6 +2652,11 @@ fn carryover_write_back_round_trips_and_respects_user_precedence() {
             provenance: CarryProvenance::User,
         }];
         btctax_core::tax::testonly::answer_all_live_declarations(&mut y2025);
+        // ★ R9 / T6 — the Digital Assets answer, off this vault's own ledger.
+        {
+            let (state, _) = s.project().expect("the fixture ledger projects");
+            btctax_core::tax::testonly::reconcile_digital_asset_activity(&mut y2025, &state, 2025);
+        }
         btctax_cli::return_inputs::set(s.conn(), 2025, &y2025).unwrap();
         s.save().unwrap();
     }
@@ -2656,6 +2733,11 @@ fn income_import_preserves_a_computed_capital_loss_carryover_and_the_qbi_busines
             long: dec!(60000),
         };
         btctax_core::tax::testonly::answer_all_live_declarations(&mut y2024);
+        // ★ R9 / T6 — the Digital Assets answer, off this vault's own ledger.
+        {
+            let (state, _) = s.project().expect("the fixture ledger projects");
+            btctax_core::tax::testonly::reconcile_digital_asset_activity(&mut y2024, &state, 2024);
+        }
         btctax_cli::return_inputs::set(s.conn(), 2024, &y2024).unwrap();
 
         let y2025 = btctax_core::tax::testonly::answered(ReturnInputs {
@@ -2762,40 +2844,48 @@ fn import_preserves_a_computed_carryover() {
         btctax_cli::return_inputs::set(
             s.conn(),
             2024,
-            &btctax_core::tax::testonly::answered(ReturnInputs {
-                filing_status: FilingStatus::Single,
-                header: adult_filer_header(),
-                w2s: vec![W2 {
-                    owner: Owner::Taxpayer,
-                    box1_wages: dec!(50000),
-                    box3_ss_wages: dec!(50000),
-                    box5_medicare_wages: dec!(50000),
-                    ..Default::default()
-                }],
-                // §170(f)(8): this filer holds a contemporaneous written acknowledgment for the
-                // $40,000 gift. Not covered by `answered()`, which walks the DECLARATION registry;
-                // the CWA is a class-(B) skippable made mandatory by `screen_absolute`.
-                charitable_cwa_obtained: Some(true),
-                schedule_a: Some(ScheduleAInputs {
-                    charitable: vec![CharitableGift {
-                        class: CharitableClass::Cash60,
-                        amount: dec!(40000),
+            &answered_for(
+                &s,
+                2024,
+                ReturnInputs {
+                    filing_status: FilingStatus::Single,
+                    header: adult_filer_header(),
+                    w2s: vec![W2 {
+                        owner: Owner::Taxpayer,
+                        box1_wages: dec!(50000),
+                        box3_ss_wages: dec!(50000),
+                        box5_medicare_wages: dec!(50000),
+                        ..Default::default()
                     }],
+                    // §170(f)(8): this filer holds a contemporaneous written acknowledgment for the
+                    // $40,000 gift. Not covered by `answered()`, which walks the DECLARATION registry;
+                    // the CWA is a class-(B) skippable made mandatory by `screen_absolute`.
+                    charitable_cwa_obtained: Some(true),
+                    schedule_a: Some(ScheduleAInputs {
+                        charitable: vec![CharitableGift {
+                            class: CharitableClass::Cash60,
+                            amount: dec!(40000),
+                        }],
+                        ..Default::default()
+                    }),
                     ..Default::default()
-                }),
-                ..Default::default()
-            }),
+                },
+            ),
         )
         .unwrap();
         // 2025 row must exist before the write-back (I1).
         btctax_cli::return_inputs::set(
             s.conn(),
             2025,
-            &btctax_core::tax::testonly::answered(ReturnInputs {
-                filing_status: FilingStatus::Single,
-                header: adult_filer_header(),
-                ..Default::default()
-            }),
+            &answered_for(
+                &s,
+                2025,
+                ReturnInputs {
+                    filing_status: FilingStatus::Single,
+                    header: adult_filer_header(),
+                    ..Default::default()
+                },
+            ),
         )
         .unwrap();
         s.save().unwrap();
@@ -2864,6 +2954,11 @@ fn full_return_report_surfaces_conservative_omission_advisories() {
                                                            //   ladder step 2 and proceeds. Condition 4 is then never asked.
         ri.header.form8615_condition3_age_support = Some(false);
         btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        // ★ R9 / T6 — the Digital Assets answer, off this vault's own ledger.
+        {
+            let (state, _) = s.project().expect("the fixture ledger projects");
+            btctax_core::tax::testonly::reconcile_digital_asset_activity(&mut ri, &state, 2024);
+        }
         btctax_cli::return_inputs::set(s.conn(), 2024, &ri).unwrap();
         s.save().unwrap();
     }
@@ -3292,11 +3387,12 @@ fn a_re_import_keeps_every_answer_record_already_on_the_row() {
     //   passes for the wrong reason, which is the whole failure class this file exists to catch.
     assert_eq!(
         before.len(),
-        34,
-        "the interview wrote {} records, not the 34 this kill was measured against — if the \
+        35,
+        "the interview wrote {} records, not the 35 this kill was measured against — if the \
          registry grew, update the number; if it SHRANK, the keystroke script is under-answering \
          and the survival assertion below has stopped meaning anything. ★ It was 30 before T5, \
-         which added the 1098-E census row and R3's three document-less income questions",
+         which added the 1098-E census row and R3's three document-less income questions, and 34 \
+         before T6, which added R9's Digital Assets question",
         before.len()
     );
 
@@ -3665,38 +3761,46 @@ fn the_full_remedy_chain_restores_a_computed_carryover() {
         btctax_cli::return_inputs::set(
             s.conn(),
             2024,
-            &btctax_core::tax::testonly::answered(ReturnInputs {
-                filing_status: FilingStatus::Single,
-                header: adult_filer_header(),
-                w2s: vec![W2 {
-                    box1_wages: dec!(50000),
-                    box5_medicare_wages: dec!(50000),
-                    ..Default::default()
-                }],
-                // §170(f)(8): this filer holds a contemporaneous written acknowledgment for the
-                // $40,000 gift. Not covered by `answered()`, which walks the DECLARATION registry;
-                // the CWA is a class-(B) skippable made mandatory by `screen_absolute`.
-                charitable_cwa_obtained: Some(true),
-                schedule_a: Some(ScheduleAInputs {
-                    charitable: vec![CharitableGift {
-                        class: CharitableClass::Cash60,
-                        amount: dec!(40000),
+            &answered_for(
+                &s,
+                2024,
+                ReturnInputs {
+                    filing_status: FilingStatus::Single,
+                    header: adult_filer_header(),
+                    w2s: vec![W2 {
+                        box1_wages: dec!(50000),
+                        box5_medicare_wages: dec!(50000),
+                        ..Default::default()
                     }],
+                    // §170(f)(8): this filer holds a contemporaneous written acknowledgment for the
+                    // $40,000 gift. Not covered by `answered()`, which walks the DECLARATION registry;
+                    // the CWA is a class-(B) skippable made mandatory by `screen_absolute`.
+                    charitable_cwa_obtained: Some(true),
+                    schedule_a: Some(ScheduleAInputs {
+                        charitable: vec![CharitableGift {
+                            class: CharitableClass::Cash60,
+                            amount: dec!(40000),
+                        }],
+                        ..Default::default()
+                    }),
                     ..Default::default()
-                }),
-                ..Default::default()
-            }),
+                },
+            ),
         )
         .unwrap();
         // 2025 row must exist for the write-back (I1).
         btctax_cli::return_inputs::set(
             s.conn(),
             2025,
-            &btctax_core::tax::testonly::answered(ReturnInputs {
-                filing_status: FilingStatus::Single,
-                header: adult_filer_header(),
-                ..Default::default()
-            }),
+            &answered_for(
+                &s,
+                2025,
+                ReturnInputs {
+                    filing_status: FilingStatus::Single,
+                    header: adult_filer_header(),
+                    ..Default::default()
+                },
+            ),
         )
         .unwrap();
         s.save().unwrap();
@@ -3735,27 +3839,31 @@ fn the_full_remedy_chain_restores_a_computed_carryover() {
         btctax_cli::return_inputs::set(
             s.conn(),
             2024,
-            &btctax_core::tax::testonly::answered(ReturnInputs {
-                filing_status: FilingStatus::Single,
-                header: adult_filer_header(),
-                w2s: vec![W2 {
-                    box1_wages: dec!(50000),
-                    box5_medicare_wages: dec!(50000),
-                    ..Default::default()
-                }],
-                // §170(f)(8): this filer holds a contemporaneous written acknowledgment for the
-                // $40,000 gift. Not covered by `answered()`, which walks the DECLARATION registry;
-                // the CWA is a class-(B) skippable made mandatory by `screen_absolute`.
-                charitable_cwa_obtained: Some(true),
-                schedule_a: Some(ScheduleAInputs {
-                    charitable: vec![CharitableGift {
-                        class: CharitableClass::Cash60,
-                        amount: dec!(40000),
+            &answered_for(
+                &s,
+                2024,
+                ReturnInputs {
+                    filing_status: FilingStatus::Single,
+                    header: adult_filer_header(),
+                    w2s: vec![W2 {
+                        box1_wages: dec!(50000),
+                        box5_medicare_wages: dec!(50000),
+                        ..Default::default()
                     }],
+                    // §170(f)(8): this filer holds a contemporaneous written acknowledgment for the
+                    // $40,000 gift. Not covered by `answered()`, which walks the DECLARATION registry;
+                    // the CWA is a class-(B) skippable made mandatory by `screen_absolute`.
+                    charitable_cwa_obtained: Some(true),
+                    schedule_a: Some(ScheduleAInputs {
+                        charitable: vec![CharitableGift {
+                            class: CharitableClass::Cash60,
+                            amount: dec!(40000),
+                        }],
+                        ..Default::default()
+                    }),
                     ..Default::default()
-                }),
-                ..Default::default()
-            }),
+                },
+            ),
         )
         .unwrap();
         s.save().unwrap();
@@ -3790,39 +3898,47 @@ fn fr2024_writeback_vault_with_pseudo_trigger() -> (tempfile::TempDir, PathBuf) 
     btctax_cli::return_inputs::set(
         s.conn(),
         2024,
-        &btctax_core::tax::testonly::answered(ReturnInputs {
-            filing_status: FilingStatus::Single,
-            header: adult_filer_header(),
-            w2s: vec![W2 {
-                owner: Owner::Taxpayer,
-                box1_wages: dec!(50000),
-                box3_ss_wages: dec!(50000),
-                box5_medicare_wages: dec!(50000),
-                ..Default::default()
-            }],
-            // §170(f)(8): this filer holds a contemporaneous written acknowledgment for the
-            // $40,000 gift. Not covered by `answered()`, which walks the DECLARATION registry;
-            // the CWA is a class-(B) skippable made mandatory by `screen_absolute`.
-            charitable_cwa_obtained: Some(true),
-            schedule_a: Some(ScheduleAInputs {
-                charitable: vec![CharitableGift {
-                    class: CharitableClass::Cash60,
-                    amount: dec!(40000),
+        &answered_for(
+            &s,
+            2024,
+            ReturnInputs {
+                filing_status: FilingStatus::Single,
+                header: adult_filer_header(),
+                w2s: vec![W2 {
+                    owner: Owner::Taxpayer,
+                    box1_wages: dec!(50000),
+                    box3_ss_wages: dec!(50000),
+                    box5_medicare_wages: dec!(50000),
+                    ..Default::default()
                 }],
+                // §170(f)(8): this filer holds a contemporaneous written acknowledgment for the
+                // $40,000 gift. Not covered by `answered()`, which walks the DECLARATION registry;
+                // the CWA is a class-(B) skippable made mandatory by `screen_absolute`.
+                charitable_cwa_obtained: Some(true),
+                schedule_a: Some(ScheduleAInputs {
+                    charitable: vec![CharitableGift {
+                        class: CharitableClass::Cash60,
+                        amount: dec!(40000),
+                    }],
+                    ..Default::default()
+                }),
                 ..Default::default()
-            }),
-            ..Default::default()
-        }),
+            },
+        ),
     )
     .unwrap();
     btctax_cli::return_inputs::set(
         s.conn(),
         2025,
-        &btctax_core::tax::testonly::answered(ReturnInputs {
-            filing_status: FilingStatus::Single,
-            header: adult_filer_header(),
-            ..Default::default()
-        }),
+        &answered_for(
+            &s,
+            2025,
+            ReturnInputs {
+                filing_status: FilingStatus::Single,
+                header: adult_filer_header(),
+                ..Default::default()
+            },
+        ),
     )
     .unwrap();
     s.save().unwrap();
@@ -3937,30 +4053,34 @@ fn vault_with_a_gift_over_its_ceiling() -> (tempfile::TempDir, PathBuf) {
         btctax_cli::return_inputs::set(
             s.conn(),
             2024,
-            &btctax_core::tax::testonly::answered(ReturnInputs {
-                filing_status: FilingStatus::Single,
-                header: adult_filer_header(),
-                w2s: vec![W2 {
-                    owner: Owner::Taxpayer,
-                    box1_wages: dec!(50000),
-                    box3_ss_wages: dec!(50000),
-                    box5_medicare_wages: dec!(50000),
-                    ..Default::default()
-                }],
-                schedule_a: Some(ScheduleAInputs {
-                    charitable: vec![CharitableGift {
-                        class: CharitableClass::Cash60,
-                        amount: dec!(40000),
+            &answered_for(
+                &s,
+                2024,
+                ReturnInputs {
+                    filing_status: FilingStatus::Single,
+                    header: adult_filer_header(),
+                    w2s: vec![W2 {
+                        owner: Owner::Taxpayer,
+                        box1_wages: dec!(50000),
+                        box3_ss_wages: dec!(50000),
+                        box5_medicare_wages: dec!(50000),
+                        ..Default::default()
                     }],
+                    schedule_a: Some(ScheduleAInputs {
+                        charitable: vec![CharitableGift {
+                            class: CharitableClass::Cash60,
+                            amount: dec!(40000),
+                        }],
+                        ..Default::default()
+                    }),
+                    // ★ P4 (phase 2): an itemizing return with a gift >= $250 must state whether it
+                    //   holds the §170(f)(8) acknowledgment. The subject here is the CARRYOVER, not
+                    //   substantiation, so answer it rather than dodge it — a $40,000 gift with no CWA
+                    //   is a deduction the statute denies, and a fixture must not model an unlawful one.
+                    charitable_cwa_obtained: Some(true),
                     ..Default::default()
-                }),
-                // ★ P4 (phase 2): an itemizing return with a gift >= $250 must state whether it
-                //   holds the §170(f)(8) acknowledgment. The subject here is the CARRYOVER, not
-                //   substantiation, so answer it rather than dodge it — a $40,000 gift with no CWA
-                //   is a deduction the statute denies, and a fixture must not model an unlawful one.
-                charitable_cwa_obtained: Some(true),
-                ..Default::default()
-            }),
+                },
+            ),
         )
         .unwrap();
         s.save().unwrap();
@@ -4019,26 +4139,30 @@ fn a_gift_within_its_ceiling_prints_no_charitable_carryover_line() {
         btctax_cli::return_inputs::set(
             s.conn(),
             2024,
-            &btctax_core::tax::testonly::answered(ReturnInputs {
-                filing_status: FilingStatus::Single,
-                header: adult_filer_header(),
-                w2s: vec![W2 {
-                    owner: Owner::Taxpayer,
-                    box1_wages: dec!(50000),
-                    box3_ss_wages: dec!(50000),
-                    box5_medicare_wages: dec!(50000),
-                    ..Default::default()
-                }],
-                schedule_a: Some(ScheduleAInputs {
-                    // $1,000 against a $36,000 ceiling — nothing carries.
-                    charitable: vec![CharitableGift {
-                        class: CharitableClass::Cash60,
-                        amount: dec!(1000),
+            &answered_for(
+                &s,
+                2024,
+                ReturnInputs {
+                    filing_status: FilingStatus::Single,
+                    header: adult_filer_header(),
+                    w2s: vec![W2 {
+                        owner: Owner::Taxpayer,
+                        box1_wages: dec!(50000),
+                        box3_ss_wages: dec!(50000),
+                        box5_medicare_wages: dec!(50000),
+                        ..Default::default()
                     }],
+                    schedule_a: Some(ScheduleAInputs {
+                        // $1,000 against a $36,000 ceiling — nothing carries.
+                        charitable: vec![CharitableGift {
+                            class: CharitableClass::Cash60,
+                            amount: dec!(1000),
+                        }],
+                        ..Default::default()
+                    }),
                     ..Default::default()
-                }),
-                ..Default::default()
-            }),
+                },
+            ),
         )
         .unwrap();
         s.save().unwrap();
@@ -4092,11 +4216,15 @@ fn f1_advisory_for_declared_carryforward(declared: rust_decimal::Decimal) -> Opt
         btctax_cli::return_inputs::set(
             s.conn(),
             2024,
-            &btctax_core::tax::testonly::answered(ReturnInputs {
-                filing_status: FilingStatus::Single,
-                header: adult_filer_header(),
-                ..Default::default() // no wages — this is what puts TI at the floor
-            }),
+            &answered_for(
+                &s,
+                2024,
+                ReturnInputs {
+                    filing_status: FilingStatus::Single,
+                    header: adult_filer_header(),
+                    ..Default::default() // no wages — this is what puts TI at the floor
+                },
+            ),
         )
         .unwrap();
         s.save().unwrap();
@@ -4274,6 +4402,9 @@ fn a_computed_capital_loss_stamp_survives_every_command_that_should_retract_it()
         };
         ri.capital_loss_carryforward_in = cl;
         btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        // ★ R9 / T6 — this vault SELLS BTC in 2024, so the Digital Assets question is answered
+        //   `Yes`. Stated as a fact about this fixture's own ledger rather than typed blind.
+        ri.digital_asset_activity = Some(true);
         ri
     };
     let read_2025 = || {
@@ -4298,12 +4429,16 @@ fn a_computed_capital_loss_stamp_survives_every_command_that_should_retract_it()
         btctax_cli::return_inputs::set(
             s.conn(),
             2025,
-            &btctax_core::tax::testonly::answered(ReturnInputs {
-                tax_year: 2025,
-                filing_status: FilingStatus::Single,
-                header: adult_filer_header(),
-                ..Default::default()
-            }),
+            &answered_for(
+                &s,
+                2025,
+                ReturnInputs {
+                    tax_year: 2025,
+                    filing_status: FilingStatus::Single,
+                    header: adult_filer_header(),
+                    ..Default::default()
+                },
+            ),
         )
         .unwrap();
         s.save().unwrap();

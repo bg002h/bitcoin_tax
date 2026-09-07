@@ -833,6 +833,17 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
             crate::edit::form::broker_census_by_provider(&rows)
         })
         .unwrap_or_default();
+    // ★★★ R9 / T6 — STEP 0, the interview's entry: the LEDGER's status for this year, read ONCE
+    //     from the same snapshot. The SAME `step0_panel` `income answer` prints, so one ledger
+    //     cannot be described two ways. `None` snapshot ⇒ an empty panel, which renders as
+    //     "nothing outstanding" and gates nothing (R9: authoring proceeds regardless).
+    let step0_of = |ri: Option<&btctax_core::tax::return_inputs::ReturnInputs>| {
+        app.snapshot
+            .as_ref()
+            .map_or_else(btctax_cli::step0::Step0Panel::default, |snap| {
+                btctax_cli::step0::step0_panel(&snap.state, &snap.events, ri, year)
+            })
+    };
     // ★★★ C-1 / R10.4 — year N's row, for the `Durable` date-of-birth HINT and nothing else. Read
     //     ONCE at open through the persist seam (KAT-G1 confines `conn()` to that module); a missing
     //     prior row costs the filer a lookup, never an answer.
@@ -872,6 +883,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
             refused_section: None,
             broker_census: broker_census.clone(),
             broker_regime: regime,
+            step0: btctax_cli::step0::Step0Panel::default(),
             now,
         },
         Ok((btctax_cli::input_form_store::Loaded::Committed(ri), stale_note)) => {
@@ -898,6 +910,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 refused_section: None,
                 broker_census: broker_census.clone(),
                 broker_regime: regime,
+                step0: btctax_cli::step0::Step0Panel::default(),
                 now,
             }
         }
@@ -925,6 +938,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 refused_section: None,
                 broker_census: broker_census.clone(),
                 broker_regime: regime,
+                step0: btctax_cli::step0::Step0Panel::default(),
                 now,
             }
         }
@@ -964,6 +978,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 refused_section: None,
                 broker_census: broker_census.clone(),
                 broker_regime: regime,
+                step0: btctax_cli::step0::Step0Panel::default(),
                 now,
             }
         }
@@ -977,6 +992,10 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
     if let Some(ri) = form.working.as_mut() {
         crate::edit::form::seed_broker_rows(ri, &form.broker_census, regime);
     }
+    // ★★★ R9 / T6 — STEP 0, computed AFTER the seed and from the return this session will actually
+    //     edit, so its venue-vs-answer list reads the answers the filer holds rather than an
+    //     earlier shape of them.
+    form.step0 = step0_of(form.working.as_ref());
     app.tax_inputs_form = Some(form);
 }
 
@@ -1432,7 +1451,8 @@ fn open_tax_inputs_commit_modal(app: &mut EditorApp) {
             kind: crate::edit::form::TaxInputsModalKind::Commit,
             year,
             filing_status_label: crate::edit::form::filing_status_label(ri),
-            summary: crate::edit::tax_inputs::commit_summary(ri, shadows),
+            // ★ R9 / T6 — the venue-vs-answer listing rides in the commit modal (J-4, J-7).
+            summary: crate::edit::tax_inputs::commit_summary_with_step0(ri, shadows, &form.step0),
             shadows,
         };
         form.modal = Some(modal);

@@ -750,6 +750,7 @@ $ btctax --vault v.pgp income show --year 2024
   "interest_or_dividends_without_1099": null,
   "state_refund_without_1099g": null,
   "itemized_prior_year": null,
+  "digital_asset_activity": true,
   "schedule_b_filer_records": [],
   "answer_log": {},
   "answer_log_history": []

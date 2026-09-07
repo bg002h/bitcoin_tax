@@ -107,6 +107,7 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         interest_or_dividends_without_1099,
         state_refund_without_1099g,
         itemized_prior_year,
+        digital_asset_activity,
         schedule_c,
         schedule_a,
         itemize_election,
@@ -306,6 +307,11 @@ pub fn classify(ri: &ReturnInputs) -> Census {
     //     and a `false` btctax assumed rather than asked would blank Schedule 1 line 1 on the
     //     filer's behalf — an understatement laundered as a lawful blank.
     c.declaration(itemized_prior_year, QuestionId::ItemizedPriorYear);
+    // ★★★ R9 / T6 — the Form 1040 page-1 DIGITAL ASSETS question. Class (A) and ALWAYS live: the
+    //     form prints it on every return, and the box that prints is now this ANSWER rather than
+    //     the ledger predicate, which could only ever say *Yes* or leave a mandatory question
+    //     blank on a §6065-signed page.
+    c.declaration(digital_asset_activity, QuestionId::DigitalAssetActivity);
     if let Some(sc) = schedule_c {
         classify_schedule_c(&mut c, sc);
     }

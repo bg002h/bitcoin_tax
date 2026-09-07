@@ -130,6 +130,11 @@ charitable_carryover_in = []
 #     (The wage question is not live: this household HOLDS two Forms W-2.)
 interest_or_dividends_without_1099 = false
 state_refund_without_1099g = false
+# ★★★ R9 / T6 — Form 1040 page 1's DIGITAL ASSETS question. Mandatory on every return ("You must
+#     answer the digital asset question on Form 1040 whether or not you received a Form 1099-DA"),
+#     and this household SOLD 2 BTC in 2024, so the answer is Yes — which is also what its own
+#     ledger witnesses, so the T6 cross-check agrees.
+digital_asset_activity = true
 
 [capital_loss_carryforward_in]
 long = "0"

@@ -1597,6 +1597,32 @@ pub struct ReturnInputs {
     /// DECISION; a `Yes` refuses naming the State and Local Income Tax Refund Worksheet.
     #[serde(default)]
     pub itemized_prior_year: Option<bool>,
+    /// ★★★ **R9 / T6 — THE DIGITAL ASSETS QUESTION, Form 1040 page 1, above line 1a.**
+    ///
+    /// *"At any time during 2025, did you: (a) receive (as a reward, award, or payment for property
+    /// or services); or (b) sell, exchange, or otherwise dispose of a digital asset (or a financial
+    /// interest in a digital asset)?"* (`f1040--2025.txt:36-37`; the instruction at
+    /// `i1040gi--2025.txt:1352-1357`.) A class-(A) declaration: `None` blocks commit, and the box
+    /// the return PRINTS is this answer — never the ledger predicate.
+    ///
+    /// ★★★ **Why the answer and not the predicate.** Until T6 the box was decided by
+    /// [`crate::tax::return_1040::digital_asset_activity`], which can only ever say *Yes* or
+    /// *nothing*: a filer who bought monthly and sold nothing had the mandatory question left blank
+    /// on a §6065-signed page. The predicate is still read — it CROSS-CHECKS this answer in
+    /// [`crate::tax::return_1040::screen_compute_dependent`] — but it no longer answers for the
+    /// filer.
+    ///
+    /// ★★ The cross-check is deliberately ASYMMETRIC (R9):
+    /// - the ledger witnesses activity and the filer answered **No** ⇒ REFUSE
+    ///   ([`crate::tax::return_refuse::RefuseReason::DigitalAssetAnswerContradictsLedger`]), naming
+    ///   the first qualifying event so the filer can check it;
+    /// - the ledger witnesses nothing and the filer answered **Yes** ⇒ ACCEPT, with the off-ledger
+    ///   WARNING ([`crate::tax::advisories::Advisory::DigitalAssetYesNotOnLedger`]) and never a
+    ///   refusal. The ledger is not complete by construction — no self-custody wallet is importable
+    ///   — so refusing a truthful *Yes* would leave *No* as the only way through the gate: a false
+    ///   answer the tool coerced into sworn testimony.
+    #[serde(default)]
+    pub digital_asset_activity: Option<bool>,
     /// ★★★ **R5 — the filer's-records rows a `Yes` on [`Self::interest_or_dividends_without_1099`]
     /// opens.** `Source::FilerRecords`, live iff that question is `Some(true)`, and non-empty is then
     /// REQUIRED. See [`ScheduleBRecord`].
@@ -1713,6 +1739,10 @@ impl Default for ReturnInputs {
             interest_or_dividends_without_1099: None,
             state_refund_without_1099g: None,
             itemized_prior_year: None,
+            // ★★★ R9 — `None`: a fresh return has not been asked the Digital Assets question. A
+            //     defaulted `Some(false)` would swear "no digital assets" on the filer's behalf,
+            //     which is the one direction this field exists to close.
+            digital_asset_activity: None,
             schedule_b_filer_records: Vec::new(),
             schedule_c: None,
             schedule_a: None,

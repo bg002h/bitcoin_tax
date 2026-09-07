@@ -8,33 +8,33 @@
   6││  ✓ W-2s                        ││                                                                                    │
   7││  ✓ Forms 1099-INT              ││                                                                                    │
   8││  ✓ Forms 1099-DIV              ││                                                                                    │
-  9││  ✓ Interest and dividends from ││                                                                                    │
- 10││  ✓ Forms 1099-B (Schedule D sum││                                                                                    │
- 11││  ✓ Forms 1099-G                ││                                                                                    │
- 12││  ✓ Forms 1098-E (student loan i││                                                                                    │
- 13││  … Schedule A (itemized deducti││                                                                                    │
- 14││  … Payments                    ││                                                                                    │
- 15││  … Carryforwards from l┌ Confirm commit for 2024 ───────────────────────────────────────────┐                        │
- 16││  … §199A limitation (on│  Commit tax inputs for 2024 — WRITES THE VAULT                     │                        │
- 17││  ✓ Declarations        │                                                                    │                        │
- 18││  ✓ Documents received  │  filing status: Mfj                                                │                        │
- 19││  … Income exclusions (§│  2 W-2(s)  ·  Schedule A: yes  ·  1 dependent(s)                   │                        │
- 20││  … Skippables          │                                                                    │                        │
- 21││                        │  [Enter] commit   [Esc] cancel — writes nothing                    │                        │
+  9││  ✓ Interest and dividen┌ Confirm commit for 2024 ───────────────────────────────────────────┐                        │
+ 10││  ✓ Forms 1099-B (Schedu│  Commit tax inputs for 2024 — WRITES THE VAULT                     │                        │
+ 11││  ✓ Forms 1099-G        │                                                                    │                        │
+ 12││  ✓ Forms 1098-E (studen│  filing status: Mfj                                                │                        │
+ 13││  … Schedule A (itemized│  2 W-2(s) · Schedule A: yes · 1 dependent(s)                       │                        │
+ 14││  … Payments            │                                                                    │                        │
+ 15││  … Carryforwards from l│                                                                    │                        │
+ 16││  … §199A limitation (on│  VENUES WITH NO FORM 1099-DA ANSWER (commit is not blocked by this;│                        │
+ 17││  ✓ Declarations        │    the EXPORT is):                                                 │                        │
+ 18││  ✓ Documents received  │  • river has 1 noncovered row(s) on this year's Form 8949 and NO   │                        │
+ 19││  … Income exclusions (§│    Form 1099-DA answer on file — a venue you disposed on is not    │                        │
+ 20││  … Skippables          │    accounted for                                                   │                        │
+ 21││                        │                                                                    │                        │
  22││                        │                                                                    │                        │
- 23││                        │                                                                    │                        │
- 24││                        └────────────────────────────────────────────────────────────────────┘                        │
- 25││                                ││                                                                                    │
- 26││                                ││                                                                                    │
- 27││                                ││                                                                                    │
- 28││                                ││                                                                                    │
- 29││                                ││                                                                                    │
- 30││                                ││                                                                                    │
- 31││                                ││                                                                                    │
- 32││                                ││                                                                                    │
- 33│└────────────────────────────────┘└────────────────────────────────────────────────────────────────────────────────────┘
- 34│┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
- 35││  active source: full return   ·   screens clean, except what report computes                                         │
+ 23││                        │  NO STANDING ORDER (Notice 2026-20 §4.02(2)):                      │                        │
+ 24││                        │  • exchange:river:default: your first custodial disposition of 2024│                        │
+ 25││                        │    is dated 2024-05-01, and no standing order (a dated method      │                        │
+ 26│└────────────────────────│    election) was in force for it — expect box 1g to reflect the    │────────────────────────┘
+ 27│┌────────────────────────│    broker's default; a `basis_differs` answer refuses; `btctax     │────────────────────────┐
+ 28││  active source: full re│    reconcile select-lots` / `import-selections` is the exit        │                        │
+ 29││  Step 0 (2024): 2 block└────────────────────────────────────────────────────────────────────┘h no standing           │
+ 30││      order · 0 owner action(s). `btctax verify` and `btctax income answer` print them in full.                       │
+ 31││  • river has 1 noncovered row(s) on this year's Form 8949 and NO Form 1099-DA answer on file — a venue you           │
+ 32││        disposed on is not accounted for                                                                              │
+ 33││  • exchange:river:default: your first custodial disposition of 2024 is dated 2024-05-01, and no standing order       │
+ 34││        (a dated method election) was in force for it — expect box 1g to reflect the broker's default; a              │
+ 35││        `basis_differs` answer refuses; `btctax reconcile select-lots` / `import-selections` is the exit              │
  36││  interview: complete · return: computable                                                                            │
  37││   [↑/↓] field · [←/→ or Tab] section · [s] commit · [t] source · [Esc/q] close (autosaved)                           │
  38││                                                                                                                      │
@@ -77,35 +77,35 @@
   8│ 34..35 fg=Yellow
   8│ 119..120 fg=Yellow
   9│ 0..1 fg=Cyan mod=BOLD
-  9│ 33..34 fg=Cyan mod=BOLD
-  9│ 34..35 fg=Yellow
+  9│ 25..95 fg=Red
   9│ 119..120 fg=Yellow
  10│ 0..1 fg=Cyan mod=BOLD
- 10│ 33..34 fg=Cyan mod=BOLD
- 10│ 34..35 fg=Yellow
+ 10│ 25..26 fg=Red
+ 10│ 26..73 fg=Red mod=BOLD
+ 10│ 94..95 fg=Red
  10│ 119..120 fg=Yellow
  11│ 0..1 fg=Cyan mod=BOLD
- 11│ 33..34 fg=Cyan mod=BOLD
- 11│ 34..35 fg=Yellow
+ 11│ 25..26 fg=Red
+ 11│ 94..95 fg=Red
  11│ 119..120 fg=Yellow
  12│ 0..1 fg=Cyan mod=BOLD
- 12│ 33..34 fg=Cyan mod=BOLD
- 12│ 34..35 fg=Yellow
+ 12│ 25..26 fg=Red
+ 12│ 94..95 fg=Red
  12│ 119..120 fg=Yellow
  13│ 0..1 fg=Cyan mod=BOLD
- 13│ 33..34 fg=Cyan mod=BOLD
- 13│ 34..35 fg=Yellow
+ 13│ 25..26 fg=Red
+ 13│ 94..95 fg=Red
  13│ 119..120 fg=Yellow
  14│ 0..1 fg=Cyan mod=BOLD
- 14│ 33..34 fg=Cyan mod=BOLD
- 14│ 34..35 fg=Yellow
+ 14│ 25..26 fg=Red
+ 14│ 94..95 fg=Red
  14│ 119..120 fg=Yellow
  15│ 0..1 fg=Cyan mod=BOLD
- 15│ 25..95 fg=Red
+ 15│ 25..26 fg=Red
+ 15│ 94..95 fg=Red
  15│ 119..120 fg=Yellow
  16│ 0..1 fg=Cyan mod=BOLD
  16│ 25..26 fg=Red
- 16│ 26..73 fg=Red mod=BOLD
  16│ 94..95 fg=Red
  16│ 119..120 fg=Yellow
  17│ 0..1 fg=Cyan mod=BOLD
@@ -126,7 +126,6 @@
  20│ 119..120 fg=Yellow
  21│ 0..1 fg=Cyan mod=BOLD
  21│ 25..26 fg=Red
- 21│ 26..74 fg=DarkGray
  21│ 94..95 fg=Red
  21│ 119..120 fg=Yellow
  22│ 0..1 fg=Cyan mod=BOLD
@@ -138,46 +137,48 @@
  23│ 94..95 fg=Red
  23│ 119..120 fg=Yellow
  24│ 0..1 fg=Cyan mod=BOLD
- 24│ 25..95 fg=Red
+ 24│ 25..26 fg=Red
+ 24│ 94..95 fg=Red
  24│ 119..120 fg=Yellow
  25│ 0..1 fg=Cyan mod=BOLD
- 25│ 33..34 fg=Cyan mod=BOLD
- 25│ 34..35 fg=Yellow
+ 25│ 25..26 fg=Red
+ 25│ 94..95 fg=Red
  25│ 119..120 fg=Yellow
- 26│ 0..1 fg=Cyan mod=BOLD
- 26│ 33..34 fg=Cyan mod=BOLD
- 26│ 34..35 fg=Yellow
- 26│ 119..120 fg=Yellow
- 27│ 0..1 fg=Cyan mod=BOLD
- 27│ 33..34 fg=Cyan mod=BOLD
- 27│ 34..35 fg=Yellow
- 27│ 119..120 fg=Yellow
- 28│ 0..1 fg=Cyan mod=BOLD
- 28│ 33..34 fg=Cyan mod=BOLD
- 28│ 34..35 fg=Yellow
- 28│ 119..120 fg=Yellow
- 29│ 0..1 fg=Cyan mod=BOLD
- 29│ 33..34 fg=Cyan mod=BOLD
- 29│ 34..35 fg=Yellow
- 29│ 119..120 fg=Yellow
- 30│ 0..1 fg=Cyan mod=BOLD
- 30│ 33..34 fg=Cyan mod=BOLD
- 30│ 34..35 fg=Yellow
- 30│ 119..120 fg=Yellow
- 31│ 0..1 fg=Cyan mod=BOLD
- 31│ 33..34 fg=Cyan mod=BOLD
- 31│ 34..35 fg=Yellow
- 31│ 119..120 fg=Yellow
- 32│ 0..1 fg=Cyan mod=BOLD
- 32│ 33..34 fg=Cyan mod=BOLD
- 32│ 34..35 fg=Yellow
- 32│ 119..120 fg=Yellow
- 33│ 0..34 fg=Cyan mod=BOLD
- 33│ 34..120 fg=Yellow
- 34│ 0..120 fg=DarkGray
+ 26│ 0..25 fg=Cyan mod=BOLD
+ 26│ 25..26 fg=Red
+ 26│ 94..95 fg=Red
+ 26│ 95..120 fg=Yellow
+ 27│ 0..25 fg=DarkGray
+ 27│ 25..26 fg=Red
+ 27│ 94..95 fg=Red
+ 27│ 95..120 fg=DarkGray
+ 28│ 0..1 fg=DarkGray
+ 28│ 18..25 fg=Cyan
+ 28│ 25..26 fg=Red
+ 28│ 94..95 fg=Red
+ 28│ 119..120 fg=DarkGray
+ 29│ 0..1 fg=DarkGray
+ 29│ 1..25 fg=Yellow
+ 29│ 25..95 fg=Red
+ 29│ 95..108 fg=Yellow
+ 29│ 119..120 fg=DarkGray
+ 30│ 0..1 fg=DarkGray
+ 30│ 1..96 fg=Yellow
+ 30│ 119..120 fg=DarkGray
+ 31│ 0..1 fg=DarkGray
+ 31│ 1..108 fg=Yellow
+ 31│ 119..120 fg=DarkGray
+ 32│ 0..1 fg=DarkGray
+ 32│ 1..41 fg=Yellow
+ 32│ 119..120 fg=DarkGray
+ 33│ 0..1 fg=DarkGray
+ 33│ 1..112 fg=Yellow
+ 33│ 119..120 fg=DarkGray
+ 34│ 0..1 fg=DarkGray
+ 34│ 1..105 fg=Yellow
+ 34│ 119..120 fg=DarkGray
  35│ 0..1 fg=DarkGray
- 35│ 18..29 fg=Cyan
- 35│ 36..78 fg=DarkGray
+ 35│ 1..105 fg=Yellow
  35│ 119..120 fg=DarkGray
  36│ 0..43 fg=DarkGray
  36│ 119..120 fg=DarkGray

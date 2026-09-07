@@ -274,21 +274,36 @@ fn state_bearing_sources() -> Vec<(String, String)> {
     .collect()
 }
 
-/// Every prompt in both return registries, labelled by its registry identity.
+/// Every prompt in both return registries, labelled by its registry identity — **including the
+/// RENDERED ones**.
+///
+/// ★★★ **T6 extended this, and the extension is the point.** The check scanned only `q.prompt`, the
+/// STATIC fallback, while `FormQuestion::prompt_text` renders three questions from the return itself
+/// (`RENDERED_PROMPTS`) — so the words a filer is actually SHOWN were never read. That is the exact
+/// shape of the F2/F4 failure the harness records: an instrument reporting success over a region it
+/// could not see. The rendered set was empty of banned words when this was written, and *"it happened
+/// to be clean"* is not the same fact as *"it is checked"*.
+///
+/// Rendered against a `Default` return, which is enough for a WORD check: the renderers interpolate a
+/// year and a filing status, and neither can introduce *transfer*, *lot* or *fmv*. The rendered text
+/// is labelled distinctly so a hit names which surface said it.
 fn registry_prompts() -> Vec<(String, String)> {
-    let mut out: Vec<(String, String)> = btctax_core::tax::questions::FORM_QUESTIONS
+    use btctax_core::tax::questions::{FORM_QUESTIONS, RENDERED_PROMPTS, SKIPPABLE_QUESTIONS};
+    let probe = btctax_core::tax::return_inputs::ReturnInputs::default();
+    let mut out: Vec<(String, String)> = FORM_QUESTIONS
         .iter()
         .map(|q| (format!("FORM_QUESTIONS {:?}", q.id), q.prompt.to_string()))
         .collect();
+    out.extend(SKIPPABLE_QUESTIONS.iter().map(|s| {
+        (
+            format!("SKIPPABLE_QUESTIONS {:?}", s.id),
+            s.prompt.to_string(),
+        )
+    }));
     out.extend(
-        btctax_core::tax::questions::SKIPPABLE_QUESTIONS
+        RENDERED_PROMPTS
             .iter()
-            .map(|s| {
-                (
-                    format!("SKIPPABLE_QUESTIONS {:?}", s.id),
-                    s.prompt.to_string(),
-                )
-            }),
+            .map(|(id, render)| (format!("RENDERED_PROMPTS {id:?}"), render(&probe))),
     );
     out
 }
@@ -310,6 +325,22 @@ pub fn run() -> Result<String, String> {
         return Err(format!(
             "only {} registry prompts scanned — R3's census rows alone are eighteen",
             prompts.len()
+        ));
+    }
+    // ★★★ T6 — the RENDERED prompts must be IN the scanned set, not merely producible. Without this
+    //     the extension is invisible: dropping the `RENDERED_PROMPTS` extend above would leave a
+    //     smaller set that still clears the floor, and the checker would go quietly blind again on
+    //     the words a filer is actually shown.
+    let rendered = btctax_core::tax::questions::RENDERED_PROMPTS.len();
+    let scanned_rendered = prompts
+        .iter()
+        .filter(|(label, _)| label.starts_with("RENDERED_PROMPTS "))
+        .count();
+    if scanned_rendered != rendered {
+        return Err(format!(
+            "{scanned_rendered} of {rendered} RENDERED prompts were scanned — the words a filer is \
+             SHOWN are the ones this check exists to read, and a static-only scan reports success \
+             over a region it cannot see"
         ));
     }
     let mut findings = Vec::new();

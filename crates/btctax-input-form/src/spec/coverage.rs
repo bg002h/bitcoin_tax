@@ -654,19 +654,20 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     // change happened to keep the sets balanced.
     let field_count: usize = form_spec().iter().map(|s| s.fields.len()).sum();
     assert_eq!(
-        field_count, 182,
-        "expected 182 Fields — 117 before T5, plus its FIFTY-EIGHT: the four document-less income \
+        field_count, 183,
+        "expected 183 Fields — 117 before T5, plus its FIFTY-EIGHT: the four document-less income \
          declarations (R3), W-2 boxes 13 and 14b, and the six document sections (1099-INT 14, \
          1099-DIV 14, 1099-B 8, 1099-G 7, 1098-E 4, and R5's five filer's-records leaves) — plus \
          the SEVEN the seam review's M-1 added, one per income box that had no reader and now \
          refuses (1099-G 5/6/7/9, 1099-B 13, 1099-DIV 9/10). A refuse-guard needs a Field on the \
          document's own row or the guard is a brick the filer cannot reach, which is the FR-65 \
-         defect T5 itself was fixing."
+         defect T5 itself was fixing. ★ R9 / T6 added the 183rd, Form 1040 page 1's DIGITAL ASSETS \
+         question."
     );
     assert_eq!(
         covered.len(),
-        181,
-        "expected 181 distinctly-covered in-scope leaves — every one of the 182 Fields but \
+        182,
+        "expected 182 distinctly-covered in-scope leaves — every one of the 183 Fields but \
          `DocForm1098`, whose row is still shadowed by the `schedule_a.mortgage_interest_1098` \
          scalar (T9) and so is never live. It was 115 of 117 before T5, then 174 of 175; the seven \
          M-1 refuse-guards are all covered."
@@ -948,6 +949,8 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
         "state_refund_without_1099g",
     ),
     (FieldId::DeclItemizedPriorYear, "itemized_prior_year"),
+    // ── ★★★ R9 / T6 — Form 1040 page 1's DIGITAL ASSETS question. ──
+    (FieldId::DeclDigitalAssetActivity, "digital_asset_activity"),
     // ── ★★★ R4 / T5 — W-2 boxes 13 and 14b, which the struct had no field for at all. ──
     (
         FieldId::W2Box13StatutoryEmployee,

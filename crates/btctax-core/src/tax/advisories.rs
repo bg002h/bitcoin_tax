@@ -81,6 +81,18 @@ pub enum Advisory {
     ///   figure it could demand and no answer a refusal could clear. `codes` is what the employer
     ///   printed, quoted back so the filer can look it up.
     TipsDeductionForgoneWithTtoc { codes: Vec<String> },
+    /// ★★★ **R9 / T6 — the filer answered the Form 1040 Digital Assets question `Yes`, and this
+    /// vault's ledger witnesses no qualifying event in the year.**
+    ///
+    /// A WARNING and NEVER a refusal, and the asymmetry is the point. The ledger is not complete by
+    /// construction — no self-custody wallet is importable at all — so a filer paid in BTC to their
+    /// own wallet has no export to import, and refusing their truthful *Yes* would leave *No* as the
+    /// only way through the gate: a false answer the tool coerced into sworn testimony.
+    ///
+    /// What the warning has to say is what the *Yes* does NOT do: check the box, and nothing else.
+    /// Schedule 1 line 8v and Form 8949 come only from the ledger, so off-ledger activity is
+    /// declared on page 1 and reported nowhere.
+    DigitalAssetYesNotOnLedger { year: i32 },
     /// FinCEN Notice 2020-2 disclosure — the filer declared a foreign financial account. v1 never
     /// auto-answers Schedule B Part III.
     FbarFinCen,
@@ -465,6 +477,17 @@ impl Advisory {
                  and only you can say how much of box 7 is left. Enter the qualified amount under \
                  Schedule 1-A Part II if you have one.",
                 codes.join(", ")
+            ),
+            Advisory::DigitalAssetYesNotOnLedger { year } => format!(
+                "DIGITAL ASSETS ANSWERED \"YES\", AND NOTHING ON THIS LEDGER SHOWS IT — you \
+                 answered the Form 1040 Digital Assets question \"Yes\" for {year}, and this \
+                 vault records no receipt and no disposition in {year}. That is accepted and the \
+                 box will print \"Yes\": btctax holds only what you imported, and no self-custody \
+                 wallet can be imported at all, so a payment in kind to your own wallet leaves no \
+                 trace here. But understand what the \"Yes\" does and does not do — it checks the \
+                 box, and NOTHING else. Schedule 1 line 8v and Form 8949 are built only from this \
+                 ledger, so any off-ledger receipt or disposition is NOT on this return. Report it \
+                 yourself, or import the activity and re-run."
             ),
             Advisory::FbarFinCen =>
                 "FBAR / FinCEN — you declared a foreign financial account. Under FinCEN Notice 2020-2 an \
@@ -1393,6 +1416,19 @@ pub fn advisories(
             capital_loss: cl,
             charitable: ch,
         });
+    }
+
+    // ★★★ R9 / T6 — a `Yes` on the Digital Assets question that this ledger does not witness. The
+    //     MIRROR of `RefuseReason::DigitalAssetAnswerContradictsLedger`, and deliberately the OTHER
+    //     instrument: that direction refuses, this one warns and lets the return through.
+    //
+    // ★ The predicate is `digital_asset_activity`, the SAME one the refusal calls — one definition
+    //   of "the ledger witnesses a qualifying event", so the two directions can never disagree
+    //   about which cell of the table a return is in.
+    if ri.digital_asset_activity == Some(true)
+        && !crate::tax::return_1040::digital_asset_activity(state, year)
+    {
+        out.push(Advisory::DigitalAssetYesNotOnLedger { year });
     }
 
     // FinCEN Notice 2020-2 — a declared foreign account.

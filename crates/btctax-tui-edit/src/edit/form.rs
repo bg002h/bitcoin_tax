@@ -250,6 +250,15 @@ pub struct TaxInputsFormState {
     /// *precisely because* no `ReturnInputs` is stored, so the refusal and the skipped seed are
     /// guaranteed to co-occur.
     pub broker_regime: Option<btctax_core::InformationReturnRegime>,
+    /// ★★★ **R9 / T6 — STEP 0, the interview's entry.** The ledger's status for this year, computed
+    /// ONCE at open from the projected snapshot (`btctax_cli::step0::step0_panel`) — the same
+    /// function `income answer` prints, so the two surfaces cannot describe one ledger differently.
+    ///
+    /// ★ Cached rather than recomputed per frame for the reason `broker_census` is: it needs the
+    ///   PROJECTION, and a per-keystroke redraw must not re-fold the ledger. It is a report about
+    ///   the ledger, and the tax-inputs flow never writes to the ledger, so it cannot go stale
+    ///   inside a session.
+    pub step0: btctax_cli::step0::Step0Panel,
     /// ★ Task 5: a staged `RemoveRow` awaiting the payload-confirm ("remove W-2 #2?"). `Some` while the
     /// confirm modal is open — Enter applies it, Esc clears it. It carries the VALIDATED row address (never
     /// a raw cursor), so a later cursor move cannot re-target the delete.
@@ -335,6 +344,13 @@ impl TaxInputsFormState {
     /// interview half recomputed from the live working return. One line when the year computes,
     /// three when it does not — the renderer and the layout must agree on the count, so both read
     /// it here rather than each deriving it.
+    /// ★★★ R9 / T6 — the Step 0 lines this frame draws. One place, so the layout's row count and
+    /// the renderer's text cannot disagree (the same discipline `year_gate_lines` carries).
+    #[must_use]
+    pub fn step0_lines(&self) -> Vec<String> {
+        self.step0.tui_lines()
+    }
+
     pub fn year_gate_lines(&self) -> Vec<String> {
         self.year_gate
             .clone()
@@ -426,6 +442,7 @@ impl TaxInputsFormState {
             descent: None,
             modal: None,
             refused_section: None,
+            step0: Default::default(),
             broker_census: Default::default(),
             broker_regime: None,
             now,

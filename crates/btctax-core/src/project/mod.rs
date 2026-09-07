@@ -8,8 +8,8 @@ pub mod resolve;
 pub mod transition;
 
 pub use compliance::{
-    disposal_compliance, identification_is_timely, ComplianceStatus, DisposalCompliance,
-    DispositionMoment,
+    disposal_compliance, identification_is_timely, standing_order_in_force, ComplianceStatus,
+    DisposalCompliance, DispositionMoment,
 };
 pub use conservation::{conservation_report, ConservationReport};
 pub use evaluate::{evaluate_disposal, CandidateDisposal, EvaluateError, EvaluateOutcome};

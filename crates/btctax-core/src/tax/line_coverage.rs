@@ -2530,7 +2530,7 @@ pub fn cover_form1040lines(l: &crate::tax::printed::Form1040Lines) -> Coverage {
         line33,
         line34,
         line37,
-        digital_asset_yes: _,
+        digital_asset_answer: _,
     } = l;
     let mut c = Coverage::quoting("2024");
     c.line(
@@ -2833,7 +2833,7 @@ fn zero_form1040lines() -> crate::tax::printed::Form1040Lines {
         line33: Usd::ZERO,
         line34: Usd::ZERO,
         line37: Usd::ZERO,
-        digital_asset_yes: false,
+        digital_asset_answer: Some(false),
     }
 }
 

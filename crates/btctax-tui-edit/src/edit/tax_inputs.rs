@@ -715,6 +715,40 @@ fn optional_present(ri: &ReturnInputs, id: SectionId) -> bool {
 /// `ri.filing_status`), the sections present (n W-2s, whether a Schedule A, n dependents — all via the
 /// engine's `Repeating::len` / `OptionalSingleton::present` accessors, never a leaf), and — when a raw
 /// `tax_profile` is shadowed (`shadows`) — the shadow + all-zero warning (§9 create-row amendment).
+///
+/// ★★★ **R9 / T6 — THE VENUE-vs-ANSWER LISTING RIDES HERE TOO.** A venue with dispositions on this
+/// year's Form 8949 and no Form 1099-DA answer is what J-4 and J-7 are about — the filer who forgot
+/// River — and the commit modal is the last screen before the row is written. The rows come from the
+/// SAME `step0_panel` the entry screen and `income answer` print, never a second derivation.
+pub fn commit_summary_with_step0(
+    ri: &ReturnInputs,
+    shadows: bool,
+    step0: &btctax_cli::step0::Step0Panel,
+) -> String {
+    let mut s = commit_summary(ri, shadows);
+    let unanswered: Vec<&btctax_cli::step0::Step0Row> = step0
+        .venues
+        .iter()
+        .filter(|v| !v.handoff.is_empty())
+        .collect();
+    if !unanswered.is_empty() {
+        s.push_str(
+            "\n\nVENUES WITH NO FORM 1099-DA ANSWER (commit is not blocked by this; the \
+                    EXPORT is):",
+        );
+        for v in unanswered {
+            s.push_str(&format!("\n  • {}", v.what));
+        }
+    }
+    if !step0.standing_orders.is_empty() {
+        s.push_str("\n\nNO STANDING ORDER (Notice 2026-20 §4.02(2)):");
+        for so in &step0.standing_orders {
+            s.push_str(&format!("\n  • {}", so.what));
+        }
+    }
+    s
+}
+
 pub fn commit_summary(ri: &ReturnInputs, shadows: bool) -> String {
     let fs = filing_status_label(ri);
     let w2s = repeating_len(ri, SectionId::W2s);

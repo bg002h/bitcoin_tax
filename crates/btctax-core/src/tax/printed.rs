@@ -660,10 +660,13 @@ pub struct Form1040Lines {
     pub line34: Usd,
     /// L37 — the amount owed. Zero when the return is due a refund.
     pub line37: Usd,
-    /// The **Digital Asset question**. `true` for any crypto disposal, income, gift or donation.
-    /// btctax never answers "No" — a "No" it cannot vouch for is worse than leaving the question to
-    /// the filer, so this is `true` or the question is left for them.
-    pub digital_asset_yes: bool,
+    /// ★★★ The **Digital Assets question**, as the FILER ANSWERED IT (R9 / T6). `Some(true)` prints
+    /// *Yes*, `Some(false)` prints *No*, `None` prints neither and the packet's hand-mark list says
+    /// the mandatory question is unmarked.
+    ///
+    /// ★ It was `digital_asset_yes: bool`, fed from the ledger predicate, which could only ever say
+    ///   *Yes* or leave a mandatory question blank on a §6065-signed page.
+    pub digital_asset_answer: Option<bool>,
 }
 
 /// The 1040's **income block** (lines 1a–11), printed.
@@ -767,7 +770,7 @@ pub fn form_1040_lines(
     status: FilingStatus,
     other_withholding: Usd,
     estimated_payments: Usd,
-    digital_asset_yes: bool,
+    digital_asset_answer: Option<bool>,
 ) -> Form1040Lines {
     // ── Income — from the printed block (Schedule A already composed on its L11). ───────────────
     let Form1040Income {
@@ -911,7 +914,7 @@ pub fn form_1040_lines(
         line33,
         line34,
         line37,
-        digital_asset_yes,
+        digital_asset_answer,
     }
 }
 
@@ -1762,7 +1765,7 @@ mod tests {
             FilingStatus::Single,
             Usd::ZERO,
             Usd::ZERO,
-            false,
+            Some(false),
         );
         assert_eq!(l.line12, dec!(15000), "L12e");
         assert_eq!(l.line13, Usd::ZERO, "L13a — no Form 8995 in this fixture");
@@ -1904,7 +1907,7 @@ mod tests {
                 ss_wage_base: dec!(168600),     // TY2024 §230 wage base
                 capital_loss_limit: dec!(3000), // §1211(b) — the non-MFS ceiling
                 extension_payment: z,
-                digital_asset_activity: false,
+                digital_asset_answer: Some(false),
             },
         }
     }
@@ -1965,7 +1968,7 @@ mod tests {
             FilingStatus::Single,
             Usd::ZERO,
             Usd::ZERO,
-            false,
+            Some(false),
         );
         assert_eq!(
             l.line2a,
@@ -2202,7 +2205,7 @@ mod tests {
             FilingStatus::Single,
             Usd::ZERO,
             Usd::ZERO,
-            false,
+            Some(false),
         );
 
         assert_eq!(l.line15, dec!(47150), "the PRINTED L15 (61,750 − 14,600)");
@@ -2317,7 +2320,7 @@ mod tests {
             FilingStatus::Single,
             Usd::ZERO,
             Usd::ZERO,
-            false,
+            Some(false),
         );
         assert_eq!(
             l.line15,
@@ -3155,7 +3158,7 @@ mod tests {
                 FilingStatus::Single,
                 Usd::ZERO,
                 Usd::ZERO,
-                false,
+                Some(false),
             )
         };
         assert_eq!(l.line23, s2.line21, "1040 L23 = Schedule 2's PRINTED L21");
@@ -3200,7 +3203,7 @@ mod tests {
                 FilingStatus::Single,
                 Usd::ZERO,
                 dec!(500),
-                true,
+                Some(true),
             )
         };
 
@@ -3319,7 +3322,7 @@ mod tests {
                 FilingStatus::Single,
                 Usd::ZERO,
                 Usd::ZERO,
-                true,
+                Some(true),
             )
         };
         assert_eq!(

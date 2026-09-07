@@ -166,11 +166,12 @@ mod tests {
             );
         }
         assert_eq!(
-            decl_count, 20,
-            "20 declarations are Decl* fields (the other two dedup to Schedule A). ★ R10.4 / T4b \
+            decl_count, 21,
+            "21 declarations are Decl* fields (the other two dedup to Schedule A). ★ R10.4 / T4b \
              added the sixteenth (the carried filing status's confirmation); ★ R3 / T5 added the \
              four of the DOCUMENT-LESS INCOME DOOR — wages with no W-2, interest or dividends with \
-             no 1099, a state refund with no 1099-G, and the §111(a) prior-year-itemized gate."
+             no 1099, a state refund with no 1099-G, and the §111(a) prior-year-itemized gate; \
+             ★ R9 / T6 added the twenty-first, Form 1040 page 1's DIGITAL ASSETS question."
         );
         assert_eq!(
             deduped,
@@ -181,11 +182,11 @@ mod tests {
             "exactly the two Schedule-A-owned mortgage declarations dedup"
         );
 
-        // 20 delegating Decl* fields + the foreign_country_names Text field.
+        // 21 delegating Decl* fields + the foreign_country_names Text field.
         assert_eq!(
             decls.fields.len(),
-            21,
-            "20 declarations + foreign_country_names"
+            22,
+            "21 declarations + foreign_country_names"
         );
         assert!(decls
             .fields

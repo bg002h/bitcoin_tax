@@ -12,6 +12,7 @@ capital_loss_carryforward_in_provenance = "user"
 charitable_carryover_in = []
 charitable_carryover_in_provenance = "user"
 charitable_cwa_obtained = true
+digital_asset_activity = true
 donations_had_restrictions = false
 dual_status_alien = false
 excluded_puerto_rico_income = "0"

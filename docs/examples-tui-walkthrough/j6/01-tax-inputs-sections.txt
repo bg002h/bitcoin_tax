@@ -25,16 +25,16 @@
  23││                                ││                                                                                    │
  24││                                ││                                                                                    │
  25││                                ││                                                                                    │
- 26││                                ││                                                                                    │
- 27││                                ││                                                                                    │
- 28││                                ││                                                                                    │
- 29││                                ││                                                                                    │
- 30││                                ││                                                                                    │
- 31││                                ││                                                                                    │
- 32││                                ││                                                                                    │
- 33│└────────────────────────────────┘└────────────────────────────────────────────────────────────────────────────────────┘
- 34│┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
- 35││  active source: full return   ·   screens clean, except what report computes                                         │
+ 26│└────────────────────────────────┘└────────────────────────────────────────────────────────────────────────────────────┘
+ 27│┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+ 28││  active source: full return   ·   screens clean, except what report computes                                         │
+ 29││  Step 0 (2024): 2 blocker kind(s) · 1 venue(s) needing a Form 1099-DA answer · 1 venue(s) with no standing           │
+ 30││      order · 0 owner action(s). `btctax verify` and `btctax income answer` print them in full.                       │
+ 31││  • river has 1 noncovered row(s) on this year's Form 8949 and NO Form 1099-DA answer on file — a venue you           │
+ 32││        disposed on is not accounted for                                                                              │
+ 33││  • exchange:river:default: your first custodial disposition of 2024 is dated 2024-05-01, and no standing order       │
+ 34││        (a dated method election) was in force for it — expect box 1g to reflect the broker's default; a              │
+ 35││        `basis_differs` answer refuses; `btctax reconcile select-lots` / `import-selections` is the exit              │
  36││  interview: complete · return: computable                                                                            │
  37││   [↑/↓] field · [←/→ or Tab] section · [s] commit · [t] source · [Esc/q] close (autosaved)                           │
  38││                                                                                                                      │
@@ -144,40 +144,33 @@
  25│ 33..34 fg=Cyan mod=BOLD
  25│ 34..35 fg=Yellow
  25│ 119..120 fg=Yellow
- 26│ 0..1 fg=Cyan mod=BOLD
- 26│ 33..34 fg=Cyan mod=BOLD
- 26│ 34..35 fg=Yellow
- 26│ 119..120 fg=Yellow
- 27│ 0..1 fg=Cyan mod=BOLD
- 27│ 33..34 fg=Cyan mod=BOLD
- 27│ 34..35 fg=Yellow
- 27│ 119..120 fg=Yellow
- 28│ 0..1 fg=Cyan mod=BOLD
- 28│ 33..34 fg=Cyan mod=BOLD
- 28│ 34..35 fg=Yellow
- 28│ 119..120 fg=Yellow
- 29│ 0..1 fg=Cyan mod=BOLD
- 29│ 33..34 fg=Cyan mod=BOLD
- 29│ 34..35 fg=Yellow
- 29│ 119..120 fg=Yellow
- 30│ 0..1 fg=Cyan mod=BOLD
- 30│ 33..34 fg=Cyan mod=BOLD
- 30│ 34..35 fg=Yellow
- 30│ 119..120 fg=Yellow
- 31│ 0..1 fg=Cyan mod=BOLD
- 31│ 33..34 fg=Cyan mod=BOLD
- 31│ 34..35 fg=Yellow
- 31│ 119..120 fg=Yellow
- 32│ 0..1 fg=Cyan mod=BOLD
- 32│ 33..34 fg=Cyan mod=BOLD
- 32│ 34..35 fg=Yellow
- 32│ 119..120 fg=Yellow
- 33│ 0..34 fg=Cyan mod=BOLD
- 33│ 34..120 fg=Yellow
- 34│ 0..120 fg=DarkGray
+ 26│ 0..34 fg=Cyan mod=BOLD
+ 26│ 34..120 fg=Yellow
+ 27│ 0..120 fg=DarkGray
+ 28│ 0..1 fg=DarkGray
+ 28│ 18..29 fg=Cyan
+ 28│ 36..78 fg=DarkGray
+ 28│ 119..120 fg=DarkGray
+ 29│ 0..1 fg=DarkGray
+ 29│ 1..108 fg=Yellow
+ 29│ 119..120 fg=DarkGray
+ 30│ 0..1 fg=DarkGray
+ 30│ 1..96 fg=Yellow
+ 30│ 119..120 fg=DarkGray
+ 31│ 0..1 fg=DarkGray
+ 31│ 1..108 fg=Yellow
+ 31│ 119..120 fg=DarkGray
+ 32│ 0..1 fg=DarkGray
+ 32│ 1..41 fg=Yellow
+ 32│ 119..120 fg=DarkGray
+ 33│ 0..1 fg=DarkGray
+ 33│ 1..112 fg=Yellow
+ 33│ 119..120 fg=DarkGray
+ 34│ 0..1 fg=DarkGray
+ 34│ 1..105 fg=Yellow
+ 34│ 119..120 fg=DarkGray
  35│ 0..1 fg=DarkGray
- 35│ 18..29 fg=Cyan
- 35│ 36..78 fg=DarkGray
+ 35│ 1..105 fg=Yellow
  35│ 119..120 fg=DarkGray
  36│ 0..43 fg=DarkGray
  36│ 119..120 fg=DarkGray

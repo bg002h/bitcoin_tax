@@ -227,7 +227,7 @@ fn f1040() -> Form1040Lines {
         line33: dec!(26215),
         line34: Usd::ZERO,
         line37: dec!(904),
-        digital_asset_yes: true,
+        digital_asset_answer: Some(true),
     }
 }
 

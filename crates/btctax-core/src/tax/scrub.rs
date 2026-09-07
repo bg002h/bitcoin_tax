@@ -610,6 +610,8 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
         interest_or_dividends_without_1099: _,
         state_refund_without_1099g: _,
         itemized_prior_year: _,
+        // ★ R9 / T6 — one yes/no about the FILER'S OWN activity; carries no identity.
+        digital_asset_activity: _,
         schedule_c, // ★ business_description is FREE TEXT — scrubbed below
         // ★★ Sch 1-A: `vehicles[].description` is FREE TEXT — a filer writes "Dad's truck" or a
         //    plate. Scrubbed below. The eligibility bools and money carry no identity.

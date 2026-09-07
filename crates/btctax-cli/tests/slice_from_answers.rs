@@ -878,6 +878,12 @@ fn ty2024_with_inputs_still_exports_the_full_return() {
         ..Default::default()
     };
     btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+    // ★ R9 / T6 — the Digital Assets answer, off this vault's own ledger (it disposes crypto).
+    {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (state, _) = s.project().expect("the fixture ledger projects");
+        btctax_core::tax::testonly::reconcile_digital_asset_activity(&mut ri, &state, 2024);
+    }
     save_committed(&vault, 2024, &ri);
 
     let out = tempfile::tempdir().unwrap();

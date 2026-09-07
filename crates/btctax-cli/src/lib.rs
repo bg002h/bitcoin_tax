@@ -17,6 +17,8 @@ pub mod render;
 pub mod resolve;
 pub mod return_inputs;
 pub mod session;
+/// ★★★ R9 / T6 — Step 0 of the interview: a STATUS PANEL over the held session, never a question set.
+pub mod step0;
 pub mod tax_profile;
 pub mod testonly;
 pub mod year_readiness;
