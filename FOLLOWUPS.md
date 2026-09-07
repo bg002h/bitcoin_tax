@@ -6212,17 +6212,27 @@ build, each with an owning phase.
   promise conditioned on templates + answers; the pre-2025 Schedule D kill on C/F boxes), re-verified
   **8/8 RESOLVED, 0C/0I/0M/0N** (`…build-1099da-R6-review-r2.md`). **FR-62 is CLOSED** (2026-09-06, 3185
   tests): `export-irs-pdf` on a params-less year files the crypto slice from the stored answers. Residue → FR-63, and two observations from the fold
-  (ownerless): `admin.rs`'s `slice_broker_refusal` doc block is orphaned four functions above its `fn`
-  (pre-existing); the full return's Section-B unanswered-restriction row has only incidental coverage —
-  give it a named kill. Note for the
+  (ownerless, ✅ **both CLOSED 2026-09-06**, residue sweep 1 items 5 and 4): `admin.rs`'s
+  `slice_broker_refusal` doc block was orphaned four functions above its `fn` (pre-existing) — moved
+  onto it; the full return's Section-B unanswered-restriction row had only incidental coverage — it
+  now has `an_unanswered_restriction_question_refuses_on_a_section_b_year_only`, which falsifies each
+  of the gate's two Section-B conjuncts independently (the §170(b)(1)(C) ceiling is what separates
+  them) and was seen red under four plants. Note for the
   calendar: TY2026 still prints nothing until its Form 8949 / Schedule D finals are bundled
   (Nov 2026 – Jan 2027), which R6 makes the ONLY gate for a TY2026 crypto-slice filing.
-- **FR-63 — the TUI commit modal's slice clause (R6 D-1).** R6 says the input form's commit modal,
-  on a params-less year, tells the filer the answers are held in the draft and that the crypto slice
-  reads them. Not built: the `NoTables` status line is a tested ≤104-char no-wrap NOTICE (r1-M1) and
-  the shortest wording measured 120 chars. Needs a second NOTICE line or a modal-body slot (a TUI
-  layout change). The fact reaches the filer today through `import_note`, `uncomputable_sentence` and
-  the export's attachment-set note. **Owning phase: the next TUI pass (ownerless otherwise).**
+- **FR-63 — the TUI commit modal's slice clause (R6 D-1). ✅ CLOSED 2026-09-06** (residue sweep 1,
+  item 1). R6 says the input form's commit modal, on a params-less year, tells the filer the answers
+  are held in the draft and that the crypto slice reads them. Built as the **second NOTICE row**: the
+  flow's notice surface now draws one row per `\n`-separated segment of `app.status` and sizes its
+  block from the same split (`draw_edit.rs` `draw_tax_inputs_status` / `draw_tax_inputs_form`), so
+  the r1-M1 ≤104-char first line is untouched rather than traded against — which is what the 120-char
+  single-line wording would have forced. The predicate is the SHARED
+  `year_readiness::slice_prints_from_answers` (answers stored AND the year's own Form 8949 /
+  Schedule D templates bundled), the same one `uncomputable_sentence` and `import_note` use, so the
+  three surfaces cannot disagree about whether the artifact exists. Kill:
+  `tax_inputs_notables_notice_carries_the_slice_clause_only_when_the_slice_would_print` — TY2025 +
+  seeded answers renders it, TY2025 with no answers does not, TY2099 (no templates) does not, and
+  both rows are asserted ≤ 104 chars and present in the rendered buffer.
 - **FR-47 — `AmtParams` / `FullReturnParams` TY2026 is a NOW item, not a post-finals one.**
   Transcribe from Rev. Proc. 2025-32 §2.10: exemptions (MFJ $140,200 / single $90,100 / MFS
   $70,100 / trusts $31,400), 28% breakpoints ($122,250 MFS / $244,500 others), and per status BOTH
@@ -6280,18 +6290,30 @@ build, each with an owning phase.
   before the season and again in March 2027 on the real packet.**
   **★ BUILD LANDED 2026-09-06** (spec GREEN r6; archive `b60c600c`, T1+T5 `dc9941d5`, T2–T4 `a51b8c53`;
   3145 tests): `btctax extension` and `export-irs-pdf --pay-by-check` exist, with the §7503 weekend
-  shifter (DC holidays deliberately unmodelled — recorded in `year_record.rs`). The T1–T6 seam review
+  shifter (DC holidays deliberately unmodelled — recorded in `year_record.rs`; **the holiday half
+  landed 2026-09-06**, residue sweep 1 item 2, see below). The T1–T6 seam review
   (0C/4I/5M/2N, `17e180bf`) is folded `7eb93c27` and re-verified 11/11 RESOLVED (`f8e35037`); the
   verifier's one new finding (a manifest hash that only a fresh checkout redded — one CR byte that
   LF-normalization stripped from the committed statute page) is folded `a2fde63e` with a census that
-  hashes the committed blob. **FR-49 is CLOSED** (2026-09-06, 3153 tests). Residue: DC legal holidays
-  are not modelled in the §7503 shifter (weekends only, recorded in `year_record.rs`); the four
-  cite-check excuse-list pairs. Residue filed by the build: the cite-check excuse
-  list gained the four (stem, year) pairs like 36 of 37 others — closing them is a `FORMS` row plus a
-  cite-check extract per pair.
+  hashes the committed blob. **FR-49 is CLOSED** (2026-09-06, 3153 tests).
+  ✅ **Both residue items CLOSED 2026-09-06** (residue sweep 1):
+  **(a) the §7503 holiday half** — `year_record::section_7503_shift` now walks past District of
+  Columbia legal holidays as well as weekends (5 U.S.C. §6103(a)/(b)/(c) transcribed line by line,
+  plus D.C. Code §1-612.02 Emancipation Day; 26 U.S.C. §7503 and Treas. Reg. §301.7503-1(b) cited for
+  why DC's calendar binds every filer). It is idempotent, so `extension_due_date` now applies it to
+  the committed `return_due` too and the April date is DERIVED rather than trusted. Kills:
+  TY2017's committed 2018-04-17 re-derived from April 15, five more shift cases, a 22-row predicate
+  table, and a 140-year sweep asserting the first-free-day property for all 51,135 days.
+  **(b) the four cite-check excuse-list pairs** — `f4868`/`f1040v` × 2024/2025 now have `FORMS` rows
+  and committed `{form,instructions}` fixtures; the excuse list went **35 → 31** and archived
+  coverage **1/36 → 5/36**. The stale-excuse arm of the ratchet gained the kill it never had
+  (`re_excusing_an_archived_pair_reds_the_ratchet`).
 - **FR-50 — `forms port-status <year>`** enumerates from the emitting surface (`Stem` × year) and
   prints `NO PRIOR SIDE` / `NO DRAFT` / `NO FINAL` per cell instead of omitting the row. Two forms
-  fell out of the computed work list today (`f1040s1`, `f8283`), plus `f8995a`. Archive
+  fell out of the computed work list today (`f1040s1`, `f8283`), plus `f8995a` (✅ `f8995a--2025`
+  archived as evidence 2026-09-06, residue sweep 1 item 6 — note + extract + geometry + manifest
+  138 → 139; its work-list row moved from the excused table to the numeric one,
+  `111 / 3 / 0 / 0 / port`). Archive
   `f1040s1--2025` (it is the prior side of an emitted form's delta; §5d's "moot" is withdrawn).
   ✅ **(a) DONE 2026-09-06:** `f1040s1--2025` archived (note + extract + geometry + manifest URL); the
   work list's Schedule 1 row is now computed (72 common / 1 added / 1 removed) with its moved cell
