@@ -526,6 +526,123 @@ fn missing_cover_fns(rel: &str, src: &str, emitter_code: &str, cov_src: &str) ->
     errs
 }
 
+/// ★★★ **Rule (7) as a pure function** — `SPEC_interview.md` R2 mechanism 1 / R5, T2's kill.
+///
+/// A [`Production::Collected`] row names its source, and the name is resolved against the archive:
+///
+/// - **`DocBox`** — the (stem, year) must be one of [`crate::box_census::DOCUMENTS`], that document
+///   must actually PRINT the named box, and `extract_line` must be the box's caption verbatim. The
+///   box set and the captions both come from the document's own extract, so this is a join between
+///   two independently-derived readings of the same paper, not a hand-list checked against itself.
+/// - **`FilerRecords`** — R5's lines have no issuing third party and therefore no box, so what is
+///   checked is the INSTRUCTION sentence that tells the filer where to get the figure: the stem must
+///   be an instructions document (`i…`), never the row's own form, and the sentence must occur
+///   verbatim (whitespace-normalised) in the archived extract.
+///
+/// ★★ **The "never the row's own form" clause is the anti-tautology guard**, and it is the one rule
+/// here that exists because of how a builder under time pressure would satisfy this field: the row
+/// already carries its form's own printed text in `instruction`, and pasting that back in as the
+/// `instruction_line` would type-check, resolve, pass a `contains` check and prove nothing at all.
+///
+/// ★ A `Collected` row with NEITHER source cannot reach this function: [`line_coverage::CollectedFrom`]
+/// has exactly two variants, so the omission is `E0061` at the call site.
+fn check_collected_from(
+    root: &Path,
+    form: &str,
+    line: &str,
+    field: &str,
+    from: line_coverage::CollectedFrom,
+) -> Vec<String> {
+    use line_coverage::CollectedFrom;
+    let at = format!("{form}:{line} ({field})");
+    match from {
+        CollectedFrom::DocBox {
+            stem,
+            year,
+            box_label,
+            extract_line,
+        } => {
+            let Some(doc) = crate::box_census::DOCUMENTS
+                .iter()
+                .find(|d| d.stem == stem && d.year == year)
+            else {
+                return vec![format!(
+                    "{at} is Collected from {stem}--{year} box {box_label}, but no such information \
+                     return is archived — a DocBox must name a document the box census reads, or \
+                     nothing checks the caption"
+                )];
+            };
+            let path = root.join(format!("design/forms/extract/{stem}--{year}.txt"));
+            let text = match std::fs::read_to_string(&path) {
+                Ok(t) => t,
+                Err(e) => {
+                    return vec![format!("{at}: cannot read {}: {e}", path.display())];
+                }
+            };
+            let printed = match crate::box_census::printed_boxes(&text) {
+                Ok(p) => p,
+                Err(e) => return vec![format!("{at}: {stem}--{year}: {e}")],
+            };
+            match printed.get(box_label) {
+                None => vec![format!(
+                    "{at} names {stem}--{year} box {box_label}, which that form does not print — the \
+                     box grid enumerated from its own extract has {:?}",
+                    printed.keys().collect::<Vec<_>>()
+                )],
+                Some(caption) if caption != extract_line => vec![format!(
+                    "{at} quotes {stem}--{year} box {box_label} as {extract_line:?}, but the extract \
+                     prints {caption:?} — the box caption is the document's text, never ours \
+                     (instructions: {})",
+                    doc.instructions
+                )],
+                Some(_) => Vec::new(),
+            }
+        }
+        CollectedFrom::FilerRecords {
+            stem,
+            year,
+            instruction_line,
+        } => {
+            let mut errs = Vec::new();
+            if normalize(instruction_line).is_empty() {
+                errs.push(format!(
+                    "{at} is Collected from the filer's records with an EMPTY instruction line — a \
+                     blank quote passes every `contains` and states nothing"
+                ));
+                return errs;
+            }
+            if !stem.starts_with('i') {
+                errs.push(format!(
+                    "{at} names {stem:?} as its instructions document — a FilerRecords quotation is \
+                     the INSTRUCTION's own sentence, so the stem must be an `iNNNN` booklet"
+                ));
+            }
+            if stem == form {
+                errs.push(format!(
+                    "{at} quotes its own form back at itself — the row already carries the form's \
+                     printed text in `instruction`, so this proves nothing"
+                ));
+            }
+            let path = root.join(format!("design/forms/extract/{stem}--{year}.txt"));
+            match std::fs::read_to_string(&path) {
+                Err(e) => errs.push(format!(
+                    "{at} cites {stem}--{year}, which is not archived: {e}"
+                )),
+                Ok(text) => {
+                    if !normalize(&text).contains(&normalize(instruction_line)) {
+                        errs.push(format!(
+                            "{at} cites {stem}--{year} for {instruction_line:?} — NOT FOUND in that \
+                             extract. The sentence that says where a filer's-records figure comes \
+                             from is quoted, never summarised"
+                        ));
+                    }
+                }
+            }
+            errs
+        }
+    }
+}
+
 pub fn check(cov: &line_coverage::Coverage) -> Result<String, String> {
     let root = repo_root();
     let mut extracts: BTreeMap<String, String> = BTreeMap::new();
@@ -704,6 +821,18 @@ pub fn check(cov: &line_coverage::Coverage) -> Result<String, String> {
                 "{}:{} ({}) is Combine but its quote contains a \"-0-\" clause — it is Clamped",
                 e.form, e.line, e.field
             ));
+        }
+
+        // ★★★ (7) A `Collected` line NAMES WHERE THE FIGURE COMES FROM, and the naming is checked
+        //     against the archive. `SPEC_interview.md` R2 mechanism 1 / R5, T2's kill.
+        //
+        //     The half that is genuinely new is `DocBox`: it joins the printed line to the
+        //     information return's own BOX GRID, enumerated from that document's extract by
+        //     `box_census`. So a Form W-2 whose box 1 caption changes by one character reds here as
+        //     well as in the box census — the line's claim about the document and the document's own
+        //     text are checked against each other, not each against itself.
+        if let Production::Collected(from) = e.production {
+            errs.extend(check_collected_from(&root, e.form, &e.line, e.field, from));
         }
     }
 
@@ -1156,7 +1285,11 @@ mod tests {
             "f1040",
             "5b",
             "line5b",
-            Production::Collected,
+            Production::filer_records(
+                "i1040gi",
+                "2024",
+                "Include on line 25c any federal income tax withheld on your Form(s) W-2G.",
+            ),
             "Taxable interest",
         );
         let e = check(&c).unwrap_err();
@@ -1234,7 +1367,11 @@ mod tests {
             "f1040",
             "25d",
             "line25d",
-            Production::Collected,
+            Production::filer_records(
+                "i1040gi",
+                "2024",
+                "Include on line 25c any federal income tax withheld on your Form(s) W-2G.",
+            ),
             "Federal income tax withheld from:",
         );
         let e = check(&c).unwrap_err();
@@ -1255,7 +1392,11 @@ mod tests {
                 "f8995",
                 "5",
                 "smuggled",
-                Production::Collected,
+                Production::filer_records(
+                    "i1040gi",
+                    "2024",
+                    "Include on line 25c any federal income tax withheld on your Form(s) W-2G.",
+                ),
                 blank,
             );
             let e = check(&c).unwrap_err();
@@ -1313,7 +1454,11 @@ mod tests {
                 "f8995",
                 "QDCGT Worksheet, 3",
                 Box::leak(format!("filler{i}").into_boxed_str()),
-                Production::Collected,
+                Production::filer_records(
+                    "i1040gi",
+                    "2024",
+                    "Include on line 25c any federal income tax withheld on your Form(s) W-2G.",
+                ),
                 "Qualified business income component. Multiply line 4 by 20% (0.20)",
             );
         }
@@ -1333,7 +1478,11 @@ mod tests {
                 "schedule_d",
                 "1",
                 Box::leak(format!("filler{i}").into_boxed_str()),
-                Production::Collected,
+                Production::filer_records(
+                    "i1040gi",
+                    "2024",
+                    "Include on line 25c any federal income tax withheld on your Form(s) W-2G.",
+                ),
                 "anything",
             );
         }
@@ -1419,6 +1568,122 @@ mod tests {
             "rule (5) must reject duplicate coverage of one line: {e}"
         );
 
+        // ★★★ (7) THE `Collected` SOURCE. Five plants, because the rule has five ways to be gutted
+        //     and a single one would leave four of them silent. The clean row each plant is derived
+        //     from is 1040 line 2b — Collected from Form 1099-INT box 1 — so nothing but the source
+        //     naming differs between pass and fail.
+        let clean_docbox = |c: &mut Coverage| {
+            c.line(
+                btctax_core::conventions::Usd::ZERO,
+                "f1040",
+                "2b",
+                "line2b",
+                Production::doc_box("f1099int", "2024", "1", "1 Interest income"),
+                "Taxable interest",
+            )
+        };
+        let mut c = Coverage::default();
+        clean_docbox(&mut c);
+        assert!(
+            check(&c).is_ok(),
+            "the DocBox control row must PASS — otherwise every plant below passes for the wrong \
+             reason: {:?}",
+            check(&c)
+        );
+
+        /// (what it is, the source to plant, the substring the refusal must contain).
+        type SourcePlant = (
+            &'static str,
+            btctax_core::tax::line_coverage::CollectedFrom,
+            &'static str,
+        );
+        use btctax_core::tax::line_coverage::CollectedFrom;
+        let source_plants: &[SourcePlant] = &[
+            // (7a) ★★ ONE CHARACTER of a box caption — the transcription defect this repo's standing
+            //      rule exists for, now reachable through a printed line's own claim about a document.
+            (
+                "a DocBox caption changed by one character",
+                CollectedFrom::DocBox {
+                    stem: "f1099int",
+                    year: "2024",
+                    box_label: "1",
+                    extract_line: "1 Interest incom",
+                },
+                "but the extract prints",
+            ),
+            // (7b) A box the form does not print — the stale entry after a revision renumbers.
+            (
+                "a DocBox naming a box the form does not print",
+                CollectedFrom::DocBox {
+                    stem: "f1099int",
+                    year: "2024",
+                    box_label: "99",
+                    extract_line: "99 Something",
+                },
+                "which that form does not print",
+            ),
+            // (7c) A document that is not archived at all: nothing would ever check the caption.
+            (
+                "a DocBox naming an unarchived document",
+                CollectedFrom::DocBox {
+                    stem: "f1099nec",
+                    year: "2024",
+                    box_label: "1",
+                    extract_line: "1 Nonemployee compensation",
+                },
+                "no such information return is archived",
+            ),
+            // (7d) ★★★ THE ANTI-TAUTOLOGY GUARD. The row already carries f1040's own printed text, so
+            //      quoting f1040 back at itself would resolve, pass a `contains`, and prove nothing.
+            (
+                "a FilerRecords quoting the row's own form",
+                CollectedFrom::FilerRecords {
+                    stem: "f1040",
+                    year: "2024",
+                    instruction_line: "Taxable interest",
+                },
+                "quotes its own form back at itself",
+            ),
+            // (7e) A paraphrase of the instruction — the same rot rule (2) catches on the form side.
+            (
+                "a FilerRecords sentence that is not in the instructions",
+                CollectedFrom::FilerRecords {
+                    stem: "i1040gi",
+                    year: "2024",
+                    instruction_line: "Write down whatever interest you think you got.",
+                },
+                "NOT FOUND in that extract",
+            ),
+            // (7f) An empty quote: `contains("")` is true for every haystack.
+            (
+                "a FilerRecords with a blank instruction line",
+                CollectedFrom::FilerRecords {
+                    stem: "i1040gi",
+                    year: "2024",
+                    instruction_line: "   ",
+                },
+                "EMPTY instruction line",
+            ),
+        ];
+        for (what, from, needle) in source_plants {
+            let mut c = Coverage::default();
+            c.line(
+                btctax_core::conventions::Usd::ZERO,
+                "f1040",
+                "2b",
+                "line2b",
+                Production::Collected(*from),
+                "Taxable interest",
+            );
+            let e = check(&c)
+                .err()
+                .unwrap_or_else(|| panic!("planting {what} must RED, and it did not"));
+            assert!(
+                e.contains(needle),
+                "planting {what} red for the wrong reason: expected {needle:?}, got:\n{e}"
+            );
+        }
+
         // A form with neither an extract nor a map — a typo'd stem.
         let mut c = Coverage::default();
         c.line(
@@ -1426,7 +1691,11 @@ mod tests {
             "f9999",
             "1",
             "line1",
-            Production::Collected,
+            Production::filer_records(
+                "i1040gi",
+                "2024",
+                "Include on line 25c any federal income tax withheld on your Form(s) W-2G.",
+            ),
             "anything",
         );
         let e = check(&c).unwrap_err();

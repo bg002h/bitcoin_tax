@@ -46,12 +46,26 @@ fn ext_is_document(n: &str) -> bool {
 }
 
 /// `f1040--2024.pdf`, `i1040gi--2024.pdf.txt`, `f8949--2025.pdf` — the IRS's own stem
-/// convention: `f`/`i`/`p` + at least three digits.
+/// convention: `f`/`i`/`p` + at least three digits, **or** the W-series spelling `f`/`i` + `w` +
+/// at least one digit (`fw2--2025.pdf`, `iw2w3--2025.pdf`).
 ///
 /// ★ Same standard as `human_readable_form` below: these must be files the repo actually HOLDS.
 /// `f8949.pdf` and `p550.pdf` used to be listed here and are in no tree — note that the `p`
 /// arm is still load-bearing for the *shape* (it matches `Pub525_…` style stems only via
 /// `irs_guidance`'s `PUB` prefix, not here), so it is kept, not pruned.
+///
+/// ★★★ **THE W-SERIES ARM WAS ADDED 2026-09-06, AND IT WAS A SILENT HOLE.** The IRS does not number
+/// every form `NNNN`: the wage and withholding series is `W-2`, `W-3`, `W-4`, `W-9`, and their
+/// filenames are `fw2`, `iw2w3`, `fw9`. Under the digits-only rule `classify("fw2--2025.pdf")`
+/// returned `None`, so `collect_sources` skipped the file entirely — the W-2 and its instructions
+/// could be fetched, noted, extracted and committed, and **`authority-manifest` would still print
+/// "OK — every entry resolves and every source is listed"** while listing neither. Measured on the
+/// first regen of the interview T2 archive: 14 documents added to the tree, **12** reached the
+/// manifest. That is precisely the "archived but never recorded" half the manifest census exists to
+/// catch, defeated by the shape detector one layer below it.
+///
+/// ★ The arm is deliberately narrow — `w` then **at least one digit**, so `fwd.txt` or `index.html`
+/// still classify as `None`. See `the_w_series_stems_are_primary_sources`.
 fn irs_stem(name: &str) -> bool {
     if !ext_is_document(name) {
         return false;
@@ -61,7 +75,12 @@ fn irs_stem(name: &str) -> bool {
         Some('f') | Some('i') | Some('p') => {}
         _ => return false,
     }
-    c.take_while(|ch| ch.is_ascii_digit()).count() >= 3
+    let rest: Vec<char> = c.collect();
+    if rest.iter().take_while(|ch| ch.is_ascii_digit()).count() >= 3 {
+        return true;
+    }
+    // The W-series: `fw2`, `iw2w3`, `fw9`. `w` followed by at least one digit.
+    matches!(rest.first(), Some('w')) && rest.get(1).is_some_and(char::is_ascii_digit)
 }
 
 /// `26USC_s1211.html`, `26CFR_1.1012-1_basis.xml` — statute and regulation, rungs 4 and 3.
@@ -543,6 +562,47 @@ mod tests {
                 classify(name),
                 None,
                 "`{name}` must not classify as a primary source"
+            );
+        }
+    }
+
+    /// ★★★ **THE KILL for the W-series arm (B1, seen red on the un-widened matcher).** Planted by
+    /// reverting `irs_stem` to `f`/`i`/`p` + three digits, this test reds with
+    /// *"`fw2--2025.pdf` is an IRS primary source (the W-2), left None: expected Some(\"irs-stem\")"*
+    /// — and it is not decorative, because with the arm missing the whole W-2 pair is invisible to
+    /// `collect_sources`, so `authority-manifest` prints OK on an archive that lists neither.
+    ///
+    /// ★ Both halves are asserted in one test on purpose: the positive half alone is satisfied by a
+    /// matcher that returns `Some` for everything, and the negative half alone is satisfied by the
+    /// old digits-only matcher. Neither one, on its own, watches the instrument *discriminate*.
+    #[test]
+    fn the_w_series_stems_are_primary_sources() {
+        for name in [
+            "fw2--2025.pdf",
+            "fw2--2025.pdf.txt",
+            "iw2w3--2025.pdf",
+            "iw2w3--2025.pdf.txt",
+            "fw9.pdf",
+        ] {
+            assert_eq!(
+                classify(name),
+                Some("irs-stem"),
+                "`{name}` is an IRS primary source (the W-series); a `None` here makes it invisible \
+                 to the manifest census while `authority-manifest` still prints OK"
+            );
+        }
+        // The arm must not swallow ordinary `f*`/`i*` documents that carry no IRS stem.
+        for name in [
+            "forward.txt",
+            "index.html",
+            "issues.txt",
+            "fw.pdf",
+            "iw.pdf",
+        ] {
+            assert_eq!(
+                classify(name),
+                None,
+                "`{name}` must not classify as a primary source — the W arm requires a digit"
             );
         }
     }

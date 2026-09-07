@@ -77,8 +77,9 @@ pub const DEFAULT_ROW_YEAR: &str = "2024";
 /// SPEC's r1 `computed` became a residual bucket.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Production {
-    /// *(the filer supplies it)* — blank exactly when not asked.
-    Collected,
+    /// *(the filer supplies it)* — blank exactly when not asked, and it **names where it is
+    /// collected from** ([`CollectedFrom`], `SPEC_interview.md` R2 mechanism 1 / R5).
+    Collected(CollectedFrom),
     /// *"Enter the amount from line N"* — blank when the source line is blank.
     Carry,
     /// *"Add lines X through Y"* / *"Combine lines X and Y"*, **with no clamp clause**.
@@ -99,6 +100,99 @@ pub enum Production {
     Constant,
     /// Fits no production. **Requires a reason**, and the count is ratcheted.
     Exception,
+}
+
+/// ★★★ **WHERE A COLLECTED FIGURE COMES FROM — the document side of the census.**
+/// (`design/SPEC_interview.md` r2 R2 mechanism 1, R5, and the T2 row's kill.)
+///
+/// A `Collected` line says *"the filer supplies it"*, and until now that was the whole statement.
+/// But **a figure with a third-party document behind it and a figure from memory are different
+/// evidence in an examination** (R5), and only the first has a caption that can be checked against
+/// anything. So every `Collected` row now names one of two sources, and `xtask line-coverage`
+/// verifies the naming:
+///
+/// | variant | what is checked |
+/// |---|---|
+/// | [`Self::DocBox`] | the named document is an archived information return, it PRINTS that box, and `extract_line` is that box's caption **verbatim** |
+/// | [`Self::FilerRecords`] | the named INSTRUCTIONS document is archived and carries `instruction_line` verbatim |
+///
+/// ★★ **There is no third variant, and that is the kill.** T2's guarantee is *"a `Collected` line
+/// with neither a `DocBox` nor a `FilerRecords { instruction_line }` reds"*; making the two
+/// exhaustive means a `Collected` row that names nothing cannot be written — `Production::Collected`
+/// with no argument is `E0532`/`E0061`, at the call site, before any test runs. A third *"computed
+/// elsewhere"* arm was considered and rejected: it is the residual bucket this file already records
+/// [`Production::Exception`] becoming in SPEC r1, and it would have absorbed every row that is
+/// mis-tagged rather than surfacing it.
+///
+/// ★★★ **Adding the field surfaced eight mis-tagged rows, which is the whole argument for making
+/// the compiler do the review.** Form 6251 lines 2a/2b (*"enter the amount from … line 12"*),
+/// 4 (*"Combine lines 1 through 3"*), 9 (*"Subtract line 8 from line 7"*) and 11 (*"If zero or less,
+/// enter -0-"*), Schedule C line 28 (*"Add lines 8 through 27b"*), Schedule SE line 2 (*"from
+/// Schedule C, line 31"*) and Form 8995 line 12 were all tagged `Collected` while their own quoted
+/// sentence names another production. Nobody supplies those figures; they are arithmetic over
+/// printed lines, and each is now the production its sentence dictates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CollectedFrom {
+    /// A numbered box on an information return the filer transcribes: Form W-2 box 1, Form 1099-INT
+    /// box 4, Form 1098 box 1.
+    ///
+    /// ★ The `year` is the DOCUMENT's, not the row's, and they legitimately differ: the
+    /// 1099-INT/DIV/G family is continuous-use and its TY2025 revision is filed under `--2024`.
+    DocBox {
+        /// The archived form's stem, e.g. `"fw2"`.
+        stem: &'static str,
+        /// The archived revision's year, e.g. `"2025"`.
+        year: &'static str,
+        /// The box's own label, e.g. `"1"`, `"2a"`, `"12b"`.
+        box_label: &'static str,
+        /// **The line of the extract**: the box's caption exactly as
+        /// `design/forms/extract/<stem>--<year>.txt` prints it, label included.
+        extract_line: &'static str,
+    },
+    /// **No issuing third party** — the figure is the filer's own record (R5): line 26's estimated
+    /// payments, Schedule A 5b/5c, the charitable rows, a prior-year carryover.
+    ///
+    /// ★ These have no box, which is exactly why the variant exists (fold M6). What they do have is
+    /// the instruction sentence that tells the filer where to get the figure, and that sentence is
+    /// checked verbatim against the archived instructions.
+    FilerRecords {
+        /// The INSTRUCTIONS document's stem, e.g. `"i1040gi"`. Never the form itself: quoting a
+        /// line's own printed text back at it would be a tautology, and the checker rejects it.
+        stem: &'static str,
+        year: &'static str,
+        /// **The line of the instructions**, verbatim.
+        instruction_line: &'static str,
+    },
+}
+
+impl Production {
+    /// A [`Production::Collected`] line transcribed from a numbered box on an information return.
+    pub const fn doc_box(
+        stem: &'static str,
+        year: &'static str,
+        box_label: &'static str,
+        extract_line: &'static str,
+    ) -> Production {
+        Production::Collected(CollectedFrom::DocBox {
+            stem,
+            year,
+            box_label,
+            extract_line,
+        })
+    }
+
+    /// A [`Production::Collected`] line the filer supplies from their own records (R5).
+    pub const fn filer_records(
+        stem: &'static str,
+        year: &'static str,
+        instruction_line: &'static str,
+    ) -> Production {
+        Production::Collected(CollectedFrom::FilerRecords {
+            stem,
+            year,
+            instruction_line,
+        })
+    }
 }
 
 /// Which way an *"enter -0-"* clause clamps.
@@ -328,14 +422,14 @@ pub fn cover_form6251(p: &crate::tax::form6251::Form6251) -> Coverage {
     // ★ Nested collectors go through `dated` too: a sub-form that never named its year would
     //   otherwise reach the table pre-stamped with the default and pass this gate invisibly.
     c.0.extend(dated(cover_form6251line1(line1)));
-    c.line(*line2a, f, "2a", "line2a", Production::Collected,
+    c.line(*line2a, f, "2a", "line2a", Production::Carry,
         "If filing Schedule A (Form 1040), enter the taxes from Schedule A, line 7; otherwise, enter the amount from Form 1040 or 1040-SR, line 12");
     c.line(
         *line2b,
         f,
         "2b",
         "line2b",
-        Production::Collected,
+        Production::Carry,
         "Tax refund from Schedule 1 (Form 1040), line 1 or line 8z",
     );
     c.line(
@@ -343,10 +437,10 @@ pub fn cover_form6251(p: &crate::tax::form6251::Form6251) -> Coverage {
         f,
         "3",
         "line3",
-        Production::Collected,
+        Production::filer_records("i6251", "2024", "Enter on line 3 the total of any other adjustments that apply to you, including the following."),
         "Other adjustments, including income-based related adjustments",
     );
-    c.line(*line4, f, "4", "line4", Production::Collected,
+    c.line(*line4, f, "4", "line4", Production::Combine,
         "Alternative minimum taxable income. Combine lines 1 through 3. (If married filing separately and line 4 is more than $875,950, see instructions.)");
     c.line(*line5, f, "5", "line5", Production::Constant, "Exemption.");
     c.line(*line6, f, "6", "line6", Production::Clamped(Polarity::FloorAtZero),
@@ -375,7 +469,11 @@ pub fn cover_form6251(p: &crate::tax::form6251::Form6251) -> Coverage {
         f,
         "8",
         "line8",
-        Production::Collected,
+        Production::filer_records(
+            "i6251",
+            "2024",
+            "The AMTFTC is a credit that you can claim against the AMT.",
+        ),
         "Alternative minimum tax foreign tax credit (see instructions)",
     );
     c.line(
@@ -383,12 +481,12 @@ pub fn cover_form6251(p: &crate::tax::form6251::Form6251) -> Coverage {
         f,
         "9",
         "line9",
-        Production::Collected,
+        Production::Combine,
         "Tentative minimum tax. Subtract line 8 from line 7",
     );
     c.line(*line10, f, "10", "line10", Production::Clamped(Polarity::FloorAtZero),
         "Add Form 1040 or 1040-SR, line 16 (minus any tax from Form 4972), and Schedule 2 (Form 1040), line 1z. Subtract from the result Schedule 3 (Form 1040), line 1 and any negative amount reported on Form 8978, line 14 (treated as a positive number). If zero or less, enter -0-. If you used Schedule J to figure your tax on Form 1040 or 1040-SR, line 16, refigure that tax without using Schedule J before completing this line. See instructions");
-    c.line(*line11, f, "11", "line11", Production::Collected,
+    c.line(*line11, f, "11", "line11", Production::Clamped(Polarity::FloorAtZero),
         "AMT. Subtract line 10 from line 9. If zero or less, enter -0-. Enter here and on Schedule 2 (Form 1040), line 2");
     c.line(*line12, f, "12", "line12", Production::Carry,
         "Enter the amount from Form 6251, line 6. If you are filing Form 2555, enter the amount from line 3 of the worksheet in the instructions for line 7");
@@ -623,7 +721,11 @@ pub fn cover_form8995apartii(p: &crate::tax::qbi_a::Form8995APartIi) -> Coverage
         f,
         "4",
         "line4",
-        Production::Collected,
+        Production::filer_records(
+            "i8995a",
+            "2024",
+            "Enter your W-2 wages from the trade, business, or aggregation.",
+        ),
         "Allocable share of W-2 wages from the trade, business, or aggregation",
     );
     c.line(
@@ -642,7 +744,7 @@ pub fn cover_form8995apartii(p: &crate::tax::qbi_a::Form8995APartIi) -> Coverage
         Production::Scaled,
         "Multiply line 4 by 25% (0.25)",
     );
-    c.line(*line7, f, "7", "line7", Production::Collected,
+    c.line(*line7, f, "7", "line7", Production::filer_records("i8995a", "2024", "Enter your share of the UBIA for all qualified property for the trade or business."),
         "Allocable share of the unadjusted basis immediately after acquisition (UBIA) of all qualified property");
     c.line(
         *line8,
@@ -829,14 +931,18 @@ pub fn cover_form8995apartiv(p: &crate::tax::qbi_a::Form8995APartIv) -> Coverage
     let mut c = Coverage::quoting("2024");
     c.line(*line27, f, "27", "line27", Production::Carry,
         "Total qualified business income component from all qualified trades, businesses, or aggregations. Enter the amount from line 16");
-    c.line(*line28, f, "28", "line28", Production::Collected,
+    c.line(*line28, f, "28", "line28", Production::filer_records("i8995a", "2024", "If the net amount is a loss, enter as a negative number."),
         "Qualified REIT dividends and publicly traded partnership (PTP) income or (loss). See instructions");
     c.line(
         *line29,
         f,
         "29",
         "line29",
-        Production::Collected,
+        Production::filer_records(
+            "i8995a",
+            "2024",
+            "Any negative amount will be carried forward to the next year.",
+        ),
         "Qualified REIT dividends and PTP (loss) carryforward from prior years",
     );
     c.line(*line30, f, "30", "line30", Production::Clamped(Polarity::FloorAtZero),
@@ -944,7 +1050,7 @@ pub fn cover_form8995lines(l: &crate::tax::qbi::Form8995Lines) -> Coverage {
         f,
         "3",
         "line3",
-        Production::Collected,
+        Production::filer_records("i8995", "2024", "Include here the qualified portion of trade or business (loss) carryforward allowed in calculating taxable income in the current year"),
         "Qualified business net (loss) carryforward from the prior year",
     );
     c.line(
@@ -968,7 +1074,11 @@ pub fn cover_form8995lines(l: &crate::tax::qbi::Form8995Lines) -> Coverage {
         f,
         "6",
         "line6",
-        Production::Collected,
+        Production::filer_records(
+            "i8995",
+            "2024",
+            "Enter income as a positive number and losses as a negative number.",
+        ),
         "Qualified REIT dividends and publicly traded partnership (PTP) income or (loss)",
     );
     c.line(
@@ -976,7 +1086,7 @@ pub fn cover_form8995lines(l: &crate::tax::qbi::Form8995Lines) -> Coverage {
         f,
         "7",
         "line7",
-        Production::Collected,
+        Production::filer_records("i8995", "2024", "Include here the qualified portion of PTP (loss) carryforward allowed in calculating taxable income in the current year"),
         "Qualified REIT dividends and qualified PTP (loss) carryforward from the prior",
     );
     c.line(*line8, f, "8", "line8", Production::Clamped(Polarity::FloorAtZero),
@@ -1010,7 +1120,7 @@ pub fn cover_form8995lines(l: &crate::tax::qbi::Form8995Lines) -> Coverage {
         f,
         "12",
         "line12",
-        Production::Collected,
+        Production::Combine,
         "Enter your net capital gain, if any, increased by any qualified dividends",
     );
     c.line(
@@ -1178,7 +1288,7 @@ pub fn cover_schedulealines(l: &crate::tax::printed::ScheduleALines) -> Coverage
         f,
         "1",
         "line1",
-        Production::Collected,
+        Production::filer_records("i1040sca", "2024", "Enter the total of your medical and dental expenses, after you reduce these expenses by any payments received from insurance or other sources."),
         "Medical and dental expenses (see instructions)",
     );
     c.line(
@@ -1205,14 +1315,14 @@ pub fn cover_schedulealines(l: &crate::tax::printed::ScheduleALines) -> Coverage
         Production::Clamped(Polarity::FloorAtZero),
         "Subtract line 3 from line 1. If line 3 is more than line 1, enter -0-",
     );
-    c.line(*line5a, f, "5a", "line5a", Production::Collected,
+    c.line(*line5a, f, "5a", "line5a", Production::filer_records("i1040sca", "2024", "State and local income taxes paid in 2024 for a prior year, such as taxes paid with your 2023 state or local income tax return."),
         "State and local income taxes or general sales taxes. You may include either income taxes or general sales taxes on line 5a, but not both");
     c.line(
         *line5b,
         f,
         "5b",
         "line5b",
-        Production::Collected,
+        Production::filer_records("i1040sca", "2024", "Enter on line 5b the state and local taxes you paid on real estate you own that wasn't used for business"),
         "State and local real estate taxes (see instructions)",
     );
     c.line(
@@ -1220,7 +1330,7 @@ pub fn cover_schedulealines(l: &crate::tax::printed::ScheduleALines) -> Coverage
         f,
         "5c",
         "line5c",
-        Production::Collected,
+        Production::filer_records("i1040sca", "2024", "Enter on line 5c the state and local personal property taxes you paid, but only if the taxes were based on value alone and were imposed on a yearly basis."),
         "State and local personal property taxes",
     );
     c.line(
@@ -1252,7 +1362,12 @@ pub fn cover_schedulealines(l: &crate::tax::printed::ScheduleALines) -> Coverage
         f,
         "8a",
         "line8a",
-        Production::Collected,
+        Production::doc_box(
+            "f1098",
+            "2025",
+            "1",
+            "1 Mortgage interest received from payer(s)/borrower(s)",
+        ),
         "Home mortgage interest and points reported to you on Form 1098.",
     );
     c.line(
@@ -1268,7 +1383,7 @@ pub fn cover_schedulealines(l: &crate::tax::printed::ScheduleALines) -> Coverage
         f,
         "9",
         "line9",
-        Production::Collected,
+        Production::filer_records("i1040sca", "2024", "Investment interest is interest paid on money you borrowed that is allocable to property held for investment."),
         "Investment interest. Attach Form 4952 if required. See instructions",
     );
     c.line(
@@ -1284,7 +1399,7 @@ pub fn cover_schedulealines(l: &crate::tax::printed::ScheduleALines) -> Coverage
         f,
         "11",
         "line11",
-        Production::Collected,
+        Production::filer_records("i1040sca", "2024", "Enter on line 11 the total value of gifts you made in cash or by check (including out-of-pocket expenses), unless a limit on deducting gifts applies to you."),
         "Gifts by cash or check. If you made any gift of $250 or more",
     );
     c.line(
@@ -1292,7 +1407,7 @@ pub fn cover_schedulealines(l: &crate::tax::printed::ScheduleALines) -> Coverage
         f,
         "12",
         "line12",
-        Production::Collected,
+        Production::filer_records("i1040sca", "2024", "Enter on line 12 the total value of your contributions of property other than by cash or check, unless a limit on deducting gifts applies to you."),
         "Other than by cash or check. If you made any gift of $250 or more",
     );
     c.line(
@@ -1300,7 +1415,7 @@ pub fn cover_schedulealines(l: &crate::tax::printed::ScheduleALines) -> Coverage
         f,
         "13",
         "line13",
-        Production::Collected,
+        Production::filer_records("i1040sca", "2024", "After applying those limits, enter the amount of your carryover that you are allowed to deduct this year."),
         "Carryover from prior year",
     );
     c.line(
@@ -1367,7 +1482,7 @@ pub fn cover_scheduleclines(l: &crate::tax::printed::ScheduleCLines) -> Coverage
     } = l;
     let f = "f1040sc";
     let mut c = Coverage::quoting("2024");
-    c.line(*line1, f, "1", "line1", Production::Collected,
+    c.line(*line1, f, "1", "line1", Production::filer_records("i1040sc", "2024", "Enter gross receipts from your trade or business. Be sure to check any Forms 1099 you received for business income that must be reported on this line."),
         "Gross receipts or sales. See instructions for line 1 and check the box if this income was reported to you on Form W-2 and the “Statutory employee” box on that form was checked");
     c.line(
         *line3,
@@ -1398,7 +1513,7 @@ pub fn cover_scheduleclines(l: &crate::tax::printed::ScheduleCLines) -> Coverage
         f,
         "28",
         "line28",
-        Production::Collected,
+        Production::Combine,
         "Total expenses before expenses for business use of home. Add lines 8 through 27b",
     );
     c.line(
@@ -1479,7 +1594,7 @@ pub fn cover_scheduleselines(l: &crate::tax::printed::ScheduleSeLines) -> Covera
         Production::Combine,
         "Add lines 4c and 5b",
     );
-    c.line(*line8a, f, "8a", "line8a", Production::Collected,
+    c.line(*line8a, f, "8a", "line8a", Production::doc_box("fw2", "2025", "3", "3 Social security wages"),
         "Total social security wages and tips (total of boxes 3 and 7 on Form(s) W-2) and railroad retirement (tier 1) compensation. If $168,600 or more, skip lines 8b through 10, and go to line 11");
     c.line(
         *line8d,
@@ -1547,7 +1662,7 @@ pub fn cover_schedule1lines(l: &crate::tax::printed::Schedule1Lines) -> Coverage
         f,
         "1",
         "line1",
-        Production::Collected,
+        Production::doc_box("f1099g", "2024", "2", "2 State or local income tax"),
         "Taxable refunds, credits, or offsets of state and local income taxes",
     );
     c.line(
@@ -1563,7 +1678,7 @@ pub fn cover_schedule1lines(l: &crate::tax::printed::Schedule1Lines) -> Coverage
         f,
         "7",
         "line7",
-        Production::Collected,
+        Production::doc_box("f1099g", "2024", "1", "1 Unemployment compensation"),
         "Unemployment compensation",
     );
     c.line(
@@ -1571,7 +1686,11 @@ pub fn cover_schedule1lines(l: &crate::tax::printed::Schedule1Lines) -> Coverage
         f,
         "8v",
         "line8v",
-        Production::Collected,
+        Production::filer_records(
+            "i1040gi",
+            "2024",
+            "you received ordinary income in connection with digital assets",
+        ),
         "Digital assets received as ordinary income not reported elsewhere. See",
     );
     c.line(
@@ -1603,7 +1722,7 @@ pub fn cover_schedule1lines(l: &crate::tax::printed::Schedule1Lines) -> Coverage
         f,
         "18",
         "line18",
-        Production::Collected,
+        Production::doc_box("f1099int", "2024", "2", "2 Early withdrawal penalty"),
         "Penalty on early withdrawal of savings",
     );
     c.exception(*line21, f, "21", "line21",
@@ -1723,7 +1842,7 @@ pub fn cover_schedule3lines(l: &crate::tax::printed::Schedule3Lines) -> Coverage
         f,
         "1",
         "line1",
-        Production::Collected,
+        Production::filer_records("i1040gi", "2024", "If you paid income tax to a foreign country or U.S. territory, you may be able to take this credit."),
         "Foreign tax credit. Attach Form 1116 if required",
     );
     c.line(*line8, f, "8", "line8", Production::Combine,
@@ -1733,7 +1852,7 @@ pub fn cover_schedule3lines(l: &crate::tax::printed::Schedule3Lines) -> Coverage
         f,
         "10",
         "line10",
-        Production::Collected,
+        Production::filer_records("i1040gi", "2024", "If you got an automatic extension of time to file Form 1040, 1040-SR, or 1040-NR by filing Form 4868 or by making a payment, enter the amount of the payment or any amount you paid with Form 4868."),
         "Amount paid with request for extension to file (see instructions)",
     );
     c.exception(*line11, f, "11", "line11",
@@ -1789,7 +1908,7 @@ pub fn cover_form8959lines(l: &crate::tax::other_taxes::Form8959Lines) -> Covera
     } = l;
     let f = "f8959";
     let mut c = Coverage::quoting("2024");
-    c.line(*line1, f, "1", "line1", Production::Collected,
+    c.line(*line1, f, "1", "line1", Production::doc_box("fw2", "2025", "5", "5 Medicare wages and tips"),
         "Medicare wages and tips from Form W-2, box 5. If you have more than one Form W-2, enter the total of the amounts from box 5");
     c.line(
         *line4,
@@ -1855,7 +1974,7 @@ pub fn cover_form8959lines(l: &crate::tax::other_taxes::Form8959Lines) -> Covera
         "Additional Medicare Tax on self-employment income. Multiply line 12 by 0.9% (0.009). Enter here and go to Part III");
     c.line(*line18, f, "18", "line18", Production::Combine,
         "Add lines 7, 13, and 17. Also include this amount on Schedule 2 (Form 1040), line 11 (Form 1040-SS filers, see instructions), and go to Part V");
-    c.line(*line19, f, "19", "line19", Production::Collected,
+    c.line(*line19, f, "19", "line19", Production::doc_box("fw2", "2025", "6", "6 Medicare tax withheld"),
         "Medicare tax withheld from Form W-2, box 6. If you have more than one Form W-2, enter the total of the amounts from box 6");
     c.line(
         *line20,
@@ -1954,7 +2073,7 @@ pub fn cover_form8960lines(l: &crate::tax::other_taxes::Form8960Lines) -> Covera
         f,
         "7",
         "line7",
-        Production::Collected,
+        Production::filer_records("i8960", "2024", "For example, use line 7 to report additions and modifications to net investment income, such as the following."),
         "Other modifications to investment income (see instructions)",
     );
     c.line(
@@ -1974,7 +2093,7 @@ pub fn cover_form8960lines(l: &crate::tax::other_taxes::Form8960Lines) -> Covera
         f,
         "9b",
         "line9b",
-        Production::Collected,
+        Production::filer_records("i8960", "2024", "Include state, local, and foreign income taxes you paid for the tax year that are attributable to net investment income."),
         "State, local, and foreign income tax (see instructions)",
     );
     // ★★ BLANK-CAPABLE, and this is the census entry the code used to contradict (FR-12).
@@ -2094,14 +2213,14 @@ pub fn cover_scheduledlines(l: &crate::tax::printed::ScheduleDLines) -> Coverage
     let f = "f1040sd";
     let mut c = Coverage::quoting("2024");
     // §G-28/B4 — Schedule D's own totals-without-Form-8949 lines.
-    c.line(*line1a_d, f, "1a(d)", "line1a_d", Production::Collected, "Totals for all short-term transactions reported on Form 1099-B for which basis was reported to the IRS and for which you have no adjustments (see instructions). However, if you choose to report all these transactions on Form 8949, leave this line blank and go to line 1b");
-    c.line(*line1a_e, f, "1a(e)", "line1a_e", Production::Collected, "Totals for all short-term transactions reported on Form 1099-B for which basis was reported to the IRS and for which you have no adjustments (see instructions). However, if you choose to report all these transactions on Form 8949, leave this line blank and go to line 1b");
+    c.line(*line1a_d, f, "1a(d)", "line1a_d", Production::doc_box("f1099b", "2025", "1d", "1d Proceeds"), "Totals for all short-term transactions reported on Form 1099-B for which basis was reported to the IRS and for which you have no adjustments (see instructions). However, if you choose to report all these transactions on Form 8949, leave this line blank and go to line 1b");
+    c.line(*line1a_e, f, "1a(e)", "line1a_e", Production::doc_box("f1099b", "2025", "1e", "1e Cost or other basis"), "Totals for all short-term transactions reported on Form 1099-B for which basis was reported to the IRS and for which you have no adjustments (see instructions). However, if you choose to report all these transactions on Form 8949, leave this line blank and go to line 1b");
     // ★ Column (h) quotes the LINE's own sentence, like lines 3 and 10 beside it — the column header
     //   ("Subtract column (e) from column (d)…") is a four-row wrap in the text layer and is carried
     //   by the `1a(h)` LABEL, not by the quote.
     c.line(*line1a_h, f, "1a(h)", "line1a_h", Production::Combine, "Totals for all short-term transactions reported on Form 1099-B for which basis was reported to the IRS and for which you have no adjustments (see instructions). However, if you choose to report all these transactions on Form 8949, leave this line blank and go to line 1b");
-    c.line(*line8a_d, f, "8a(d)", "line8a_d", Production::Collected, "Totals for all long-term transactions reported on Form 1099-B for which basis was reported to the IRS and for which you have no adjustments (see instructions). However, if you choose to report all these transactions on Form 8949, leave this line blank and go to line 8b");
-    c.line(*line8a_e, f, "8a(e)", "line8a_e", Production::Collected, "Totals for all long-term transactions reported on Form 1099-B for which basis was reported to the IRS and for which you have no adjustments (see instructions). However, if you choose to report all these transactions on Form 8949, leave this line blank and go to line 8b");
+    c.line(*line8a_d, f, "8a(d)", "line8a_d", Production::doc_box("f1099b", "2025", "1d", "1d Proceeds"), "Totals for all long-term transactions reported on Form 1099-B for which basis was reported to the IRS and for which you have no adjustments (see instructions). However, if you choose to report all these transactions on Form 8949, leave this line blank and go to line 8b");
+    c.line(*line8a_e, f, "8a(e)", "line8a_e", Production::doc_box("f1099b", "2025", "1e", "1e Cost or other basis"), "Totals for all long-term transactions reported on Form 1099-B for which basis was reported to the IRS and for which you have no adjustments (see instructions). However, if you choose to report all these transactions on Form 8949, leave this line blank and go to line 8b");
     c.line(*line8a_h, f, "8a(h)", "line8a_h", Production::Combine, "Totals for all long-term transactions reported on Form 1099-B for which basis was reported to the IRS and for which you have no adjustments (see instructions). However, if you choose to report all these transactions on Form 8949, leave this line blank and go to line 8b");
     // ★★ spec 1099-DA T4 / r3 N-2 — THE FOUR PER-BOX ROWS ARE QUOTED FROM THE **2025** REVISION,
     //    because that is the revision whose routing the code implements.
@@ -2240,7 +2359,7 @@ pub fn cover_scheduledlines(l: &crate::tax::printed::ScheduleDLines) -> Coverage
         Production::Carry,
         "Totals for all transactions reported on Form(s) 8949 with Box C checked",
     );
-    c.line(*line6, f, "6", "line6", Production::Collected,
+    c.line(*line6, f, "6", "line6", Production::filer_records("i1040sd", "2024", "Use this worksheet to figure your capital loss carryovers from 2023 to 2024"),
         "Short-term capital loss carryover. Enter the amount, if any, from line 8 of your Capital Loss Carryover Worksheet in the instructions");
     c.line(
         *line7,
@@ -2279,10 +2398,10 @@ pub fn cover_scheduledlines(l: &crate::tax::printed::ScheduleDLines) -> Coverage
         f,
         "13",
         "line13",
-        Production::Collected,
+        Production::doc_box("f1099div", "2024", "2a", "2a Total capital gain distr."),
         "Capital gain distributions. See the instructions",
     );
-    c.line(*line14, f, "14", "line14", Production::Collected,
+    c.line(*line14, f, "14", "line14", Production::filer_records("i1040sd", "2024", "Use this worksheet to figure your capital loss carryovers from 2023 to 2024"),
         "Long-term capital loss carryover. Enter the amount, if any, from line 13 of your Capital Loss Carryover Worksheet in the instructions");
     c.line(
         *line15,
@@ -2356,7 +2475,7 @@ pub fn cover_schedulebrow(
         "f1040sb",
         line,
         "amount",
-        Production::Collected,
+        Production::doc_box("f1099int", "2024", "1", "1 Interest income"),
         instruction,
     );
     c
@@ -2454,7 +2573,7 @@ pub fn cover_form1040lines(l: &crate::tax::printed::Form1040Lines) -> Coverage {
         "f1040",
         "1a",
         "Form1040Lines.line1a",
-        Production::Collected,
+        Production::doc_box("fw2", "2025", "1", "1 Wages, tips, other compensation"),
         "Total amount from Form(s) W-2, box 1 (see instructions)",
     );
     c.line(
@@ -2462,7 +2581,7 @@ pub fn cover_form1040lines(l: &crate::tax::printed::Form1040Lines) -> Coverage {
         "f1040",
         "2a",
         "Form1040Lines.line2a",
-        Production::Collected,
+        Production::doc_box("f1099int", "2024", "8", "8 Tax-exempt interest"),
         "Tax-exempt interest",
     );
     c.line(
@@ -2470,7 +2589,7 @@ pub fn cover_form1040lines(l: &crate::tax::printed::Form1040Lines) -> Coverage {
         "f1040",
         "2b",
         "Form1040Lines.line2b",
-        Production::Collected,
+        Production::doc_box("f1099int", "2024", "1", "1 Interest income"),
         "Taxable interest",
     );
     c.line(
@@ -2478,7 +2597,7 @@ pub fn cover_form1040lines(l: &crate::tax::printed::Form1040Lines) -> Coverage {
         "f1040",
         "3a",
         "Form1040Lines.line3a",
-        Production::Collected,
+        Production::doc_box("f1099div", "2024", "1b", "1b Qualified dividends"),
         "Qualified dividends",
     );
     c.line(
@@ -2486,7 +2605,7 @@ pub fn cover_form1040lines(l: &crate::tax::printed::Form1040Lines) -> Coverage {
         "f1040",
         "3b",
         "Form1040Lines.line3b",
-        Production::Collected,
+        Production::doc_box("f1099div", "2024", "1a", "1a Total ordinary dividends"),
         "Ordinary dividends",
     );
     c.line(
@@ -2630,7 +2749,7 @@ pub fn cover_form1040lines(l: &crate::tax::printed::Form1040Lines) -> Coverage {
         "f1040",
         "25a",
         "Form1040Lines.line25a",
-        Production::Collected,
+        Production::doc_box("fw2", "2025", "2", "2 Federal income tax withheld"),
         "Federal income tax withheld from: a Form(s) W-2",
     );
     c.line(
@@ -2638,7 +2757,7 @@ pub fn cover_form1040lines(l: &crate::tax::printed::Form1040Lines) -> Coverage {
         "f1040",
         "25b",
         "Form1040Lines.line25b",
-        Production::Collected,
+        Production::doc_box("f1099int", "2024", "4", "4 Federal income tax withheld"),
         "Form(s) 1099",
     );
     c.line(
@@ -2646,7 +2765,11 @@ pub fn cover_form1040lines(l: &crate::tax::printed::Form1040Lines) -> Coverage {
         "f1040",
         "25c",
         "Form1040Lines.line25c",
-        Production::Collected,
+        Production::filer_records(
+            "i1040gi",
+            "2024",
+            "Include on line 25c any federal income tax withheld on your Form(s) W-2G.",
+        ),
         "Other forms (see instructions)",
     );
     c.line(
@@ -2662,7 +2785,7 @@ pub fn cover_form1040lines(l: &crate::tax::printed::Form1040Lines) -> Coverage {
         "f1040",
         "26",
         "Form1040Lines.line26",
-        Production::Collected,
+        Production::filer_records("i1040gi", "2024", "Include any overpayment that you applied to your 2024 estimated tax from your 2023 return or an amended return (Form 1040-X)."),
         "2024 estimated tax payments and amount applied from 2023 return",
     );
     c.line(
@@ -2772,7 +2895,7 @@ pub fn cover_form1040income(l: &crate::tax::printed::Form1040Income) -> Coverage
         "f1040",
         "1a",
         "Form1040Income.line1a",
-        Production::Collected,
+        Production::doc_box("fw2", "2025", "1", "1 Wages, tips, other compensation"),
         "Total amount from Form(s) W-2, box 1 (see instructions)",
     );
     c.line(
@@ -2788,7 +2911,7 @@ pub fn cover_form1040income(l: &crate::tax::printed::Form1040Income) -> Coverage
         "f1040",
         "2a",
         "Form1040Income.line2a",
-        Production::Collected,
+        Production::doc_box("f1099int", "2024", "8", "8 Tax-exempt interest"),
         "Tax-exempt interest",
     );
     c.line(
@@ -2796,7 +2919,7 @@ pub fn cover_form1040income(l: &crate::tax::printed::Form1040Income) -> Coverage
         "f1040",
         "2b",
         "Form1040Income.line2b",
-        Production::Collected,
+        Production::doc_box("f1099int", "2024", "1", "1 Interest income"),
         "Taxable interest",
     );
     c.line(
@@ -2804,7 +2927,7 @@ pub fn cover_form1040income(l: &crate::tax::printed::Form1040Income) -> Coverage
         "f1040",
         "3a",
         "Form1040Income.line3a",
-        Production::Collected,
+        Production::doc_box("f1099div", "2024", "1b", "1b Qualified dividends"),
         "Qualified dividends",
     );
     c.line(
@@ -2812,7 +2935,7 @@ pub fn cover_form1040income(l: &crate::tax::printed::Form1040Income) -> Coverage
         "f1040",
         "3b",
         "Form1040Income.line3b",
-        Production::Collected,
+        Production::doc_box("f1099div", "2024", "1a", "1a Total ordinary dividends"),
         "Ordinary dividends",
     );
     c.line(
@@ -2903,7 +3026,11 @@ pub fn cover_printed8949row(r: &crate::tax::printed::Printed8949Row, part: &str)
         "f8949",
         &fmt_part(part, "1", "d"),
         "proceeds_d",
-        Production::Collected,
+        Production::filer_records(
+            "i8949",
+            "2024",
+            "The net proceeds equal the gross proceeds minus any selling expenses",
+        ),
         "Proceeds",
     );
     c.line(
@@ -2911,7 +3038,7 @@ pub fn cover_printed8949row(r: &crate::tax::printed::Printed8949Row, part: &str)
         "f8949",
         &fmt_part(part, "1", "e"),
         "cost_e",
-        Production::Collected,
+        Production::filer_records("i8949", "2024", "The basis of property you buy is usually its cost, including the purchase price and any costs of purchase, such as commissions."),
         "Cost or other basis",
     );
     c.line(
@@ -2988,7 +3115,7 @@ pub fn cover_setaxresult(r: &crate::tax::se::SeTaxResult) -> Coverage {
     } = r;
     let f = "f1040sse";
     let mut c = Coverage::quoting("2024");
-    c.line(*net_se, f, "2", "net_se", Production::Collected,
+    c.line(*net_se, f, "2", "net_se", Production::Carry,
         "Net profit or (loss) from Schedule C, line 31; and Schedule K-1 (Form 1065), box 14, code A");
     c.line(
         *net_se,
@@ -3209,7 +3336,7 @@ pub fn cover_schedule1a(s: &crate::tax::schedule_1a::Schedule1A) -> Coverage {
         f,
         "2a",
         "line2a",
-        Production::Collected,
+        Production::filer_records("i1040gi", "2025", "If you do have excluded income from Puerto Rico, or you are filing Form 2555 or 4563, complete lines 2a through 2e in Part I of Schedule 1-A to figure your MAGI."),
         "Enter any income from Puerto Rico that you excluded",
     );
     c.line(
@@ -3254,7 +3381,7 @@ pub fn cover_schedule1a(s: &crate::tax::schedule_1a::Schedule1A) -> Coverage {
     );
 
     // ── Part II — No Tax on Tips ─────────────────────────────────────────────────────────────
-    c.line(*line4a, f, "4a", "line4a", Production::Collected,
+    c.line(*line4a, f, "4a", "line4a", Production::doc_box("fw2", "2025", "7", "7 Social security tips"),
         "Enter qualified tips included on Form W-2, box 7, but see the instructions if Form W-2, box 5 is more than $176,100 or you received tips that are not subject to social security and Medicare taxes");
     c.exception(*line4b, f, "4b", "line4b",
         "Qualified tips included on Form 4137, line 1, row A, column (c). If Form 4137 is not filed, enter -0-",
@@ -3262,7 +3389,7 @@ pub fn cover_schedule1a(s: &crate::tax::schedule_1a::Schedule1A) -> Coverage {
     c.exception(*line4c, f, "4c", "line4c",
         "If you only received qualified tips as an employee with respect to employment with one employer, enter the larger of line 4a or line 4b. Otherwise, see the instructions to determine the amount to enter on line 4c",
         "\"The LARGER of\" — there is no larger-of production (`Bounded` is \"Enter the smaller of\"), and the \"Otherwise\" branch is the Qualified Tips From More Than One Employer Worksheet, which no production names. Same shape as f1040:12, filed for the same reason.");
-    c.line(*line5, f, "5", "line5", Production::Collected,
+    c.line(*line5, f, "5", "line5", Production::filer_records("i1040gi", "2025", "Include the qualified tips you and/or your spouse received in the course of a trade or business, but only to the extent the trade or business in which you received the qualified tips has net income."),
         "Qualified tips received in the course of a trade or business. Qualified tip amount included in Form 1099-NEC, box 1; Form 1099-MISC, box 3; or Form 1099-K, box 1a. Do not enter more than the net profit from the trade or business");
     c.line(
         *line6,
@@ -3320,9 +3447,9 @@ pub fn cover_schedule1a(s: &crate::tax::schedule_1a::Schedule1A) -> Coverage {
     );
 
     // ── Part III — No Tax on Overtime ────────────────────────────────────────────────────────
-    c.line(*line14a, f, "14a", "line14a", Production::Collected,
+    c.line(*line14a, f, "14a", "line14a", Production::doc_box("fw2", "2025", "1", "1 Wages, tips, other compensation"),
         "Qualified overtime compensation included in Form W-2, box 1. If you received qualified overtime compensation not reported on Form W-2, box 1, see instructions");
-    c.line(*line14b, f, "14b", "line14b", Production::Collected,
+    c.line(*line14b, f, "14b", "line14b", Production::filer_records("i1040gi", "2025", "Enter on Line 14b only the qualified overtime compensation amount that is included in Form 1099-NEC, box 1, or Form 1099-MISC, box 3."),
         "Qualified overtime compensation included in Form 1099-NEC, box 1, or Form 1099-MISC, box 3 (see instructions)");
     c.line(
         *line14c,
@@ -3375,7 +3502,7 @@ pub fn cover_schedule1a(s: &crate::tax::schedule_1a::Schedule1A) -> Coverage {
         f,
         "22a(ii)",
         "line22a.col_ii_deducted_elsewhere",
-        Production::Collected,
+        Production::filer_records("i1040gi", "2025", "On line 22, column (ii), enter the amount of the QPVLI, if any, that was deducted elsewhere on your return"),
         "(ii) Deducted on",
     );
     c.line(
@@ -3383,7 +3510,7 @@ pub fn cover_schedule1a(s: &crate::tax::schedule_1a::Schedule1A) -> Coverage {
         f,
         "22a(iii)",
         "line22a.col_iii_schedule_1a",
-        Production::Collected,
+        Production::filer_records("i1040gi", "2025", "On line 22, column (iii), enter the total amount of the QPVLI paid or accrued on the loan during the taxable year minus the amount on line 22, column (ii)."),
         "(iii) Schedule 1-A",
     );
     c.line(
@@ -3391,7 +3518,7 @@ pub fn cover_schedule1a(s: &crate::tax::schedule_1a::Schedule1A) -> Coverage {
         f,
         "22b(ii)",
         "line22b.col_ii_deducted_elsewhere",
-        Production::Collected,
+        Production::filer_records("i1040gi", "2025", "On line 22, column (ii), enter the amount of the QPVLI, if any, that was deducted elsewhere on your return"),
         "(ii) Deducted on",
     );
     c.line(
@@ -3399,7 +3526,7 @@ pub fn cover_schedule1a(s: &crate::tax::schedule_1a::Schedule1A) -> Coverage {
         f,
         "22b(iii)",
         "line22b.col_iii_schedule_1a",
-        Production::Collected,
+        Production::filer_records("i1040gi", "2025", "On line 22, column (iii), enter the total amount of the QPVLI paid or accrued on the loan during the taxable year minus the amount on line 22, column (ii)."),
         "(iii) Schedule 1-A",
     );
     c.line(

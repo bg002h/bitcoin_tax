@@ -51,9 +51,17 @@ to make impossible to miss.
 
 Archived ≠ extracted ≠ conformance-tested. These PDFs are step 1 of three:
 
-1. **archived** — done: **60** documents recorded, all in `design/forms/` (measured
-   `design/forms/*/*.pdf.txt`), each as a URL note plus its extracted text. ★ The older
-   `design/amt-form6251/` holds **no** notes — it was retired as an archive on 2026-07-30.
+1. **archived** — done: **98** documents recorded, all in `design/forms/` (measured
+   `ls design/forms/*/*.pdf.txt | wc -l`, 2026-09-06), each as a URL note plus its extracted text.
+   ★ The older `design/amt-form6251/` holds **no** notes — it was retired as an archive on
+   2026-07-30.
+
+   ★★ **This count said 60 and had been stale for some time** — 84 notes were on disk at
+   `d49de0c7`, before the interview T2 archive added its 14 (the seven information returns
+   `fw2` / `f1099int` / `f1099div` / `f1099g` / `f1099b` / `f1098` / `f1098e` and their
+   instructions, `iw2w3` / `i1099int` / `i1099div` / `i1099g` / `i1099b` / `i1098` / `i1098et`).
+   A hand-maintained count in prose is exactly the thing `CLAUDE.md` says never to hand-count;
+   the command that produces it is now written beside it.
 2. **extracted** — text layer committed as an in-crate fixture (`xtask extract-schedule-1a` is the model;
    `-layout` for a form, plain `pdftotext -f N -l M` for 3-column instruction pages). Done for
    Schedule 1-A only.

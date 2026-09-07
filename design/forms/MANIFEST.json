@@ -99,6 +99,33 @@
     "extract": "design/forms/extract/f1040v--2024.txt"
   },
   {
+    "path": "design/forms/2024/f1099div--2024.pdf",
+    "kind": "form",
+    "storage": "note",
+    "sha256": "4ea1de804ff1db921753bd6319beeccfe4647299e03d79816e04d852a9cd1435",
+    "bytes": 542425,
+    "url": "https://www.irs.gov/pub/irs-prior/f1099div--2024.pdf",
+    "extract": "design/forms/extract/f1099div--2024.txt"
+  },
+  {
+    "path": "design/forms/2024/f1099g--2024.pdf",
+    "kind": "form",
+    "storage": "note",
+    "sha256": "fe46acb40d53442cca67fba55f79aa7683ab8d351e109096c3d6000f60e6226f",
+    "bytes": 523268,
+    "url": "https://www.irs.gov/pub/irs-prior/f1099g--2024.pdf",
+    "extract": "design/forms/extract/f1099g--2024.txt"
+  },
+  {
+    "path": "design/forms/2024/f1099int--2024.pdf",
+    "kind": "form",
+    "storage": "note",
+    "sha256": "ee7697c9b29374596fd9645b157b7312d121ae3c2f76bebf68908c3fc2b739e6",
+    "bytes": 538774,
+    "url": "https://www.irs.gov/pub/irs-prior/f1099int--2024.pdf",
+    "extract": "design/forms/extract/f1099int--2024.txt"
+  },
+  {
     "path": "design/forms/2024/f4868--2024.pdf",
     "kind": "form",
     "storage": "note",
@@ -232,6 +259,33 @@
     "bytes": 254687,
     "url": "https://www.irs.gov/pub/irs-prior/i1040sse--2024.pdf",
     "extract": "design/forms/extract/i1040sse--2024.txt"
+  },
+  {
+    "path": "design/forms/2024/i1099div--2024.pdf",
+    "kind": "instructions",
+    "storage": "note",
+    "sha256": "af89ec14c288df70092cc2439e0bf215bab9704fc0b70ba3f9bd7d420067e607",
+    "bytes": 178269,
+    "url": "https://www.irs.gov/pub/irs-prior/i1099div--2024.pdf",
+    "extract": "design/forms/extract/i1099div--2024.txt"
+  },
+  {
+    "path": "design/forms/2024/i1099g--2024.pdf",
+    "kind": "instructions",
+    "storage": "note",
+    "sha256": "bd1f344b01190496a6a81ae768fb2ff1df8b1d74300a3631a5b6be17eccb9f3a",
+    "bytes": 128896,
+    "url": "https://www.irs.gov/pub/irs-prior/i1099g--2024.pdf",
+    "extract": "design/forms/extract/i1099g--2024.txt"
+  },
+  {
+    "path": "design/forms/2024/i1099int--2024.pdf",
+    "kind": "instructions",
+    "storage": "note",
+    "sha256": "6f13ff025d4ab270ac53d9f1b60f7f354b1e558366b9d6bfd49cc60bf57fbc63",
+    "bytes": 196656,
+    "url": "https://www.irs.gov/pub/irs-prior/i1099int--2024.pdf",
+    "extract": "design/forms/extract/i1099int--2024.txt"
   },
   {
     "path": "design/forms/2024/i6251--2024.pdf",
@@ -405,6 +459,33 @@
     "extract": "design/forms/extract/f1040v--2025.txt"
   },
   {
+    "path": "design/forms/2025/f1098--2025.pdf",
+    "kind": "form",
+    "storage": "note",
+    "sha256": "304da9c0f67a46ff04ba831359185dc13dde335199cbf7c413dc879e5410dd87",
+    "bytes": 501143,
+    "url": "https://www.irs.gov/pub/irs-prior/f1098--2025.pdf",
+    "extract": "design/forms/extract/f1098--2025.txt"
+  },
+  {
+    "path": "design/forms/2025/f1098e--2025.pdf",
+    "kind": "form",
+    "storage": "note",
+    "sha256": "66287bb7f31bbfb1b28a0fef2c2c60175fe01a0f7890763a483dc29ded180246",
+    "bytes": 481922,
+    "url": "https://www.irs.gov/pub/irs-prior/f1098e--2025.pdf",
+    "extract": "design/forms/extract/f1098e--2025.txt"
+  },
+  {
+    "path": "design/forms/2025/f1099b--2025.pdf",
+    "kind": "form",
+    "storage": "note",
+    "sha256": "7e334cea66c2b2be3d88615a56db288a2805cb8705076b3b282a4eabbbd788ad",
+    "bytes": 601719,
+    "url": "https://www.irs.gov/pub/irs-prior/f1099b--2025.pdf",
+    "extract": "design/forms/extract/f1099b--2025.txt"
+  },
+  {
     "path": "design/forms/2025/f4868--2025.pdf",
     "kind": "form",
     "storage": "note",
@@ -495,6 +576,15 @@
     "extract": "design/forms/extract/f8995a--2025.txt"
   },
   {
+    "path": "design/forms/2025/fw2--2025.pdf",
+    "kind": "form",
+    "storage": "note",
+    "sha256": "6a52ad63693de54220a3326b22c4d0fb34f4c25084366537087312975a55ae96",
+    "bytes": 1343180,
+    "url": "https://www.irs.gov/pub/irs-prior/fw2--2025.pdf",
+    "extract": "design/forms/extract/fw2--2025.txt"
+  },
+  {
     "path": "design/forms/2025/i1040gi--2025.pdf",
     "kind": "instructions",
     "storage": "note",
@@ -547,6 +637,33 @@
     "bytes": 176326,
     "url": "https://www.irs.gov/pub/irs-prior/i1040sse--2025.pdf",
     "extract": "design/forms/extract/i1040sse--2025.txt"
+  },
+  {
+    "path": "design/forms/2025/i1098--2025.pdf",
+    "kind": "instructions",
+    "storage": "note",
+    "sha256": "d1d6647dd6a3bc6fb6132593fcc04deb4f163faa9cecaf867961e28f96cbe51a",
+    "bytes": 182716,
+    "url": "https://www.irs.gov/pub/irs-prior/i1098--2025.pdf",
+    "extract": "design/forms/extract/i1098--2025.txt"
+  },
+  {
+    "path": "design/forms/2025/i1098et--2025.pdf",
+    "kind": "instructions",
+    "storage": "note",
+    "sha256": "68c0f34312f15295ac882e3b4148c0cc93df1f5cf31de8c8f9793258672bafb1",
+    "bytes": 161690,
+    "url": "https://www.irs.gov/pub/irs-prior/i1098et--2025.pdf",
+    "extract": "design/forms/extract/i1098et--2025.txt"
+  },
+  {
+    "path": "design/forms/2025/i1099b--2025.pdf",
+    "kind": "instructions",
+    "storage": "note",
+    "sha256": "55bbe7df46f43f2c305481f303bc9e6518f5874766a2d183f2cb14dc0b91d745",
+    "bytes": 232745,
+    "url": "https://www.irs.gov/pub/irs-prior/i1099b--2025.pdf",
+    "extract": "design/forms/extract/i1099b--2025.txt"
   },
   {
     "path": "design/forms/2025/i6251--2025.pdf",
@@ -619,6 +736,15 @@
     "bytes": 216021,
     "url": "https://www.irs.gov/pub/irs-prior/i8995--2025.pdf",
     "extract": "design/forms/extract/i8995--2025.txt"
+  },
+  {
+    "path": "design/forms/2025/iw2w3--2025.pdf",
+    "kind": "instructions",
+    "storage": "note",
+    "sha256": "bfecbc99720cc8fbedb50f6e698ac1f6fa758dbfa5df775715446b7cc30bae2b",
+    "bytes": 523710,
+    "url": "https://www.irs.gov/pub/irs-prior/iw2w3--2025.pdf",
+    "extract": "design/forms/extract/iw2w3--2025.txt"
   },
   {
     "path": "design/forms/2026/f1040s1--2026-DRAFT.pdf",

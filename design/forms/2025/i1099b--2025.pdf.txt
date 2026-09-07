@@ -1,0 +1,21 @@
+https://www.irs.gov/pub/irs-prior/i1099b--2025.pdf
+
+# i1099b--2025.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  55bbe7df46f43f2c305481f303bc9e6518f5874766a2d183f2cb14dc0b91d745
+# bytes   232745
+#
+# Fetch:    curl -sL -o i1099b--2025.pdf https://www.irs.gov/pub/irs-prior/i1099b--2025.pdf
+# Verify:   sha256sum i1099b--2025.pdf   # must equal the sha256 above
+#
+# ★ A DIFFERENT hash does not mean a corrupt download — it means the IRS REVISED this
+# document. That is a change to the authority: review it, never silently absorb it.
+#
+# The committed text layer is design/forms/extract/i1099b--2025.txt — that is what the
+# conformance tests read, so they run with no PDF and no network.
+#
+# Archived 2026-09-06 for the interview build (design/SPEC_interview.md r2 §7 T2): the
+# information returns the document screens (R4) transcribe their boxes from, so a box
+# caption is checkable against the form's own text instead of a hand-list.
+# REVISION, READ OFF THE DOCUMENT'S OWN TEXT (never assumed from the filename):
+#   "2025 / Instructions for Form 1099-B" (extract:1,3).
+# Annual cadence.

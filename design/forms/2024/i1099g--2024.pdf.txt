@@ -1,0 +1,21 @@
+https://www.irs.gov/pub/irs-prior/i1099g--2024.pdf
+
+# i1099g--2024.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  bd1f344b01190496a6a81ae768fb2ff1df8b1d74300a3631a5b6be17eccb9f3a
+# bytes   128896
+#
+# Fetch:    curl -sL -o i1099g--2024.pdf https://www.irs.gov/pub/irs-prior/i1099g--2024.pdf
+# Verify:   sha256sum i1099g--2024.pdf   # must equal the sha256 above
+#
+# ★ A DIFFERENT hash does not mean a corrupt download — it means the IRS REVISED this
+# document. That is a change to the authority: review it, never silently absorb it.
+#
+# The committed text layer is design/forms/extract/i1099g--2024.txt — that is what the
+# conformance tests read, so they run with no PDF and no network.
+#
+# Archived 2026-09-06 for the interview build (design/SPEC_interview.md r2 §7 T2): the
+# information returns the document screens (R4) transcribe their boxes from, so a box
+# caption is checkable against the form's own text instead of a hand-list.
+# REVISION, READ OFF THE DOCUMENT'S OWN TEXT (never assumed from the filename):
+#   "(Rev. March 2024)" (extract:6).
+# PERIODIC (continuous-use); no --2025 edition exists. March, like its form.

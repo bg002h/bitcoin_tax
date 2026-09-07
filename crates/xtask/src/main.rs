@@ -10,6 +10,7 @@
 mod archive_check;
 mod authority_conflicts;
 mod authority_manifest;
+mod box_census;
 /// N1 — asserts `btctax_core::tax::capital_loss_carryover` is verbatim and complete against the 2025
 /// Schedule D instructions' text layer.
 ///
@@ -219,6 +220,14 @@ fn main() {
                 }
             }
         }
+        Some("box-census") => {
+            // ★ SPEC_interview R4/I2: every box an archived information return PRINTS carries exactly
+            //   one recorded decision, the caption checked verbatim against design/forms/extract/.
+            if let Err(e) = box_census::run() {
+                eprintln!("xtask box-census: {e}");
+                std::process::exit(1);
+            }
+        }
         Some("check-isolation") => {
             if let Err(e) = check_isolation::run() {
                 eprintln!("xtask check-isolation: {e}");
@@ -238,7 +247,7 @@ fn main() {
         _ => {
             eprintln!(
                 "usage: cargo run -p xtask -- <docs [--pdf] | examples | subcommand-coverage | \
-                 check-isolation | line-coverage | cite-check | prompt-check | authority-conflicts | harness-check | archive-check | authority-manifest [--regen] | extract-geometry <stem> | label-census <stem> | label-proof <stem> | label-boxes <stem> | \
+                 check-isolation | line-coverage | box-census | cite-check | prompt-check | authority-conflicts | harness-check | archive-check | authority-manifest [--regen] | extract-geometry <stem> | label-census <stem> | label-proof <stem> | label-boxes <stem> | \
                  classify-path <path> | \
                  extract-schedule-1a | dump-fields <pdf> | form-delta <old> <new> | \
                  port-status <prior-tag> <new-tag>>"

@@ -1,0 +1,21 @@
+https://www.irs.gov/pub/irs-prior/fw2--2025.pdf
+
+# fw2--2025.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  6a52ad63693de54220a3326b22c4d0fb34f4c25084366537087312975a55ae96
+# bytes   1343180
+#
+# Fetch:    curl -sL -o fw2--2025.pdf https://www.irs.gov/pub/irs-prior/fw2--2025.pdf
+# Verify:   sha256sum fw2--2025.pdf   # must equal the sha256 above
+#
+# ★ A DIFFERENT hash does not mean a corrupt download — it means the IRS REVISED this
+# document. That is a change to the authority: review it, never silently absorb it.
+#
+# The committed text layer is design/forms/extract/fw2--2025.txt — that is what the
+# conformance tests read, so they run with no PDF and no network.
+#
+# Archived 2026-09-06 for the interview build (design/SPEC_interview.md r2 §7 T2): the
+# information returns the document screens (R4) transcribe their boxes from, so a box
+# caption is checkable against the form's own text instead of a hand-list.
+# REVISION, READ OFF THE DOCUMENT'S OWN TEXT (never assumed from the filename):
+#   "2025", printed on the form face beside "Form W-2 Wage and Tax Statement" (extract:73).
+# Annual cadence: Form W-2 carries a tax year, not a "Rev." date.
