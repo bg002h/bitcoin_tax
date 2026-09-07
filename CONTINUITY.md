@@ -6,6 +6,15 @@ _Last updated: **2026-09-06**. Written at a deliberate pause; safe to exit. **Re
 
 # ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
 
+> ## ★★★ RESUME 2026-09-06 (last) — the residue sweep LANDED (`ca3b3eb9`, 3175 tests; docs `a97db15c`); its ONE sonnet verification (S6) is IN FLIGHT (worktree). Read this block first.
+>
+> When it returns: copy, persist; fold any Critical/Important via one opus agent (else nothing);
+> then the queue is EMPTY — every spec-queued track and the residue are closed. The owner's items
+> stand: S5's 2026-09-15 real-data run (needs the 2026 exports), S8's print rehearsal, T7 (Notice
+> 2026-20 standing order before the next 2026 sale), decisions S1/S2/S7, the push (~215 commits).
+> Under S6, future work is: spec → ONE opus review → fold → build → ONE seam review → fold → ONE
+> sonnet re-verification. One opus agent at a time; briefs persisted as `BRIEF-*.md`.
+
 > ## ★★★ RESUME 2026-09-06 (late night) — S6 RULED (one prose round, then build); the RESIDUE SWEEP is next: one opus agent under `BRIEF-build-residue-sweep-1.md`, then one sonnet verification. Read this block first.
 >
 > The sweep: FR-63 (the TUI commit modal's slice clause — a second NOTICE line or a modal-body slot,
