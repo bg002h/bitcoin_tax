@@ -80,10 +80,11 @@ as the reader of `Declined` — this task is where that reader lands.
    f1040s3 `Part I       Nonrefundable Credits` :15, `Part II      Other Payments and Refundable
    Credits` :41 (both `Overstates`; keying on the parts is finer than the spec's title and equally
    derived); f1040sa title :5; f1040sd three parts :19/:44/:75; f1040sb title :6. 2024 — s1 :15/:58,
-   s2 :15/:46, s3 :15/:40, sd :21/:46 (+Part III), and **`f1040--2024.txt` has no `Income` token at a
-   line start** — read that extract yourself and record the key you find; if the 2024 text layer has
-   no separable caption, do NOT fall back to the title (Form 1040 mixes directions — lines 1–9 versus
-   25–38) — red, stop that form's table, and report it. Placement of an entry into a part: by the
+   s2 :15/:46, s3 :15/:40, sd :21/:46 (+Part III), and f1040 `Income` as the leading token of the
+   line-1a row again (`f1040--2024.txt:49`, one leading space). Assert the caption as the leading
+   non-blank token of a line, so both years key the same way; if a future revision drops the caption
+   from the text layer, do NOT fall back to the title (Form 1040 mixes directions — lines 1–9 versus
+   25–38) — red, and report it. Placement of an entry into a part: by the
    entry's `line` and the part's line range read from the extract, recorded in the map (e.g. a
    `part = "…"` key) or computed — either way asserted, never hand-typed per entry.
 4. **The join rules** (R2.2): `Understates` ⇒ `QuestionId` or `RefuseReason` only (an `Advisory`
