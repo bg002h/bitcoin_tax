@@ -1035,7 +1035,7 @@ mod tests {
     #[test]
     fn deleting_one_dependent_leaves_the_others_records_alone_and_a_new_ssn_starts_fresh() {
         let mut r = ri();
-        let (ssn0, ssn1) = ("111-22-3333", "444-55-6666");
+        let (ssn0, ssn1) = ("111-22-3333", "444-00-6666");
         let key = |ssn: &str, gate| AnswerKey::DependentGate {
             ssn_hash: dependent_ssn_hash(ssn),
             gate,
@@ -1069,7 +1069,7 @@ mod tests {
         );
 
         // Row 1's SSN corrected: a different person, so the old records become history.
-        assert_eq!(supersede_dependent_identity(&mut r, ssn1, "777-88-9999"), 2);
+        assert_eq!(supersede_dependent_identity(&mut r, ssn1, "777-00-9999"), 2);
         assert!(r.answer_log.is_empty());
         assert_eq!(r.answer_log_history.len(), 2);
         assert!(r.answer_log_history.iter().all(

@@ -1795,7 +1795,7 @@ mod broker_block_tests {
         use btctax_core::tax::provenance::{
             dependent_ssn_hash, record_answer, AnswerKey, AnswerState, DependentGate,
         };
-        let (ssn0, ssn1) = ("111-22-3333", "444-55-6666");
+        let (ssn0, ssn1) = ("111-22-3333", "444-00-6666");
         let key = |ssn: &str| AnswerKey::DependentGate {
             ssn_hash: dependent_ssn_hash(ssn),
             gate: DependentGate::QcRelationship,
@@ -1851,7 +1851,7 @@ mod broker_block_tests {
         (ssn_field.set)(
             &mut ri,
             &RowAddr(vec![0]),
-            FieldValue::SecretEntry("777-88-9999".into()),
+            FieldValue::SecretEntry("777-00-9999".into()),
         )
         .unwrap();
         assert!(

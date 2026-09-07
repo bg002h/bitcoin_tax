@@ -81,10 +81,22 @@ hook runs. This is a future item; the current spec scope is Linux only.
 
 ## Path allowlist
 
-The owner-specific scan excludes exactly ONE path: `LICENSE`. The MIT
-copyright-holder line in that file is a deliberate, accepted exception
-(the user's standing rule per R0-I4). Growing the allowlist is a spec-level
-change, not an edit-in-place of this hook.
+The owner-specific scan excludes four paths, each a deliberate, accepted
+exception (the user's standing rule per R0-I4):
+
+- `LICENSE` — the MIT copyright-holder line.
+- `legal/text/`, `legal/primary-sources/`, `design/forms/extract/` — **archived
+  public text** (statute, regulation, Federal Register notices, IRS forms and
+  instructions), every file a verbatim public document pinned by sha256
+  (`legal/SHA256SUMS`, `design/forms/MANIFEST.json`, checked by `xtask
+  authority-manifest`). Owner data cannot enter
+  one of these files without also failing the manifest, and public text
+  legitimately carries ordinary names and place names that an owner pattern
+  collides with (grown 2026-09-07 after a Federal Register list of Kansas
+  counties blocked a push in 247 commits; owner ruling).
+
+Growing the allowlist further is a spec-level change, not an edit-in-place of
+this hook.
 
 ---
 

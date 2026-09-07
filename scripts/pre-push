@@ -51,7 +51,20 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     # ── Owner-specific scan (primary gate) [R0-I4 allowlist] ─────────────
     if [ -n "$COMBINED" ]; then
       set +e
-      git grep -InE "$COMBINED" "$rev" -- ':(exclude)LICENSE' >&2
+      # Path allowlist [R0-I4; grown 2026-09-07, owner ruling]: LICENSE (the MIT
+      # copyright-holder line), and the three ARCHIVED-PUBLIC-TEXT trees — statute /
+      # regulation / Federal Register text under legal/, and the IRS form and
+      # instruction extracts under design/forms/extract/. Every file there is a
+      # verbatim public document pinned by sha256 (legal/SHA256SUMS,
+      # design/forms/MANIFEST.json, checked by `xtask authority-manifest`), so owner
+      # data cannot enter one without also failing the manifest; and public text
+      # legitimately contains ordinary names and place names that an owner pattern
+      # will collide with (a Federal Register list of Kansas counties tripped it).
+      git grep -InE "$COMBINED" "$rev" -- \
+        ':(exclude)LICENSE' \
+        ':(exclude)legal/text/' \
+        ':(exclude)legal/primary-sources/' \
+        ':(exclude)design/forms/extract/' >&2
       gs=$?
       set -e
       if [ "$gs" -eq 0 ]; then

@@ -103,7 +103,14 @@ ALLOWED_SSN_LEGACY='^(111-11-1111|111-22-3333|123-45-6789|222-22-2222|222-33-444
 #   become public (once pushed, they leave the pushed range and are never
 #   rescanned). It is scaffolding for one push, not a permanent exemption. A new
 #   synthetic SSN still belongs in the structural space above, never here.
-ALLOWED_SSN_UNPUSHED_HISTORY='^(111-22-0004|111-22-0009|333-44-5555)$'
+#
+#   444-55-6666  — valid-SHAPED synthetic SSNs the interview build wrote into fixtures
+#   777-88-9999    (btctax-core provenance.rs / scrub.rs, btctax-input-form sections.rs)
+#                  from commit 3142775d (2026-09-06) onward, before the pre-push scan ran
+#                  on that range. HEAD is being moved to the structural never-issued
+#                  space (group 00); the intermediate commits still carry these two and
+#                  are unpushed as of 2026-09-07. Same bucket, same reason, same expiry.
+ALLOWED_SSN_UNPUSHED_HISTORY='^(111-22-0004|111-22-0009|333-44-5555|444-55-6666|777-88-9999)$'
 
 # ── EIN exclusion (2-7 shape) ────────────────────────────────────────────────
 # No structural rule is available: the IRS has issued prefixes across nearly the
@@ -145,7 +152,18 @@ ALLOWED_SSN_UNPUSHED_HISTORY='^(111-22-0004|111-22-0009|333-44-5555)$'
 #   ★ The invariant that actually holds: every entry here is token-exact and carries its citation.
 ALLOWED_EIN_REVIEW_ARTIFACT='^(90-0000001|91-0000002|55-5555555|99-1000000)$'
 
-ALLOWED_EIN='^(11-1111111|22-2222222|33-3333333|44-4444444|12-3456789|98-7654321|99-1234567|56-1234567)$'
+#   99-9999999   — repeated-digit synthetic payer EIN, the interview's 1099 fixtures
+#                  (btctax-core document_census.rs, scrub_axis.rs) [interview T1/T3, 2026-09-06/07]
+#   10-1010101   — alternating-digit synthetic payer EIN, the scrub-axis sentinel's
+#                  second 1099-B row (btctax-core scrub_axis.rs)
+#   88-8888888   — repeated-digit synthetic payer EIN (btctax-core scrub_axis.rs)
+#   77-7777777   — repeated-digit synthetic payer EIN (btctax-core scrub_axis.rs)
+#   66-6666666   — repeated-digit synthetic payer EIN (btctax-core scrub_axis.rs)
+#   00-0000000   — the IRS's OWN example EIN, printed in the General Instructions for
+#                  Forms W-2 and W-3 and archived verbatim as public text under
+#                  design/forms/extract/iw2w3--2024/2025/2026.txt (interview T2, hashes
+#                  in design/forms/MANIFEST.json); an all-zero prefix is not an issued EIN
+ALLOWED_EIN='^(11-1111111|22-2222222|33-3333333|44-4444444|12-3456789|98-7654321|99-1234567|56-1234567|99-9999999|10-1010101|88-8888888|77-7777777|66-6666666|00-0000000)$'
 
 ALLOWED="$ALLOWED_SSN_IMPOSSIBLE|$ALLOWED_SSN_LEGACY|$ALLOWED_SSN_UNPUSHED_HISTORY|$ALLOWED_EIN|$ALLOWED_EIN_REVIEW_ARTIFACT"
 

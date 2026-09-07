@@ -304,6 +304,37 @@ echo "=== H-series: pre-push hook ==="
   cleanup_ws
 }
 
+# KAT-H8b: archived-public-text carve-out [R0-I4, grown 2026-09-07]
+#   sub-case 1: owner pattern matches ONLY under legal/text/, legal/primary-sources/
+#               and design/forms/extract/ → exit 0
+#   sub-case 2: same content also in a source file → exit 1
+{
+  new_ws
+  commit_file "readme.txt" "clean" "base"
+  BASE="$TIP"
+  mkdir -p "$TMPWS/legal/text" "$TMPWS/legal/primary-sources" "$TMPWS/design/forms/extract"
+  commit_file "legal/text/notice.txt" "SYNTHETIC-OWNER-77 county list" "archive a notice"
+  commit_file "legal/primary-sources/statute.txt" "SYNTHETIC-OWNER-77 in a statute" "archive a statute"
+  commit_file "design/forms/extract/f1040--2025.txt" "SYNTHETIC-OWNER-77 on a form" "archive an extract"
+  printf 'SYNTHETIC-OWNER-[0-9]+\n' > "$TMPWS/.pii-patterns"
+  printf 'refs/heads/main %s refs/heads/main %s\n' "$TIP" "$BASE" \
+    | run_hook origin 2>/dev/null && rc=0 || rc=$?
+  [ "$rc" -eq 0 ] && pass "H8b-1 (archived-public-text carve-out — only there → exit 0)" || fail "H8b-1: expected rc=0; got $rc"
+  cleanup_ws
+
+  new_ws
+  commit_file "readme.txt" "clean" "base"
+  BASE="$TIP"
+  mkdir -p "$TMPWS/legal/text" "$TMPWS/crates/x/src"
+  commit_file "legal/text/notice.txt" "SYNTHETIC-OWNER-77 county list" "archive a notice"
+  commit_file "crates/x/src/lib.rs" "// SYNTHETIC-OWNER-77 also here" "also in source"
+  printf 'SYNTHETIC-OWNER-[0-9]+\n' > "$TMPWS/.pii-patterns"
+  printf 'refs/heads/main %s refs/heads/main %s\n' "$TIP" "$BASE" \
+    | run_hook origin 2>/dev/null && rc=0 || rc=$?
+  [ "$rc" -eq 1 ] && pass "H8b-2 (archived-public-text carve-out — also in source → exit 1)" || fail "H8b-2: expected rc=1; got $rc"
+  cleanup_ws
+}
+
 # KAT-H9: deleted ref — all-zeros local SHA → skipped, exit 0
 {
   new_ws

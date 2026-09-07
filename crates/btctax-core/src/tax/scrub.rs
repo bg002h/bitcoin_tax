@@ -891,7 +891,7 @@ mod tests {
         };
         use crate::tax::return_inputs::Dependent;
 
-        let (ssn0, ssn1) = ("111-22-3333", "444-55-6666");
+        let (ssn0, ssn1) = ("111-22-3333", "444-00-6666");
         let mut ri = kitchen_sink_household().0;
         ri.header.dependents = vec![
             Dependent {
