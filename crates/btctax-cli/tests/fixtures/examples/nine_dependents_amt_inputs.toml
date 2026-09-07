@@ -70,6 +70,16 @@ charitable_carryover_in = []
 charitable_carryover_in_provenance = "user"
 capital_loss_carryforward_in_provenance = "user"
 
+# ★★★ R3 / T5 — THE DOCUMENT-LESS INCOME DOOR. A census row answered "none" makes its paired
+#     question LIVE, because the instructions name income that exists with no information return
+#     behind it: wages from an employer who issued no Form W-2 ("Even if you don't get a Form W-2,
+#     you must still report your earnings"), interest a bank paying under $10 never reported, a
+#     state refund the agency never mailed a 1099-G for. These are TOP-LEVEL `ReturnInputs` fields,
+#     not census rows. This household has none of them, and says so.
+w2_wages_without_w2 = false
+interest_or_dividends_without_1099 = false
+state_refund_without_1099g = false
+
 # ── R3 / §5.1 — THE DOCUMENT CENSUS. Every type ANSWERED: "none" and "nobody asked" are the same
 #    blank on the printed page and are not the same testimony, so an unanswered row refuses.
 #
@@ -92,6 +102,9 @@ w2g = false
 c_1099 = false
 a_1095 = false
 t_1098 = false
+# ★ T5 — the 1098-E row opened when `Form1098E` replaced the `sch1.student_loan_interest_paid`
+#   scalar. This household holds no student loan, so the answer is a truthful "none".
+form_1098e = false
 
 [capital_loss_carryforward_in]
 long = "0"
@@ -119,7 +132,6 @@ ssn = "123-45-6789"
 hsa_activity = false
 ira_deduction_claimed = "0"
 state_refund_taxable = "0"
-student_loan_interest_paid = "0"
 
 [payments]
 estimated_tax_payments = "0"

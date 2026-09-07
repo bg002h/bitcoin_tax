@@ -552,7 +552,7 @@ $ btctax --vault v.pgp income show --year 2024
     "b_1099": false,
     "g_1099": true,
     "form_1098": null,
-    "form_1098e": null,
+    "form_1098e": false,
     "r_1099": false,
     "ssa_1099": false,
     "nec_misc_k_1099": false,
@@ -581,7 +581,9 @@ $ btctax --vault v.pgp income show --year 2024
       "box19_local_tax": "0",
       "box12": [],
       "box8_allocated_tips": "0",
-      "box10_dependent_care": "0"
+      "box10_dependent_care": "0",
+      "box13_statutory_employee": false,
+      "box14b_treasury_tipped_occupation_codes": ""
     },
     {
       "owner": "spouse",
@@ -598,7 +600,9 @@ $ btctax --vault v.pgp income show --year 2024
       "box19_local_tax": "0",
       "box12": [],
       "box8_allocated_tips": "0",
-      "box10_dependent_care": "0"
+      "box10_dependent_care": "0",
+      "box13_statutory_employee": false,
+      "box14b_treasury_tipped_occupation_codes": ""
     }
   ],
   "int_1099": [
@@ -612,7 +616,11 @@ $ btctax --vault v.pgp income show --year 2024
       "box4_fed_withheld": "100",
       "box6_foreign_tax": "100",
       "box8_tax_exempt_interest": "0",
-      "box9_private_activity_bond_amt": "0"
+      "box9_private_activity_bond_amt": "0",
+      "box10_market_discount": "0",
+      "box11_bond_premium": "0",
+      "box12_bond_premium_treasury": "0",
+      "box13_bond_premium_tax_exempt": "0"
     }
   ],
   "div_1099": [
@@ -639,10 +647,13 @@ $ btctax --vault v.pgp income show --year 2024
       "payer_tin": "",
       "transcribed_on": null,
       "box1_unemployment": "1000",
-      "box4_fed_withheld": "0"
+      "box2_state_refund": "0",
+      "box4_fed_withheld": "0",
+      "box10_family_leave_benefits": "0"
     }
   ],
   "b_1099": [],
+  "form_1098e": [],
   "schedule_c": {
     "owner": "taxpayer",
     "business_description": "Bitcoin mining",
@@ -681,7 +692,6 @@ $ btctax --vault v.pgp income show --year 2024
   "mfs_spouse_itemizes": null,
   "sch1": {
     "state_refund_taxable": "0",
-    "student_loan_interest_paid": "0",
     "ira_deduction_claimed": "0",
     "hsa_activity": false
   },
@@ -730,6 +740,11 @@ $ btctax --vault v.pgp income show --year 2024
   "form_4563_line15": "0",
   "opened_from": null,
   "filing_status_confirmed": null,
+  "w2_wages_without_w2": null,
+  "interest_or_dividends_without_1099": null,
+  "state_refund_without_1099g": null,
+  "itemized_prior_year": null,
+  "schedule_b_filer_records": [],
   "answer_log": {},
   "answer_log_history": []
 }

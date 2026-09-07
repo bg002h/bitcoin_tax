@@ -52,6 +52,57 @@ fn pp() -> Passphrase {
     Passphrase::new("pw".into())
 }
 
+/// ★★★ **THE KEYSTROKE SCRIPT, DERIVED FROM THE REGISTRY — never hand-counted.**
+///
+/// Every script in this file used to be a literal `b"n\nn\nn…"` whose length was a hand-count of the
+/// live question set, and every one of them went red each time the interview grew. **Since T5 a
+/// count taken from one snapshot cannot be right even in principle**: R3's document-less income door
+/// makes a question live *because* another was answered "no", so `income answer` sweeps until the
+/// set stops growing and the script has to do the same.
+///
+/// This simulates that sweep on a CLONE: declarations answer `no` unless named in `yes`, skippables
+/// take a bare Enter. Running short still fails loudly (*"input ended before every question was
+/// answered"*), so the derivation can never silently under-answer.
+fn answer_script(
+    ri: &btctax_core::tax::return_inputs::ReturnInputs,
+    yes: &[btctax_core::tax::questions::QuestionId],
+) -> Vec<u8> {
+    use btctax_cli::cmd::answer::{live_questions, Ask};
+    use btctax_core::tax::questions::QuestionId;
+    let mut ri = ri.clone();
+    let mut asked_decl: std::collections::BTreeSet<QuestionId> = std::collections::BTreeSet::new();
+    let mut asked_skip: std::collections::BTreeSet<btctax_core::tax::questions::SkippableId> =
+        std::collections::BTreeSet::new();
+    let mut script = String::new();
+    for _ in 0..8 {
+        let round: Vec<Ask> = live_questions(&ri)
+            .into_iter()
+            .filter(|a| match a {
+                Ask::Declaration(q) => !asked_decl.contains(&q.id),
+                Ask::Skippable(sk) => !asked_skip.contains(&sk.id),
+            })
+            .collect();
+        if round.is_empty() {
+            break;
+        }
+        for a in round {
+            match a {
+                Ask::Declaration(q) => {
+                    asked_decl.insert(q.id);
+                    let v = yes.contains(&q.id);
+                    script.push_str(if v { "y\n" } else { "n\n" });
+                    (q.set)(&mut ri, v);
+                }
+                Ask::Skippable(sk) => {
+                    asked_skip.insert(sk.id);
+                    script.push('\n');
+                }
+            }
+        }
+    }
+    script.into_bytes()
+}
+
 /// Single filer: OTI=40,000; MAGI excl. crypto=60,000; QD=0.
 /// MAGI is set so that even after adding the 20,000 LT gain (→ magi_with=80,000) we stay
 /// below the Single §1411 NIIT threshold of $200,000.
@@ -805,7 +856,7 @@ fn report_tax_year_derives_and_computes_from_ty2024_return_inputs() {
     let toml = _dir.path().join("inputs.toml");
     std::fs::write(
         &toml,
-        "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\nfiling_form_4952 = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"90000\"\nbox2_fed_withheld = \"12000\"\nbox5_medicare_wages = \"90000\"\n\n\n# R3 — the document census: this household holds a W-2 and nothing else.\n[documents]\nw2 = true\nint_1099 = false\ndiv_1099 = false\nb_1099 = false\ng_1099 = false\nr_1099 = false\nssa_1099 = false\nnec_misc_k_1099 = false\nk1 = false\nschedule_e_rental = false\ns_1099 = false\noid_1099 = false\nw2g = false\nc_1099 = false\na_1095 = false\nt_1098 = false\n",
+        "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\nfiling_form_4952 = false\n# R3 / T5 — the document-less income door, answered: no undocumented wages, interest,\n# dividends or state refund.\nw2_wages_without_w2 = false\ninterest_or_dividends_without_1099 = false\nstate_refund_without_1099g = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"90000\"\nbox2_fed_withheld = \"12000\"\nbox5_medicare_wages = \"90000\"\n\n\n# R3 — the document census: this household holds a W-2 and nothing else.\n[documents]\nw2 = true\nint_1099 = false\ndiv_1099 = false\nb_1099 = false\ng_1099 = false\nr_1099 = false\nssa_1099 = false\nnec_misc_k_1099 = false\nk1 = false\nschedule_e_rental = false\ns_1099 = false\noid_1099 = false\nw2g = false\nc_1099 = false\na_1095 = false\nt_1098 = false\nform_1098e = false\n",
     )
     .unwrap();
     // The CSV disposal is in 2025, but v1 full-return tables are TY2024-only; import for 2024 to exercise
@@ -856,7 +907,7 @@ fn report_tax_year_refuses_business_income_without_schedule_c() {
 
     // Full-return inputs for 2024 with NO Schedule C.
     let toml = _dir.path().join("inputs.toml");
-    std::fs::write(&toml, "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\nfiling_form_4952 = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n\n# R3 — the document census: this crypto-only household received no information return.\n[documents]\nw2 = false\nint_1099 = false\ndiv_1099 = false\nb_1099 = false\ng_1099 = false\nr_1099 = false\nssa_1099 = false\nnec_misc_k_1099 = false\nk1 = false\nschedule_e_rental = false\ns_1099 = false\noid_1099 = false\nw2g = false\nc_1099 = false\na_1095 = false\nt_1098 = false\n").unwrap();
+    std::fs::write(&toml, "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\nfiling_form_4952 = false\n# R3 / T5 — the document-less income door, answered: no undocumented wages, interest,\n# dividends or state refund.\nw2_wages_without_w2 = false\ninterest_or_dividends_without_1099 = false\nstate_refund_without_1099g = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n\n# R3 — the document census: this crypto-only household received no information return.\n[documents]\nw2 = false\nint_1099 = false\ndiv_1099 = false\nb_1099 = false\ng_1099 = false\nr_1099 = false\nssa_1099 = false\nnec_misc_k_1099 = false\nk1 = false\nschedule_e_rental = false\ns_1099 = false\noid_1099 = false\nw2g = false\nc_1099 = false\na_1095 = false\nt_1098 = false\nform_1098e = false\n").unwrap();
     cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false, false).unwrap();
 
     let err = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap_err();
@@ -2917,8 +2968,14 @@ fn a_pre_d8_vault_refuses_until_answered_and_income_answer_is_the_way_out() {
     // `DocumentCensusContradicted` — the census refusing a "no" the data contradicts, which is
     // exactly the state it exists to make visible, and is what this script red with when the order
     // moved and the "y" stayed where it was.
-    let mut keystrokes: &[u8] =
-        b"y\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\n\n\n\n\n\n\n\n";
+    let row = {
+        let s = btctax_cli::Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::get(s.conn(), 2024)
+            .unwrap()
+            .unwrap()
+    };
+    let script = answer_script(&row, &[btctax_core::tax::questions::QuestionId::DocW2]);
+    let mut keystrokes: &[u8] = &script;
     let mut screen: Vec<u8> = Vec::new();
     cmd::answer::answer_return_inputs(
         &vault,
@@ -3010,7 +3067,14 @@ fn the_editor_and_income_answer_write_the_same_answer_record() {
     )
     .unwrap();
     cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false, false).unwrap();
-    let mut keystrokes: &[u8] = b"n\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\n\n\n\n\n\n\n\n\n\n\n\n";
+    let script = {
+        let s = btctax_cli::Session::open(&vault, &pp()).unwrap();
+        let row = btctax_cli::return_inputs::get(s.conn(), 2024)
+            .unwrap()
+            .unwrap();
+        answer_script(&row, &[])
+    };
+    let mut keystrokes: &[u8] = &script;
     let mut screen: Vec<u8> = Vec::new();
     cmd::answer::answer_return_inputs(
         &vault,
@@ -3196,7 +3260,14 @@ fn a_re_import_keeps_every_answer_record_already_on_the_row() {
     )
     .unwrap();
     cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false, false).unwrap();
-    let mut keystrokes: &[u8] = b"n\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\n\n\n\n\n\n\n\n\n\n\n\n";
+    let script = {
+        let s = btctax_cli::Session::open(&vault, &pp()).unwrap();
+        let row = btctax_cli::return_inputs::get(s.conn(), 2024)
+            .unwrap()
+            .unwrap();
+        answer_script(&row, &[])
+    };
+    let mut keystrokes: &[u8] = &script;
     let mut screen: Vec<u8> = Vec::new();
     cmd::answer::answer_return_inputs(
         &vault,
@@ -3221,10 +3292,11 @@ fn a_re_import_keeps_every_answer_record_already_on_the_row() {
     //   passes for the wrong reason, which is the whole failure class this file exists to catch.
     assert_eq!(
         before.len(),
-        30,
-        "the interview wrote {} records, not the 30 this kill was measured against — if the \
+        34,
+        "the interview wrote {} records, not the 34 this kill was measured against — if the \
          registry grew, update the number; if it SHRANK, the keystroke script is under-answering \
-         and the survival assertion below has stopped meaning anything",
+         and the survival assertion below has stopped meaning anything. ★ It was 30 before T5, \
+         which added the 1098-E census row and R3's three document-less income questions",
         before.len()
     );
 
@@ -3299,7 +3371,14 @@ fn re_answering_at_the_keyboard_moves_the_stale_record_into_history_by_itself() 
     }
 
     // NOVEMBER: the filer re-answers at the keyboard. No sweep is called anywhere.
-    let mut keystrokes: &[u8] = b"n\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\n\n\n\n\n\n\n\n\n\n\n\n";
+    let script = {
+        let s = btctax_cli::Session::open(&vault, &pp()).unwrap();
+        let row = btctax_cli::return_inputs::get(s.conn(), 2024)
+            .unwrap()
+            .unwrap();
+        answer_script(&row, &[])
+    };
+    let mut keystrokes: &[u8] = &script;
     let mut screen: Vec<u8> = Vec::new();
     cmd::answer::answer_return_inputs(
         &vault,
@@ -3475,7 +3554,7 @@ fn answered_toml(dir: &Path) -> PathBuf {
     std::fs::write(
         &toml,
         "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\n\
-         dual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\nfiling_form_4952 = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n\
+         dual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\nfiling_form_4952 = false\n# R3 / T5 — the document-less income door, answered: no undocumented wages, interest,\n# dividends or state refund.\nw2_wages_without_w2 = false\ninterest_or_dividends_without_1099 = false\nstate_refund_without_1099g = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n\
          [sch1]\nhsa_activity = false\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\n\
          box1_wages = \"50000\"\nbox2_fed_withheld = \"6000\"\nbox5_medicare_wages = \"50000\"\n",
     )
@@ -4299,5 +4378,95 @@ fn a_computed_capital_loss_stamp_survives_every_command_that_should_retract_it()
         read_2025().capital_loss_carryforward_in_provenance,
         CarryProvenance::User,
         "★ …and the stamp is gone with it"
+    );
+}
+
+/// ★★★ **R4 / T5 — THE TRANSCRIPTION WARNING REACHES `report`, AND WRITES NOTHING.**
+///
+/// The unit test in `transcription_warnings.rs` proves the rule; this proves the CALL SITE, which is
+/// the half a render-only test cannot reach — delete the `render_transcription_warnings` line in
+/// `cmd::tax` and the block vanishes from the report with every unit test still green.
+///
+/// The plant is R4's own example: **box 1 typed into box 3**, on wages above the Social Security
+/// wage base, so box 3 exceeds the base and box 4 no longer matches 6.2% of it.
+#[test]
+fn a_box_1_in_box_3_slip_prints_a_transcription_warning_on_the_report_and_changes_no_figure() {
+    use btctax_core::tax::return_inputs::{Owner, ReturnInputs, W2};
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2025(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+    let clean_wages = dec!(250000);
+    let real_ss_wages = dec!(168600); // the TY2024 base
+    let build = |ss_wages: rust_decimal::Decimal| {
+        let mut ri = ReturnInputs {
+            // ★ The storage boundary stamps the year on read, so the fixture states it — otherwise
+            //   the byte-identity kill below would compare a stamped row against an unstamped one
+            //   and fail for a reason that has nothing to do with warnings.
+            tax_year: 2024,
+            filing_status: FilingStatus::Single,
+            header: btctax_core::tax::testonly::not_a_dependent(),
+            w2s: vec![W2 {
+                owner: Owner::Taxpayer,
+                employer: "ACME".into(),
+                box1_wages: clean_wages,
+                box3_ss_wages: ss_wages,
+                box4_ss_withheld: dec!(10453.20), // 6.2% of the REAL base
+                box5_medicare_wages: clean_wages,
+                box6_medicare_withheld: dec!(4075), // 1.45% + the 0.9% surtax over 200,000
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        ri.header.form8615_condition3_age_support = Some(false);
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        ri
+    };
+    let report_for = |ri: &ReturnInputs| {
+        {
+            let mut s = Session::open(&vault, &pp()).unwrap();
+            btctax_cli::return_inputs::set(s.conn(), 2024, ri).unwrap();
+            s.save().unwrap();
+        }
+        cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap()
+    };
+
+    // (a) The correctly transcribed W-2: no block at all.
+    let clean = build(real_ss_wages);
+    let ok = report_for(&clean);
+    let ok_dual = ok.dual_report.clone().expect("a full-return year");
+    assert!(
+        !ok_dual.contains("TRANSCRIPTION WARNINGS"),
+        "a W-2 whose boxes agree must raise nothing: {ok_dual}"
+    );
+
+    // (b) The slip: box 1's figure typed into box 3.
+    let slipped = build(clean_wages);
+    let bad = report_for(&slipped);
+    let bad_dual = bad.dual_report.clone().expect("a full-return year");
+    assert!(
+        bad_dual.contains("TRANSCRIPTION WARNINGS"),
+        "the slip must be surfaced on the report: {bad_dual}"
+    );
+    assert!(
+        bad_dual.contains("wage base"),
+        "…naming the ceiling box 3 broke: {bad_dual}"
+    );
+    assert!(
+        bad_dual.contains("btctax has changed nothing"),
+        "…and saying plainly that nothing was written: {bad_dual}"
+    );
+
+    // ★★★ THE KILL: the ROW IS BYTE-IDENTICAL after the report ran. A "warning" that quietly
+    //     corrected box 3 would be writing testimony the filer never gave — and would silently move
+    //     the §6413(c) excess-Social-Security credit, which is exactly the figure this box feeds.
+    let stored = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::get(s.conn(), 2024)
+            .unwrap()
+            .unwrap()
+    };
+    assert_eq!(
+        stored, slipped,
+        "a warning must never change a stored value — the row must survive `report` byte for byte"
     );
 }

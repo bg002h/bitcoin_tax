@@ -215,6 +215,13 @@ pub fn maximal_sentinel() -> ReturnInputs {
         ],
         box8_allocated_tips: dec!(0),
         box10_dependent_care: dec!(0),
+        // ★ FALSE on purpose: a checked box 13 refuses `StatutoryEmployeeW2`, which — because
+        //   `screen_inputs` returns the FIRST refusal — would mask every other cell in the matrix.
+        box13_statutory_employee: false,
+        // ★ A REAL Treasury Tipped Occupation Code ("102" = wait staff, `i1040gi--2025.txt:43541`),
+        //   not a `SENTINEL_` token: scrub KEEPS it (a published taxonomy, not a person), so a
+        //   token here would fail the survival scan — the same reasoning as the box-12 codes above.
+        box14b_treasury_tipped_occupation_codes: "102".to_string(),
     };
     let int_1099 = |tag: &str, tin: &str| Form1099Int {
         payer: format!("SENTINEL_int_payer_{tag}"),
@@ -233,6 +240,12 @@ pub fn maximal_sentinel() -> ReturnInputs {
         box6_foreign_tax: dec!(4),
         box8_tax_exempt_interest: dec!(5),
         box9_private_activity_bond_amt: dec!(0),
+        box10_market_discount: dec!(6),
+        // ★ ZERO on purpose: any bond premium refuses `AmortizableBondPremiumNotComputed` and would
+        //   mask every other cell (see `box9` above).
+        box11_bond_premium: dec!(0),
+        box12_bond_premium_treasury: dec!(0),
+        box13_bond_premium_tax_exempt: dec!(0),
     };
     let div_1099 = |tag: &str, tin: &str| Form1099Div {
         payer: format!("SENTINEL_div_payer_{tag}"),
@@ -255,7 +268,12 @@ pub fn maximal_sentinel() -> ReturnInputs {
         payer_tin: tin.to_string(), // R10.2 — see `int_1099`
         transcribed_on: Some(date!(2025 - 02 - 05)),
         box1_unemployment: dec!(31),
+        // ★ NON-ZERO, which makes the RETURN-LEVEL `itemized_prior_year` gate live — answered
+        //   `Some(false)` in the literal below, the §111(a) neutral, so no refusal masks the matrix.
+        box2_state_refund: dec!(7),
         box4_fed_withheld: dec!(3),
+        // ★ ZERO on purpose: > 0 refuses `FamilyLeaveBenefits` and would mask every other cell.
+        box10_family_leave_benefits: dec!(0),
     };
     let b_1099 = |tag: &str, tin: &str| Form1099B {
         payer: format!("SENTINEL_b_payer_{tag}"),
@@ -266,6 +284,25 @@ pub fn maximal_sentinel() -> ReturnInputs {
         long_term_proceeds: dec!(51),
         long_term_basis: dec!(50),
         basis_reported_and_no_adjustments: Some(true),
+    };
+    // ★ R4 / T5 — Form 1098-E: a LENDER NAME and a lender TIN, the same identity class as a 1099
+    //   payer, so the axis must instantiate both or the guarantee is asserted over nothing.
+    let f1098e = |tag: &str, tin: &str| crate::tax::return_inputs::Form1098E {
+        lender: format!("SENTINEL_lender_{tag}"),
+        lender_tin: tin.to_string(), // R10.2 — see `int_1099`
+        transcribed_on: Some(date!(2025 - 02 - 07)),
+        box1_interest: dec!(61),
+    };
+    // ★★★ R5 / T5 — the filer's-records rows: a payer name, a THIRD PARTY'S SSN and their street
+    //     address. A real, canonicalizable SSN rather than a token, for the same reason the TINs are
+    //     real: scrub preserves the VALIDITY CLASS, so a token that could never canonicalize would
+    //     test the malformed leg twice and the well-formed leg never.
+    let sb_record = |tag: &str, ssn: &str| crate::tax::return_inputs::ScheduleBRecord {
+        payer_name: format!("SENTINEL_sb_payer_{tag}"),
+        payer_ssn: ssn.to_string(),
+        payer_address: format!("SENTINEL_sb_address_{tag}"),
+        amount: dec!(71),
+        kind: crate::tax::return_inputs::ScheduleBRecordKind::Interest,
     };
 
     let mut ri = ReturnInputs {
@@ -329,6 +366,23 @@ pub fn maximal_sentinel() -> ReturnInputs {
         div_1099: vec![div_1099("one", "55-5555555"), div_1099("two", "66-6666666")],
         g_1099: vec![g_1099("one", "77-7777777"), g_1099("two", "88-8888888")],
         b_1099: vec![b_1099("one", "99-9999999"), b_1099("two", "10-1010101")],
+        form_1098e: vec![f1098e("one", "11-1111111"), f1098e("two", "99-9999999")],
+        schedule_b_filer_records: vec![
+            sb_record("one", "000-44-4444"),
+            sb_record("two", "000-55-5555"),
+        ],
+        // ★★★ R3 — the three document-less income questions, answered. None of them is LIVE on this
+        //     fixture (every supported census row is `true`, because it transcribes a row of each),
+        //     but a maximal fixture leaves no `Option` at `None`: a leaf that is `None` on both
+        //     sides produces no differing path and drops out of the derived axis silently, which is
+        //     this module's stated blind spot.
+        w2_wages_without_w2: Some(false),
+        interest_or_dividends_without_1099: Some(true),
+        state_refund_without_1099g: Some(false),
+        // ★ LIVE (1099-G box 2 above is non-zero) and answered the §111(a) NEUTRAL: no prior-year
+        //   itemizing ⇒ no tax benefit ⇒ the refund is not income and Schedule 1 line 1 is blank by
+        //   decision. `Some(true)` would refuse and mask every cell of the matrix.
+        itemized_prior_year: Some(false),
         schedule_c: Some(ScheduleCInputs {
             owner: Owner::Taxpayer,
             business_description: "SENTINEL_business_description".into(),
@@ -371,7 +425,6 @@ pub fn maximal_sentinel() -> ReturnInputs {
         mfs_spouse_itemizes: Some(false),
         sch1: Schedule1Inputs {
             state_refund_taxable: dec!(1),
-            student_loan_interest_paid: dec!(2),
             // ★ Zero: a claimed IRA deduction refuses (no compute consumer), masking every cell.
             ira_deduction_claimed: dec!(0),
             hsa_activity: Some(false),
@@ -965,11 +1018,15 @@ mod matrix {
             ),
             // ★★ R10.2 — a payer TIN is the same class of identifier as a W-2 EIN and is mapped
             //    through the same `EinMap`, so its partition and validity class both survive. There
-            //    is no MALFORMED row yet: nothing reads a validity class off `payer_tin` today (the
-            //    document screens that will are task T5), and a `Fixture` cell here would compare
-            //    `None == None` — the "exercised and vacuous" state this module exists to prevent.
-            //    ★ When T5 gives it a reader, this cell becomes a `Fixture` and the reason below
-            //      stops being true — which is exactly when someone should be made to look.
+            //    is no MALFORMED row yet: nothing reads a validity class off `payer_tin`, and a
+            //    `Fixture` cell here would compare `None == None` — the "exercised and vacuous"
+            //    state this module exists to prevent.
+            //    ★★ T5 HAS LANDED AND DID NOT GIVE IT ONE. The 1099 screens it built refuse on box
+            //       VALUES (bond premium, statutory employee, family leave, the refund worksheet),
+            //       never on the shape of a payer TIN — an empty TIN still means "not transcribed",
+            //       exactly as `Form1099Int::payer_tin` says. The prediction that used to stand here
+            //       named T5; it is recorded as spent rather than left to look like an open promise.
+            //       If any screen ever canonicalizes a payer TIN, this cell becomes a `Fixture`.
             (
                 "int_1099[].payer_tin",
                 Fixture(|r| r.int_1099.clear()),
@@ -986,6 +1043,64 @@ mod matrix {
                 Fixture(|r| {
                     for f in &mut r.div_1099 {
                         f.payer_tin = String::new();
+                    }
+                }),
+                NoSuchState(NO_READER),
+            ),
+            // ── ★ R4 / R5 / T5 — the 1098-E lender and the Schedule B filer's-records rows. ──
+            (
+                "form_1098e[].lender",
+                Fixture(|r| r.form_1098e.clear()),
+                Fixture(|r| {
+                    for f in &mut r.form_1098e {
+                        f.lender = String::new();
+                    }
+                }),
+                NoSuchState(NO_READER),
+            ),
+            (
+                "form_1098e[].lender_tin",
+                Fixture(|r| r.form_1098e.clear()),
+                Fixture(|r| {
+                    for f in &mut r.form_1098e {
+                        f.lender_tin = String::new();
+                    }
+                }),
+                NoSuchState(NO_READER),
+            ),
+            (
+                "schedule_b_filer_records[].payer_name",
+                Fixture(|r| r.schedule_b_filer_records.clear()),
+                Fixture(|r| {
+                    for f in &mut r.schedule_b_filer_records {
+                        f.payer_name = String::new();
+                    }
+                }),
+                NoSuchState(NO_READER),
+            ),
+            // ★★★ A THIRD PARTY'S SSN — the buyer on a seller-financed mortgage, which Schedule B
+            //     asks for by name. Scrubbed through `synthetic_ssn_like`, so the VALIDITY CLASS
+            //     survives: an eight-digit typo must still be a typo on the scrubbed copy.
+            (
+                "schedule_b_filer_records[].payer_ssn",
+                Fixture(|r| r.schedule_b_filer_records.clear()),
+                Fixture(|r| {
+                    for f in &mut r.schedule_b_filer_records {
+                        f.payer_ssn = String::new();
+                    }
+                }),
+                Fixture(|r| {
+                    for f in &mut r.schedule_b_filer_records {
+                        f.payer_ssn = "123-45-678".into();
+                    }
+                }),
+            ),
+            (
+                "schedule_b_filer_records[].payer_address",
+                Fixture(|r| r.schedule_b_filer_records.clear()),
+                Fixture(|r| {
+                    for f in &mut r.schedule_b_filer_records {
+                        f.payer_address = String::new();
                     }
                 }),
                 NoSuchState(NO_READER),

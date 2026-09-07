@@ -705,6 +705,15 @@ pub fn report_tax_year(
                             &ri, &state, &ar, params, year,
                         );
                         block.push_str(&crate::render::render_advisories(&advs));
+                        // ★★★ R4 — the checks the DOCUMENT guarantees, displayed and never written.
+                        //     The year's table is present on this branch, so the box-3 wage-base
+                        //     ceiling runs too.
+                        block.push_str(&crate::render::render_transcription_warnings(
+                            &btctax_core::tax::transcription_warnings::transcription_warnings(
+                                &ri,
+                                Some(table.ss_wage_base),
+                            ),
+                        ));
                         Some(block)
                     }
                 }
@@ -1420,6 +1429,95 @@ mod tests {
         assert_eq!(a.charitable[0].class, CharitableClass::Cash60);
         assert_eq!(a.charitable[0].amount, dec!(2500));
         assert_eq!(ri.payments.estimated_tax_payments, dec!(6000));
+    }
+
+    /// ★★★ **R4 / R5 / T5 — `income import` ACCEPTS THE NEW TABLES, AND NAMES A MISSPELT KEY IN
+    ///     THEM.**
+    ///
+    /// Both halves, because either alone is satisfiable by the wrong thing: a parser that accepted
+    /// everything would pass the first, and one that accepted nothing would pass the second.
+    ///
+    /// ★ The unknown-key half is the load-bearing one for a TRANSCRIPTION surface: a filer copying
+    ///   `box11_bond_premum` off the paper must be told, because a silently-ignored key would drop a
+    ///   figure that REFUSES the return, and they would file a smaller tax believing btctax had seen
+    ///   it. `serde_ignored` derives the key set from the type, so this needs no list.
+    #[test]
+    fn income_import_takes_the_new_document_tables_and_names_a_misspelt_key_in_them() {
+        let text = r#"
+            filing_status = "Single"
+            w2_wages_without_w2 = false
+            interest_or_dividends_without_1099 = true
+            state_refund_without_1099g = false
+            itemized_prior_year = false
+
+            [[int_1099]]
+            payer = "First Bank"
+            payer_tin = "11-1111111"
+            transcribed_on = [2026, 34]
+            box1_interest = "2000"
+            box10_market_discount = "150"
+
+
+            [[g_1099]]
+            payer = "State of Example"
+            box1_unemployment = "0"
+            box2_state_refund = "900"
+            box10_family_leave_benefits = "0"
+
+            [[form_1098e]]
+            lender = "Example Servicing"
+            lender_tin = "99-9999999"
+            box1_interest = "600"
+
+            [[schedule_b_filer_records]]
+            payer_name = "A neighbour"
+            payer_ssn = "000-00-0001"
+            payer_address = "1 Example St"
+            amount = "1200"
+            kind = "interest"
+
+            [[w2s]]
+            owner = "taxpayer"
+            employer = "ACME"
+            box1_wages = "50000"
+            box2_fed_withheld = "5000"
+            box13_statutory_employee = false
+            box14b_treasury_tipped_occupation_codes = "102"
+        "#;
+        let ri = parse_return_inputs_toml(text).unwrap();
+        assert_eq!(ri.int_1099[0].box10_market_discount, dec!(150));
+        assert_eq!(
+            ri.int_1099[0].transcribed_on,
+            Some(time::macros::date!(2026 - 02 - 03))
+        );
+        assert_eq!(ri.g_1099[0].box2_state_refund, dec!(900));
+        assert_eq!(ri.form_1098e[0].box1_interest, dec!(600));
+        assert_eq!(ri.form_1098e[0].lender, "Example Servicing");
+        assert_eq!(ri.schedule_b_filer_records[0].amount, dec!(1200));
+        assert_eq!(
+            ri.schedule_b_filer_records[0].kind,
+            btctax_core::tax::return_inputs::ScheduleBRecordKind::Interest
+        );
+        assert_eq!(ri.w2s[0].box14b_treasury_tipped_occupation_codes, "102");
+        assert!(!ri.w2s[0].box13_statutory_employee);
+        assert_eq!(ri.itemized_prior_year, Some(false));
+        assert_eq!(ri.interest_or_dividends_without_1099, Some(true));
+
+        // ★ THE OTHER HALF: a typo in the very box whose non-zero value REFUSES.
+        let bad = r#"
+            filing_status = "Single"
+
+            [[int_1099]]
+            payer = "First Bank"
+            box1_interest = "2000"
+            box11_bond_premum = "40"
+        "#;
+        let err = parse_return_inputs_toml(bad).unwrap_err().to_string();
+        assert!(
+            err.contains("int_1099.0.box11_bond_premum"),
+            "the refusal must name the exact path, or a dropped bond premium files a smaller tax \
+             than the paper supports: {err}"
+        );
     }
 
     /// `income show` redacts SSNs and the IP-PIN in a DISPLAY copy; the stored value is untouched (I5).

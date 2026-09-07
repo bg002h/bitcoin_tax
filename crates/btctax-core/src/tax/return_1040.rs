@@ -584,16 +584,57 @@ fn itemized_was_chosen(ri: &ReturnInputs, standard: Usd, itemized: Option<Usd>) 
 fn sum_wages(ri: &ReturnInputs) -> Usd {
     ri.w2s.iter().map(|w| w.box1_wages).sum()
 }
-/// 1040 2b taxable interest = box 1 + box 3 (Treasury); box 3 is NOT a subset of box 1.
+/// 1040 2b taxable interest = box 1 + box 3 (Treasury) + **box 10 (market discount)**, plus the
+/// filer's own interest records (R5).
+///
+/// ★ Box 3 is NOT a subset of box 1. ★★ **Box 10 is not either**: Schedule B line 1 says *"Also
+/// include any accrued market discount that is includible in income"* (`i1040sb--2025.txt:60-61`),
+/// so it is a separate addition — income, and omitting it UNDERSTATES.
+///
+/// ★★★ The `FilerRecords` half is R3's document-less income door: *"Report on line 1 all of your
+/// taxable interest"*. A bank paying under $10, a seller-financed mortgage and a nominee
+/// distribution have no 1099 behind them, and dropping them understates by exactly their amount.
 fn sum_taxable_interest(ri: &ReturnInputs) -> Usd {
-    ri.int_1099
+    let documented: Usd = ri
+        .int_1099
         .iter()
-        .map(|i| i.box1_interest + i.box3_treasury_interest)
+        .map(|i| i.box1_interest + i.box3_treasury_interest + i.box10_market_discount)
+        .sum();
+    documented + sum_filer_record_interest(ri)
+}
+/// Σ of the filer's own INTEREST records (Schedule B line 1) — R5.
+fn sum_filer_record_interest(ri: &ReturnInputs) -> Usd {
+    use crate::tax::return_inputs::ScheduleBRecordKind;
+    ri.schedule_b_filer_records
+        .iter()
+        .filter(|r| r.kind == ScheduleBRecordKind::Interest)
+        .map(|r| r.amount)
         .sum()
 }
-/// 1040 3b ordinary dividends = Σ box 1a (ALREADY includes box 1b qualified — "strip once").
+/// Σ of the filer's own DIVIDEND records (Schedule B line 5) — R5.
+fn sum_filer_record_dividends(ri: &ReturnInputs) -> Usd {
+    use crate::tax::return_inputs::ScheduleBRecordKind;
+    ri.schedule_b_filer_records
+        .iter()
+        .filter(|r| r.kind == ScheduleBRecordKind::Dividend)
+        .map(|r| r.amount)
+        .sum()
+}
+/// 1040 3b ordinary dividends = Σ box 1a (ALREADY includes box 1b qualified — "strip once"), plus
+/// the filer's own dividend records (R5 — *"if you received dividends not reported on Form
+/// 1099-DIV"*, `i1040gi--2025.txt:2521`).
 fn sum_ordinary_dividends(ri: &ReturnInputs) -> Usd {
-    ri.div_1099.iter().map(|d| d.box1a_ordinary).sum()
+    let documented: Usd = ri.div_1099.iter().map(|d| d.box1a_ordinary).sum();
+    documented + sum_filer_record_dividends(ri)
+}
+/// ★★★ **Schedule 1 line 21's §221 input — the SUM of the Form 1098-E rows' box 1.**
+///
+/// It replaced the `sch1.student_loan_interest_paid` scalar at T5: a bare `Usd` with no issuer, no
+/// TIN and no transcription date made `$0` indistinguishable from *never asked*, one level below the
+/// form line. The rows carry all three, and the census row `documents.form_1098e` refuses a declared
+/// 1098-E with nothing transcribed.
+pub fn sum_student_loan_interest(ri: &ReturnInputs) -> Usd {
+    ri.form_1098e.iter().map(|e| e.box1_interest).sum()
 }
 /// 1040 3a qualified dividends = Σ box 1b (the preferential split ONLY — never added to income again).
 fn sum_qualified_dividends(ri: &ReturnInputs) -> Usd {
@@ -1412,7 +1453,7 @@ pub fn derive_tax_profile(ri: &ReturnInputs, params: &FullReturnParams, year: i3
     let income_total = wages + taxable_int + ord_div + noncrypto_cap_agi + sch1_income;
     let agi_before_student_loan = income_total - early_wd;
     let student_loan = student_loan_deduction(
-        ri.sch1.student_loan_interest_paid,
+        sum_student_loan_interest(ri),
         agi_before_student_loan,
         status,
         params,
@@ -1981,7 +2022,7 @@ pub fn assemble_absolute(
         .sum();
     let agi_before_student_loan = total_income - early_wd - half_se;
     let student_loan = student_loan_deduction(
-        ri.sch1.student_loan_interest_paid,
+        sum_student_loan_interest(ri),
         agi_before_student_loan,
         status,
         params,
@@ -2812,13 +2853,12 @@ pub fn screen_absolute(
             //   §1411, but its character as "interest" under §163(d) is genuinely arguable, so leaving
             //   it out of the ceiling is conservative in the over-refusing (not understating)
             //   direction. Stated so the omission is not silent.
-            let interest: Usd = ri
-                .int_1099
-                .iter()
-                .map(|i| i.box1_interest + i.box3_treasury_interest)
-                .sum();
-            let ordinary_dividends: Usd = ri.div_1099.iter().map(|d| d.box1a_ordinary).sum();
-            let qualified_dividends: Usd = ri.div_1099.iter().map(|d| d.box1b_qualified).sum();
+            // ★ THE SHARED HELPERS, not a second copy: they are what 1040 lines 2b/3b/3a print,
+            //   and a local re-derivation here silently diverged the moment T5 added 1099-INT box
+            //   10 and the filer's-records rows to the same quantity.
+            let interest = sum_taxable_interest(ri);
+            let ordinary_dividends = sum_ordinary_dividends(ri);
+            let qualified_dividends = sum_qualified_dividends(ri);
             let ceiling = (interest + ordinary_dividends - qualified_dividends).max(Usd::ZERO);
             if investment_interest > ceiling {
                 return refusal(
@@ -4342,9 +4382,135 @@ mod tests {
         );
     }
 
-    /// The derivation flows the student-loan deduction into AGI (Single with $1,000 paid, below range).
+    /// ★★★ **R4 — 1099-INT BOX 10 (MARKET DISCOUNT) REACHES FORM 1040 LINE 2b, AND SCHEDULE B
+    ///     LINE 1 WITH IT.**
+    ///
+    /// Schedule B line 1: *"Also include any accrued market discount that is includible in income."*
+    /// It is INCOME and it is NOT part of box 1, so a chain that dropped it would understate by
+    /// exactly its amount — invisible on the page, because the line would still print a plausible
+    /// figure.
+    ///
+    /// The kill is a DIFFERENCE, not a value: the same return with and without $100 in box 10, with
+    /// line 2b higher by exactly $100. A chain that ignored the box would print the same number
+    /// twice and an equality assertion against a hand-computed total would still pass.
     #[test]
-    fn derive_applies_student_loan_adjustment() {
+    fn box_10_market_discount_raises_form_1040_line_2b_by_its_own_amount() {
+        use crate::tax::printed::schedule_b_lines;
+        let base = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            int_1099: vec![Form1099Int {
+                payer: "First Bank".into(),
+                box1_interest: dec!(2000),
+                box3_treasury_interest: dec!(500),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let mut with_discount = base.clone();
+        with_discount.int_1099[0].box10_market_discount = dec!(100);
+
+        assert_eq!(sum_taxable_interest(&base), dec!(2500));
+        assert_eq!(
+            sum_taxable_interest(&with_discount),
+            dec!(2600),
+            "★ THE KILL: box 10 is a separate addition to line 2b, not a subset of box 1"
+        );
+
+        // …and it reaches the PRINTED chain, not merely the helper: Schedule B line 1's row for
+        // this payer carries it, and line 4 (→ 1040 line 2b) is higher by the same $100.
+        let b0 = schedule_b_lines(&base).expect("over the $1,500 Schedule B floor");
+        let b1 = schedule_b_lines(&with_discount).expect("over the floor");
+        assert_eq!(b0.line4, dec!(2500));
+        assert_eq!(
+            b1.line4,
+            dec!(2600),
+            "Schedule B line 1's own row must carry the market discount"
+        );
+        assert_eq!(
+            b1.part1_rows.len(),
+            1,
+            "one payer, one row: {:?}",
+            b1.part1_rows
+        );
+        assert_eq!(b1.part1_rows[0].amount, dec!(2600));
+    }
+
+    /// ★★★ **R5 — THE FILER'S-RECORDS ROWS REACH SCHEDULE B LINES 1 AND 5, AND THE
+    ///     SELLER-FINANCED MORTGAGE IS LISTED FIRST.**
+    ///
+    /// i1040sb, *Seller-financed mortgages*: *"list first any interest the buyer paid you on a
+    /// mortgage or other form of seller financing"*, showing *"that buyer's social security number
+    /// (SSN) and address"*. Both halves are printed rules, so both are asserted: the ORDER, and the
+    /// SSN and address in the name column.
+    #[test]
+    fn the_filers_records_reach_schedule_b_and_the_seller_financed_row_is_listed_first() {
+        use crate::tax::printed::schedule_b_lines;
+        use crate::tax::return_inputs::{ScheduleBRecord, ScheduleBRecordKind};
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            int_1099: vec![Form1099Int {
+                payer: "First Bank".into(),
+                box1_interest: dec!(2000),
+                ..Default::default()
+            }],
+            schedule_b_filer_records: vec![
+                ScheduleBRecord {
+                    payer_name: "Small Credit Union".into(),
+                    amount: dec!(7),
+                    kind: ScheduleBRecordKind::Interest,
+                    ..Default::default()
+                },
+                ScheduleBRecord {
+                    payer_name: "Chris Buyer".into(),
+                    payer_ssn: "000-00-0001".into(),
+                    payer_address: "1 Example St, Exampleton XX".into(),
+                    amount: dec!(4400),
+                    kind: ScheduleBRecordKind::Interest,
+                },
+                ScheduleBRecord {
+                    payer_name: "A nominee distribution".into(),
+                    amount: dec!(30),
+                    kind: ScheduleBRecordKind::Dividend,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            sum_taxable_interest(&ri),
+            dec!(6407),
+            "line 2b takes the documented $2,000 plus BOTH undocumented interest rows"
+        );
+        assert_eq!(
+            sum_ordinary_dividends(&ri),
+            dec!(30),
+            "line 3b takes the dividend row, which no 1099-DIV reported"
+        );
+        let b = schedule_b_lines(&ri).expect("over the $1,500 floor");
+        assert_eq!(b.line4, dec!(6407));
+        assert_eq!(b.line6, dec!(30));
+        assert_eq!(
+            b.part1_rows[0].payer, "Chris Buyer (SSN 000-00-0001, 1 Example St, Exampleton XX)",
+            "the seller-financed row is LISTED FIRST, with the buyer's SSN and address in the name \
+             column, exactly as Schedule B's instructions require: {:?}",
+            b.part1_rows
+        );
+        assert_eq!(
+            b.part1_rows.iter().map(|r| r.amount).collect::<Vec<_>>(),
+            vec![dec!(4400), dec!(2000), dec!(7)],
+            "…then the transcribed 1099-INTs, then the filer's other records: {:?}",
+            b.part1_rows
+        );
+    }
+
+    /// ★★★ **T5 — the §221 deduction now comes off the FORM 1098-E ROWS, not a scalar.**
+    ///
+    /// Rewritten from the `sch1.student_loan_interest_paid` version: the figure that reaches
+    /// Schedule 1 line 21 is the SUM of `form_1098e[].box1_interest`, so a return with two
+    /// servicers deducts both. The kill is that DELETING the rows moves AGI — a chain that read
+    /// nothing would leave both figures identical.
+    #[test]
+    fn derive_applies_student_loan_adjustment_from_the_1098e_rows() {
         let ri = ReturnInputs {
             filing_status: FilingStatus::Single,
             w2s: vec![w2(Owner::Taxpayer, dec!(50000), dec!(50000), dec!(50000))],
@@ -4355,10 +4521,27 @@ mod tests {
             ..Default::default()
         };
         let mut with_loan = ri.clone();
-        with_loan.sch1.student_loan_interest_paid = dec!(1000);
+        with_loan.form_1098e = vec![
+            crate::tax::return_inputs::Form1098E {
+                lender: "Servicer A".into(),
+                box1_interest: dec!(600),
+                ..Default::default()
+            },
+            crate::tax::return_inputs::Form1098E {
+                lender: "Servicer B".into(),
+                box1_interest: dec!(400),
+                ..Default::default()
+            },
+        ];
+        assert_eq!(sum_student_loan_interest(&with_loan), dec!(1000));
         let p = derive_tax_profile(&with_loan, &ty2024_params(), 2024);
         // AGI = 50,000 + 1,000 − 1,000 student-loan = 50,000.
         assert_eq!(p.magi_excluding_crypto, dec!(50000));
+        // ★ THE KILL: with no 1098-E row there is no deduction, so AGI is $1,000 higher. If the
+        //   chain stopped reading the rows, both would be 51,000 and the assertion above alone
+        //   would still pass on a fixture that happened to owe nothing.
+        let without = derive_tax_profile(&ri, &ty2024_params(), 2024);
+        assert_eq!(without.magi_excluding_crypto, dec!(51000));
     }
 
     /// The SE-earner channel: with a spouse-owned Schedule C, `w2_ss_wages` tracks the SPOUSE's box 3,

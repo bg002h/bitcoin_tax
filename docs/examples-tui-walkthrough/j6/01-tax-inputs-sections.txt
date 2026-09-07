@@ -6,20 +6,20 @@
   4││  ✓ Address                     ││                                                                                    │
   5││  ✓ Dependents                  ││                                                                                    │
   6││  ✓ W-2s                        ││                                                                                    │
-  7││  … Schedule A (itemized deducti││                                                                                    │
-  8││  … Payments                    ││                                                                                    │
-  9││  … Carryforwards from last year││                                                                                    │
- 10││  … §199A limitation (only if yo││                                                                                    │
- 11││  ✓ Declarations                ││                                                                                    │
- 12││  ✓ Documents received          ││                                                                                    │
- 13││  … Income exclusions (§911/931/││                                                                                    │
- 14││  … Skippables                  ││                                                                                    │
- 15││                                ││                                                                                    │
- 16││                                ││                                                                                    │
- 17││                                ││                                                                                    │
- 18││                                ││                                                                                    │
- 19││                                ││                                                                                    │
- 20││                                ││                                                                                    │
+  7││  ✓ Forms 1099-INT              ││                                                                                    │
+  8││  ✓ Forms 1099-DIV              ││                                                                                    │
+  9││  ✓ Interest and dividends from ││                                                                                    │
+ 10││  ✓ Forms 1099-B (Schedule D sum││                                                                                    │
+ 11││  ✓ Forms 1099-G                ││                                                                                    │
+ 12││  ✓ Forms 1098-E (student loan i││                                                                                    │
+ 13││  … Schedule A (itemized deducti││                                                                                    │
+ 14││  … Payments                    ││                                                                                    │
+ 15││  … Carryforwards from last year││                                                                                    │
+ 16││  … §199A limitation (only if yo││                                                                                    │
+ 17││  ✓ Declarations                ││                                                                                    │
+ 18││  ✓ Documents received          ││                                                                                    │
+ 19││  … Income exclusions (§911/931/││                                                                                    │
+ 20││  … Skippables                  ││                                                                                    │
  21││                                ││                                                                                    │
  22││                                ││                                                                                    │
  23││                                ││                                                                                    │

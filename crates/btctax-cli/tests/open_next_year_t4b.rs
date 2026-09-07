@@ -138,10 +138,19 @@ fn a_year_with_money_in_it(ri: &mut ReturnInputs) {
     // ★ No `ira_deduction_claimed`: a claimed IRA deduction is refused in v1 (the active-participant
     //   phase-out worksheet is unmodelled), and this fixture has to COMPUTE.
     ri.sch1 = Schedule1Inputs {
-        student_loan_interest_paid: dec!(600),
         state_refund_taxable: dec!(310),
         ..Default::default()
     };
+    // ★ T5 — the §221 student-loan interest that used to be the `sch1` scalar is now a Form 1098-E
+    //   ROW, so this fixture carries the document the figure came off. The opener does NOT seed
+    //   loan servicers (it seeds W-2 employers, 1099 payers and venues), which is asserted by
+    //   `document_census::tests::every_kind_with_a_section_drops_its_pre_named_rows`.
+    ri.form_1098e = vec![btctax_core::tax::return_inputs::Form1098E {
+        lender: "Example Student Loan Servicing".into(),
+        lender_tin: "10-1010101".into(),
+        box1_interest: dec!(600),
+        ..Default::default()
+    }];
     ri.payments = Payments {
         estimated_tax_payments: dec!(1500),
         extension_payment: dec!(250),
@@ -506,19 +515,58 @@ fn the_date_of_birth_hint_appears_only_on_an_opened_year() {
 /// by `skippable`. Returns what the filer saw.
 ///
 /// ★ The script is DERIVED from `live_questions`, never a magic count — the count is exactly what
+/// ★★★ **THE SCRIPT, DERIVED BY SIMULATING `income answer`'s OWN SWEEP.**
+///
+/// One pass over `live_questions` is not enough since T5: R3's document-less income door makes a
+/// question live BECAUSE another was answered "no", so the command sweeps until the set stops
+/// growing and a script taken from one snapshot runs out mid-run (*"input ended before every
+/// question was answered"*). Declarations answer `n`; skippables take whatever `skippable` says.
+fn sweep_script(
+    ri: &ReturnInputs,
+    skippable: impl Fn(btctax_core::tax::questions::SkippableId) -> String,
+) -> String {
+    use btctax_cli::cmd::answer::Ask;
+    let mut ri = ri.clone();
+    let mut decl: std::collections::BTreeSet<btctax_core::tax::questions::QuestionId> =
+        std::collections::BTreeSet::new();
+    let mut skip: std::collections::BTreeSet<btctax_core::tax::questions::SkippableId> =
+        std::collections::BTreeSet::new();
+    let mut script = String::new();
+    for _ in 0..8 {
+        let round: Vec<Ask> = cmd::answer::live_questions(&ri)
+            .into_iter()
+            .filter(|a| match a {
+                Ask::Declaration(q) => !decl.contains(&q.id),
+                Ask::Skippable(sk) => !skip.contains(&sk.id),
+            })
+            .collect();
+        if round.is_empty() {
+            break;
+        }
+        for a in round {
+            match a {
+                Ask::Declaration(q) => {
+                    decl.insert(q.id);
+                    script.push_str("n\n");
+                    (q.set)(&mut ri, false);
+                }
+                Ask::Skippable(sk) => {
+                    skip.insert(sk.id);
+                    script.push_str(&skippable(sk.id));
+                }
+            }
+        }
+    }
+    script
+}
+
 ///   broke `tax_report`'s script when the interview grew.
 fn answer_the_draft(
     vault: &std::path::Path,
     skippable: impl Fn(btctax_core::tax::questions::SkippableId) -> String,
 ) -> String {
     let ri = draft(vault);
-    let mut script = String::new();
-    for a in cmd::answer::live_questions(&ri) {
-        match a {
-            btctax_cli::cmd::answer::Ask::Declaration(_) => script.push_str("n\n"),
-            btctax_cli::cmd::answer::Ask::Skippable(sk) => script.push_str(&skippable(sk.id)),
-        }
-    }
+    let script = sweep_script(&ri, &skippable);
     let mut keys = script.as_bytes();
     let mut screen = Vec::new();
     cmd::answer::answer_return_inputs(
@@ -898,9 +946,7 @@ fn answering_no_to_the_census_removes_the_pre_named_rows() {
         "premise: the opener pre-named one employer"
     );
 
-    let asks = cmd::answer::live_questions(&seed);
-    let declarations = asks.iter().filter(|a| !a.is_skippable()).count();
-    let script = "n\n".repeat(declarations) + &"\n".repeat(asks.len() - declarations);
+    let script = sweep_script(&seed, |_| "\n".to_string());
     let mut keys = script.as_bytes();
     let mut screen = Vec::new();
     cmd::answer::answer_return_inputs(

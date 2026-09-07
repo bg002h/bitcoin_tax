@@ -347,186 +347,225 @@ pub fn answer_return_inputs(
         "before",
     )?;
 
-    for ask in live_questions(&ri) {
-        match ask {
-            // A MANDATORY declaration — silence with nothing on file is refused, never accepted (D-8).
-            Ask::Declaration(q) => {
-                let cur = (q.get)(&ri);
-                // ★★★ R10.4 — the words PUT TO THE FILER, rendered from the return. For the carried
-                //     filing status that sentence QUOTES the status, and it is what `record_answer`
-                //     hashes below, so editing the status changes the hash and R10.3's re-ask rule
-                //     returns this question to unanswered on its own.
-                let prompt = q.prompt_text(&ri).into_owned();
-                loop {
-                    let shown = match cur {
-                        Some(true) => "y/n, currently y",
-                        Some(false) => "y/n, currently n",
-                        None => "y/n",
-                    };
-                    write!(out, "{prompt} [{shown}]: ")?;
-                    out.flush()?;
-                    let mut line = String::new();
-                    if input.read_line(&mut line)? == 0 {
-                        return Err(CliError::Usage(
-                            "input ended before every question was answered — nothing was stored"
-                                .into(),
-                        ));
-                    }
-                    match parse_yes_no(&line, cur) {
-                        Some(v) => {
-                            (q.set)(&mut ri, v);
-                            // ★★★ R10.3 — THE ONE WRITER, reached from the keyboard. The form
-                            //     engine's `apply` reaches the same function with the same `now`, so
-                            //     the same answer produces a byte-identical record on either surface.
-                            //     A class-(A) declaration has no lawful decline, so it is always
-                            //     `Given` — the loop cannot exit without a value.
-                            record_answer(
-                                &mut ri,
-                                AnswerKey::Question(q.id),
-                                &prompt,
-                                now,
-                                AnswerState::Given,
-                            );
-                            break;
-                        }
-                        // ★ No default and no answer ⇒ ASK AGAIN. Accepting silence here would reintroduce
-                        // D-8 through the front door.
-                        None => writeln!(out, "  please answer y or n")?,
-                    }
-                }
-            }
-            // A SKIPPABLE prompt — a bare Enter KEEPS whatever is on file (which may be `None`, forgoing the
-            // benefit; the matching advisory then tells the filer). Two value shapes, branched by `kind()`.
-            Ask::Skippable(sk) => match sk.kind {
-                SkippableKind::Date => {
-                    let cur = (sk.get_date)(&ri);
-                    // ★ C-1 — the HINT: year N's date for THIS skippable, read through the
-                    //   skippable's own accessor (never a hand-list of the two DOBs), shown only
-                    //   where this year has no answer yet. Typing it is a fresh answer; skipping it
-                    //   declines. Nothing is pre-filled.
-                    let hint = cur.is_none().then_some(()).and_then(|()| {
-                        let prior = prior_year_row.as_ref()?;
-                        let d = (sk.get_date)(prior)?;
-                        Some(format!(
-                            "; TY{n}'s return gave {d} — type it to confirm",
-                            n = prior.tax_year
-                        ))
-                    });
-                    loop {
-                        let shown = cur.map_or_else(|| "none".to_string(), |d| d.to_string());
-                        write!(
-                            out,
-                            "{} [{}{}; Enter to skip]: ",
-                            sk.prompt,
-                            shown,
-                            hint.as_deref().unwrap_or_default()
-                        )?;
-                        out.flush()?;
-                        let mut line = String::new();
-                        if input.read_line(&mut line)? == 0 {
-                            return Err(CliError::Usage(
-                                "input ended before every question was answered — nothing was stored".into(),
-                            ));
-                        }
-                        match parse_date(&line) {
-                            Ok(None) => break,
-                            Ok(Some(d)) => {
-                                (sk.set_date)(&mut ri, d);
-                                break;
-                            }
-                            Err(e) => writeln!(out, "  not a date (YYYY-MM-DD): {e}")?,
-                        }
-                    }
-                }
-                SkippableKind::YesNo => {
-                    let cur = (sk.get_bool)(&ri);
+    // ★★★ **R3 / T5 — ASKING IS A SWEEP, NOT A SNAPSHOT.**
+    //
+    //     `live_questions` reads the return as it stands, and R3's document-less income door makes
+    //     that insufficient in one pass: `w2_wages_without_w2` is live EXACTLY when the W-2 census
+    //     row says `No`, so a filer who answers "no W-2 this year" makes a NEW question live in the
+    //     middle of their own session. Asking from a single snapshot would end the run with that
+    //     question unanswered, print it in the "after" panel as blocking, and leave the filer to run
+    //     the command again to reach a question their previous answer created.
+    //
+    // ★ Each item is asked AT MOST ONCE per session, keyed by its `AnswerKey`, so a skippable the
+    //   filer deliberately skipped is never re-asked in the same run; and the sweep stops as soon as
+    //   a pass finds nothing new. The bound is a guard against a liveness CYCLE (A opens B opens A),
+    //   which no registry entry has today — it fails loudly rather than looping forever.
+    let mut asked: std::collections::BTreeSet<AnswerKey> = std::collections::BTreeSet::new();
+    let key_of = |a: &Ask| match a {
+        Ask::Declaration(q) => AnswerKey::Question(q.id),
+        Ask::Skippable(sk) => AnswerKey::Skippable(sk.id),
+    };
+    const MAX_SWEEPS: usize = 8;
+    let mut sweeps = 0usize;
+    loop {
+        let round: Vec<Ask> = live_questions(&ri)
+            .into_iter()
+            .filter(|a| !asked.contains(&key_of(a)))
+            .collect();
+        if round.is_empty() {
+            break;
+        }
+        sweeps += 1;
+        if sweeps > MAX_SWEEPS {
+            return Err(CliError::Usage(
+                "the question set did not settle: answering one question kept making another live. \
+                 This is a liveness cycle in the registry, not something you can answer your way \
+                 out of — nothing was stored"
+                    .into(),
+            ));
+        }
+        for ask in round {
+            asked.insert(key_of(&ask));
+            match ask {
+                // A MANDATORY declaration — silence with nothing on file is refused, never accepted (D-8).
+                Ask::Declaration(q) => {
+                    let cur = (q.get)(&ri);
+                    // ★★★ R10.4 — the words PUT TO THE FILER, rendered from the return. For the carried
+                    //     filing status that sentence QUOTES the status, and it is what `record_answer`
+                    //     hashes below, so editing the status changes the hash and R10.3's re-ask rule
+                    //     returns this question to unanswered on its own.
+                    let prompt = q.prompt_text(&ri).into_owned();
                     loop {
                         let shown = match cur {
                             Some(true) => "y/n, currently y",
                             Some(false) => "y/n, currently n",
                             None => "y/n",
                         };
-                        write!(out, "{} [{}; Enter to skip]: ", sk.prompt, shown)?;
+                        write!(out, "{prompt} [{shown}]: ")?;
                         out.flush()?;
                         let mut line = String::new();
                         if input.read_line(&mut line)? == 0 {
                             return Err(CliError::Usage(
-                                "input ended before every question was answered — nothing was stored".into(),
-                            ));
+                            "input ended before every question was answered — nothing was stored"
+                                .into(),
+                        ));
                         }
-                        // ★ A bare Enter KEEPS whatever is on file (may be `None` ⇒ skip); only y/n sets a
-                        // value; garbage re-asks. Silence is a legitimate outcome here — unlike a declaration.
-                        if line.trim().is_empty() {
-                            break;
-                        }
-                        match parse_yes_no(line.trim(), None) {
+                        match parse_yes_no(&line, cur) {
                             Some(v) => {
-                                (sk.set_bool)(&mut ri, v);
+                                (q.set)(&mut ri, v);
+                                // ★★★ R10.3 — THE ONE WRITER, reached from the keyboard. The form
+                                //     engine's `apply` reaches the same function with the same `now`, so
+                                //     the same answer produces a byte-identical record on either surface.
+                                //     A class-(A) declaration has no lawful decline, so it is always
+                                //     `Given` — the loop cannot exit without a value.
+                                record_answer(
+                                    &mut ri,
+                                    AnswerKey::Question(q.id),
+                                    &prompt,
+                                    now,
+                                    AnswerState::Given,
+                                );
                                 break;
                             }
-                            None => writeln!(out, "  please answer y or n, or Enter to skip")?,
+                            // ★ No default and no answer ⇒ ASK AGAIN. Accepting silence here would reintroduce
+                            // D-8 through the front door.
+                            None => writeln!(out, "  please answer y or n")?,
                         }
                     }
                 }
-                // ★★★ FR-29 — the THIRD-ANSWER arm. `parse_enum`
-                //     (`btctax-input-form/src/parse.rs`) is an exact `options.contains(&raw)` with no
-                //     trimming and no case-folding, because there the options are stable tokens a
-                //     renderer presents as a closed choice. At the keyboard they are not: the prompt
-                //     tells the filer *"Answer YES, NO, or CANNOT KNOW"*, which is not the token
-                //     `"CannotKnow"`. **The parser accommodates the filer's words, never the other way
-                //     round** — the prompt's wording comes from the form and from plain English.
-                SkippableKind::Choice(options) => {
-                    let cur = (sk.get_choice)(&ri);
-                    loop {
-                        let shown = cur.unwrap_or("unanswered");
-                        write!(
-                            out,
-                            "{} [{}; currently {shown}; Enter to skip]: ",
-                            sk.prompt,
-                            options.join("/")
-                        )?;
-                        out.flush()?;
-                        let mut line = String::new();
-                        if input.read_line(&mut line)? == 0 {
-                            return Err(CliError::Usage(
+                // A SKIPPABLE prompt — a bare Enter KEEPS whatever is on file (which may be `None`, forgoing the
+                // benefit; the matching advisory then tells the filer). Two value shapes, branched by `kind()`.
+                Ask::Skippable(sk) => match sk.kind {
+                    SkippableKind::Date => {
+                        let cur = (sk.get_date)(&ri);
+                        // ★ C-1 — the HINT: year N's date for THIS skippable, read through the
+                        //   skippable's own accessor (never a hand-list of the two DOBs), shown only
+                        //   where this year has no answer yet. Typing it is a fresh answer; skipping it
+                        //   declines. Nothing is pre-filled.
+                        let hint = cur.is_none().then_some(()).and_then(|()| {
+                            let prior = prior_year_row.as_ref()?;
+                            let d = (sk.get_date)(prior)?;
+                            Some(format!(
+                                "; TY{n}'s return gave {d} — type it to confirm",
+                                n = prior.tax_year
+                            ))
+                        });
+                        loop {
+                            let shown = cur.map_or_else(|| "none".to_string(), |d| d.to_string());
+                            write!(
+                                out,
+                                "{} [{}{}; Enter to skip]: ",
+                                sk.prompt,
+                                shown,
+                                hint.as_deref().unwrap_or_default()
+                            )?;
+                            out.flush()?;
+                            let mut line = String::new();
+                            if input.read_line(&mut line)? == 0 {
+                                return Err(CliError::Usage(
                                 "input ended before every question was answered — nothing was stored".into(),
                             ));
-                        }
-                        // A bare Enter KEEPS whatever is on file (which may be `None` ⇒ still skipped).
-                        if line.trim().is_empty() {
-                            break;
-                        }
-                        match parse_parent_alive_choice(&line, options) {
-                            Some(tok) => {
-                                (sk.set_choice)(&mut ri, tok);
-                                break;
                             }
-                            // ★ Fail-closed: an unmatched string cannot become an answer, so the worst
-                            //   case is a filer who is asked again.
-                            None => writeln!(
-                                out,
-                                "  please answer yes, no, or \"cannot know\", or Enter to skip"
-                            )?,
+                            match parse_date(&line) {
+                                Ok(None) => break,
+                                Ok(Some(d)) => {
+                                    (sk.set_date)(&mut ri, d);
+                                    break;
+                                }
+                                Err(e) => writeln!(out, "  not a date (YYYY-MM-DD): {e}")?,
+                            }
                         }
                     }
-                }
-            },
-        }
-        // ★★★ R10.3 — one record per prompt PUT TO THE FILER. Placed after the `Ask` match so the
-        //     three SKIPPABLE shapes (date / yes-no / choice) share one recording site instead of
-        //     three, and the state is read back off `ri` once each has written its value.
-        //
-        // ★ **What this placement does NOT enforce, stated because the previous wording claimed it
-        //   did** (seam review N2). The declaration does not pass through this line — it records
-        //   inside its own branch, at the `parse_yes_no` success arm, because a declaration's record
-        //   is always `Given` and its loop cannot exit without a value. And this site is an `if let`,
-        //   not a `match`: a THIRD `Ask` variant would compile here and record nothing. The `match`
-        //   above IS exhaustive and would red on a new variant — that is the real net, and it is a
-        //   compile error that forces someone to look at this line, not a guarantee that they will
-        //   add a recording arm. Same shape as the classifier's carefully-stated `_` limit.
-        if let Ask::Skippable(sk) = ask {
-            let state = skippable_state(sk, &ri);
-            record_answer(&mut ri, AnswerKey::Skippable(sk.id), sk.prompt, now, state);
+                    SkippableKind::YesNo => {
+                        let cur = (sk.get_bool)(&ri);
+                        loop {
+                            let shown = match cur {
+                                Some(true) => "y/n, currently y",
+                                Some(false) => "y/n, currently n",
+                                None => "y/n",
+                            };
+                            write!(out, "{} [{}; Enter to skip]: ", sk.prompt, shown)?;
+                            out.flush()?;
+                            let mut line = String::new();
+                            if input.read_line(&mut line)? == 0 {
+                                return Err(CliError::Usage(
+                                "input ended before every question was answered — nothing was stored".into(),
+                            ));
+                            }
+                            // ★ A bare Enter KEEPS whatever is on file (may be `None` ⇒ skip); only y/n sets a
+                            // value; garbage re-asks. Silence is a legitimate outcome here — unlike a declaration.
+                            if line.trim().is_empty() {
+                                break;
+                            }
+                            match parse_yes_no(line.trim(), None) {
+                                Some(v) => {
+                                    (sk.set_bool)(&mut ri, v);
+                                    break;
+                                }
+                                None => writeln!(out, "  please answer y or n, or Enter to skip")?,
+                            }
+                        }
+                    }
+                    // ★★★ FR-29 — the THIRD-ANSWER arm. `parse_enum`
+                    //     (`btctax-input-form/src/parse.rs`) is an exact `options.contains(&raw)` with no
+                    //     trimming and no case-folding, because there the options are stable tokens a
+                    //     renderer presents as a closed choice. At the keyboard they are not: the prompt
+                    //     tells the filer *"Answer YES, NO, or CANNOT KNOW"*, which is not the token
+                    //     `"CannotKnow"`. **The parser accommodates the filer's words, never the other way
+                    //     round** — the prompt's wording comes from the form and from plain English.
+                    SkippableKind::Choice(options) => {
+                        let cur = (sk.get_choice)(&ri);
+                        loop {
+                            let shown = cur.unwrap_or("unanswered");
+                            write!(
+                                out,
+                                "{} [{}; currently {shown}; Enter to skip]: ",
+                                sk.prompt,
+                                options.join("/")
+                            )?;
+                            out.flush()?;
+                            let mut line = String::new();
+                            if input.read_line(&mut line)? == 0 {
+                                return Err(CliError::Usage(
+                                "input ended before every question was answered — nothing was stored".into(),
+                            ));
+                            }
+                            // A bare Enter KEEPS whatever is on file (which may be `None` ⇒ still skipped).
+                            if line.trim().is_empty() {
+                                break;
+                            }
+                            match parse_parent_alive_choice(&line, options) {
+                                Some(tok) => {
+                                    (sk.set_choice)(&mut ri, tok);
+                                    break;
+                                }
+                                // ★ Fail-closed: an unmatched string cannot become an answer, so the worst
+                                //   case is a filer who is asked again.
+                                None => writeln!(
+                                    out,
+                                    "  please answer yes, no, or \"cannot know\", or Enter to skip"
+                                )?,
+                            }
+                        }
+                    }
+                },
+            }
+            // ★★★ R10.3 — one record per prompt PUT TO THE FILER. Placed after the `Ask` match so the
+            //     three SKIPPABLE shapes (date / yes-no / choice) share one recording site instead of
+            //     three, and the state is read back off `ri` once each has written its value.
+            //
+            // ★ **What this placement does NOT enforce, stated because the previous wording claimed it
+            //   did** (seam review N2). The declaration does not pass through this line — it records
+            //   inside its own branch, at the `parse_yes_no` success arm, because a declaration's record
+            //   is always `Given` and its loop cannot exit without a value. And this site is an `if let`,
+            //   not a `match`: a THIRD `Ask` variant would compile here and record nothing. The `match`
+            //   above IS exhaustive and would red on a new variant — that is the real net, and it is a
+            //   compile error that forces someone to look at this line, not a guarantee that they will
+            //   add a recording arm. Same shape as the classifier's carefully-stated `_` limit.
+            if let Ask::Skippable(sk) = ask {
+                let state = skippable_state(sk, &ri);
+                record_answer(&mut ri, AnswerKey::Skippable(sk.id), sk.prompt, now, state);
+            }
         }
     }
 
@@ -626,12 +665,13 @@ mod tests {
         assert_eq!(
             declaration_ids(&single()),
             vec![
-                // ★★★ R3 / §5.1 — THE DOCUMENT CENSUS, ASKED FIRST (T3 seam review, M5). Sixteen of
-                // the eighteen rows are live for every filer: a document type must be ANSWERED, and
-                // "a filer cannot answer no to a category they were never shown". The two missing
-                // ones are `DocForm1098` and `DocForm1098e`, whose amount is collected today by a
-                // scalar — they open with T9 and T5 respectively, and until then a `No` on the row
-                // would contradict a figure the filer already entered.
+                // ★★★ R3 / §5.1 — THE DOCUMENT CENSUS, ASKED FIRST (T3 seam review, M5). SEVENTEEN
+                // of the eighteen rows are live for every filer: a document type must be ANSWERED,
+                // and "a filer cannot answer no to a category they were never shown". The only
+                // missing one is `DocForm1098`, whose amount is collected today by a scalar — it
+                // opens with T9, and until then a `No` on the row would contradict a figure the
+                // filer already entered. ★ `DocForm1098e` was the other; T5 replaced its scalar
+                // with `Form1098E` rows and the row opened.
                 //
                 // ★ They come first because a real interview asks the SHOEBOX first, and because
                 // five of the residual attestation's own limbs (1099-R, SSA-1099, K-1, Schedule E
@@ -643,6 +683,8 @@ mod tests {
                 QuestionId::DocDiv1099,
                 QuestionId::DocB1099,
                 QuestionId::DocG1099,
+                // ★ T5 — the 1098-E row opened when `Form1098E` replaced the student-loan scalar.
+                QuestionId::DocForm1098e,
                 QuestionId::DocR1099,
                 QuestionId::DocSsa1099,
                 QuestionId::DocNecMiscK1099,
@@ -687,7 +729,7 @@ mod tests {
         let last_census = ids
             .iter()
             .rposition(|id| btctax_core::tax::document_census::row_of_question(*id).is_some())
-            .expect("a Single filer is asked sixteen census rows");
+            .expect("a Single filer is asked seventeen census rows");
         let first_gate = ids
             .iter()
             .position(|id| btctax_core::tax::document_census::row_of_question(*id).is_none())
@@ -765,20 +807,40 @@ mod tests {
             screen_inputs(&ri, table, params).is_some(),
             "an all-unanswered return must refuse — else this test proves nothing"
         );
-        for ask in live_questions(&ri) {
-            match ask {
-                // ★★ Answer "no" — EXCEPT on a document-census row, which is answered from what
-                //    this return actually carries. Since D1 a blanket "no" is itself a refusable
-                //    contradiction: this fixture holds a transcribed Form 1099-INT, and swearing it
-                //    received none is exactly `DocumentCensusContradicted`. That is the census
-                //    working, so the fixture answers TRUTHFULLY rather than the rule being relaxed.
-                Ask::Declaration(q) => {
-                    let truth = btctax_core::tax::document_census::row_of_question(q.id)
-                        .and_then(|row| btctax_core::tax::document_census::declared_rows(&ri, row))
-                        .is_some_and(|n| n > 0);
-                    (q.set)(&mut ri, truth);
+        // ★★★ **THE SWEEP, mirrored from `answer_return_inputs`.** R3's document-less income door
+        //     makes a question live only once its census row is answered `No`, so a SINGLE pass
+        //     over `live_questions` cannot clear the screen — and this test is the property that
+        //     says the command can. It re-derives the live set until it stops growing, exactly as
+        //     the command does.
+        let mut asked: std::collections::BTreeSet<QuestionId> = std::collections::BTreeSet::new();
+        for _ in 0..8 {
+            let round: Vec<Ask> = live_questions(&ri)
+                .into_iter()
+                .filter(|a| a.declaration_id().is_none_or(|id| !asked.contains(&id)))
+                .collect();
+            if round.is_empty() {
+                break;
+            }
+            for ask in round {
+                if let Some(id) = ask.declaration_id() {
+                    asked.insert(id);
                 }
-                Ask::Skippable(_) => {} // skippable by design
+                match ask {
+                    // ★★ Answer "no" — EXCEPT on a document-census row, which is answered from what
+                    //    this return actually carries. Since D1 a blanket "no" is itself a refusable
+                    //    contradiction: this fixture holds a transcribed Form 1099-INT, and swearing it
+                    //    received none is exactly `DocumentCensusContradicted`. That is the census
+                    //    working, so the fixture answers TRUTHFULLY rather than the rule being relaxed.
+                    Ask::Declaration(q) => {
+                        let truth = btctax_core::tax::document_census::row_of_question(q.id)
+                            .and_then(|row| {
+                                btctax_core::tax::document_census::declared_rows(&ri, row)
+                            })
+                            .is_some_and(|n| n > 0);
+                        (q.set)(&mut ri, truth);
+                    }
+                    Ask::Skippable(_) => {} // skippable by design
+                }
             }
         }
         assert!(
@@ -820,6 +882,40 @@ mod tests {
                     expenses: dec!(5000),
                     ..Default::default()
                 });
+            }
+            // ★★★ R3 / T5 — THE DOCUMENT-LESS INCOME DOOR. Each of the three paired questions is
+            //     live EXACTLY when its census row says `No` — the pairing R3 states — so the
+            //     scenario answers that row and nothing else.
+            QuestionId::WagesWithoutW2Question => {
+                r.documents.set(
+                    btctax_core::tax::document_census::DocumentRow::W2,
+                    Some(false),
+                );
+            }
+            QuestionId::InterestOrDividendsWithout1099 => {
+                r.documents.set(
+                    btctax_core::tax::document_census::DocumentRow::Int1099,
+                    Some(false),
+                );
+            }
+            QuestionId::StateRefundWithout1099g => {
+                r.documents.set(
+                    btctax_core::tax::document_census::DocumentRow::G1099,
+                    Some(false),
+                );
+            }
+            // ★ R3/I1 — the §111(a) gate, made live from the DOCUMENT side (a transcribed box 2),
+            //   so the scenario does not depend on another registry entry's answer.
+            QuestionId::ItemizedPriorYear => {
+                r.g_1099 = vec![btctax_core::tax::return_inputs::Form1099G {
+                    payer: "State of Example".into(),
+                    box2_state_refund: dec!(900),
+                    ..Default::default()
+                }];
+                r.documents.set(
+                    btctax_core::tax::document_census::DocumentRow::G1099,
+                    Some(true),
+                );
             }
             _ => {}
         }
@@ -933,11 +1029,11 @@ mod tests {
     fn income_answer_asks_every_live_declaration() {
         for q in FORM_QUESTIONS {
             let ri = scenario_for(q.id);
-            // ★★ R3 — two census rows are DELIBERATELY not live yet (`form_1098` → T9,
-            //    `form_1098e` → T5: their amount is collected today by a scalar). A never-live
-            //    question cannot be exercised by this property; the skip is DERIVED from the
-            //    census's own liveness predicate, not from a name list, so the moment T9/T5 flips
-            //    `row_is_live` the row re-enters this loop with no edit here.
+            // ★★ R3 — ONE census row is DELIBERATELY not live yet (`form_1098` → T9: its amount is
+            //    collected today by a scalar). A never-live question cannot be exercised by this
+            //    property; the skip is DERIVED from the census's own liveness predicate, not from a
+            //    name list, so the moment T9 flips `row_is_live` the row re-enters this loop with
+            //    no edit here — which is exactly what `form_1098e` did at T5.
             if !(q.live)(&ri) {
                 let row = btctax_core::tax::document_census::row_of_question(q.id);
                 assert!(
@@ -945,7 +1041,7 @@ mod tests {
                         &ri, row
                     )),
                     "{:?} is not live in its own scenario and is not a census row awaiting its \
-                     screen (T5/T9)",
+                     screen (T9)",
                     q.id
                 );
                 continue;

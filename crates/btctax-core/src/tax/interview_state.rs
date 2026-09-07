@@ -643,13 +643,43 @@ mod tests {
              summary rows — the panel must not refuse what the screen files: {:?}",
             interview_state(&on_8949).refusing
         );
+        // ★★★ **T5 FLIPPED THE 1099-G HALF, so the panel must flip with it.** Box 2 now HAS a
+        //     field, `requires_transcription(G1099)` is `true`, and a declared 1099-G with nothing
+        //     transcribed is once again "nothing ever populated it". The point of asserting it here
+        //     is the same as before: the panel and the screen must name the SAME refusals, so a
+        //     panel still excusing the 1099-G would be the second rule drifting from the first.
         let mut box2_only = answered_single();
         box2_only.documents.set(DocumentRow::G1099, Some(true));
-        box2_only.sch1.state_refund_taxable = dec!(900);
         assert!(
-            interview_state(&box2_only).refusing.is_empty(),
-            "a box-2-only 1099-G has no field to transcribe into until T5: {:?}",
+            interview_state(&box2_only).refusing.iter().any(|r| r.reason
+                == RefuseReason::DocumentDeclaredNotTranscribed {
+                    kind: DocumentRow::G1099
+                }),
+            "since T5 the 1099-G has a box-2 field, so a declared one with no row must be listed \
+             as refusing: {:?}",
             interview_state(&box2_only).refusing
+        );
+        // …and the row the filer then enters, box 2 alone, leaves the panel naming only the
+        // §111(a) gate — the question that decides whether the refund is income at all.
+        let mut transcribed = box2_only.clone();
+        transcribed.g_1099 = vec![crate::tax::return_inputs::Form1099G {
+            payer: "State of Example".into(),
+            box2_state_refund: dec!(900),
+            ..Default::default()
+        }];
+        assert!(
+            interview_state(&transcribed).refusing.is_empty(),
+            "a transcribed box-2 row is not a REFUSING state — the prior-year-itemized question is \
+             blocking, not refusing: {:?}",
+            interview_state(&transcribed).refusing
+        );
+        assert!(
+            interview_state(&transcribed).blocking.iter().any(|b| b.item
+                == crate::tax::provenance::AnswerKey::Question(
+                    crate::tax::questions::QuestionId::ItemizedPriorYear
+                )),
+            "…and it must be listed as BLOCKING: {:?}",
+            interview_state(&transcribed).blocking
         );
     }
 

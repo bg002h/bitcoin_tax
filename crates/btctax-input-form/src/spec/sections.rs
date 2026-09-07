@@ -660,8 +660,10 @@ const W2_FIELDS: &[Field] = &[
     Field {
         id: FieldId::W2Employer,
         clear: None,
-        label: "Employer",
-        help: "The employer's name (W-2 box c).",
+        label: "c Employer's name, address, and ZIP code",
+        help: "Box c \u{201c}Employer's name, address, and ZIP code\u{201d} \u{2014} the employer's \
+               name, which is what btctax stores; the address is printed on the W-2 you keep, and no \
+               line of the federal return reads it.",
         kind: FieldKind::Text,
         live: |_| true,
         get: |ri, a| ri.w2s.get(a.0[0]).map(|w| FieldValue::Text(w.employer.clone())),
@@ -674,10 +676,11 @@ const W2_FIELDS: &[Field] = &[
     Field {
         id: FieldId::W2Ein,
         clear: None,
-        label: "Employer EIN (box b)",
-        help: "The employer's EIN (W-2 box b). Required only when Social Security withheld exceeds the \
-               §3101(a) cap: the excess-SS credit needs MORE THAN ONE EMPLOYER (Schedule 3 line 11), \
-               and one employer's over-withholding is recovered from the employer, never on the return.",
+        label: "b Employer identification number (EIN)",
+        help: "Box b \u{201c}Employer identification number (EIN)\u{201d}. Required only when Social \
+               Security withheld exceeds the §3101(a) cap: the excess-SS credit needs MORE THAN ONE \
+               EMPLOYER (Schedule 3 line 11), and one employer's over-withholding is recovered from \
+               the employer, never on the return.",
         kind: FieldKind::Text,
         live: |_| true,
         get: |ri, a| {
@@ -694,17 +697,64 @@ const W2_FIELDS: &[Field] = &[
             Ok(())
         },
     },
-    w2_money!(FieldId::Box1Wages, "Box 1 — wages", "W-2 box 1 (wages, tips, other comp.)", box1_wages),
-    w2_money!(FieldId::Box2FedWh, "Box 2 — federal tax withheld", "W-2 box 2 → 1040 25a", box2_fed_withheld),
-    w2_money!(FieldId::Box3SsWages, "Box 3 — Social Security wages", "W-2 box 3 (per-earner SS cap)", box3_ss_wages),
-    w2_money!(FieldId::Box4SsWh, "Box 4 — Social Security tax withheld", "W-2 box 4 → excess-SS credit (§4.9)", box4_ss_withheld),
-    w2_money!(FieldId::Box5MedWages, "Box 5 — Medicare wages", "W-2 box 5 → Form 8959 Part I", box5_medicare_wages),
-    w2_money!(FieldId::Box6MedWh, "Box 6 — Medicare tax withheld", "W-2 box 6 → Form 8959 Part V", box6_medicare_withheld),
-    w2_money!(FieldId::Box7SsTips, "Box 7 — Social Security tips", "W-2 box 7", box7_ss_tips),
-    w2_money!(FieldId::Box17StateWh, "Box 17 — state income tax", "W-2 box 17 → Sch A 5a (income-tax path)", box17_state_tax_withheld),
-    w2_money!(FieldId::Box19LocalTax, "Box 19 — local income tax", "W-2 box 19 → Sch A 5a", box19_local_tax),
-    w2_money!(FieldId::Box8AllocTips, "Box 8 — allocated tips", "W-2 box 8 (refuse-guard if > 0, §4.10)", box8_allocated_tips),
-    w2_money!(FieldId::Box10DepCare, "Box 10 — dependent-care benefits", "W-2 box 10 (refuse-guard if > 0, §4.10)", box10_dependent_care),
+    // ★★★ R4 / T5 — THE LABELS ARE THE BOX CAPTIONS, VERBATIM. `xtask box-census` joins each
+    //     printed box to the field below and asserts the box's own words appear in its label or
+    //     help, so a caption a revision re-words cannot keep pointing at a field describing the old
+    //     one. The reach stays in the help, where a reader needs it.
+    w2_money!(FieldId::Box1Wages, "1 Wages, tips, other compensation", "Box 1 \u{201c}Wages, tips, other compensation\u{201d} \u{2014} Form 1040 line 1a.", box1_wages),
+    w2_money!(FieldId::Box2FedWh, "2 Federal income tax withheld", "Box 2 \u{201c}Federal income tax withheld\u{201d} \u{2014} Form 1040 line 25a.", box2_fed_withheld),
+    w2_money!(FieldId::Box3SsWages, "3 Social security wages", "Box 3 \u{201c}Social security wages\u{201d} \u{2014} the per-earner §3101(a) cap and the excess-SS credit.", box3_ss_wages),
+    w2_money!(FieldId::Box4SsWh, "4 Social security tax withheld", "Box 4 \u{201c}Social security tax withheld\u{201d} \u{2014} Schedule 3 line 11, the §6413(c) excess-SS credit.", box4_ss_withheld),
+    w2_money!(FieldId::Box5MedWages, "5 Medicare wages and tips", "Box 5 \u{201c}Medicare wages and tips\u{201d} \u{2014} Form 8959 Part I (Additional Medicare Tax).", box5_medicare_wages),
+    w2_money!(FieldId::Box6MedWh, "6 Medicare tax withheld", "Box 6 \u{201c}Medicare tax withheld\u{201d} \u{2014} Form 8959 Part V \u{2192} Form 1040 line 25c.", box6_medicare_withheld),
+    w2_money!(FieldId::Box7SsTips, "7 Social security tips", "Box 7 \u{201c}Social security tips\u{201d} \u{2014} the §6413(c) wage total, and the starting point for Schedule 1-A line 4a's qualified tips.", box7_ss_tips),
+    w2_money!(FieldId::Box17StateWh, "17 State income tax", "Box 17 \u{201c}State income tax\u{201d} \u{2014} Schedule A line 5a, on the income-tax election.", box17_state_tax_withheld),
+    w2_money!(FieldId::Box19LocalTax, "19 Local income tax", "Box 19 \u{201c}Local income tax\u{201d} \u{2014} Schedule A line 5a.", box19_local_tax),
+    w2_money!(FieldId::Box8AllocTips, "8 Allocated tips", "Box 8 \u{201c}Allocated tips\u{201d} \u{2014} unreported tip income needing Form 4137, which btctax does not build, so any amount refuses.", box8_allocated_tips),
+    w2_money!(FieldId::Box10DepCare, "10 Dependent care benefits", "Box 10 \u{201c}Dependent care benefits\u{201d} \u{2014} needs Form 2441, which btctax does not build, so any amount refuses.", box10_dependent_care),
+    Field {
+        id: FieldId::W2Box13StatutoryEmployee,
+        clear: None,
+        label: "13 Statutory employee",
+        help: "Check this ONLY if the \"Statutory employee\" box on your Form W-2 is checked. A \
+               checked box 13 means this W-2's box-1 wages are business receipts: they belong on \
+               SCHEDULE C LINE 1, with the expenses of earning them deducted against them, not on \
+               Form 1040 line 1a. btctax files every W-2's box 1 on line 1a, so a checked box \
+               refuses rather than file the wages on the wrong line.",
+        kind: FieldKind::Bool,
+        live: |_| true,
+        get: |ri, a| ri.w2s.get(a.0[0]).map(|w| FieldValue::Bool(w.box13_statutory_employee)),
+        set: |ri, a, v| {
+            let FieldValue::Bool(b) = v else { return Err(SetError::WrongKind) };
+            ri.w2s.get_mut(a.0[0]).ok_or(SetError::NoSuchRow)?.box13_statutory_employee = b;
+            Ok(())
+        },
+    },
+    Field {
+        id: FieldId::W2Box14bTtoc,
+        clear: None,
+        label: "14b Treasury Tipped Occupation Code(s)",
+        help: "The code(s) printed in box 14b of a 2026 or later Form W-2 — blank on earlier \
+               editions, which print box 14 alone. It is your employer's statement of the \
+               occupation your tips were earned in, and Schedule 1-A Part II's Caution turns on it: \
+               \"These tips must have been received in an occupation listed at \
+               IRS.gov/TippedOccupations.\" Enter it exactly as printed (e.g. 102 for wait staff).",
+        kind: FieldKind::Text,
+        live: |_| true,
+        get: |ri, a| {
+            ri.w2s
+                .get(a.0[0])
+                .map(|w| FieldValue::Text(w.box14b_treasury_tipped_occupation_codes.clone()))
+        },
+        set: |ri, a, v| {
+            let FieldValue::Text(t) = v else { return Err(SetError::WrongKind) };
+            ri.w2s
+                .get_mut(a.0[0])
+                .ok_or(SetError::NoSuchRow)?
+                .box14b_treasury_tipped_occupation_codes = t;
+            Ok(())
+        },
+    },
 ];
 
 pub(crate) const W2S: Section = Section {
@@ -1862,3 +1912,466 @@ mod broker_block_tests {
         assert_eq!(ri.answer_log_history[0].0, key(ssn1));
     }
 }
+
+// ── ★★★ R4 / T5 — THE INFORMATION-RETURN SECTIONS ────────────────────────────────────────────────
+//
+// One REPEATING section per supported document type, modelled exactly on `W2s`: per row the payer
+// identity (`payer`, `payer_tin`, `transcribed_on`) plus **one `Field` per collected box, named for
+// the box, carrying the box's own printed CAPTION verbatim in its help** — the transcription rule
+// (`CLAUDE.md`: *"one field per numbered line, named for the line, in the form's own numbering,
+// carrying the official instruction text verbatim as its doc comment"*), applied one level down.
+//
+// ★ The captions are the archived extracts' own text (`design/forms/extract/<stem>--<edition>.txt`),
+//   and `xtask box-census` joins each box to the `FieldId` below and CHECKS that the caption's words
+//   appear in the field's help. A re-worded box, or a field pointed at another section, reds there.
+//
+// ★★ Every box is a plain `Usd`, never an `Option<Usd>` — R4: *"a document row's every box is
+//    testimony by construction, because the row exists only because the filer declared the document
+//    (R3) — a 1099-INT with box 2 = 0 is the DOCUMENT's zero."*
+
+/// A repeating money leaf over `ri.$vec[addr.0[0]].$field`.
+macro_rules! doc_money {
+    ($id:expr, $vec:ident, $label:literal, $help:expr, $field:ident) => {
+        Field {
+            id: $id,
+            clear: None,
+            label: $label,
+            help: $help,
+            kind: FieldKind::Money,
+            live: |_| true,
+            get: |ri, a| ri.$vec.get(a.0[0]).map(|r| FieldValue::Money(r.$field)),
+            set: |ri, a, v| {
+                let FieldValue::Money(m) = v else {
+                    return Err(SetError::WrongKind);
+                };
+                ri.$vec.get_mut(a.0[0]).ok_or(SetError::NoSuchRow)?.$field = m;
+                Ok(())
+            },
+        }
+    };
+}
+
+/// A repeating text leaf over `ri.$vec[addr.0[0]].$field`.
+macro_rules! doc_text {
+    ($id:expr, $vec:ident, $label:literal, $help:expr, $field:ident) => {
+        Field {
+            id: $id,
+            clear: None,
+            label: $label,
+            help: $help,
+            kind: FieldKind::Text,
+            live: |_| true,
+            get: |ri, a| {
+                ri.$vec
+                    .get(a.0[0])
+                    .map(|r| FieldValue::Text(r.$field.clone()))
+            },
+            set: |ri, a, v| {
+                let FieldValue::Text(t) = v else {
+                    return Err(SetError::WrongKind);
+                };
+                ri.$vec.get_mut(a.0[0]).ok_or(SetError::NoSuchRow)?.$field = t;
+                Ok(())
+            },
+        }
+    };
+}
+
+/// R10.2 — the repeating `transcribed_on` leaf. `None` is a real answer (*"transcribed without a
+/// date"*, printed by the packet manifest), so `clear` writes `None` rather than a sentinel date.
+macro_rules! doc_transcribed_on {
+    ($id:expr, $vec:ident) => {
+        Field {
+            id: $id,
+            clear: Some(|ri, a| {
+                ri.$vec
+                    .get_mut(a.0[0])
+                    .ok_or(SetError::NoSuchRow)?
+                    .transcribed_on = None;
+                Ok(())
+            }),
+            label: "Transcribed on",
+            help: "The date you copied this document's boxes into btctax. It is provenance about \
+                   the EVIDENCE, not a figure on the return — leave it blank and the packet's \
+                   manifest names the row as transcribed without a date rather than hiding it.",
+            kind: FieldKind::Date,
+            live: |_| true,
+            get: |ri, a| {
+                ri.$vec
+                    .get(a.0[0])
+                    .map(|r| FieldValue::Date(r.transcribed_on))
+            },
+            set: |ri, a, v| {
+                let FieldValue::Date(d) = v else {
+                    return Err(SetError::WrongKind);
+                };
+                ri.$vec
+                    .get_mut(a.0[0])
+                    .ok_or(SetError::NoSuchRow)?
+                    .transcribed_on = d;
+                Ok(())
+            },
+        }
+    };
+}
+
+/// The `Repeating` section kind over a top-level `Vec` — `add` always has a container, `remove`
+/// reports out-of-range (I-4).
+macro_rules! doc_section_kind {
+    ($vec:ident, $ty:ty) => {
+        SectionKind::Repeating {
+            len: |ri, _| ri.$vec.len(),
+            add: |ri, _| {
+                ri.$vec.push(<$ty>::default());
+                Ok(())
+            },
+            remove: |ri, a| {
+                if a.0[0] < ri.$vec.len() {
+                    ri.$vec.remove(a.0[0]);
+                    Ok(())
+                } else {
+                    Err(SetError::NoSuchRow)
+                }
+            },
+        }
+    };
+}
+
+/// The shared help for a payer TIN (R10.2 — the cross-year document identity).
+const PAYER_TIN_HELP: &str =
+    "The payer's TIN as printed on the form (\u{201c}PAYER'S TIN\u{201d}). It is the cross-year \
+     identity of this payer: leaving it blank means NOT TRANSCRIBED, never \u{201c}the payer has \
+     none\u{201d}.";
+
+// ── 1099-INT ─────────────────────────────────────────────────────────────────────────────────────
+
+const INT_1099_FIELDS: &[Field] = &[
+    doc_text!(FieldId::Int1099Payer, int_1099, "PAYER'S name", "The payer as printed on the Form 1099-INT.", payer),
+    doc_text!(FieldId::Int1099PayerTin, int_1099, "PAYER'S TIN", PAYER_TIN_HELP, payer_tin),
+    doc_transcribed_on!(FieldId::Int1099TranscribedOn, int_1099),
+    doc_money!(FieldId::Int1099Box1Interest, int_1099, "1 Interest income",
+        "Box 1 \u{201c}Interest income\u{201d} \u{2014} Schedule B line 1, then Form 1040 line 2b.", box1_interest),
+    doc_money!(FieldId::Int1099Box2EarlyWithdrawal, int_1099, "2 Early withdrawal penalty",
+        "Box 2 \u{201c}Early withdrawal penalty\u{201d} \u{2014} Schedule 1 line 18, an adjustment to income.", box2_early_withdrawal_penalty),
+    doc_money!(FieldId::Int1099Box3Treasury, int_1099, "3 Interest on U.S. Savings Bonds and Treasury obligations",
+        "Box 3 \u{201c}Interest on U.S. Savings Bonds and Treasury obligations\u{201d} \u{2014} Form 1040 line 2b. It is NOT part of box 1: the two are added.", box3_treasury_interest),
+    doc_money!(FieldId::Int1099Box4FedWithheld, int_1099, "4 Federal income tax withheld",
+        "Box 4 \u{201c}Federal income tax withheld\u{201d} \u{2014} Form 1040 line 25b.", box4_fed_withheld),
+    doc_money!(FieldId::Int1099Box6ForeignTax, int_1099, "6 Foreign tax paid",
+        "Box 6 \u{201c}Foreign tax paid\u{201d} \u{2014} the \u{a7}904(j) no-Form-1116 foreign tax credit on Schedule 3 line 1. Above the $300/$600 ceiling it refuses.", box6_foreign_tax),
+    doc_money!(FieldId::Int1099Box8TaxExempt, int_1099, "8 Tax-exempt interest",
+        "Box 8 \u{201c}Tax-exempt interest\u{201d} \u{2014} Form 1040 line 2a. Reported, never taxed.", box8_tax_exempt_interest),
+    doc_money!(FieldId::Int1099Box9PrivateActivity, int_1099, "9 Specified private activity bond interest",
+        "Box 9 \u{201c}Specified private activity bond interest\u{201d} \u{2014} a Form 6251 AMT preference. btctax does not model it, so ANY amount here refuses rather than understate the AMT.", box9_private_activity_bond_amt),
+    doc_money!(FieldId::Int1099Box10MarketDiscount, int_1099, "10 Market discount",
+        "Box 10 \u{201c}Market discount\u{201d} \u{2014} Schedule B line 1 and the Form 1040 line 2b sum: \u{201c}Also include any accrued market discount that is includible in income\u{201d} (Schedule B instructions). Income, so leaving it out would understate your tax.", box10_market_discount),
+    doc_money!(FieldId::Int1099Box11BondPremium, int_1099, "11 Bond premium",
+        "Box 11 \u{201c}Bond premium\u{201d} \u{2014} \u{a7}171 amortizable bond premium REDUCES the interest you report, as a named Schedule B line-1 adjustment (Pub. 550). btctax computes no part of it, so any amount here refuses rather than report more interest than you owe tax on.", box11_bond_premium),
+    doc_money!(FieldId::Int1099Box12BondPremiumTreasury, int_1099, "12 Bond premium on Treasury obligations",
+        "Box 12 \u{201c}Bond premium on Treasury obligations\u{201d} \u{2014} as box 11: a \u{a7}171 reduction btctax does not compute, so any amount refuses.", box12_bond_premium_treasury),
+    doc_money!(FieldId::Int1099Box13BondPremiumTaxExempt, int_1099, "13 Bond premium on tax-exempt bond",
+        "Box 13 \u{201c}Bond premium on tax-exempt bond\u{201d} \u{2014} as box 11: a \u{a7}171 reduction btctax does not compute, so any amount refuses.", box13_bond_premium_tax_exempt),
+];
+
+pub(crate) const INT_1099S: Section = Section {
+    id: SectionId::Int1099s,
+    title: "Forms 1099-INT",
+    kind: doc_section_kind!(int_1099, btctax_core::tax::return_inputs::Form1099Int),
+    fields: INT_1099_FIELDS,
+};
+
+// ── 1099-DIV ─────────────────────────────────────────────────────────────────────────────────────
+
+const DIV_1099_FIELDS: &[Field] = &[
+    doc_text!(FieldId::Div1099Payer, div_1099, "PAYER'S name", "The payer as printed on the Form 1099-DIV.", payer),
+    doc_text!(FieldId::Div1099PayerTin, div_1099, "PAYER'S TIN", PAYER_TIN_HELP, payer_tin),
+    doc_transcribed_on!(FieldId::Div1099TranscribedOn, div_1099),
+    doc_money!(FieldId::Div1099Box1aOrdinary, div_1099, "1a Total ordinary dividends",
+        "Box 1a \u{201c}Total ordinary dividends\u{201d} \u{2014} Form 1040 line 3b. It ALREADY INCLUDES box 1b, so enter it as printed; btctax never adds the two.", box1a_ordinary),
+    doc_money!(FieldId::Div1099Box1bQualified, div_1099, "1b Qualified dividends",
+        "Box 1b \u{201c}Qualified dividends\u{201d} \u{2014} Form 1040 line 3a, the preferential-rate slice of box 1a. It may never exceed box 1a.", box1b_qualified),
+    doc_money!(FieldId::Div1099Box2aCapGain, div_1099, "2a Total capital gain distr.",
+        "Box 2a \u{201c}Total capital gain distr.\u{201d} \u{2014} Schedule D line 13, long-term.", box2a_capgain_distr),
+    doc_money!(FieldId::Div1099Box2bUnrecap1250, div_1099, "2b Unrecap. Sec. 1250 gain",
+        "Box 2b \u{201c}Unrecap. Sec. 1250 gain\u{201d} \u{2014} the 25% rate group needs the Schedule D unrecaptured-gain worksheet, which btctax does not build, so any amount refuses.", box2b_unrecap_1250),
+    doc_money!(FieldId::Div1099Box2cSection1202, div_1099, "2c Section 1202 gain",
+        "Box 2c \u{201c}Section 1202 gain\u{201d} \u{2014} the qualified small business stock exclusion, which btctax does not compute, so any amount refuses.", box2c_section_1202),
+    doc_money!(FieldId::Div1099Box2dCollectibles, div_1099, "2d Collectibles (28%) gain",
+        "Box 2d \u{201c}Collectibles (28%) gain\u{201d} \u{2014} the 28% rate group, which btctax does not compute, so any amount refuses.", box2d_collectibles_28),
+    doc_money!(FieldId::Div1099Box4FedWithheld, div_1099, "4 Federal income tax withheld",
+        "Box 4 \u{201c}Federal income tax withheld\u{201d} \u{2014} Form 1040 line 25b.", box4_fed_withheld),
+    doc_money!(FieldId::Div1099Box5Section199a, div_1099, "5 Section 199A dividends",
+        "Box 5 \u{201c}Section 199A dividends\u{201d} \u{2014} the REIT/PTP slice of box 1a that feeds the \u{a7}199A qualified business income deduction (Form 8995 line 6).", box5_section_199a),
+    doc_money!(FieldId::Div1099Box7ForeignTax, div_1099, "7 Foreign tax paid",
+        "Box 7 \u{201c}Foreign tax paid\u{201d} \u{2014} the \u{a7}904(j) no-Form-1116 foreign tax credit on Schedule 3 line 1.", box7_foreign_tax),
+    doc_money!(FieldId::Div1099Box12ExemptInterest, div_1099, "12 Exempt-interest dividends",
+        "Box 12 \u{201c}Exempt-interest dividends\u{201d} \u{2014} Form 1040 line 2a. Reported, never taxed.", box12_exempt_interest_dividends),
+    doc_money!(FieldId::Div1099Box13PrivateActivity, div_1099, "13 Specified private activity bond interest dividends",
+        "Box 13 \u{201c}Specified private activity bond interest dividends\u{201d} \u{2014} a Form 6251 AMT preference btctax does not model, so any amount refuses.", box13_private_activity_amt),
+];
+
+pub(crate) const DIV_1099S: Section = Section {
+    id: SectionId::Div1099s,
+    title: "Forms 1099-DIV",
+    kind: doc_section_kind!(div_1099, btctax_core::tax::return_inputs::Form1099Div),
+    fields: DIV_1099_FIELDS,
+};
+
+// ── 1099-B ───────────────────────────────────────────────────────────────────────────────────────
+
+const B_1099_FIELDS: &[Field] = &[
+    doc_text!(FieldId::B1099Payer, b_1099, "PAYER'S name (the broker)",
+        "The broker, for your own records. Schedule D lines 1a/8a name no payer, so nothing on the printed return reads this \u{2014} it exists so three brokers are three tellable rows.", payer),
+    doc_text!(FieldId::B1099PayerTin, b_1099, "PAYER'S TIN", PAYER_TIN_HELP, payer_tin),
+    doc_transcribed_on!(FieldId::B1099TranscribedOn, b_1099),
+    doc_money!(FieldId::B1099ShortTermProceeds, b_1099, "Short-term total: 1d Proceeds",
+        "The SHORT-TERM total of box 1d \u{201c}Proceeds\u{201d} \u{2014} Schedule D line 1a, column (d).", short_term_proceeds),
+    doc_money!(FieldId::B1099ShortTermBasis, b_1099, "Short-term total: 1e Cost or other basis",
+        "The SHORT-TERM total of box 1e \u{201c}Cost or other basis\u{201d} \u{2014} Schedule D line 1a, column (e).", short_term_basis),
+    doc_money!(FieldId::B1099LongTermProceeds, b_1099, "Long-term total: 1d Proceeds",
+        "The LONG-TERM total of box 1d \u{201c}Proceeds\u{201d} \u{2014} Schedule D line 8a, column (d). Box 2 \u{201c}Short-term gain or loss\u{201d} on the form is what tells you which total a transaction joins.", long_term_proceeds),
+    doc_money!(FieldId::B1099LongTermBasis, b_1099, "Long-term total: 1e Cost or other basis",
+        "The LONG-TERM total of box 1e \u{201c}Cost or other basis\u{201d} \u{2014} Schedule D line 8a, column (e).", long_term_basis),
+    Field {
+        id: FieldId::B1099BasisReportedNoAdjustments,
+        clear: Some(|ri, a| {
+            ri.b_1099
+                .get_mut(a.0[0])
+                .ok_or(SetError::NoSuchRow)?
+                .basis_reported_and_no_adjustments = None;
+            Ok(())
+        }),
+        label: "12 Check if basis reported to IRS \u{2014} AND no adjustments?",
+        help: "Answer YES only if BOTH are true of every transaction on this Form 1099-B: box 12 \
+               \u{201c}Basis reported to IRS\u{201d} is checked, AND you have no adjustments (no \
+               wash sale in box 1g, no accrued market discount in box 1f, no disallowed loss in box \
+               7, no noncovered security in box 5). Schedule D lines 1a and 8a accept totals only \
+               on those two conditions; anything else belongs on Form 8949 one row at a time, which \
+               btctax fills from its own crypto lot engine alone. Unanswered and NO both refuse.",
+        kind: FieldKind::TriState,
+        live: |_| true,
+        get: |ri, a| {
+            ri.b_1099
+                .get(a.0[0])
+                .map(|r| FieldValue::TriState(r.basis_reported_and_no_adjustments))
+        },
+        set: |ri, a, v| {
+            let FieldValue::TriState(Some(b)) = v else {
+                return Err(SetError::WrongKind);
+            };
+            ri.b_1099
+                .get_mut(a.0[0])
+                .ok_or(SetError::NoSuchRow)?
+                .basis_reported_and_no_adjustments = Some(b);
+            Ok(())
+        },
+    },
+];
+
+pub(crate) const B_1099S: Section = Section {
+    id: SectionId::B1099s,
+    title: "Forms 1099-B (Schedule D summary totals)",
+    kind: doc_section_kind!(b_1099, btctax_core::tax::return_inputs::Form1099B),
+    fields: B_1099_FIELDS,
+};
+
+// ── 1099-G ───────────────────────────────────────────────────────────────────────────────────────
+
+const G_1099_FIELDS: &[Field] = &[
+    doc_text!(FieldId::G1099Payer, g_1099, "PAYER'S name", "The state or agency as printed on the Form 1099-G.", payer),
+    doc_text!(FieldId::G1099PayerTin, g_1099, "PAYER'S TIN", PAYER_TIN_HELP, payer_tin),
+    doc_transcribed_on!(FieldId::G1099TranscribedOn, g_1099),
+    doc_money!(FieldId::G1099Box1Unemployment, g_1099, "1 Unemployment compensation",
+        "Box 1 \u{201c}Unemployment compensation\u{201d} \u{2014} Schedule 1 line 7.", box1_unemployment),
+    doc_money!(FieldId::G1099Box2StateRefund, g_1099, "2 State or local income tax refunds, credits, or offsets",
+        "Box 2 \u{201c}State or local income tax refunds, credits, or offsets\u{201d} \u{2014} Schedule 1 line 1, but ONLY if you itemized on the return for the year you paid that tax (\u{a7}111(a)'s tax-benefit rule). btctax asks that question once for the return, because you owe the same answer whether or not a Form 1099-G arrived.", box2_state_refund),
+    doc_money!(FieldId::G1099Box4FedWithheld, g_1099, "4 Federal income tax withheld",
+        "Box 4 \u{201c}Federal income tax withheld\u{201d} \u{2014} Form 1040 line 25b.", box4_fed_withheld),
+    doc_money!(FieldId::G1099Box10FamilyLeave, g_1099, "10 Family leave benefits",
+        "Box 10 \u{201c}Family leave benefits\u{201d} \u{2014} new on the December 2026 revision, for a state paid family and medical leave program (Rev. Rul. 2025-4). The benefits are income and reach Schedule 1 line 8z, which btctax fills from nothing, so any amount here refuses rather than vanish.", box10_family_leave_benefits),
+];
+
+pub(crate) const G_1099S: Section = Section {
+    id: SectionId::G1099s,
+    title: "Forms 1099-G",
+    kind: doc_section_kind!(g_1099, btctax_core::tax::return_inputs::Form1099G),
+    fields: G_1099_FIELDS,
+};
+
+// ── 1098-E ───────────────────────────────────────────────────────────────────────────────────────
+
+const FORM_1098E_FIELDS: &[Field] = &[
+    doc_text!(FieldId::Form1098eLender, form_1098e, "RECIPIENT'S/LENDER'S name", "The lender or servicer as printed on the Form 1098-E.", lender),
+    doc_text!(FieldId::Form1098eLenderTin, form_1098e, "RECIPIENT'S/LENDER'S TIN", PAYER_TIN_HELP, lender_tin),
+    doc_transcribed_on!(FieldId::Form1098eTranscribedOn, form_1098e),
+    doc_money!(FieldId::Form1098eBox1Interest, form_1098e, "1 Student loan interest received by lender",
+        "Box 1 \u{201c}Student loan interest received by lender\u{201d} \u{2014} Schedule 1 line 21, the \u{a7}221 deduction, after its $2,500 cap and its MAGI phase-out. btctax adds box 1 across every Form 1098-E on this return.", box1_interest),
+];
+
+pub(crate) const FORM_1098ES: Section = Section {
+    id: SectionId::Form1098Es,
+    title: "Forms 1098-E (student loan interest)",
+    kind: doc_section_kind!(form_1098e, btctax_core::tax::return_inputs::Form1098E),
+    fields: FORM_1098E_FIELDS,
+};
+
+// ── ★★★ R5 — the filer's-records rows for Schedule B lines 1 and 5 ──────────────────────────────
+//
+// LIVE only when the filer has said such income exists, so nobody is shown a section for income
+// they do not have; non-empty is then REQUIRED (`FilerRecordsDeclaredNotTranscribed`).
+
+/// The section's liveness — the R3 door, in one place.
+fn schedule_b_records_live(ri: &btctax_core::tax::return_inputs::ReturnInputs) -> bool {
+    btctax_core::tax::questions::question_is_live(
+        btctax_core::tax::questions::QuestionId::InterestOrDividendsWithout1099,
+        ri,
+    ) && ri.interest_or_dividends_without_1099 == Some(true)
+}
+
+const SB_RECORD_FIELDS: &[Field] = &[
+    Field {
+        id: FieldId::SbRecordPayerName,
+        clear: None,
+        label: "Name of payer",
+        help: "Schedule B line 1 / line 5, the \u{201c}List name of payer\u{201d} column \u{2014} \
+               who paid you. For a seller-financed mortgage this is the BUYER.",
+        kind: FieldKind::Text,
+        live: schedule_b_records_live,
+        get: |ri, a| {
+            ri.schedule_b_filer_records
+                .get(a.0[0])
+                .map(|r| FieldValue::Text(r.payer_name.clone()))
+        },
+        set: |ri, a, v| {
+            let FieldValue::Text(t) = v else { return Err(SetError::WrongKind) };
+            ri.schedule_b_filer_records
+                .get_mut(a.0[0])
+                .ok_or(SetError::NoSuchRow)?
+                .payer_name = t;
+            Ok(())
+        },
+    },
+    Field {
+        id: FieldId::SbRecordPayerSsn,
+        clear: None,
+        label: "Buyer's SSN (seller-financed mortgage only)",
+        help: "Schedule B: \u{201c}If you sold your home or other property and the buyer used the \
+               property as a personal residence, list first any interest the buyer paid you on a \
+               mortgage \u{2026} and show that buyer's social security number (SSN) and address.\u{201d} \
+               Leave it blank for every other kind of row.",
+        kind: FieldKind::Secret,
+        live: schedule_b_records_live,
+        get: |ri, a| {
+            ri.schedule_b_filer_records
+                .get(a.0[0])
+                .map(|r| FieldValue::Secret(mask_ssn(&r.payer_ssn)))
+        },
+        set: |ri, a, v| {
+            let FieldValue::SecretEntry(t) = v else { return Err(SetError::WrongKind) };
+            ri.schedule_b_filer_records
+                .get_mut(a.0[0])
+                .ok_or(SetError::NoSuchRow)?
+                .payer_ssn = t;
+            Ok(())
+        },
+    },
+    Field {
+        id: FieldId::SbRecordPayerAddress,
+        clear: None,
+        label: "Buyer's address (seller-financed mortgage only)",
+        help: "The buyer's address, which Schedule B asks for beside their SSN on a seller-financed \
+               mortgage. Leave it blank for every other kind of row.",
+        kind: FieldKind::Text,
+        live: schedule_b_records_live,
+        get: |ri, a| {
+            ri.schedule_b_filer_records
+                .get(a.0[0])
+                .map(|r| FieldValue::Text(r.payer_address.clone()))
+        },
+        set: |ri, a, v| {
+            let FieldValue::Text(t) = v else { return Err(SetError::WrongKind) };
+            ri.schedule_b_filer_records
+                .get_mut(a.0[0])
+                .ok_or(SetError::NoSuchRow)?
+                .payer_address = t;
+            Ok(())
+        },
+    },
+    Field {
+        id: FieldId::SbRecordAmount,
+        clear: None,
+        label: "Amount",
+        help: "The amount, from your own records. Schedule B line 1 says to report ALL of your \
+               taxable interest, whether or not a payer sent you a Form 1099-INT.",
+        kind: FieldKind::Money,
+        live: schedule_b_records_live,
+        get: |ri, a| {
+            ri.schedule_b_filer_records
+                .get(a.0[0])
+                .map(|r| FieldValue::Money(r.amount))
+        },
+        set: |ri, a, v| {
+            let FieldValue::Money(m) = v else { return Err(SetError::WrongKind) };
+            ri.schedule_b_filer_records
+                .get_mut(a.0[0])
+                .ok_or(SetError::NoSuchRow)?
+                .amount = m;
+            Ok(())
+        },
+    },
+    Field {
+        id: FieldId::SbRecordKind,
+        clear: None,
+        label: "Interest or dividend?",
+        help: "Which Schedule B list this row joins: Interest goes on line 1 (and carries to Form \
+               1040 line 2b); Dividend goes on line 5 (and carries to Form 1040 line 3b).",
+        kind: FieldKind::Enum(&["Interest", "Dividend"]),
+        live: schedule_b_records_live,
+        get: |ri, a| {
+            ri.schedule_b_filer_records
+                .get(a.0[0])
+                .map(|r| FieldValue::Choice(format!("{:?}", r.kind)))
+        },
+        set: |ri, a, v| {
+            use btctax_core::tax::return_inputs::ScheduleBRecordKind as K;
+            let FieldValue::Choice(c) = v else { return Err(SetError::WrongKind) };
+            let kind = match c.as_str() {
+                "Interest" => K::Interest,
+                "Dividend" => K::Dividend,
+                _ => return Err(SetError::WrongKind),
+            };
+            ri.schedule_b_filer_records
+                .get_mut(a.0[0])
+                .ok_or(SetError::NoSuchRow)?
+                .kind = kind;
+            Ok(())
+        },
+    },
+];
+
+pub(crate) const SCHEDULE_B_FILER_RECORDS: Section = Section {
+    id: SectionId::ScheduleBFilerRecords,
+    title: "Interest and dividends from your own records",
+    kind: SectionKind::Repeating {
+        len: |ri, _| ri.schedule_b_filer_records.len(),
+        // ★ The section is LIVE only behind the R3 door, so `add` refuses on a return that has not
+        //   opened it — a row nobody could see would be testimony the filer never gave.
+        add: |ri, _| {
+            if !schedule_b_records_live(ri) {
+                return Err(SetError::NoSuchRow);
+            }
+            ri.schedule_b_filer_records
+                .push(btctax_core::tax::return_inputs::ScheduleBRecord::default());
+            Ok(())
+        },
+        remove: |ri, a| {
+            if a.0[0] < ri.schedule_b_filer_records.len() {
+                ri.schedule_b_filer_records.remove(a.0[0]);
+                Ok(())
+            } else {
+                Err(SetError::NoSuchRow)
+            }
+        },
+    },
+    fields: SB_RECORD_FIELDS,
+};

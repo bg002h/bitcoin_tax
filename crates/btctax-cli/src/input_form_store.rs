@@ -1404,6 +1404,9 @@ mod tests {
                 DocumentRow::Div1099 => r.div_1099.push(Default::default()),
                 DocumentRow::B1099 => r.b_1099.push(Default::default()),
                 DocumentRow::G1099 => r.g_1099.push(Default::default()),
+                // ★ T5 — the 1098-E became countable when `Form1098E` replaced the
+                //   `sch1.student_loan_interest_paid` scalar.
+                DocumentRow::Form1098e => r.form_1098e.push(Default::default()),
                 other => panic!("a new countable census row ({other:?}) needs a case here"),
             }
             assert!(

@@ -282,6 +282,27 @@ const DECL_FIELDS: &[Field] = &[
         ri.filing_status_confirmed = None;
         Ok(())
     }),
+    // ★★★ Indices 36..=39 — R3 / T5's DOCUMENT-LESS INCOME DOOR. Appended at the END for the
+    //     array-index reason above. They live in `Declarations` rather than in `DocumentCensus`
+    //     because they are not census rows: `row_of_question` returns `None` for them, and they
+    //     have no rows to guard against, so the census section's I-10 `ContradictsTranscribedRows`
+    //     guard would be meaningless on them.
+    decl_tristate!(36, FieldId::DeclWagesWithoutW2, |ri| {
+        ri.w2_wages_without_w2 = None;
+        Ok(())
+    }),
+    decl_tristate!(37, FieldId::DeclInterestOrDividendsWithout1099, |ri| {
+        ri.interest_or_dividends_without_1099 = None;
+        Ok(())
+    }),
+    decl_tristate!(38, FieldId::DeclStateRefundWithout1099g, |ri| {
+        ri.state_refund_without_1099g = None;
+        Ok(())
+    }),
+    decl_tristate!(39, FieldId::DeclItemizedPriorYear, |ri| {
+        ri.itemized_prior_year = None;
+        Ok(())
+    }),
     FOREIGN_COUNTRY_NAMES,
 ];
 
@@ -589,6 +610,11 @@ pub fn field_to_question(id: FieldId) -> Option<QuestionId> {
         FieldId::DocA1095 => QuestionId::DocA1095,
         FieldId::DocT1098 => QuestionId::DocT1098,
         FieldId::DeclFilingStatusConfirmed => QuestionId::FilingStatusConfirmed,
+        // ★ R3 / T5 — the document-less income door.
+        FieldId::DeclWagesWithoutW2 => QuestionId::WagesWithoutW2Question,
+        FieldId::DeclInterestOrDividendsWithout1099 => QuestionId::InterestOrDividendsWithout1099,
+        FieldId::DeclStateRefundWithout1099g => QuestionId::StateRefundWithout1099g,
+        FieldId::DeclItemizedPriorYear => QuestionId::ItemizedPriorYear,
         _ => return None,
     })
 }
@@ -648,6 +674,12 @@ pub fn question_to_field(id: QuestionId) -> FieldId {
         QuestionId::DocA1095 => FieldId::DocA1095,
         QuestionId::DocT1098 => FieldId::DocT1098,
         QuestionId::FilingStatusConfirmed => FieldId::DeclFilingStatusConfirmed,
+        // ★ R3 / T5 — the document-less income door. Not deduped anywhere: no document section
+        //   carries an answer about income that arrived WITHOUT its document.
+        QuestionId::WagesWithoutW2Question => FieldId::DeclWagesWithoutW2,
+        QuestionId::InterestOrDividendsWithout1099 => FieldId::DeclInterestOrDividendsWithout1099,
+        QuestionId::StateRefundWithout1099g => FieldId::DeclStateRefundWithout1099g,
+        QuestionId::ItemizedPriorYear => FieldId::DeclItemizedPriorYear,
     }
 }
 

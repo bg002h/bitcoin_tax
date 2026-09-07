@@ -2353,6 +2353,15 @@ fn draw_tax_inputs_status(
     for g in &gate_lines {
         lines.push(Line::from(Span::styled(format!("  {g}"), gate_style)));
     }
+    // ★★★ **R4 — THE TRANSCRIPTION WARNINGS, WHERE THE ROW IS EDITED.** Yellow like the screen
+    //     status, because they want the filer's eye — but they are NOT a refusal: nothing is
+    //     blocked and nothing has been changed. The whole message shows on the row it is about.
+    for w in form.transcription_warning_lines() {
+        lines.push(Line::from(Span::styled(
+            format!("  {w}"),
+            Style::default().fg(Color::Yellow),
+        )));
+    }
     lines.push(Line::from(Span::styled(
         legend,
         Style::default().fg(Color::DarkGray),

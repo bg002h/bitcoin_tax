@@ -49,6 +49,8 @@ pub mod tables;
 /// P7 golden-return matrix. No tax logic — every figure is a fixture, not a fact.
 #[doc(hidden)]
 pub mod testonly;
+/// ★★★ R4 — the checks the DOCUMENT guarantees, displayed and never written.
+pub mod transcription_warnings;
 pub mod types;
 
 pub use return_1040::{

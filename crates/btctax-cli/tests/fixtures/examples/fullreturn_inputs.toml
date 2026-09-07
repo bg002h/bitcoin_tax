@@ -20,11 +20,13 @@ filing_status = "Mfj"
 foreign_accounts = false
 foreign_country_names = ""
 foreign_trust = false
+form_1098e = []
 form_2555_line45 = "0"
 form_2555_line50 = "0"
 form_4563_line15 = "0"
 itemize_election = "auto"
 other_out_of_scope_income = false
+schedule_b_filer_records = []
 tax_year = 2024
 
 [answer_log]
@@ -55,6 +57,7 @@ a_1095 = false
 b_1099 = false
 c_1099 = false
 div_1099 = true
+form_1098e = false
 g_1099 = true
 int_1099 = true
 k1 = false
@@ -69,7 +72,9 @@ w2 = true
 w2g = false
 
 [[g_1099]]
+box10_family_leave_benefits = "0"
 box1_unemployment = "1000"
+box2_state_refund = "0"
 box4_fed_withheld = "0"
 payer = "State of IL"
 payer_tin = ""
@@ -103,6 +108,10 @@ occupation = "Engineer"
 ssn = "123-45-6789"
 
 [[int_1099]]
+box10_market_discount = "0"
+box11_bond_premium = "0"
+box12_bond_premium_treasury = "0"
+box13_bond_premium_tax_exempt = "0"
 box1_interest = "2000"
 box2_early_withdrawal_penalty = "0"
 box3_treasury_interest = "0"
@@ -128,7 +137,6 @@ reit_ptp_carryforward_in_provenance = "user"
 hsa_activity = false
 ira_deduction_claimed = "0"
 state_refund_taxable = "0"
-student_loan_interest_paid = "0"
 
 [schedule_1a]
 vehicles = []
@@ -163,6 +171,8 @@ owner = "taxpayer"
 [[w2s]]
 box10_dependent_care = "0"
 box12 = []
+box13_statutory_employee = false
+box14b_treasury_tipped_occupation_codes = ""
 box17_state_tax_withheld = "9000"
 box19_local_tax = "0"
 box1_wages = "200000"
@@ -179,6 +189,8 @@ owner = "taxpayer"
 [[w2s]]
 box10_dependent_care = "0"
 box12 = []
+box13_statutory_employee = false
+box14b_treasury_tipped_occupation_codes = ""
 box17_state_tax_withheld = "4000"
 box19_local_tax = "0"
 box1_wages = "90000"

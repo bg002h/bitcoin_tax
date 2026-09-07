@@ -174,7 +174,15 @@ fn row_depth(id: SectionId) -> usize {
         SectionId::Dependents
         | SectionId::W2s
         | SectionId::ScheduleACharitable
-        | SectionId::BrokerReporting => 1,
+        | SectionId::BrokerReporting
+        // ★ R4 / T5 — the six document sections are depth-1 repeating groups over a TOP-LEVEL
+        //   `Vec`, exactly like `W2s`.
+        | SectionId::Int1099s
+        | SectionId::Div1099s
+        | SectionId::B1099s
+        | SectionId::G1099s
+        | SectionId::Form1098Es
+        | SectionId::ScheduleBFilerRecords => 1,
         SectionId::W2Box12 => 2,
         SectionId::ReturnOptions
         | SectionId::Taxpayer

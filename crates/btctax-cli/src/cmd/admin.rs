@@ -488,6 +488,27 @@ fn hand_marks(printed: &btctax_core::tax::packet::PrintedReturn) -> Vec<String> 
     marks
 }
 
+/// ★★★ **R4 / §4.4 — the manifest's undated-rows block.** Empty when every transcribed row carries
+/// a date, so a filer who dated everything sees nothing; present, and naming each row, otherwise.
+fn undated_rows_block(rows: &[String]) -> String {
+    use std::fmt::Write as _;
+    if rows.is_empty() {
+        return String::new();
+    }
+    let mut s = String::from(
+        "\n# ── TRANSCRIBED WITHOUT A DATE ──\n\
+         #\n\
+         # These document rows carry no transcription date. That is not an error and nothing was\n\
+         # dropped — the figures are on the return exactly as entered. It is recorded because an\n\
+         # absent date is a fact about the EVIDENCE, and the manifest is what you follow while\n\
+         # assembling paper.\n#\n",
+    );
+    for r in rows {
+        let _ = writeln!(s, "#   · {r}");
+    }
+    s
+}
+
 /// Render [`hand_marks`] as the packet manifest's closing section — the manifest is the artifact the
 /// filer is told to follow while assembling paper, which is why the marks live there (decision 13)
 /// rather than only on a stderr line that scrolls away.
@@ -1823,6 +1844,12 @@ fn export_full_return(
         &mut manifest,
     )?;
 
+    // ★★★ R4 / §4.4 — THE UNDATED DOCUMENT ROWS, NAMED RATHER THAN TIDIED AWAY. An absent
+    //     `transcribed_on` is a fact about the EVIDENCE, not the absence of a fact, and the manifest
+    //     is the artifact the filer follows while assembling paper.
+    manifest.push_str(&undated_rows_block(
+        &btctax_core::tax::provenance::undated_document_rows(&ri),
+    ));
     let marks = hand_marks(&printed);
     manifest.push_str(&hand_marks_block(&marks));
     let manifest_path = out_dir.join("manifest.txt");

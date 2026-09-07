@@ -46,6 +46,10 @@ pub enum DocumentKind {
     Form1099Div,
     Form1099G,
     Form1099B,
+    /// ★ T5 — Form 1098-E, *Student Loan Interest Statement*. Its rows replaced the
+    /// `sch1.student_loan_interest_paid` scalar, which is why Schedule 1 line 21's figure moved from
+    /// `FilerRecords` (the `sch1` prefix) to a document.
+    Form1098E,
 }
 
 /// Where one money leaf's figure comes from (R10 part 1).
@@ -83,6 +87,7 @@ pub const LEAF_SOURCE: &[(&str, Source)] = &[
     ("div_1099", Source::Document(DocumentKind::Form1099Div)),
     ("g_1099", Source::Document(DocumentKind::Form1099G)),
     ("b_1099", Source::Document(DocumentKind::Form1099B)),
+    ("form_1098e", Source::Document(DocumentKind::Form1098E)),
     // ── The filer's own records ──────────────────────────────────────────────────────────────────
     // Schedule A: medical, SALT, interest, gifts — every one a figure the filer reads off their own
     // books or a statement btctax does not transcribe. (`mortgage_interest_1098` moves to a
@@ -92,6 +97,11 @@ pub const LEAF_SOURCE: &[(&str, Source)] = &[
     ("schedule_c", Source::FilerRecords),
     ("schedule_1a", Source::FilerRecords),
     ("payments", Source::FilerRecords),
+    // ★★★ R5 / T5 — the Schedule B rows the form attributes to the FILER'S OWN RECORDS: a bank
+    //     paying under $10, a nominee distribution, a seller-financed mortgage. No information
+    //     return reports them, and the source is recorded so the packet's manifest can say which
+    //     figures have a document behind them and which came from the filer's books.
+    ("schedule_b_filer_records", Source::FilerRecords),
     ("qbi", Source::FilerRecords),
     // ★ Form 8960 line 9b — i8960's *"any reasonable method"* allocation. Collected, never computed:
     //   the method is the FILER'S election, so the figure is theirs.
@@ -108,6 +118,60 @@ pub const LEAF_SOURCE: &[(&str, Source)] = &[
     ("capital_loss_carryforward_in", Source::Computed),
     ("charitable_carryover_in", Source::Computed),
 ];
+
+/// ★★★ **R4 / §4.4 — EVERY TRANSCRIBED DOCUMENT ROW THAT CARRIES NO `transcribed_on`, NAMED.**
+///
+/// R4: *"a row that arrives by TOML with `transcribed_on = None` is not silently tidied away — the
+/// packet manifest prints it as **transcribed without a date**, because an absent date is a fact
+/// about the evidence, not the absence of a fact."*
+///
+/// ★ It is not a defect and never refuses: the date is provenance about OUR handling of the paper,
+///   and a row imported from a TOML written before the field existed is perfectly lawful. What is
+///   not lawful is hiding it, because the manifest is the artifact a filer follows while assembling
+///   paper, and a row with no date is one they cannot vouch for from the manifest alone.
+///
+/// One line per undated row, in `LEAF_SOURCE` document order, each naming the document, the row's
+/// one-based number and its issuer.
+#[must_use]
+pub fn undated_document_rows(ri: &ReturnInputs) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut add = |kind: &str, i: usize, issuer: &str, dated: bool| {
+        if dated {
+            return;
+        }
+        let who = if issuer.trim().is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", issuer.trim())
+        };
+        out.push(format!(
+            "{kind} #{}{who} — transcribed without a date",
+            i + 1
+        ));
+    };
+    for (i, w) in ri.w2s.iter().enumerate() {
+        // ★ The W-2 row carries no `transcribed_on` of its own (R10.2 gave it to the 1099 families
+        //   and the 1098-E, whose rows arrive by TOML). Named here in a comment rather than left to
+        //   a reader's inference: when the W-2 gains one, this loop is where it is reported.
+        let _ = (i, w);
+    }
+    for (i, r) in ri.int_1099.iter().enumerate() {
+        add("Form 1099-INT", i, &r.payer, r.transcribed_on.is_some());
+    }
+    for (i, r) in ri.div_1099.iter().enumerate() {
+        add("Form 1099-DIV", i, &r.payer, r.transcribed_on.is_some());
+    }
+    for (i, r) in ri.g_1099.iter().enumerate() {
+        add("Form 1099-G", i, &r.payer, r.transcribed_on.is_some());
+    }
+    for (i, r) in ri.b_1099.iter().enumerate() {
+        add("Form 1099-B", i, &r.payer, r.transcribed_on.is_some());
+    }
+    for (i, r) in ri.form_1098e.iter().enumerate() {
+        add("Form 1098-E", i, &r.lender, r.transcribed_on.is_some());
+    }
+    out
+}
 
 /// Resolve one serde leaf path to its [`Source`], or `None` when no [`LEAF_SOURCE`] prefix claims it.
 ///

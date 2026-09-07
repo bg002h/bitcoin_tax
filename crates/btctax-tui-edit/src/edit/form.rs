@@ -342,6 +342,64 @@ impl TaxInputsFormState {
             .lines()
     }
 
+    /// ★★★ **R4 — THE TRANSCRIPTION WARNINGS FOR THIS SCREEN, WHERE THE ROW IS EDITED.**
+    ///
+    /// The **whole message** when the cursor is on the very row it is about — that is the moment the
+    /// filer has the paper open and can act on it — and a COUNT with the rows named otherwise, so a
+    /// warning on a row the filer has walked away from is never silently dropped.
+    ///
+    /// ★ The year's table is deliberately NOT read here: the editor runs on a year whose package may
+    ///   not have arrived (R11), so the box-3 wage-base check waits, exactly as it does in every
+    ///   other params-gated rule. `report` runs the same function WITH the table.
+    ///
+    /// ★ Nothing is written. `transcription_warnings` takes `&ReturnInputs`.
+    #[must_use]
+    pub fn transcription_warning_lines(&self) -> Vec<String> {
+        use btctax_core::tax::transcription_warnings::{transcription_warnings, WarnedDocument};
+        let Some(ri) = self.working.as_ref() else {
+            return Vec::new();
+        };
+        let all = transcription_warnings(ri, None);
+        if all.is_empty() {
+            return Vec::new();
+        }
+        // Which document section the cursor is in, if it is in one at all.
+        let here = btctax_input_form::form_spec()
+            .get(self.section_idx)
+            .and_then(|s| match s.id {
+                btctax_input_form::SectionId::W2s => Some(WarnedDocument::W2),
+                btctax_input_form::SectionId::Int1099s => Some(WarnedDocument::Form1099Int),
+                btctax_input_form::SectionId::Div1099s => Some(WarnedDocument::Form1099Div),
+                btctax_input_form::SectionId::G1099s => Some(WarnedDocument::Form1099G),
+                btctax_input_form::SectionId::Form1098Es => Some(WarnedDocument::Form1098E),
+                _ => None,
+            });
+        let row = self.addr.0.first().copied();
+        let on_this_row: Vec<&str> = all
+            .iter()
+            .filter(|w| Some(w.document) == here && Some(w.row) == row)
+            .map(|w| w.message.as_str())
+            .collect();
+        if !on_this_row.is_empty() {
+            return on_this_row
+                .into_iter()
+                .map(|m| format!("warning · {m}"))
+                .collect();
+        }
+        let where_ = all
+            .iter()
+            .map(|w| format!("{} #{}", w.document.designation(), w.row + 1))
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>()
+            .join(", ");
+        vec![format!(
+            "warning · {} transcription warning(s) on {where_} — open the row to read it; nothing \
+             has been changed",
+            all.len()
+        )]
+    }
+
     /// A fresh flow for `year` with no working return (NI-2: `working = None`). The renderer shows
     /// ONLY the filing-status choice until an `apply` materializes the return. Test/opener helper.
     pub fn fresh(year: i32, now: time::Date) -> Self {

@@ -6,20 +6,20 @@
   4││  ✓ Address                     ││                                                                                    │
   5││  ✓ Dependents                  ││                                                                                    │
   6││  ✓ W-2s                        ││                                                                                    │
-  7││  … Schedule A (itemized deducti││                                                                                    │
-  8││  … Payments                    ││                                                                                    │
-  9││  … Carryforwards from last year││                                                                                    │
- 10││  … §199A limitation (only if yo││                                                                                    │
- 11││  ✓ Declarations                ││                                                                                    │
- 12││  ✓ Documents received          ││                                                                                    │
- 13││  … Income exclusions (§911/931/││                                                                                    │
- 14││  … Skippables                  ││                                                                                    │
- 15││                        ┌ Confirm commit for 2024 ───────────────────────────────────────────┐                        │
- 16││                        │  Commit tax inputs for 2024 — WRITES THE VAULT                     │                        │
- 17││                        │                                                                    │                        │
- 18││                        │  filing status: Mfj                                                │                        │
- 19││                        │  2 W-2(s)  ·  Schedule A: yes  ·  1 dependent(s)                   │                        │
- 20││                        │                                                                    │                        │
+  7││  ✓ Forms 1099-INT              ││                                                                                    │
+  8││  ✓ Forms 1099-DIV              ││                                                                                    │
+  9││  ✓ Interest and dividends from ││                                                                                    │
+ 10││  ✓ Forms 1099-B (Schedule D sum││                                                                                    │
+ 11││  ✓ Forms 1099-G                ││                                                                                    │
+ 12││  ✓ Forms 1098-E (student loan i││                                                                                    │
+ 13││  … Schedule A (itemized deducti││                                                                                    │
+ 14││  … Payments                    ││                                                                                    │
+ 15││  … Carryforwards from l┌ Confirm commit for 2024 ───────────────────────────────────────────┐                        │
+ 16││  … §199A limitation (on│  Commit tax inputs for 2024 — WRITES THE VAULT                     │                        │
+ 17││  ✓ Declarations        │                                                                    │                        │
+ 18││  ✓ Documents received  │  filing status: Mfj                                                │                        │
+ 19││  … Income exclusions (§│  2 W-2(s)  ·  Schedule A: yes  ·  1 dependent(s)                   │                        │
+ 20││  … Skippables          │                                                                    │                        │
  21││                        │  [Enter] commit   [Esc] cancel — writes nothing                    │                        │
  22││                        │                                                                    │                        │
  23││                        │                                                                    │                        │

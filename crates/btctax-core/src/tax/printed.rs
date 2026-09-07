@@ -1299,29 +1299,77 @@ pub fn schedule_b_lines(ri: &crate::tax::return_inputs::ReturnInputs) -> Option<
         return None;
     }
 
-    // Part I — every 1099-INT that paid taxable interest (box 1 + box 3 treasury).
-    let part1_rows: Vec<ScheduleBRow> = ri
-        .int_1099
-        .iter()
-        .map(|i| ScheduleBRow {
-            payer: i.payer.clone(),
-            amount: round_dollar(i.box1_interest + i.box3_treasury_interest),
-        })
-        .filter(|r| r.amount > Usd::ZERO)
+    use crate::tax::return_inputs::ScheduleBRecordKind;
+
+    // ★★★ **R5 — the SELLER-FINANCED MORTGAGE IS LISTED FIRST, and that is the form's own order.**
+    //
+    // i1040sb, *Seller-financed mortgages*: *"If you sold your home or other property and the buyer
+    // used the property as a personal residence, **list first** any interest the buyer paid you on a
+    // mortgage or other form of seller financing."* — and the same paragraph requires the buyer's
+    // SSN and address, which no other Schedule B row carries. So a filer's-records row that has an
+    // SSN is exactly that case, and it prints its SSN and address in the name column beside the
+    // buyer's name.
+    let filer_row = |r: &crate::tax::return_inputs::ScheduleBRecord| ScheduleBRow {
+        payer: if r.payer_ssn.trim().is_empty() {
+            r.payer_name.clone()
+        } else {
+            // The name column for a seller-financed mortgage: name, SSN, address.
+            format!(
+                "{} (SSN {}{})",
+                r.payer_name.trim(),
+                r.payer_ssn.trim(),
+                if r.payer_address.trim().is_empty() {
+                    String::new()
+                } else {
+                    format!(", {}", r.payer_address.trim())
+                }
+            )
+        },
+        amount: round_dollar(r.amount),
+    };
+    let interest_records = || {
+        ri.schedule_b_filer_records
+            .iter()
+            .filter(|r| r.kind == ScheduleBRecordKind::Interest)
+    };
+
+    // Part I — the seller-financed rows first, then every 1099-INT that paid taxable interest
+    // (box 1 + box 3 Treasury + box 10 market discount), then the filer's other interest records.
+    let mut part1_rows: Vec<ScheduleBRow> = interest_records()
+        .filter(|r| !r.payer_ssn.trim().is_empty())
+        .map(filer_row)
         .collect();
+    part1_rows.extend(ri.int_1099.iter().map(|i| ScheduleBRow {
+        payer: i.payer.clone(),
+        // ★ Box 10: *"Also include any accrued market discount that is includible in income"*.
+        amount: round_dollar(i.box1_interest + i.box3_treasury_interest + i.box10_market_discount),
+    }));
+    part1_rows.extend(
+        interest_records()
+            .filter(|r| r.payer_ssn.trim().is_empty())
+            .map(filer_row),
+    );
+    part1_rows.retain(|r| r.amount > Usd::ZERO);
     let line2 = part1_rows.iter().map(|r| r.amount).sum(); // ★ sums the PRINTED rows
     let line4 = line2; // − line 3 (Form 8815), unmodeled ⇒ blank
 
-    // Part II — every 1099-DIV that paid ordinary dividends (box 1a, which INCLUDES the qualified 1b).
-    let part2_rows: Vec<ScheduleBRow> = ri
+    // Part II — every 1099-DIV that paid ordinary dividends (box 1a, which INCLUDES the qualified
+    // 1b), then the filer's own dividend records (a nominee distribution has no 1099-DIV).
+    let mut part2_rows: Vec<ScheduleBRow> = ri
         .div_1099
         .iter()
         .map(|d| ScheduleBRow {
             payer: d.payer.clone(),
             amount: round_dollar(d.box1a_ordinary),
         })
-        .filter(|r| r.amount > Usd::ZERO)
         .collect();
+    part2_rows.extend(
+        ri.schedule_b_filer_records
+            .iter()
+            .filter(|r| r.kind == ScheduleBRecordKind::Dividend)
+            .map(filer_row),
+    );
+    part2_rows.retain(|r| r.amount > Usd::ZERO);
     let line6 = part2_rows.iter().map(|r| r.amount).sum(); // ★ sums the PRINTED rows
 
     Some(ScheduleBLines {

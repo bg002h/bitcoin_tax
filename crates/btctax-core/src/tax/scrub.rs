@@ -596,6 +596,20 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
         div_1099: _,
         g_1099: _,
         b_1099: _,
+        // ★ R4 / T5 — the 1098-E rows carry a LENDER NAME and a lender TIN, exactly the identity
+        //   class the 1099 payers carry. Scrubbed below, through the same `EinMap`.
+        form_1098e: _,
+        // ★★★ R5 / T5 — THE MOST IDENTIFYING ROWS ON THE RETURN. A `schedule_b_filer_records` row
+        //     is the seller-financed-mortgage case Schedule B asks for BY NAME: the buyer's own
+        //     **SSN** and street address (`i1040sb--2025.txt:24, 77`) — a third party's identity,
+        //     not the filer's. Scrubbed below.
+        schedule_b_filer_records: _,
+        // ★ R3 — three tri-states about whether income arrived WITHOUT its document, plus the
+        //   prior-year-itemized gate. Facts about the return, never about a person.
+        w2_wages_without_w2: _,
+        interest_or_dividends_without_1099: _,
+        state_refund_without_1099g: _,
+        itemized_prior_year: _,
         schedule_c, // ★ business_description is FREE TEXT — scrubbed below
         // ★★ Sch 1-A: `vehicles[].description` is FREE TEXT — a filer writes "Dad's truck" or a
         //    plate. Scrubbed below. The eligibility bools and money carry no identity.
@@ -740,6 +754,12 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
             box12: _,
             box8_allocated_tips: _,
             box10_dependent_care: _,
+            // ★ KEPT: box 13 is a CHECKBOX and box 14b a published Treasury TAXONOMY code — the
+            //   same class as a box-12 code letter. Neither names anyone, and both are READ (box 13
+            //   refuses `StatutoryEmployeeW2`; box 14b drives the Schedule 1-A tips advisory), so
+            //   replacing them would move the scrubbed copy's verdict.
+            box13_statutory_employee: _,
+            box14b_treasury_tipped_occupation_codes: _,
         } = w;
         w.employer = replace_preserving_emptiness(&w.employer, format!("Employer{}", i + 1));
         if let Some(e) = w.ein.as_ref().filter(|e| !e.trim().is_empty()) {
@@ -756,6 +776,10 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
             box6_foreign_tax: _,
             box8_tax_exempt_interest: _,
             box9_private_activity_bond_amt: _,
+            box10_market_discount: _,
+            box11_bond_premium: _,
+            box12_bond_premium_treasury: _,
+            box13_bond_premium_tax_exempt: _,
             // ★ R10.2 — mapped below through the SAME `EinMap` as a W-2 EIN: a payer TIN is the same
             //   class of identifier, and only its sameness across rows carries information.
             payer_tin: _,
@@ -804,12 +828,49 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
         let crate::tax::return_inputs::Form1099G {
             payer: _,
             box1_unemployment: _,
+            box2_state_refund: _,
             box4_fed_withheld: _,
+            box10_family_leave_benefits: _,
             payer_tin: _,      // R10.2 — mapped below (see the 1099-INT loop)
             transcribed_on: _, // R10.2 — KEPT (see the 1099-INT loop)
         } = f;
         f.payer = replace_preserving_emptiness(&f.payer, format!("Agency{}", i + 1));
         f.payer_tin = map_payer_tin(&mut eins, &f.payer_tin);
+    }
+    // ★ R4 / T5 — Form 1098-E: a lender NAME and a lender TIN, the 1099-payer identity class.
+    for (i, f) in out.form_1098e.iter_mut().enumerate() {
+        let crate::tax::return_inputs::Form1098E {
+            lender: _,
+            lender_tin: _, // mapped below, through the SAME `EinMap` as every other payer TIN
+            transcribed_on: _, // R10.2 — KEPT (see the 1099-INT loop)
+            box1_interest: _,
+        } = f;
+        f.lender = replace_preserving_emptiness(&f.lender, format!("Servicer{}", i + 1));
+        f.lender_tin = map_payer_tin(&mut eins, &f.lender_tin);
+    }
+    // ★★★ R5 / T5 — the filer's-records rows. `payer_ssn` is a **third party's** SSN (the buyer on a
+    //     seller-financed mortgage), so it goes through `synthetic_ssn_like` exactly like a
+    //     dependent's: the VALIDITY CLASS is preserved (an eight-digit typo still refuses on the
+    //     scrubbed copy) while no original byte survives. `payer_address` is a street address and is
+    //     replaced with the same impossible stand-in the header uses.
+    for (i, r) in out.schedule_b_filer_records.iter_mut().enumerate() {
+        let crate::tax::return_inputs::ScheduleBRecord {
+            payer_name: _,
+            payer_ssn: _,
+            payer_address: _,
+            amount: _, // a figure Schedule B line 1 / 5 reads — KEPT
+            kind: _,   // which Schedule B list the row joins — a taxonomy, not a person
+        } = r;
+        r.payer_name = replace_preserving_emptiness(&r.payer_name, format!("Payer{}", i + 1));
+        r.payer_ssn = if r.payer_ssn.trim().is_empty() {
+            r.payer_ssn.clone()
+        } else {
+            synthetic_ssn_like(&r.payer_ssn, synthetic_ssn(200 + i))
+        };
+        r.payer_address = replace_preserving_emptiness(
+            &r.payer_address,
+            format!("{SCRUB_STREET}, {SCRUB_CITY}, {SCRUB_STATE} {SCRUB_ZIP}"),
+        );
     }
     out
 }

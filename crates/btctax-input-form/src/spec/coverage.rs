@@ -108,6 +108,29 @@ fn maximal_fixture() -> ReturnInputs {
         }],
         ..Default::default()
     }];
+    // ★★★ R4 / §5.7 — ONE ROW OF EVERY DOCUMENT `Vec`. They were EXEMPT by struct-prefix until T5
+    //     (`int_1099`, `div_1099`, `g_1099`, `b_1099`), which is why the fixture left them empty;
+    //     the sections landed, the exemptions went, and an empty `Vec` would now realize no leaf at
+    //     all and give FALSE drift-protection for every 1099 box.
+    //
+    // ★ Leaf VALUES stay at the zero/empty default so every sentinel differs — except the two
+    //   LIVENESS PRIMERS noted below, which must be non-default and still differ from their own
+    //   field's sentinel.
+    ri.int_1099 = vec![btctax_core::tax::return_inputs::Form1099Int::default()];
+    ri.div_1099 = vec![btctax_core::tax::return_inputs::Form1099Div::default()];
+    ri.b_1099 = vec![btctax_core::tax::return_inputs::Form1099B::default()];
+    ri.g_1099 = vec![btctax_core::tax::return_inputs::Form1099G {
+        // ★★ LIVENESS PRIMER for `DeclItemizedPriorYear`: the §111(a) gate is live iff a 1099-G
+        //    box 2 is > 0 (or the document-less refund question is Yes). `1` is non-default and
+        //    differs from the Money sentinel `4242`, so the box-2 field's own diff stays exact.
+        box2_state_refund: dec!(1),
+        ..Default::default()
+    }];
+    ri.form_1098e = vec![btctax_core::tax::return_inputs::Form1098E::default()];
+    // ★★★ R5 — one filer's-records row. Its five leaves are covered only while the R3 door is open,
+    //     which `fixture_for` primes per field (the door's own declaration cannot be covered on a
+    //     fixture that already holds its answer).
+    ri.schedule_b_filer_records = vec![btctax_core::tax::return_inputs::ScheduleBRecord::default()];
     ri.schedule_a = Some(ScheduleAInputs {
         // `CharitableGift` has no `Default`; Cash60/zero is the sections.rs `add` starting point.
         charitable: vec![CharitableGift {
@@ -208,6 +231,8 @@ fn sentinel(f: &Field) -> FieldValue {
                 FieldId::Form8615Condition4ParentAlive => "CannotKnow",
                 // spec 1099-DA T6 — the fixture's slots are NotReported
                 FieldId::BrokerCovered | FieldId::BrokerNoncovered => "BasisMatches",
+                // ★ R5 — the fixture row's kind is the `Default`, `Interest`.
+                FieldId::SbRecordKind => "Dividend",
                 other => panic!("no Enum sentinel for {other:?} — add a distinct real choice"),
             };
             FieldValue::Choice(choice.to_string())
@@ -261,6 +286,43 @@ fn fixture_for(field: &Field, base: &ReturnInputs) -> ReturnInputs {
             ri.header.form8615_condition4_parent_alive =
                 Some(btctax_core::tax::return_inputs::ParentAliveAnswer::CannotKnow);
         }
+        // ★★★ R3 / T5 — THE DOCUMENT-LESS INCOME DOOR. Each of the three paired questions is live
+        //     EXACTLY when its census row says `No`, and the maximal fixture leaves every census
+        //     row `None` (unanswered — the honest starting point, and what makes the census rows'
+        //     own sentinels differ). So each door question's coverage needs its own row answered
+        //     `No` first: structural, exactly like the §G-9 dates of death above, because one
+        //     fixture cannot both cover a census row and satisfy the question that row opens.
+        FieldId::DeclWagesWithoutW2 => {
+            ri.documents.set(
+                btctax_core::tax::document_census::DocumentRow::W2,
+                Some(false),
+            );
+        }
+        FieldId::DeclStateRefundWithout1099g => {
+            ri.documents.set(
+                btctax_core::tax::document_census::DocumentRow::G1099,
+                Some(false),
+            );
+        }
+        FieldId::DeclInterestOrDividendsWithout1099 => {
+            ri.documents.set(
+                btctax_core::tax::document_census::DocumentRow::Int1099,
+                Some(false),
+            );
+        }
+        // ★ R5 — the filer's-records ROWS need the door both live AND answered YES: the section is
+        //   invisible otherwise, and a row nobody could see would be testimony never given.
+        FieldId::SbRecordPayerName
+        | FieldId::SbRecordPayerSsn
+        | FieldId::SbRecordPayerAddress
+        | FieldId::SbRecordAmount
+        | FieldId::SbRecordKind => {
+            ri.documents.set(
+                btctax_core::tax::document_census::DocumentRow::Int1099,
+                Some(false),
+            );
+            ri.interest_or_dividends_without_1099 = Some(true);
+        }
         _ => {}
     }
     ri
@@ -275,7 +337,14 @@ fn addr_for(id: SectionId) -> RowAddr {
         SectionId::Dependents
         | SectionId::W2s
         | SectionId::ScheduleACharitable
-        | SectionId::BrokerReporting => RowAddr(vec![0]),
+        | SectionId::BrokerReporting
+        // ★ R4 / R5 / T5 — the six document sections are depth-1 repeating groups.
+        | SectionId::Int1099s
+        | SectionId::Div1099s
+        | SectionId::B1099s
+        | SectionId::G1099s
+        | SectionId::Form1098Es
+        | SectionId::ScheduleBFilerRecords => RowAddr(vec![0]),
         _ => RowAddr::default(),
     }
 }
@@ -383,13 +452,14 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     // of the IN-SCOPE `sch1` (its `hsa_activity` IS in scope, so `sch1` cannot be exempted wholesale). The
     // "provenance leaves" (`qbi.*_provenance`, `charitable_carryover_in[].provenance`) fall under their
     // struct-prefix exemptions.
+    // ★★★ **THE RATCHET (R4's kill): `EXEMPT_PREFIXES` MAY ONLY SHRINK.**
+    //
+    // T5 removed FOUR of the nine — `int_1099`, `div_1099`, `g_1099`, `b_1099` — because the four
+    // 1099 sections landed and every box is now a `Field`. What is left is either provenance (ours,
+    // never the filer's) or a deferred section with its owning task named. The count is asserted
+    // `<=` below, so a later task may drop an entry but never add one back without moving the pin
+    // deliberately.
     const EXEMPT_PREFIXES: &[&str] = &[
-        "int_1099",
-        "div_1099",
-        "g_1099",
-        // §G-28/B4 — 1099-B rows join the other information-return vectors: all of them are
-        // TOML-import surfaces, none is a v1 input-form section.
-        "b_1099",
         "capital_loss_carryforward_in",
         "charitable_carryover_in",
         // ★★★ **Schedule 1-A (TY2025) — EXEMPTED DELIBERATELY, AND THIS IS A KNOWN GAP, NOT A
@@ -466,11 +536,15 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
         //     row is deliberately unaskable until its section lands.
         //
         //     REMOVE `documents.form_1098` when **T9** replaces the mortgage scalar with a `Form1098`
-        //     section; REMOVE `documents.form_1098e` when **T5** replaces the student-loan scalar.
-        //     Assertion (l) below already reds on a stale entry, and the mutate-and-diff skip that
-        //     pairs with these is derived from `row_is_live`, so neither half can go stale silently.
+        //     section. Assertion (l) below already reds on a stale entry, and the mutate-and-diff
+        //     skip that pairs with it is derived from `row_is_live`, so neither half can go stale
+        //     silently.
+        //
+        //     ★★★ **`documents.form_1098e` LEFT THIS LIST AT T5**, which is the mechanism working:
+        //     `Form1098E` replaced the `sch1.student_loan_interest_paid` scalar, `row_is_live`
+        //     opened the row, the mutate-and-diff skip stopped skipping it, and assertion (3) below
+        //     then demanded a Field for the leaf. Nobody had to remember.
         "documents.form_1098",
-        "documents.form_1098e",
         "capital_loss_carryforward_in_provenance",
         "charitable_carryover_in_provenance",
         "qbi.reit_ptp_carryforward_in_provenance",
@@ -489,7 +563,6 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
         //    the filer must be able to reach them from the editor.)
         "schedule_c.other_gross_receipts",
         "sch1.state_refund_taxable",
-        "sch1.student_loan_interest_paid",
         "sch1.ira_deduction_claimed",
     ];
     let is_exempt = |path: &str| {
@@ -521,6 +594,20 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
             "EXEMPT_PREFIXES entry {prefix:?} matches no fixture leaf — stale exemption (would mask a gap)"
         );
     }
+
+    // ── ★★★ (l2) THE RATCHET — `EXEMPT_PREFIXES` may only SHRINK (R4's kill). ──
+    //
+    // A count, not a list, and asserted `<=` rather than `==`: a later task that drops an entry
+    // passes, and one that ADDS an exemption back — the only direction that can hide a leaf nobody
+    // collects — reds. Moving the pin up must be a deliberate edit with a reason beside it.
+    const EXEMPT_PREFIX_CEILING: usize = 5;
+    assert!(
+        EXEMPT_PREFIXES.len() <= EXEMPT_PREFIX_CEILING,
+        "EXEMPT_PREFIXES is a RATCHET and may only shrink: {} entries, ceiling {EXEMPT_PREFIX_CEILING}. \
+         T5 took it from 9 to 5 by landing the four 1099 sections; adding one back hides a leaf \
+         nobody collects. {EXEMPT_PREFIXES:?}",
+        EXEMPT_PREFIXES.len()
+    );
 
     // ── 3. THE ASSERTION: {all in-scope leaves} == {covered} ∪ {exempt}, and nothing is both. ──
     let uncovered: Vec<&String> = before
@@ -567,18 +654,18 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     // change happened to keep the sets balanced.
     let field_count: usize = form_spec().iter().map(|s| s.fields.len()).sum();
     assert_eq!(
-        field_count, 117,
-        "expected 117 Fields — 98 + R3's eighteen document-census rows + R10.4's filing-status \
-         confirmation"
+        field_count, 175,
+        "expected 175 Fields — 117 before T5, plus its FIFTY-EIGHT: the four document-less income \
+         declarations (R3), W-2 boxes 13 and 14b, and the six document sections (1099-INT 14, \
+         1099-DIV 14, 1099-B 8, 1099-G 7, 1098-E 4, and R5's five filer's-records leaves)"
     );
     assert_eq!(
         covered.len(),
-        115,
-        "expected 115 distinctly-covered in-scope leaves — 98 + R10.4's filing-status confirmation \
-         + SIXTEEN of R3's eighteen census \
-         rows. The other two (`form_1098` → T9, `form_1098e` → T5) have a Field but are shadowed by \
-         a scalar and so are not live; they are EXEMPT above, and this number rises to 117 when \
-         their sections land."
+        174,
+        "expected 174 distinctly-covered in-scope leaves — every one of the 175 Fields but \
+         `DocForm1098`, whose row is still shadowed by the `schedule_a.mortgage_interest_1098` \
+         scalar (T9) and so is never live. It was 115 of 117 before T5; `documents.form_1098e` \
+         joined the covered set when its section landed."
     );
 
     // ── 5. ★ I-6: PIN the observed FieldId → leaf-path map against a literal (kills TRANSPOSITION). ──
@@ -846,4 +933,176 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
     (FieldId::DobSpouse, "header.spouse.date_of_birth"),
     (FieldId::DodTaxpayer, "header.taxpayer.date_of_death"),
     (FieldId::DodSpouse, "header.spouse.date_of_death"),
+    // ── ★★★ R3 / T5 — the DOCUMENT-LESS INCOME DOOR's four declarations. ──
+    (FieldId::DeclWagesWithoutW2, "w2_wages_without_w2"),
+    (
+        FieldId::DeclInterestOrDividendsWithout1099,
+        "interest_or_dividends_without_1099",
+    ),
+    (
+        FieldId::DeclStateRefundWithout1099g,
+        "state_refund_without_1099g",
+    ),
+    (FieldId::DeclItemizedPriorYear, "itemized_prior_year"),
+    // ── ★★★ R4 / T5 — W-2 boxes 13 and 14b, which the struct had no field for at all. ──
+    (
+        FieldId::W2Box13StatutoryEmployee,
+        "w2s[0].box13_statutory_employee",
+    ),
+    (
+        FieldId::W2Box14bTtoc,
+        "w2s[0].box14b_treasury_tipped_occupation_codes",
+    ),
+    // ── ★★★ R4 / T5 — Form 1099-INT. ──
+    (FieldId::Int1099Payer, "int_1099[0].payer"),
+    (FieldId::Int1099PayerTin, "int_1099[0].payer_tin"),
+    (FieldId::Int1099TranscribedOn, "int_1099[0].transcribed_on"),
+    (FieldId::Int1099Box1Interest, "int_1099[0].box1_interest"),
+    (
+        FieldId::Int1099Box2EarlyWithdrawal,
+        "int_1099[0].box2_early_withdrawal_penalty",
+    ),
+    (
+        FieldId::Int1099Box3Treasury,
+        "int_1099[0].box3_treasury_interest",
+    ),
+    (
+        FieldId::Int1099Box4FedWithheld,
+        "int_1099[0].box4_fed_withheld",
+    ),
+    (
+        FieldId::Int1099Box6ForeignTax,
+        "int_1099[0].box6_foreign_tax",
+    ),
+    (
+        FieldId::Int1099Box8TaxExempt,
+        "int_1099[0].box8_tax_exempt_interest",
+    ),
+    (
+        FieldId::Int1099Box9PrivateActivity,
+        "int_1099[0].box9_private_activity_bond_amt",
+    ),
+    (
+        FieldId::Int1099Box10MarketDiscount,
+        "int_1099[0].box10_market_discount",
+    ),
+    (
+        FieldId::Int1099Box11BondPremium,
+        "int_1099[0].box11_bond_premium",
+    ),
+    (
+        FieldId::Int1099Box12BondPremiumTreasury,
+        "int_1099[0].box12_bond_premium_treasury",
+    ),
+    (
+        FieldId::Int1099Box13BondPremiumTaxExempt,
+        "int_1099[0].box13_bond_premium_tax_exempt",
+    ),
+    // ── ★★★ R4 / T5 — Form 1099-DIV. ──
+    (FieldId::Div1099Payer, "div_1099[0].payer"),
+    (FieldId::Div1099PayerTin, "div_1099[0].payer_tin"),
+    (FieldId::Div1099TranscribedOn, "div_1099[0].transcribed_on"),
+    (FieldId::Div1099Box1aOrdinary, "div_1099[0].box1a_ordinary"),
+    (
+        FieldId::Div1099Box1bQualified,
+        "div_1099[0].box1b_qualified",
+    ),
+    (
+        FieldId::Div1099Box2aCapGain,
+        "div_1099[0].box2a_capgain_distr",
+    ),
+    (
+        FieldId::Div1099Box2bUnrecap1250,
+        "div_1099[0].box2b_unrecap_1250",
+    ),
+    (
+        FieldId::Div1099Box2cSection1202,
+        "div_1099[0].box2c_section_1202",
+    ),
+    (
+        FieldId::Div1099Box2dCollectibles,
+        "div_1099[0].box2d_collectibles_28",
+    ),
+    (
+        FieldId::Div1099Box4FedWithheld,
+        "div_1099[0].box4_fed_withheld",
+    ),
+    (
+        FieldId::Div1099Box5Section199a,
+        "div_1099[0].box5_section_199a",
+    ),
+    (
+        FieldId::Div1099Box7ForeignTax,
+        "div_1099[0].box7_foreign_tax",
+    ),
+    (
+        FieldId::Div1099Box12ExemptInterest,
+        "div_1099[0].box12_exempt_interest_dividends",
+    ),
+    (
+        FieldId::Div1099Box13PrivateActivity,
+        "div_1099[0].box13_private_activity_amt",
+    ),
+    // ── ★★★ R4 / T5 — Form 1099-B. ──
+    (FieldId::B1099Payer, "b_1099[0].payer"),
+    (FieldId::B1099PayerTin, "b_1099[0].payer_tin"),
+    (FieldId::B1099TranscribedOn, "b_1099[0].transcribed_on"),
+    (
+        FieldId::B1099ShortTermProceeds,
+        "b_1099[0].short_term_proceeds",
+    ),
+    (FieldId::B1099ShortTermBasis, "b_1099[0].short_term_basis"),
+    (
+        FieldId::B1099LongTermProceeds,
+        "b_1099[0].long_term_proceeds",
+    ),
+    (FieldId::B1099LongTermBasis, "b_1099[0].long_term_basis"),
+    (
+        FieldId::B1099BasisReportedNoAdjustments,
+        "b_1099[0].basis_reported_and_no_adjustments",
+    ),
+    // ── ★★★ R4 / T5 — Form 1099-G. ──
+    (FieldId::G1099Payer, "g_1099[0].payer"),
+    (FieldId::G1099PayerTin, "g_1099[0].payer_tin"),
+    (FieldId::G1099TranscribedOn, "g_1099[0].transcribed_on"),
+    (
+        FieldId::G1099Box1Unemployment,
+        "g_1099[0].box1_unemployment",
+    ),
+    (FieldId::G1099Box2StateRefund, "g_1099[0].box2_state_refund"),
+    (FieldId::G1099Box4FedWithheld, "g_1099[0].box4_fed_withheld"),
+    (
+        FieldId::G1099Box10FamilyLeave,
+        "g_1099[0].box10_family_leave_benefits",
+    ),
+    // ── ★★★ R4 / T5 — Form 1098-E, and the census row its section opened. ──
+    (FieldId::Form1098eLender, "form_1098e[0].lender"),
+    (FieldId::Form1098eLenderTin, "form_1098e[0].lender_tin"),
+    (
+        FieldId::Form1098eTranscribedOn,
+        "form_1098e[0].transcribed_on",
+    ),
+    (
+        FieldId::Form1098eBox1Interest,
+        "form_1098e[0].box1_interest",
+    ),
+    (FieldId::DocForm1098e, "documents.form_1098e"),
+    // ── ★★★ R5 / T5 — the filer's-records rows for Schedule B lines 1 and 5. ──
+    (
+        FieldId::SbRecordPayerName,
+        "schedule_b_filer_records[0].payer_name",
+    ),
+    (
+        FieldId::SbRecordPayerSsn,
+        "schedule_b_filer_records[0].payer_ssn",
+    ),
+    (
+        FieldId::SbRecordPayerAddress,
+        "schedule_b_filer_records[0].payer_address",
+    ),
+    (
+        FieldId::SbRecordAmount,
+        "schedule_b_filer_records[0].amount",
+    ),
+    (FieldId::SbRecordKind, "schedule_b_filer_records[0].kind"),
 ];

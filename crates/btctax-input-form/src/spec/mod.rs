@@ -29,6 +29,16 @@ pub fn form_spec() -> &'static [Section] {
         sections::DEPENDENTS,
         sections::W2S,
         sections::W2_BOX12,
+        // ★★★ R4 / T5 — one repeating section per supported information return, in the order a
+        //     filer meets the documents (wages, then interest, then dividends, then broker
+        //     proceeds, then government payments, then the student-loan statement), with R5's
+        //     filer's-records rows immediately after the two 1099s whose door opens them.
+        sections::INT_1099S,
+        sections::DIV_1099S,
+        sections::SCHEDULE_B_FILER_RECORDS,
+        sections::B_1099S,
+        sections::G_1099S,
+        sections::FORM_1098ES,
         sections::SCHEDULE_A,
         sections::SCHEDULE_A_CHARITABLE,
         sections::PAYMENTS,
@@ -156,9 +166,11 @@ mod tests {
             );
         }
         assert_eq!(
-            decl_count, 16,
-            "16 declarations are Decl* fields (the other two dedup to Schedule A). ★ R10.4 / T4b \
-             added the sixteenth: the carried filing status's confirmation."
+            decl_count, 20,
+            "20 declarations are Decl* fields (the other two dedup to Schedule A). ★ R10.4 / T4b \
+             added the sixteenth (the carried filing status's confirmation); ★ R3 / T5 added the \
+             four of the DOCUMENT-LESS INCOME DOOR — wages with no W-2, interest or dividends with \
+             no 1099, a state refund with no 1099-G, and the §111(a) prior-year-itemized gate."
         );
         assert_eq!(
             deduped,
@@ -169,11 +181,11 @@ mod tests {
             "exactly the two Schedule-A-owned mortgage declarations dedup"
         );
 
-        // 16 delegating Decl* fields + the foreign_country_names Text field.
+        // 20 delegating Decl* fields + the foreign_country_names Text field.
         assert_eq!(
             decls.fields.len(),
-            17,
-            "16 declarations + foreign_country_names"
+            21,
+            "20 declarations + foreign_country_names"
         );
         assert!(decls
             .fields
@@ -278,6 +290,19 @@ mod tests {
                 // ★ R10.4 / T4b — liveness primer for the carried filing status's confirmation: it
                 //   is live only on a year the OPENER made.
                 ri.opened_from = Some(2024);
+                // ★★★ R3 / T5 — the DOCUMENT-LESS INCOME DOOR's four declarations. Each of the
+                //     first three is live EXACTLY when its census row says `No`, and the fourth
+                //     (§111(a)) once a refund exists — so the primer answers every countable row
+                //     `No` and gives the fixture a 1099-G box-2 refund from the DOCUMENT side.
+                //     Priming all four at once is safe here because the test drives one field at a
+                //     time through the registry, never the census.
+                for row in btctax_core::tax::document_census::DocumentRow::ALL {
+                    ri.documents.set(*row, Some(false));
+                }
+                ri.g_1099 = vec![btctax_core::tax::return_inputs::Form1099G {
+                    box2_state_refund: rust_decimal_macros::dec!(1),
+                    ..Default::default()
+                }];
                 ri
             };
             assert!(

@@ -123,6 +123,13 @@ has_income_exclusion = false
 other_out_of_scope_income = false
 itemize_election = "auto"
 charitable_carryover_in = []
+# ★★★ R3 / T5 — THE DOCUMENT-LESS INCOME DOOR. The census rows for 1099-INT / 1099-DIV / 1099-G are
+#     "none" below, which makes these two questions LIVE: the instructions name interest and
+#     dividends nobody issues a 1099 for (a bank paying under $10, a nominee distribution) and a
+#     state refund reportable "even if you didn't receive Form 1099-G". This household has neither.
+#     (The wage question is not live: this household HOLDS two Forms W-2.)
+interest_or_dividends_without_1099 = false
+state_refund_without_1099g = false
 
 [capital_loss_carryforward_in]
 long = "0"
@@ -148,6 +155,9 @@ w2g = false
 c_1099 = false
 a_1095 = false
 t_1098 = false
+# ★ T5 — the 1098-E row opened when `Form1098E` replaced the `sch1.student_loan_interest_paid`
+#   scalar. This household holds no student loan, so the answer is a truthful "none".
+form_1098e = false
 
 [header]
 address_street = "88 Larkspur Way"
@@ -188,7 +198,6 @@ qbi_carryforward_in_provenance = "user"
 hsa_activity = false
 ira_deduction_claimed = "0"
 state_refund_taxable = "0"
-student_loan_interest_paid = "0"
 
 [[w2s]]
 owner = "taxpayer"

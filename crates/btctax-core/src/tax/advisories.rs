@@ -66,6 +66,21 @@ pub enum Advisory {
     /// [`Self::AgedBoxForfeitedNoDob`] the filer has given us everything except one yes/no, so this is
     /// the cheapest advisory on the list to act on. `persons` counts taxpayer + (on MFJ) spouse.
     AgedBoxForfeitedDeathUnanswered { per_box: Usd, persons: usize },
+    /// ★★★ **R4 / FR-65 — a Form W-2 carries a Treasury Tipped Occupation Code in box 14b, and the
+    /// return claims no qualified tips.**
+    ///
+    /// The 2026 revision added box 14b so the employer can state the occupation the tips were earned
+    /// in, and that is exactly what Schedule 1-A Part II's own Caution turns on: *"These tips must
+    /// have been received in an occupation listed at IRS.gov/TippedOccupations."* A code on the paper
+    /// beside an unclaimed Part II is a §224 deduction the filer is FORGOING — the overstatement
+    /// direction, which §3.4 permits **only if they are told**.
+    ///
+    /// ★ An advisory and never a refusal, for the same reason the CTC one is: btctax cannot know
+    ///   from the code alone how much of box 7 is a *qualified* tip (the instructions exclude service
+    ///   charges, automatic gratuities and tips from an unlisted second occupation), so there is no
+    ///   figure it could demand and no answer a refusal could clear. `codes` is what the employer
+    ///   printed, quoted back so the filer can look it up.
+    TipsDeductionForgoneWithTtoc { codes: Vec<String> },
     /// FinCEN Notice 2020-2 disclosure — the filer declared a foreign financial account. v1 never
     /// auto-answers Schedule B Part III.
     FbarFinCen,
@@ -437,6 +452,19 @@ impl Advisory {
                 } else {
                     "it"
                 }
+            ),
+            Advisory::TipsDeductionForgoneWithTtoc { codes } => format!(
+                "NO TAX ON TIPS NOT CLAIMED — your Form W-2 box 14b carries Treasury Tipped \
+                 Occupation Code(s) {}, which is your employer's statement that your tips were \
+                 earned in a listed occupation. That is the condition Schedule 1-A Part II turns on \
+                 (\"These tips must have been received in an occupation listed at \
+                 IRS.gov/TippedOccupations\"), and this return claims no qualified tips — so the \
+                 §224 deduction is FORGONE and your tax is OVERSTATED by whatever it would have \
+                 been worth. btctax cannot claim it for you: the instructions exclude service \
+                 charges, automatic gratuities and tips from an occupation that is not on the list, \
+                 and only you can say how much of box 7 is left. Enter the qualified amount under \
+                 Schedule 1-A Part II if you have one.",
+                codes.join(", ")
             ),
             Advisory::FbarFinCen =>
                 "FBAR / FinCEN — you declared a foreign financial account. Under FinCEN Notice 2020-2 an \
@@ -1142,6 +1170,26 @@ pub fn advisories(
         out.push(Advisory::EicOmitted);
     }
 
+    // ★★★ R4 / FR-65 — a Treasury Tipped Occupation Code on the paper, beside an unclaimed
+    //     Schedule 1-A Part II. §3.4's conservative-omission shape: the filer is FORGOING a §224
+    //     deduction their own W-2 evidences, which overstates their tax, and the only lawful
+    //     response is to say so.
+    let ttoc_codes: Vec<String> = ri
+        .w2s
+        .iter()
+        .map(|w| w.box14b_treasury_tipped_occupation_codes.trim())
+        .filter(|c| !c.is_empty())
+        .map(str::to_string)
+        .collect();
+    let claims_tips = ri
+        .schedule_1a
+        .tips
+        .as_ref()
+        .is_some_and(|t| t.qualified_tips_reported > Usd::ZERO);
+    if !ttoc_codes.is_empty() && !claims_tips {
+        out.push(Advisory::TipsDeductionForgoneWithTtoc { codes: ttoc_codes });
+    }
+
     // [★ P5-I2] §3.4 / SPEC §1.2 — the other favorable credits v1 never computes. UNCONDITIONAL: v1
     // captures no input that could establish eligibility, so it cannot know whether this filer
     // qualifies, only that it did not try. LIMITATIONS.md promises every omission row fires an
@@ -1390,6 +1438,95 @@ pub fn advisories(
 
 #[cfg(test)]
 mod tests {
+
+    /// ★★★ **R4 / FR-65 — THE 2026 W-2's BOX 14b HAS A READER, and it is an advisory.**
+    ///
+    /// The box is a CODE, not an amount, so it reaches no line by arithmetic; what it does is
+    /// satisfy Schedule 1-A Part II's own Caution. A code on the paper beside an unclaimed Part II
+    /// is a forgone §224 deduction — the OVERSTATEMENT direction, which §3.4 permits only if the
+    /// filer is told, and which must never become a refusal (btctax cannot know how much of box 7
+    /// is a qualified tip).
+    ///
+    /// Both halves: it fires with a code and no claim, and is SILENT once the claim exists —
+    /// otherwise a filer who did claim would be nagged, and the check would be trained away.
+    #[test]
+    fn a_treasury_tipped_occupation_code_beside_an_unclaimed_part_ii_advises_and_never_refuses() {
+        use crate::tax::return_inputs::{Owner, Schedule1aTips, W2};
+        let with_code = |claimed: Usd| {
+            let mut ri = ReturnInputs {
+                tax_year: 2026,
+                filing_status: crate::tax::types::FilingStatus::Single,
+                w2s: vec![W2 {
+                    owner: Owner::Taxpayer,
+                    employer: "Diner".into(),
+                    box1_wages: dec!(30000),
+                    box7_ss_tips: dec!(8000),
+                    // ★ 102 = wait staff (`i1040gi--2025.txt:43541`).
+                    box14b_treasury_tipped_occupation_codes: "102".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            };
+            if claimed > Usd::ZERO {
+                ri.schedule_1a.tips = Some(Schedule1aTips {
+                    qualified_tips_reported: claimed,
+                    ..Default::default()
+                });
+            }
+            ri
+        };
+        let fire = |ri: &ReturnInputs| {
+            advisories(
+                ri,
+                &LedgerState::default(),
+                dec!(30000),
+                dec!(30000),
+                Usd::ZERO,
+                &crate::tax::testonly::ty2024_params(),
+                2026,
+                false,
+            )
+        };
+
+        // (a) A code, no claim ⇒ advised, with the code quoted back.
+        let unclaimed = with_code(Usd::ZERO);
+        let got = fire(&unclaimed);
+        let ttoc: Vec<&Advisory> = got
+            .iter()
+            .filter(|a| matches!(a, Advisory::TipsDeductionForgoneWithTtoc { .. }))
+            .collect();
+        assert_eq!(ttoc.len(), 1, "{got:#?}");
+        assert!(
+            ttoc[0].message().contains("102"),
+            "the message quotes the employer's own code: {}",
+            ttoc[0].message()
+        );
+        assert!(
+            ttoc[0].message().contains("OVERSTATED"),
+            "…and names the direction, which is what §3.4 requires: {}",
+            ttoc[0].message()
+        );
+
+        // (b) The same W-2 with the deduction CLAIMED ⇒ silent.
+        let claimed = with_code(dec!(8000));
+        assert!(
+            !fire(&claimed)
+                .iter()
+                .any(|a| matches!(a, Advisory::TipsDeductionForgoneWithTtoc { .. })),
+            "a filer who claimed the deduction must not be nagged"
+        );
+
+        // (c) A W-2 with no code at all ⇒ silent, so the trigger really is box 14b.
+        let mut no_code = with_code(Usd::ZERO);
+        no_code.w2s[0].box14b_treasury_tipped_occupation_codes = String::new();
+        assert!(
+            !fire(&no_code)
+                .iter()
+                .any(|a| matches!(a, Advisory::TipsDeductionForgoneWithTtoc { .. })),
+            "★ THE KILL: with no code the advisory must not fire — otherwise it is advising every \
+             wage earner and box 14b is not its reader at all"
+        );
+    }
     use super::*;
     use crate::tax::return_inputs::{Dependent, ScheduleAInputs};
     use crate::tax::tables::SaltLimitation;

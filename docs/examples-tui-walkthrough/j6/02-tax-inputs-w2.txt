@@ -2,24 +2,24 @@
   0│┌ Sections ──────────────────────┐┌ W-2s ──────────────────────────────────────────────────────────────────────────────┐
   1││  ✓ Return options              ││  W-2s #1                                                                           │
   2││  … Taxpayer                    ││  Owner  [Taxpayer]                                                                 │
-  3││  … Spouse                      ││  Employer  [ACME]                                                                  │
-  4││  ✓ Address                     ││  Employer EIN (box b)  []                                                          │
-  5││  ✓ Dependents                  ││  Box 1 — wages  [$200000]                                                          │
-  6││> ✓ W-2s                        ││  Box 2 — federal tax withheld  [$40000]                                            │
-  7││  … Schedule A (itemized deducti││  Box 3 — Social Security wages  [$168600]                                          │
-  8││  … Payments                    ││  Box 4 — Social Security tax withheld  [$10453.20]                                 │
-  9││  … Carryforwards from last year││  Box 5 — Medicare wages  [$200000]                                                 │
- 10││  … §199A limitation (only if yo││  Box 6 — Medicare tax withheld  [$2900]                                            │
- 11││  ✓ Declarations                ││  Box 7 — Social Security tips  [$0]                                                │
- 12││  ✓ Documents received          ││  Box 17 — state income tax  [$9000]                                                │
- 13││  … Income exclusions (§911/931/││  Box 19 — local income tax  [$0]                                                   │
- 14││  … Skippables                  ││  Box 8 — allocated tips  [$0]                                                      │
- 15││                                ││  Box 10 — dependent-care benefits  [$0]                                            │
- 16││                                ││  Box 12 entries (0) →                                                              │
- 17││                                ││                                                                                    │
- 18││                                ││  [Left/Esc] back to rows                                                           │
- 19││                                ││                                                                                    │
- 20││                                ││                                                                                    │
+  3││  … Spouse                      ││  c Employer's name, address, and ZIP code  [ACME]                                  │
+  4││  ✓ Address                     ││  b Employer identification number (EIN)  []                                        │
+  5││  ✓ Dependents                  ││  1 Wages, tips, other compensation  [$200000]                                      │
+  6││> ✓ W-2s                        ││  2 Federal income tax withheld  [$40000]                                           │
+  7││  ✓ Forms 1099-INT              ││  3 Social security wages  [$168600]                                                │
+  8││  ✓ Forms 1099-DIV              ││  4 Social security tax withheld  [$10453.20]                                       │
+  9││  ✓ Interest and dividends from ││  5 Medicare wages and tips  [$200000]                                              │
+ 10││  ✓ Forms 1099-B (Schedule D sum││  6 Medicare tax withheld  [$2900]                                                  │
+ 11││  ✓ Forms 1099-G                ││  7 Social security tips  [$0]                                                      │
+ 12││  ✓ Forms 1098-E (student loan i││  17 State income tax  [$9000]                                                      │
+ 13││  … Schedule A (itemized deducti││  19 Local income tax  [$0]                                                         │
+ 14││  … Payments                    ││  8 Allocated tips  [$0]                                                            │
+ 15││  … Carryforwards from last year││  10 Dependent care benefits  [$0]                                                  │
+ 16││  … §199A limitation (only if yo││  13 Statutory employee  [[ ]]                                                      │
+ 17││  ✓ Declarations                ││  14b Treasury Tipped Occupation Code(s)  []                                        │
+ 18││  ✓ Documents received          ││  Box 12 entries (0) →                                                              │
+ 19││  … Income exclusions (§911/931/││                                                                                    │
+ 20││  … Skippables                  ││  [Left/Esc] back to rows                                                           │
  21││                                ││                                                                                    │
  22││                                ││                                                                                    │
  23││                                ││                                                                                    │
@@ -108,7 +108,6 @@
  16│ 0..1 fg=Cyan mod=BOLD
  16│ 33..34 fg=Cyan mod=BOLD
  16│ 34..35 fg=Yellow
- 16│ 35..57 fg=Cyan
  16│ 119..120 fg=Yellow
  17│ 0..1 fg=Cyan mod=BOLD
  17│ 33..34 fg=Cyan mod=BOLD
@@ -117,7 +116,7 @@
  18│ 0..1 fg=Cyan mod=BOLD
  18│ 33..34 fg=Cyan mod=BOLD
  18│ 34..35 fg=Yellow
- 18│ 35..60 fg=DarkGray
+ 18│ 35..57 fg=Cyan
  18│ 119..120 fg=Yellow
  19│ 0..1 fg=Cyan mod=BOLD
  19│ 33..34 fg=Cyan mod=BOLD
@@ -126,6 +125,7 @@
  20│ 0..1 fg=Cyan mod=BOLD
  20│ 33..34 fg=Cyan mod=BOLD
  20│ 34..35 fg=Yellow
+ 20│ 35..60 fg=DarkGray
  20│ 119..120 fg=Yellow
  21│ 0..1 fg=Cyan mod=BOLD
  21│ 33..34 fg=Cyan mod=BOLD

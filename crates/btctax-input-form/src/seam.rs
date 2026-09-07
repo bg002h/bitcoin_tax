@@ -33,6 +33,22 @@ pub enum SectionId {
     ///   keys by the renderer (the seam cannot see the ledger), never added by hand: an answer for a
     ///   key no row reads refuses as unread.
     BrokerReporting,
+    // ── ★★★ R4 / T5 — one REPEATING section per supported information return, modelled on `W2s`. ──
+    /// Form 1099-INT rows — `ri.int_1099`.
+    Int1099s,
+    /// Form 1099-DIV rows — `ri.div_1099`.
+    Div1099s,
+    /// Form 1099-B rows — `ri.b_1099` (the Schedule D line 1a/8a summary option).
+    B1099s,
+    /// Form 1099-G rows — `ri.g_1099`.
+    G1099s,
+    /// Form 1098-E rows — `ri.form_1098e` (Schedule 1 line 21).
+    Form1098Es,
+    /// ★★★ R5 / T5 — interest and dividends from the FILER'S OWN RECORDS, with no information
+    /// return behind them: `ri.schedule_b_filer_records`. Its own section rather than more 1099
+    /// rows, because the provenance is different by construction (`Source::FilerRecords`) and the
+    /// section is live only when the filer says such income exists.
+    ScheduleBFilerRecords,
     Declarations,
     /// ★★★ R3 / §5.1 — THE DOCUMENT CENSUS: one tri-state per document type. Its own section rather
     /// than more `Declarations` leaves, because the filer answers it FIRST — it is the question
@@ -86,6 +102,12 @@ pub enum FieldId {
     Box19LocalTax,
     Box8AllocTips,
     Box10DepCare,
+    /// ★★★ W-2 **box 13 *Statutory employee***. A checked box sends box 1 to Schedule C line 1, not
+    /// to Form 1040 line 1a, so `true` refuses `StatutoryEmployeeW2`.
+    W2Box13StatutoryEmployee,
+    /// W-2 **box 14b *Treasury Tipped Occupation Code(s)*** (the 2026 revision) — the code Schedule
+    /// 1-A Part II's Caution turns on.
+    W2Box14bTtoc,
     // W2 box 12 (per row)
     Box12Code,
     Box12Amount,
@@ -234,6 +256,112 @@ pub enum FieldId {
     /// ★ R10.4 / T4b — is the filing status CARRIED by the year-N+1 opener still this year's status?
     ///   Live only on a year the opener made (`opened_from.is_some()`).
     DeclFilingStatusConfirmed,
+    // ── ★★★ R3 / T5 — the DOCUMENT-LESS INCOME DOOR's four declarations. ────────────────────────
+    /// Wages from an employer who issued no Form W-2 (live iff `documents.w2 == Some(false)`).
+    DeclWagesWithoutW2,
+    /// Interest or dividends with no Form 1099-INT / 1099-DIV behind them.
+    DeclInterestOrDividendsWithout1099,
+    /// A state or local income tax refund with no Form 1099-G.
+    DeclStateRefundWithout1099g,
+    /// §111(a) — did the PRIOR-YEAR return itemize? Return-level (R3/I1).
+    DeclItemizedPriorYear,
+    // ── ★★★ R4 / T5 — Form 1099-INT (per row). One Field per COLLECTED box, named for the box. ──
+    /// The payer as printed on the form.
+    Int1099Payer,
+    /// R10.2 — the payer's TIN, the cross-year document identity.
+    Int1099PayerTin,
+    /// R10.2 — the date this row was transcribed off the paper.
+    Int1099TranscribedOn,
+    /// Box 1 — *Interest income* → Schedule B line 1 → 1040 line 2b.
+    Int1099Box1Interest,
+    /// Box 2 — *Early withdrawal penalty* → Schedule 1 line 18.
+    Int1099Box2EarlyWithdrawal,
+    /// Box 3 — *Interest on U.S. Savings Bonds and Treasury obligations* → 1040 line 2b.
+    Int1099Box3Treasury,
+    /// Box 4 — *Federal income tax withheld* → 1040 line 25b.
+    Int1099Box4FedWithheld,
+    /// Box 6 — *Foreign tax paid* → the §904(j) election on Schedule 3 line 1.
+    Int1099Box6ForeignTax,
+    /// Box 8 — *Tax-exempt interest* → 1040 line 2a.
+    Int1099Box8TaxExempt,
+    /// Box 9 — *Specified private activity bond interest* — a refuse-guard (AMT preference).
+    Int1099Box9PrivateActivity,
+    /// Box 10 — *Market discount* → Schedule B line 1 and the 1040 line 2b sum.
+    Int1099Box10MarketDiscount,
+    /// Box 11 — *Bond premium* — a refuse-guard (§171, Pub. 550).
+    Int1099Box11BondPremium,
+    /// Box 12 — *Bond premium on Treasury obligations* — a refuse-guard.
+    Int1099Box12BondPremiumTreasury,
+    /// Box 13 — *Bond premium on tax-exempt bond* — a refuse-guard.
+    Int1099Box13BondPremiumTaxExempt,
+    // ── ★★★ R4 / T5 — Form 1099-DIV (per row). ──────────────────────────────────────────────────
+    Div1099Payer,
+    Div1099PayerTin,
+    Div1099TranscribedOn,
+    /// Box 1a — *Total ordinary dividends* → 1040 line 3b (it INCLUDES box 1b).
+    Div1099Box1aOrdinary,
+    /// Box 1b — *Qualified dividends* → 1040 line 3a.
+    Div1099Box1bQualified,
+    /// Box 2a — *Total capital gain distr.* → Schedule D line 13.
+    Div1099Box2aCapGain,
+    /// Box 2b — *Unrecap. Sec. 1250 gain* — a refuse-guard.
+    Div1099Box2bUnrecap1250,
+    /// Box 2c — *Section 1202 gain* — a refuse-guard.
+    Div1099Box2cSection1202,
+    /// Box 2d — *Collectibles (28%) gain* — a refuse-guard.
+    Div1099Box2dCollectibles,
+    /// Box 4 — *Federal income tax withheld* → 1040 line 25b.
+    Div1099Box4FedWithheld,
+    /// Box 5 — *Section 199A dividends* → the QBI deduction.
+    Div1099Box5Section199a,
+    /// Box 7 — *Foreign tax paid* → the §904(j) election.
+    Div1099Box7ForeignTax,
+    /// Box 12 — *Exempt-interest dividends* → 1040 line 2a.
+    Div1099Box12ExemptInterest,
+    /// Box 13 — *Specified private activity bond interest dividends* — a refuse-guard.
+    Div1099Box13PrivateActivity,
+    // ── ★★★ R4 / T5 — Form 1099-B (per row), the Schedule D line 1a/8a SUMMARY option. ──────────
+    B1099Payer,
+    B1099PayerTin,
+    B1099TranscribedOn,
+    /// Schedule D line 1a(d) — short-term proceeds (1099-B box 1d, short-term).
+    B1099ShortTermProceeds,
+    /// Schedule D line 1a(e) — short-term cost or other basis (box 1e, short-term).
+    B1099ShortTermBasis,
+    /// Schedule D line 8a(d) — long-term proceeds (box 1d, long-term).
+    B1099LongTermProceeds,
+    /// Schedule D line 8a(e) — long-term cost or other basis (box 1e, long-term).
+    B1099LongTermBasis,
+    /// ★★★ THE GATE — box 12 checked AND no adjustments, both limbs named in the prompt.
+    B1099BasisReportedNoAdjustments,
+    // ── ★★★ R4 / T5 — Form 1099-G (per row). ────────────────────────────────────────────────────
+    G1099Payer,
+    G1099PayerTin,
+    G1099TranscribedOn,
+    /// Box 1 — *Unemployment compensation* → Schedule 1 line 7.
+    G1099Box1Unemployment,
+    /// Box 2 — *State or local income tax refunds, credits, or offsets* → Schedule 1 line 1,
+    /// through the return-level prior-year-itemized gate.
+    G1099Box2StateRefund,
+    /// Box 4 — *Federal income tax withheld* → 1040 line 25b.
+    G1099Box4FedWithheld,
+    /// Box 10 — *Family leave benefits* (Rev. December 2026) — a refuse-guard.
+    G1099Box10FamilyLeave,
+    // ── ★★★ R4 / T5 — Form 1098-E (per row). ────────────────────────────────────────────────────
+    Form1098eLender,
+    Form1098eLenderTin,
+    Form1098eTranscribedOn,
+    /// Box 1 — *Student loan interest received by lender* → Schedule 1 line 21 (§221).
+    Form1098eBox1Interest,
+    // ── ★★★ R5 / T5 — the filer's-records rows for Schedule B lines 1 / 5. ──────────────────────
+    SbRecordPayerName,
+    /// The buyer's SSN on a seller-financed mortgage (`i1040sb--2025.txt:24`).
+    SbRecordPayerSsn,
+    /// The buyer's address on a seller-financed mortgage (`i1040sb--2025.txt:77`).
+    SbRecordPayerAddress,
+    SbRecordAmount,
+    /// Which Schedule B list the row joins — line 1 (interest) or line 5 (dividend).
+    SbRecordKind,
 }
 
 /// The value shape of a field.

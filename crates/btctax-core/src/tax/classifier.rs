@@ -101,6 +101,12 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         div_1099,
         g_1099,
         b_1099,
+        form_1098e,
+        schedule_b_filer_records,
+        w2_wages_without_w2,
+        interest_or_dividends_without_1099,
+        state_refund_without_1099g,
+        itemized_prior_year,
         schedule_c,
         schedule_a,
         itemize_election,
@@ -276,6 +282,30 @@ pub fn classify(ri: &ReturnInputs) -> Census {
     for b in b_1099 {
         classify_1099b(&mut c, b);
     }
+    for e in form_1098e {
+        classify_1098e(&mut c, e);
+    }
+    for r in schedule_b_filer_records {
+        classify_schedule_b_record(&mut c, r);
+    }
+    // ★★★ R3 — the three DOCUMENT-LESS INCOME questions, each class (A). A census `No` never closes
+    //     income the instructions say to report without the document: the form names incomes that
+    //     exist with no information return behind them, and each is small money in the
+    //     UNDERSTATEMENT direction, where the residual attestation is the only net.
+    c.declaration(w2_wages_without_w2, QuestionId::WagesWithoutW2Question);
+    c.declaration(
+        interest_or_dividends_without_1099,
+        QuestionId::InterestOrDividendsWithout1099,
+    );
+    c.declaration(
+        state_refund_without_1099g,
+        QuestionId::StateRefundWithout1099g,
+    );
+    // ★★★ R3/I1 — the prior-year itemize gate, RETURN-LEVEL because a filer with no 1099-G owes the
+    //     same answer. Class (A): §111(a)'s tax-benefit rule decides whether the refund is income,
+    //     and a `false` btctax assumed rather than asked would blank Schedule 1 line 1 on the
+    //     filer's behalf — an understatement laundered as a lawful blank.
+    c.declaration(itemized_prior_year, QuestionId::ItemizedPriorYear);
     if let Some(sc) = schedule_c {
         classify_schedule_c(&mut c, sc);
     }
@@ -488,7 +518,24 @@ fn classify_w2(c: &mut Census, w: &W2) {
         box12,
         box8_allocated_tips: _,
         box10_dependent_care: _,
+        box13_statutory_employee,
+        // A published Treasury taxonomy CODE the employer printed — a `String` scalar the `_` rule
+        // permits, and data rather than an answer (`Schedule1aTips::treasury_occupation_code` is
+        // classified the same way).
+        box14b_treasury_tipped_occupation_codes: _,
     } = w;
+    // ★★★ Box 13 *Statutory employee* — the DOCUMENT'S own checkbox, not an answer btctax defaulted
+    //     for the filer. The row exists only because the census declared the document (R3), so an
+    //     unchecked box is the employer's testimony that the wages are ordinary wages. `true`
+    //     REFUSES (`StatutoryEmployeeW2`, Schedule C line 1), so a checked box can never be laundered
+    //     into 1040 line 1a; `false` claims nothing and forgoes nothing.
+    c.exempt(
+        box13_statutory_employee,
+        Class::DataDerived,
+        "W-2 box 13 *Statutory employee* — a checkbox the EMPLOYER printed on a document the filer \
+         declared (R3), not a defaulted answer; `true` refuses StatutoryEmployeeW2 naming Schedule C \
+         line 1, so it can never file box 1 on the wrong line (§2.8)",
+    );
     c.exempt(
         owner,
         Class::SerdeRequired,
@@ -517,6 +564,10 @@ fn classify_1099int(_c: &mut Census, i: &Form1099Int) {
         box6_foreign_tax: _,
         box8_tax_exempt_interest: _,
         box9_private_activity_bond_amt: _,
+        box10_market_discount: _,
+        box11_bond_premium: _,
+        box12_bond_premium_treasury: _,
+        box13_bond_premium_tax_exempt: _,
         // R10.2 document identity — a `String` and an `Option<Date>`, both scalar leaves the `_` rule
         // permits. Neither carries answered-ness: an empty TIN is "not transcribed", and the
         // transcription date is a fact about OUR handling of the paper, never testimony.
@@ -549,11 +600,44 @@ fn classify_1099g(_c: &mut Census, g: &Form1099G) {
     let Form1099G {
         payer: _,
         box1_unemployment: _,
+        box2_state_refund: _,
         box4_fed_withheld: _,
+        box10_family_leave_benefits: _,
         // R10.2 document identity — scalar leaves; see `classify_1099int`.
         payer_tin: _,
         transcribed_on: _,
     } = g;
+}
+
+/// R4 / §5.2 — Form 1098-E. Four leaves, none of them an answered-ness shape: a lender, a TIN, a
+/// transcription date and one box the §221 chain reads.
+fn classify_1098e(_c: &mut Census, e: &crate::tax::return_inputs::Form1098E) {
+    let crate::tax::return_inputs::Form1098E {
+        lender: _,
+        lender_tin: _,
+        transcribed_on: _,
+        box1_interest: _,
+    } = e;
+}
+
+/// R5 — one filer's-records row for Schedule B lines 1 / 5. The row EXISTS only because
+/// `interest_or_dividends_without_1099` was answered YES (a class-(A) declaration above), so nothing
+/// here is a default that could answer for the filer; `kind` is data (which list the row joins).
+fn classify_schedule_b_record(c: &mut Census, r: &crate::tax::return_inputs::ScheduleBRecord) {
+    let crate::tax::return_inputs::ScheduleBRecord {
+        payer_name: _,
+        payer_ssn: _,
+        payer_address: _,
+        amount: _,
+        kind,
+    } = r;
+    c.exempt(
+        kind,
+        Class::DataDerived,
+        "the row's Schedule B list (interest → line 1, dividend → line 5) is DATA about the figure, \
+         not a defaulted answer for the filer; the row exists only because the class-(A) \
+         `InterestOrDividendsWithout1099` declaration was answered YES (§2.8)",
+    );
 }
 
 /// §G-28/B4 — Form 1099-B totals for Schedule D lines 1a/8a.
@@ -842,7 +926,6 @@ fn classify_charitable_gift(c: &mut Census, g: &CharitableGift) {
 fn classify_schedule1(c: &mut Census, s: &Schedule1Inputs) {
     let Schedule1Inputs {
         state_refund_taxable: _,
-        student_loan_interest_paid: _,
         ira_deduction_claimed: _,
         hsa_activity,
     } = s;

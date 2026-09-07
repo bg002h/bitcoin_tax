@@ -10694,11 +10694,15 @@ mod tests {
         }
         assert_eq!(
             app.tax_inputs_form.as_ref().unwrap().section_idx,
-            11,
-            "section cursor clamps at the last live section (12 on Single: Spouse hidden, \
+            17,
+            "section cursor clamps at the last live section (18 on Single: Spouse hidden, \
              box12/charitable nested). ★ +1 for the §G-22 Carryforwards section — the two QBI loss \
              carryforwards were import-only, and omitting them UNDERSTATES tax. ★ +1 again for R3's \
-             DocumentCensus section — eighteen tri-states, one per document TYPE."
+             DocumentCensus section — eighteen tri-states, one per document TYPE. ★ +6 for T5's \
+             information-return sections: Forms 1099-INT, 1099-DIV, the filer's-records rows, \
+             1099-B, 1099-G and 1098-E. ★ THE SCHEDULE-B FILER'S-RECORDS SECTION IS COUNTED even \
+             though it is live only behind R3's door — the left pane lists every section and its \
+             fields report `live` individually, exactly as `Spouse` does on an MFJ return."
         );
         // Left past the start clamps at 0.
         for _ in 0..50 {
@@ -11356,6 +11360,81 @@ mod tests {
         );
     }
 
+    /// ★★★ **R4 / T5 — THE TRANSCRIPTION WARNING IS RENDERED WHERE THE ROW IS EDITED, AND WRITES
+    ///     NOTHING.**
+    ///
+    /// R4: *"the filer corrects the box, the tool never writes it."* The core rule is unit-tested in
+    /// `transcription_warnings.rs`; this is the RENDER, which no unit test can reach — delete the
+    /// loop from `draw_tax_inputs_status` and every core test stays green while the filer sees
+    /// nothing.
+    ///
+    /// The plant is R4's own example: **box 1 typed into box 3**.
+    #[test]
+    fn a_transcription_warning_is_rendered_in_the_editor_and_changes_no_stored_value() {
+        use btctax_core::tax::return_inputs::{Owner, ReturnInputs, W2};
+        use btctax_core::tax::types::FilingStatus;
+        let build = |ss_wages: rust_decimal::Decimal| ReturnInputs {
+            tax_year: 2024,
+            filing_status: FilingStatus::Single,
+            w2s: vec![W2 {
+                owner: Owner::Taxpayer,
+                employer: "ACME".into(),
+                box1_wages: rust_decimal_macros::dec!(250000),
+                box3_ss_wages: ss_wages,
+                box4_ss_withheld: rust_decimal_macros::dec!(10453.20),
+                box5_medicare_wages: rust_decimal_macros::dec!(250000),
+                box6_medicare_withheld: rust_decimal_macros::dec!(4075),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let render_with = |ri: ReturnInputs| {
+            let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+            let mut form = crate::edit::form::TaxInputsFormState::fresh(
+                2024,
+                time::macros::date!(2026 - 09 - 01),
+            );
+            form.working = Some(ri);
+            app.tax_inputs_form = Some(form);
+            let text = render_editor(&mut app);
+            let after = app
+                .tax_inputs_form
+                .as_ref()
+                .unwrap()
+                .working
+                .clone()
+                .unwrap();
+            (text, after)
+        };
+
+        // (a) The correctly transcribed W-2 — box 3 at the TY2024 base — shows no warning.
+        let clean = build(rust_decimal_macros::dec!(168600));
+        let (ok, _) = render_with(clean);
+        assert!(
+            !ok.contains("warning ·"),
+            "a W-2 whose boxes agree must raise nothing on screen: {ok}"
+        );
+
+        // (b) The slip: box 1's figure typed into box 3, so box 4 no longer matches 6.2% of it.
+        let slipped = build(rust_decimal_macros::dec!(250000));
+        let before = slipped.clone();
+        let (bad, after) = render_with(slipped);
+        assert!(
+            bad.contains("warning ·"),
+            "the slip must be surfaced where the row is edited: {bad}"
+        );
+        assert!(
+            bad.contains("Form W-2 #1"),
+            "…naming the ROW the filer has to open: {bad}"
+        );
+        // ★★★ THE KILL: the working return is byte-identical after the render. A "warning" that
+        //     quietly corrected box 3 would be writing testimony the filer never gave.
+        assert_eq!(
+            after, before,
+            "rendering a warning must never change a stored value"
+        );
+    }
+
     /// ★ I-4 (§9A): a screen-refused commit attributes the refusal to a live SECTION (a `SectionId`, never a
     /// leaf), renders the `!` glyph on that section in the left pane, and shows the `1 issue: <section>`
     /// screen status. The SALT election mismatch attributes to Schedule A. A later successful `apply` clears
@@ -11407,7 +11486,9 @@ mod tests {
         // A successful apply clears the attribution → `screens clean` again (the `!` re-arms only on a
         // fresh refusal). Navigation alone does NOT clear it — so retreat to ReturnOptions (Left resets the
         // field cursor to FilingStatus) and cycle the filing status (an Enum apply that always succeeds).
-        for _ in 0..10 {
+        // ★ Enough Lefts to reach section 0 from anywhere — the cursor CLAMPS at 0, so an
+        //   over-count is safe and a hand-count goes stale every time a section lands (T5 added six).
+        for _ in 0..btctax_input_form::form_spec().len() + 2 {
             handle_key(&mut app, press(KeyCode::Left));
         }
         assert!(

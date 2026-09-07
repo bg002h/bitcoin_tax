@@ -1547,6 +1547,31 @@ pub fn render_advisories(advisories: &[btctax_core::tax::advisories::Advisory]) 
     s
 }
 
+/// ★★★ **R4 — the transcription warnings, printed beside the advisories.**
+///
+/// They are a different instrument from an advisory and the block says so: an advisory names a
+/// figure btctax deliberately did not compute, while these name a figure on the FILER'S PAPER that
+/// does not add up. Neither changes a number; only one has a remedy the filer performs with the
+/// document in hand.
+pub fn render_transcription_warnings(
+    warnings: &[btctax_core::tax::transcription_warnings::TranscriptionWarning],
+) -> String {
+    let mut s = String::new();
+    if warnings.is_empty() {
+        return s;
+    }
+    let _ = writeln!(s, "\n  ── TRANSCRIPTION WARNINGS ({}) ──", warnings.len());
+    for w in warnings {
+        let _ = writeln!(s, "{}", wrap_bulleted(&w.message));
+    }
+    let _ = writeln!(
+        s,
+        "  (A warning never changes a stored value and never fails the command. Each names a row \n\
+         \x20  on your own paperwork to re-read.)"
+    );
+    s
+}
+
 /// The §4.12 provenance label for the resolved profile — printed on the full-return output so a
 /// reviewer can audit which source produced the figures (`p2-provenance-printing`).
 pub fn provenance_label(p: crate::resolve::Provenance) -> &'static str {

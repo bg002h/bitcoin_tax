@@ -239,21 +239,59 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         // ── Everything else (§7 line 521): a deferred section (Schedule C, QBI, 1099 boxes, carryforwards)
         //    or a compute/absolute screen — no v1 form field to point at. Entered via TOML import or computed
         //    at `report`/`export`. ──
-        R::PrivateActivityBondAmt => vec![Anchor::NotInForm {
-            note: "private-activity-bond interest (1099-INT box 9 / 1099-DIV box 13) is not a v1 form field — \
-                   entered via TOML import (§7 I-3)",
-        }],
-        R::UnrecapturedOrSpecialRateGain => vec![Anchor::NotInForm {
-            note: "special-rate capital gains (1099-DIV box 2b/2c/2d) are not v1 form fields — entered via \
-                   TOML import",
-        }],
-        R::InconsistentDividendSubset(_) => vec![Anchor::NotInForm {
-            note: "the 1099-DIV dividend boxes (1a/1b/5) are not v1 form fields — entered via TOML import",
-        }],
-        R::ForeignTaxOverCeiling => vec![Anchor::NotInForm {
-            note: "foreign tax paid (1099-INT box 6 / 1099-DIV box 7) is not a v1 form field — entered via \
-                   TOML import",
-        }],
+        // ── ★★★ R4 / T5 — THE FIVE RE-ATTRIBUTED ANCHORS. Each of these said *"not a v1 form
+        //    field — entered via TOML import"*, which stopped being true the moment the 1099
+        //    sections landed. An anchor claiming a refusal has no form field is a FALSEHOOD when one
+        //    exists, and it leaves the filer with nowhere to go — the same reasoning already
+        //    recorded on `QbiAboveThreshold` and on the carryover-worksheet pair above. ──
+        R::PrivateActivityBondAmt => vec![
+            Anchor::Field(FieldId::Int1099Box9PrivateActivity),
+            Anchor::Field(FieldId::Div1099Box13PrivateActivity),
+        ],
+        R::UnrecapturedOrSpecialRateGain => vec![
+            Anchor::Field(FieldId::Div1099Box2bUnrecap1250),
+            Anchor::Field(FieldId::Div1099Box2cSection1202),
+            Anchor::Field(FieldId::Div1099Box2dCollectibles),
+        ],
+        R::InconsistentDividendSubset(_) => vec![
+            Anchor::Field(FieldId::Div1099Box1aOrdinary),
+            Anchor::Field(FieldId::Div1099Box1bQualified),
+            Anchor::Field(FieldId::Div1099Box5Section199a),
+        ],
+        R::ForeignTaxOverCeiling => vec![
+            Anchor::Field(FieldId::Int1099Box6ForeignTax),
+            Anchor::Field(FieldId::Div1099Box7ForeignTax),
+        ],
+        // ── ★★★ R3 / T5 — THE DOCUMENT-LESS INCOME DOOR. Each unanswered leg anchors on its own
+        //    declaration; each ADVERSE leg anchors there too, because that is where a filer who
+        //    answered by mistake fixes it, and one who answered truthfully is told the exit by the
+        //    refusal's own text. ──
+        R::WagesWithoutW2Unanswered | R::WagesWithoutW2 => {
+            vec![decl(QuestionId::WagesWithoutW2Question)]
+        }
+        R::InterestOrDividendsWithout1099Unanswered => {
+            vec![decl(QuestionId::InterestOrDividendsWithout1099)]
+        }
+        // ★ The rows themselves are the remedy, so the SECTION is the anchor — and the declaration
+        //   beside it, for the filer whose true answer was "no".
+        R::FilerRecordsDeclaredNotTranscribed => vec![
+            Anchor::Section(SectionId::ScheduleBFilerRecords),
+            decl(QuestionId::InterestOrDividendsWithout1099),
+        ],
+        R::StateRefundWithout1099gUnanswered => {
+            vec![decl(QuestionId::StateRefundWithout1099g)]
+        }
+        R::ItemizedPriorYearUnanswered | R::StateAndLocalRefundWorksheetNotComputed => {
+            vec![decl(QuestionId::ItemizedPriorYear)]
+        }
+        // ── ★★★ R4 / T5 — the box decisions that refuse. Each anchors on the BOX. ──
+        R::AmortizableBondPremiumNotComputed => vec![
+            Anchor::Field(FieldId::Int1099Box11BondPremium),
+            Anchor::Field(FieldId::Int1099Box12BondPremiumTreasury),
+            Anchor::Field(FieldId::Int1099Box13BondPremiumTaxExempt),
+        ],
+        R::StatutoryEmployeeW2 => vec![Anchor::Field(FieldId::W2Box13StatutoryEmployee)],
+        R::FamilyLeaveBenefits => vec![Anchor::Field(FieldId::G1099Box10FamilyLeave)],
         R::IraDeductionClaimed => vec![Anchor::NotInForm {
             note: "the Schedule 1 IRA deduction is not a v1 form field — entered via TOML import",
         }],
@@ -271,11 +309,9 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::ScheduleCNoBusinessDescription => vec![Anchor::NotInForm {
             note: "Schedule C is not a v1 form section — its business description is entered via TOML import",
         }],
-        // §G-28/B4 — 1099-B rows are not a v1 form section either; they arrive by TOML import, and the
-        // confirmation that fixes this refusal is a field on the row itself.
-        R::Form1099BNeedsForm8949 => vec![Anchor::NotInForm {
-            note: "Form 1099-B rows are entered via TOML import — set `basis_reported_and_no_adjustments` on the row",
-        }],
+        // ★ The fifth: the confirmation that clears this refusal is a field ON THE ROW, so the
+        //   anchor is that field.
+        R::Form1099BNeedsForm8949 => vec![Anchor::Field(FieldId::B1099BasisReportedNoAdjustments)],
         // ★★ T3a — Schedule 1-A lines 5 and 14b. `NotInForm` for a reason that will EXPIRE: the
         //    Sch 1-A form section is not built yet (coverage EXEMPT_PREFIXES says so and why), and
         //    even once it is, the cure for these two is not a Sch 1-A field at all — it is a
@@ -373,13 +409,19 @@ mod tests {
         );
     }
 
+    /// ★★★ **T5 INVERTED THIS TEST, and the inversion IS the deliverable.** It used to pin
+    /// *"a 1099 box is not a v1 form field"* — true while the only way in was a TOML table, and a
+    /// falsehood the moment the 1099 sections landed. The refusal fires on TWO boxes on TWO
+    /// documents, so it anchors on both.
     #[test]
-    fn private_activity_bond_is_not_in_form() {
-        let anchors = attribute(&RefuseReason::PrivateActivityBondAmt);
-        assert_eq!(anchors.len(), 1, "exactly one anchor");
-        assert!(
-            matches!(anchors[0], NotInForm { .. }),
-            "a 1099 box is not a v1 form field: {anchors:?}"
+    fn private_activity_bond_anchors_the_two_boxes_that_raise_it() {
+        assert_eq!(
+            attribute(&RefuseReason::PrivateActivityBondAmt),
+            vec![
+                Field(FieldId::Int1099Box9PrivateActivity),
+                Field(FieldId::Div1099Box13PrivateActivity)
+            ],
+            "1099-INT box 9 and 1099-DIV box 13 both raise it, and both are form fields now"
         );
     }
 
@@ -531,18 +573,21 @@ mod tests {
     }
 
     /// The compute/absolute/deferred bucket (§7 line 521) is all `NotInForm`, plus the defensive-only pair.
+    ///
+    /// ★★★ **T5 REMOVED FOUR ENTRIES FROM THIS LIST** — `UnrecapturedOrSpecialRateGain`,
+    /// `InconsistentDividendSubset`, `ForeignTaxOverCeiling` and `Form1099BNeedsForm8949` — because
+    /// the 1099-DIV, 1099-INT and 1099-B sections landed and every one of them now has a field the
+    /// filer can reach. `IraDeductionClaimed` deliberately STAYS: HSA and IRA contributions are
+    /// refused unchanged (§2.2), so its anchor is honest. Their new anchors are asserted in
+    /// [`the_five_reattributed_anchors_point_at_real_form_fields`].
     #[test]
     fn deferred_and_defensive_refusals_are_not_in_form() {
         for r in [
-            RefuseReason::UnrecapturedOrSpecialRateGain,
-            RefuseReason::InconsistentDividendSubset("box 5 §199A dividends".into()),
-            RefuseReason::ForeignTaxOverCeiling,
             RefuseReason::IraDeductionClaimed,
             RefuseReason::BusinessInterestIncome,
             RefuseReason::BusinessIncomeWithoutScheduleC,
             RefuseReason::ScheduleCLoss,
             RefuseReason::ScheduleCNoBusinessDescription,
-            RefuseReason::Form1099BNeedsForm8949,
             RefuseReason::KiddieTax,
             RefuseReason::AmtScreenTriggered,
             RefuseReason::NegativeAmount("W-2 box 1 wages".into()),
@@ -586,6 +631,83 @@ mod tests {
                 "{id:?} is not a field in the form spec"
             );
         }
+    }
+
+    /// ★★★ **T5 / R4 — THE `NotInForm` COUNT FELL BY EXACTLY FIVE, and the five are named.**
+    ///
+    /// The count is READ OFF THIS FILE'S OWN SOURCE, never off a list typed beside it: an anchor
+    /// added or removed moves the number with no edit anywhere else, which is the whole point (the
+    /// same technique `return_refuse.rs` uses to census its own screen). `Anchor::NotInForm {` is
+    /// spelled with its `Anchor::` prefix ONLY inside [`attribute`]; the tests below match on the
+    /// bare `NotInForm { .. }` pattern, so they cannot inflate the count.
+    ///
+    /// ★ The positive half matters more than the number: each of the five now yields anchors that
+    ///   are REAL fields of a real section, so the renderer has something to focus and the filer has
+    ///   somewhere to go. A count alone could be satisfied by deleting an arm.
+    #[test]
+    fn the_five_reattributed_anchors_point_at_real_form_fields_and_the_count_fell_by_five() {
+        const BEFORE_T5: usize = 17;
+        // ★ Counted inside [`attribute`]'s own body only — from `pub fn attribute` to the first
+        //   `#[cfg(test)]` — so this test's own prose and its `Anchor::NotInForm { note }` match arm
+        //   cannot inflate the number it is asserting.
+        let src = include_str!("attribute.rs");
+        let start = src
+            .find("pub fn attribute(")
+            .expect("the function this file exists for");
+        let end = src[start..]
+            .find("#[cfg(test)]")
+            .expect("the test module follows it")
+            + start;
+        let now = src[start..end].matches("Anchor::NotInForm {").count();
+        assert_eq!(
+            now,
+            BEFORE_T5 - 5,
+            "T5 re-attributed exactly five anchors (PrivateActivityBondAmt, \
+             UnrecapturedOrSpecialRateGain, InconsistentDividendSubset, ForeignTaxOverCeiling, \
+             Form1099BNeedsForm8949); the source now has {now} `NotInForm` anchors, not {}",
+            BEFORE_T5 - 5
+        );
+
+        // The five, and every anchor each yields must be a real Field or Section of `form_spec()`.
+        for r in [
+            RefuseReason::PrivateActivityBondAmt,
+            RefuseReason::UnrecapturedOrSpecialRateGain,
+            RefuseReason::InconsistentDividendSubset("box 1b qualified dividends".into()),
+            RefuseReason::ForeignTaxOverCeiling,
+            RefuseReason::Form1099BNeedsForm8949,
+        ] {
+            let anchors = attribute(&r);
+            assert!(!anchors.is_empty(), "{r:?} must anchor somewhere");
+            for a in &anchors {
+                match a {
+                    Anchor::Field(id) => assert!(
+                        crate::spec::form_spec()
+                            .iter()
+                            .any(|s| s.fields.iter().any(|f| f.id == *id)),
+                        "{r:?} anchors on {id:?}, which is not a field of the form spec"
+                    ),
+                    Anchor::Section(sid) => assert!(
+                        crate::spec::form_spec().iter().any(|s| s.id == *sid),
+                        "{r:?} anchors on {sid:?}, which is not a section of the form spec"
+                    ),
+                    Anchor::NotInForm { note } => panic!(
+                        "{r:?} was re-attributed by T5 and must no longer say it is not in the \
+                         form: {note}"
+                    ),
+                }
+            }
+        }
+
+        // ★ `IraDeductionClaimed` is NOT among them and must stay `NotInForm`: HSA and IRA
+        //   contributions are refused unchanged (§2.2), so there is no field to point at and
+        //   inventing one would be the falsehood in the other direction.
+        assert!(
+            matches!(
+                attribute(&RefuseReason::IraDeductionClaimed).as_slice(),
+                [NotInForm { .. }]
+            ),
+            "the Schedule 1 IRA deduction has no form field and its anchor must say so"
+        );
     }
 
     /// ★ The invariant behind the whole map: no refusal attributes to nowhere. Every arm returns a non-empty

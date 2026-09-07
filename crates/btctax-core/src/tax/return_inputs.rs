@@ -78,6 +78,32 @@ pub struct W2 {
     pub box8_allocated_tips: Usd, // refuse-guard if > 0 (§4.10)
     #[serde(default)]
     pub box10_dependent_care: Usd, // refuse-guard if > 0 (§4.10)
+    /// **Box 13 — *Statutory employee*.** The checkbox as the paper prints it.
+    ///
+    /// ★★★ **A checked box 13 sends box 1 to SCHEDULE C, not to Form 1040 line 1a.** Until T5 the
+    /// `W2` struct had no box 13 at all, so a statutory employee's wages filed on the wrong line with
+    /// nothing to notice it — `RefuseReason::StatutoryEmployeeW2` names Schedule C line 1 and refuses.
+    ///
+    /// ★ A plain `bool`, not a tri-state, for the reason every other box on this row is plain: the
+    /// row exists only because the filer declared the document (R3), so an unchecked box is the
+    /// **document's** answer, not an absence of one. Box 13's two other checkboxes (*Retirement plan*,
+    /// *Third-party sick pay*) print under the same label and carry their own census entries.
+    #[serde(default)]
+    pub box13_statutory_employee: bool,
+    /// **Box 14b — *Treasury Tipped Occupation Code(s)*** (the 2026 revision; `fw2--2026.txt:71`).
+    ///
+    /// ★★★ It is the employer's statement of the code Schedule 1-A Part II's Caution turns on —
+    /// *"These tips must have been received in an occupation listed at IRS.gov/TippedOccupations"*
+    /// (`f1040s1a--2025.txt:24-25`) — and the occupation must have *"customarily and regularly
+    /// received tips on or before December 31, 2024"* (`i1040gi--2025.txt:43514-43526`, which names
+    /// the TTOC by that name). A code, never an amount, so it is a `String`: empty means the box is
+    /// blank on the paper (or the edition prints no box 14b at all).
+    ///
+    /// ★ Its reader is [`crate::tax::advisories::Advisory::TipsDeductionForgoneWithTtoc`]: a W-2
+    /// carrying a code beside a return that claims no qualified tips is a **forgone** deduction, the
+    /// overstatement direction, so §3.4 makes it an advisory and never a refusal.
+    #[serde(default)]
+    pub box14b_treasury_tipped_occupation_codes: String,
 }
 
 /// Form 1099-INT (SPEC §4.3).
@@ -105,6 +131,26 @@ pub struct Form1099Int {
     pub box8_tax_exempt_interest: Usd, // → 1040 2a (NOT a §1411 add-back)
     #[serde(default)]
     pub box9_private_activity_bond_amt: Usd, // refuse-guard (AMT pref)
+    /// **Box 10 — *Market discount*.** → Schedule B line 1 and the Form 1040 line 2b sum.
+    ///
+    /// Schedule B line 1's instruction: *"Also include any accrued market discount that is includible
+    /// in income"* (`i1040sb--2025.txt`). INCOME, so omitting it understates tax — R4 collects it.
+    #[serde(default)]
+    pub box10_market_discount: Usd,
+    /// **Box 11 — *Bond premium*.** A refuse-guard: > 0 refuses
+    /// [`super::return_refuse::RefuseReason::AmortizableBondPremiumNotComputed`].
+    ///
+    /// ★ Amortizable bond premium REDUCES interest income (§171), and btctax computes no part of the
+    /// §171 election or its Schedule B adjustment line. Dropping the figure would OVERSTATE the tax
+    /// silently; refusing is both the conservative and the honest direction (Pub. 550).
+    #[serde(default)]
+    pub box11_bond_premium: Usd,
+    /// **Box 12 — *Bond premium on Treasury obligations*.** As box 11.
+    #[serde(default)]
+    pub box12_bond_premium_treasury: Usd,
+    /// **Box 13 — *Bond premium on tax-exempt bond*.** As box 11.
+    #[serde(default)]
+    pub box13_bond_premium_tax_exempt: Usd,
 }
 
 /// Form 1099-DIV (SPEC §4.3).
@@ -151,8 +197,95 @@ pub struct Form1099G {
     #[serde(default)]
     pub transcribed_on: Option<Date>,
     pub box1_unemployment: Usd, // → Sch 1 L7
+    /// **Box 2 — *State or local income tax refunds, credits, or offsets*.** → Schedule 1 line 1,
+    /// through the **return-level** [`ReturnInputs::itemized_prior_year`] gate.
+    ///
+    /// ★★★ **The gate is NOT a field on this row**, and that is R3/I1's ruling: a filer can owe the
+    /// same answer with **no** 1099-G at all (*"Report any taxable refund you received even if you
+    /// didn't receive Form 1099-G"*, `i1040gi--2025.txt:41897-41898`), and a gate that rides on a row
+    /// that might not exist cannot be asked of them.
+    ///
+    /// `itemized_prior_year = Some(false)` ⇒ §111(a) makes the refund non-taxable and Schedule 1
+    /// line 1 is **blank by decision**. `Some(true)` ⇒ REFUSE naming the *State and Local Income Tax
+    /// Refund Worksheet*, which btctax does not compute.
+    #[serde(default)]
+    pub box2_state_refund: Usd,
     #[serde(default)]
     pub box4_fed_withheld: Usd, // → 1040 25b
+    /// **Box 10 — *Family leave benefits*** — NEW on the Rev. December 2026 grid, which also
+    /// renumbered the state boxes `10a/10b/11 → 11a/11b/12` (`i1099g--2026.txt:17-25`).
+    ///
+    /// ★★★ A refuse-guard. Rev. Rul. 2025-4 requires a state paid family and medical leave program to
+    /// report the benefits it pays, and they are includible in gross income — reaching **Schedule 1
+    /// line 8z** (*"Other income. List type and amount"*, `f1040s1--2026-DRAFT.txt:94`), for which
+    /// btctax models no inflow. An income box with no reader UNDERSTATES, so > 0 refuses
+    /// ([`super::return_refuse::RefuseReason::FamilyLeaveBenefits`]) rather than being dropped.
+    #[serde(default)]
+    pub box10_family_leave_benefits: Usd,
+}
+
+/// **Form 1098-E — *Student Loan Interest Statement*** (R4 / §5.2, new at T5).
+///
+/// ★★★ It REPLACES the scalar `Schedule1Inputs::student_loan_interest_paid`. The scalar was a bare
+/// `Usd` with no issuer, no TIN and no transcription date — so `$0` there was indistinguishable from
+/// *never asked*, which is the D-8 trap one level below the form line. A document row cannot be
+/// blank-by-accident: it exists only because the filer declared the document
+/// (`DocumentRow::Form1098e`), and Schedule 1 line 21 reads the SUM of the rows' box 1.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct Form1098E {
+    /// The lender / servicer as printed on the form.
+    pub lender: String,
+    /// **R10.2 — document identity.** See [`Form1099Int::payer_tin`].
+    #[serde(default)]
+    pub lender_tin: String,
+    /// **R10.2 — when this row was transcribed.** See [`Form1099Int::transcribed_on`].
+    #[serde(default)]
+    pub transcribed_on: Option<Date>,
+    /// **Box 1 — *Student loan interest received by lender*.** → Schedule 1 line 21 (§221), through
+    /// the $2,500 cap and the MAGI phase-out.
+    #[serde(default)]
+    pub box1_interest: Usd,
+}
+
+/// Which Schedule B list a [`ScheduleBRecord`] belongs on (R3/R5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ScheduleBRecordKind {
+    /// Schedule B **Part I line 1** — *"Report on line 1 all of your taxable interest"*; the sum
+    /// carries to Form 1040 line 2b.
+    #[default]
+    Interest,
+    /// Schedule B **Part II line 5** — ordinary dividends; the sum carries to Form 1040 line 3b.
+    Dividend,
+}
+
+/// ★★★ **R5 — interest or dividends the instructions say to report with NO information return
+/// behind them**, collected as the filer's OWN records.
+///
+/// The door R3 opens when `documents.int_1099`/`div_1099` is `Some(false)` and
+/// [`ReturnInputs::interest_or_dividends_without_1099`] is `Yes`: a bank paying under $10, a nominee
+/// distribution, or a **seller-financed mortgage**, which Schedule B asks for by name — *"list first
+/// and show that buyer's social security number (SSN) and address"* (`i1040sb--2025.txt:24, 77`).
+///
+/// ★ [`Self::payer_ssn`] and [`Self::payer_address`] are exactly that case and are empty otherwise.
+/// Provenance is [`crate::tax::provenance::Source::FilerRecords`] by struct (R10): a figure from the
+/// filer's own books and one off a document are different evidence in an examination.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ScheduleBRecord {
+    /// Schedule B lines 1 / 5, column *"(List name of payer …)"*.
+    pub payer_name: String,
+    /// The buyer's SSN on a seller-financed mortgage (`i1040sb--2025.txt:24`); empty otherwise.
+    #[serde(default)]
+    pub payer_ssn: String,
+    /// The buyer's address on a seller-financed mortgage (`i1040sb--2025.txt:77`); empty otherwise.
+    #[serde(default)]
+    pub payer_address: String,
+    /// The amount, as the filer's own records report it.
+    #[serde(default)]
+    pub amount: Usd,
+    /// Which Schedule B list this row joins.
+    #[serde(default)]
+    pub kind: ScheduleBRecordKind,
 }
 
 /// **Form 1099-B** — broker proceeds, as TOTALS for Schedule D lines 1a and 8a (§G-28/B4).
@@ -720,9 +853,6 @@ pub struct Schedule1Inputs {
     /// L1 — taxable portion of a state/local refund (user attests; §111 worksheet not modeled).
     #[serde(default)]
     pub state_refund_taxable: Usd,
-    /// L21 — student-loan interest PAID (the $2,500-cap/MAGI-phaseout worksheet runs in Phase 2/4).
-    #[serde(default)]
-    pub student_loan_interest_paid: Usd,
     /// An IRA deduction claimed → refuses in v1 (the phase-out worksheet is a follow-on, I3).
     #[serde(default)]
     pub ira_deduction_claimed: Usd,
@@ -997,6 +1127,10 @@ pub struct ReturnInputs {
     /// §G-28/B4 — broker 1099-B TOTALS for Schedule D lines 1a/8a. Empty on a pure-crypto return.
     #[serde(default)]
     pub b_1099: Vec<Form1099B>,
+    /// ★★★ **R4 / §5.2 — Form 1098-E rows.** Schedule 1 line 21 (§221) reads the SUM of their box 1;
+    /// it replaced the scalar `sch1.student_loan_interest_paid` at T5. See [`Form1098E`].
+    #[serde(default)]
+    pub form_1098e: Vec<Form1098E>,
     #[serde(default)]
     pub schedule_c: Option<ScheduleCInputs>,
     #[serde(default)]
@@ -1369,6 +1503,58 @@ pub struct ReturnInputs {
     /// re-ask rule returns the question to unanswered for free.
     #[serde(default)]
     pub filing_status_confirmed: Option<bool>,
+    // ── ★★★ R3 — THE DOCUMENT-LESS INCOME DOOR. Three paired questions, each live iff its census
+    //    row is `Some(false)`, plus the return-level prior-year-itemized gate and the filer's-records
+    //    rows a YES on the interest question opens.
+    //
+    //    ★ *"A census `No` never closes income the instructions say to report WITHOUT the document."*
+    //      The document-first rule is right for amounts and wrong as a stop: the form names incomes
+    //      that exist with no information return behind them, each small money in the UNDERSTATEMENT
+    //      direction.
+    /// ★★★ **R3 — wages with no Form W-2.** Live iff `documents.w2 == Some(false)`.
+    ///
+    /// *"Even if you don't get a Form W-2, you must still report your earnings"*
+    /// (`i1040gi--2025.txt:2442-2444`). A class-(A) declaration: `None` blocks, and `Some(true)`
+    /// REFUSES ([`crate::tax::return_refuse::RefuseReason::WagesWithoutW2`]) naming Form 1040 line 1a,
+    /// because btctax has no surface for wages that arrive without the document.
+    #[serde(default)]
+    pub w2_wages_without_w2: Option<bool>,
+    /// ★★★ **R3 — interest or dividends with no Form 1099-INT / 1099-DIV.** Live iff **both**
+    /// `documents.int_1099` and `documents.div_1099` are `Some(false)`.
+    ///
+    /// Schedule B line 1 *"Report on line 1 all of your taxable interest"* (`i1040sb--2025.txt:56-58`);
+    /// Form 1040 line 3b *"if you received dividends not reported on Form 1099-DIV"*
+    /// (`i1040gi--2025.txt:2521`); and the seller-financed mortgage Schedule B asks for with the
+    /// buyer's SSN and address (`i1040sb--2025.txt:24, 77`).
+    ///
+    /// ★ Unlike its two siblings a `Yes` does **not** refuse — it OPENS
+    /// [`Self::schedule_b_filer_records`], because Schedule B lines 1 and 5 take exactly what those
+    /// rows carry. A `Yes` with no row refuses as UNANSWERED
+    /// ([`crate::tax::return_refuse::RefuseReason::FilerRecordsDeclaredNotTranscribed`]).
+    #[serde(default)]
+    pub interest_or_dividends_without_1099: Option<bool>,
+    /// ★★★ **R3 — a state or local income tax refund with no Form 1099-G.** Live iff
+    /// `documents.g_1099 == Some(false)`.
+    ///
+    /// *"Report any taxable refund you received even if you didn't receive Form 1099-G"*
+    /// (`i1040gi--2025.txt:41897-41898`). `Some(true)` REFUSES naming the **State and Local Income
+    /// Tax Refund Worksheet** — the same exit 1099-G box 2 takes.
+    #[serde(default)]
+    pub state_refund_without_1099g: Option<bool>,
+    /// ★★★ **R3/I1 — did you itemize on your PRIOR-YEAR return?** RETURN-LEVEL, never a `Form1099G`
+    /// row field, *because a gate may not ride on a row that might not exist*: the identical answer
+    /// is owed by a filer with no 1099-G at all, through [`Self::state_refund_without_1099g`].
+    ///
+    /// Live iff `state_refund_without_1099g == Some(true)` **or** any `g_1099[].box2_state_refund > 0`.
+    /// §111(a)'s tax-benefit rule: a `No` makes the refund non-taxable and Schedule 1 line 1 blank by
+    /// DECISION; a `Yes` refuses naming the State and Local Income Tax Refund Worksheet.
+    #[serde(default)]
+    pub itemized_prior_year: Option<bool>,
+    /// ★★★ **R5 — the filer's-records rows a `Yes` on [`Self::interest_or_dividends_without_1099`]
+    /// opens.** `Source::FilerRecords`, live iff that question is `Some(true)`, and non-empty is then
+    /// REQUIRED. See [`ScheduleBRecord`].
+    #[serde(default)]
+    pub schedule_b_filer_records: Vec<ScheduleBRecord>,
     #[serde(default)]
     pub answer_log: std::collections::BTreeMap<
         crate::tax::provenance::AnswerKey,
@@ -1472,6 +1658,15 @@ impl Default for ReturnInputs {
             div_1099: Vec::new(),
             g_1099: Vec::new(),
             b_1099: Vec::new(),
+            form_1098e: Vec::new(),
+            // ★★★ R3 — all `None`: a fresh return has been asked NOTHING about income that arrived
+            //     without its document either. A defaulted `Some(false)` here would be the same
+            //     laundering as a defaulted census row, one door further in.
+            w2_wages_without_w2: None,
+            interest_or_dividends_without_1099: None,
+            state_refund_without_1099g: None,
+            itemized_prior_year: None,
+            schedule_b_filer_records: Vec::new(),
             schedule_c: None,
             schedule_a: None,
             itemize_election: ItemizeElection::Auto,

@@ -2783,3 +2783,74 @@ fn no_code_path_pushes_the_4868_or_the_voucher_into_the_stapled_packet() {
     assert_eq!(btctax_forms::attachment_sequence("f4868", 2025), None);
     assert_eq!(btctax_forms::attachment_sequence("f1040v", 2025), None);
 }
+
+/// ★★★ **R4 / §4.4 / T5 — A DOCUMENT ROW WITH NO `transcribed_on` IS NAMED ON THE MANIFEST.**
+///
+/// *"A row that arrives by TOML with `transcribed_on = None` is not silently tidied away — the
+/// packet manifest prints it as **transcribed without a date**, because an absent date is a fact
+/// about the evidence, not the absence of a fact."*
+///
+/// Both halves, because either alone is satisfiable by a block that is always printed or never:
+/// a DATED row raises no block at all, and an UNDATED one is named with its issuer.
+#[test]
+fn the_manifest_names_a_document_row_transcribed_without_a_date_and_stays_silent_when_dated() {
+    use btctax_core::tax::return_inputs::{Form1099Int, Owner, W2};
+    let manifest_for = |dated: Option<time::Date>| {
+        let (_d, vault, out) = {
+            let (d, vault, out) = full_return_vault(&[], |ri| {
+                ri.w2s = vec![W2 {
+                    owner: Owner::Taxpayer,
+                    employer: "ACME".into(),
+                    box1_wages: dec!(40000),
+                    box2_fed_withheld: dec!(3000),
+                    box3_ss_wages: dec!(40000),
+                    box4_ss_withheld: dec!(2480),
+                    box5_medicare_wages: dec!(40000),
+                    box6_medicare_withheld: dec!(580),
+                    ..Default::default()
+                }];
+                ri.documents.set(
+                    btctax_core::tax::document_census::DocumentRow::Int1099,
+                    Some(true),
+                );
+                ri.int_1099 = vec![Form1099Int {
+                    payer: "First Bank".into(),
+                    box1_interest: dec!(200),
+                    transcribed_on: dated,
+                    ..Default::default()
+                }];
+            });
+            (d, vault, out)
+        };
+        cmd::admin::export_irs_pdf(
+            &vault,
+            &pp(),
+            out.path(),
+            2024,
+            &[],
+            None,
+            Default::default(),
+        )
+        .expect("a wage-and-interest packet exports");
+        std::fs::read_to_string(out.path().join("manifest.txt")).unwrap()
+    };
+
+    // (a) UNDATED — named, with the document, its row number and its payer.
+    let undated = manifest_for(None);
+    assert!(
+        undated.contains("TRANSCRIBED WITHOUT A DATE"),
+        "the manifest must carry the block: {undated}"
+    );
+    assert!(
+        undated.contains("Form 1099-INT #1 (First Bank) — transcribed without a date"),
+        "…naming the row and its issuer: {undated}"
+    );
+
+    // (b) DATED — no block at all. Without this half the block could be unconditional and the
+    //     assertion above would still pass.
+    let dated = manifest_for(Some(time::macros::date!(2026 - 02 - 03)));
+    assert!(
+        !dated.contains("TRANSCRIBED WITHOUT A DATE"),
+        "a dated row must raise nothing: {dated}"
+    );
+}

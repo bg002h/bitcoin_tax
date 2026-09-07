@@ -116,6 +116,8 @@
 //!   claim is *"every box the form PRINTS"*, and a limit nobody wrote down is a limit nobody can
 //!   check.
 
+use btctax_core::tax::return_refuse::RefuseReason;
+use btctax_input_form::{FieldId, SectionId};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -453,16 +455,80 @@ pub fn revision_in_force(stem: &str, tax_year: u32) -> Option<&'static str> {
 }
 
 /// What the return does with one printed box. Exactly one per caption — R4's *"`collected(FieldId)`,
-/// `refuse_if_nonzero(RefuseReason)` … or `not_read(reason)`"*, at the fidelity T2 can carry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// `refuse_if_nonzero(RefuseReason)` … or `not_read(reason)`"*.
+///
+/// ★★★ **T5 JOINED IT TO THE REGISTRY.** T2 landed the instrument with the decisions as PROSE —
+/// `Collected("Form1099Int.box1_interest → …")` — and said so in terms: *"the entries deliberately
+/// do not yet join to `FieldId` or `RefuseReason` variants — those are T5/T9's, and a join written
+/// before the variants exist would be a hand-list pretending to be a check."* T5 built the sections,
+/// so the variants exist and the join is now the real thing:
+///
+/// - a [`FieldId`] that does not exist **does not compile**;
+/// - a `FieldId` that is not a `Field` of that document's own section **reds**
+///   ([`tests::every_collected_box_names_a_field_of_its_own_section`]);
+/// - a [`RefuseReason`] variant that is deleted or renamed **does not compile**;
+/// - and the box's own printed CAPTION must appear in the field's label or help, so a box whose
+///   wording moved between revisions cannot keep pointing at a field that says something else.
+///
+/// ★ The prose survives as `note`, because the field name alone does not say WHICH LINE the box
+///   reaches, and that sentence is the whole reason a reader can audit the table.
+/// ★ NO `PartialEq`. [`Self::RefuseIfNonzero`] carries a `fn` pointer, and Rust's own
+/// `unpredictable_function_pointer_comparisons` lint says why comparing one is meaningless: two
+/// distinct constructors may be merged to the same address, and one constructor may have several.
+/// Nothing here needs decision equality — the census compares LABELS and CAPTIONS — so the type
+/// simply does not offer an operation that cannot be trusted.
+#[derive(Debug, Clone, Copy)]
 pub enum BoxDecision {
-    /// A field holds this box and its figure reaches a printed line. The string names the field.
-    Collected(&'static str),
-    /// A field holds this box **only in order to refuse on it** — nothing it carries reaches a line.
-    RefuseIfNonzero(&'static str),
+    /// One or more `Field`s of **this document's own section** hold the box, and its figure reaches
+    /// a printed line.
+    Collected {
+        fields: &'static [FieldId],
+        note: &'static str,
+    },
+    /// The box IS collected, but by `Field`s **outside** this document's row — the 1040 header
+    /// prints the employee's SSN once for the return rather than once per W-2, the W-2's box-12
+    /// slots are their own nested section, and Form 1098's box 1 is still a Schedule A leaf until
+    /// T9. Every id must still be a real `Field`, and NONE may belong to this document's own
+    /// section (or the entry should have been [`Self::Collected`]).
+    CollectedElsewhere {
+        fields: &'static [FieldId],
+        note: &'static str,
+    },
+    /// A `Field` of this document's section holds the box **only in order to refuse on it** —
+    /// nothing it carries reaches a line. `reason` is a constructor rather than a value because a
+    /// `&'static [BoxEntry]` cannot hold a type with drop glue; it is still the real variant, so
+    /// deleting it fails to compile.
+    RefuseIfNonzero {
+        field: FieldId,
+        reason: fn() -> RefuseReason,
+        note: &'static str,
+    },
     /// No field holds it. The string is the reason, and it is the whole value of the entry: it is what
     /// distinguishes *"the return has no use for this box"* from *"we forgot this box"*.
     NotRead(&'static str),
+}
+
+/// The `FormSpec` section that holds one document's ROWS, or `None` for a document with no section
+/// of its own yet.
+///
+/// ★ DERIVED from the stem, and exhaustive over the archived stems: a document added to
+/// [`DOCUMENTS`] with no arm here reds in [`tests::every_stem_maps_to_a_section_or_says_why`]
+/// rather than silently landing in the "no section" bucket.
+#[must_use]
+pub fn section_of_stem(stem: &str) -> Option<SectionId> {
+    match stem {
+        "fw2" => Some(SectionId::W2s),
+        "f1099int" => Some(SectionId::Int1099s),
+        "f1099div" => Some(SectionId::Div1099s),
+        "f1099b" => Some(SectionId::B1099s),
+        "f1099g" => Some(SectionId::G1099s),
+        "f1098e" => Some(SectionId::Form1098Es),
+        // ★ Form 1098 has no section until **T9**: its one collected box is still the Schedule A
+        //   scalar `mortgage_interest_1098`, so every one of its entries is `CollectedElsewhere` or
+        //   `NotRead`.
+        "f1098" => None,
+        _ => None,
+    }
 }
 
 /// One printed box, its caption as the form prints it, and the decision.
@@ -497,96 +563,103 @@ pub struct BoxEntry {
 pub const BOXES: &[BoxEntry] = &[
     // ── Form W-2 — 2024, 2025 and 2026 (29 / 29 / 30 printed boxes) ─────────────────────────────────
     BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "a", caption: "a Employee’s social security number",
-        decision: BoxDecision::Collected("header.taxpayer.ssn / header.spouse.ssn — the 1040 header prints it once for the return, not per W-2 row") },
+        decision: BoxDecision::CollectedElsewhere { fields: &[FieldId::TpSsn, FieldId::SpSsn], note: "header.taxpayer.ssn / header.spouse.ssn — the 1040 header prints it once for the return, not per W-2 row" } },
     BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "b", caption: "b Employer identification number (EIN)",
-        decision: BoxDecision::Collected("W2.ein — the only thing that can answer §6413(c)'s 'more than one employer' test") },
+        decision: BoxDecision::Collected { fields: &[FieldId::W2Ein], note: "W2.ein — the only thing that can answer §6413(c)'s 'more than one employer' test" } },
     BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "c", caption: "c Employer’s name, address, and ZIP code",
-        decision: BoxDecision::Collected("W2.employer") },
+        decision: BoxDecision::Collected { fields: &[FieldId::W2Employer], note: "W2.employer" } },
     BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "d", caption: "d Control number",
         decision: BoxDecision::NotRead("the employer's internal payroll number; no line of the return reads it") },
     BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "e", caption: "e Employee’s first name and initial",
-        decision: BoxDecision::Collected("header.taxpayer.name / header.spouse.name — printed once on the 1040 header") },
+        decision: BoxDecision::CollectedElsewhere { fields: &[FieldId::TpFirstName, FieldId::TpLastName, FieldId::SpFirstName, FieldId::SpLastName], note: "header.taxpayer.name / header.spouse.name — printed once on the 1040 header" } },
     BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "f", caption: "f Employee’s address and ZIP code",
-        decision: BoxDecision::Collected("header.address_street / address_city / address_state / address_zip") },
+        decision: BoxDecision::CollectedElsewhere { fields: &[FieldId::AddrStreet, FieldId::AddrCity, FieldId::AddrState, FieldId::AddrZip], note: "header.address_street / address_city / address_state / address_zip" } },
     BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "1", caption: "1 Wages, tips, other compensation",
-        decision: BoxDecision::Collected("W2.box1_wages → 1040 line 1a") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Box1Wages], note: "W2.box1_wages → 1040 line 1a" } },
     BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "2", caption: "2 Federal income tax withheld",
-        decision: BoxDecision::Collected("W2.box2_fed_withheld → 1040 line 25a") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Box2FedWh], note: "W2.box2_fed_withheld → 1040 line 25a" } },
     BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "3", caption: "3 Social security wages",
-        decision: BoxDecision::Collected("W2.box3_ss_wages → the per-earner SS cap and the excess-SS credit") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Box3SsWages], note: "W2.box3_ss_wages → the per-earner SS cap and the excess-SS credit" } },
     BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "4", caption: "4 Social security tax withheld",
-        decision: BoxDecision::Collected("W2.box4_ss_withheld → Schedule 3 line 11, excess social security") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Box4SsWh], note: "W2.box4_ss_withheld → Schedule 3 line 11, excess social security" } },
     BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "5", caption: "5 Medicare wages and tips",
-        decision: BoxDecision::Collected("W2.box5_medicare_wages → Form 8959 Part I") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Box5MedWages], note: "W2.box5_medicare_wages → Form 8959 Part I" } },
     BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "6", caption: "6 Medicare tax withheld",
-        decision: BoxDecision::Collected("W2.box6_medicare_withheld → Form 8959 Part V → 1040 line 25c") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Box6MedWh], note: "W2.box6_medicare_withheld → Form 8959 Part V → 1040 line 25c" } },
     BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "7", caption: "7 Social security tips",
-        decision: BoxDecision::Collected("W2.box7_ss_tips → the §6413(c) wage total, and Schedule 1-A line 4a's tips") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Box7SsTips], note: "W2.box7_ss_tips → the §6413(c) wage total, and Schedule 1-A line 4a's tips" } },
     BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "8", caption: "8 Allocated tips",
-        decision: BoxDecision::RefuseIfNonzero("W2.box8_allocated_tips — allocated tips are unreported income needing Form 4137; > 0 refuses") },
+        decision: BoxDecision::RefuseIfNonzero { field: FieldId::Box8AllocTips, reason: || RefuseReason::AllocatedTips, note: "W2.box8_allocated_tips — allocated tips are unreported income needing Form 4137; > 0 refuses" } },
     BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "9", caption: "9",
         decision: BoxDecision::NotRead("the 2025 revision prints box 9 shaded and CAPTIONLESS — there is no figure to collect; the box exists on the paper and is recorded so the census cannot silently gain a caption in a later revision") },
     BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "10", caption: "10 Dependent care benefits",
-        decision: BoxDecision::RefuseIfNonzero("W2.box10_dependent_care — dependent care benefits need Form 2441; > 0 refuses") },
+        decision: BoxDecision::RefuseIfNonzero { field: FieldId::Box10DepCare, reason: || RefuseReason::DependentCareBenefit, note: "W2.box10_dependent_care — dependent care benefits need Form 2441; > 0 refuses" } },
     BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "11", caption: "11 Nonqualified plans",
         decision: BoxDecision::NotRead("distributions from a nonqualified deferred compensation plan, already included in box 1 for income tax; the SSA reads it, no 1040 line does") },
     BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "12a", caption: "12a See instructions for box 12",
-        decision: BoxDecision::Collected("W2.box12 — a Vec<Box12Entry> of (code, amount), so all four printed slots are one repeating field") },
+        decision: BoxDecision::CollectedElsewhere { fields: &[FieldId::Box12Code, FieldId::Box12Amount], note: "W2.box12 — a Vec<Box12Entry> of (code, amount), so all four printed slots are one repeating field" } },
     BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "12b", caption: "12b",
-        decision: BoxDecision::Collected("W2.box12 — the second of the form's four printed slots; the label prints bare beside a vertical 'Code' rail") },
+        decision: BoxDecision::CollectedElsewhere { fields: &[FieldId::Box12Code, FieldId::Box12Amount], note: "W2.box12 — the second of the form's four printed slots; the label prints bare beside a vertical 'Code' rail" } },
     BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "12c", caption: "12c",
-        decision: BoxDecision::Collected("W2.box12 — the third printed slot") },
+        decision: BoxDecision::CollectedElsewhere { fields: &[FieldId::Box12Code, FieldId::Box12Amount], note: "W2.box12 — the third printed slot" } },
     BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "12d", caption: "12d",
-        decision: BoxDecision::Collected("W2.box12 — the fourth printed slot") },
+        decision: BoxDecision::CollectedElsewhere { fields: &[FieldId::Box12Code, FieldId::Box12Amount], note: "W2.box12 — the fourth printed slot" } },
     BoxEntry { stem: "fw2", editions: &["2024", "2025"], label: "13", caption: "13 Statutory",
-        decision: BoxDecision::NotRead("T5: R4 collects the three box-13 checkboxes, of which 'Statutory employee' refuses StatutoryEmployeeW2 naming Schedule C line 1 — a checked box 13 sends box 1 to Schedule C, not to 1040 line 1a. No field holds it at T2") },
+        decision: BoxDecision::Collected { fields: &[FieldId::W2Box13StatutoryEmployee],
+            note: "W2.box13_statutory_employee — the 'Statutory employee' checkbox. A checked box 13 sends box 1 to SCHEDULE C LINE 1, not to 1040 line 1a, so `true` refuses StatutoryEmployeeW2 rather than file the wages on the wrong line. ★ The other two checkboxes printed under the same label — 'Retirement plan' and 'Third-party sick pay' — reach no line btctax computes: the first qualifies the §219(g) IRA phase-out, and a claimed IRA deduction refuses outright (IraDeductionClaimed); the second is already inside box 1" } },
     BoxEntry { stem: "fw2", editions: &["2026"], label: "13", caption: "13 employee",
-        decision: BoxDecision::NotRead("T5: R4 collects the three box-13 checkboxes, of which 'Statutory employee' refuses StatutoryEmployeeW2 naming Schedule C line 1 — a checked box 13 sends box 1 to Schedule C, not to 1040 line 1a. No field holds it at T2") },
+        decision: BoxDecision::Collected { fields: &[FieldId::W2Box13StatutoryEmployee],
+            note: "W2.box13_statutory_employee — the same checkbox as the 2024/2025 grid, whose caption the 2026 layout wraps one word later ('13 Statutory' / '13 employee'). The split is visible here precisely so the wrap cannot be mistaken for a new box" } },
     BoxEntry { stem: "fw2", editions: &["2024", "2025"], label: "14", caption: "14 Other",
         decision: BoxDecision::NotRead("free-text employer reporting; nothing reaches a line until the filer identifies the item, and the residual scope attestation covers what they cannot") },
     BoxEntry { stem: "fw2", editions: &["2026"], label: "14a", caption: "14a Other",
         decision: BoxDecision::NotRead("free-text employer reporting; nothing reaches a line until the filer identifies the item, and the residual scope attestation covers what they cannot") },
     BoxEntry { stem: "fw2", editions: &["2026"], label: "14b", caption: "14b Treasury Tipped Occupation Code(s)",
-        decision: BoxDecision::NotRead("T5: the Treasury Tipped Occupation Code(s) the 2026 revision added beside box 14a. It says whether box 7's tips came from a qualifying occupation, which is what Schedule 1-A line 4a's tips deduction turns on — a code, not an amount, and no field holds it at T2") },
+        decision: BoxDecision::Collected { fields: &[FieldId::W2Box14bTtoc],
+            note: "W2.box14b_treasury_tipped_occupation_codes — the Treasury Tipped Occupation Code(s) the 2026 revision added beside box 14a. It is the employer's statement of the occupation the tips were earned in, which is exactly what Schedule 1-A Part II's own Caution turns on: 'These tips must have been received in an occupation listed at IRS.gov/TippedOccupations.' A CODE, never an amount, so it reaches no line by arithmetic — its reader is Advisory::TipsDeductionForgoneWithTtoc, which fires when a W-2 carries a code and the return claims no qualified tips. The overstatement direction, so §3.4 makes it an advisory and never a refusal" } },
     BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "15", caption: "15 State",
         decision: BoxDecision::NotRead("the state's two-letter code and the employer's state ID number; the federal return prints neither") },
     BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "16", caption: "16 State wages, tips, etc.",
         decision: BoxDecision::NotRead("state wages; no federal line reads a state wage figure") },
     BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "17", caption: "17 State income tax",
-        decision: BoxDecision::Collected("W2.box17_state_tax_withheld → Schedule A line 5a on the income-tax election") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Box17StateWh], note: "W2.box17_state_tax_withheld → Schedule A line 5a on the income-tax election" } },
     BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "18", caption: "18 Local wages, tips, etc.",
         decision: BoxDecision::NotRead("local wages; no federal line reads a local wage figure") },
     BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "19", caption: "19 Local income tax",
-        decision: BoxDecision::Collected("W2.box19_local_tax → Schedule A line 5a") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Box19LocalTax], note: "W2.box19_local_tax → Schedule A line 5a" } },
     BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "20", caption: "20 Locality name",
         decision: BoxDecision::NotRead("the locality's name; Schedule A line 5a takes the amount, never the locality") },
     // ── Form 1099-INT (Rev. January 2024) — 17 boxes; still in force for TY2026 ─────────────────────
     BoxEntry { stem: "f1099int", editions: &["2024"], label: "1", caption: "1 Interest income",
-        decision: BoxDecision::Collected("Form1099Int.box1_interest → Schedule B line 1 → 1040 line 2b") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Int1099Box1Interest], note: "Form1099Int.box1_interest → Schedule B line 1 → 1040 line 2b" } },
     BoxEntry { stem: "f1099int", editions: &["2024"], label: "2", caption: "2 Early withdrawal penalty",
-        decision: BoxDecision::Collected("Form1099Int.box2_early_withdrawal_penalty → Schedule 1 line 18") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Int1099Box2EarlyWithdrawal], note: "Form1099Int.box2_early_withdrawal_penalty → Schedule 1 line 18" } },
     BoxEntry { stem: "f1099int", editions: &["2024"], label: "3", caption: "3 Interest on U.S. Savings Bonds and Treasury obligations",
-        decision: BoxDecision::Collected("Form1099Int.box3_treasury_interest → 1040 line 2b") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Int1099Box3Treasury], note: "Form1099Int.box3_treasury_interest → 1040 line 2b" } },
     BoxEntry { stem: "f1099int", editions: &["2024"], label: "4", caption: "4 Federal income tax withheld",
-        decision: BoxDecision::Collected("Form1099Int.box4_fed_withheld → 1040 line 25b") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Int1099Box4FedWithheld], note: "Form1099Int.box4_fed_withheld → 1040 line 25b" } },
     BoxEntry { stem: "f1099int", editions: &["2024"], label: "5", caption: "5 Investment expenses",
         decision: BoxDecision::NotRead("a miscellaneous itemized deduction, suspended for 2018–2025 by §67(g); no Schedule A line takes it") },
     BoxEntry { stem: "f1099int", editions: &["2024"], label: "6", caption: "6 Foreign tax paid",
-        decision: BoxDecision::Collected("Form1099Int.box6_foreign_tax → the §904(j) foreign tax credit election on Schedule 3 line 1") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Int1099Box6ForeignTax], note: "Form1099Int.box6_foreign_tax → the §904(j) foreign tax credit election on Schedule 3 line 1" } },
     BoxEntry { stem: "f1099int", editions: &["2024"], label: "7", caption: "7 Foreign country or U.S. territory",
         decision: BoxDecision::NotRead("the country's name; the §904(j) election reads the AMOUNT in box 6 and Form 1116 — which would read the country — is out of scope") },
     BoxEntry { stem: "f1099int", editions: &["2024"], label: "8", caption: "8 Tax-exempt interest",
-        decision: BoxDecision::Collected("Form1099Int.box8_tax_exempt_interest → 1040 line 2a") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Int1099Box8TaxExempt], note: "Form1099Int.box8_tax_exempt_interest → 1040 line 2a" } },
     BoxEntry { stem: "f1099int", editions: &["2024"], label: "9", caption: "9 Specified private activity bond",
-        decision: BoxDecision::RefuseIfNonzero("Form1099Int.box9_private_activity_bond_amt — a Form 6251 line 2g AMT preference; > 0 refuses") },
+        decision: BoxDecision::RefuseIfNonzero { field: FieldId::Int1099Box9PrivateActivity, reason: || RefuseReason::PrivateActivityBondAmt, note: "Form1099Int.box9_private_activity_bond_amt — a Form 6251 line 2g AMT preference; > 0 refuses" } },
     BoxEntry { stem: "f1099int", editions: &["2024"], label: "10", caption: "10 Market discount",
-        decision: BoxDecision::NotRead("T5: R4 collects it to Schedule B line 1 and the 1040 line 2b sum — i1040sb, 'Also include any accrued market discount that is includible in income'. Income, so the understatement direction; no field holds it at T2") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Int1099Box10MarketDiscount],
+            note: "Form1099Int.box10_market_discount → Schedule B line 1 and the 1040 line 2b sum — i1040sb, 'Also include any accrued market discount that is includible in income'. Income, so omitting it UNDERSTATES" } },
     BoxEntry { stem: "f1099int", editions: &["2024"], label: "11", caption: "11 Bond premium",
-        decision: BoxDecision::NotRead("T5: R4 refuses on > 0 (AmortizableBondPremiumNotComputed), naming the amortizable-bond-premium adjustment and Pub. 550. A reduction, so refusing is both the conservative and the honest direction; no field holds it at T2") },
+        decision: BoxDecision::RefuseIfNonzero { field: FieldId::Int1099Box11BondPremium, reason: || RefuseReason::AmortizableBondPremiumNotComputed,
+            note: "Form1099Int.box11_bond_premium — §171 amortizable bond premium REDUCES reported interest through a named Schedule B line-1 adjustment (Pub. 550), which btctax does not compute. A reduction, so refusing is both the conservative and the honest direction: dropping it would report more interest than the filer owes tax on" } },
     BoxEntry { stem: "f1099int", editions: &["2024"], label: "12", caption: "12 Bond premium on Treasury obligations",
-        decision: BoxDecision::NotRead("T5: as box 11 — refuses on > 0 until the bond-premium adjustment is transcribed") },
+        decision: BoxDecision::RefuseIfNonzero { field: FieldId::Int1099Box12BondPremiumTreasury, reason: || RefuseReason::AmortizableBondPremiumNotComputed,
+            note: "Form1099Int.box12_bond_premium_treasury — as box 11: a §171 reduction btctax does not compute, so any amount refuses" } },
     BoxEntry { stem: "f1099int", editions: &["2024"], label: "13", caption: "13 Bond premium on tax-exempt bond",
-        decision: BoxDecision::NotRead("T5: as box 11 — refuses on > 0 until the bond-premium adjustment is transcribed") },
+        decision: BoxDecision::RefuseIfNonzero { field: FieldId::Int1099Box13BondPremiumTaxExempt, reason: || RefuseReason::AmortizableBondPremiumNotComputed,
+            note: "Form1099Int.box13_bond_premium_tax_exempt — as box 11: a §171 reduction btctax does not compute, so any amount refuses" } },
     BoxEntry { stem: "f1099int", editions: &["2024"], label: "14", caption: "14 Tax-exempt and tax credit",
         decision: BoxDecision::NotRead("the tax-exempt and tax credit bond CUSIP number — an identifier, not an amount") },
     BoxEntry { stem: "f1099int", editions: &["2024"], label: "15", caption: "15 State",
@@ -597,17 +670,17 @@ pub const BOXES: &[BoxEntry] = &[
         decision: BoxDecision::NotRead("state income tax the payer withheld; Schedule A line 5a is collected from the W-2 and the filer's records, and no Form1099Int field holds this box") },
     // ── Form 1099-DIV (Rev. January 2024) — 22 boxes; still in force for TY2026 ─────────────────────
     BoxEntry { stem: "f1099div", editions: &["2024"], label: "1a", caption: "1a Total ordinary dividends",
-        decision: BoxDecision::Collected("Form1099Div.box1a_ordinary → 1040 line 3b (it INCLUDES box 1b)") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Div1099Box1aOrdinary], note: "Form1099Div.box1a_ordinary → 1040 line 3b (it INCLUDES box 1b)" } },
     BoxEntry { stem: "f1099div", editions: &["2024"], label: "1b", caption: "1b Qualified dividends",
-        decision: BoxDecision::Collected("Form1099Div.box1b_qualified → 1040 line 3a, the preferential-rate slice") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Div1099Box1bQualified], note: "Form1099Div.box1b_qualified → 1040 line 3a, the preferential-rate slice" } },
     BoxEntry { stem: "f1099div", editions: &["2024"], label: "2a", caption: "2a Total capital gain distr.",
-        decision: BoxDecision::Collected("Form1099Div.box2a_capgain_distr → Schedule D line 13") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Div1099Box2aCapGain], note: "Form1099Div.box2a_capgain_distr → Schedule D line 13" } },
     BoxEntry { stem: "f1099div", editions: &["2024"], label: "2b", caption: "2b Unrecap. Sec. 1250 gain",
-        decision: BoxDecision::RefuseIfNonzero("Form1099Div.box2b_unrecap_1250 — the 25% rate group needs the Schedule D unrecaptured-gain worksheet; > 0 refuses") },
+        decision: BoxDecision::RefuseIfNonzero { field: FieldId::Div1099Box2bUnrecap1250, reason: || RefuseReason::UnrecapturedOrSpecialRateGain, note: "Form1099Div.box2b_unrecap_1250 — the 25% rate group needs the Schedule D unrecaptured-gain worksheet; > 0 refuses" } },
     BoxEntry { stem: "f1099div", editions: &["2024"], label: "2c", caption: "2c Section 1202 gain",
-        decision: BoxDecision::RefuseIfNonzero("Form1099Div.box2c_section_1202 — qualified small business stock exclusion; > 0 refuses") },
+        decision: BoxDecision::RefuseIfNonzero { field: FieldId::Div1099Box2cSection1202, reason: || RefuseReason::UnrecapturedOrSpecialRateGain, note: "Form1099Div.box2c_section_1202 — qualified small business stock exclusion; > 0 refuses" } },
     BoxEntry { stem: "f1099div", editions: &["2024"], label: "2d", caption: "2d Collectibles (28%) gain",
-        decision: BoxDecision::RefuseIfNonzero("Form1099Div.box2d_collectibles_28 — the 28% rate group; > 0 refuses") },
+        decision: BoxDecision::RefuseIfNonzero { field: FieldId::Div1099Box2dCollectibles, reason: || RefuseReason::UnrecapturedOrSpecialRateGain, note: "Form1099Div.box2d_collectibles_28 — the 28% rate group; > 0 refuses" } },
     BoxEntry { stem: "f1099div", editions: &["2024"], label: "2e", caption: "2e Section 897 ordinary dividends",
         decision: BoxDecision::NotRead("§897 (FIRPTA) reporting, which the instructions address to foreign persons; for a U.S. filer the amount is already inside box 1a and reaches no line of its own") },
     BoxEntry { stem: "f1099div", editions: &["2024"], label: "2f", caption: "2f Section 897 capital gain",
@@ -615,13 +688,13 @@ pub const BOXES: &[BoxEntry] = &[
     BoxEntry { stem: "f1099div", editions: &["2024"], label: "3", caption: "3 Nondividend distributions",
         decision: BoxDecision::NotRead("R4's decision: it reduces basis and does not reach a line this year; Pub. 550") },
     BoxEntry { stem: "f1099div", editions: &["2024"], label: "4", caption: "4 Federal income tax withheld",
-        decision: BoxDecision::Collected("Form1099Div.box4_fed_withheld → 1040 line 25b") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Div1099Box4FedWithheld], note: "Form1099Div.box4_fed_withheld → 1040 line 25b" } },
     BoxEntry { stem: "f1099div", editions: &["2024"], label: "5", caption: "5 Section 199A dividends",
-        decision: BoxDecision::Collected("Form1099Div.box5_section_199a → the QBI deduction (Form 8995 line 6)") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Div1099Box5Section199a], note: "Form1099Div.box5_section_199a → the QBI deduction (Form 8995 line 6)" } },
     BoxEntry { stem: "f1099div", editions: &["2024"], label: "6", caption: "6 Investment expenses",
         decision: BoxDecision::NotRead("a miscellaneous itemized deduction, suspended for 2018–2025 by §67(g)") },
     BoxEntry { stem: "f1099div", editions: &["2024"], label: "7", caption: "7 Foreign tax paid",
-        decision: BoxDecision::Collected("Form1099Div.box7_foreign_tax → the §904(j) foreign tax credit election on Schedule 3 line 1") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Div1099Box7ForeignTax], note: "Form1099Div.box7_foreign_tax → the §904(j) foreign tax credit election on Schedule 3 line 1" } },
     BoxEntry { stem: "f1099div", editions: &["2024"], label: "8", caption: "8 Foreign country or U.S. possession",
         decision: BoxDecision::NotRead("the country's name; the §904(j) election reads the AMOUNT in box 7") },
     BoxEntry { stem: "f1099div", editions: &["2024"], label: "9", caption: "9 Cash liquidation distributions",
@@ -631,9 +704,9 @@ pub const BOXES: &[BoxEntry] = &[
     BoxEntry { stem: "f1099div", editions: &["2024"], label: "11", caption: "11 FATCA filing",
         decision: BoxDecision::NotRead("the FATCA filing requirement checkbox — a chapter 4 obligation of the PAYER; no line of the filer's return reads it") },
     BoxEntry { stem: "f1099div", editions: &["2024"], label: "12", caption: "12 Exempt-interest dividends",
-        decision: BoxDecision::Collected("Form1099Div.box12_exempt_interest_dividends → 1040 line 2a") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Div1099Box12ExemptInterest], note: "Form1099Div.box12_exempt_interest_dividends → 1040 line 2a" } },
     BoxEntry { stem: "f1099div", editions: &["2024"], label: "13", caption: "13 Specified private activity",
-        decision: BoxDecision::RefuseIfNonzero("Form1099Div.box13_private_activity_amt — specified private activity bond interest dividends, a Form 6251 AMT preference; > 0 refuses") },
+        decision: BoxDecision::RefuseIfNonzero { field: FieldId::Div1099Box13PrivateActivity, reason: || RefuseReason::PrivateActivityBondAmt, note: "Form1099Div.box13_private_activity_amt — specified private activity bond interest dividends, a Form 6251 AMT preference; > 0 refuses" } },
     BoxEntry { stem: "f1099div", editions: &["2024"], label: "14", caption: "14 State",
         decision: BoxDecision::NotRead("the state's two-letter code; the federal return prints none") },
     BoxEntry { stem: "f1099div", editions: &["2024"], label: "15", caption: "15 State identification no.",
@@ -642,13 +715,14 @@ pub const BOXES: &[BoxEntry] = &[
         decision: BoxDecision::NotRead("state income tax the payer withheld; no Form1099Div field holds it") },
     // ── Form 1099-G — Rev. March 2024 (12 boxes) and Rev. December 2026 (13: box 10 is NEW) ─────────
     BoxEntry { stem: "f1099g", editions: &["2024", "2026"], label: "1", caption: "1 Unemployment compensation",
-        decision: BoxDecision::Collected("Form1099G.box1_unemployment → Schedule 1 line 7") },
+        decision: BoxDecision::Collected { fields: &[FieldId::G1099Box1Unemployment], note: "Form1099G.box1_unemployment → Schedule 1 line 7" } },
     BoxEntry { stem: "f1099g", editions: &["2024", "2026"], label: "2", caption: "2 State or local income tax",
-        decision: BoxDecision::NotRead("T5: §5.2 adds Form1099G.box2_state_refund, and the RETURN-LEVEL itemized_prior_year gate decides Schedule 1 line 1 — No ⇒ blank by decision, Yes ⇒ refuse naming the State and Local Income Tax Refund Worksheet. No field holds it at T2") },
+        decision: BoxDecision::Collected { fields: &[FieldId::G1099Box2StateRefund],
+            note: "Form1099G.box2_state_refund → Schedule 1 line 1, through the RETURN-LEVEL itemized_prior_year gate (R3/I1 — a gate may not ride on a row that might not exist). §111(a): No ⇒ no tax benefit ⇒ line 1 blank BY DECISION; Yes ⇒ refuse naming the State and Local Income Tax Refund Worksheet, which btctax does not compute" } },
     BoxEntry { stem: "f1099g", editions: &["2024", "2026"], label: "3", caption: "3 Box 2 amount is for tax year",
         decision: BoxDecision::NotRead("the tax year box 2's refund relates to; it is read by the State and Local Income Tax Refund Worksheet, which is not transcribed (owner Q1)") },
     BoxEntry { stem: "f1099g", editions: &["2024", "2026"], label: "4", caption: "4 Federal income tax withheld",
-        decision: BoxDecision::Collected("Form1099G.box4_fed_withheld → 1040 line 25b") },
+        decision: BoxDecision::Collected { fields: &[FieldId::G1099Box4FedWithheld], note: "Form1099G.box4_fed_withheld → 1040 line 25b" } },
     BoxEntry { stem: "f1099g", editions: &["2024", "2026"], label: "5", caption: "5 RTAA payments",
         decision: BoxDecision::NotRead("Reemployment Trade Adjustment Assistance, Schedule 1 line 8z; btctax models no line 8z inflow and the residual scope attestation names what it cannot take") },
     BoxEntry { stem: "f1099g", editions: &["2024", "2026"], label: "6", caption: "6 Taxable grants",
@@ -656,11 +730,11 @@ pub const BOXES: &[BoxEntry] = &[
     BoxEntry { stem: "f1099g", editions: &["2024", "2026"], label: "7", caption: "7 Agriculture payments",
         decision: BoxDecision::NotRead("Schedule F income; farm income is an excluded family (§2.2) and its census row refuses") },
     BoxEntry { stem: "f1099g", editions: &["2024", "2026"], label: "8", caption: "8 Check if box 2 is",
-        decision: BoxDecision::NotRead("the checkbox saying box 2 is trade or business income; it qualifies box 2, which is T5's") },
+        decision: BoxDecision::NotRead("the checkbox saying box 2's refund is of a tax on TRADE OR BUSINESS income. It qualifies box 2 — which btctax collects — but the qualification only matters to a filer with a Schedule C whose state tax was a business expense, and btctax takes Schedule C expenses as a flat total it never itemizes. The §111(a) gate reads the AMOUNT in box 2, never this box") },
     BoxEntry { stem: "f1099g", editions: &["2024", "2026"], label: "9", caption: "9 Market gain",
         decision: BoxDecision::NotRead("CCC loan market gain, Schedule F; farm income is an excluded family (§2.2)") },
     BoxEntry { stem: "f1099g", editions: &["2026"], label: "10", caption: "10 Family leave benefits",
-        decision: BoxDecision::RefuseIfNonzero("T5: paid family leave benefits — an INCOME box the Rev. December 2026 grid added, reportable on Schedule 1. No field holds it and no line reads it, so > 0 REFUSES until T5 decides the line: an income box with no reader understates, and this fails closed instead") },
+        decision: BoxDecision::RefuseIfNonzero { field: FieldId::G1099Box10FamilyLeave, reason: || RefuseReason::FamilyLeaveBenefits, note: "T5: paid family leave benefits — an INCOME box the Rev. December 2026 grid added, reportable on Schedule 1. No field holds it and no line reads it, so > 0 REFUSES until T5 decides the line: an income box with no reader understates, and this fails closed instead" } },
     BoxEntry { stem: "f1099g", editions: &["2024"], label: "10a", caption: "10a State",
         decision: BoxDecision::NotRead("the state's two-letter code; the federal return prints none") },
     BoxEntry { stem: "f1099g", editions: &["2024"], label: "10b", caption: "10b State identification no.",
@@ -681,15 +755,15 @@ pub const BOXES: &[BoxEntry] = &[
     BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "1c", caption: "1c Date sold or disposed",
         decision: BoxDecision::NotRead("per-transaction, and Schedule D lines 1a/8a carry no dates; a row needing Form 8949 is refused") },
     BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "1d", caption: "1d Proceeds",
-        decision: BoxDecision::Collected("Form1099B.short_term_proceeds / long_term_proceeds → Schedule D line 1a(d) / 8a(d)") },
+        decision: BoxDecision::Collected { fields: &[FieldId::B1099ShortTermProceeds, FieldId::B1099LongTermProceeds], note: "Form1099B.short_term_proceeds / long_term_proceeds → Schedule D line 1a(d) / 8a(d)" } },
     BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "1e", caption: "1e Cost or other basis",
-        decision: BoxDecision::Collected("Form1099B.short_term_basis / long_term_basis → Schedule D line 1a(e) / 8a(e)") },
+        decision: BoxDecision::Collected { fields: &[FieldId::B1099ShortTermBasis, FieldId::B1099LongTermBasis], note: "Form1099B.short_term_basis / long_term_basis → Schedule D line 1a(e) / 8a(e)" } },
     BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "1f", caption: "1f Accrued market discount",
         decision: BoxDecision::NotRead("an ADJUSTMENT: a row carrying one fails basis_reported_and_no_adjustments, so the gate refuses Form1099BNeedsForm8949 rather than dropping the figure") },
     BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "1g", caption: "1g Wash sale loss disallowed",
         decision: BoxDecision::NotRead("an ADJUSTMENT: the row fails the 1a/8a gate and is refused to Form 8949") },
     BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "2", caption: "2 Short-term gain or loss",
-        decision: BoxDecision::Collected("Form1099B's short_term_* vs long_term_* pair — the box decides WHICH Schedule D lines a row's totals reach") },
+        decision: BoxDecision::Collected { fields: &[FieldId::B1099ShortTermProceeds, FieldId::B1099ShortTermBasis, FieldId::B1099LongTermProceeds, FieldId::B1099LongTermBasis], note: "Form1099B's short_term_* vs long_term_* pair — the box decides WHICH Schedule D lines a row's totals reach" } },
     BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "3", caption: "3 Check if proceeds from:",
         decision: BoxDecision::NotRead("collectibles or QOF proceeds; either is an adjustment case the gate refuses to Form 8949") },
     BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "4", caption: "4 Federal income tax withheld",
@@ -711,7 +785,7 @@ pub const BOXES: &[BoxEntry] = &[
     BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "11", caption: "11 Aggregate profit or (loss)",
         decision: BoxDecision::NotRead("the §1256 aggregate, Form 6781; an excluded family (§2.2)") },
     BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "12", caption: "12 Check if basis reported to",
-        decision: BoxDecision::Collected("Form1099B.basis_reported_and_no_adjustments — the first half of the gate Schedule D lines 1a/8a require") },
+        decision: BoxDecision::Collected { fields: &[FieldId::B1099BasisReportedNoAdjustments], note: "Form1099B.basis_reported_and_no_adjustments — the first half of the gate Schedule D lines 1a/8a require" } },
     BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "13", caption: "13 Bartering",
         decision: BoxDecision::NotRead("barter exchange income, which reaches Schedule 1 line 8z or Schedule C; btctax models no line 8z inflow") },
     BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "14", caption: "14 State name",
@@ -722,7 +796,7 @@ pub const BOXES: &[BoxEntry] = &[
         decision: BoxDecision::NotRead("state income tax withheld; no Form1099B field holds it") },
     // ── Form 1098 — Rev. January 2022 and Rev. April 2025 (11 boxes each) ───────────────────────────
     BoxEntry { stem: "f1098", editions: &["2022", "2025"], label: "1", caption: "1 Mortgage interest received from payer(s)/borrower(s)",
-        decision: BoxDecision::Collected("ScheduleAInputs.mortgage_interest_1098 → Schedule A line 8a; §5.2 replaces it with Form1098.box1_interest in T9") },
+        decision: BoxDecision::CollectedElsewhere { fields: &[FieldId::SaMortgage1098], note: "ScheduleAInputs.mortgage_interest_1098 → Schedule A line 8a; §5.2 replaces it with Form1098.box1_interest in T9" } },
     BoxEntry { stem: "f1098", editions: &["2022", "2025"], label: "2", caption: "2 Outstanding mortgage",
         decision: BoxDecision::NotRead("T9: Form1098.box2_outstanding_principal feeds the AGGREGATE, status-adjusted §163(h)(3)(B) ceiling check; no field holds it at T2") },
     BoxEntry { stem: "f1098", editions: &["2022", "2025"], label: "3", caption: "3 Mortgage origination date",
@@ -745,7 +819,8 @@ pub const BOXES: &[BoxEntry] = &[
         decision: BoxDecision::NotRead("the mortgage ACQUISITION date — when the present lender acquired the loan, printed only on a transferred mortgage. The §163(h)(3)(B) ceiling test reads box 3, the ORIGINATION date, so this box reaches no line") },
     // ── Form 1098-E — 2024, 2025 and 2026 (2 boxes each) ────────────────────────────────────────────
     BoxEntry { stem: "f1098e", editions: &["2024", "2025", "2026"], label: "1", caption: "1 Student loan interest received by lender",
-        decision: BoxDecision::Collected("Schedule1Inputs.student_loan_interest_paid → Schedule 1 line 21; §5.2 replaces it with Form1098E.box1_interest in T5") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Form1098eBox1Interest],
+            note: "Form1098E.box1_interest → Schedule 1 line 21 (§221), as the SUM over every transcribed row. It replaced the `sch1.student_loan_interest_paid` scalar at T5: a bare Usd with no lender, no TIN and no transcription date made $0 indistinguishable from 'never asked'" } },
     BoxEntry { stem: "f1098e", editions: &["2024", "2025", "2026"], label: "2", caption: "2 Check if box 1 does not include loan origination fees",
         decision: BoxDecision::NotRead("a qualifier on box 1 for loans made before September 1, 2004: it says the lender left origination fees and capitalized interest OUT. Schedule 1 line 21 takes the box-1 amount as printed, and btctax does not compute the omitted fees") },
 ];
@@ -1087,8 +1162,10 @@ pub fn run() -> Result<(), String> {
         let (mut collected, mut refusing, mut unread) = (0, 0, 0);
         for b in &in_scope {
             match b.decision {
-                BoxDecision::Collected(_) => collected += 1,
-                BoxDecision::RefuseIfNonzero(_) => refusing += 1,
+                BoxDecision::Collected { .. } | BoxDecision::CollectedElsewhere { .. } => {
+                    collected += 1;
+                }
+                BoxDecision::RefuseIfNonzero { .. } => refusing += 1,
                 BoxDecision::NotRead(_) => unread += 1,
             }
         }
@@ -1105,6 +1182,15 @@ pub fn run() -> Result<(), String> {
         }
         total += printed.len();
         decided += in_scope.len();
+    }
+    // ★★★ R4 / T5 — THE JOIN, checked by the command a human types when a form changes.
+    let join = field_join_failures();
+    if !join.is_empty() {
+        failures.push(format!(
+            "the box → FieldId join failed on {} entr(ies):\n  {}",
+            join.len(),
+            join.join("\n  ")
+        ));
     }
     if !failures.is_empty() {
         return Err(format!(
@@ -1124,6 +1210,195 @@ pub fn run() -> Result<(), String> {
             .len()
     );
     Ok(())
+}
+
+// ── ★★★ R4 / T5 — THE JOIN: a box decision, the form registry, and the printed caption ──────────
+
+/// Every `Field` of `form_spec()`, as `(SectionId, FieldId)` — the structure the census joins to.
+#[must_use]
+pub fn form_fields() -> Vec<(SectionId, FieldId)> {
+    btctax_input_form::form_spec()
+        .iter()
+        .flat_map(|s| s.fields.iter().map(move |f| (s.id, f.id)))
+        .collect()
+}
+
+/// The words a `Field` puts in front of the filer — its label and its help, run together.
+#[must_use]
+pub fn field_words(id: FieldId) -> Option<String> {
+    btctax_input_form::form_spec().iter().find_map(|s| {
+        s.fields
+            .iter()
+            .find(|f| f.id == id)
+            .map(|f| format!("{} {}", f.label, f.help))
+    })
+}
+
+/// A caption or a field's words, reduced to what a comparison can honestly be made on: lowercase,
+/// single-spaced, and with the typographic apostrophe folded to the ASCII one.
+///
+/// ★ The fold is not cosmetic. The IRS extracts print `Employee’s`, and a Rust source literal
+/// naturally carries `Employee's`; comparing them raw would make the check fail on a difference no
+/// reader would call a difference, and the usual repair for that is to delete the check.
+#[must_use]
+pub fn normalize(s: &str) -> String {
+    s.replace(['\u{2019}', '\u{2018}'], "'")
+        .to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The caption's own WORDS — the caption with its leading label stripped. `None` when the caption is
+/// nothing but the label (the W-2's shaded box 9 and its bare `12b`/`12c`/`12d` slots), which is a
+/// real answer and not a failure: there is no wording to check.
+#[must_use]
+pub fn caption_words(entry: &BoxEntry) -> Option<String> {
+    let rest = entry.caption.strip_prefix(entry.label)?.trim();
+    (!rest.is_empty()).then(|| normalize(rest))
+}
+
+/// ★★★ **THE JOIN, AS A CHECK THE COMMAND ITSELF RUNS.**
+///
+/// Every failure the census's own decisions can carry, in one pass:
+/// - a `Collected`/`RefuseIfNonzero` naming a `FieldId` that is not a `Field` of the document's OWN
+///   section (a `FieldId` that does not exist cannot compile);
+/// - a `CollectedElsewhere` naming one that IS on the document's own row (say `Collected`, or the
+///   distinction stops meaning anything);
+/// - a collected box whose printed CAPTION appears in none of the fields that collect it — the
+///   revision-drift case a caption-only census cannot see;
+/// - a `NotRead` with an empty reason, which is *"we forgot this box"* with extra steps.
+///
+/// ★ It runs inside [`run`] rather than only in a test, because `xtask box-census` is what a human
+///   types when they change a form, and a check that only the suite performs is a check they meet a
+///   round late.
+#[must_use]
+pub fn field_join_failures() -> Vec<String> {
+    let fields = form_fields();
+    let sections_of = |id: FieldId| -> Vec<SectionId> {
+        fields
+            .iter()
+            .filter(|(_, f)| *f == id)
+            .map(|(s, _)| *s)
+            .collect()
+    };
+    let mut bad = Vec::new();
+    for b in BOXES {
+        let own = section_of_stem(b.stem);
+        let words = caption_words(b);
+        // The fields that must carry the box's own printed words, if any.
+        let mut carriers: Vec<FieldId> = Vec::new();
+        match b.decision {
+            BoxDecision::Collected { fields: fs, note } => {
+                if note.trim().is_empty() {
+                    bad.push(format!(
+                        "{}/{}: a Collected entry with no note",
+                        b.stem, b.label
+                    ));
+                }
+                let Some(section) = own else {
+                    bad.push(format!(
+                        "{}/{}: `Collected` needs the document's OWN section, and {} has none —                          use `CollectedElsewhere`",
+                        b.stem, b.label, b.stem
+                    ));
+                    continue;
+                };
+                if fs.is_empty() {
+                    bad.push(format!("{}/{}: Collected names no field", b.stem, b.label));
+                }
+                for f in fs {
+                    let secs = sections_of(*f);
+                    if secs.is_empty() {
+                        bad.push(format!(
+                            "{}/{}: {f:?} is not a Field of the form spec",
+                            b.stem, b.label
+                        ));
+                    } else if !secs.contains(&section) {
+                        bad.push(format!(
+                            "{}/{}: {f:?} is in {secs:?}, not in this document's own section                              ({section:?}) — a box collected somewhere else is                              `CollectedElsewhere`, with the reason said out loud",
+                            b.stem, b.label
+                        ));
+                    }
+                }
+                carriers = fs.to_vec();
+            }
+            BoxDecision::CollectedElsewhere { fields: fs, note } => {
+                if note.trim().is_empty() {
+                    bad.push(format!(
+                        "{}/{}: a CollectedElsewhere entry with no note — the note IS the reason it                          is elsewhere",
+                        b.stem, b.label
+                    ));
+                }
+                if fs.is_empty() {
+                    bad.push(format!(
+                        "{}/{}: CollectedElsewhere names no field",
+                        b.stem, b.label
+                    ));
+                }
+                for f in fs {
+                    let secs = sections_of(*f);
+                    if secs.is_empty() {
+                        bad.push(format!(
+                            "{}/{}: {f:?} is not a Field of the form spec",
+                            b.stem, b.label
+                        ));
+                    } else if own.is_some_and(|o| secs.contains(&o)) {
+                        bad.push(format!(
+                            "{}/{}: {f:?} IS in this document's own section — say `Collected`",
+                            b.stem, b.label
+                        ));
+                    }
+                }
+            }
+            BoxDecision::RefuseIfNonzero {
+                field,
+                reason,
+                note,
+            } => {
+                if note.trim().is_empty() {
+                    bad.push(format!(
+                        "{}/{}: a refuse-guard with no note",
+                        b.stem, b.label
+                    ));
+                }
+                // ★ Construct the refusal, so the entry names a variant that really exists AND is
+                //   constructible — not merely a path that compiles behind a closure.
+                let _ = reason();
+                match own {
+                    None => bad.push(format!(
+                        "{}/{}: a refuse-guard needs the document's own section",
+                        b.stem, b.label
+                    )),
+                    Some(section) if !sections_of(field).contains(&section) => bad.push(format!(
+                        "{}/{}: the refuse-guard field {field:?} must live on this document's own                          row — a guard the filer cannot reach is a brick",
+                        b.stem, b.label
+                    )),
+                    Some(_) => carriers.push(field),
+                }
+            }
+            BoxDecision::NotRead(reason) => {
+                if reason.trim().is_empty() {
+                    bad.push(format!(
+                        "{}/{}: a NotRead with an EMPTY reason — the reason is the whole value of                          the entry, and without it this is \"we forgot this box\" with extra steps",
+                        b.stem, b.label
+                    ));
+                }
+            }
+        }
+        if let Some(w) = words {
+            if !carriers.is_empty()
+                && !carriers
+                    .iter()
+                    .any(|f| field_words(*f).is_some_and(|s| normalize(&s).contains(w.as_str())))
+            {
+                bad.push(format!(
+                    "{}/{}: the box prints {w:?}, and no field that collects it ({carriers:?}) says                      so — a box whose caption moved between revisions must not keep pointing at a                      field describing the old one",
+                    b.stem, b.label
+                ));
+            }
+        }
+    }
+    bad
 }
 
 #[cfg(test)]
@@ -1534,6 +1809,96 @@ mod tests {
             boxes.keys().collect::<Vec<_>>(),
             ["1", "a"],
             "the Code rail entered the census: {boxes:?}"
+        );
+    }
+
+    // ── ★★★ R4 / T5 — THE JOIN TESTS. ──────────────────────────────────────────────────────────
+
+    /// ★★★ **THE JOIN IS CLEAN, and the check the COMMAND runs is the one the suite runs.**
+    ///
+    /// [`field_join_failures`] is a single pass over every entry: a `Collected` naming a field of
+    /// another section, a `CollectedElsewhere` naming one of its own, a caption no collecting field
+    /// carries, and a `NotRead` with an empty reason. Sharing it with [`run`] is what stops the
+    /// suite and the command from checking two different things.
+    #[test]
+    fn the_box_to_field_join_is_clean() {
+        let bad = field_join_failures();
+        assert!(
+            bad.is_empty(),
+            "the box → FieldId join failed:\n  {}",
+            bad.join("\n  ")
+        );
+    }
+
+    /// Every archived stem either HAS a form section or is recorded as having none, and the record is
+    /// [`section_of_stem`]'s own `match` rather than a comment.
+    #[test]
+    fn every_stem_maps_to_a_section_or_says_why() {
+        let stems: BTreeSet<&str> = DOCUMENTS.iter().map(|d| d.stem).collect();
+        let without: Vec<&str> = stems
+            .iter()
+            .copied()
+            .filter(|s| section_of_stem(s).is_none())
+            .collect();
+        assert_eq!(
+            without,
+            vec!["f1098"],
+            "Form 1098 is the only archived document with no form section (its one collected box is \
+             still the Schedule A scalar until T9). Anything else here is a document whose section \
+             landed without `section_of_stem` being told."
+        );
+    }
+
+    /// ★★★ **B1 — THE JOIN, SEEN RED ON PLANTED DEFECTS.** Three, one per mechanism, each asserted
+    ///     against the SAME predicates the tests above run, so a checker that stopped checking
+    ///     cannot pass this either.
+    #[test]
+    fn the_join_reds_on_a_field_from_the_wrong_section_and_on_a_reworded_caption() {
+        let fields = form_fields();
+        let in_section = |id: FieldId, sec: SectionId| fields.contains(&(sec, id));
+
+        // (1) A `Collected` naming a field of ANOTHER section. `Box1Wages` is a W-2 field; the
+        //     1099-INT's own section is `Int1099s`.
+        assert!(
+            !in_section(FieldId::Box1Wages, SectionId::Int1099s),
+            "the plant's premise: a W-2 field is not a 1099-INT field"
+        );
+        assert!(
+            in_section(FieldId::Int1099Box1Interest, SectionId::Int1099s),
+            "…and the real one is"
+        );
+
+        // (2) A caption the field's words do not carry. The real 1099-INT box 1 caption is
+        //     "1 Interest income", which `Int1099Box1Interest` says; a revision that renamed it
+        //     must not pass.
+        let real = BOXES
+            .iter()
+            .find(|b| b.stem == "f1099int" && b.label == "1")
+            .expect("1099-INT box 1 is censused");
+        let words = field_words(FieldId::Int1099Box1Interest).expect("the field exists");
+        assert!(
+            normalize(&words).contains(caption_words(real).unwrap().as_str()),
+            "premise: the real caption IS in the field's words"
+        );
+        let planted = BoxEntry {
+            stem: "f1099int",
+            editions: &["2024"],
+            label: "1",
+            caption: "1 Interest income from a source nobody wrote down",
+            decision: real.decision,
+        };
+        assert!(
+            !normalize(&words).contains(caption_words(&planted).unwrap().as_str()),
+            "★ THE KILL: a re-worded caption must NOT be found in the field's words — if this \
+             passes, the caption check is a no-op"
+        );
+
+        // (3) A `CollectedElsewhere` whose field IS on the document's own row. `Box1Wages` is a
+        //     `W2s` field, so claiming it is collected "elsewhere" than the W-2 row is the defect.
+        assert!(
+            in_section(FieldId::Box1Wages, SectionId::W2s),
+            "★ THE KILL: `CollectedElsewhere` on this field would be false, and the join above \
+             asserts exactly that"
         );
     }
 }

@@ -99,8 +99,36 @@ impl FormQuestion {
 pub type RenderedPrompt = (QuestionId, fn(&ReturnInputs) -> String);
 
 /// The questions whose prompt is RENDERED FROM THE RETURN. See [`FormQuestion::prompt_text`].
-pub const RENDERED_PROMPTS: &[RenderedPrompt] =
-    &[(QuestionId::FilingStatusConfirmed, filing_status_prompt)];
+pub const RENDERED_PROMPTS: &[RenderedPrompt] = &[
+    (QuestionId::FilingStatusConfirmed, filing_status_prompt),
+    // ★ R3 — both quote a YEAR off the return, because the instruction's own sentence does: *"if you
+    //   received a refund … in 2025"* and the tax-benefit rule looks at *"the year you paid the
+    //   tax"*. Naming the wrong year would make the question uncheckable against the filer's papers.
+    (QuestionId::StateRefundWithout1099g, state_refund_prompt),
+    (QuestionId::ItemizedPriorYear, itemized_prior_year_prompt),
+];
+
+/// *"Did you receive a refund, credit or offset of state or local income taxes in 2026? …"*
+fn state_refund_prompt(ri: &ReturnInputs) -> String {
+    format!(
+        "Did you receive a refund, credit or offset of state or local income taxes in {}? (Form 1040 \
+         instructions, Schedule 1 line 1: \"Report any taxable refund you received even if you \
+         didn't receive Form 1099-G.\")",
+        ri.tax_year
+    )
+}
+
+/// *"Did you itemize deductions on your 2025 federal return …?"* — the §111(a) tax-benefit test,
+/// asked of the year the tax was PAID, which is the year before the refund arrived.
+fn itemized_prior_year_prompt(ri: &ReturnInputs) -> String {
+    format!(
+        "Did you itemize deductions on your {} federal return — that is, did you file a Schedule A \
+         instead of taking the standard deduction? (Form 1040 instructions, Schedule 1 line 1: none \
+         of a state or local income tax refund is taxable if, in the year you paid the tax, you did \
+         not itemize.)",
+        ri.tax_year - 1
+    )
+}
 
 /// *"Your TY2024 return filed as Head of Household. Is Head of Household your filing status for
 /// TY2025? (Marital status is determined on the last day of the tax year — Form 1040 instructions,
@@ -237,6 +265,21 @@ pub enum QuestionId {
     /// Live only on a year the opener made (`opened_from.is_some()`). APPENDED AT THE END for the
     /// `decl_tristate!` array-index reason recorded above.
     FilingStatusConfirmed,
+    // ── ★★★ R3 / T5 — THE DOCUMENT-LESS INCOME DOOR. Three paired questions, each live iff its
+    //    census row(s) answered NO, plus the return-level prior-year-itemize gate. APPENDED AT THE
+    //    END for the `decl_tristate!` array-index reason recorded above.
+    /// **R3** — wages from an employer who issued no Form W-2. Live iff `documents.w2 == Some(false)`.
+    WagesWithoutW2Question,
+    /// **R3** — taxable interest or dividends for which no Form 1099-INT or 1099-DIV was issued.
+    /// Live iff EITHER `documents.int_1099` or `documents.div_1099` is `Some(false)` — one question
+    /// paired with two rows, so each row's own `No` opens it.
+    InterestOrDividendsWithout1099,
+    /// **R3** — a refund, credit or offset of state or local income taxes with no Form 1099-G. Live
+    /// iff `documents.g_1099 == Some(false)`.
+    StateRefundWithout1099g,
+    /// **R3/I1** — did the PRIOR-YEAR return itemize? Return-level, live iff
+    /// `state_refund_without_1099g == Some(true)` **or** any `g_1099[].box2_state_refund > 0`.
+    ItemizedPriorYear,
 }
 
 impl QuestionId {
@@ -277,6 +320,10 @@ impl QuestionId {
         QuestionId::DocA1095,
         QuestionId::DocT1098,
         QuestionId::FilingStatusConfirmed,
+        QuestionId::WagesWithoutW2Question,
+        QuestionId::InterestOrDividendsWithout1099,
+        QuestionId::StateRefundWithout1099g,
+        QuestionId::ItemizedPriorYear,
     ];
 }
 
@@ -1543,6 +1590,127 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         //   (`screen_inputs`), because the status the return would compute on is the wrong one.
         neutral: true,
     },
+    // ── ★★★ R3 / T5 — THE DOCUMENT-LESS INCOME DOOR. Four entries, indices 36..=39. ─────────────
+    //
+    // ★ *"A census `No` never closes income the instructions say to report WITHOUT the document."*
+    //   The document-first rule is right for amounts and wrong as a stop: the form names incomes
+    //   that exist with no information return behind them, and each is small money in the
+    //   UNDERSTATEMENT direction, where the residual attestation is the only net.
+    //
+    // ★ APPENDED AT THE END for the `decl_tristate!` array-index reason recorded above.
+    FormQuestion {
+        id: QuestionId::WagesWithoutW2Question,
+        prompt: "Did you receive wages, salary or tips from an employer who issued no Form W-2? \
+                 (Form 1040 line 1a instructions: \"Even if you don't get a Form W-2, you must \
+                 still report your earnings.\")",
+        unanswered: RefuseReason::WagesWithoutW2Unanswered,
+        unanswered_detail:
+            "you answered that you received NO Form W-2, and the Form 1040 instructions say \
+             earnings must be reported whether or not the form arrives — so btctax has to ask \
+             whether there were any. It is not a formality: wages with no W-2 behind them are the \
+             commonest income a document-first interview would drop, and dropping income \
+             UNDERSTATES the tax on a return signed under §6065. Run `btctax income answer`",
+        // ★ Live EXACTLY on its census row's `Some(false)` — the R3 pairing. A filer who received a
+        //   W-2 is never asked it (their wages have a document and a section).
+        live: |ri| {
+            ri.documents.get(crate::tax::document_census::DocumentRow::W2) == Some(false)
+        },
+        get: |ri| ri.w2_wages_without_w2,
+        set: |ri, v| ri.w2_wages_without_w2 = Some(v),
+        // ★ §G-15 — PER-YEAR: whether an undocumented employer paid you is a fact about ONE year.
+        durability: Durability::PerYear,
+        // ★ Neutral at FALSE: "no such earnings" needs no section and forgoes nothing. A `Yes`
+        //   REFUSES — btctax has no surface for wages that arrive without the document.
+        neutral: false,
+    },
+    FormQuestion {
+        id: QuestionId::InterestOrDividendsWithout1099,
+        prompt: "Did you receive taxable interest or dividends for which no Form 1099-INT or Form \
+                 1099-DIV was issued — a bank paying under $10, a seller-financed mortgage you \
+                 hold, or a nominee distribution? (Schedule B line 1: \"Report on line 1 all of \
+                 your taxable interest.\" Form 1040 line 3b instructions: \"See Pub. 550 … if you \
+                 received dividends not reported on Form 1099-DIV.\")",
+        unanswered: RefuseReason::InterestOrDividendsWithout1099Unanswered,
+        unanswered_detail:
+            "you answered that you received no Form 1099-INT and/or no Form 1099-DIV, and Schedule \
+             B line 1 says to report ALL of your taxable interest — a payer is not required to \
+             issue a 1099-INT below $10, a seller-financed mortgage has no payer at all, and a \
+             nominee distribution is reported by someone else. Answering YES opens a place to enter \
+             them; answering NO records that there were none. Run `btctax income answer`",
+        // ★ ONE question paired with TWO census rows, so EITHER row's `No` opens it: a filer with
+        //   1099-INTs but no 1099-DIV can still hold dividends nobody reported.
+        live: |ri| {
+            ri.documents.get(crate::tax::document_census::DocumentRow::Int1099) == Some(false)
+                || ri.documents.get(crate::tax::document_census::DocumentRow::Div1099)
+                    == Some(false)
+        },
+        get: |ri| ri.interest_or_dividends_without_1099,
+        set: |ri, v| ri.interest_or_dividends_without_1099 = Some(v),
+        durability: Durability::PerYear,
+        // ★ Neutral at FALSE. Unlike its two siblings a `Yes` does NOT refuse — it OPENS the
+        //   filer's-records rows, because Schedule B lines 1 and 5 take exactly what they carry.
+        neutral: false,
+    },
+    FormQuestion {
+        id: QuestionId::StateRefundWithout1099g,
+        // ★ The STATIC fallback; the words actually shown quote the tax year (`RENDERED_PROMPTS`).
+        prompt: "Did you receive a refund, credit or offset of state or local income taxes this \
+                 year? (Form 1040 instructions, Schedule 1 line 1: \"Report any taxable refund you \
+                 received even if you didn't receive Form 1099-G.\")",
+        unanswered: RefuseReason::StateRefundWithout1099gUnanswered,
+        unanswered_detail:
+            "you answered that you received no Form 1099-G, and the Form 1040 instructions say to \
+             report a taxable state or local income tax refund \"even if you didn't receive Form \
+             1099-G\" — some states now publish it only electronically, and some never send one. \
+             Whether any of it is taxable turns on §111(a), which is asked next. Run `btctax income \
+             answer`",
+        live: |ri| {
+            ri.documents.get(crate::tax::document_census::DocumentRow::G1099) == Some(false)
+        },
+        get: |ri| ri.state_refund_without_1099g,
+        set: |ri, v| ri.state_refund_without_1099g = Some(v),
+        durability: Durability::PerYear,
+        // ★ Neutral at FALSE: no refund, nothing on Schedule 1 line 1, nothing forgone.
+        neutral: false,
+    },
+    FormQuestion {
+        id: QuestionId::ItemizedPriorYear,
+        // ★ The STATIC fallback; the words shown quote year N−1 (`RENDERED_PROMPTS`).
+        prompt: "Did you itemize deductions on your PRIOR-YEAR federal return — that is, did you \
+                 file a Schedule A instead of taking the standard deduction? (Form 1040 \
+                 instructions, Schedule 1 line 1: none of a state or local income tax refund is \
+                 taxable if, in the year you paid the tax, you did not itemize.)",
+        unanswered: RefuseReason::ItemizedPriorYearUnanswered,
+        unanswered_detail:
+            "this return reports a state or local income tax refund, and §111(a)'s TAX-BENEFIT RULE \
+             decides whether any of it is income: a refund of tax that never reduced your federal \
+             tax is not income at all. The only thing that answers it is whether you ITEMIZED in \
+             the year you paid the tax. btctax will not assume either way — assuming \"no\" would \
+             blank Schedule 1 line 1 on your behalf and understate the tax. Run `btctax income \
+             answer`",
+        // ★★★ RETURN-LEVEL, and live from EITHER side, because *a gate may not ride on a row that
+        //     might not exist*: the identical answer is owed by a filer with a transcribed 1099-G
+        //     box 2 and by one who received the refund with no 1099-G at all (R3/I1).
+        // ★ The refund-question limb goes through `question_is_live`, never through a second copy
+        //   of that question's own predicate: a STALE `Some(true)` on a return whose 1099-G census
+        //   row has since flipped to `Yes` must not keep this gate live, or the filer meets a
+        //   blocking question that no surface still asks. The 1099-G limb needs no such guard — a
+        //   transcribed box 2 is a figure on the return, not an answer that can go stale.
+        live: |ri| {
+            (question_is_live(QuestionId::StateRefundWithout1099g, ri)
+                && ri.state_refund_without_1099g == Some(true))
+                || ri.g_1099.iter().any(|g| g.box2_state_refund > Usd::ZERO)
+        },
+        get: |ri| ri.itemized_prior_year,
+        set: |ri, v| ri.itemized_prior_year = Some(v),
+        // ★ §G-15 — PER-YEAR: it names a DIFFERENT prior year every year, so an answer given for
+        //   2025's return is not an answer about 2026's.
+        durability: Durability::PerYear,
+        // ★ Neutral at FALSE: §111(a) then makes none of the refund income and Schedule 1 line 1 is
+        //   blank BY DECISION. A `Yes` REFUSES — the State and Local Income Tax Refund Worksheet is
+        //   not built.
+        neutral: false,
+    },
 ];
 
 /// The identity of each SKIPPABLE prompt (§2, class B) — the questions where silence is LAWFUL: a bare
@@ -2455,6 +2623,11 @@ mod tests {
                 QuestionId::DocA1095 => 33,
                 QuestionId::DocT1098 => 34,
                 QuestionId::FilingStatusConfirmed => 35,
+                // ★ R3 / T5 — the document-less income door, indices 36..=39.
+                QuestionId::WagesWithoutW2Question => 36,
+                QuestionId::InterestOrDividendsWithout1099 => 37,
+                QuestionId::StateRefundWithout1099g => 38,
+                QuestionId::ItemizedPriorYear => 39,
             };
             assert_eq!(idx, i, "QuestionId::ALL is out of order / missing {id:?}");
             assert_eq!(
@@ -2465,10 +2638,11 @@ mod tests {
         }
         assert_eq!(
             QuestionId::ALL.len(),
-            36,
-            "17 declarations + the 18 R3 document-census rows + R10.4's filing-status confirmation"
+            40,
+            "17 declarations + the 18 R3 document-census rows + R10.4's filing-status confirmation \
+             + T5's four document-less-income-door questions"
         );
-        assert_eq!(FORM_QUESTIONS.len(), 36, "one entry per declaration");
+        assert_eq!(FORM_QUESTIONS.len(), 40, "one entry per declaration");
     }
 
     /// ★★★ §G-6/ISO — THE OUT-OF-SCOPE QUESTION MUST NAME THE ISO EXERCISE, WHICH IS NOT INCOME.

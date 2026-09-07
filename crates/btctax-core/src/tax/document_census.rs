@@ -150,16 +150,18 @@ impl DocumentRow {
     #[must_use]
     pub const fn exit_sentence(self) -> Option<&'static str> {
         Some(match self {
-            // ★ Transcribable TODAY, so no exit: the W-2 through its own section, and the four 1099
-            //   families through `income import` until T5 builds their screens. A row btctax can
-            //   hold the rows for is not an excluded family, and telling its filer to leave would
-            //   be false.
+            // ★ Transcribable TODAY, so no exit: the W-2 and — since T5 — the four 1099 families,
+            //   each through its own form section as well as `income import`. A row btctax can hold
+            //   the rows for is not an excluded family, and telling its filer to leave would be
+            //   false.
             DocumentRow::W2
             | DocumentRow::Int1099
             | DocumentRow::Div1099
             | DocumentRow::B1099
             | DocumentRow::G1099 => return None,
-            // Not live (their amount is a scalar until T9 / T5) — no answer, so no exit.
+            // ★ T5 — the 1098-E has its own section now, so it is transcribable and no exit is
+            //   owed. `form_1098` is still not live (its amount is a scalar until T9), so no answer
+            //   of its can reach a refusal either.
             DocumentRow::Form1098 | DocumentRow::Form1098e => return None,
             // ── §2.2, verbatim. ─────────────────────────────────────────────────────────────────
             DocumentRow::R1099 => {
@@ -251,14 +253,14 @@ impl DocumentRow {
                  `btctax income import`"
             }
             DocumentRow::Int1099 => {
-                "enter it as an `[[int_1099]]` table through `btctax income import` — the 1099-INT \
-                 SCREEN and its box census are task T5, but the rows themselves are read today \
-                 (Form 1040 line 2a/2b and Schedule B line 1)"
+                "enter it in the Form 1099-INT section of the tax-inputs form, or as an \
+                 `[[int_1099]]` table through `btctax income import` — Form 1040 lines 2a/2b and \
+                 Schedule B line 1 read the rows"
             }
             DocumentRow::Div1099 => {
-                "enter it as a `[[div_1099]]` table through `btctax income import` — the 1099-DIV \
-                 SCREEN and its box census are task T5, but the rows themselves are read today \
-                 (Form 1040 lines 3a/3b and Schedule B line 5)"
+                "enter it in the Form 1099-DIV section of the tax-inputs form, or as a \
+                 `[[div_1099]]` table through `btctax income import` — Form 1040 lines 3a/3b and \
+                 Schedule B line 5 read the rows"
             }
             // ★★★ NOT "enter the rows". A `[[b_1099]]` row is the Schedule D line 1a/8a SUMMARY
             //     option, and `form_1099b_gains` is ADDED to the ledger's `capital_net` — so
@@ -274,15 +276,18 @@ impl DocumentRow {
                  1a/8a SUMMARY option only, and entering one beside ledger dispositions would \
                  count the same gains twice"
             }
-            // ★★★ Box 2 has NO field on `Form1099G` — see `requires_transcription`. The route in
-            //     for the commonest 1099-G is the scalar, and the screen is T5's.
+            // ★ T5 gave box 2 a field, so the route is no longer split: every 1099-G a filer holds
+            //   is transcribed as a row, and `itemized_prior_year` decides §111(a) on box 2.
             DocumentRow::G1099 => {
-                "enter box 1 (unemployment compensation) as a `[[g_1099]]` table through `btctax \
-                 income import`, which Schedule 1 line 7 reads today — but if your 1099-G reports \
-                 only BOX 2, a prior-year state or local income tax refund, there is no box-2 field \
-                 to transcribe into yet: that amount reaches Schedule 1 line 1 through the \
-                 `sch1.state_refund_taxable` input, and the box-2 field, its screen and the State \
-                 and Local Income Tax Refund Worksheet are task T5"
+                "enter it in the Form 1099-G section of the tax-inputs form, or as a `[[g_1099]]` \
+                 table through `btctax income import` — box 1 (unemployment compensation) reaches \
+                 Schedule 1 line 7, and box 2 (a state or local income tax refund) reaches Schedule \
+                 1 line 1 through the prior-year-itemized question"
+            }
+            DocumentRow::Form1098e => {
+                "enter it in the Form 1098-E section of the tax-inputs form, or as a \
+                 `[[form_1098e]]` table through `btctax income import` — Schedule 1 line 21 reads \
+                 the SUM of the rows' box 1 (§221)"
             }
             _ => return None,
         })
@@ -399,8 +404,8 @@ pub struct DocumentCensus {
     /// `schedule_a.mortgage_interest_1098` scalar; see [`row_is_live`].
     #[serde(default)]
     pub form_1098: Option<bool>,
-    /// Form 1098-E — student loan interest, Schedule 1 line 21. **Not live until T5** replaces the
-    /// `sch1.student_loan_interest_paid` scalar; see [`row_is_live`].
+    /// Form 1098-E — student loan interest, Schedule 1 line 21. **Live since T5**, which replaced
+    /// the `sch1.student_loan_interest_paid` scalar with `form_1098e` rows; see [`row_is_live`].
     #[serde(default)]
     pub form_1098e: Option<bool>,
     /// Form 1099-R — §2.2, refuses on `Some(true)`.
@@ -515,8 +520,10 @@ pub fn declared_rows(
         DocumentRow::Div1099 => Some(ri.div_1099.len()),
         DocumentRow::B1099 => Some(ri.b_1099.len()),
         DocumentRow::G1099 => Some(ri.g_1099.len()),
+        // ★ T5 — the 1098-E gained a `Vec` when `Form1098E` replaced the
+        //   `sch1.student_loan_interest_paid` scalar.
+        DocumentRow::Form1098e => Some(ri.form_1098e.len()),
         DocumentRow::Form1098
-        | DocumentRow::Form1098e
         | DocumentRow::R1099
         | DocumentRow::Ssa1099
         | DocumentRow::NecMiscK1099
@@ -547,6 +554,11 @@ pub const fn requires_transcription(row: DocumentRow) -> bool {
         //   line 5 only through `div_1099` (boxes 1a–13). A declared one with no row is therefore
         //   exactly "nothing ever populated it".
         DocumentRow::W2 | DocumentRow::Int1099 | DocumentRow::Div1099 => true,
+        // ★★★ 1098-E — YES, from T5. Schedule 1 line 21 reads the SUM of the rows' box 1 and
+        //     NOTHING ELSE carries student-loan interest onto the return: the
+        //     `sch1.student_loan_interest_paid` scalar that used to is gone. A declared 1098-E with
+        //     no row is therefore exactly "nothing ever populated it".
+        DocumentRow::Form1098e => true,
         // ★★★ 1099-B — NO, and the FORM says so. `Form1099B`'s own quoted instruction reads
         //     *"However, if you choose to report all these transactions on Form 8949, leave this
         //     line blank and go to line 1b."* The `[[b_1099]]` row exists for the Schedule D line
@@ -557,19 +569,19 @@ pub const fn requires_transcription(row: DocumentRow) -> bool {
         //     would double-count every gain (`form_1099b_gains` is ADDED to the ledger's
         //     `capital_net`). The declaration is still required; only the rows are optional.
         DocumentRow::B1099 => false,
-        // ★★★ 1099-G — NO, until **T5**. The commonest 1099-G is an itemizer's prior-year state
-        //     refund, box 2 alone, and `Form1099G` has no box 2: it models `box1_unemployment` and
-        //     `box4_fed_withheld`. Box 2 reaches the return today through the scalar
-        //     `sch1.state_refund_taxable`, so demanding a row would force either false testimony
-        //     ("no 1099-G") or a hollow all-zero row beside a refund the census never mentions —
-        //     the census laundering the very thing it exists to catch. **T5 adds
-        //     `box2_state_refund` and the State and Local Income Tax Refund Worksheet screen, and
-        //     flips this to `true`.**
-        DocumentRow::G1099 => false,
-        // The §2.2 families refuse on `Yes` before this is ever read, and the two scalar-shadowed
-        // rows are not live — none of them has rows to demand.
+        // ★★★ 1099-G — **YES, from T5, and this flipped from `false`.**
+        //
+        //     It was `false` because the commonest 1099-G is an itemizer's prior-year state refund,
+        //     box 2 alone, and `Form1099G` HAD NO BOX 2 — so demanding a row would have forced
+        //     either false testimony ("no 1099-G") or a hollow all-zero row beside a refund the
+        //     census never mentions, which is the census laundering the very thing it exists to
+        //     catch. T5 added `box2_state_refund`, so that filer now has a field to transcribe
+        //     into, `itemized_prior_year` decides §111(a) on it, and a declared 1099-G with no row
+        //     is once again exactly "nothing ever populated it".
+        DocumentRow::G1099 => true,
+        // The §2.2 families refuse on `Yes` before this is ever read, and the one scalar-shadowed
+        // row left (`form_1098`, until T9) is not live — none of them has rows to demand.
         DocumentRow::Form1098
-        | DocumentRow::Form1098e
         | DocumentRow::R1099
         | DocumentRow::Ssa1099
         | DocumentRow::NecMiscK1099
@@ -598,14 +610,18 @@ pub fn row_of_question(id: crate::tax::questions::QuestionId) -> Option<Document
 
 /// ★ THE liveness predicate for one census row — the ONLY copy, read by the row's `FormQuestion`.
 ///
-/// Every row is live except `form_1098` and `form_1098e`, whose amounts are collected today by a
-/// scalar (`schedule_a.mortgage_interest_1098`, `sch1.student_loan_interest_paid`): a `No` there
-/// would contradict a figure already entered, and a `Yes` would demand a transcription section that
-/// does not exist. §5.1's `schedule_a.is_some()` liveness for `form_1098` lands with **T9**; the
-/// `form_1098e` row opens with **T5**.
+/// Every row is live except `form_1098`, whose amount is still collected by a scalar
+/// (`schedule_a.mortgage_interest_1098`): a `No` there would contradict a figure already entered,
+/// and a `Yes` would demand a transcription section that does not exist. §5.1's
+/// `schedule_a.is_some()` liveness for it lands with **T9**.
+///
+/// ★ **`form_1098e` OPENED AT T5**, when [`crate::tax::return_inputs::Form1098E`] replaced the
+///   `sch1.student_loan_interest_paid` scalar: it now has a `Vec` to count, a form section to
+///   transcribe into and a Schedule 1 line 21 chain that reads the rows, so the row is askable and
+///   both its `Yes` and its `No` mean something.
 #[must_use]
 pub fn row_is_live(_ri: &crate::tax::return_inputs::ReturnInputs, row: DocumentRow) -> bool {
-    !matches!(row, DocumentRow::Form1098 | DocumentRow::Form1098e)
+    !matches!(row, DocumentRow::Form1098)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -670,10 +686,14 @@ pub fn row_is_pre_named(
                 ..Default::default()
             }
         }),
-        // No section exists, so there is no row to be pre-named — the same seventeen-vs-five split
-        // [`declared_rows`] draws, and it is a `match` so a kind that GAINS a section reds here.
-        DocumentRow::Form1098
-        | DocumentRow::Form1098e
+        // ★ T5 — the 1098-E HAS a section now, but the year-N+1 opener does not seed lenders (it
+        //   seeds W-2 employers, 1099 payers and venues — R10.4). So no `form_1098e` row can be
+        //   pre-named, and a `No` beside a transcribed row correctly refuses instead of deleting it.
+        //   If the opener ever carries a servicer identity, this arm is where it lands.
+        DocumentRow::Form1098e
+        // No section exists, so there is no row to be pre-named — and it is a `match`, so a kind
+        // that GAINS a section reds here.
+        | DocumentRow::Form1098
         | DocumentRow::R1099
         | DocumentRow::Ssa1099
         | DocumentRow::NecMiscK1099
@@ -848,6 +868,25 @@ mod tests {
                     payer: "P".into(),
                     ..Default::default()
                 }),
+                // ★ T5 — see the sibling test: a 1098-E row is testimony, never a pre-named
+                //   identity, so the registry setter correctly keeps it.
+                DocumentRow::Form1098e => {
+                    ri.form_1098e.push(crate::tax::return_inputs::Form1098E {
+                        lender: "Servicer".into(),
+                        ..Default::default()
+                    });
+                    let q = FORM_QUESTIONS
+                        .iter()
+                        .find(|q| q.id == row.question_id())
+                        .expect("every census row is a registry question");
+                    (q.set)(&mut ri, false);
+                    assert_eq!(
+                        declared_rows(&ri, *row),
+                        Some(1),
+                        "a transcribed 1098-E row must survive a `No` through the registry too"
+                    );
+                    continue;
+                }
                 other => panic!("{other:?} gained a section — give it a pre-named seed here"),
             }
             let q = FORM_QUESTIONS
@@ -918,6 +957,30 @@ mod tests {
                     payer: "P".into(),
                     ..Default::default()
                 }),
+                // ★★★ T5 — the 1098-E HAS a section now, and it is deliberately NOT pre-namable:
+                //     `open_next_year` seeds W-2 employers, 1099 payers and venues, never loan
+                //     servicers. So a transcribed row is TESTIMONY, survives a `No`, and the census
+                //     contradiction refusal fires — which is the correct behaviour, not an
+                //     omission. Asserted positively so this arm can never become a silent skip.
+                DocumentRow::Form1098e => {
+                    ri.form_1098e.push(crate::tax::return_inputs::Form1098E {
+                        lender: "Servicer".into(),
+                        ..Default::default()
+                    });
+                    assert!(
+                        !row_is_pre_named(&ri, *row, 0),
+                        "the opener does not seed loan servicers, so no `form_1098e` row can be \
+                         pre-named — if that changes, give this arm a seed and drop this assert"
+                    );
+                    answer_row(&mut ri, *row, false);
+                    assert_eq!(
+                        declared_rows(&ri, *row),
+                        Some(1),
+                        "a transcribed 1098-E row must survive a `No` — it is testimony, not a \
+                         carried identity"
+                    );
+                    continue;
+                }
                 other => panic!("{other:?} gained a section — give it a pre-named seed here"),
             }
             assert_eq!(declared_rows(&ri, *row), Some(1));
@@ -1020,10 +1083,14 @@ mod tests {
         );
     }
 
-    /// The two scalar-shadowed rows are the ONLY non-live ones, and the reason is recorded in the
-    /// predicate rather than in a comment somewhere else.
+    /// The scalar-shadowed row is the ONLY non-live one, and the reason is recorded in the predicate
+    /// rather than in a comment somewhere else.
+    ///
+    /// ★ **T5 moved this from two rows to one.** `form_1098e` was shadowed by
+    /// `sch1.student_loan_interest_paid`; T5 deleted that scalar, gave the 1098-E its own rows and
+    /// its own form section, and the row opened. `form_1098` waits for T9.
     #[test]
-    fn only_the_two_scalar_shadowed_rows_are_not_live() {
+    fn only_the_one_scalar_shadowed_row_is_not_live() {
         let ri = crate::tax::return_inputs::ReturnInputs::default();
         let dead: Vec<_> = DocumentRow::ALL
             .iter()
@@ -1031,8 +1098,8 @@ mod tests {
             .collect();
         assert_eq!(
             dead,
-            vec![&DocumentRow::Form1098, &DocumentRow::Form1098e],
-            "only Form 1098 (T9) and Form 1098-E (T5) are shadowed by a scalar"
+            vec![&DocumentRow::Form1098],
+            "only Form 1098 (T9) is still shadowed by a scalar"
         );
     }
 }
