@@ -294,6 +294,43 @@ the omission can cost the filer something:
 
 ---
 
+### Phase 7 — THE INTERVIEW (owner ask 2026-09-07). **ON the critical path for the owner's TY2026 return; the every-year machinery for the input side.**
+
+*"Can we design an interview process to elicit income data, deduction related information, real
+estate, dependence, etc., as well as exports from Bitcoin exchanges to allow the interview process
+to fill out most of the tax return, if not all of it?"* — prepared 2026-09-07 with an Opus recon
+(`design/agent-reports/2026-09-07-interview-recon.md`: of Form 1040's 60 entry lines, 24 are
+unreachable from any surface today; dependents are collected for identity, never for entitlement;
+the year gate is the biggest gap) and three Fable lenses: `design/BRAINSTORM_interview.md`,
+`design/SPEC_interview.md` (r1), and its ONE review (S6).
+
+**The shape:** document-first and form-derived — a tri-state document census → one transcription
+screen per information return (box-named fields, each naming the line it reaches) → the forms' own
+gate questions transcribed from the instructions' skip logic; the ledger's questions stay in
+`reconcile`, sequenced as one journey behind a Step-0 status panel; "derived" is a CENSUS KILL
+(every field joins a document box, a gate, a computation or a refusal), never a generator. The unit
+is DOCUMENT for amounts + GATE for conditions. Every excluded family (Schedule E, K-1, …) is a typed
+census row that REFUSES with a named exit — nobody is under-filed silently.
+
+**The build (spec §7):** T1 provenance schema (first — cannot be back-filled) · T2 archive the
+information returns (W-2, 1099-INT/DIV/G/B, 1098, 1098-E + instructions) · T3 document census +
+interview state · T4 the year gate + draft protection (authoring TY2026 in Sep–Dec) · T5 the
+1099-INT/DIV/B/G + 1098-E sections · T6 the exchange seam (Step-0 panel, the DA declaration, the
+standing-order warning) · T7 dependents gates (§152 Steps 1–5 per row) · T8 row (7), HoH, the TY2025+
+grid emitter · T9 real estate (Form 1098, Schedule A 8b/8c, the 8396 gate, the home-sale gates, the
+rental/K-1 refusals) · T10 the trailer (direct deposit, phone, spouse IP PIN, foreign address) · T11
+the oracle path (`ReturnInputs → oracle row`) · T12 the panel in the TUI + docs; T13 (Schedule C
+Part II + 1099-NEC) and T14 (1099-R / SSA-1099) iff S2 says so; T15 Schedule 8812 post-v1 (the line
+19 forgo disappears). Process: S6 — the spec's one review folded, then one opus agent per task, one
+seam review per build, one sonnet re-verification.
+
+**Why it is on the critical path:** the owner's TY2026 return must be AUTHORED in Sep–Dec 2026 (the
+only slack the calendar has), and today it can only arrive by an unscreened TOML. T1–T4 make it
+authorable; T5–T10 make it complete for a W-2-plus-crypto filer; T11 makes it validated.
+
+**Owner questions it raises (spec §9):** the 2026 document list (S2, sharpened); line 19 in v1;
+whether the S1 rehearsal is the interview's first live walk; direct deposit or paper check.
+
 ## 4. RANKED BY FILING RISK — the order the work closes in
 
 **The ranking rule**, from this repo's own severity doctrine (`CLAUDE.md`, "an entry is testimony";

@@ -6,6 +6,17 @@ _Last updated: **2026-09-06**. Written at a deliberate pause; safe to exit. **Re
 
 # ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
 
+> ## ★★★ RESUME 2026-09-07 (interview) — the INTERVIEW project: recon `bf58fcdb`, brainstorm `c5af3f60`, spec r1 `127cb75c`; its ONE Fable review (S6) is IN FLIGHT (worktree). Read this block first.
+>
+> Owner ask: an interview eliciting income, deductions, real estate, dependents + the exchange
+> exports to fill most of the return. Memory: `interview-project`. Long-range plan Phase 7; roadmap
+> NOW bucket. When the review returns: copy from the worktree, persist, ledger, fold Criticals/
+> Importants into `SPEC_interview.md` (the controller edits; a second prose round only if a Critical
+> changes the SHAPE), mark the spec GREEN, then build T1 (provenance schema) by one opus agent under
+> a brief written from the spec's §7 row — one seam review per build, one sonnet re-verification.
+> Owner questions to surface (spec §9): the 2026 document list (S2), line 19 in v1, S1 as the first
+> live walk, direct deposit vs paper check. The build cannot start T13/T14 without S2.
+
 > ## ★★★ RESUME 2026-09-07 — THE QUEUE IS EMPTY. Residue sweep 1 verified 6/6, 15/15 kills red, 0C/0I (`…build-residue-sweep-1-verification.md`). No agent in flight. Read this block first.
 >
 > `main` at the commit after `240c9f40`, 3175 tests green, tree clean, ~217 commits unpushed. Every
