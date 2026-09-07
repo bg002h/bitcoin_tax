@@ -6291,6 +6291,13 @@ build, each with an owning phase.
   changed literal. Run the generic scan on the staged tree in pre-commit (B1: plant a shaped token,
   watch the commit refuse), and put the never-issued SSN space and the documented EIN list in every
   build brief so agents pick from it.
+- **FR-72 — `Schedule1aTips::occupation_on_treasury_list` is a live figure with no reader (T5 build
+  `34472416`, residue item 2). Owning task: the Schedule 1-A track (its Part II compute), reconciled
+  before interview T8 closes.** `Schedule1aPartII::compute` takes `qualified_tips_reported` alone, so
+  the Caution's occupation gate is collected and never enforced; T5 deliberately did not point W-2
+  box 14b (*Treasury Tipped Occupation Code(s)*) at it (D-5) and covers the box with
+  `Advisory::TipsDeductionForgoneWithTtoc` instead. The honest end state is the gate read by the
+  compute and the box joined to it; the T5 seam review says whether the advisory is honest meanwhile.
   Owner-driven; the assistant prepares the walk (a checklist of moments from `SPEC_interview.md` §6)
   and records the findings verbatim.
 - **FR-47 — `AmtParams` / `FullReturnParams` TY2026 is a NOW item, not a post-finals one.**
