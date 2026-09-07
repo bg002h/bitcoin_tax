@@ -6,6 +6,18 @@ _Last updated: **2026-09-06**. Written at a deliberate pause; safe to exit. **Re
 
 # ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
 
+> ## ★★★ RESUME 2026-09-07 (interview, T1 folded / T2 building) — T1 landed `3142775d`, its seam review (1C/1I/4M/3N, `aeb4db8e`; ledger `f68af570`) FOLDED `d49de0c7` (3202 tests); the sonnet re-verification (worktree) AND the T2 build (opus, main tree, `BRIEF-build-interview-T2.md`) are IN FLIGHT. Read this block first.
+>
+> Pending once they return (do NOT commit while T2's edits are half-done): copy + persist the T1 r2
+> verification (close T1 at 0C/0I or fold residue); machine-check T2's report (fourteen archived
+> documents with the year read off each; `authority-manifest` OK; `Production::Collected { from }`;
+> the per-document box censuses seen red), commit T2 through the gate, then T2's ONE seam review
+> (opus, worktree) → persist → ledger → fold → sonnet re-verify → T3 (document census + interview
+> state) under a brief from §7's T3 row. The C1 lesson of T1's review: every WRITER of a provenance
+> structure must be enumerated in the brief (import, apply, answer, scrub, draft flush) — put it in
+> every interview brief from T3 on. Owner questions open: Q1 (2026 documents), Q2 (line 19), Q4
+> (deposit vs check). The simulated real return (FR-64) is the interview's first live use.
+
 > ## ★★★ RESUME 2026-09-07 (interview, T1) — spec r2 GREEN by S6 (`62424903`); T1 (provenance schema) is BUILDING with one opus agent (`BRIEF-build-interview-T1.md`); its review brief `BRIEF-review-interview-T1.md` is on disk UNCOMMITTED with the roadmap/spec/FOLLOWUPS edits below. Read this block first.
 >
 > **Owner, 2026-09-07: "We will plan to use the interview to simulate a real tax return."** Recorded
