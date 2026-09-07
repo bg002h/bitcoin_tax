@@ -6275,6 +6275,15 @@ build, each with an owning phase.
   literal in `open_next_year::seed` fail to compile (every field named, no `..Default` tail), which is
   the forcing function — T7 decides identity-vs-declaration per field and gives the prompt its
   surface. The T4b seam review checks whether a seeded row can reach a commit un-asked.
+- **FR-71 — the generic PII-shape scan runs only at push and in CI, never at commit (found
+  2026-09-07 when the first push in five weeks was rejected on 45 commits' fixture TINs). Owning
+  phase: harness (class α).** `scripts/pre-commit` runs `make check` but not
+  `scripts/pii-scan-generic.sh`, so a builder's synthetic `99-9999999` or a valid-shaped `444-55-6666`
+  lands in history and is caught only when the range is pushed — at which point the fix is an
+  allowlist entry for the intermediate commits (the "unpushed history" bucket) rather than a
+  changed literal. Run the generic scan on the staged tree in pre-commit (B1: plant a shaped token,
+  watch the commit refuse), and put the never-issued SSN space and the documented EIN list in every
+  build brief so agents pick from it.
   Owner-driven; the assistant prepares the walk (a checklist of moments from `SPEC_interview.md` §6)
   and records the findings verbatim.
 - **FR-47 — `AmtParams` / `FullReturnParams` TY2026 is a NOW item, not a post-finals one.**
