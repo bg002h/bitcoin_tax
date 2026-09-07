@@ -138,31 +138,17 @@ impl DocumentRow {
     #[must_use]
     pub const fn exit_sentence(self) -> Option<&'static str> {
         Some(match self {
-            // Supported and transcribable today — no exit.
-            DocumentRow::W2 => return None,
+            // ★ Transcribable TODAY, so no exit: the W-2 through its own section, and the four 1099
+            //   families through `income import` until T5 builds their screens. A row btctax can
+            //   hold the rows for is not an excluded family, and telling its filer to leave would
+            //   be false.
+            DocumentRow::W2
+            | DocumentRow::Int1099
+            | DocumentRow::Div1099
+            | DocumentRow::B1099
+            | DocumentRow::G1099 => return None,
             // Not live (their amount is a scalar until T9 / T5) — no answer, so no exit.
             DocumentRow::Form1098 | DocumentRow::Form1098e => return None,
-            // ── In scope, screen not built (T5). ────────────────────────────────────────────────
-            DocumentRow::Int1099 => {
-                "btctax cannot yet take a Form 1099-INT: the 1099-INT screen and its box census are \
-                 not built (T5). Interest reaches Form 1040 line 2a/2b and Schedule B line 1, so \
-                 filing without it would understate the tax."
-            }
-            DocumentRow::Div1099 => {
-                "btctax cannot yet take a Form 1099-DIV: the 1099-DIV screen and its box census are \
-                 not built (T5). Dividends reach Form 1040 lines 3a/3b and Schedule B line 5, so \
-                 filing without them would understate the tax."
-            }
-            DocumentRow::B1099 => {
-                "btctax cannot yet take a Form 1099-B: the 1099-B screen and its box census are not \
-                 built (T5). Broker proceeds reach Schedule D lines 1a/8a, so filing without them \
-                 would understate the tax."
-            }
-            DocumentRow::G1099 => {
-                "btctax cannot yet take a Form 1099-G: the 1099-G screen, box 2 and the State and \
-                 Local Income Tax Refund Worksheet are not built (T5). A taxable refund reaches \
-                 Schedule 1 line 1, so filing without it would understate the tax."
-            }
             // ── §2.2, verbatim. ─────────────────────────────────────────────────────────────────
             DocumentRow::R1099 => {
                 "btctax cannot take a Form 1099-R for this year: Form 1040 lines 4a–5b and the \
@@ -232,6 +218,48 @@ impl DocumentRow {
             DocumentRow::A1095 => Q::DocA1095,
             DocumentRow::T1098 => Q::DocT1098,
         }
+    }
+
+    /// ★★★ **How a filer ENTERS this document today** — named in the
+    /// [`DocumentDeclaredNotTranscribed`] refusal, because *"you declared one and none is
+    /// transcribed"* is only half a message: the other half is where to put it.
+    ///
+    /// The W-2 has a screen. The four 1099 families do not yet — **T5** builds them — but their rows
+    /// exist on `ReturnInputs` and `income import` fills them from the TOML wire today, so the
+    /// honest instruction names that route and says which task replaces it. `None` for a row that
+    /// cannot be transcribed at all (the §2.2 families refuse on `Yes` before this is ever read, and
+    /// the two scalar-shadowed rows are not live).
+    ///
+    /// [`DocumentDeclaredNotTranscribed`]: crate::tax::return_refuse::RefuseReason::DocumentDeclaredNotTranscribed
+    #[must_use]
+    pub const fn entry_route(self) -> Option<&'static str> {
+        Some(match self {
+            DocumentRow::W2 => {
+                "enter it in the W-2 section of the tax-inputs form, or as a `[[w2s]]` table through \
+                 `btctax income import`"
+            }
+            DocumentRow::Int1099 => {
+                "enter it as an `[[int_1099]]` table through `btctax income import` — the 1099-INT \
+                 SCREEN and its box census are task T5, but the rows themselves are read today \
+                 (Form 1040 line 2a/2b and Schedule B line 1)"
+            }
+            DocumentRow::Div1099 => {
+                "enter it as a `[[div_1099]]` table through `btctax income import` — the 1099-DIV \
+                 SCREEN and its box census are task T5, but the rows themselves are read today \
+                 (Form 1040 lines 3a/3b and Schedule B line 5)"
+            }
+            DocumentRow::B1099 => {
+                "enter it as a `[[b_1099]]` table through `btctax income import` — the 1099-B \
+                 SCREEN and its box census are task T5, but the rows themselves are read today \
+                 (Schedule D lines 1a and 8a)"
+            }
+            DocumentRow::G1099 => {
+                "enter it as a `[[g_1099]]` table through `btctax income import` — the 1099-G \
+                 SCREEN, box 2 and the State and Local Income Tax Refund Worksheet are task T5, but \
+                 the rows themselves are read today (Schedule 1 lines 1 and 7)"
+            }
+            _ => return None,
+        })
     }
 
     /// The census question the filer is asked, phrased as the **form's own attribution** (R3): the
@@ -459,11 +487,17 @@ pub fn transcribed_rows(
 ) -> Option<usize> {
     match row {
         DocumentRow::W2 => Some(ri.w2s.len()),
-        DocumentRow::Int1099
-        | DocumentRow::Div1099
-        | DocumentRow::B1099
-        | DocumentRow::G1099
-        | DocumentRow::Form1098
+        // ★★★ COUNTABLE, and the earlier reading that they were not was simply WRONG: `income
+        //     import` fills these four `Vec`s today and the printed return already reads them
+        //     (Form 1040 line 2a/2b and Schedule B line 1; lines 3a/3b and Schedule B line 5;
+        //     Schedule D lines 1a/8a; Schedule 1 lines 1 and 7). What T5 adds is a SCREEN and a box
+        //     census, not the ability to hold the rows — so the honest rule is the W-2's rule, and
+        //     the row that is missing is a way to ENTER a document, not a way to declare one.
+        DocumentRow::Int1099 => Some(ri.int_1099.len()),
+        DocumentRow::Div1099 => Some(ri.div_1099.len()),
+        DocumentRow::B1099 => Some(ri.b_1099.len()),
+        DocumentRow::G1099 => Some(ri.g_1099.len()),
+        DocumentRow::Form1098
         | DocumentRow::Form1098e
         | DocumentRow::R1099
         | DocumentRow::Ssa1099
@@ -546,18 +580,21 @@ mod tests {
                     );
                     refusing += 1;
                 }
+                // ★ A row with NO exit is one btctax can hold the rows for today — and that set
+                //   is DERIVED, not listed: `entry_route` is `Some` exactly for the transcribable
+                //   rows, and the two scalar-shadowed rows are the ones `row_is_live` excludes. A
+                //   hand-list here would have to be edited twice when T5 or T9 lands.
                 None => assert!(
-                    matches!(
-                        row,
-                        DocumentRow::W2 | DocumentRow::Form1098 | DocumentRow::Form1098e
-                    ),
+                    row.entry_route().is_some()
+                        || matches!(row, DocumentRow::Form1098 | DocumentRow::Form1098e),
                     "{row:?} has no exit sentence but is neither transcribable nor non-live"
                 ),
             }
         }
         assert_eq!(
-            refusing, 15,
-            "fifteen rows refuse on Yes: eleven §2.2 families plus the four T5 screens"
+            refusing, 11,
+            "exactly §2.2's eleven excluded families refuse on Yes — the W-2 and the four 1099 \
+             families are transcribable TODAY (D1), and the two scalar-shadowed rows are not live"
         );
     }
 

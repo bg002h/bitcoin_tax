@@ -1130,13 +1130,17 @@ pub fn screen_document_census(ri: &ReturnInputs) -> Option<Refusal> {
                     );
                 }
                 if transcribed_rows(ri, row) == Some(0) {
+                    // ★ The refusal names the WAY IN, not just the gap: "you declared one and none
+                    //   is transcribed" is half a message, and a refusal with no exit is a brick
+                    //   with better prose.
+                    let route = row.entry_route().unwrap_or("enter the document");
                     return refuse(
                         RefuseReason::DocumentDeclaredNotTranscribed { kind: row },
                         format!(
                             "you answered that you received one or more {doc}, and none is \
                              transcribed on this return. A declared document with no transcription \
                              is exactly \"nothing ever populated it\" — the blank that looks \
-                             identical to a correct one on the printed page. Enter the document, or \
+                             identical to a correct one on the printed page. Either {route}, or \
                              change the answer to \"no\" if you received none."
                         ),
                     );
@@ -1981,35 +1985,105 @@ mod tests {
             refused += 1;
         }
         assert_eq!(
-            refused, 15,
-            "fifteen rows refuse on Yes — a shrinking count means a family stopped being announced"
+            refused, 11,
+            "§2.2's eleven excluded families refuse on Yes — a shrinking count means a family \
+             stopped being announced"
         );
     }
 
-    /// ★★ **The controller's T3 decision, made executable.** The four supported-by-§5.1 rows whose
-    /// SCREEN is task T5 refuse on `Yes` and NAME T5, rather than accepting a document there is no
-    /// surface to transcribe. A filer with interest today is refused rather than under-filed.
+    /// ★★★ **THE FOUR 1099 ROWS TAKE THE SAME THREE RULES AS THE W-2 ROW** (pre-review fold, D1).
+    ///
+    /// This replaces `the_four_t5_rows_refuse_naming_their_task`, which pinned the opposite and was
+    /// watched going RED on this change. That test encoded a premise that was simply false —
+    /// *"nothing collects them today"* — when `income import` fills all four `Vec`s and the printed
+    /// return already reads them. The consequence of the false premise was worse than the gap it
+    /// tried to close: the TRUTHFUL answer for a filer holding an imported 1099-INT refused the
+    /// return, so the only fileable answer was *"I received no Form 1099-INT"* beside transcribed
+    /// 1099-INT interest — the census demanding false testimony to let a return out.
+    ///
+    /// What T5 adds is a SCREEN, not the ability to hold the rows. So the missing thing is a way to
+    /// ENTER a document, which the `DocumentDeclaredNotTranscribed` refusal names, and not a reason
+    /// to tell the filer to leave.
     #[test]
-    fn the_four_t5_rows_refuse_naming_their_task() {
+    fn the_four_1099_rows_take_the_same_three_rules_as_the_w2_row() {
         use crate::tax::document_census::DocumentRow;
+        use crate::tax::return_inputs::{Form1099B, Form1099Div, Form1099G, Form1099Int};
+
+        // One row of each document, added to a censused fixture by the same path `income import`
+        // writes: the `Vec` on `ReturnInputs`.
+        let with_one_row = |row: DocumentRow| -> ReturnInputs {
+            let mut r = censused();
+            match row {
+                DocumentRow::Int1099 => r.int_1099 = vec![Form1099Int::default()],
+                DocumentRow::Div1099 => r.div_1099 = vec![Form1099Div::default()],
+                DocumentRow::B1099 => r.b_1099 = vec![Form1099B::default()],
+                DocumentRow::G1099 => r.g_1099 = vec![Form1099G::default()],
+                other => panic!("{other:?} is not one of the four"),
+            }
+            r
+        };
+
         for row in [
             DocumentRow::Int1099,
             DocumentRow::Div1099,
             DocumentRow::B1099,
             DocumentRow::G1099,
         ] {
-            let mut r = censused();
-            r.documents.set(row, Some(true));
-            let refusal = screen_inputs(&r, &tbl(), &params())
-                .unwrap_or_else(|| panic!("{row:?} = Yes must refuse until T5 builds its screen"));
+            // ── (1) `Some(true)` WITH a row PASSES. The whole point of the fold. ────────────────
+            let mut ok = with_one_row(row);
+            ok.documents.set(row, Some(true));
             assert_eq!(
-                refusal.reason,
-                RefuseReason::DocumentTypeUnsupported { kind: row }
+                raw(&ok),
+                None,
+                "{row:?} = Yes with one transcribed row must FILE — the filer entered it through \
+                 `income import`, and a census that refused it would be demanding false testimony"
+            );
+
+            // ── (2) `Some(true)` with ZERO rows refuses, and NAMES the way in. ─────────────────
+            let mut declared = censused();
+            declared.documents.set(row, Some(true));
+            let r = screen_inputs(&declared, &tbl(), &params())
+                .unwrap_or_else(|| panic!("{row:?} declared with nothing transcribed must refuse"));
+            assert_eq!(
+                r.reason,
+                RefuseReason::DocumentDeclaredNotTranscribed { kind: row },
+                "{row:?}: a declared document with no transcription is UNANSWERED, not UNSUPPORTED"
             );
             assert!(
-                refusal.detail.contains("(T5)"),
-                "{row:?}'s refusal must name the task that opens it: {}",
-                refusal.detail
+                r.detail.contains("income import"),
+                "{row:?}'s refusal must name the route in — a refusal with no exit is a brick with \
+                 better prose: {}",
+                r.detail
+            );
+            assert!(
+                r.detail.contains("T5"),
+                "{row:?}'s refusal must say which task replaces that route with a screen: {}",
+                r.detail
+            );
+
+            // ── (3) `Some(false)` beside a transcribed row refuses the contradiction. ──────────
+            let mut no = with_one_row(row);
+            no.documents.set(row, Some(false));
+            assert_eq!(
+                raw(&no),
+                Some(RefuseReason::DocumentCensusContradicted { kind: row }),
+                "{row:?} = No beside a transcribed row must refuse, exactly as the W-2 row does"
+            );
+
+            // ── (4) `None` blocks, through the registry loop. ──────────────────────────────────
+            let mut unanswered = with_one_row(row);
+            unanswered.documents.set(row, None);
+            assert_eq!(
+                raw(&unanswered),
+                Some(RefuseReason::DocumentCensusUnanswered { kind: row }),
+                "{row:?} unanswered must block"
+            );
+
+            // ── (5) …and none of the four is an EXCLUDED family any more. ─────────────────────
+            assert_eq!(
+                row.exit_sentence(),
+                None,
+                "{row:?} must carry no §2.2 exit — btctax can hold its rows today"
             );
         }
     }

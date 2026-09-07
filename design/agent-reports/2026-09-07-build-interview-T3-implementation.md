@@ -536,3 +536,227 @@ shape"*.
   whose `RefuseReason` cover is inherited from the family they sum.
 - **Schedule 1-A, Schedule C, Schedule SE, Form 8949 and the rest are out of the join's scope** —
   R2.2 scopes it to the seven forms the interview reaches.
+
+---
+
+# Pre-review fold (D1, D11)
+
+Folded on `main` at `0807335b` (the T3 build commit). No commits, no subagents; every plant reverted
+from a `cp` backup. Both folds are **accepted defects in my own build**, not scope changes.
+
+**Gate after the fold:** `cargo nextest run --locked --workspace --no-fail-fast` → **3242 run, 3242
+passed, 12 skipped**; `cargo fmt --all` clean; `CARGO_TARGET_DIR=target-clippy cargo clippy
+--workspace --all-targets --all-features -- -D warnings` clean.
+
+## The measured fact the coordinator asked about: 27 vs 28 blocks
+
+**28 is right; my report's "27 blocks" was a hand tally and is a defect in the report** (it is also
+in the T3 commit message). Nothing computed it — the per-map counts were printed during the build and
+I added them up wrong. Machine-checked now:
+
+```
+$ grep -rh '^\[\[direction' crates/btctax-forms/forms/ | wc -l
+28
+2024: f1040 10 · f1040s1 3 · f1040s2 2 · f1040s3 2 · f1040sa 1 · f1040sb 1 · schedule_d 3   = 22
+2025: f1040s2 2 · f1040s3 2 · f1040sa 1 · f1040sb 1                                          =  6
+```
+
+The "eleven tables" figure is right. This is exactly the failure `CLAUDE.md` names — *never hand-count
+what a tool can count* — committed inside a report about deriving numbers from forms. The fold adds
+**2 `[[subtracts]]` blocks** (both Schedule B), so the tree now carries **28 direction blocks and 2
+subtract sentences across 11 tables**.
+
+---
+
+## D1 — the four 1099 rows take the W-2's three rules
+
+**The premise that was false.** My brief said *"nothing collects them today"* of `int_1099`,
+`div_1099`, `b_1099`, `g_1099`. `income import` fills all four `Vec`s, and the printed return already
+reads them (1040 line 2a/2b + Schedule B line 1; lines 3a/3b + Schedule B line 5; Schedule D lines
+1a/8a; Schedule 1 lines 1 and 7). What T5 adds is a **screen**, not the ability to hold the rows —
+so the missing thing is a way to ENTER a document, not a reason to tell the filer to leave.
+
+**What changed.**
+
+| | before the fold | after |
+|---|---|---|
+| `transcribed_rows` for the four | `None` | `Some(vec.len())`, exactly as `w2` |
+| `exit_sentence()` for the four | a T5 "cannot yet take" sentence | `None` — they are not §2.2 families |
+| rows that refuse on `Some(true)` | 15 | **11** (§2.2's excluded families, and only those) |
+| `Some(true)` + rows present | refused `DocumentTypeUnsupported` | **passes** |
+| `Some(true)` + zero rows | refused `DocumentTypeUnsupported` | refuses `DocumentDeclaredNotTranscribed`, naming the route in |
+| `Some(false)` + rows present | unreachable (no row count) | refuses `DocumentCensusContradicted`; `apply(SetField(No))` errors |
+| `None` | blocked | blocked (unchanged) |
+
+New `DocumentRow::entry_route()` (a `const fn`, `Some` for the five transcribable rows) supplies the
+half of the message that was missing: *"you declared one and none is transcribed"* now continues
+*"…either enter it as an `[[int_1099]]` table through `btctax income import` — the 1099-INT SCREEN
+and its box census are task T5, but the rows themselves are read today (Form 1040 line 2a/2b and
+Schedule B line 1) — or change the answer to \"no\" if you received none."*
+
+`row_is_live` and the two scalar-shadowed rows are untouched; no `covered_by` changed (every census
+cover that pointed at `DocumentTypeUnsupported` names one of the eleven §2.2 rows).
+
+**Fixtures returned to the truth.** The three sites that had been carrying a false census answer, and
+the comments that explained the false state, are gone:
+
+- `crates/btctax-core/src/tax/scrub_axis.rs` — the loop already derives the answer from
+  `transcribed_rows`, so the sentinel now swears `int_1099 = div_1099 = g_1099 = b_1099 = true`
+  automatically; the "RECORDED TENSION" note is deleted.
+- `crates/btctax-cli/tests/fixtures/examples/nine_dependents_amt_inputs.toml` —
+  `int_1099 = true`, `b_1099 = true` (it holds $45,000 of 1099-INT interest and $2,000,000 of
+  1099-B proceeds); the tension note is replaced by a statement of what the household holds.
+- `crates/btctax-cli/tests/fixtures/examples/fullreturn_inputs.toml` — regenerated from
+  `kitchen_sink_household()`: `int_1099` / `div_1099` / `g_1099` `false → true`.
+- `crates/btctax-cli/src/cmd/answer.rs::every_live_question_can_actually_be_answered_and_clears_the_screen`
+  answered every declaration `false`, including a census row on a fixture holding a 1099-INT. It now
+  answers each census row from what the return carries — **the fixture was corrected, not the rule**:
+  a blanket "no" is now itself a refusable contradiction, which is the census working.
+
+`docs/examples/examples.md` regenerated (the three census values in the J6 `income show` block).
+
+### D1 kills
+
+**K-D1a · the test that asserted the old behaviour.** `the_four_t5_rows_refuse_naming_their_task`
+was watched going RED on the production change before being replaced:
+> `the_four_t5_rows_refuse_naming_their_task` panicked: `assertion left == right failed` — `left: DocumentDeclaredNotTranscribed { kind: Int1099 }`, `right: DocumentTypeUnsupported { kind: Int1099 }`
+
+It is replaced by `the_four_1099_rows_take_the_same_three_rules_as_the_w2_row`, which runs all four
+rows through five assertions each (Yes+row passes · Yes+zero refuses naming `income import` and T5 ·
+No+row contradicts · None blocks · no §2.2 exit).
+
+**K-D1b · countability.** Plant: `transcribed_rows(Int1099) → None`.
+> `Int1099 declared with nothing transcribed must refuse`
+
+**K-D1c · the route in the refusal.** Plant: drop `entry_route()` from the
+`DocumentDeclaredNotTranscribed` detail.
+> `Int1099's refusal must name the route in — a refusal with no exit is a brick with better prose: you answered that you received one or more Form 1099-INT, and none is transcribed on this return. … Either enter the document, or change the answer to "no" if you received none.`
+
+**K-D1d · the contradiction on the four.** Plant: disable the `Some(false)`-with-rows arm of
+`screen_document_census`.
+> `assertion left == right failed: Int1099 = No beside a transcribed row must refuse, exactly as the W-2 row does` — `left: None`, `right: Some(DocumentCensusContradicted { kind: Int1099 })`
+
+**K-D1e · `apply(SetField(No))` on the four.** The I-10 test now covers all four rows as well as the
+W-2 — the row is put on the return the way `income import` puts it there (straight onto the `Vec`),
+because they have no `AddRow` section until T5, and the guard must not care which writer filled it.
+Plant (unchanged from K4): remove the guard from `census_tristate!`.
+> `a census No beside a transcribed W-2 must be refused with the count` — `left: Ok(())`, `right: Err(SetError(ContradictsTranscribedRows { rows: 1 }))`
+
+**Count moved:** the refusing-row count `15 → 11` in two tests
+(`every_refusing_row_has_its_own_exit_sentence_and_the_rest_have_none`,
+`every_unsupported_census_row_refuses_with_its_own_exit_sentence`), and the "no exit sentence" set is
+now **derived** from `entry_route().is_some()` rather than hand-listed, so T5 and T9 do not have to
+edit it twice.
+
+---
+
+## D11 — a DERIVED flip for a line the form itself subtracts
+
+**The rule, as built.** Within one form, an `unmodeled` entry whose line number the form's own extract
+SUBTRACTS takes the OPPOSITE direction of its block. The sentence is recorded as
+`[[subtracts]] { sentence, extract_line }`, the join asserts it **verbatim at that extract line**, and
+the subtracted line number is **parsed out of the sentence itself** — never typed beside it, so the
+map cannot record a flip the form does not print. `NoDollar` has no opposite and is left alone.
+
+New `btctax_forms::SubtractSentence` (re-exported beside `DirectionBlock`), a `subtracts` field on
+every census-bearing map struct, and `census_join::subtracted_line()` + the flip in `verdict`.
+
+**The mechanical sweep across all 13 maps.** Every *"Subtract line X from line Y"* the eleven
+census-bearing extracts print — **9 sentences** — with X tested against that map's `unmodeled` entries:
+
+| extract:line | sentence | X | flips? |
+|---|---|---|---|
+| `f1040--2024.txt:78` | Subtract line 10 from line 9 | 10 | no — line 10 is mapped |
+| `f1040--2024.txt:86` | Subtract line 14 from line 11 | 14 | no — mapped |
+| `f1040--2024.txt:97` | Subtract line 21 from line 18 | 21 | no — mapped |
+| `f1040--2024.txt:114` | subtract line 24 from line 33 | 24 | no — mapped |
+| `f1040--2024.txt:120` | Subtract line 33 from line 24 | 33 | no — mapped |
+| `f1040sa--2024.txt:19` | Subtract line 3 from line 1 | 3 | no — Schedule A line 3 is mapped |
+| `f1040sa--2025.txt:20` | Subtract line 3 from line 1 | 3 | no — mapped |
+| **`f1040sb--2024.txt:38`** | **Subtract line 3 from line 2** | **3** | **YES** |
+| **`f1040sb--2025.txt:38`** | **Subtract line 3 from line 2** | **3** | **YES** |
+
+**Every entry the rule flips — two, one per year:**
+
+| entry | block | before → after |
+|---|---|---|
+| `2024/f1040sb` `topmostSubform[0].Page1[0].f1_32[0]`, line **3** (*"Excludable interest on series EE and I U.S. savings bonds issued after 1989 (attach Form 8815)"*) | `Interest and Ordinary Dividends` (whole-form key) | `Understates` → **`Overstates`** |
+| `2025/f1040sb` same FQN, line **3** | same | `Understates` → **`Overstates`** |
+
+**Consequences, exactly as D11 predicted.** Schedule B line 3's cover moves from
+`QuestionId::OtherOutOfScopeIncome` (which REFUSES on yes — refusing a filer for holding a benefit)
+to `Advisory::UnmodeledDeductionsOmitted`, whose message is widened to name it in the form's own
+terms: *"On Schedule B it does not compute the Form 8815 EXCLUSION of interest on series EE or I U.S.
+savings bonds cashed for higher-education expenses (line 3), which the form SUBTRACTS from your
+interest — so the whole amount is reported as taxable."* An existing variant fitted, so **no third
+advisory was added**. Limb **(f)** leaves the attestation prompt (4,641 → **4,425** chars); the
+prompt still names all remaining keywords, machine-checked (`MISSING: 0`). Cover split moves
+`Advisory 127 / QuestionId 124 / RefuseReason 47` → **`129 / 122 / 47`**.
+
+D11 therefore **closes the deviation my report flagged**: no filer is refused for being entitled to
+the §135 exclusion, and the line is still announced rather than silent.
+
+### D11 kills
+
+**K-D11a · remove the flip (real map).** Plant: delete the `[[subtracts]]` block from
+`2024/f1040sb.map.toml`.
+> `2024/f1040sb topmostSubform[0].Page1[0].f1_32[0] (line "3"): an ADVISORY covers an 'Understates' line ("Interest and Ordinary Dividends"). A blank there is a FALSE STATEMENT, not a forgone benefit — only a question the filer reads or a refusal that stops the return may cover it.`
+
+**K-D11b · a subtract sentence the extract does not carry (real map).** Plant:
+`"Subtract line 3 from line 1"`.
+> `2024/f1040sb:38: the extract does not carry "Subtract line 3 from line 1" — it reads "4 Subtract line 3 from line 2. Enter the result here and on Form 1040 or 1040-SR, line 2b 4". A direction FLIP must be the form subtracting the line in its own words, never a judgement typed into the map.`
+
+…and, in the same run, the cover it was propping up reds too — the flip and the cover stand or fall
+together, which is the property that makes the rule safe.
+
+**In-suite planted defects** —
+`census_join::tests::a_subtracted_line_flips_its_blocks_direction_and_only_the_forms_own_words_may_flip_it`
+drives the pure `verdict` over a Schedule-B-shaped fixture: with the flip the `Advisory` cover is
+green; without it, red; a sentence the extract lacks, red; a sentence pointed at the wrong extract
+line, red; a recorded sentence that is not a subtraction at all, red
+(`is not a "Subtract line X from line Y" sentence`); plus four parser cases (`"Subtract line 3 from
+line 2"` → `3`, `"…Subtract line 14 from line 11. If zero or less…"` → `14`, `"Add lines 1 through
+7"` → `None`, `"Subtract the amount from line 2"` → `None`).
+
+---
+
+## The 18 original kills after the fold
+
+All re-run and **green** (19 tests, including the two rewritten/added ones):
+
+```
+$ cargo nextest run --locked --workspace --no-fail-fast -E '<the 19 kill tests>'
+Summary [0.243s] 19 tests run: 19 passed, 3235 skipped
+```
+
+Two of the eighteen changed shape rather than merely passing:
+`the_four_t5_rows_refuse_naming_their_task` → `the_four_1099_rows_take_the_same_three_rules_as_the_w2_row`
+(the red is quoted above), and `a_census_no_over_transcribed_rows_is_refused_and_stores_nothing`
+gained the four 1099 rows.
+
+## Suite lines after the fold
+
+```
+btctax-core        Summary [ 0.533s] 1247 tests run: 1247 passed,  0 skipped
+btctax-input-form  Summary [ 0.026s]   67 tests run:   67 passed,  0 skipped
+btctax-forms       Summary [ 5.124s]  354 tests run:  354 passed,  4 skipped
+btctax-cli         Summary [ 6.392s]  723 tests run:  723 passed,  1 skipped
+xtask              Summary [ 6.343s]  151 tests run:  151 passed,  1 skipped
+btctax-tui-edit    Summary [ 1.943s]  382 tests run:  382 passed,  2 skipped
+btctax-tui         Summary [ 1.590s]  160 tests run:  160 passed,  2 skipped
+workspace          Summary [17.467s] 3242 tests run: 3242 passed, 12 skipped
+```
+`cargo run -p xtask -- census-join` → *"298 unmodeled entries across 13 maps, every one placed by a
+direction block asserted against the form's extract and covered by an existing variant"* ·
+`cargo run -p xtask -- stop-list` → *"8 btctax-input-form sources, 4 state-bearing sources and 54
+registry prompts scanned; no forbidden shape"*.
+
+## Deviations retired / remaining
+
+- **D1 retired** — the four rows are the W-2's rules; no fixture carries a false census answer.
+- **D11 retired** — Schedule B line 3 is `Overstates` by a reading of the form, covered by an
+  advisory, and the attestation no longer refuses a filer for holding a Form 8815 exclusion.
+- **New, small:** `SubtractSentence` + `subtracts` on the map structs and their re-export (D13's
+  shape, same reasoning); `DocumentRow::entry_route()`.
+- **Unchanged and still open:** D7 (the `DEPENDENT_GATES × rows` walk waits on T7 — still the one
+  untested part of R12), and the loose-`Overstates`-cover note.

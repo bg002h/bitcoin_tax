@@ -42,7 +42,7 @@ pub use packet::attachment_sequence;
 // ★ R2.2 — the census + direction shapes, for `xtask::census_join`. Re-exported rather than
 //   re-declared there: two definitions of what a `[census]` entry IS would drift, and the join's
 //   whole job is to hold the committed maps to one reading.
-pub use map::{CensusDecision, Direction, DirectionBlock};
+pub use map::{CensusDecision, Direction, DirectionBlock, SubtractSentence};
 mod pdf;
 mod schedule23;
 mod schedule_a;

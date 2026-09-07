@@ -547,10 +547,10 @@ $ btctax --vault v.pgp income show --year 2024
   },
   "documents": {
     "w2": true,
-    "int_1099": false,
-    "div_1099": false,
+    "int_1099": true,
+    "div_1099": true,
     "b_1099": false,
-    "g_1099": false,
+    "g_1099": true,
     "form_1098": null,
     "form_1098e": null,
     "r_1099": false,
@@ -792,9 +792,11 @@ Check what this feature actually produced: open the Form 8275 PDF and confirm th
     other taxes write-in (line 6), no home mortgage interest not reported to you on Form
     1098 (line 8b), no points not reported to you on Form 1098 (line 8c), no casualty or
     theft loss from a federally declared disaster (line 15, Form 4684) and no other itemized
-    deduction write-in (line 16). Each one it leaves blank is a deduction you may be
-    entitled to: if you have any of them your tax is OVERSTATED — claim them yourself, or
-    with a preparer.
+    deduction write-in (line 16). On Schedule B it does not compute the Form 8815 EXCLUSION
+    of interest on series EE or I U.S. savings bonds cashed for higher-education expenses
+    (line 3), which the form SUBTRACTS from your interest — so the whole amount is reported
+    as taxable. Each one it leaves blank is money you may be entitled to keep: if you have
+    any of them your tax is OVERSTATED — claim them yourself, or with a preparer.
   • RETURN OPTIONS NOT OFFERED — v1 fills a calendar-year Form 1040 for a filer with a
     domestic address, and it offers none of the following: a FISCAL YEAR (the "For the year
     Jan. 1–Dec. 31" line stays as printed), a FOREIGN ADDRESS (country, province, postal
@@ -1153,9 +1155,11 @@ Schedule D (raw pre-netting part totals) — tax year 2024
     other taxes write-in (line 6), no home mortgage interest not reported to you on Form
     1098 (line 8b), no points not reported to you on Form 1098 (line 8c), no casualty or
     theft loss from a federally declared disaster (line 15, Form 4684) and no other itemized
-    deduction write-in (line 16). Each one it leaves blank is a deduction you may be
-    entitled to: if you have any of them your tax is OVERSTATED — claim them yourself, or
-    with a preparer.
+    deduction write-in (line 16). On Schedule B it does not compute the Form 8815 EXCLUSION
+    of interest on series EE or I U.S. savings bonds cashed for higher-education expenses
+    (line 3), which the form SUBTRACTS from your interest — so the whole amount is reported
+    as taxable. Each one it leaves blank is money you may be entitled to keep: if you have
+    any of them your tax is OVERSTATED — claim them yourself, or with a preparer.
   • RETURN OPTIONS NOT OFFERED — v1 fills a calendar-year Form 1040 for a filer with a
     domestic address, and it offers none of the following: a FISCAL YEAR (the "For the year
     Jan. 1–Dec. 31" line stays as printed), a FOREIGN ADDRESS (country, province, postal

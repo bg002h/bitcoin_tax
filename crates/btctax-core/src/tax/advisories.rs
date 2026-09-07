@@ -169,8 +169,8 @@ pub enum Advisory {
     OtherCreditsOmitted,
     /// ★★★ **R2.2 — the DEDUCTION side of [`Advisory::OtherCreditsOmitted`].**
     ///
-    /// Every Schedule 1 Part II adjustment and every Schedule A line btctax does not model is a
-    /// deduction the return leaves blank. A blank there forgoes money LAWFULLY and can only
+    /// Every Schedule 1 Part II adjustment, every Schedule A line btctax does not model, and
+    /// Schedule B line 3's Form 8815 exclusion is money the return leaves on the table. A blank there forgoes money LAWFULLY and can only
     /// OVERSTATE the tax — the *"announced, never silent"* half of R2.2's direction rule — but until
     /// now nothing said so: `OtherCreditsOmitted` names CREDITS, and no advisory named the
     /// adjustments or the itemized lines at all. So most of Schedule 1 Part II and Schedule A had no
@@ -508,8 +508,11 @@ impl Advisory {
                  Schedule A it models no other taxes write-in (line 6), no home mortgage interest \
                  not reported to you on Form 1098 (line 8b), no points not reported to you on Form \
                  1098 (line 8c), no casualty or theft loss from a federally declared disaster \
-                 (line 15, Form 4684) and no other itemized deduction write-in (line 16). Each one \
-                 it leaves blank is a deduction you may be entitled to: if you have any of them \
+                 (line 15, Form 4684) and no other itemized deduction write-in (line 16). On \
+                 Schedule B it does not compute the Form 8815 EXCLUSION of interest on series EE or \
+                 I U.S. savings bonds cashed for higher-education expenses (line 3), which the form \
+                 SUBTRACTS from your interest — so the whole amount is reported as taxable. Each \
+                 one it leaves blank is money you may be entitled to keep: if you have any of them \
                  your tax is OVERSTATED — claim them yourself, or with a preparer."
                     .to_string(),
             Advisory::UnmodeledReturnOptionsOmitted =>

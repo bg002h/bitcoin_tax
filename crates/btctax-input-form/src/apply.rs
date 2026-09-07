@@ -491,6 +491,58 @@ mod tests {
         .unwrap();
         set_w2_census(&mut w, false).unwrap();
         assert_eq!(w.as_ref().unwrap().documents.w2, Some(false));
+
+        // ── ★★★ D1 — THE SAME GUARD ON ALL FOUR 1099 ROWS. ──────────────────────────────────────
+        //
+        // They have no `AddRow` section until T5, so the row is put on the return the way `income
+        // import` puts it there: straight onto the `Vec`. The guard must not care which writer
+        // filled it — the contradiction is between the ANSWER and the DATA.
+        use btctax_core::tax::document_census::DocumentRow;
+        use btctax_core::tax::return_inputs::{Form1099B, Form1099Div, Form1099G, Form1099Int};
+        for (row, fid) in [
+            (DocumentRow::Int1099, FieldId::DocInt1099),
+            (DocumentRow::Div1099, FieldId::DocDiv1099),
+            (DocumentRow::B1099, FieldId::DocB1099),
+            (DocumentRow::G1099, FieldId::DocG1099),
+        ] {
+            let mut w: Working = None;
+            materialize(&mut w, FilingStatus::Single);
+            {
+                let ri = w.as_mut().unwrap();
+                match row {
+                    DocumentRow::Int1099 => ri.int_1099 = vec![Form1099Int::default()],
+                    DocumentRow::Div1099 => ri.div_1099 = vec![Form1099Div::default()],
+                    DocumentRow::B1099 => ri.b_1099 = vec![Form1099B::default()],
+                    DocumentRow::G1099 => ri.g_1099 = vec![Form1099G::default()],
+                    other => panic!("{other:?} is not one of the four"),
+                }
+            }
+            let set = |w: &mut Working, v: bool| {
+                apply(
+                    w,
+                    Edit::SetField {
+                        id: fid,
+                        addr: RowAddr::default(),
+                        value: FieldValue::TriState(Some(v)),
+                    },
+                    now,
+                )
+            };
+            assert_eq!(
+                set(&mut w, false),
+                Err(ApplyError::SetError(SetError::ContradictsTranscribedRows {
+                    rows: 1
+                })),
+                "{row:?}: a census No beside a transcribed row must be refused with the count"
+            );
+            assert_eq!(
+                w.as_ref().unwrap().documents.get(row),
+                None,
+                "{row:?}: the refused write must store nothing"
+            );
+            set(&mut w, true).unwrap();
+            assert_eq!(w.as_ref().unwrap().documents.get(row), Some(true));
+        }
     }
 
     /// I-10 (spec §10): a `ForceItemize` + `DeleteSection(ScheduleA)` leaves `itemize_election == Auto` — a

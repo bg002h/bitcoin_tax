@@ -673,10 +673,7 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
                  them. (e) Your tax for the year comes from a form this tool does not fill — the \
                  parent's election to report a child's interest and dividends (Form 8814), the tax \
                  on a lump-sum distribution (Form 4972), or any other alternative form whose amount \
-                 belongs on Form 1040 line 16. (f) You can exclude interest on series EE or I U.S. \
-                 savings bonds you cashed to pay higher-education expenses (Form 8815) — btctax \
-                 cannot compute that exclusion and would report the whole amount as taxable \
-                 interest.",
+                 belongs on Form 1040 line 16.",
         unanswered: RefuseReason::OtherIncomeUnanswered,
         unanswered_detail:
             "btctax asks about HSA activity, dual-status alien status and foreign accounts, and a \

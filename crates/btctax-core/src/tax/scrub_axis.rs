@@ -489,13 +489,8 @@ pub fn maximal_sentinel() -> ReturnInputs {
     };
     // ★★★ R3 — THE DOCUMENT CENSUS, answered from the fixture's own rows. Done here rather than in
     //     the literal above because the answer for a countable row IS the row count, which the
-    //     literal cannot see while it is still being built.
-    //
-    // ★★ RECORDED TENSION (T3, the controller's decision): `int_1099` / `div_1099` / `g_1099` /
-    //    `b_1099` are not COUNTABLE yet — T5 builds their screens, and `transcribed_rows` says
-    //    `None` for them — so this fixture's imported 1099 rows sit beside a census `false`. There
-    //    is no row count today to refuse that against; T5 makes them countable and this loop then
-    //    answers `true` for them with no edit here.
+    //     literal cannot see while it is still being built. This household holds a W-2 and a row of
+    //     each 1099 family it imports, so it swears to exactly those.
     for row in crate::tax::document_census::DocumentRow::ALL {
         let has = crate::tax::document_census::transcribed_rows(&ri, *row).is_some_and(|n| n > 0);
         ri.documents.set(*row, Some(has));

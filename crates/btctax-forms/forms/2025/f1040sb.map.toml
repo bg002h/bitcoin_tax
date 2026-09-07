@@ -243,8 +243,17 @@ extract_line = 6
 direction    = "Understates"
 first_line   = "1"
 last_line    = "8"
+
+# ★★★ R2.2's DERIVED FLIP. Schedule B is a whole-form `Understates` key, and line 4 prints the form's
+#     own exception: line 3 is SUBTRACTED from line 2, so it is a REDUCTION of interest income and a
+#     blank there OVERSTATES the tax. The sentence is asserted verbatim at this extract line and the
+#     subtracted line number is parsed OUT of it, so nothing is typed per entry.
+[[subtracts]]
+sentence     = "Subtract line 3 from line 2"
+extract_line = 38
+
 [census]
-"topmostSubform[0].Page1[0].f1_32[0]" = { line = "3", rule = "unmodeled", reason = "Excludable interest on series EE and I U.S. savings bonds issued after 1989 (attach Form 8815) — btctax models no Form 8815, so line 4 = line 2. Unchanged for TY2025: the printed line 3 wording is identical to TY2024 (the text-layer diff on that line is trailing gutter whitespace only).", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "8815" }
+"topmostSubform[0].Page1[0].f1_32[0]" = { line = "3", rule = "unmodeled", reason = "Excludable interest on series EE and I U.S. savings bonds issued after 1989 (attach Form 8815) — btctax models no Form 8815, so line 4 = line 2. Unchanged for TY2025: the printed line 3 wording is identical to TY2024 (the text-layer diff on that line is trailing gutter whitespace only).", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
 # ★★ CORRECTED vs the TY2024 map, which said of this field: "Not a silent truncation: an over-long
 #    value FAILS CLOSED at verify.rs:516, so a list needing two lines refuses rather than clipping."
 #    BOTH halves of that are false on this PDF and were false on the 2024 one. (a) verify.rs:516 is

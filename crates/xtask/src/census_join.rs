@@ -32,7 +32,7 @@
 //! with exit 0 — the trap `crate-publishing-state` records. So the reading travels here, exactly as
 //! `line_coverage_check.rs` does.
 
-use btctax_forms::{CensusDecision, Direction, DirectionBlock};
+use btctax_forms::{CensusDecision, Direction, DirectionBlock, SubtractSentence};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -89,6 +89,34 @@ pub fn line_label(line: &str) -> Option<u32> {
     digits.parse().ok()
 }
 
+/// ★★★ **The line a *"Subtract line X from line Y"* sentence SUBTRACTS**, parsed out of the sentence
+/// itself so it can never be a second key that disagrees with the form's words.
+///
+/// `None` when the string is not that shape — which is a finding, not a silent skip: a
+/// `[[subtracts]]` entry whose sentence is not a subtraction is recording something the rule cannot
+/// act on.
+#[must_use]
+pub fn subtracted_line(sentence: &str) -> Option<String> {
+    let s = norm(sentence).to_ascii_lowercase();
+    let after = s.split("subtract line ").nth(1)?;
+    let token = after.split(" from line ").next()?.trim();
+    (!token.is_empty()
+        && token.len() <= 3
+        && token.starts_with(|c: char| c.is_ascii_digit())
+        && token.chars().all(|c| c.is_ascii_alphanumeric()))
+    .then(|| token.to_string())
+}
+
+/// The opposite direction. `NoDollar` has no opposite — a cell carrying no dollar is not made into
+/// one by being subtracted.
+fn flipped(d: Direction) -> Direction {
+    match d {
+        Direction::Understates => Direction::Overstates,
+        Direction::Overstates => Direction::Understates,
+        Direction::NoDollar => Direction::NoDollar,
+    }
+}
+
 /// The span of extract lines a block heads: from its own caption to the next block's, or EOF.
 fn spans(blocks: &[DirectionBlock], total: usize) -> Vec<(usize, usize)> {
     let mut starts: Vec<usize> = blocks.iter().map(|b| b.extract_line).collect();
@@ -116,6 +144,7 @@ fn spans(blocks: &[DirectionBlock], total: usize) -> Vec<(usize, usize)> {
 pub fn verdict(
     label: &str,
     blocks: &[DirectionBlock],
+    subtracts: &[SubtractSentence],
     census: &BTreeMap<String, CensusDecision>,
     extract: &[String],
     variants: &BTreeSet<String>,
@@ -223,6 +252,47 @@ pub fn verdict(
         }
     }
 
+    // ── 3b. ★★★ THE DERIVED FLIP. Every recorded *"Subtract line X from line Y"* is asserted
+    //        VERBATIM at its extract line, and X is parsed OUT of the sentence — so the set of
+    //        flipped lines is a reading of the form, exactly like the block captions above. ────────
+    let mut flips: BTreeSet<u32> = BTreeSet::new();
+    for sub in subtracts {
+        match extract.get(sub.extract_line - 1) {
+            None => out.push(format!(
+                "{label}: [[subtracts]] {:?} points at line {} of an extract with {} lines",
+                sub.sentence,
+                sub.extract_line,
+                extract.len()
+            )),
+            Some(l) => {
+                if !norm(l).contains(&norm(&sub.sentence)) {
+                    out.push(format!(
+                        "{label}:{}: the extract does not carry {:?} — it reads {:?}. A direction \
+                         FLIP must be the form subtracting the line in its own words, never a \
+                         judgement typed into the map.",
+                        sub.extract_line,
+                        sub.sentence,
+                        norm(l)
+                    ));
+                    continue;
+                }
+            }
+        }
+        match subtracted_line(&sub.sentence)
+            .as_deref()
+            .and_then(line_label)
+        {
+            Some(n) => {
+                flips.insert(n);
+            }
+            None => out.push(format!(
+                "{label}: [[subtracts]] {:?} is not a \"Subtract line X from line Y\" sentence, so \
+                 there is no line it could flip",
+                sub.sentence
+            )),
+        }
+    }
+
     // ── 4/5. Place every entry, and join it. ─────────────────────────────────────────────────────
     let mut placed: BTreeMap<&str, usize> =
         blocks.iter().map(|b| (b.caption.as_str(), 0)).collect();
@@ -280,8 +350,15 @@ pub fn verdict(
             ));
             continue;
         }
+        // ★★ The block grades the line, UNLESS the form subtracts it — then the line is a
+        //    reduction of whatever the block measures, and its direction inverts.
+        let direction = if n.is_some_and(|n| flips.contains(&n)) {
+            flipped(block.direction)
+        } else {
+            block.direction
+        };
         let is_advisory = cover.starts_with("Advisory::");
-        if block.direction == Direction::Understates && is_advisory {
+        if direction == Direction::Understates && is_advisory {
             out.push(format!(
                 "{label} {fqn} (line {:?}): an ADVISORY covers an `Understates` line ({:?}). A blank \
                  there is a FALSE STATEMENT, not a forgone benefit — only a question the filer reads \
@@ -453,6 +530,7 @@ pub fn run() -> Result<String, String> {
             findings.extend(verdict(
                 &format!("{year}/{stem}"),
                 &parsed.direction,
+                &parsed.subtracts,
                 &parsed.census,
                 &extract,
                 &variants,
@@ -490,6 +568,8 @@ struct MapShape {
     census: BTreeMap<String, CensusDecision>,
     #[serde(default)]
     direction: Vec<DirectionBlock>,
+    #[serde(default)]
+    subtracts: Vec<SubtractSentence>,
 }
 
 #[cfg(test)]
@@ -597,7 +677,7 @@ mod tests {
             v.into_iter().map(|(k, e)| (k.to_string(), e)).collect()
         };
         let run = |c: &BTreeMap<String, CensusDecision>, b: &[DirectionBlock]| {
-            verdict("T", b, c, &extract, &variants, &prompts)
+            verdict("T", b, &[], c, &extract, &variants, &prompts)
         };
 
         // ── The clean baseline. Both parts placed, both covered legally. ─────────────────────────
@@ -663,7 +743,7 @@ mod tests {
             "QuestionId::OtherOutOfScopeIncome".to_string(),
             "…Jury duty pay, Prizes and awards, or a farm…".to_string(),
         );
-        assert!(verdict("T", &blocks, &c, &extract, &variants, &prompts2).is_empty());
+        assert!(verdict("T", &blocks, &[], &c, &extract, &variants, &prompts2).is_empty());
 
         // ── (5) A keyword that is not in the entry's OWN reason — chosen to match the prompt. ────
         let mut c = good.clone();
@@ -730,6 +810,123 @@ mod tests {
 
         // ── (13) A form with unmodeled entries and NO table at all. ──────────────────────────────
         assert!(run(&good, &[])[0].contains("must carry a direction table"));
+    }
+
+    /// ★★★ **THE DERIVED FLIP (D11), and both ways it must fail.**
+    ///
+    /// A line the form itself subtracts is a REDUCTION of whatever its block measures, so its
+    /// direction inverts — which is what stops Schedule B line 3 (the Form 8815 exclusion) being
+    /// covered by a question that REFUSES a filer for holding a benefit. The flip is only ever a
+    /// reading of the form: the sentence must be printed where the map says it is, and the
+    /// subtracted line number is parsed OUT of the sentence rather than typed beside it.
+    #[test]
+    fn a_subtracted_line_flips_its_blocks_direction_and_only_the_forms_own_words_may_flip_it() {
+        // A one-part income form whose line 4 subtracts line 3 — Schedule B's shape.
+        let extract: Vec<String> = vec![
+            "SCHEDULE B                     Interest and Ordinary Dividends".into(), // 1
+            "  1  List name of payer".into(),                                        // 2
+            "  2  Add the amounts on line 1".into(),                                 // 3
+            "  3  Excludable interest on series EE and I U.S. savings bonds".into(), // 4
+            "  4  Subtract line 3 from line 2. Enter the result here".into(),        // 5
+        ];
+        let blocks = vec![block(
+            "Interest and Ordinary Dividends",
+            1,
+            Direction::Understates,
+            Some(("1", "4")),
+        )];
+        let variants: BTreeSet<String> = ["Advisory::UnmodeledDeductionsOmitted"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let prompts: BTreeMap<String, String> = BTreeMap::new();
+        let census: BTreeMap<String, CensusDecision> = [(
+            "f.3".to_string(),
+            entry(
+                "3",
+                "Excludable interest on series EE and I U.S. savings bonds (attach Form 8815).",
+                "Advisory::UnmodeledDeductionsOmitted",
+                None,
+            ),
+        )]
+        .into_iter()
+        .collect();
+        let sub = |sentence: &str, at: usize| SubtractSentence {
+            sentence: sentence.to_string(),
+            extract_line: at,
+        };
+
+        // ── WITH the flip: line 3 is `Overstates`, so an Advisory is an honest cover. ────────────
+        let subs = vec![sub("Subtract line 3 from line 2", 5)];
+        assert!(
+            verdict("T", &blocks, &subs, &census, &extract, &variants, &prompts).is_empty(),
+            "{:?}",
+            verdict("T", &blocks, &subs, &census, &extract, &variants, &prompts)
+        );
+
+        // ── (1) ★★★ REMOVE THE FLIP: the same Advisory now reds under the Understates rule. ─────
+        let f = verdict("T", &blocks, &[], &census, &extract, &variants, &prompts);
+        assert_eq!(f.len(), 1, "{f:?}");
+        assert!(
+            f[0].contains("ADVISORY covers an `Understates` line"),
+            "without the flip the block grades line 3, and the cover must red: {}",
+            f[0]
+        );
+
+        // ── (2) ★★★ A SENTENCE THE EXTRACT DOES NOT CARRY. The flip must be the FORM subtracting
+        //        the line, never a judgement typed into the map to make a cover legal. ───────────
+        let planted = vec![sub("Subtract line 3 from line 1", 5)];
+        let f = verdict(
+            "T", &blocks, &planted, &census, &extract, &variants, &prompts,
+        );
+        assert!(
+            f.iter().any(|x| x.contains("the extract does not carry")),
+            "a sentence the form does not print must red: {f:?}"
+        );
+
+        // ── (3) …and one pointed at the wrong LINE of the extract reds too. ─────────────────────
+        let f = verdict(
+            "T",
+            &blocks,
+            &[sub("Subtract line 3 from line 2", 3)],
+            &census,
+            &extract,
+            &variants,
+            &prompts,
+        );
+        assert!(
+            f.iter().any(|x| x.contains("the extract does not carry")),
+            "{f:?}"
+        );
+
+        // ── (4) A recorded sentence that is not a subtraction at all. ───────────────────────────
+        let f = verdict(
+            "T",
+            &blocks,
+            &[sub("Interest and Ordinary Dividends", 1)],
+            &census,
+            &extract,
+            &variants,
+            &prompts,
+        );
+        assert!(
+            f.iter()
+                .any(|x| x.contains("is not a \"Subtract line X from line Y\" sentence")),
+            "{f:?}"
+        );
+
+        // ── The parser: the subtracted line comes OUT of the sentence, never beside it. ─────────
+        assert_eq!(
+            subtracted_line("Subtract line 3 from line 2").as_deref(),
+            Some("3")
+        );
+        assert_eq!(
+            subtracted_line("  4   Subtract line 14 from line 11. If zero or less, enter -0-")
+                .as_deref(),
+            Some("14")
+        );
+        assert_eq!(subtracted_line("Add lines 1 through 7"), None);
+        assert_eq!(subtracted_line("Subtract the amount from line 2"), None);
     }
 
     /// The line-label parser: the bound is what tells a form line from a form NUMBER.

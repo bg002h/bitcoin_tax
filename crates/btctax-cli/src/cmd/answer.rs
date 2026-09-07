@@ -595,8 +595,20 @@ mod tests {
         );
         for ask in live_questions(&ri) {
             match ask {
-                Ask::Declaration(q) => (q.set)(&mut ri, false), // answer "no"
-                Ask::Skippable(_) => {}                         // skippable by design
+                // ★★ Answer "no" — EXCEPT on a document-census row, which is answered from what
+                //    this return actually carries. Since D1 a blanket "no" is itself a refusable
+                //    contradiction: this fixture holds a transcribed Form 1099-INT, and swearing it
+                //    received none is exactly `DocumentCensusContradicted`. That is the census
+                //    working, so the fixture answers TRUTHFULLY rather than the rule being relaxed.
+                Ask::Declaration(q) => {
+                    let truth = btctax_core::tax::document_census::row_of_question(q.id)
+                        .and_then(|row| {
+                            btctax_core::tax::document_census::transcribed_rows(&ri, row)
+                        })
+                        .is_some_and(|n| n > 0);
+                    (q.set)(&mut ri, truth);
+                }
+                Ask::Skippable(_) => {} // skippable by design
             }
         }
         assert!(

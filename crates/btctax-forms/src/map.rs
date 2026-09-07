@@ -96,6 +96,29 @@ pub enum Direction {
     NoDollar,
 }
 
+/// ★★★ **R2.2's DERIVED FLIP — a line the form itself SUBTRACTS.**
+///
+/// A block's direction grades the lines it heads, and it is right for almost all of them. But a form
+/// prints its own exceptions: Schedule B is a whole-form `Understates` key (its Part headings run
+/// into their content in the text layer), and inside it line 4 reads *"Subtract line 3 from line
+/// 2"*. Line 3 is therefore a REDUCTION of interest income — leaving it blank OVERSTATES the tax,
+/// the exact opposite of its block — so covering it with a question that REFUSES on yes would refuse
+/// a filer for holding a benefit.
+///
+/// So the flip is read off the form: this records the sentence and the extract line it is printed
+/// on, `xtask::census_join` asserts it VERBATIM there, parses the subtracted line number out of the
+/// sentence itself, and inverts that line's direction. Nothing is typed per entry, and a revision
+/// that stops subtracting the line reds instead of drifting.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SubtractSentence {
+    /// The form's own words, e.g. `"Subtract line 3 from line 2"`. The subtracted line is parsed
+    /// OUT of this — it is never a second key that could disagree with the sentence.
+    pub sentence: String,
+    /// The 1-based line of `design/forms/extract/<stem>--<year>.txt` the sentence is printed on.
+    pub extract_line: usize,
+}
+
 /// ★★★ **R2.2 — one block of a form's `[direction]` table.**
 ///
 /// A block is a caption the form actually prints, read off the archived text layer at
@@ -278,6 +301,10 @@ pub struct Form6251Map {
     /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
     #[serde(default)]
     pub direction: Vec<DirectionBlock>,
+    /// ★★★ R2.2's derived flip — every *"Subtract line X from line Y"* this form prints where X is
+    /// an `unmodeled` census entry. See [`SubtractSentence`].
+    #[serde(default)]
+    pub subtracts: Vec<SubtractSentence>,
     pub line1: MoneyCell,
     pub line2a: MoneyCell,
     pub line2b: MoneyCell,
@@ -404,7 +431,8 @@ impl Form6251Map {
             attachment_sequence: _,
             census: _,
             // R2.2 — the direction table is provenance about the census, never a money cell.
-            direction: _, // provenance for the fields we do NOT fill; never a money cell
+            direction: _,
+            subtracts: _, // provenance for the fields we do NOT fill; never a money cell
             identity: _,  // not money
             line1: _,
             line2a: _,
@@ -608,6 +636,10 @@ pub struct Form8949Map {
     /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
     #[serde(default)]
     pub direction: Vec<DirectionBlock>,
+    /// ★★★ R2.2's derived flip — every *"Subtract line X from line Y"* this form prints where X is
+    /// an `unmodeled` census entry. See [`SubtractSentence`].
+    #[serde(default)]
+    pub subtracts: Vec<SubtractSentence>,
     /// "Name(s) shown on return" + SSN — on **both pages** (the 8949 is a two-page detail attachment, and
     /// each page carries the header). `Option`: the crypto slice never writes it, and the 2017/2025 maps
     /// have no verified FQNs. The FULL-return filler refuses on `None` — an unnamed 8949 is not filable
@@ -854,6 +886,10 @@ pub struct Form1040Map {
     /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
     #[serde(default)]
     pub direction: Vec<DirectionBlock>,
+    /// ★★★ R2.2's derived flip — every *"Subtract line X from line Y"* this form prints where X is
+    /// an `unmodeled` census entry. See [`SubtractSentence`].
+    #[serde(default)]
+    pub subtracts: Vec<SubtractSentence>,
     /// The full-return identity BLOCK (P6.2). The 1040's header is not two cells like a schedule's: it
     /// is names + SSNs + address + the §63(f) aged/blind checkboxes + the dependents table. `Option`
     /// because this map is SHARED with the crypto slice, whose 2017/2025 editions have no verified
@@ -1211,6 +1247,10 @@ pub struct Form8283Map {
     /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
     #[serde(default)]
     pub direction: Vec<DirectionBlock>,
+    /// ★★★ R2.2's derived flip — every *"Subtract line X from line Y"* this form prints where X is
+    /// an `unmodeled` census entry. See [`SubtractSentence`].
+    #[serde(default)]
+    pub subtracts: Vec<SubtractSentence>,
     /// The FILER's identity — "Name(s) shown on your income tax return" + identifying number. `Option`
     /// because the crypto slice never writes it (its 8283 rides beside a return btctax did not produce)
     /// and the 2017/2025 maps have no verified FQNs; the FULL-return filler refuses on `None`.
@@ -1401,6 +1441,10 @@ pub struct Form8275Map {
     /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
     #[serde(default)]
     pub direction: Vec<DirectionBlock>,
+    /// ★★★ R2.2's derived flip — every *"Subtract line X from line Y"* this form prints where X is
+    /// an `unmodeled` census entry. See [`SubtractSentence`].
+    #[serde(default)]
+    pub subtracts: Vec<SubtractSentence>,
     /// The FILER's identity — "Name(s) shown on return" + "Identifying number shown on return". The map
     /// always DECLARES these cells (unlike Form 8283, whose 2017 revision structurally lacks an identity
     /// block), but Task 16's crypto-slice fill (`fill_form_8275_slice`) leaves them unwritten — mirroring
@@ -1594,6 +1638,10 @@ pub struct ScheduleDMap {
     /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
     #[serde(default)]
     pub direction: Vec<DirectionBlock>,
+    /// ★★★ R2.2's derived flip — every *"Subtract line X from line Y"* this form prints where X is
+    /// an `unmodeled` census entry. See [`SubtractSentence`].
+    #[serde(default)]
+    pub subtracts: Vec<SubtractSentence>,
     /// The name + SSN header cells (P6.2). `Option` because this map is SHARED with the crypto-slice
     /// path, whose 2017/2025 editions have no verified identity FQNs and no `ReturnInputs` to source an
     /// identity from. The FULL-return filler refuses on `None` — it may not emit an unnamed form.
@@ -1770,6 +1818,10 @@ pub struct Form8959Map {
     /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
     #[serde(default)]
     pub direction: Vec<DirectionBlock>,
+    /// ★★★ R2.2's derived flip — every *"Subtract line X from line Y"* this form prints where X is
+    /// an `unmodeled` census entry. See [`SubtractSentence`].
+    #[serde(default)]
+    pub subtracts: Vec<SubtractSentence>,
     /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
     /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
     pub identity: IdentityCells,
@@ -1942,6 +1994,10 @@ pub struct Form4868Map {
     /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
     #[serde(default)]
     pub direction: Vec<DirectionBlock>,
+    /// ★★★ R2.2's derived flip — every *"Subtract line X from line Y"* this form prints where X is
+    /// an `unmodeled` census entry. See [`SubtractSentence`].
+    #[serde(default)]
+    pub subtracts: Vec<SubtractSentence>,
     /// L1 — "Your name(s) (see instructions)". Bound by NAME after the Rust field
     /// `ReturnHeader.name_line` it is filled from (see the struct's deviation note).
     pub name_line: String,
@@ -2102,6 +2158,10 @@ pub struct Form1040VMap {
     /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
     #[serde(default)]
     pub direction: Vec<DirectionBlock>,
+    /// ★★★ R2.2's derived flip — every *"Subtract line X from line Y"* this form prints where X is
+    /// an `unmodeled` census entry. See [`SubtractSentence`].
+    #[serde(default)]
+    pub subtracts: Vec<SubtractSentence>,
     /// Box 1 — "Your social security number (SSN)" / "(if a joint return, SSN shown first on your
     /// return)". `/MaxLen` 11 ⇒ hyphenated.
     pub box1_ssn: String,
@@ -2252,6 +2312,10 @@ pub struct Form8960Map {
     /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
     #[serde(default)]
     pub direction: Vec<DirectionBlock>,
+    /// ★★★ R2.2's derived flip — every *"Subtract line X from line Y"* this form prints where X is
+    /// an `unmodeled` census entry. See [`SubtractSentence`].
+    #[serde(default)]
+    pub subtracts: Vec<SubtractSentence>,
     /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
     /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
     pub identity: IdentityCells,
@@ -2404,6 +2468,10 @@ pub struct Form8995AMap {
     /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
     #[serde(default)]
     pub direction: Vec<DirectionBlock>,
+    /// ★★★ R2.2's derived flip — every *"Subtract line X from line Y"* this form prints where X is
+    /// an `unmodeled` census entry. See [`SubtractSentence`].
+    #[serde(default)]
+    pub subtracts: Vec<SubtractSentence>,
     /// Name + SSN. REQUIRED — a schedule that does not name its taxpayer is not filable.
     pub identity: IdentityCells,
     /// Part IV lines 27-40, in the form's own numbering. See `forms/2024/f8995a.map.toml` for how the
@@ -2583,6 +2651,10 @@ pub struct Form8995Map {
     /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
     #[serde(default)]
     pub direction: Vec<DirectionBlock>,
+    /// ★★★ R2.2's derived flip — every *"Subtract line X from line Y"* this form prints where X is
+    /// an `unmodeled` census entry. See [`SubtractSentence`].
+    #[serde(default)]
+    pub subtracts: Vec<SubtractSentence>,
     /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
     /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
     pub identity: IdentityCells,
@@ -2739,6 +2811,10 @@ pub struct Schedule2Map {
     /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
     #[serde(default)]
     pub direction: Vec<DirectionBlock>,
+    /// ★★★ R2.2's derived flip — every *"Subtract line X from line Y"* this form prints where X is
+    /// an `unmodeled` census entry. See [`SubtractSentence`].
+    #[serde(default)]
+    pub subtracts: Vec<SubtractSentence>,
     /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
     /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
     pub identity: IdentityCells,
@@ -2860,6 +2936,10 @@ pub struct Schedule3Map {
     /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
     #[serde(default)]
     pub direction: Vec<DirectionBlock>,
+    /// ★★★ R2.2's derived flip — every *"Subtract line X from line Y"* this form prints where X is
+    /// an `unmodeled` census entry. See [`SubtractSentence`].
+    #[serde(default)]
+    pub subtracts: Vec<SubtractSentence>,
     /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
     /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
     pub identity: IdentityCells,
@@ -2981,6 +3061,10 @@ pub struct ScheduleAMap {
     /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
     #[serde(default)]
     pub direction: Vec<DirectionBlock>,
+    /// ★★★ R2.2's derived flip — every *"Subtract line X from line Y"* this form prints where X is
+    /// an `unmodeled` census entry. See [`SubtractSentence`].
+    #[serde(default)]
+    pub subtracts: Vec<SubtractSentence>,
     /// L5a's §164(b)(5) sales-tax election checkbox — the election core already honours in the
     /// arithmetic, which the filed form never showed (ARCH-P6.3a Q7 item 3).
     pub check_5a_sales_tax: CheckChoice,
@@ -3151,6 +3235,10 @@ pub struct Schedule1Map {
     /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
     #[serde(default)]
     pub direction: Vec<DirectionBlock>,
+    /// ★★★ R2.2's derived flip — every *"Subtract line X from line Y"* this form prints where X is
+    /// an `unmodeled` census entry. See [`SubtractSentence`].
+    #[serde(default)]
+    pub subtracts: Vec<SubtractSentence>,
     /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
     /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
     pub identity: IdentityCells,
@@ -3286,6 +3374,10 @@ pub struct ScheduleCMap {
     /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
     #[serde(default)]
     pub direction: Vec<DirectionBlock>,
+    /// ★★★ R2.2's derived flip — every *"Subtract line X from line Y"* this form prints where X is
+    /// an `unmodeled` census entry. See [`SubtractSentence`].
+    #[serde(default)]
+    pub subtracts: Vec<SubtractSentence>,
     /// Line A — "Principal business or profession".
     pub line_a_business: String,
     /// Line B — the NAICS code (a 6-character comb).
@@ -3452,6 +3544,10 @@ pub struct ScheduleBMap {
     /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
     #[serde(default)]
     pub direction: Vec<DirectionBlock>,
+    /// ★★★ R2.2's derived flip — every *"Subtract line X from line Y"* this form prints where X is
+    /// an `unmodeled` census entry. See [`SubtractSentence`].
+    #[serde(default)]
+    pub subtracts: Vec<SubtractSentence>,
     /// L7b — the foreign-country list. It IS a captured input; the claim that v1 had none was false
     /// (ARCH-P6.3a Q7 item 7).
     pub line7b_countries: String,
@@ -3564,6 +3660,10 @@ pub struct ScheduleSeMap {
     /// map with no `unmodeled` census entry; `xtask::census_join` holds both halves of that.
     #[serde(default)]
     pub direction: Vec<DirectionBlock>,
+    /// ★★★ R2.2's derived flip — every *"Subtract line X from line Y"* this form prints where X is
+    /// an `unmodeled` census entry. See [`SubtractSentence`].
+    #[serde(default)]
+    pub subtracts: Vec<SubtractSentence>,
     /// The identity header — "Name of person **with self-employment income**" + THAT person's SSN, i.e.
     /// the PROPRIETOR, not the return's joint name line. `Option` because this map is shared with the
     /// crypto slice (whose 2017/2025 editions have no verified identity FQNs and write no identity at
