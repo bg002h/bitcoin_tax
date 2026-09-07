@@ -56,7 +56,7 @@ pub fn answer_all_live_declarations(ri: &mut ReturnInputs) {
 /// Flips a COUNTABLE row to `Some(true)` when the return holds rows of that document, whether the row
 /// was unanswered or was answered `Some(false)` by an earlier
 /// [`answer_all_live_declarations`] pass. Nothing else is touched: a `Some(true)` stays, and a row
-/// with no section (`transcribed_rows` = `None`) is left to the caller.
+/// with no section (`declared_rows` = `None`) is left to the caller.
 ///
 /// **Why it is separate and re-runnable.** Fixture builders answer the declarations and THEN shape
 /// the return, so the answering pass cannot see the rows the shape is about to add — and a `false`
@@ -68,7 +68,7 @@ pub fn answer_all_live_declarations(ri: &mut ReturnInputs) {
 /// from the fixture's own data; it never answers for a human.
 pub fn reconcile_document_census(ri: &mut ReturnInputs) {
     for row in crate::tax::document_census::DocumentRow::ALL {
-        if crate::tax::document_census::transcribed_rows(ri, *row).is_some_and(|n| n > 0)
+        if crate::tax::document_census::declared_rows(ri, *row).is_some_and(|n| n > 0)
             && ri.documents.get(*row) != Some(true)
         {
             ri.documents.set(*row, Some(true));

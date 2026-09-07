@@ -51,9 +51,26 @@ impl Ask {
 /// declarations would leave the return refused and unstorable; asking everything at once prevents that
 /// deadlock. The spouse DOB prompt is gated on `header.spouse.is_some()` (r3 I-7).
 pub fn live_questions(ri: &ReturnInputs) -> Vec<Ask> {
-    let mut asks: Vec<Ask> = FORM_QUESTIONS
-        .iter()
-        .filter(|q| (q.live)(ri))
+    // ★★★ **DOCUMENT-FIRST** (T3 seam review, M5). A real interview asks the shoebox first: what
+    //     did you receive? The registry ARRAY cannot say so — `decl_tristate!`/`census_tristate!`
+    //     couple to a literal index, so the eighteen census rows had to be APPENDED at 17..=34 —
+    //     and a filer therefore answered eight gate declarations, the 4,673-character residual
+    //     attestation among them, before being asked *"Did you receive one or more Form W-2?"*.
+    //     Worse, five of that attestation's own limbs (1099-R, SSA-1099, K-1, Schedule E rental,
+    //     W-2G) are then asked again one at a time, twelve questions later.
+    //
+    //     ★ So the ORDER is fixed here, in what the filer is shown, and the array is left exactly as
+    //     it is: the index coupling is untouched, and `FORM_QUESTIONS`' own order still decides
+    //     everything inside each group. Correctness never depended on this — `screen_document_census`
+    //     runs before the `OtherOutOfScopeIncome` refusal either way — so this is a journey fix, and
+    //     it is a stable partition, never a sort.
+    let live = || FORM_QUESTIONS.iter().filter(|q| (q.live)(ri));
+    let is_census = |q: &&'static FormQuestion| {
+        btctax_core::tax::document_census::row_of_question(q.id).is_some()
+    };
+    let mut asks: Vec<Ask> = live()
+        .filter(is_census)
+        .chain(live().filter(|q| !is_census(q)))
         .map(Ask::Declaration)
         .collect();
     // ★ P9 §2.2 class-(B) skippables — DERIVED from the core [`SKIPPABLE_QUESTIONS`] registry (the DOBs, the
@@ -494,6 +511,35 @@ mod tests {
         assert_eq!(
             declaration_ids(&single()),
             vec![
+                // ★★★ R3 / §5.1 — THE DOCUMENT CENSUS, ASKED FIRST (T3 seam review, M5). Sixteen of
+                // the eighteen rows are live for every filer: a document type must be ANSWERED, and
+                // "a filer cannot answer no to a category they were never shown". The two missing
+                // ones are `DocForm1098` and `DocForm1098e`, whose amount is collected today by a
+                // scalar — they open with T9 and T5 respectively, and until then a `No` on the row
+                // would contradict a figure the filer already entered.
+                //
+                // ★ They come first because a real interview asks the SHOEBOX first, and because
+                // five of the residual attestation's own limbs (1099-R, SSA-1099, K-1, Schedule E
+                // rental, W-2G) are these very rows asked again one at a time. The registry array is
+                // unchanged and still 17..=34 (`decl_tristate!` couples to the index); the ORDER is
+                // a stable partition inside `live_questions`.
+                QuestionId::DocW2,
+                QuestionId::DocInt1099,
+                QuestionId::DocDiv1099,
+                QuestionId::DocB1099,
+                QuestionId::DocG1099,
+                QuestionId::DocR1099,
+                QuestionId::DocSsa1099,
+                QuestionId::DocNecMiscK1099,
+                QuestionId::DocK1,
+                QuestionId::DocScheduleERental,
+                QuestionId::DocS1099,
+                QuestionId::DocOid1099,
+                QuestionId::DocW2g,
+                QuestionId::DocC1099,
+                QuestionId::DocA1095,
+                QuestionId::DocT1098,
+                // ── …then the gate declarations, in registry order, unchanged. ──────────────────
                 QuestionId::DependentTaxpayer,
                 QuestionId::ForeignAccounts,
                 QuestionId::ForeignTrust,
@@ -514,31 +560,42 @@ mod tests {
                 // whether the filer borrowed to invest. It reaches the $0-income household too, which
                 // is the population the plan measured this defect on.
                 QuestionId::FilingForm4952,
-                // ★★★ R3 / §5.1 — THE DOCUMENT CENSUS. Sixteen of the eighteen rows are live for
-                // every filer: a document type must be ANSWERED, and "a filer cannot answer no to
-                // a category they were never shown". The two missing ones are `DocForm1098` and
-                // `DocForm1098e`, whose amount is collected today by a scalar — they open with T9
-                // and T5 respectively, and until then a `No` on the row would contradict a figure
-                // the filer already entered.
-                QuestionId::DocW2,
-                QuestionId::DocInt1099,
-                QuestionId::DocDiv1099,
-                QuestionId::DocB1099,
-                QuestionId::DocG1099,
-                QuestionId::DocR1099,
-                QuestionId::DocSsa1099,
-                QuestionId::DocNecMiscK1099,
-                QuestionId::DocK1,
-                QuestionId::DocScheduleERental,
-                QuestionId::DocS1099,
-                QuestionId::DocOid1099,
-                QuestionId::DocW2g,
-                QuestionId::DocC1099,
-                QuestionId::DocA1095,
-                QuestionId::DocT1098,
             ]
         );
         assert!(!has_spouse_dob(&single()), "no spouse ⇒ no spouse DOB");
+
+        // ★★★ THE PARTITION, stated as the property rather than only as this one vector: EVERY live
+        //     census row precedes EVERY other live declaration, and neither group's internal order
+        //     moved. A future registry entry inserted mid-array must not be able to slip a gate in
+        //     front of the shoebox.
+        let ids = declaration_ids(&single());
+        let last_census = ids
+            .iter()
+            .rposition(|id| btctax_core::tax::document_census::row_of_question(*id).is_some())
+            .expect("a Single filer is asked sixteen census rows");
+        let first_gate = ids
+            .iter()
+            .position(|id| btctax_core::tax::document_census::row_of_question(*id).is_none())
+            .expect("…and eight gate declarations");
+        assert!(
+            last_census < first_gate,
+            "the document census must be asked BEFORE every other declaration: {ids:?}"
+        );
+        let registry_order = |id: QuestionId| {
+            FORM_QUESTIONS
+                .iter()
+                .position(|q| q.id == id)
+                .expect("every asked id is a registry entry")
+        };
+        for group in [&ids[..first_gate], &ids[first_gate..]] {
+            assert!(
+                group
+                    .windows(2)
+                    .all(|w| registry_order(w[0]) < registry_order(w[1])),
+                "★ the reorder is a stable PARTITION, not a sort — registry order still decides \
+                 everything inside each group: {group:?}"
+            );
+        }
     }
 
     /// ★ The prompt scope must track the REFUSAL scope. A spouse question asked of a spouse-less return is
@@ -602,9 +659,7 @@ mod tests {
                 //    working, so the fixture answers TRUTHFULLY rather than the rule being relaxed.
                 Ask::Declaration(q) => {
                     let truth = btctax_core::tax::document_census::row_of_question(q.id)
-                        .and_then(|row| {
-                            btctax_core::tax::document_census::transcribed_rows(&ri, row)
-                        })
+                        .and_then(|row| btctax_core::tax::document_census::declared_rows(&ri, row))
                         .is_some_and(|n| n > 0);
                     (q.set)(&mut ri, truth);
                 }

@@ -329,7 +329,7 @@ macro_rules! census_tristate {
                 };
                 if !b {
                     if let Some(rows) =
-                        btctax_core::tax::document_census::transcribed_rows(ri, $row)
+                        btctax_core::tax::document_census::declared_rows(ri, $row)
                     {
                         if rows > 0 {
                             return Err(SetError::ContradictsTranscribedRows { rows });
@@ -339,7 +339,15 @@ macro_rules! census_tristate {
                 (FORM_QUESTIONS[$idx].set)(ri, b);
                 Ok(())
             },
+            // ★ N1 — the SAME liveness guard `get` and `set` carry. It was the one arm of the three
+            //   that wrote through on a non-live row. Harmless today (the two non-live rows are
+            //   already `None`), but the moment `row_is_live` gains a real predicate — T9's
+            //   `schedule_a.is_some()` for `form_1098` — an unguarded `clear` would be a write to a
+            //   row the filer is not being asked, on a section they cannot see.
             clear: Some(|ri, _| {
+                if !(FORM_QUESTIONS[$idx].live)(ri) {
+                    return Err(SetError::NoSuchRow);
+                }
                 ri.documents.set($row, None);
                 Ok(())
             }),

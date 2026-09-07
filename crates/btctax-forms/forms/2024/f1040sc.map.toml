@@ -178,7 +178,13 @@ ssn  = "topmostSubform[0].Page1[0].f1_2[0]"
 "topmostSubform[0].Page1[0].c1_6[0]" = { line = "1 stat emp", rule = "unmodeled", reason = "\"Check the box if this income was reported to you on Form W-2 and the 'Statutory employee' box on that form was checked.\" btctax collects W-2s and Schedule C separately and never links them. ★ Direction is safe: a statutory employee's income already had FICA withheld and is NOT subject to SE tax, so failing to check the box makes btctax compute SE tax that is not owed — an overstatement." }
 "topmostSubform[0].Page1[0].f1_11[0]" = { line = "2", rule = "unmodeled", reason = "Returns and allowances — not collected; line 3 (mapped) therefore equals line 1." }
 "topmostSubform[0].Page1[0].f1_13[0]" = { line = "4", rule = "unmodeled", reason = "Cost of goods sold (from line 42) — btctax models no inventory, so all of Part III is dead and line 5 (mapped) equals line 3." }
-"topmostSubform[0].Page1[0].f1_15[0]" = { line = "6", rule = "unmodeled", reason = "Other income, including federal and state gasoline or fuel tax credit or refund — not collected (matching Schedule 3 line 12, Form 4136); line 7 (mapped) equals line 5." }
+# ★★★ THE ONE SCHEDULE C BLANK THAT UNDERSTATES. Every other consequential blank on this form runs
+#     the safe way and says so (line 2 returns and allowances, line 4 COGS, line 30 home office,
+#     line 41 inventory, the statutory-employee box); line 6 is INCOME. Schedule C is outside the
+#     `xtask::census_join` scope (R2.2 scopes it to the seven forms the interview reaches — FR-66
+#     files the widening), so this one cover is asserted directly by
+#     `census_join::tests::schedule_c_line_6_is_covered_and_the_attestation_reaches_it`.
+"topmostSubform[0].Page1[0].f1_15[0]" = { line = "6", rule = "unmodeled", reason = "Other income, including federal and state gasoline or fuel tax credit or refund — not collected (matching Schedule 3 line 12, Form 4136); line 7 (mapped) equals line 5.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "fuel tax" }
 
 # ── Part II lines 8-17 (left column) — see the aggregate-expense note above ─────────────────────
 "topmostSubform[0].Page1[0].Lines8-17[0].f1_17[0]" = { line = "8",   rule = "unmodeled", reason = "Advertising — no expense-category breakdown is collected; the aggregate appears on line 28." }

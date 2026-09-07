@@ -283,14 +283,14 @@ pub fn maximal_sentinel() -> ReturnInputs {
         //   W-2 household would: yes to the W-2 it transcribes, no to everything else.
         documents: {
             // ★ Every row answered `false` — "I received none" — then the rows this fixture
-            //   actually transcribes flipped to `true`. Derived from `transcribed_rows` rather
+            //   actually transcribes flipped to `true`. Derived from `declared_rows` rather
             //   than hand-listed, so a row that gains a section later is answered here for free.
             //
             // ★★ RECORDED TENSION (T3, controller's decision): `int_1099` / `div_1099` /
             //    `g_1099` / `b_1099` are NOT countable yet — T5 builds their screens — so this
             //    fixture's imported 1099 rows sit beside a census `false`. That state cannot be
             //    refused today because there is no row count to refuse it against; T5 makes
-            //    `transcribed_rows` return `Some(n)` for them and this fixture then answers
+            //    `declared_rows` return `Some(n)` for them and this fixture then answers
             //    `true` with no edit here.
             let mut c = crate::tax::document_census::DocumentCensus::default();
             for row in crate::tax::document_census::DocumentRow::ALL {
@@ -492,7 +492,7 @@ pub fn maximal_sentinel() -> ReturnInputs {
     //     literal cannot see while it is still being built. This household holds a W-2 and a row of
     //     each 1099 family it imports, so it swears to exactly those.
     for row in crate::tax::document_census::DocumentRow::ALL {
-        let has = crate::tax::document_census::transcribed_rows(&ri, *row).is_some_and(|n| n > 0);
+        let has = crate::tax::document_census::declared_rows(&ri, *row).is_some_and(|n| n > 0);
         ri.documents.set(*row, Some(has));
     }
     ri

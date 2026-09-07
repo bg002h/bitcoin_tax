@@ -419,6 +419,57 @@ mod tests {
         );
     }
 
+    /// ★★ **N1 — a census row's THREE arms all check liveness, `clear` included** (T3 seam review).
+    ///
+    /// `get` and `set` returned early on a non-live row from the start; `clear` wrote through. It is
+    /// harmless at HEAD (the two non-live rows are already `None`, so the write is a no-op), which
+    /// is exactly why it needed a test rather than an argument: the moment `row_is_live` gains a
+    /// real predicate — T9's `schedule_a.is_some()` for `form_1098` — an unguarded `clear` is a
+    /// write to a row the filer is not being asked, through a section that is not being shown.
+    #[test]
+    fn clearing_a_non_live_census_row_is_refused_exactly_as_setting_it_is() {
+        let now = time::macros::date!(2026 - 09 - 01);
+        let mut w: Working = None;
+        materialize(&mut w, FilingStatus::Single);
+
+        // `form_1098` is scalar-shadowed and therefore not live (T9 opens it).
+        for (id, live) in [(FieldId::DocForm1098, false), (FieldId::DocW2, true)] {
+            let set = apply(
+                &mut w,
+                Edit::SetField {
+                    id,
+                    addr: RowAddr::default(),
+                    value: FieldValue::TriState(Some(true)),
+                },
+                now,
+            );
+            let cleared = apply(
+                &mut w,
+                Edit::ClearField {
+                    id,
+                    addr: RowAddr::default(),
+                },
+                now,
+            );
+            if live {
+                set.expect("a live census row is settable");
+                cleared.expect("…and clearable");
+            } else {
+                assert_eq!(
+                    set,
+                    Err(ApplyError::SetError(SetError::NoSuchRow)),
+                    "{id:?} is not live: `set` must refuse"
+                );
+                assert_eq!(
+                    cleared,
+                    Err(ApplyError::SetError(SetError::NoSuchRow)),
+                    "★ …and `clear` must refuse on the SAME predicate — un-answering a row nobody \
+                     is being asked is still a write to it"
+                );
+            }
+        }
+    }
+
     /// ★★★ **R3 — a census `No` over transcribed rows is REFUSED, not stored and not silently
     ///     destructive** (the `DeleteSection(ScheduleA)` I-10 precedent).
     ///

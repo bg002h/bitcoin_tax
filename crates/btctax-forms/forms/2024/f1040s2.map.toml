@@ -89,20 +89,23 @@ ssn  = "form1[0].Page1[0].f1_02[0]"
 #     it; an entry with no printed line number carries `part = "<caption>"`. An entry no block
 #     places REDS — it is never defaulted to Overstates.
 #
-#     Understates = a blank here omits income or an addition to tax (the direction in which a blank
-#     is a false statement, so an Advisory may never cover it). Overstates = a blank forgoes a
-#     deduction, credit or payment lawfully. NoDollar = the cell carries no dollar at all.
+#
+#     ★★★ A BLOCK STATES NO DIRECTION, and that absence is the guarantee. It records only what the
+#     form PRINTS: the caption and the lines it heads. Which way a blank inside it moves the tax is
+#     READ from the caption in one reviewed place — `xtask::census_join::DIRECTION_OF_CAPTION` —
+#     where each reading cites the form's own total sentence (the total these lines are combined
+#     into, and the line of the 1040 that total goes to) as its evidence. `DirectionBlock` carries
+#     `deny_unknown_fields`, so a `direction = "..."` key here is a PARSE ERROR, not a judgement
+#     nobody checked.
 [[direction]]
 caption      = "Part I       Tax"
 extract_line = 15
-direction    = "Understates"
 first_line   = "1"
 last_line    = "3"
 
 [[direction]]
 caption      = "Part II      Other Taxes"
 extract_line = 46
-direction    = "Understates"
 first_line   = "4"
 last_line    = "21"
 [census]
@@ -131,6 +134,20 @@ last_line    = "21"
 # free-text credit on Schedule 3: an unnamed, uncomputed amount is testimony it cannot substantiate.
 "form1[0].Page1[0].f1_09[0]" = { line = "1y type",   rule = "unmodeled", reason = "\"Other additions to tax\" free-text description — btctax writes no write-in taxes.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "write-in taxes" }
 "form1[0].Page1[0].f1_10[0]" = { line = "1y amount", rule = "unmodeled", reason = "Amount for the 1y write-in — same. btctax writes no write-in taxes.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "write-in taxes" }
+# ★★★ THE DEAD SUMS (lines 1z, 7 and 18), and a LIMITATION OF THE JOIN recorded where it bites
+#     (T3 seam review, M3). Each of these three lines is a SUM whose blankness is correct only if
+#     EVERY addend is blank, and each carries a `covered_by` naming the mechanism that keeps just
+#     ONE of them blank — line 7's `AllocatedTips` says nothing about line 6's Form 8919 case, which
+#     has its own separate cover. The `reason` strings state the conjunction honestly, and the
+#     direction rule existence-checks a `RefuseReason` by design, so nothing is hidden today.
+#
+#     What the join CANNOT express is "covered by the conjunction of these lines' covers". So the
+#     rot to watch for is this: if an addend's own cover is later weakened or removed — line 6's, or
+#     any of line 1a–1y's, or any of line 17a–17z's — the SUM stays green on a refusal that never
+#     touches the addend that started printing. Widening the join to conjunctive covers is FR-66's
+#     neighbourhood; until then, changing any addend's cover on this form means re-reading the sum
+#     above it. (This is the same shape D9c records for the dead block: a limitation named at the
+#     site beats a rule that silently does not apply.)
 "form1[0].Page1[0].f1_11[0]" = { line = "1z",        rule = "unmodeled", reason = "\"Add lines 1a through 1y\" — dead with every line 1 item blank.", covered_by = "RefuseReason::DocumentTypeUnsupported" }
 
 # ── Line 2 — Alternative minimum tax ★ the one line here btctax genuinely computes ───────────────

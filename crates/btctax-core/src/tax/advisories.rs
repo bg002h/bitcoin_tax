@@ -515,17 +515,37 @@ impl Advisory {
                  one it leaves blank is money you may be entitled to keep: if you have any of them \
                  your tax is OVERSTATED — claim them yourself, or with a preparer."
                     .to_string(),
+            // ★★★ TWO CLAUSES, and the split is not cosmetic (T3 seam review, I5). Seven of these
+            //     cells are ADMINISTRATIVE and a blank in them cannot move a figure, so "none of
+            //     these changes your tax — mark it by hand" is true advice. The eighth is the
+            //     §6013(g)/(h) election, and for it that sentence was false in the largest possible
+            //     way: the election is what makes a joint return available to a filer married to a
+            //     nonresident alien, and it subjects that spouse's WORLDWIDE INCOME to U.S. tax.
+            //     btctax asks nothing about an NRA spouse and computes nothing for one, so the old
+            //     wording told such a filer their tax was unaffected and instructed them to check
+            //     the box by hand — an invitation to sign an understated return, printed by the
+            //     tool. An NRA-spouse GATE is FR-67 (owning task T8); the false clause did not wait
+            //     for it.
             Advisory::UnmodeledReturnOptionsOmitted =>
                 "RETURN OPTIONS NOT OFFERED — v1 fills a calendar-year Form 1040 for a filer with a \
                  domestic address, and it offers none of the following: a FISCAL YEAR (the \
                  \"For the year Jan. 1–Dec. 31\" line stays as printed), a FOREIGN ADDRESS \
-                 (country, province, postal code), the §6013(g)/(h) election to treat a \
-                 NONRESIDENT-ALIEN SPOUSE as a U.S. resident, a THIRD-PARTY DESIGNEE (the \
+                 (country, province, postal code), a THIRD-PARTY DESIGNEE (the \
                  \"Do you want to allow another person to discuss this return with the IRS?\" \
                  block), applying an overpayment to NEXT YEAR'S ESTIMATED TAX (line 36), your \
                  SPOUSE'S IDENTITY PROTECTION PIN, and your phone number or email address. None of \
-                 these changes your tax; each is a choice the printed return leaves blank because \
-                 btctax never asked. If you want any of them, mark the form by hand before signing."
+                 THOSE SEVEN changes your tax; each is a choice the printed return leaves blank \
+                 because btctax never asked, and if you want any of them, mark the form by hand \
+                 before signing. ONE FURTHER CELL IS LEFT BLANK AND IT IS NOT ADMINISTRATIVE: the \
+                 §6013(g)/(h) election to treat a NONRESIDENT-ALIEN SPOUSE as a U.S. resident, on \
+                 the Filing Status block of page 1. That election DOES change your tax — it is what \
+                 makes a joint return available when one spouse is a nonresident alien, and it \
+                 subjects that spouse's WORLDWIDE INCOME to U.S. tax for the entire year, for every \
+                 later year until it is revoked. btctax never asked whether you have a \
+                 nonresident-alien spouse and has computed nothing for one: the figures on this \
+                 return are your own income alone. So do NOT check that box by hand — checking it \
+                 without adding that spouse's worldwide income would file an understated return \
+                 under penalties of perjury. If it applies to you, this is a preparer's return."
                     .to_string(),
             Advisory::RefundByPaperCheck { refund } => format!(
                 "REFUND BY PAPER CHECK — your return is due a refund of {}, but v1 never fills the \
@@ -1677,6 +1697,69 @@ mod tests {
             ],
             "{got:?}"
         );
+    }
+
+    /// ★★★ **THE §6013(g)/(h) ELECTION IS NOT ADMINISTRATIVE, AND THE ADVISORY MUST NOT SAY IT IS**
+    ///     (T3 seam review, I5).
+    ///
+    /// The advisory names eight cells the printed return leaves blank. Seven are administrative and
+    /// the honest advice for them is *"none of these changes your tax — mark it by hand"*. The
+    /// eighth is the election that makes a joint return available to a filer married to a
+    /// nonresident alien **and subjects that spouse's worldwide income to U.S. tax**; btctax asks
+    /// nothing about an NRA spouse and computes nothing for one. Telling that filer their tax is
+    /// unaffected and instructing them to check the box by hand is an invitation to sign an
+    /// understated return, printed by the tool — so the reassurance is SCOPED and the election gets
+    /// its own clause.
+    ///
+    /// ★ This is the kill for that split: restoring the old blanket sentence reds here.
+    #[test]
+    fn the_return_options_advisory_scopes_its_reassurance_and_warns_off_the_nra_election() {
+        let msg = Advisory::UnmodeledReturnOptionsOmitted.message();
+
+        // The old sentence, verbatim. It covered the election too, and for the election it was false.
+        assert!(
+            !msg.contains("None of these changes your tax"),
+            "the blanket reassurance covered the §6013(g)/(h) election, which DOES change the tax: \
+             {msg}"
+        );
+        assert!(
+            msg.contains("None of THOSE SEVEN changes your tax"),
+            "the reassurance must be scoped to the seven administrative cells: {msg}"
+        );
+
+        // …and the election is named, with what it actually does and what not to do.
+        assert!(msg.contains("§6013(g)/(h)"), "{msg}");
+        assert!(
+            msg.contains("That election DOES change your tax"),
+            "the election's own clause must contradict the reassurance, not inherit it: {msg}"
+        );
+        assert!(
+            msg.contains("WORLDWIDE INCOME"),
+            "…and say WHY — the spouse's worldwide income becomes taxable: {msg}"
+        );
+        assert!(
+            msg.contains("do NOT check that box by hand"),
+            "…and withdraw the instruction that made it actionable: {msg}"
+        );
+        assert!(
+            msg.contains("preparer's return"),
+            "…and name the exit, or the warning is a brick: {msg}"
+        );
+
+        // The seven that ARE administrative are still all named — the split must not drop a cell.
+        for cell in [
+            "FISCAL YEAR",
+            "FOREIGN ADDRESS",
+            "THIRD-PARTY DESIGNEE",
+            "NEXT YEAR'S ESTIMATED TAX (line 36)",
+            "SPOUSE'S IDENTITY PROTECTION PIN",
+            "phone number or email address",
+        ] {
+            assert!(
+                msg.contains(cell),
+                "the advisory stopped naming {cell:?}: {msg}"
+            );
+        }
     }
 
     /// Dependents fire the CTC omission; a missing DOB fires the §63(f) aged-box forfeit; low AGI with

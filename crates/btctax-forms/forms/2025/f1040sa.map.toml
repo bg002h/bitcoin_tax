@@ -169,13 +169,17 @@ ssn  = "form1[0].Page1[0].f1_2[0]"
 #     it; an entry with no printed line number carries `part = "<caption>"`. An entry no block
 #     places REDS — it is never defaulted to Overstates.
 #
-#     Understates = a blank here omits income or an addition to tax (the direction in which a blank
-#     is a false statement, so an Advisory may never cover it). Overstates = a blank forgoes a
-#     deduction, credit or payment lawfully. NoDollar = the cell carries no dollar at all.
+#
+#     ★★★ A BLOCK STATES NO DIRECTION, and that absence is the guarantee. It records only what the
+#     form PRINTS: the caption and the lines it heads. Which way a blank inside it moves the tax is
+#     READ from the caption in one reviewed place — `xtask::census_join::DIRECTION_OF_CAPTION` —
+#     where each reading cites the form's own total sentence (the total these lines are combined
+#     into, and the line of the 1040 that total goes to) as its evidence. `DirectionBlock` carries
+#     `deny_unknown_fields`, so a `direction = "..."` key here is a PARSE ERROR, not a judgement
+#     nobody checked.
 [[direction]]
 caption      = "Itemized Deductions"
 extract_line = 5
-direction    = "Overstates"
 first_line   = "1"
 last_line    = "18"
 [census]

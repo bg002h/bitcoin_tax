@@ -81,21 +81,6 @@ pub struct CensusDecision {
     pub part: Option<String>,
 }
 
-/// Which way a wrongly-blank line moves the tax (R2.2's DIRECTION RULE).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-pub enum Direction {
-    /// Income, or an addition to tax. A blank here is a FALSE STATEMENT, so an `Advisory` may never
-    /// cover it — only a `QuestionId` the filer actually reads or a `RefuseReason` that stops the
-    /// return.
-    Understates,
-    /// A deduction, credit or payment. A blank forgoes money lawfully, and a sentence saying btctax
-    /// did not try is an honest cover.
-    Overstates,
-    /// The cell carries no dollar at all — a date, a name, a checkbox, an election btctax does not
-    /// offer. It can move the tax in neither direction.
-    NoDollar,
-}
-
 /// ★★★ **R2.2's DERIVED FLIP — a line the form itself SUBTRACTS.**
 ///
 /// A block's direction grades the lines it heads, and it is right for almost all of them. But a form
@@ -119,21 +104,30 @@ pub struct SubtractSentence {
     pub extract_line: usize,
 }
 
-/// ★★★ **R2.2 — one block of a form's `[direction]` table.**
+/// ★★★ **R2.2 — one block of a form's `[direction]` table: a caption the form prints, and the range
+/// of its own numbered lines that caption heads.**
 ///
-/// A block is a caption the form actually prints, read off the archived text layer at
-/// `extract_line`, plus the range of the form's own line numbers it heads. The direction is thereby
-/// a READING OF THE FORM rather than a hand-list: a re-parted revision moves the caption, the
-/// verbatim assertion reds, and nothing silently defaults.
+/// ★★★ **There is deliberately NO `direction` key here, and its absence is the guarantee.** A block
+/// records only what the form PRINTS — the caption, verbatim at `extract_line`, and the first and
+/// last line it heads. Which way a blank inside it moves the tax is a READING of that caption, and
+/// the reading lives in exactly one reviewed place beside the rule that consumes it
+/// (`xtask::census_join::DIRECTION_OF_CAPTION`), each row citing the form's own total sentence as
+/// evidence. Because the struct carries `deny_unknown_fields`, a map that tries to state a direction
+/// of its own is a PARSE ERROR rather than a judgement nobody checked — which is what makes
+/// "the direction of a line is read off the form, not typed" true of the value and not only of the
+/// heading. The seam review that forced this found two TOML keys moving Form 1040 line 1b, a
+/// numbered income line, under an advisory cover with every instrument green.
+///
+/// A re-parted revision moves the caption, the verbatim assertion reds, and nothing silently
+/// defaults.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DirectionBlock {
-    /// The caption, verbatim. Asserted against `design/forms/extract/<stem>--<year>.txt`.
+    /// The caption, verbatim. Asserted against `design/forms/extract/<stem>--<year>.txt`, and the
+    /// key the direction is READ from.
     pub caption: String,
     /// The 1-based line of that extract on which the caption is printed.
     pub extract_line: usize,
-    /// Which way a blank moves the tax inside this block.
-    pub direction: Direction,
     /// The first form line number this block heads (e.g. `"1"`, `"1a"`, `"8a"`). Absent on a block
     /// that heads no numbered line — it then places only entries that name it explicitly.
     #[serde(default)]

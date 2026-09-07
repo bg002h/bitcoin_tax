@@ -800,12 +800,21 @@ Check what this feature actually produced: open the Form 8275 PDF and confirm th
   • RETURN OPTIONS NOT OFFERED — v1 fills a calendar-year Form 1040 for a filer with a
     domestic address, and it offers none of the following: a FISCAL YEAR (the "For the year
     Jan. 1–Dec. 31" line stays as printed), a FOREIGN ADDRESS (country, province, postal
-    code), the §6013(g)/(h) election to treat a NONRESIDENT-ALIEN SPOUSE as a U.S. resident,
-    a THIRD-PARTY DESIGNEE (the "Do you want to allow another person to discuss this return
-    with the IRS?" block), applying an overpayment to NEXT YEAR'S ESTIMATED TAX (line 36),
-    your SPOUSE'S IDENTITY PROTECTION PIN, and your phone number or email address. None of
-    these changes your tax; each is a choice the printed return leaves blank because btctax
-    never asked. If you want any of them, mark the form by hand before signing.
+    code), a THIRD-PARTY DESIGNEE (the "Do you want to allow another person to discuss this
+    return with the IRS?" block), applying an overpayment to NEXT YEAR'S ESTIMATED TAX (line
+    36), your SPOUSE'S IDENTITY PROTECTION PIN, and your phone number or email address. None
+    of THOSE SEVEN changes your tax; each is a choice the printed return leaves blank
+    because btctax never asked, and if you want any of them, mark the form by hand before
+    signing. ONE FURTHER CELL IS LEFT BLANK AND IT IS NOT ADMINISTRATIVE: the §6013(g)/(h)
+    election to treat a NONRESIDENT-ALIEN SPOUSE as a U.S. resident, on the Filing Status
+    block of page 1. That election DOES change your tax — it is what makes a joint return
+    available when one spouse is a nonresident alien, and it subjects that spouse's
+    WORLDWIDE INCOME to U.S. tax for the entire year, for every later year until it is
+    revoked. btctax never asked whether you have a nonresident-alien spouse and has computed
+    nothing for one: the figures on this return are your own income alone. So do NOT check
+    that box by hand — checking it without adding that spouse's worldwide income would file
+    an understated return under penalties of perjury. If it applies to you, this is a
+    preparer's return.
   • REFUND BY PAPER CHECK — your return is due a refund of $8,954.20, but v1 never fills the
     direct-deposit block (1040 lines 35b–35d). As filed, the IRS will mail a check. Add your
     routing and account numbers by hand if you want it deposited.
@@ -1163,12 +1172,21 @@ Schedule D (raw pre-netting part totals) — tax year 2024
   • RETURN OPTIONS NOT OFFERED — v1 fills a calendar-year Form 1040 for a filer with a
     domestic address, and it offers none of the following: a FISCAL YEAR (the "For the year
     Jan. 1–Dec. 31" line stays as printed), a FOREIGN ADDRESS (country, province, postal
-    code), the §6013(g)/(h) election to treat a NONRESIDENT-ALIEN SPOUSE as a U.S. resident,
-    a THIRD-PARTY DESIGNEE (the "Do you want to allow another person to discuss this return
-    with the IRS?" block), applying an overpayment to NEXT YEAR'S ESTIMATED TAX (line 36),
-    your SPOUSE'S IDENTITY PROTECTION PIN, and your phone number or email address. None of
-    these changes your tax; each is a choice the printed return leaves blank because btctax
-    never asked. If you want any of them, mark the form by hand before signing.
+    code), a THIRD-PARTY DESIGNEE (the "Do you want to allow another person to discuss this
+    return with the IRS?" block), applying an overpayment to NEXT YEAR'S ESTIMATED TAX (line
+    36), your SPOUSE'S IDENTITY PROTECTION PIN, and your phone number or email address. None
+    of THOSE SEVEN changes your tax; each is a choice the printed return leaves blank
+    because btctax never asked, and if you want any of them, mark the form by hand before
+    signing. ONE FURTHER CELL IS LEFT BLANK AND IT IS NOT ADMINISTRATIVE: the §6013(g)/(h)
+    election to treat a NONRESIDENT-ALIEN SPOUSE as a U.S. resident, on the Filing Status
+    block of page 1. That election DOES change your tax — it is what makes a joint return
+    available when one spouse is a nonresident alien, and it subjects that spouse's
+    WORLDWIDE INCOME to U.S. tax for the entire year, for every later year until it is
+    revoked. btctax never asked whether you have a nonresident-alien spouse and has computed
+    nothing for one: the figures on this return are your own income alone. So do NOT check
+    that box by hand — checking it without adding that spouse's worldwide income would file
+    an understated return under penalties of perjury. If it applies to you, this is a
+    preparer's return.
   • DATE OF BIRTH NOT ON FILE — the §63(f) additional standard deduction for age 65+ ($1,550
     per box) was NOT granted, because v1 never assumes a birthdate. If you (or your spouse)
     are 65 or older, enter the date of birth and re-run: your tax is currently OVERSTATED.

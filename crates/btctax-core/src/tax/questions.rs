@@ -643,7 +643,10 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
                  (Form 6252), a casualty or theft loss (Form 4684), a section 1256 contract or \
                  straddle (Form 6781), a like-kind exchange (Form 8824), or an undistributed \
                  capital gain (Form 2439) — each of which puts a figure on Schedule D that btctax \
-                 cannot see. (b) You \
+                 cannot see. And it covers OTHER INCOME ON A SCHEDULE C, including a federal or \
+                 state gasoline or fuel tax credit or refund (Form 4136) — Schedule C line 6, which \
+                 btctax never asks about and leaves blank, so a blank there would UNDERSTATE your \
+                 business income. (b) You \
                  EXERCISED AN INCENTIVE STOCK OPTION (ISO) and still held the stock at the end of the \
                  year — you would have a Form 3921. (c) You had any other item this tool never asked \
                  about that changes your ALTERNATIVE MINIMUM TAX — depletion, a tax-shelter farm \

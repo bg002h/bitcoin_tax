@@ -9,7 +9,7 @@
 //! |---|---|---|
 //! | `None` | not asked / not yet received | **blocks commit** (class A). A broker that has not mailed by February is *unanswered*, never *none* |
 //! | `Some(false)` | none | the section is non-live and the type's `Vec` **must** be empty |
-//! | `Some(true)` | one or more | the section is live; **zero transcribed rows refuses** |
+//! | `Some(true)` | one or more | the section is live; zero rows refuses **for a kind that requires transcription** — see the two predicates below |
 //!
 //! And for an **unsupported** type (`SPEC_interview.md` §2.2) `Some(true)` refuses with that family's
 //! own exit sentence — *"a filer cannot answer no to a category they were never shown"*, so the row
@@ -19,11 +19,25 @@
 //! `None`, `income answer` asks it, and the Declarations adapter renders it — zero new plumbing, and
 //! exactly one liveness predicate per row.
 //!
-//! ★★ **The rows are NOT all countable, and that is recorded rather than papered over.**
-//! [`transcribed_rows`] returns `Some(n)` only for a kind btctax has a *screen* for; `None` says
-//! *"there is no section whose rows could be counted"*. The three-rule engine below then applies only
-//! the rules a `None` can honestly support — which is why a kind with no section refuses outright on
-//! `Some(true)` instead of pretending to check a row count it does not have.
+//! ★★★ **"Did you receive one" and "how many rows did you transcribe" are TWO questions, and the
+//! census keeps two predicates for them.** [`declared_rows`] answers *how many rows of this document
+//! does the return carry* — `Some(n)` for every kind with a `Vec` on `ReturnInputs`, `None` where
+//! there is no section whose rows could be counted at all. [`requires_transcription`] answers the
+//! different question *must a declared document of this kind appear as rows* — and for two kinds the
+//! honest answer is **no**, because the form itself says so:
+//!
+//! - a **1099-B** whose transactions all go on Form 8949 leaves the summary line blank by the form's
+//!   own printed instruction, and for btctax's own population — a crypto filer whose dispositions
+//!   are in the ledger and print on Form 8949 / Schedule D — zero `[[b_1099]]` rows IS the correct
+//!   return;
+//! - a **1099-G** reporting only box 2 (a prior-year state refund, the commonest 1099-G there is)
+//!   has no field to be transcribed into: `Form1099G` models box 1 and box 4, and box 2 reaches the
+//!   return today through the `sch1.state_refund_taxable` scalar. **T5** adds the box and the screen.
+//!
+//! Collapsing the two into one predicate refused both of those filers for answering truthfully,
+//! which is the T3 seam review's I2/I3. The DECLARATION is still required of every live row, and the
+//! contradiction rule (`Some(false)` beside transcribed rows) still runs on all five `Vec`s — only
+//! the *demand for rows* is now the narrower of the two.
 
 use serde::{Deserialize, Serialize};
 
@@ -128,13 +142,11 @@ impl DocumentRow {
 
     /// ★★★ **§2.2's exit sentence, VERBATIM** — what a filer who holds this document is told.
     ///
-    /// `None` for a row btctax can actually take (`W2`) and for the two rows whose amount is
-    /// collected today by a scalar (`Form1098`, `Form1098e`) — those are not live, so no answer of
-    /// theirs can reach a refusal.
-    ///
-    /// ★ The four rows whose SCREEN is task T5 carry a sentence of the same shape as §2.2's: the
-    /// family is in scope, the transcription surface is not built yet, and a filer who has one is
-    /// refused rather than under-filed.
+    /// `None` for the five rows btctax can hold the rows for today (`W2` and the four 1099 families
+    /// `income import` fills) and for the two whose amount is collected by a scalar (`Form1098`,
+    /// `Form1098e`) — the latter are not live, so no answer of theirs can reach a refusal. A row
+    /// with no exit sentence is not an excluded family, and telling its filer to leave would be
+    /// false.
     #[must_use]
     pub const fn exit_sentence(self) -> Option<&'static str> {
         Some(match self {
@@ -248,15 +260,29 @@ impl DocumentRow {
                  SCREEN and its box census are task T5, but the rows themselves are read today \
                  (Form 1040 lines 3a/3b and Schedule B line 5)"
             }
+            // ★★★ NOT "enter the rows". A `[[b_1099]]` row is the Schedule D line 1a/8a SUMMARY
+            //     option, and `form_1099b_gains` is ADDED to the ledger's `capital_net` — so
+            //     telling a crypto filer whose dispositions are already in the ledger to enter
+            //     their exchange 1099-B would double-count every gain. The form's own instruction
+            //     is the honest route, and it is a blank.
             DocumentRow::B1099 => {
-                "enter it as a `[[b_1099]]` table through `btctax income import` — the 1099-B \
-                 SCREEN and its box census are task T5, but the rows themselves are read today \
-                 (Schedule D lines 1a and 8a)"
+                "leave the summary blank if the transactions are already on this return — your \
+                 ledger's dispositions print per transaction on Form 8949 and carry to Schedule D, \
+                 which is the Form 1099-B's own printed option (\"if you choose to report all these \
+                 transactions on Form 8949, leave this line blank and go to line 1b\"). A \
+                 `[[b_1099]]` table through `btctax income import` is for the Schedule D line \
+                 1a/8a SUMMARY option only, and entering one beside ledger dispositions would \
+                 count the same gains twice"
             }
+            // ★★★ Box 2 has NO field on `Form1099G` — see `requires_transcription`. The route in
+            //     for the commonest 1099-G is the scalar, and the screen is T5's.
             DocumentRow::G1099 => {
-                "enter it as a `[[g_1099]]` table through `btctax income import` — the 1099-G \
-                 SCREEN, box 2 and the State and Local Income Tax Refund Worksheet are task T5, but \
-                 the rows themselves are read today (Schedule 1 lines 1 and 7)"
+                "enter box 1 (unemployment compensation) as a `[[g_1099]]` table through `btctax \
+                 income import`, which Schedule 1 line 7 reads today — but if your 1099-G reports \
+                 only BOX 2, a prior-year state or local income tax refund, there is no box-2 field \
+                 to transcribe into yet: that amount reaches Schedule 1 line 1 through the \
+                 `sch1.state_refund_taxable` input, and the box-2 field, its screen and the State \
+                 and Local Income Tax Refund Worksheet are task T5"
             }
             _ => return None,
         })
@@ -465,34 +491,26 @@ impl DocumentCensus {
     }
 }
 
-/// ★★★ **How many rows of this document has the filer actually transcribed?** `None` = *there is no
-/// section whose rows could be counted*.
+/// ★★★ **How many rows of this document does the return CARRY?** `None` = *there is no section
+/// whose rows could be counted at all*.
 ///
-/// **The controller's recorded decision (T3, folded as a deviation).** Only `W2` has a transcription
-/// section at HEAD. `int_1099` / `div_1099` / `b_1099` / `g_1099` have a `Vec` on `ReturnInputs` but
-/// **no screen and no box census** — T5 builds those — so counting their rows would report a number
-/// nobody was ever asked to fill, and a `Some(false)` beside an imported row would be refused for a
-/// question the filer was never given a way to answer. They therefore count as `None` here and refuse
-/// outright on `Some(true)`, which is §2.2's rule applied to a family that is in scope but not yet
-/// transcribable: **refuse rather than under-file.** T5 flips them exactly as T13 flips
-/// `nec_misc_k_1099`.
+/// This is a fact about the return, not a demand: it answers the contradiction rule (a `Some(false)`
+/// beside transcribed rows) and the `apply(SetField(No))` guard, both of which need a count for every
+/// kind that has one. Five kinds have a `Vec` on `ReturnInputs` — `w2s`, `int_1099`, `div_1099`,
+/// `b_1099`, `g_1099` — and `income import` fills all five today; the printed return already reads
+/// them (Form 1040 line 1a; line 2a/2b and Schedule B line 1; lines 3a/3b and Schedule B line 5;
+/// Schedule D lines 1a/8a; Schedule 1 lines 1 and 7).
 ///
-/// `form_1098` / `form_1098e` are `None` for a different reason: their amount IS collected today, by
-/// a scalar, so a `No` on the row would contradict an entered amount. They are not live at all
-/// ([`row_is_live`]).
+/// ★ Whether a declared document MUST appear as rows is the separate question
+/// [`requires_transcription`] answers. The two were one predicate until the T3 seam review; see the
+/// module header.
 #[must_use]
-pub fn transcribed_rows(
+pub fn declared_rows(
     ri: &crate::tax::return_inputs::ReturnInputs,
     row: DocumentRow,
 ) -> Option<usize> {
     match row {
         DocumentRow::W2 => Some(ri.w2s.len()),
-        // ★★★ COUNTABLE, and the earlier reading that they were not was simply WRONG: `income
-        //     import` fills these four `Vec`s today and the printed return already reads them
-        //     (Form 1040 line 2a/2b and Schedule B line 1; lines 3a/3b and Schedule B line 5;
-        //     Schedule D lines 1a/8a; Schedule 1 lines 1 and 7). What T5 adds is a SCREEN and a box
-        //     census, not the ability to hold the rows — so the honest rule is the W-2's rule, and
-        //     the row that is missing is a way to ENTER a document, not a way to declare one.
         DocumentRow::Int1099 => Some(ri.int_1099.len()),
         DocumentRow::Div1099 => Some(ri.div_1099.len()),
         DocumentRow::B1099 => Some(ri.b_1099.len()),
@@ -510,6 +528,59 @@ pub fn transcribed_rows(
         | DocumentRow::C1099
         | DocumentRow::A1095
         | DocumentRow::T1098 => None,
+    }
+}
+
+/// ★★★ **Must a DECLARED document of this kind appear on the return as transcribed rows?**
+///
+/// The only consumer is [`RefuseReason::DocumentDeclaredNotTranscribed`]: *"you said you received
+/// one, and there is none here"* is a true and useful refusal exactly where zero rows cannot be the
+/// correct return — and a false one where the form itself offers the filer a blank.
+///
+/// [`RefuseReason::DocumentDeclaredNotTranscribed`]: crate::tax::return_refuse::RefuseReason::DocumentDeclaredNotTranscribed
+#[must_use]
+pub const fn requires_transcription(row: DocumentRow) -> bool {
+    match row {
+        // ★ Nothing else carries these amounts onto the return. A W-2 reaches Form 1040 line 1a only
+        //   through `w2s`; a 1099-INT reaches line 2a/2b and Schedule B line 1 only through
+        //   `int_1099` (boxes 1–9 are fully modelled); a 1099-DIV reaches lines 3a/3b and Schedule B
+        //   line 5 only through `div_1099` (boxes 1a–13). A declared one with no row is therefore
+        //   exactly "nothing ever populated it".
+        DocumentRow::W2 | DocumentRow::Int1099 | DocumentRow::Div1099 => true,
+        // ★★★ 1099-B — NO, and the FORM says so. `Form1099B`'s own quoted instruction reads
+        //     *"However, if you choose to report all these transactions on Form 8949, leave this
+        //     line blank and go to line 1b."* The `[[b_1099]]` row exists for the Schedule D line
+        //     1a/8a summary OPTION only. btctax's own population is the other case: a crypto
+        //     filer's exchange 1099-B covers dispositions that are already in the ledger and print
+        //     per-transaction on Form 8949 and Schedule D — their truthful census answer is YES and
+        //     their correct row count is ZERO. Demanding the row would refuse them, and entering one
+        //     would double-count every gain (`form_1099b_gains` is ADDED to the ledger's
+        //     `capital_net`). The declaration is still required; only the rows are optional.
+        DocumentRow::B1099 => false,
+        // ★★★ 1099-G — NO, until **T5**. The commonest 1099-G is an itemizer's prior-year state
+        //     refund, box 2 alone, and `Form1099G` has no box 2: it models `box1_unemployment` and
+        //     `box4_fed_withheld`. Box 2 reaches the return today through the scalar
+        //     `sch1.state_refund_taxable`, so demanding a row would force either false testimony
+        //     ("no 1099-G") or a hollow all-zero row beside a refund the census never mentions —
+        //     the census laundering the very thing it exists to catch. **T5 adds
+        //     `box2_state_refund` and the State and Local Income Tax Refund Worksheet screen, and
+        //     flips this to `true`.**
+        DocumentRow::G1099 => false,
+        // The §2.2 families refuse on `Yes` before this is ever read, and the two scalar-shadowed
+        // rows are not live — none of them has rows to demand.
+        DocumentRow::Form1098
+        | DocumentRow::Form1098e
+        | DocumentRow::R1099
+        | DocumentRow::Ssa1099
+        | DocumentRow::NecMiscK1099
+        | DocumentRow::K1
+        | DocumentRow::ScheduleERental
+        | DocumentRow::S1099
+        | DocumentRow::Oid1099
+        | DocumentRow::W2g
+        | DocumentRow::C1099
+        | DocumentRow::A1095
+        | DocumentRow::T1098 => false,
     }
 }
 

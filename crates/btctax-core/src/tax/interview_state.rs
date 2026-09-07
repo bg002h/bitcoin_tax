@@ -355,23 +355,29 @@ fn refusal_of_answer(
 /// about an answer: a declared document with nothing transcribed, and a "no" beside transcribed rows.
 /// Both are `refusing` — the filer must act before commit, and both have an in-form exit.
 fn census_row_invariant(ri: &ReturnInputs, row: DocumentRow) -> Option<Refusing> {
-    use crate::tax::document_census::{row_is_live, transcribed_rows};
+    use crate::tax::document_census::{declared_rows, requires_transcription, row_is_live};
     if !row_is_live(ri, row) {
         return None;
     }
-    let rows = transcribed_rows(ri, row)?;
+    let rows = declared_rows(ri, row)?;
     let item = AnswerKey::Question(row.question_id());
     let doc = row.designation();
     match ri.documents.get(row) {
-        Some(true) if rows == 0 && row.exit_sentence().is_none() => Some(Refusing {
+        // ★ Gated on `requires_transcription`, exactly as `screen_document_census` is — the panel
+        //   and the screen must name the same refusals or the panel is a second, drifting rule.
+        Some(true)
+            if rows == 0 && requires_transcription(row) && row.exit_sentence().is_none() =>
+        {
+            Some(Refusing {
             item,
             prompt: row.prompt(),
             reason: RefuseReason::DocumentDeclaredNotTranscribed { kind: row },
-            exit: format!(
-                "you declared one or more {doc} and none is transcribed — enter the document, or \
-                 change the answer to \"no\""
-            ),
-        }),
+                exit: format!(
+                    "you declared one or more {doc} and none is transcribed — enter the document, \
+                     or change the answer to \"no\""
+                ),
+            })
+        }
         Some(false) if rows > 0 => Some(Refusing {
             item,
             prompt: row.prompt(),
@@ -622,6 +628,27 @@ mod tests {
         let mut ok = b.clone();
         ok.documents.set(DocumentRow::W2, Some(true));
         assert!(interview_state(&ok).refusing.is_empty());
+
+        // ★★★ **THE PANEL AND THE SCREEN NAME THE SAME REFUSALS.** The rows invariant is two
+        //     predicates since the T3 seam fold, and a panel that kept the OLD one-predicate rule
+        //     would tell a truthful 1099-B filer their return is refusing while `screen_inputs`
+        //     files it — a second rule drifting from the first. `requires_transcription` gates both.
+        let mut on_8949 = answered_single();
+        on_8949.documents.set(DocumentRow::B1099, Some(true));
+        assert!(
+            interview_state(&on_8949).refusing.is_empty(),
+            "a Form 1099-B whose transactions are all on Form 8949 is a CORRECT return with zero \
+             summary rows — the panel must not refuse what the screen files: {:?}",
+            interview_state(&on_8949).refusing
+        );
+        let mut box2_only = answered_single();
+        box2_only.documents.set(DocumentRow::G1099, Some(true));
+        box2_only.sch1.state_refund_taxable = dec!(900);
+        assert!(
+            interview_state(&box2_only).refusing.is_empty(),
+            "a box-2-only 1099-G has no field to transcribe into until T5: {:?}",
+            interview_state(&box2_only).refusing
+        );
     }
 
     /// ★★★ **A params-gated prompt WAITS rather than blocks, and becomes blocking the moment the

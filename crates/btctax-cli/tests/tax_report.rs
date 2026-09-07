@@ -2905,16 +2905,20 @@ fn a_pre_d8_vault_refuses_until_answered_and_income_answer_is_the_way_out() {
     //   ladder step 1 — the two answers are never demanded. A household with the same money in
     //   capital gains would refuse until they were given.
     //
-    // ★ Seven "n" for the pre-census declarations, then SIXTEEN more for R3's live document-census
-    // rows (eighteen §5.1 rows less `form_1098`/`form_1098e`, which are shadowed by a scalar until
-    // T9/T5 and so are not live), then bare Enters for the skippables. The exact count is deliberate:
-    // a script that runs out fails with "input ended before every question was answered", which is
-    // how this test noticed the interview had grown at all.
-    // ★ R3 — the ninth answer is "y": this household HOLDS a Form W-2 (imported above), and a "no"
-    // beside a transcribed row is `DocumentCensusContradicted` — the census refusing a "no" the data
-    // contradicts, which is exactly the state it exists to make visible.
+    // ★★★ DOCUMENT-FIRST (T3 seam review, M5). The SIXTEEN live document-census rows come first —
+    // eighteen §5.1 rows less `form_1098`/`form_1098e`, shadowed by a scalar until T9/T5 — then the
+    // seven pre-census gate declarations, then bare Enters for the skippables. Twenty-three
+    // mandatory answers either way: `live_questions` PARTITIONS the registry, it does not add to it.
+    // The exact count is deliberate: a script that runs out fails with "input ended before every
+    // question was answered", which is how this test noticed the interview had grown at all.
+    //
+    // ★ R3 — the FIRST answer is now "y" (it was the eighth): `DocW2` leads the census, and this
+    // household HOLDS a Form W-2 (imported above). A "no" beside a transcribed row is
+    // `DocumentCensusContradicted` — the census refusing a "no" the data contradicts, which is
+    // exactly the state it exists to make visible, and is what this script red with when the order
+    // moved and the "y" stayed where it was.
     let mut keystrokes: &[u8] =
-        b"n\nn\nn\nn\nn\nn\nn\ny\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\n\n\n\n\n\n\n\n";
+        b"y\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\nn\n\n\n\n\n\n\n\n";
     let mut screen: Vec<u8> = Vec::new();
     cmd::answer::answer_return_inputs(
         &vault,

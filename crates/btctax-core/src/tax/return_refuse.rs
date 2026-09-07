@@ -1107,7 +1107,9 @@ pub fn screen_broker_reporting(
 ///
 /// Returns the FIRST refusal in [`DocumentRow::ALL`] order, so the message is deterministic.
 pub fn screen_document_census(ri: &ReturnInputs) -> Option<Refusal> {
-    use crate::tax::document_census::{row_is_live, transcribed_rows, DocumentRow};
+    use crate::tax::document_census::{
+        declared_rows, requires_transcription, row_is_live, DocumentRow,
+    };
     for row in DocumentRow::ALL {
         let row = *row;
         if !row_is_live(ri, row) {
@@ -1129,7 +1131,12 @@ pub fn screen_document_census(ri: &ReturnInputs) -> Option<Refusal> {
                         ),
                     );
                 }
-                if transcribed_rows(ri, row) == Some(0) {
+                // ★★★ TWO PREDICATES, not one. `declared_rows` says how many rows the return
+                //     carries; `requires_transcription` says whether a declared document of this
+                //     kind MUST appear as rows at all. A 1099-B all of whose transactions go on
+                //     Form 8949, and a 1099-G reporting only box 2, are correct returns with zero
+                //     rows — refusing them was the T3 seam review's I2/I3.
+                if requires_transcription(row) && declared_rows(ri, row) == Some(0) {
                     // ★ The refusal names the WAY IN, not just the gap: "you declared one and none
                     //   is transcribed" is half a message, and a refusal with no exit is a brick
                     //   with better prose.
@@ -1147,7 +1154,7 @@ pub fn screen_document_census(ri: &ReturnInputs) -> Option<Refusal> {
                 }
             }
             Some(false) => {
-                if let Some(n) = transcribed_rows(ri, row) {
+                if let Some(n) = declared_rows(ri, row) {
                     if n > 0 {
                         return refuse(
                             RefuseReason::DocumentCensusContradicted { kind: row },
@@ -1865,7 +1872,7 @@ mod tests {
         let mut ri = ri.clone();
         for row in crate::tax::document_census::DocumentRow::ALL {
             let has_rows =
-                crate::tax::document_census::transcribed_rows(&ri, *row).is_some_and(|n| n > 0);
+                crate::tax::document_census::declared_rows(&ri, *row).is_some_and(|n| n > 0);
             if has_rows && ri.documents.get(*row) == Some(false) {
                 ri.documents.set(*row, Some(true));
             }
@@ -1991,22 +1998,25 @@ mod tests {
         );
     }
 
-    /// ★★★ **THE FOUR 1099 ROWS TAKE THE SAME THREE RULES AS THE W-2 ROW** (pre-review fold, D1).
+    /// ★★★ **THE FOUR 1099 ROWS DECLARE LIKE THE W-2 ROW — AND ONLY THREE OF THEM DEMAND ROWS.**
     ///
-    /// This replaces `the_four_t5_rows_refuse_naming_their_task`, which pinned the opposite and was
-    /// watched going RED on this change. That test encoded a premise that was simply false —
-    /// *"nothing collects them today"* — when `income import` fills all four `Vec`s and the printed
-    /// return already reads them. The consequence of the false premise was worse than the gap it
-    /// tried to close: the TRUTHFUL answer for a filer holding an imported 1099-INT refused the
-    /// return, so the only fileable answer was *"I received no Form 1099-INT"* beside transcribed
-    /// 1099-INT interest — the census demanding false testimony to let a return out.
+    /// The declaration, the contradiction and the block are the W-2's rules for all four (the
+    /// pre-review D1 fold, which replaced `the_four_t5_rows_refuse_naming_their_task` — that test
+    /// pinned the opposite and was watched going RED on the change). What the T3 seam review then
+    /// found is that the *fourth* rule, "a declared document must be transcribed", is not the W-2's
+    /// rule for two of them:
     ///
-    /// What T5 adds is a SCREEN, not the ability to hold the rows. So the missing thing is a way to
-    /// ENTER a document, which the `DocumentDeclaredNotTranscribed` refusal names, and not a reason
-    /// to tell the filer to leave.
+    /// - **1099-B** — the form's own instruction makes the Schedule D line 1a/8a summary optional
+    ///   (*"if you choose to report all these transactions on Form 8949, leave this line blank"*),
+    ///   and btctax's own population is exactly that case: the dispositions are in the ledger and
+    ///   print per transaction. Zero rows is the CORRECT return.
+    /// - **1099-G** — `Form1099G` has no box 2, so the commonest 1099-G of all (a prior-year state
+    ///   refund) cannot be transcribed truthfully at all. **T5** adds the box and flips it.
+    ///
+    /// So the truth table below is over TWO predicates, and the second is what rule (2) is gated on.
     #[test]
-    fn the_four_1099_rows_take_the_same_three_rules_as_the_w2_row() {
-        use crate::tax::document_census::DocumentRow;
+    fn the_four_1099_rows_declare_like_the_w2_row_and_only_three_demand_rows() {
+        use crate::tax::document_census::{requires_transcription, DocumentRow};
         use crate::tax::return_inputs::{Form1099B, Form1099Div, Form1099G, Form1099Int};
 
         // One row of each document, added to a censused fixture by the same path `income import`
@@ -2039,27 +2049,41 @@ mod tests {
                  `income import`, and a census that refused it would be demanding false testimony"
             );
 
-            // ── (2) `Some(true)` with ZERO rows refuses, and NAMES the way in. ─────────────────
+            // ── (2) `Some(true)` with ZERO rows — the ONE rule that splits, on
+            //        `requires_transcription`. Where rows are demanded it refuses and NAMES the way
+            //        in; where the form itself offers a blank, a truthful Yes FILES. ─────────────
             let mut declared = censused();
             declared.documents.set(row, Some(true));
-            let r = screen_inputs(&declared, &tbl(), &params())
-                .unwrap_or_else(|| panic!("{row:?} declared with nothing transcribed must refuse"));
-            assert_eq!(
-                r.reason,
-                RefuseReason::DocumentDeclaredNotTranscribed { kind: row },
-                "{row:?}: a declared document with no transcription is UNANSWERED, not UNSUPPORTED"
-            );
-            assert!(
-                r.detail.contains("income import"),
-                "{row:?}'s refusal must name the route in — a refusal with no exit is a brick with \
-                 better prose: {}",
-                r.detail
-            );
-            assert!(
-                r.detail.contains("T5"),
-                "{row:?}'s refusal must say which task replaces that route with a screen: {}",
-                r.detail
-            );
+            let got = screen_inputs(&declared, &tbl(), &params());
+            if requires_transcription(row) {
+                let r = got.unwrap_or_else(|| {
+                    panic!("{row:?} declared with nothing transcribed must refuse")
+                });
+                assert_eq!(
+                    r.reason,
+                    RefuseReason::DocumentDeclaredNotTranscribed { kind: row },
+                    "{row:?}: a declared document with no transcription is UNANSWERED, not \
+                     UNSUPPORTED"
+                );
+                assert!(
+                    r.detail.contains("income import"),
+                    "{row:?}'s refusal must name the route in — a refusal with no exit is a brick \
+                     with better prose: {}",
+                    r.detail
+                );
+                assert!(
+                    r.detail.contains("T5"),
+                    "{row:?}'s refusal must say which task replaces that route with a screen: {}",
+                    r.detail
+                );
+            } else {
+                assert_eq!(
+                    got.map(|r| r.reason),
+                    None,
+                    "{row:?} does not require transcription — a truthful Yes with zero rows is a \
+                     CORRECT return and must file"
+                );
+            }
 
             // ── (3) `Some(false)` beside a transcribed row refuses the contradiction. ──────────
             let mut no = with_one_row(row);
@@ -2086,6 +2110,161 @@ mod tests {
                 "{row:?} must carry no §2.2 exit — btctax can hold its rows today"
             );
         }
+    }
+
+    /// ★★★ **THE TWO FILERS THE ONE-PREDICATE RULE REFUSED (T3 seam review I2 / I3).**
+    ///
+    /// Both answer the census TRUTHFULLY and both have the correct number of rows — zero — and both
+    /// were refused `DocumentDeclaredNotTranscribed` before the split. This is the review's own
+    /// probe, committed: the two shapes are ordinary populations, not corner cases, and the second
+    /// is the commonest 1099-G there is.
+    ///
+    /// ★ The mutation that reds it is one word: `requires_transcription(B1099) => true`.
+    #[test]
+    fn a_truthful_1099b_on_form_8949_and_a_box_2_only_1099g_both_file() {
+        use crate::tax::document_census::DocumentRow;
+
+        // ── P1. The crypto filer — btctax's OWN population. Their exchange's Form 1099-B covers
+        //        dispositions that are already in the ledger and print per transaction on Form 8949
+        //        and Schedule D, so the summary line is blank BY THE FORM'S OWN INSTRUCTION. There
+        //        is no `[[b_1099]]` row, and entering one would double-count every gain
+        //        (`form_1099b_gains` is added into `capital_net`).
+        let mut p1 = censused();
+        p1.documents.set(DocumentRow::B1099, Some(true));
+        assert!(
+            p1.b_1099.is_empty(),
+            "the probe's premise: zero summary rows"
+        );
+        assert_eq!(
+            raw(&p1),
+            None,
+            "a filer who received a Form 1099-B and reports every transaction on Form 8949 answers \
+             YES truthfully and transcribes NOTHING — the form prints that option, and refusing it \
+             would leave them a choice between false testimony and a double-counted return"
+        );
+
+        // ── P2. The itemizer's prior-year state refund — box 2 alone, the commonest 1099-G. It
+        //        reaches Schedule 1 line 1 through the `sch1.state_refund_taxable` scalar; there is
+        //        no box-2 field on `Form1099G` to transcribe it into until T5.
+        let mut p2 = censused();
+        p2.documents.set(DocumentRow::G1099, Some(true));
+        p2.sch1.state_refund_taxable = dec!(900);
+        assert!(p2.g_1099.is_empty(), "the probe's premise: zero rows");
+        assert_eq!(
+            raw(&p2),
+            None,
+            "a 1099-G reporting only box 2 has no field to be transcribed into — refusing it would \
+             leave the filer choosing between false testimony and a hollow all-zero row beside a \
+             refund the census never mentions"
+        );
+
+        // ── …and the refusals the split did NOT relax. ────────────────────────────────────────
+        let mut no_beside_a_row = censused();
+        no_beside_a_row.b_1099 = vec![crate::tax::return_inputs::Form1099B::default()];
+        no_beside_a_row
+            .documents
+            .set(DocumentRow::B1099, Some(false));
+        assert_eq!(
+            raw(&no_beside_a_row),
+            Some(RefuseReason::DocumentCensusContradicted {
+                kind: DocumentRow::B1099
+            }),
+            "the CONTRADICTION rule runs on all five `Vec`-bearing rows — `declared_rows` is what \
+             was split away from the demand, not switched off"
+        );
+        let mut declared_w2 = censused();
+        declared_w2.documents.set(DocumentRow::W2, Some(true));
+        assert_eq!(
+            raw(&declared_w2),
+            Some(RefuseReason::DocumentDeclaredNotTranscribed {
+                kind: DocumentRow::W2
+            }),
+            "a W-2 reaches Form 1040 line 1a ONLY through `w2s`, so a declared one with no row is \
+             still exactly \"nothing ever populated it\""
+        );
+    }
+
+    /// ★★★ **THE TWO PREDICATES, over every one of the eighteen rows, as one table.**
+    ///
+    /// `declared_rows` is a fact about the return; `requires_transcription` is a demand on the
+    /// filer. They are `Some`/`true` on different sets, and a checker that could not tell the two
+    /// apart is what refused the two truthful filers above. The invariant that binds them: a row may
+    /// only DEMAND rows if it has somewhere to count them.
+    #[test]
+    fn the_rows_invariant_is_two_predicates_and_a_demand_needs_somewhere_to_count() {
+        use crate::tax::document_census::{declared_rows, requires_transcription, DocumentRow};
+        let ri = censused();
+        let countable: Vec<DocumentRow> = DocumentRow::ALL
+            .iter()
+            .copied()
+            .filter(|r| declared_rows(&ri, *r).is_some())
+            .collect();
+        assert_eq!(
+            countable,
+            vec![
+                DocumentRow::W2,
+                DocumentRow::Int1099,
+                DocumentRow::Div1099,
+                DocumentRow::B1099,
+                DocumentRow::G1099,
+            ],
+            "the five `Vec`-bearing kinds, and only those, have a row count"
+        );
+        let demanding: Vec<DocumentRow> = DocumentRow::ALL
+            .iter()
+            .copied()
+            .filter(|r| requires_transcription(*r))
+            .collect();
+        assert_eq!(
+            demanding,
+            vec![
+                DocumentRow::W2,
+                DocumentRow::Int1099,
+                DocumentRow::Div1099,
+            ],
+            "★ 1099-B is out because the FORM offers the blank (Schedule D line 1a/8a is a summary \
+             option and the ledger is the crypto filer's 1099-B); 1099-G is out until T5 adds \
+             `box2_state_refund`. Adding either back must be a deliberate edit with a screen behind \
+             it."
+        );
+        for row in DocumentRow::ALL {
+            assert!(
+                !requires_transcription(*row) || declared_rows(&ri, *row).is_some(),
+                "{row:?} demands transcription with nowhere to count it — the demand would be \
+                 unsatisfiable"
+            );
+        }
+    }
+
+    /// ★★ **The route a refusal names must not be a route that files a wrong return.** The 1099-B
+    /// and 1099-G entry routes are latent today (neither row demands transcription), and T5 makes
+    /// the 1099-G's live — so they are read HERE rather than left as prose nobody checks.
+    #[test]
+    fn the_1099b_and_1099g_routes_name_the_blank_and_the_scalar_not_a_double_count() {
+        use crate::tax::document_census::DocumentRow;
+        let b = DocumentRow::B1099
+            .entry_route()
+            .expect("1099-B has a route");
+        assert!(
+            b.contains("Form 8949") && b.contains("leave this line blank"),
+            "the 1099-B route must name the FORM'S OWN option — reporting on Form 8949 — before it \
+             mentions a summary row: {b}"
+        );
+        assert!(
+            b.contains("count the same gains twice"),
+            "…and must say what entering one beside ledger dispositions would do: {b}"
+        );
+        let g = DocumentRow::G1099
+            .entry_route()
+            .expect("1099-G has a route");
+        assert!(
+            g.contains("sch1.state_refund_taxable"),
+            "the 1099-G route must name where BOX 2 reaches the return today: {g}"
+        );
+        assert!(
+            g.contains("T5"),
+            "…and which task builds the box-2 field and its screen: {g}"
+        );
     }
 
     /// ★★ **The two scalar-shadowed rows are NOT LIVE: answering them asks nothing and refuses
