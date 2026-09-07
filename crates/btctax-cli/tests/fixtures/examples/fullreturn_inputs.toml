@@ -6,20 +6,16 @@
 # (keys sort alphabetically — that is the `toml::Value` table order, not a meaningful layout).
 
 amt_depreciation_same_as_regular = true
+answer_log_history = []
+b_1099 = []
 capital_loss_carryforward_in_provenance = "user"
 charitable_carryover_in = []
 charitable_carryover_in_provenance = "user"
-# §170(f)(8) — this household holds a contemporaneous written acknowledgment for every gift of $250
-# or more that this return deducts. ★ DELETING THIS LINE REFUSES THE RETURN (CharitableCwaUnresolved),
-# and so does setting it `false`: the crypto donation below is far over $250 and the return itemizes.
 charitable_cwa_obtained = true
 donations_had_restrictions = false
-# Schedule D line 20 / Schedule A line 9 — this household is not filing Form 4952, so line 20 is
-# checked "Yes" (the Qualified Dividends and Capital Gain Tax Worksheet). ★ DELETING THIS LINE
-# REFUSES THE RETURN (Form4952DeclarationUnanswered); `true` refuses it as Form4952Required.
-filing_form_4952 = false
 dual_status_alien = false
 excluded_puerto_rico_income = "0"
+filing_form_4952 = false
 filing_status = "Mfj"
 foreign_accounts = false
 foreign_country_names = ""
@@ -30,6 +26,10 @@ form_4563_line15 = "0"
 itemize_election = "auto"
 other_out_of_scope_income = false
 tax_year = 2024
+
+[answer_log]
+
+[broker_reporting]
 
 [capital_loss_carryforward_in]
 long = "0"
@@ -48,11 +48,13 @@ box4_fed_withheld = "0"
 box5_section_199a = "1200"
 box7_foreign_tax = "50"
 payer = "Broker LLC"
+payer_tin = ""
 
 [[g_1099]]
 box1_unemployment = "1000"
 box4_fed_withheld = "0"
 payer = "State of IL"
+payer_tin = ""
 
 [header]
 address_city = "Springfield"
@@ -91,6 +93,7 @@ box6_foreign_tax = "100"
 box8_tax_exempt_interest = "0"
 box9_private_activity_bond_amt = "0"
 payer = "First Bank"
+payer_tin = ""
 
 [payments]
 estimated_tax_payments = "1000"
@@ -109,14 +112,15 @@ ira_deduction_claimed = "0"
 state_refund_taxable = "0"
 student_loan_interest_paid = "0"
 
+[schedule_1a]
+vehicles = []
+
 [schedule_a]
+investment_interest = "0"
 medical = "2000"
 mortgage_all_used_to_buy_build_improve = true
 mortgage_dwelling_is_amt_qualified = true
 mortgage_interest_1098 = "22000"
-# §163(h)(3)(B) — inside every i1040sca "Limits on home mortgage interest" ceiling, so line 8a keeps
-# the whole Form 1098 amount. ★ DELETING THIS LINE REFUSES THE RETURN (MortgageDebtLimitUnanswered),
-# and setting it `false` refuses it as MortgageOverDebtLimit. That is the point.
 mortgage_within_debt_limit = true
 salt_personal_property = "0"
 salt_prior_year_balance_paid = "0"
@@ -135,6 +139,7 @@ expenses = "1000"
 is_cooperative_patron = false
 is_sstb = false
 naics_code = "518210"
+other_gross_receipts = "0"
 owner = "taxpayer"
 
 [[w2s]]

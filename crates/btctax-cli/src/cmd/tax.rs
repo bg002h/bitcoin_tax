@@ -109,6 +109,48 @@ pub fn import_return_inputs(
             item.provenance = CarryProvenance::User;
         }
     }
+    // ★★★ **THE ANSWER LOG IS BTCTAX'S SIGNATURE ABOUT THE *ASKING*, AND THE IMPORT SURFACE MUST
+    //     NOT BE ABLE TO SIGN IT EITHER.** (Seam review C1.)
+    //
+    // Exactly the same class as the `Computed` block above, one field-set over: `answer_log` and
+    // `answer_log_history` are `#[serde(default)]` on `ReturnInputs`, and `income import` is a
+    // whole-blob upsert, so until this line the TOML was a SECOND WRITER of the log that
+    // `provenance.rs` documents as having exactly one. Both directions were reproduced end to end:
+    //
+    //   (a) FORGERY. A hand-written TOML mints an `AnswerRecord` btctax never observed — `state =
+    //       "given"`, an `answered_on` of the author's choosing, and a `prompt_hash` that MATCHES
+    //       the live registry wording, so `answer_status` reads `Given` and R10.3's mismatch
+    //       refusal is satisfied by an act that never happened.
+    //   (b) SILENT DESTRUCTION, which re-opens the same door from the other side. A routine
+    //       re-import that simply omits `[answer_log]` wipes every genuine record. The answered
+    //       VALUES survive (they are in the TOML), so the return still stands as testimony while
+    //       every trace of when, and under which words, it was given is gone — and because *"an
+    //       absent record is not a mismatch"* (`return_refuse.rs`, deliberate), the wording-change
+    //       refusal is thereafter permanently disarmed for that return.
+    //
+    // ★★ NORMALISE, never REFUSE — same reasoning as the `Computed` block: the keys are a
+    //    legitimate part of the serialized shape (`income scrub` emits them), so rejecting a file
+    //    carrying them would make btctax unable to read a file it emits. Discarding here and
+    //    re-attaching the STORED row's below is the only rule under which the log is written by
+    //    `record_answer` alone.
+    //
+    // ★ AND IT SAYS SO. The `Computed` block beside it prints what it preserved; the review's
+    //   complaint about the shipped behaviour was that the diligence file went *"with no note at
+    //   all"*. A file that carried records is a file whose author expects them to arrive, so the
+    //   discard is announced — and only when there was something to discard, so the ordinary import
+    //   of a hand-written TOML stays silent.
+    let carried = ri.answer_log.len() + ri.answer_log_history.len();
+    if carried > 0 {
+        eprintln!(
+            "note: ignored {carried} answer record(s) in the file. When and in what words a question \
+             was answered is recorded by btctax when it asks you — it cannot be imported, because a \
+             record of an act this vault never observed would be provenance for something that did \
+             not happen. Any records already on the {year} row are kept; run `btctax income answer \
+             --year {year}` to answer the questions here."
+        );
+    }
+    ri.answer_log.clear();
+    ri.answer_log_history.clear();
     let mut s = Session::open(vault, pp)?;
     // ★ §6.2 (M-1): reconcile the crash-recovery draft BEFORE any committed-row read/write — clear a WIP
     // draft (regenerable) so it can't shadow this write, or refuse a parked one (its sole copy).
@@ -120,6 +162,13 @@ pub fn import_return_inputs(
     // *does* supply is the user's and wins (as `User`, which the next write-back then refuses to clobber).
     if let Some(existing) = return_inputs::get(s.conn(), year)? {
         use btctax_core::tax::return_inputs::CarryProvenance;
+        // ★★★ …AND THE OTHER HALF OF C1: re-attach the STORED row's log, which is the only copy
+        //     `record_answer` ever wrote. On a fresh year there is no stored row and this block does
+        //     not run, so the log stays empty — a return imported from a file has been ANSWERED by
+        //     nobody, which is the truthful record of it. (Unlike the carryover arms below this is
+        //     unconditional: there is no "the TOML supplied one" case, because the TOML may not.)
+        ri.answer_log = existing.answer_log.clone();
+        ri.answer_log_history = existing.answer_log_history.clone();
         let mut preserved: Vec<String> = Vec::new();
         if ri.charitable_carryover_in.is_empty() {
             let computed: Vec<_> = existing

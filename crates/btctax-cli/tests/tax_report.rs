@@ -3065,6 +3065,328 @@ fn the_editor_and_income_answer_write_the_same_answer_record() {
     );
 }
 
+/// ★★★ **C1 KILL (a) — THE IMPORT SURFACE CANNOT SIGN THE ANSWER LOG.**
+///
+/// `answer_log` / `answer_log_history` are `#[serde(default)]` and `income import` is a whole-blob
+/// upsert, so a hand-written TOML used to be a SECOND WRITER of the log that `provenance.rs`
+/// documents as having exactly one. The forgery below is the dangerous shape, not a silly one: a
+/// *valid* `prompt_hash` of the live `ForeignTrust` wording, `state = "given"`, and an
+/// `answered_on` of the author's choosing — a record that reads as `AnswerStatus::Given` and
+/// satisfies R10.3's mismatch rule on the strength of an act that never happened.
+///
+/// Both halves are asserted, because closing one alone would only move the forgery: history is
+/// where a superseded record goes, and a file that can write history can plant a diligence trail.
+#[test]
+fn an_imported_toml_cannot_mint_an_answer_record_or_a_history_entry() {
+    use btctax_core::tax::provenance::{prompt_hash, AnswerKey};
+    use btctax_core::tax::questions::{QuestionId, FORM_QUESTIONS};
+
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2025(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+
+    // The hash of the words the registry asks TODAY — so the forged record is not merely present,
+    // it is *current*: `answer_status` would return `Given` for it.
+    let live = prompt_hash(
+        FORM_QUESTIONS
+            .iter()
+            .find(|q| q.id == QuestionId::ForeignTrust)
+            .unwrap()
+            .prompt,
+    );
+    let toml = csv_dir.path().join("forged.toml");
+    std::fs::write(
+        &toml,
+        format!(
+            "filing_status = \"Single\"\n\
+             foreign_trust = false\n\
+             answer_log_history = [[\"question:ForeignAccounts\", {{ answered_on = [1999, 2], \
+             prompt_hash = \"{live}\", state = \"given\" }}]]\n\
+             [header]\n[header.taxpayer]\n\
+             first_name = \"A\"\nlast_name = \"B\"\nssn = \"123-45-6789\"\n\
+             [answer_log.\"question:ForeignTrust\"]\n\
+             answered_on = [1999, 1]\n\
+             prompt_hash = \"{live}\"\n\
+             state = \"given\"\n"
+        ),
+    )
+    .unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap();
+
+    let s = btctax_cli::Session::open(&vault, &pp()).unwrap();
+    let landed = btctax_cli::return_inputs::get(s.conn(), 2024)
+        .unwrap()
+        .unwrap();
+    // The VALUE the TOML supplied is the filer's and lands (that is what import is for)…
+    assert_eq!(
+        landed.foreign_trust,
+        Some(false),
+        "the imported VALUE must still land — this guard is about the record of the ASKING, not the answer"
+    );
+    // …and the record of an act btctax never observed does not.
+    assert_eq!(
+        landed
+            .answer_log
+            .get(&AnswerKey::Question(QuestionId::ForeignTrust)),
+        None,
+        "a TOML minted an AnswerRecord: `income import` has become a second writer of the log, and \
+         a forged record with a LIVE prompt hash reads as `Given` — provenance for an act that \
+         never happened"
+    );
+    assert!(
+        landed.answer_log_history.is_empty(),
+        "a TOML minted an `answer_log_history` entry — closing `answer_log` alone only moves the \
+         forgery into the history, which is where a superseded record is supposed to be safe: {:?}",
+        landed.answer_log_history
+    );
+}
+
+/// ★★★ **C1 KILL (b) — A RE-IMPORT DOES NOT DESTROY THE DILIGENCE FILE.**
+///
+/// The other direction of the same defect, and the one a filer actually meets: a whole-blob upsert
+/// that simply omits `[answer_log]` used to wipe every genuine record. The answered VALUES survive
+/// (they are in the TOML), so the return keeps standing as testimony while every trace of when and
+/// under which words it was given is gone — and because *"an absent record is not a mismatch"*,
+/// R10.3's wording-change refusal is thereafter permanently disarmed for that return.
+#[test]
+fn a_re_import_keeps_every_answer_record_already_on_the_row() {
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2025(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+
+    // A return, then the full interview at the keyboard — genuine records, written by the one writer.
+    let toml = csv_dir.path().join("ri.toml");
+    std::fs::write(
+        &toml,
+        "filing_status = \"Single\"\n[header]\n[header.taxpayer]\nfirst_name = \"A\"\nlast_name = \"B\"\nssn = \"123-45-6789\"\n",
+    )
+    .unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap();
+    let mut keystrokes: &[u8] = b"n\nn\nn\nn\nn\nn\nn\n\n\n\n\n\n\n\n\n\n\n\n";
+    let mut screen: Vec<u8> = Vec::new();
+    cmd::answer::answer_return_inputs(
+        &vault,
+        &pp(),
+        2024,
+        time::macros::date!(2026 - 09 - 01),
+        &mut keystrokes,
+        &mut screen,
+    )
+    .unwrap();
+
+    let before = {
+        let s = btctax_cli::Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::get(s.conn(), 2024)
+            .unwrap()
+            .unwrap()
+            .answer_log
+    };
+    // ★ The measured count when this kill was written. It is asserted, not merely observed, so that
+    //   a registry that GROWS updates the number deliberately — a survival test over an empty log
+    //   passes for the wrong reason, which is the whole failure class this file exists to catch.
+    assert_eq!(
+        before.len(),
+        14,
+        "the interview wrote {} records, not the 14 this kill was measured against — if the \
+         registry grew, update the number; if it SHRANK, the keystroke script is under-answering \
+         and the survival assertion below has stopped meaning anything",
+        before.len()
+    );
+
+    // The routine re-import: the same six-line TOML, carrying no `[answer_log]` at all.
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap();
+
+    let after = {
+        let s = btctax_cli::Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::get(s.conn(), 2024)
+            .unwrap()
+            .unwrap()
+            .answer_log
+    };
+    assert_eq!(
+        after,
+        before,
+        "a re-import destroyed the answer log ({} record(s) → {}): the values survive, so the \
+         return still stands as testimony while the record of the asking is gone",
+        before.len(),
+        after.len()
+    );
+}
+
+/// ★★★ **I1 KILL — THE RE-ANSWER ITSELF HISTORISES, ON A REAL SURFACE, WITH NO SWEEP CALLED.**
+///
+/// R10.3's half two — *"the old answer is kept as history and never as the current answer"* — used to
+/// live in a `supersede_stale_prompts` sweep with **zero production callers**: a function fully
+/// tested and never run, so the guarantee was unmet on every path a filer takes while its unit test
+/// stayed green. It now lives in `record_answer`, the one writer both surfaces call.
+///
+/// This drives the ordinary case R11's Sep–Dec calendar makes likely — a prompt edited in a November
+/// fold, under an answer given in September — through `income answer` at the keyboard. Nothing in
+/// this test touches `answer_log_history`, and nothing calls a sweep.
+#[test]
+fn re_answering_at_the_keyboard_moves_the_stale_record_into_history_by_itself() {
+    use btctax_core::tax::provenance::{prompt_hash, AnswerKey, AnswerRecord, AnswerState};
+    use btctax_core::tax::questions::{QuestionId, FORM_QUESTIONS};
+
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2025(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+
+    let toml = csv_dir.path().join("ri.toml");
+    std::fs::write(
+        &toml,
+        "filing_status = \"Single\"\n[header]\n[header.taxpayer]\nfirst_name = \"A\"\nlast_name = \"B\"\nssn = \"123-45-6789\"\n",
+    )
+    .unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap();
+
+    // SEPTEMBER: an answer on file, hashed against words that are no longer the ones asked. (Written
+    // through the store rather than by editing the registry, which is `&'static str` — the STATE is
+    // what matters, and it is exactly the state a November prompt edit produces.)
+    let key = AnswerKey::Question(QuestionId::ForeignTrust);
+    const SEPT: time::Date = time::macros::date!(2026 - 09 - 01);
+    const NOV: time::Date = time::macros::date!(2026 - 11 - 14);
+    {
+        let mut s = btctax_cli::Session::open(&vault, &pp()).unwrap();
+        let mut ri = btctax_cli::return_inputs::get(s.conn(), 2024)
+            .unwrap()
+            .unwrap();
+        ri.answer_log.insert(
+            key.clone(),
+            AnswerRecord {
+                answered_on: SEPT,
+                prompt_hash: prompt_hash("the words this question asked in September"),
+                state: AnswerState::Given,
+            },
+        );
+        btctax_cli::return_inputs::set(s.conn(), 2024, &ri).unwrap();
+        s.save().unwrap();
+    }
+
+    // NOVEMBER: the filer re-answers at the keyboard. No sweep is called anywhere.
+    let mut keystrokes: &[u8] = b"n\nn\nn\nn\nn\nn\nn\n\n\n\n\n\n\n\n\n\n\n\n";
+    let mut screen: Vec<u8> = Vec::new();
+    cmd::answer::answer_return_inputs(&vault, &pp(), 2024, NOV, &mut keystrokes, &mut screen)
+        .unwrap();
+
+    let s = btctax_cli::Session::open(&vault, &pp()).unwrap();
+    let after = btctax_cli::return_inputs::get(s.conn(), 2024)
+        .unwrap()
+        .unwrap();
+    let live = prompt_hash(
+        FORM_QUESTIONS
+            .iter()
+            .find(|q| q.id == QuestionId::ForeignTrust)
+            .unwrap()
+            .prompt,
+    );
+    assert_eq!(
+        after.answer_log[&key].prompt_hash, live,
+        "the re-answer must stand under the words currently asked"
+    );
+    assert_eq!(
+        after.answer_log[&key].answered_on, NOV,
+        "…and carry the date it was actually given"
+    );
+    assert_eq!(
+        after
+            .answer_log_history
+            .iter()
+            .filter(|(k, _)| *k == key)
+            .map(|(_, r)| (r.answered_on, r.prompt_hash.clone()))
+            .collect::<Vec<_>>(),
+        vec![(
+            SEPT,
+            prompt_hash("the words this question asked in September")
+        )],
+        "the September record was DESTROYED rather than kept: `record_answer` overwrote it, so the \
+         diligence file lost the fact that an earlier answer was ever given — R10.3's half two, unmet"
+    );
+    // The other thirteen answers were written under unchanged wording, so nothing else was superseded.
+    assert_eq!(
+        after.answer_log_history.len(),
+        1,
+        "only the record whose WORDS changed is superseded — a writer that historised every answer \
+         would turn the append-only file into a keystroke log: {:?}",
+        after.answer_log_history
+    );
+}
+
+/// ★★★ **I1's OTHER HALF — A STALE RECORD SURVIVES THE READ BOUNDARY, and it must.**
+///
+/// The seam review offered two homes for R10.3's supersession: the one writer, or a sweep at
+/// `return_inputs::row_to_inputs`. Only the first is safe, and this test is why — it pins the
+/// decision so a future reader cannot re-add the sweep from the review's text and get a green suite.
+///
+/// R10.3's sentences are ordered: *"`screen_inputs` refuses such a class-(A) record as UNANSWERED.
+/// **The old answer is kept as history…**"* — the refusal comes FIRST and needs the mismatched
+/// record still in `answer_log` at read time, and R12's table lists exactly that record as
+/// **blocking**. A sweep on load moves it to history, `answer_status` then reports `NeverAsked`, and
+/// *"an absent record is not a mismatch"* lets the September answer stand silently under November's
+/// words with no re-ask. Measured: with the sweep inlined at `row_to_inputs` this assertion reads
+/// `NeverAsked` while `foreign_trust` still holds `Some(false)`.
+#[test]
+fn a_record_whose_words_changed_still_reads_as_wording_changed_after_a_load() {
+    use btctax_core::tax::provenance::{
+        answer_status, prompt_hash, AnswerKey, AnswerRecord, AnswerState, AnswerStatus,
+    };
+    use btctax_core::tax::questions::{QuestionId, FORM_QUESTIONS};
+
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2025(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+    let toml = csv_dir.path().join("ri.toml");
+    std::fs::write(
+        &toml,
+        "filing_status = \"Single\"\nforeign_trust = false\n[header]\n[header.taxpayer]\nfirst_name = \"A\"\nlast_name = \"B\"\nssn = \"123-45-6789\"\n",
+    )
+    .unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap();
+
+    let key = AnswerKey::Question(QuestionId::ForeignTrust);
+    {
+        let mut s = btctax_cli::Session::open(&vault, &pp()).unwrap();
+        let mut ri = btctax_cli::return_inputs::get(s.conn(), 2024)
+            .unwrap()
+            .unwrap();
+        ri.answer_log.insert(
+            key.clone(),
+            AnswerRecord {
+                answered_on: time::macros::date!(2026 - 09 - 01),
+                prompt_hash: prompt_hash("the words this question asked in September"),
+                state: AnswerState::Given,
+            },
+        );
+        btctax_cli::return_inputs::set(s.conn(), 2024, &ri).unwrap();
+        s.save().unwrap();
+    }
+
+    let s = btctax_cli::Session::open(&vault, &pp()).unwrap();
+    let loaded = btctax_cli::return_inputs::get(s.conn(), 2024)
+        .unwrap()
+        .unwrap();
+    let prompt = FORM_QUESTIONS
+        .iter()
+        .find(|q| q.id == QuestionId::ForeignTrust)
+        .unwrap()
+        .prompt;
+    assert_eq!(
+        answer_status(&loaded, &key, prompt),
+        AnswerStatus::WordingChanged,
+        "the read boundary superseded the record on load: it now reads {:?}, so `screen_inputs` sees \
+         no mismatch and `foreign_trust` = {:?} stands as testimony under words the filer was never \
+         shown. Supersession belongs at the RE-ANSWER (`record_answer`), never at a load.",
+        answer_status(&loaded, &key, prompt),
+        loaded.foreign_trust
+    );
+    assert!(
+        loaded.answer_log_history.is_empty(),
+        "…and a load must not write history at all — history is append-only and `get` runs on every \
+         command, so a load-time writer would grow it without bound: {:?}",
+        loaded.answer_log_history
+    );
+}
+
 /// `income answer` refuses a year that has no return. Answering questions about a return that does not
 /// exist would MATERIALIZE a near-empty `ReturnInputs` row — which then takes precedence over the user's
 /// `tax-profile` (the resolver ranks `ReturnInputs` first), silently replacing a working profile with an

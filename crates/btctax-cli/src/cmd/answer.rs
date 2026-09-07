@@ -305,9 +305,18 @@ pub fn answer_return_inputs(
                 }
             },
         }
-        // ★★★ R10.3 — one record per prompt PUT TO THE FILER, whichever shape it had. Placed here,
-        //     after the `Ask` match, so no branch can be added that asks without recording: the three
-        //     skippable shapes and the declaration all pass through this line.
+        // ★★★ R10.3 — one record per prompt PUT TO THE FILER. Placed after the `Ask` match so the
+        //     three SKIPPABLE shapes (date / yes-no / choice) share one recording site instead of
+        //     three, and the state is read back off `ri` once each has written its value.
+        //
+        // ★ **What this placement does NOT enforce, stated because the previous wording claimed it
+        //   did** (seam review N2). The declaration does not pass through this line — it records
+        //   inside its own branch, at the `parse_yes_no` success arm, because a declaration's record
+        //   is always `Given` and its loop cannot exit without a value. And this site is an `if let`,
+        //   not a `match`: a THIRD `Ask` variant would compile here and record nothing. The `match`
+        //   above IS exhaustive and would red on a new variant — that is the real net, and it is a
+        //   compile error that forces someone to look at this line, not a guarantee that they will
+        //   add a recording arm. Same shape as the classifier's carefully-stated `_` limit.
         if let Ask::Skippable(sk) = ask {
             let state = skippable_state(sk, &ri);
             record_answer(&mut ri, AnswerKey::Skippable(sk.id), sk.prompt, now, state);

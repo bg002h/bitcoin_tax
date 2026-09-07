@@ -282,6 +282,14 @@ impl<'de> Deserialize<'de> for AnswerKey {
 /// *asked and refused*; a leaf that is `None` with **no record at all** was never asked. Those two are
 /// the same bytes on the page and must never be the same thing in the model — R12 keeps a `Declined`
 /// benefit in the *forgoing* list precisely because declining is provenance, not absence.
+///
+/// ★ **It is WRITTEN here and READ by nothing in production yet** (seam review N3), and that is the
+///   same *"a stored value with no reader is not a guarantee"* caveat this module states for
+///   [`AnswerRecord::prompt_hash`]. `income answer` writes it; the only production reader of the
+///   answer types today is `return_refuse`'s `== WordingChanged`, which treats `Declined`, `Given`
+///   and `NeverAsked` alike. Its reader is **T3** — `interview_state()`, which lists a `Declined`
+///   class-(B) item in `forgoing` marked *(declined)* and never in `blocking` — rendered by **T12**.
+///   Expected at T1; it stops being acceptable if T3 slips.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AnswerState {
@@ -344,6 +352,30 @@ pub fn dependent_ssn_hash(ssn: &str) -> String {
 /// four-argument `record_answer(ri, key, prompt, now)` cannot express. `state` is therefore the fifth
 /// parameter rather than a second writer function — one writer is the guarantee, four arguments were
 /// only the sketch.
+/// ★★★ **…AND THE ONE WRITER IS WHERE R10.3's HALF TWO LIVES** (seam review I1).
+///
+/// R10.3: *"**The old answer is kept as history and never as the current answer:** the superseded
+/// `AnswerRecord` moves to `answer_log_history`, append-only, which nothing reads as an answer, **and
+/// the re-answer writes a fresh record**."* The supersession is tied to the RE-ANSWER, and the
+/// re-answer is exactly this function — so the move happens here, on the one path every surface
+/// takes, rather than in a sweep somebody has to remember to call. (It was in a sweep, with zero
+/// production callers: a function fully tested and never run.)
+///
+/// **Only a record whose `prompt_hash` DIFFERS is historised.** Re-answering the same question under
+/// the same words is a correction, not a supersession — R10.3 names the changed wording as what
+/// history holds (with `supersede_dependent_identity`'s changed `ssn`), and `forget_answer`'s doc
+/// gives the same reason from the other side. So a filer who flips an answer back and forth under
+/// one prompt cannot inflate the history, and the writer is idempotent in the way that matters.
+///
+/// ★ **Why NOT also sweep at the read boundary** (`return_inputs::row_to_inputs`), the other option
+///   the review offered: it would *disarm the refusal it exists to serve.* R10.3's preceding sentence
+///   is that `screen_inputs` refuses a class-(A) record whose hash disagrees, and R12's table lists
+///   that record as **blocking** — both of which need the stale record still IN `answer_log` at read
+///   time. Sweeping it into history on load makes `answer_status` report `NeverAsked`, and *"an
+///   absent record is not a mismatch"* then lets a September answer stand silently under November's
+///   words. Measured: with the sweep at the read boundary, `an_answer_hashed_against_earlier_words_
+///   refuses_and_a_missing_record_does_not`'s end-to-end shape stops refusing. Supersession belongs
+///   at the re-answer, which is where the spec puts it.
 pub fn record_answer(
     ri: &mut ReturnInputs,
     key: AnswerKey,
@@ -351,11 +383,18 @@ pub fn record_answer(
     now: Date,
     state: AnswerState,
 ) {
+    let hash = prompt_hash(prompt);
+    if let Some(superseded) = ri.answer_log.get(&key) {
+        if superseded.prompt_hash != hash {
+            let superseded = superseded.clone();
+            ri.answer_log_history.push((key.clone(), superseded));
+        }
+    }
     ri.answer_log.insert(
         key,
         AnswerRecord {
             answered_on: now,
-            prompt_hash: prompt_hash(prompt),
+            prompt_hash: hash,
             state,
         },
     );
@@ -405,7 +444,8 @@ pub fn answer_status(ri: &ReturnInputs, key: &AnswerKey, current_prompt: &str) -
 ///
 /// ★ `None` for a [`AnswerKey::DependentGate`]: the per-gate prompts live in the `DEPENDENT_GATES`
 /// registry, which is task T7. Until it exists a dependent record has no current prompt to compare
-/// against, so [`supersede_stale_prompts`] leaves those records alone rather than inventing a hash.
+/// against, so nothing outside [`record_answer`] can decide a dependent record is stale — and
+/// `record_answer` never has to, because it hashes the prompt the caller actually showed.
 pub fn current_prompt(key: &AnswerKey) -> Option<&'static str> {
     match key {
         AnswerKey::Question(id) => FORM_QUESTIONS
@@ -418,35 +458,6 @@ pub fn current_prompt(key: &AnswerKey) -> Option<&'static str> {
             .map(|s| s.prompt),
         AnswerKey::DependentGate { .. } => None,
     }
-}
-
-/// ★★★ **THE PROMPT-HASH MISMATCH RULE, half two: the old answer becomes HISTORY.**
-///
-/// R10.3: *"The old answer is kept as history and never as the current answer."* A record whose
-/// `prompt_hash` no longer matches the words on the screen is moved out of `answer_log` and appended
-/// to `answer_log_history`, so the question reads as unanswered and the re-answer writes a fresh
-/// record. Returns the keys it superseded, in log order.
-///
-/// ★ Idempotent by construction: the second call finds nothing in `answer_log` to move, so a sweep
-/// that runs on every load cannot grow the history. That is exactly the *"restore the text → no
-/// history entry is added"* half of the kill, seen from the other side.
-pub fn supersede_stale_prompts(ri: &mut ReturnInputs) -> Vec<AnswerKey> {
-    let stale: Vec<AnswerKey> = ri
-        .answer_log
-        .iter()
-        .filter(|(k, r)| match current_prompt(k) {
-            Some(p) => r.prompt_hash != prompt_hash(p),
-            // No current prompt to compare against — leave it standing (see `current_prompt`).
-            None => false,
-        })
-        .map(|(k, _)| k.clone())
-        .collect();
-    for key in &stale {
-        if let Some(rec) = ri.answer_log.remove(key) {
-            ri.answer_log_history.push((key.clone(), rec));
-        }
-    }
-    stale
 }
 
 /// Every `answer_log` key belonging to one dependent identity.
@@ -578,11 +589,28 @@ mod tests {
     /// on any reachable struct is detected the moment the fixture realizes it, with nobody having
     /// remembered to list it. It is `Decimal`'s own deserializer doing the classifying.
     ///
-    /// ★★ **Its honest limit, stated rather than hidden:** it can only classify a leaf the fixture
-    /// REALIZES. A new `Usd` defaults to `0` and is realized; a new `Option<Usd>` left `None` on
-    /// [`maximal_sentinel`] serializes as `null`, which rejects both probes and is therefore reported
-    /// as *not money*. The second net for that case is the classifier, which forbids `_` on an
-    /// `Option<Usd>` leaf — so it cannot be added without a human naming it.
+    /// ★★ **Its honest limits, stated rather than hidden — and MEASURED, because a wrong stated limit
+    /// is worse than none** (seam review M4). It can only classify a leaf that appears in the
+    /// serialized JSON at all, so there are exactly two blind spots, neither of them the one this
+    /// comment used to name:
+    ///
+    /// 1. **A field that is not serialized.** `#[serde(skip_serializing_if = "Option::is_none")]`
+    ///    (used in `forms.rs:293-295`) removes the key entirely when it is `None`, so [`walk`] never
+    ///    emits a leaf for it and no probe is ever written. Nothing here can see a leaf that is not
+    ///    in the document.
+    /// 2. **The elements of an EMPTY `Vec`.** `walk` descends an array only when some element is
+    ///    itself an object or array, so `[]` is pushed as one leaf at the vec's own path — and that
+    ///    leaf rejects both probes (a string is not a `Vec`). Every money box on the element type is
+    ///    therefore unwalked. This is why [`maximal_sentinel`] realizes two rows of every `Vec`.
+    ///
+    /// ★ A new `Option<Usd>` left `None` is **NOT** a blind spot, contrary to what this comment said
+    ///   before it was checked: it serializes as `null`, `walk` emits it, `set_at` replaces the whole
+    ///   value with the probe string, and the `Option<Usd>` deserializer then classifies it correctly.
+    ///   Planted and observed — the KAT reds on such a field.
+    ///
+    /// ★ The second net either way is the classifier, which forbids `_` on an `Option<Usd>` leaf
+    ///   (`no_option_money_leaf_is_bound_with_underscore`), so a money leaf cannot be added without a
+    ///   human naming it.
     fn money_leaves(ri: &ReturnInputs) -> BTreeSet<String> {
         let base = serde_json::to_value(ri).expect("ReturnInputs serializes");
         serde_json::from_value::<ReturnInputs>(base.clone())
@@ -642,8 +670,13 @@ mod tests {
     #[test]
     fn every_money_leaf_has_exactly_one_source_and_every_source_prefix_is_live() {
         let money = money_leaves(&maximal_sentinel());
+        // ★ The floor is the MEASURED count, not a round number well below it (seam review N1). At
+        //   `> 50` a fixture that had lost HALF its realized money leaves still passed the guard
+        //   whose own message says *"it has stopped being maximal"* — a guard that cannot fire on the
+        //   thing it names. 106 leaves measured at the time of writing; 100 leaves a little slack for
+        //   a field legitimately retired without making the guard vacuous.
         assert!(
-            money.len() > 50,
+            money.len() >= 100,
             "the maximal fixture realized only {} money leaves — it has stopped being maximal, and a \
              shrunken fixture makes this KAT vacuous",
             money.len()
@@ -741,6 +774,8 @@ mod tests {
         }
     }
     const D1: Date = date!(2026 - 09 - 01);
+    /// A LATER date, so a re-answer's record is distinguishable from the one it superseded.
+    const D2: Date = date!(2026 - 11 - 14);
 
     /// The wire form round-trips for all three key shapes, and a stored blob deserializes back to the
     /// same map — the `BTreeMap` key contract.
@@ -838,10 +873,18 @@ mod tests {
     }
 
     /// ★★★ **THE PROMPT-HASH MISMATCH RULE, in one test** (§8: *"an answer given under earlier words
-    /// never stands under later ones"*). Change the words → unanswered + the old record in history;
-    /// restore them → still standing, and NO new history entry.
+    /// never stands under later ones"*). Change the words → unanswered; RE-ANSWER under the new words
+    /// → the old record is in history and the fresh one is current; re-answer again under those same
+    /// words → history does not grow.
+    ///
+    /// ★★★ **The second half runs through [`record_answer`] and NOTHING ELSE** (seam review I1). The
+    ///     version of this kill that shipped called a `supersede_stale_prompts` sweep directly, and
+    ///     the sweep had zero production callers — a function fully tested and never run, so R10.3's
+    ///     *"the old answer is kept as history"* was unmet on every real path while this test was
+    ///     green. Now the only thing touched here is the one writer both surfaces call, so a
+    ///     regression cannot hide behind a test-only entry point.
     #[test]
-    fn changing_the_words_re_asks_and_historises_restoring_them_does_neither() {
+    fn changing_the_words_re_asks_and_the_re_answer_itself_historises_the_old_record() {
         let mut r = ri();
         let k = AnswerKey::Question(QuestionId::ForeignTrust);
         record_answer(
@@ -851,51 +894,72 @@ mod tests {
             D1,
             AnswerState::Given,
         );
+        assert!(
+            r.answer_log_history.is_empty(),
+            "a FIRST answer supersedes nothing"
+        );
 
-        // Same words: still an answer, and a sweep moves nothing.
+        // Same words: still an answer.
         assert_eq!(
             answer_status(&r, &k, "the ORIGINAL words"),
             AnswerStatus::Given
         );
 
-        // Changed words: reported as unanswered, with the reason R12's panel prints.
+        // Changed words: reported as unanswered, with the reason R12's panel prints — and the record
+        // is still IN the log, which is what `screen_inputs` needs to refuse it as such.
         assert_eq!(
             answer_status(&r, &k, "the ORIGINAL words?"),
             AnswerStatus::WordingChanged,
             "one added character must be enough — {WORDING_CHANGED_REASON}"
         );
+        assert!(
+            r.answer_log.contains_key(&k),
+            "a record refused for changed wording must STAY in the log until it is re-answered —              sweeping it out on load turns `WordingChanged` into `NeverAsked`, and an absent record              is not a mismatch"
+        );
 
-        // …and the supersede moves the old record OUT of the log and INTO history.
-        let mut changed = r.clone();
-        changed.answer_log.insert(
+        // ── THE RE-ANSWER. No sweep is called; `record_answer` is the whole path.
+        record_answer(
+            &mut r,
             k.clone(),
-            AnswerRecord {
-                answered_on: D1,
-                prompt_hash: prompt_hash("words nobody asks any more"),
-                state: AnswerState::Given,
-            },
+            "the ORIGINAL words?",
+            D2,
+            AnswerState::Given,
         );
-        let moved = supersede_stale_prompts(&mut changed);
-        assert_eq!(moved, vec![k.clone()]);
-        assert!(
-            !changed.answer_log.contains_key(&k),
-            "the superseded record must NOT stay current"
+        assert_eq!(
+            r.answer_log_history.len(),
+            1,
+            "the superseded record must be KEPT — history is where it goes, and nothing else wrote it"
         );
-        assert_eq!(changed.answer_log_history.len(), 1);
-        assert_eq!(changed.answer_log_history[0].0, k);
+        assert_eq!(r.answer_log_history[0].0, k);
+        assert_eq!(
+            r.answer_log_history[0].1.prompt_hash,
+            prompt_hash("the ORIGINAL words"),
+            "history must hold the record that was superseded, not the one that replaced it"
+        );
+        assert_eq!(
+            r.answer_log[&k].answered_on, D2,
+            "…and the CURRENT record is the fresh one"
+        );
+        assert_eq!(
+            answer_status(&r, &k, "the ORIGINAL words?"),
+            AnswerStatus::Given
+        );
 
-        // Restore: the record matches the live prompt, so a sweep adds NOTHING.
-        let mut restored = ri();
-        let live = current_prompt(&k).expect("a registry question has a current prompt");
-        record_answer(&mut restored, k.clone(), live, D1, AnswerState::Given);
-        assert!(supersede_stale_prompts(&mut restored).is_empty());
-        assert!(
-            restored.answer_log_history.is_empty(),
-            "restoring the wording must not add a history entry"
+        // ── Re-answering under the SAME words is a correction, not a supersession: history is flat.
+        record_answer(
+            &mut r,
+            k.clone(),
+            "the ORIGINAL words?",
+            D2,
+            AnswerState::Declined,
         );
-        // And the sweep is idempotent — running it twice cannot grow the history.
-        supersede_stale_prompts(&mut changed);
-        assert_eq!(changed.answer_log_history.len(), 1);
+        assert_eq!(
+            r.answer_log_history.len(),
+            1,
+            "changing an answer under UNCHANGED wording must not grow the history — only the words \
+             changing supersedes (R10.3), and a writer that appended every time would turn the \
+             append-only file into a keystroke log"
+        );
     }
 
     /// ★★★ **I10 — THE DILIGENCE KEY IS AN IDENTITY.** Answer gates on two dependent rows; delete

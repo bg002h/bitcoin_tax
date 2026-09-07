@@ -847,6 +847,14 @@ fn the_scrubbed_toml_round_trips_back_through_import() {
         ],
     );
     assert_eq!(code, 0, "the scrubbed file must load: {stderr}");
+    // ★ …and it SAYS it dropped the log rather than dropping it silently. The scrubbed file carries
+    //   two records and one history entry (the maximal sentinel's), so the recipient is told why
+    //   their imported return reads as answered by nobody.
+    assert!(
+        stderr.contains("ignored 3 answer record(s) in the file"),
+        "an import that discards the file's answer log must SAY so — the recipient otherwise cannot \
+         tell a return nobody was asked about from one that was: {stderr}"
+    );
 
     // ★★★ COMPARE AGAINST THE IN-MEMORY SCRUB, NOT AGAINST THE FILE. Parsing the emitted file and
     //     comparing it to what the recipient stored puts the FILE on both sides of the assertion, so
@@ -856,19 +864,42 @@ fn the_scrubbed_toml_round_trips_back_through_import() {
     //     their balance due, while the whole suite stays green.
     //
     //     The filer's own scrubbed return is the only expectation that can red on emitter loss.
-    let sent: btctax_core::tax::return_inputs::ReturnInputs = {
+    let mut sent: btctax_core::tax::return_inputs::ReturnInputs = {
         let s = Session::open(&vault, &pp()).unwrap();
         let stored = btctax_cli::return_inputs::get(s.conn(), 2024)
             .unwrap()
             .unwrap();
         btctax_core::tax::scrub::scrub_pii(&stored)
     };
-    let landed = {
+    let mut landed = {
         let s = Session::open(&recipient, &pp()).unwrap();
         btctax_cli::return_inputs::get(s.conn(), 2024)
             .unwrap()
             .unwrap()
     };
+    // ★★★ THE ANSWER LOG IS DELIBERATELY *NOT* CARRIED BY IMPORT (seam review C1). The scrubbed file
+    //     does carry `[answer_log]` — it is part of the serialized shape and re-keyed by
+    //     `rekey_dependent_answers` — but `import_return_inputs` discards it, because a record of an
+    //     ACT the recipient never performed is a forgery, and the recipient's vault has no stored row
+    //     to re-attach. So the emitter is compared on every OTHER field, and the log is asserted
+    //     EMPTY on the landed side rather than equal — which is a stronger statement than dropping
+    //     both, and it reds if the import surface ever becomes a second writer again.
+    assert!(
+        landed.answer_log.is_empty() && landed.answer_log_history.is_empty(),
+        "`income import` must not carry the file's answer log onto a fresh vault — the recipient was \
+         never asked these questions; got {} record(s) and {} history entr(ies)",
+        landed.answer_log.len(),
+        landed.answer_log_history.len()
+    );
+    assert!(
+        !sent.answer_log.is_empty(),
+        "the scrubbed file must still CONTAIN a log for the assertion above to mean anything — the \
+         maximal sentinel carries two records"
+    );
+    sent.answer_log.clear();
+    sent.answer_log_history.clear();
+    landed.answer_log.clear();
+    landed.answer_log_history.clear();
     assert_eq!(
         sent, landed,
         "the return that landed differs from the one that was sent"

@@ -8,7 +8,7 @@
 //!
 //! **The chosen edit keymap** (documented once here; the key handler in `main.rs` calls into this module):
 //! - `Enter` on a focused text-kind field (`Money`/`Text`/`Date`) → open the edit buffer (seeded from the
-//!   current value via `get`); a second `Enter` commits (`parse` → `apply(SetField, time::macros::date!(2026 - 09 - 01))`); `Esc` cancels.
+//!   current value via `get`); a second `Enter` commits (`parse` → `apply(SetField)`); `Esc` cancels.
 //! - `Enter` or `Space` on a cycle kind (`Enum`/`TriState`/`Bool`) → cycle/toggle IN PLACE (apply on the
 //!   keypress, no buffer). Enum cycles the options; TriState `never→yes→no→never`; Bool toggles.
 //! - `Secret` is skipped here (no-echo masked entry is Task 4).
@@ -259,7 +259,7 @@ pub fn cycle_focused(form: &mut TaxInputsFormState) {
 
 // ── Shape edits: add/remove row (Repeating) · create/delete section (OptionalSingleton) ────────────────
 //
-// Every shape edit goes through `apply(&mut form.working, Edit::…, time::macros::date!(2026 - 09 - 01))` (via `apply_edit`) — the flow NEVER
+// Every shape edit goes through `apply(&mut form.working, Edit::…, now)` (via `apply_edit`) — the flow NEVER
 // mutates `working` directly and never names a `ReturnInputs` leaf. A malformed `RowAddr` (or a create/
 // delete on the wrong section kind) is the engine's fail-closed `ApplyError` → `form.error`, never a panic.
 
