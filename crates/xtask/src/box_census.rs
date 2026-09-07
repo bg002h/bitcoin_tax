@@ -1,6 +1,7 @@
-//! ★★★ **THE PER-DOCUMENT BOX CENSUS** — every box an archived information return PRINTS carries
-//! exactly one recorded decision. (`design/SPEC_interview.md` r2 R4 + §5.2, fold finding I2; built by
-//! T2, populated with real decisions by T5/T9.)
+//! ★★★ **THE PER-DOCUMENT, PER-EDITION BOX CENSUS** — every box an archived information return
+//! PRINTS carries exactly one recorded decision, **in every edition the archive holds**.
+//! (`design/SPEC_interview.md` r2 R4 + §5.2, fold finding I2; built by T2, widened to three tax
+//! years by the T2 seam review's C1.)
 //!
 //! **Why this exists.** `CLAUDE.md`: *"a conformance KAT must enumerate the expected line set FROM the
 //! form's extracted text, never from a range or a hand-written list"*, and *"blank because nothing
@@ -13,30 +14,63 @@
 //! > archived extract — the table above is a reading list, never the authority.** […] A caption in the
 //! > extract with no entry **reds**; an entry naming a caption the extract does not have **reds**.
 //!
-//! ★★ **The census key is the box LABEL and the value is the box's own printed CAPTION**, quoted
-//! verbatim from `design/forms/extract/<stem>--<year>.txt`. So the three kills are one set comparison:
-//! a missing entry is a printed box nobody decided, an extra entry is a box the form does not print
-//! (a stale revision), and a caption changed by one character is both at once.
+//! ★★ **The census key is (edition, box LABEL) and the value is that box's own printed CAPTION**,
+//! quoted verbatim from `design/forms/extract/<stem>--<edition>.txt`. So the three kills are one set
+//! comparison per edition: a missing entry is a printed box nobody decided, an extra entry is a box
+//! that edition does not print, and a caption changed by one character is both at once.
+//!
+//! ## ★★★ ONE EDITION PER DOCUMENT WAS THE CRITICAL — the archive is per REVISION
+//!
+//! T2 archived one edition per document and pinned it. The seam review measured what that hides: the
+//! **Rev. December 2026 Form 1099-G prints a box 10 "Family leave benefits"** — an INCOME box — and
+//! renumbers the state boxes `10a/10b/11 → 11a/11b/12`, while `box-census` printed *"115 printed
+//! boxes … every one decided"* against the Rev. March 2024 grid. The instrument was green one layer
+//! above a box nothing decided.
+//!
+//! The fix is not a newer pin. The interview must serve **TY2024** (the only computable year),
+//! **TY2025** and **TY2026** (the target), and those filers hold **different paper**. So the archive
+//! is per revision, and which revision governs a tax year is read off the rule the IRS prints on the
+//! documents themselves (`design/forms/extract/f1098e--2026.txt:2-5`, *"Which Revision To Use for
+//! Which Year"*):
+//!
+//! > **the year of the revision date is the first year for which issuers are to use the form to
+//! > report amounts.**
+//!
+//! [`revision_in_force`] is that sentence, and nothing else: an **annual** edition governs its own
+//! tax year; a **periodic** (*"Rev. Month Year"*) edition governs from its revision year until a
+//! later revision displaces it; and a year no archived edition governs is `None`, never a nearest
+//! guess.
 //!
 //! ## What T2 owns and what it does not (fold D7)
 //!
 //! > *"T2 owns the extract, so T2's kill is the **unentered-caption** red and T5's is the entries
 //! > themselves."*
 //!
-//! So this module lands the **instrument** and a **populated fixture**: 115 entries across the seven
-//! documents, each naming either the struct field that holds the box today, the refusal the box drives
-//! today, or the reason the return does not read it. The entries deliberately do **not** yet join to
-//! `FieldId` or `RefuseReason` variants — those are T5/T9's, and a join written before the variants
-//! exist would be a hand-list pretending to be a check.
+//! So this module lands the **instrument** and a **populated fixture**: 123 entries covering 246
+//! printed boxes across the 15 archived form editions, each naming either the struct field that
+//! holds the box today, the refusal the box drives today, or the reason the return does not read it.
+//! The entries deliberately do **not** yet join to `FieldId` or `RefuseReason` variants — those are
+//! T5/T9's, and a join written before the variants exist would be a hand-list pretending to be a
+//! check.
+//!
+//! ★ **An entry carries the EDITIONS its caption is printed in**, rather than being copied once per
+//! edition. A duplicated row per edition would be ~250 hand-copies of the same decision text, and it
+//! would *hide* the thing worth seeing: where an entry's edition list splits, the caption moved
+//! between revisions. Form W-2 box 13 (`13 Statutory` → `13 employee`), Form 1099-B box 7 and the
+//! whole 1099-G state block are visible as splits in the diff, and every listed edition still has its
+//! caption checked against that edition's own extract.
 //!
 //! ## The enumerator, and why each rule is the document's rather than ours
 //!
-//! 1. **The face block.** Every information return's PDF opens with the same *Attention* preamble and
-//!    closes Copy A with a `Cat. No.` footer. The block between them is the form's own box grid, and
-//!    the preamble's last sentence — *"See Publications 1141, 1167, and 1179 …"* — occurs **exactly
-//!    once** in each of the seven extracts (measured). Bounding on the document's own furniture keeps
-//!    the prose pages, the recipient instructions and the repeated Copy B/C/1/2 faces out without a
-//!    page-number hand-list.
+//! 1. **The face block.** Every information return's PDF opens with an *Attention* preamble and
+//!    closes Copy A with a `Cat. No.` footer. The block between them is the form's own box grid.
+//!    ★★ **The preamble's last sentence is PER EDITION and is recorded on the authority**, because
+//!    it is revision-fragile: fourteen of the fifteen archived editions end it *"See Publications
+//!    1141, 1167, and 1179 …"*, and the **2026 Form W-2 rewrote its preamble** to *"See IRS
+//!    Publication 1141 …"* /
+//!    *"See IRS Publication 1223 …"*. A single hard-coded marker would have hard-failed the
+//!    enumerator on the newest W-2 the day it was archived. Each marker is asserted to occur exactly
+//!    once in its own edition, so this stays a reading of the document rather than a fallback.
 //! 2. **Runs.** `pdftotext -layout` separates columns by two or more spaces, so each line splits into
 //!    runs; a run beginning `<label> <Capital>` is a caption, and a run that is *only* a label adopts
 //!    the next run on its line unless that run is itself a label. That second rule is not a nicety:
@@ -45,18 +79,42 @@
 //! 3. **`OMB No.` ends a caption.** The Paperwork Reduction Act control number is page furniture on
 //!    every IRS form and is never a box caption; on Form 1099-G the layout collapses the column gap to
 //!    a single space (`1 Unemployment compensation OMB No. 1545-0120`) and it would otherwise be
-//!    transcribed as part of box 1's caption. The marker is asserted present in all seven extracts, so
+//!    transcribed as part of box 1's caption. The marker is asserted present in every edition, so
 //!    it is a reading of the documents rather than a taste.
 //! 4. **The contiguity guard.** The numeric labels must run `1..=max` with no gap (a lettered box
 //!    counts for its number), and lettered labels must run from `a`. This is the guard ON the
 //!    enumerator, not the enumeration: it is what turns a blind spot into a red instead of a short
-//!    list nobody counts. It has already earned itself — the first draft's run-splitter silently
-//!    dropped four boxes of Form 1099-DIV and the gap is what showed it.
+//!    list nobody counts. It has already earned itself twice — the first draft's run-splitter
+//!    silently dropped four boxes of Form 1099-DIV, and rule 5 below exists because this guard red on
+//!    a document it had never seen.
+//! 5. **`For calendar year` marks the blank year stub, which is not a box.** The Rev. January 2022
+//!    Form 1098 prints a bare `20` under *For calendar year* (the blank the issuer completes), and
+//!    the enumerator read it as box 20 — caught, loudly, by rule 4 (*"not contiguous: 12..19 missing
+//!    from 1..=20"*). The stub is the document's own furniture, named by the document's own words,
+//!    exactly like `OMB No.`
+//! 6. **A bare LETTERED run is the vertical `Code` rail, never a box.** Form W-2 prints the word
+//!    *Code* down the side of box 12 and `pdftotext` emits `C`, `o`, `d`, `e` as separate runs. Every
+//!    captionless box these forms print is NUMBERED (W-2 box 9 and 12b–12d), so a run that is only a
+//!    letter is rail furniture. ★ This rule is what makes widening [`is_label`] past `f` safe: without
+//!    it, `o` would enter the census and the letter-contiguity guard would demand `a..=o`.
 //!
-//! ★ **An empty caption is a real answer**, not a failure: the 2025 Form W-2 prints box `9` shaded
-//! with no caption at all, and boxes `12b`/`12c`/`12d` as bare labels beside a vertical *Code* rail.
-//! Recording them with a reason is the point; dropping them because they carry no words is exactly the
-//! "we forgot this box" defect.
+//! ★ **An empty caption is a real answer**, not a failure: the Form W-2 prints box `9` shaded with no
+//! caption at all, and boxes `12b`/`12c`/`12d` as bare labels beside that *Code* rail. Recording them
+//! with a reason is the point; dropping them because they carry no words is exactly the "we forgot
+//! this box" defect.
+//!
+//! ## ★ The two limits this enumerator HAS, declared rather than discovered
+//!
+//! - **A caption the layout wraps is quoted to its first printed line** (1099-INT box 9 →
+//!   `"9 Specified private activity bond"`, its second line *"interest"* sitting in another column's
+//!   vertical run). The wrap is layout, not text; quoting across it would quote something the page
+//!   never prints contiguously.
+//! - **An UNLABELLED printed box is outside its reach.** [`printed_boxes`] keys on a label, so the
+//!   1099-INT's *FATCA filing requirement* checkbox and its *2nd TIN not.* box — both printed on the
+//!   face (`design/forms/extract/f1099int--2024.txt:47`, `:51`) — appear in no census. Neither
+//!   reaches a 1040 line, so nothing is wrong today; it is declared here because the census's whole
+//!   claim is *"every box the form PRINTS"*, and a limit nobody wrote down is a limit nobody can
+//!   check.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -69,9 +127,14 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// The last sentence of the *Attention* preamble every information return opens with. Occurs exactly
-/// once per extract, and the box grid begins on the next line.
-const PREAMBLE_END: &str = "1141, 1167, and 1179";
+/// The last sentence of the *Attention* preamble on every edition but one. The box grid begins on
+/// the next line.
+pub const PREAMBLE_1141: &str = "1141, 1167, and 1179";
+
+/// ★ The 2026 Form W-2's preamble, which does NOT carry [`PREAMBLE_1141`]: it ends *"See IRS
+/// Publication 1141 …"* / *"See IRS Publication 1223 for more information about printing substitute
+/// Forms W-2c and W-3c."* (`design/forms/extract/fw2--2026.txt:26-28`).
+pub const PREAMBLE_W2_2026: &str = "See IRS Publication 1223";
 
 /// The Copy A footer. The box grid ends on the line before the first one.
 const FACE_END: &str = "Cat. No.";
@@ -79,58 +142,315 @@ const FACE_END: &str = "Cat. No.";
 /// Page furniture that is never part of a box caption. See rule 3 above.
 const FURNITURE: &str = "OMB No.";
 
-/// One archived information return the interview transcribes boxes from.
+/// The blank year the issuer completes on a continuous-use form. See rule 5 above.
+const YEAR_STUB: &str = "For calendar year";
+
+/// How a document's editions are named — and therefore how an edition maps to a tax year.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cadence {
+    /// The face carries a TAX YEAR (`2025` beside *Form W-2 Wage and Tax Statement*). That edition
+    /// is the one a filer for that year holds, and no other.
+    Annual,
+    /// The face carries a *"Rev. Month Year"*. The IRS prints the mapping rule itself: *"the year of
+    /// the revision date is the first year for which issuers are to use the form to report
+    /// amounts"*, so the edition governs from its revision year until a later revision displaces it.
+    Periodic,
+}
+
+/// One archived EDITION of an information return.
+///
+/// ★★ **One entry per edition, not per document.** The archive holds three Forms W-2 (2024, 2025,
+/// 2026) and two Forms 1099-G (Rev. 3-2024, Rev. 12-2026) because a TY2024 filer and a TY2026 filer
+/// hold different paper — and the 1099-G proves the difference is not cosmetic.
 pub struct DocumentAuthority {
     /// The IRS stem, e.g. `"f1099int"` — also the `design/forms/extract/` filename stem.
     pub stem: &'static str,
-    /// The tax year the archived revision governs. **Six of the seven documents are `--2024`**: the
-    /// 1099-INT/DIV/G family is continuous-use and `irs-prior` serves no `--2025` edition, so the
-    /// revision in force for TY2025 is filed under the year of its own *Rev.* date.
-    pub year: &'static str,
+    /// The archive's filename year: `design/forms/<edition>/<stem>--<edition>.pdf`.
+    pub edition: &'static str,
+    /// The revision year **read off the document's own text** and recorded in its `.pdf.txt` note —
+    /// the year on an annual face, the *Rev.* year on a periodic one.
+    pub revision_year: u32,
+    pub cadence: Cadence,
     /// The identically-numbered instructions booklet — **except the 1098-E**, whose instructions are
     /// the combined 1098-E/1098-T booklet `i1098et`; there is no `i1098e` document. The W-2's are
-    /// `iw2w3`, and the 1099-INT's booklet is shared with the 1099-OID.
+    /// `iw2w3`, and the 1099-INT's booklet is shared with the 1099-OID. ★ The booklet's own EDITION
+    /// is resolved per tax year by [`revision_in_force`], because a booklet can be revised when its
+    /// form is not: `i1098--2026` is Rev. December 2026 while the form is still Rev. April 2025.
     pub instructions: &'static str,
+    /// This edition's own preamble-ending sentence. See enumerator rule 1.
+    pub preamble_end: &'static str,
 }
 
-/// The seven documents `SPEC_interview.md` R4 names, as archived by T2.
+/// One archived EDITION of an instructions booklet, so [`revision_in_force`] can answer for an
+/// `i…` stem too.
+pub struct BookletEdition {
+    pub stem: &'static str,
+    pub edition: &'static str,
+    pub revision_year: u32,
+    pub cadence: Cadence,
+}
+
+/// ★★ **The 15 archived FORM editions.** Derived-and-asserted, not merely written down:
+/// `documents_equal_the_archived_information_returns` requires this list to equal, in both
+/// directions, the `MANIFEST.json` `kind: form` entries whose stem is in the W / 1098 / 1099 series.
+/// Dropping a document — the seam review dropped `f1098e` and watched all six census tests pass —
+/// now reds.
 pub const DOCUMENTS: &[DocumentAuthority] = &[
     DocumentAuthority {
         stem: "fw2",
-        year: "2025",
+        edition: "2024",
+        revision_year: 2024,
+        cadence: Cadence::Annual,
         instructions: "iw2w3",
+        preamble_end: PREAMBLE_1141,
+    },
+    DocumentAuthority {
+        stem: "fw2",
+        edition: "2025",
+        revision_year: 2025,
+        cadence: Cadence::Annual,
+        instructions: "iw2w3",
+        preamble_end: PREAMBLE_1141,
+    },
+    DocumentAuthority {
+        stem: "fw2",
+        edition: "2026",
+        revision_year: 2026,
+        cadence: Cadence::Annual,
+        instructions: "iw2w3",
+        preamble_end: PREAMBLE_W2_2026,
     },
     DocumentAuthority {
         stem: "f1099int",
-        year: "2024",
+        edition: "2024",
+        revision_year: 2024,
+        cadence: Cadence::Periodic,
         instructions: "i1099int",
+        preamble_end: PREAMBLE_1141,
     },
     DocumentAuthority {
         stem: "f1099div",
-        year: "2024",
+        edition: "2024",
+        revision_year: 2024,
+        cadence: Cadence::Periodic,
         instructions: "i1099div",
+        preamble_end: PREAMBLE_1141,
     },
     DocumentAuthority {
         stem: "f1099g",
-        year: "2024",
+        edition: "2024",
+        revision_year: 2024,
+        cadence: Cadence::Periodic,
         instructions: "i1099g",
+        preamble_end: PREAMBLE_1141,
+    },
+    DocumentAuthority {
+        stem: "f1099g",
+        edition: "2026",
+        revision_year: 2026,
+        cadence: Cadence::Periodic,
+        instructions: "i1099g",
+        preamble_end: PREAMBLE_1141,
     },
     DocumentAuthority {
         stem: "f1099b",
-        year: "2025",
+        edition: "2024",
+        revision_year: 2024,
+        cadence: Cadence::Annual,
         instructions: "i1099b",
+        preamble_end: PREAMBLE_1141,
+    },
+    DocumentAuthority {
+        stem: "f1099b",
+        edition: "2025",
+        revision_year: 2025,
+        cadence: Cadence::Annual,
+        instructions: "i1099b",
+        preamble_end: PREAMBLE_1141,
+    },
+    DocumentAuthority {
+        stem: "f1099b",
+        edition: "2026",
+        revision_year: 2026,
+        cadence: Cadence::Annual,
+        instructions: "i1099b",
+        preamble_end: PREAMBLE_1141,
     },
     DocumentAuthority {
         stem: "f1098",
-        year: "2025",
+        edition: "2022",
+        revision_year: 2022,
+        cadence: Cadence::Periodic,
         instructions: "i1098",
+        preamble_end: PREAMBLE_1141,
+    },
+    DocumentAuthority {
+        stem: "f1098",
+        edition: "2025",
+        revision_year: 2025,
+        cadence: Cadence::Periodic,
+        instructions: "i1098",
+        preamble_end: PREAMBLE_1141,
     },
     DocumentAuthority {
         stem: "f1098e",
-        year: "2025",
+        edition: "2024",
+        revision_year: 2024,
+        cadence: Cadence::Annual,
         instructions: "i1098et",
+        preamble_end: PREAMBLE_1141,
+    },
+    DocumentAuthority {
+        stem: "f1098e",
+        edition: "2025",
+        revision_year: 2025,
+        cadence: Cadence::Annual,
+        instructions: "i1098et",
+        preamble_end: PREAMBLE_1141,
+    },
+    DocumentAuthority {
+        stem: "f1098e",
+        edition: "2026",
+        revision_year: 2026,
+        cadence: Cadence::Annual,
+        instructions: "i1098et",
+        preamble_end: PREAMBLE_1141,
     },
 ];
+
+/// ★★ **The 16 archived BOOKLET editions**, asserted against `MANIFEST.json` `kind: instructions`
+/// the same way [`DOCUMENTS`] is.
+pub const BOOKLETS: &[BookletEdition] = &[
+    BookletEdition {
+        stem: "iw2w3",
+        edition: "2024",
+        revision_year: 2024,
+        cadence: Cadence::Annual,
+    },
+    BookletEdition {
+        stem: "iw2w3",
+        edition: "2025",
+        revision_year: 2025,
+        cadence: Cadence::Annual,
+    },
+    BookletEdition {
+        stem: "iw2w3",
+        edition: "2026",
+        revision_year: 2026,
+        cadence: Cadence::Annual,
+    },
+    BookletEdition {
+        stem: "i1099int",
+        edition: "2024",
+        revision_year: 2024,
+        cadence: Cadence::Periodic,
+    },
+    BookletEdition {
+        stem: "i1099div",
+        edition: "2024",
+        revision_year: 2024,
+        cadence: Cadence::Periodic,
+    },
+    BookletEdition {
+        stem: "i1099g",
+        edition: "2024",
+        revision_year: 2024,
+        cadence: Cadence::Periodic,
+    },
+    BookletEdition {
+        stem: "i1099g",
+        edition: "2026",
+        revision_year: 2026,
+        cadence: Cadence::Periodic,
+    },
+    BookletEdition {
+        stem: "i1099b",
+        edition: "2024",
+        revision_year: 2024,
+        cadence: Cadence::Annual,
+    },
+    BookletEdition {
+        stem: "i1099b",
+        edition: "2025",
+        revision_year: 2025,
+        cadence: Cadence::Annual,
+    },
+    BookletEdition {
+        stem: "i1099b",
+        edition: "2026",
+        revision_year: 2026,
+        cadence: Cadence::Annual,
+    },
+    BookletEdition {
+        stem: "i1098",
+        edition: "2022",
+        revision_year: 2022,
+        cadence: Cadence::Periodic,
+    },
+    BookletEdition {
+        stem: "i1098",
+        edition: "2025",
+        revision_year: 2025,
+        cadence: Cadence::Periodic,
+    },
+    BookletEdition {
+        stem: "i1098",
+        edition: "2026",
+        revision_year: 2026,
+        cadence: Cadence::Periodic,
+    },
+    BookletEdition {
+        stem: "i1098et",
+        edition: "2024",
+        revision_year: 2024,
+        cadence: Cadence::Annual,
+    },
+    BookletEdition {
+        stem: "i1098et",
+        edition: "2025",
+        revision_year: 2025,
+        cadence: Cadence::Annual,
+    },
+    BookletEdition {
+        stem: "i1098et",
+        edition: "2026",
+        revision_year: 2026,
+        cadence: Cadence::Annual,
+    },
+];
+
+/// ★★★ **WHICH ARCHIVED EDITION GOVERNS A TAX YEAR — the IRS's own rule, and nothing else.**
+///
+/// *"the year of the revision date is the first year for which issuers are to use the form to report
+/// amounts"* (`design/forms/extract/f1098e--2026.txt:2-5`). So:
+///
+/// - **annual** — the edition whose face year IS the tax year, and no other. A TY2024 filer holds
+///   the 2024 Form W-2; the 2025 edition says nothing about their return.
+/// - **periodic** — the archived revision with the greatest revision year `<=` the tax year. Form
+///   1099-G Rev. March 2024 governs TY2024 *and* TY2025; Rev. December 2026 takes over for TY2026.
+///
+/// ★ `None` when nothing archived governs that year, which is a real answer and a load-bearing one:
+/// a `Collected` row whose tax year has no governing edition **reds** in `xtask line-coverage`
+/// rather than being checked against whichever edition happened to be pinned.
+#[must_use]
+pub fn revision_in_force(stem: &str, tax_year: u32) -> Option<&'static str> {
+    let forms = DOCUMENTS
+        .iter()
+        .filter(|d| d.stem == stem)
+        .map(|d| (d.edition, d.revision_year, d.cadence));
+    let booklets = BOOKLETS
+        .iter()
+        .filter(|b| b.stem == stem)
+        .map(|b| (b.edition, b.revision_year, b.cadence));
+    forms
+        .chain(booklets)
+        .filter(|(_, rev, cadence)| match cadence {
+            Cadence::Annual => *rev == tax_year,
+            Cadence::Periodic => *rev <= tax_year,
+        })
+        .max_by_key(|(_, rev, _)| *rev)
+        .map(|(edition, _, _)| edition)
+}
 
 /// What the return does with one printed box. Exactly one per caption — R4's *"`collected(FieldId)`,
 /// `refuse_if_nonzero(RefuseReason)` … or `not_read(reason)`"*, at the fidelity T2 can carry.
@@ -148,9 +468,13 @@ pub enum BoxDecision {
 /// One printed box, its caption as the form prints it, and the decision.
 pub struct BoxEntry {
     pub stem: &'static str,
+    /// **The editions this caption is printed in.** An entry is in scope for an edition iff the
+    /// edition is listed here, so a box that appears (1099-G box 10), disappears (1099-G box 10a) or
+    /// is re-worded between revisions is a visible split rather than a silent overwrite.
+    pub editions: &'static [&'static str],
     /// The box's own label — `"1"`, `"2a"`, `"12b"`, `"a"`.
     pub label: &'static str,
-    /// **VERBATIM** from `design/forms/extract/<stem>--<year>.txt`, label included, as the extract
+    /// **VERBATIM** from `design/forms/extract/<stem>--<edition>.txt`, label included, as the extract
     /// prints it on the label's own line. A caption the layout wraps is quoted to its first printed
     /// line, because the wrap is layout and quoting across it would quote text the page never prints
     /// contiguously.
@@ -158,272 +482,289 @@ pub struct BoxEntry {
     pub decision: BoxDecision,
 }
 
-/// ★★ **THE POPULATION — 115 boxes across seven documents, every caption read off the extract.**
+/// ★★ **THE POPULATION — 123 entries covering 246 printed boxes across 15 archived form editions,
+/// every caption read off that edition's own extract.**
 ///
 /// The `Collected` strings name fields that exist at T2 (`crates/btctax-core/src/tax/return_inputs.rs`);
 /// a `NotRead` whose reason begins *"T5"* / *"T9"* is a box a later task collects, and its reason names
 /// the line it will reach so the schedule is legible rather than implied.
+///
+/// ★★★ **Two boxes here were invisible until the archive went per-revision**, and both are the
+/// review's C1 made concrete: Form 1099-G box 10 *Family leave benefits* (an INCOME box the
+/// Rev. December 2026 grid added, which now `RefuseIfNonzero`s rather than passing as decided), and
+/// Form W-2 box 14b *Treasury Tipped Occupation Code(s)*, which the 2026 revision added beside the
+/// old box 14 and which Schedule 1-A line 4a's tips deduction turns on.
 pub const BOXES: &[BoxEntry] = &[
-    // ── Form W-2 (2025) — 29 boxes ────────────────────────────────────────────────────────────────
-    BoxEntry { stem: "fw2", label: "a", caption: "a Employee’s social security number",
+    // ── Form W-2 — 2024, 2025 and 2026 (29 / 29 / 30 printed boxes) ─────────────────────────────────
+    BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "a", caption: "a Employee’s social security number",
         decision: BoxDecision::Collected("header.taxpayer.ssn / header.spouse.ssn — the 1040 header prints it once for the return, not per W-2 row") },
-    BoxEntry { stem: "fw2", label: "b", caption: "b Employer identification number (EIN)",
+    BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "b", caption: "b Employer identification number (EIN)",
         decision: BoxDecision::Collected("W2.ein — the only thing that can answer §6413(c)'s 'more than one employer' test") },
-    BoxEntry { stem: "fw2", label: "c", caption: "c Employer’s name, address, and ZIP code",
+    BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "c", caption: "c Employer’s name, address, and ZIP code",
         decision: BoxDecision::Collected("W2.employer") },
-    BoxEntry { stem: "fw2", label: "d", caption: "d Control number",
+    BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "d", caption: "d Control number",
         decision: BoxDecision::NotRead("the employer's internal payroll number; no line of the return reads it") },
-    BoxEntry { stem: "fw2", label: "e", caption: "e Employee’s first name and initial",
+    BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "e", caption: "e Employee’s first name and initial",
         decision: BoxDecision::Collected("header.taxpayer.name / header.spouse.name — printed once on the 1040 header") },
-    BoxEntry { stem: "fw2", label: "f", caption: "f Employee’s address and ZIP code",
+    BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "f", caption: "f Employee’s address and ZIP code",
         decision: BoxDecision::Collected("header.address_street / address_city / address_state / address_zip") },
-    BoxEntry { stem: "fw2", label: "1", caption: "1 Wages, tips, other compensation",
+    BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "1", caption: "1 Wages, tips, other compensation",
         decision: BoxDecision::Collected("W2.box1_wages → 1040 line 1a") },
-    BoxEntry { stem: "fw2", label: "2", caption: "2 Federal income tax withheld",
+    BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "2", caption: "2 Federal income tax withheld",
         decision: BoxDecision::Collected("W2.box2_fed_withheld → 1040 line 25a") },
-    BoxEntry { stem: "fw2", label: "3", caption: "3 Social security wages",
+    BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "3", caption: "3 Social security wages",
         decision: BoxDecision::Collected("W2.box3_ss_wages → the per-earner SS cap and the excess-SS credit") },
-    BoxEntry { stem: "fw2", label: "4", caption: "4 Social security tax withheld",
+    BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "4", caption: "4 Social security tax withheld",
         decision: BoxDecision::Collected("W2.box4_ss_withheld → Schedule 3 line 11, excess social security") },
-    BoxEntry { stem: "fw2", label: "5", caption: "5 Medicare wages and tips",
+    BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "5", caption: "5 Medicare wages and tips",
         decision: BoxDecision::Collected("W2.box5_medicare_wages → Form 8959 Part I") },
-    BoxEntry { stem: "fw2", label: "6", caption: "6 Medicare tax withheld",
+    BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "6", caption: "6 Medicare tax withheld",
         decision: BoxDecision::Collected("W2.box6_medicare_withheld → Form 8959 Part V → 1040 line 25c") },
-    BoxEntry { stem: "fw2", label: "7", caption: "7 Social security tips",
+    BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "7", caption: "7 Social security tips",
         decision: BoxDecision::Collected("W2.box7_ss_tips → the §6413(c) wage total, and Schedule 1-A line 4a's tips") },
-    BoxEntry { stem: "fw2", label: "8", caption: "8 Allocated tips",
+    BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "8", caption: "8 Allocated tips",
         decision: BoxDecision::RefuseIfNonzero("W2.box8_allocated_tips — allocated tips are unreported income needing Form 4137; > 0 refuses") },
-    BoxEntry { stem: "fw2", label: "9", caption: "9",
+    BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "9", caption: "9",
         decision: BoxDecision::NotRead("the 2025 revision prints box 9 shaded and CAPTIONLESS — there is no figure to collect; the box exists on the paper and is recorded so the census cannot silently gain a caption in a later revision") },
-    BoxEntry { stem: "fw2", label: "10", caption: "10 Dependent care benefits",
+    BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "10", caption: "10 Dependent care benefits",
         decision: BoxDecision::RefuseIfNonzero("W2.box10_dependent_care — dependent care benefits need Form 2441; > 0 refuses") },
-    BoxEntry { stem: "fw2", label: "11", caption: "11 Nonqualified plans",
+    BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "11", caption: "11 Nonqualified plans",
         decision: BoxDecision::NotRead("distributions from a nonqualified deferred compensation plan, already included in box 1 for income tax; the SSA reads it, no 1040 line does") },
-    BoxEntry { stem: "fw2", label: "12a", caption: "12a See instructions for box 12",
+    BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "12a", caption: "12a See instructions for box 12",
         decision: BoxDecision::Collected("W2.box12 — a Vec<Box12Entry> of (code, amount), so all four printed slots are one repeating field") },
-    BoxEntry { stem: "fw2", label: "12b", caption: "12b",
+    BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "12b", caption: "12b",
         decision: BoxDecision::Collected("W2.box12 — the second of the form's four printed slots; the label prints bare beside a vertical 'Code' rail") },
-    BoxEntry { stem: "fw2", label: "12c", caption: "12c",
+    BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "12c", caption: "12c",
         decision: BoxDecision::Collected("W2.box12 — the third printed slot") },
-    BoxEntry { stem: "fw2", label: "12d", caption: "12d",
+    BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "12d", caption: "12d",
         decision: BoxDecision::Collected("W2.box12 — the fourth printed slot") },
-    BoxEntry { stem: "fw2", label: "13", caption: "13 Statutory",
+    BoxEntry { stem: "fw2", editions: &["2024", "2025"], label: "13", caption: "13 Statutory",
         decision: BoxDecision::NotRead("T5: R4 collects the three box-13 checkboxes, of which 'Statutory employee' refuses StatutoryEmployeeW2 naming Schedule C line 1 — a checked box 13 sends box 1 to Schedule C, not to 1040 line 1a. No field holds it at T2") },
-    BoxEntry { stem: "fw2", label: "14", caption: "14 Other",
+    BoxEntry { stem: "fw2", editions: &["2026"], label: "13", caption: "13 employee",
+        decision: BoxDecision::NotRead("T5: R4 collects the three box-13 checkboxes, of which 'Statutory employee' refuses StatutoryEmployeeW2 naming Schedule C line 1 — a checked box 13 sends box 1 to Schedule C, not to 1040 line 1a. No field holds it at T2") },
+    BoxEntry { stem: "fw2", editions: &["2024", "2025"], label: "14", caption: "14 Other",
         decision: BoxDecision::NotRead("free-text employer reporting; nothing reaches a line until the filer identifies the item, and the residual scope attestation covers what they cannot") },
-    BoxEntry { stem: "fw2", label: "15", caption: "15 State",
+    BoxEntry { stem: "fw2", editions: &["2026"], label: "14a", caption: "14a Other",
+        decision: BoxDecision::NotRead("free-text employer reporting; nothing reaches a line until the filer identifies the item, and the residual scope attestation covers what they cannot") },
+    BoxEntry { stem: "fw2", editions: &["2026"], label: "14b", caption: "14b Treasury Tipped Occupation Code(s)",
+        decision: BoxDecision::NotRead("T5: the Treasury Tipped Occupation Code(s) the 2026 revision added beside box 14a. It says whether box 7's tips came from a qualifying occupation, which is what Schedule 1-A line 4a's tips deduction turns on — a code, not an amount, and no field holds it at T2") },
+    BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "15", caption: "15 State",
         decision: BoxDecision::NotRead("the state's two-letter code and the employer's state ID number; the federal return prints neither") },
-    BoxEntry { stem: "fw2", label: "16", caption: "16 State wages, tips, etc.",
+    BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "16", caption: "16 State wages, tips, etc.",
         decision: BoxDecision::NotRead("state wages; no federal line reads a state wage figure") },
-    BoxEntry { stem: "fw2", label: "17", caption: "17 State income tax",
+    BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "17", caption: "17 State income tax",
         decision: BoxDecision::Collected("W2.box17_state_tax_withheld → Schedule A line 5a on the income-tax election") },
-    BoxEntry { stem: "fw2", label: "18", caption: "18 Local wages, tips, etc.",
+    BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "18", caption: "18 Local wages, tips, etc.",
         decision: BoxDecision::NotRead("local wages; no federal line reads a local wage figure") },
-    BoxEntry { stem: "fw2", label: "19", caption: "19 Local income tax",
+    BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "19", caption: "19 Local income tax",
         decision: BoxDecision::Collected("W2.box19_local_tax → Schedule A line 5a") },
-    BoxEntry { stem: "fw2", label: "20", caption: "20 Locality name",
+    BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "20", caption: "20 Locality name",
         decision: BoxDecision::NotRead("the locality's name; Schedule A line 5a takes the amount, never the locality") },
-
-    // ── Form 1099-INT (Rev. January 2024) — 17 boxes ──────────────────────────────────────────────
-    BoxEntry { stem: "f1099int", label: "1", caption: "1 Interest income",
+    // ── Form 1099-INT (Rev. January 2024) — 17 boxes; still in force for TY2026 ─────────────────────
+    BoxEntry { stem: "f1099int", editions: &["2024"], label: "1", caption: "1 Interest income",
         decision: BoxDecision::Collected("Form1099Int.box1_interest → Schedule B line 1 → 1040 line 2b") },
-    BoxEntry { stem: "f1099int", label: "2", caption: "2 Early withdrawal penalty",
+    BoxEntry { stem: "f1099int", editions: &["2024"], label: "2", caption: "2 Early withdrawal penalty",
         decision: BoxDecision::Collected("Form1099Int.box2_early_withdrawal_penalty → Schedule 1 line 18") },
-    BoxEntry { stem: "f1099int", label: "3", caption: "3 Interest on U.S. Savings Bonds and Treasury obligations",
+    BoxEntry { stem: "f1099int", editions: &["2024"], label: "3", caption: "3 Interest on U.S. Savings Bonds and Treasury obligations",
         decision: BoxDecision::Collected("Form1099Int.box3_treasury_interest → 1040 line 2b") },
-    BoxEntry { stem: "f1099int", label: "4", caption: "4 Federal income tax withheld",
+    BoxEntry { stem: "f1099int", editions: &["2024"], label: "4", caption: "4 Federal income tax withheld",
         decision: BoxDecision::Collected("Form1099Int.box4_fed_withheld → 1040 line 25b") },
-    BoxEntry { stem: "f1099int", label: "5", caption: "5 Investment expenses",
+    BoxEntry { stem: "f1099int", editions: &["2024"], label: "5", caption: "5 Investment expenses",
         decision: BoxDecision::NotRead("a miscellaneous itemized deduction, suspended for 2018–2025 by §67(g); no Schedule A line takes it") },
-    BoxEntry { stem: "f1099int", label: "6", caption: "6 Foreign tax paid",
+    BoxEntry { stem: "f1099int", editions: &["2024"], label: "6", caption: "6 Foreign tax paid",
         decision: BoxDecision::Collected("Form1099Int.box6_foreign_tax → the §904(j) foreign tax credit election on Schedule 3 line 1") },
-    BoxEntry { stem: "f1099int", label: "7", caption: "7 Foreign country or U.S. territory",
+    BoxEntry { stem: "f1099int", editions: &["2024"], label: "7", caption: "7 Foreign country or U.S. territory",
         decision: BoxDecision::NotRead("the country's name; the §904(j) election reads the AMOUNT in box 6 and Form 1116 — which would read the country — is out of scope") },
-    BoxEntry { stem: "f1099int", label: "8", caption: "8 Tax-exempt interest",
+    BoxEntry { stem: "f1099int", editions: &["2024"], label: "8", caption: "8 Tax-exempt interest",
         decision: BoxDecision::Collected("Form1099Int.box8_tax_exempt_interest → 1040 line 2a") },
-    BoxEntry { stem: "f1099int", label: "9", caption: "9 Specified private activity bond",
+    BoxEntry { stem: "f1099int", editions: &["2024"], label: "9", caption: "9 Specified private activity bond",
         decision: BoxDecision::RefuseIfNonzero("Form1099Int.box9_private_activity_bond_amt — a Form 6251 line 2g AMT preference; > 0 refuses") },
-    BoxEntry { stem: "f1099int", label: "10", caption: "10 Market discount",
+    BoxEntry { stem: "f1099int", editions: &["2024"], label: "10", caption: "10 Market discount",
         decision: BoxDecision::NotRead("T5: R4 collects it to Schedule B line 1 and the 1040 line 2b sum — i1040sb, 'Also include any accrued market discount that is includible in income'. Income, so the understatement direction; no field holds it at T2") },
-    BoxEntry { stem: "f1099int", label: "11", caption: "11 Bond premium",
+    BoxEntry { stem: "f1099int", editions: &["2024"], label: "11", caption: "11 Bond premium",
         decision: BoxDecision::NotRead("T5: R4 refuses on > 0 (AmortizableBondPremiumNotComputed), naming the amortizable-bond-premium adjustment and Pub. 550. A reduction, so refusing is both the conservative and the honest direction; no field holds it at T2") },
-    BoxEntry { stem: "f1099int", label: "12", caption: "12 Bond premium on Treasury obligations",
+    BoxEntry { stem: "f1099int", editions: &["2024"], label: "12", caption: "12 Bond premium on Treasury obligations",
         decision: BoxDecision::NotRead("T5: as box 11 — refuses on > 0 until the bond-premium adjustment is transcribed") },
-    BoxEntry { stem: "f1099int", label: "13", caption: "13 Bond premium on tax-exempt bond",
+    BoxEntry { stem: "f1099int", editions: &["2024"], label: "13", caption: "13 Bond premium on tax-exempt bond",
         decision: BoxDecision::NotRead("T5: as box 11 — refuses on > 0 until the bond-premium adjustment is transcribed") },
-    BoxEntry { stem: "f1099int", label: "14", caption: "14 Tax-exempt and tax credit",
+    BoxEntry { stem: "f1099int", editions: &["2024"], label: "14", caption: "14 Tax-exempt and tax credit",
         decision: BoxDecision::NotRead("the tax-exempt and tax credit bond CUSIP number — an identifier, not an amount") },
-    BoxEntry { stem: "f1099int", label: "15", caption: "15 State",
+    BoxEntry { stem: "f1099int", editions: &["2024"], label: "15", caption: "15 State",
         decision: BoxDecision::NotRead("the state's two-letter code; the federal return prints none") },
-    BoxEntry { stem: "f1099int", label: "16", caption: "16 State identification no.",
+    BoxEntry { stem: "f1099int", editions: &["2024"], label: "16", caption: "16 State identification no.",
         decision: BoxDecision::NotRead("the payer's state identification number; the federal return prints none") },
-    BoxEntry { stem: "f1099int", label: "17", caption: "17 State tax withheld",
+    BoxEntry { stem: "f1099int", editions: &["2024"], label: "17", caption: "17 State tax withheld",
         decision: BoxDecision::NotRead("state income tax the payer withheld; Schedule A line 5a is collected from the W-2 and the filer's records, and no Form1099Int field holds this box") },
-
-    // ── Form 1099-DIV (Rev. January 2024) — 22 boxes ──────────────────────────────────────────────
-    BoxEntry { stem: "f1099div", label: "1a", caption: "1a Total ordinary dividends",
+    // ── Form 1099-DIV (Rev. January 2024) — 22 boxes; still in force for TY2026 ─────────────────────
+    BoxEntry { stem: "f1099div", editions: &["2024"], label: "1a", caption: "1a Total ordinary dividends",
         decision: BoxDecision::Collected("Form1099Div.box1a_ordinary → 1040 line 3b (it INCLUDES box 1b)") },
-    BoxEntry { stem: "f1099div", label: "1b", caption: "1b Qualified dividends",
+    BoxEntry { stem: "f1099div", editions: &["2024"], label: "1b", caption: "1b Qualified dividends",
         decision: BoxDecision::Collected("Form1099Div.box1b_qualified → 1040 line 3a, the preferential-rate slice") },
-    BoxEntry { stem: "f1099div", label: "2a", caption: "2a Total capital gain distr.",
+    BoxEntry { stem: "f1099div", editions: &["2024"], label: "2a", caption: "2a Total capital gain distr.",
         decision: BoxDecision::Collected("Form1099Div.box2a_capgain_distr → Schedule D line 13") },
-    BoxEntry { stem: "f1099div", label: "2b", caption: "2b Unrecap. Sec. 1250 gain",
+    BoxEntry { stem: "f1099div", editions: &["2024"], label: "2b", caption: "2b Unrecap. Sec. 1250 gain",
         decision: BoxDecision::RefuseIfNonzero("Form1099Div.box2b_unrecap_1250 — the 25% rate group needs the Schedule D unrecaptured-gain worksheet; > 0 refuses") },
-    BoxEntry { stem: "f1099div", label: "2c", caption: "2c Section 1202 gain",
+    BoxEntry { stem: "f1099div", editions: &["2024"], label: "2c", caption: "2c Section 1202 gain",
         decision: BoxDecision::RefuseIfNonzero("Form1099Div.box2c_section_1202 — qualified small business stock exclusion; > 0 refuses") },
-    BoxEntry { stem: "f1099div", label: "2d", caption: "2d Collectibles (28%) gain",
+    BoxEntry { stem: "f1099div", editions: &["2024"], label: "2d", caption: "2d Collectibles (28%) gain",
         decision: BoxDecision::RefuseIfNonzero("Form1099Div.box2d_collectibles_28 — the 28% rate group; > 0 refuses") },
-    BoxEntry { stem: "f1099div", label: "2e", caption: "2e Section 897 ordinary dividends",
+    BoxEntry { stem: "f1099div", editions: &["2024"], label: "2e", caption: "2e Section 897 ordinary dividends",
         decision: BoxDecision::NotRead("§897 (FIRPTA) reporting, which the instructions address to foreign persons; for a U.S. filer the amount is already inside box 1a and reaches no line of its own") },
-    BoxEntry { stem: "f1099div", label: "2f", caption: "2f Section 897 capital gain",
+    BoxEntry { stem: "f1099div", editions: &["2024"], label: "2f", caption: "2f Section 897 capital gain",
         decision: BoxDecision::NotRead("§897 (FIRPTA) reporting for foreign persons; already inside box 2a for a U.S. filer") },
-    BoxEntry { stem: "f1099div", label: "3", caption: "3 Nondividend distributions",
+    BoxEntry { stem: "f1099div", editions: &["2024"], label: "3", caption: "3 Nondividend distributions",
         decision: BoxDecision::NotRead("R4's decision: it reduces basis and does not reach a line this year; Pub. 550") },
-    BoxEntry { stem: "f1099div", label: "4", caption: "4 Federal income tax withheld",
+    BoxEntry { stem: "f1099div", editions: &["2024"], label: "4", caption: "4 Federal income tax withheld",
         decision: BoxDecision::Collected("Form1099Div.box4_fed_withheld → 1040 line 25b") },
-    BoxEntry { stem: "f1099div", label: "5", caption: "5 Section 199A dividends",
+    BoxEntry { stem: "f1099div", editions: &["2024"], label: "5", caption: "5 Section 199A dividends",
         decision: BoxDecision::Collected("Form1099Div.box5_section_199a → the QBI deduction (Form 8995 line 6)") },
-    BoxEntry { stem: "f1099div", label: "6", caption: "6 Investment expenses",
+    BoxEntry { stem: "f1099div", editions: &["2024"], label: "6", caption: "6 Investment expenses",
         decision: BoxDecision::NotRead("a miscellaneous itemized deduction, suspended for 2018–2025 by §67(g)") },
-    BoxEntry { stem: "f1099div", label: "7", caption: "7 Foreign tax paid",
+    BoxEntry { stem: "f1099div", editions: &["2024"], label: "7", caption: "7 Foreign tax paid",
         decision: BoxDecision::Collected("Form1099Div.box7_foreign_tax → the §904(j) foreign tax credit election on Schedule 3 line 1") },
-    BoxEntry { stem: "f1099div", label: "8", caption: "8 Foreign country or U.S. possession",
+    BoxEntry { stem: "f1099div", editions: &["2024"], label: "8", caption: "8 Foreign country or U.S. possession",
         decision: BoxDecision::NotRead("the country's name; the §904(j) election reads the AMOUNT in box 7") },
-    BoxEntry { stem: "f1099div", label: "9", caption: "9 Cash liquidation distributions",
+    BoxEntry { stem: "f1099div", editions: &["2024"], label: "9", caption: "9 Cash liquidation distributions",
         decision: BoxDecision::NotRead("a liquidating distribution is a return of capital and then a Form 8949 disposition of the stock; no chain of this return reads the box") },
-    BoxEntry { stem: "f1099div", label: "10", caption: "10 Noncash liquidation distributions",
+    BoxEntry { stem: "f1099div", editions: &["2024"], label: "10", caption: "10 Noncash liquidation distributions",
         decision: BoxDecision::NotRead("as box 9 — a liquidating distribution, reached through basis and Form 8949, not through a 1099-DIV field") },
-    BoxEntry { stem: "f1099div", label: "11", caption: "11 FATCA filing",
+    BoxEntry { stem: "f1099div", editions: &["2024"], label: "11", caption: "11 FATCA filing",
         decision: BoxDecision::NotRead("the FATCA filing requirement checkbox — a chapter 4 obligation of the PAYER; no line of the filer's return reads it") },
-    BoxEntry { stem: "f1099div", label: "12", caption: "12 Exempt-interest dividends",
+    BoxEntry { stem: "f1099div", editions: &["2024"], label: "12", caption: "12 Exempt-interest dividends",
         decision: BoxDecision::Collected("Form1099Div.box12_exempt_interest_dividends → 1040 line 2a") },
-    BoxEntry { stem: "f1099div", label: "13", caption: "13 Specified private activity",
+    BoxEntry { stem: "f1099div", editions: &["2024"], label: "13", caption: "13 Specified private activity",
         decision: BoxDecision::RefuseIfNonzero("Form1099Div.box13_private_activity_amt — specified private activity bond interest dividends, a Form 6251 AMT preference; > 0 refuses") },
-    BoxEntry { stem: "f1099div", label: "14", caption: "14 State",
+    BoxEntry { stem: "f1099div", editions: &["2024"], label: "14", caption: "14 State",
         decision: BoxDecision::NotRead("the state's two-letter code; the federal return prints none") },
-    BoxEntry { stem: "f1099div", label: "15", caption: "15 State identification no.",
+    BoxEntry { stem: "f1099div", editions: &["2024"], label: "15", caption: "15 State identification no.",
         decision: BoxDecision::NotRead("the payer's state identification number; the federal return prints none") },
-    BoxEntry { stem: "f1099div", label: "16", caption: "16 State tax withheld",
+    BoxEntry { stem: "f1099div", editions: &["2024"], label: "16", caption: "16 State tax withheld",
         decision: BoxDecision::NotRead("state income tax the payer withheld; no Form1099Div field holds it") },
-
-    // ── Form 1099-G (Rev. March 2024) — 12 boxes ──────────────────────────────────────────────────
-    BoxEntry { stem: "f1099g", label: "1", caption: "1 Unemployment compensation",
+    // ── Form 1099-G — Rev. March 2024 (12 boxes) and Rev. December 2026 (13: box 10 is NEW) ─────────
+    BoxEntry { stem: "f1099g", editions: &["2024", "2026"], label: "1", caption: "1 Unemployment compensation",
         decision: BoxDecision::Collected("Form1099G.box1_unemployment → Schedule 1 line 7") },
-    BoxEntry { stem: "f1099g", label: "2", caption: "2 State or local income tax",
+    BoxEntry { stem: "f1099g", editions: &["2024", "2026"], label: "2", caption: "2 State or local income tax",
         decision: BoxDecision::NotRead("T5: §5.2 adds Form1099G.box2_state_refund, and the RETURN-LEVEL itemized_prior_year gate decides Schedule 1 line 1 — No ⇒ blank by decision, Yes ⇒ refuse naming the State and Local Income Tax Refund Worksheet. No field holds it at T2") },
-    BoxEntry { stem: "f1099g", label: "3", caption: "3 Box 2 amount is for tax year",
+    BoxEntry { stem: "f1099g", editions: &["2024", "2026"], label: "3", caption: "3 Box 2 amount is for tax year",
         decision: BoxDecision::NotRead("the tax year box 2's refund relates to; it is read by the State and Local Income Tax Refund Worksheet, which is not transcribed (owner Q1)") },
-    BoxEntry { stem: "f1099g", label: "4", caption: "4 Federal income tax withheld",
+    BoxEntry { stem: "f1099g", editions: &["2024", "2026"], label: "4", caption: "4 Federal income tax withheld",
         decision: BoxDecision::Collected("Form1099G.box4_fed_withheld → 1040 line 25b") },
-    BoxEntry { stem: "f1099g", label: "5", caption: "5 RTAA payments",
+    BoxEntry { stem: "f1099g", editions: &["2024", "2026"], label: "5", caption: "5 RTAA payments",
         decision: BoxDecision::NotRead("Reemployment Trade Adjustment Assistance, Schedule 1 line 8z; btctax models no line 8z inflow and the residual scope attestation names what it cannot take") },
-    BoxEntry { stem: "f1099g", label: "6", caption: "6 Taxable grants",
+    BoxEntry { stem: "f1099g", editions: &["2024", "2026"], label: "6", caption: "6 Taxable grants",
         decision: BoxDecision::NotRead("a taxable grant reaches Schedule 1 line 8z; btctax models no line 8z inflow") },
-    BoxEntry { stem: "f1099g", label: "7", caption: "7 Agriculture payments",
+    BoxEntry { stem: "f1099g", editions: &["2024", "2026"], label: "7", caption: "7 Agriculture payments",
         decision: BoxDecision::NotRead("Schedule F income; farm income is an excluded family (§2.2) and its census row refuses") },
-    BoxEntry { stem: "f1099g", label: "8", caption: "8 Check if box 2 is",
+    BoxEntry { stem: "f1099g", editions: &["2024", "2026"], label: "8", caption: "8 Check if box 2 is",
         decision: BoxDecision::NotRead("the checkbox saying box 2 is trade or business income; it qualifies box 2, which is T5's") },
-    BoxEntry { stem: "f1099g", label: "9", caption: "9 Market gain",
+    BoxEntry { stem: "f1099g", editions: &["2024", "2026"], label: "9", caption: "9 Market gain",
         decision: BoxDecision::NotRead("CCC loan market gain, Schedule F; farm income is an excluded family (§2.2)") },
-    BoxEntry { stem: "f1099g", label: "10a", caption: "10a State",
+    BoxEntry { stem: "f1099g", editions: &["2026"], label: "10", caption: "10 Family leave benefits",
+        decision: BoxDecision::RefuseIfNonzero("T5: paid family leave benefits — an INCOME box the Rev. December 2026 grid added, reportable on Schedule 1. No field holds it and no line reads it, so > 0 REFUSES until T5 decides the line: an income box with no reader understates, and this fails closed instead") },
+    BoxEntry { stem: "f1099g", editions: &["2024"], label: "10a", caption: "10a State",
         decision: BoxDecision::NotRead("the state's two-letter code; the federal return prints none") },
-    BoxEntry { stem: "f1099g", label: "10b", caption: "10b State identification no.",
+    BoxEntry { stem: "f1099g", editions: &["2024"], label: "10b", caption: "10b State identification no.",
         decision: BoxDecision::NotRead("the payer's state identification number; the federal return prints none") },
-    BoxEntry { stem: "f1099g", label: "11", caption: "11 State income tax withheld",
+    BoxEntry { stem: "f1099g", editions: &["2024"], label: "11", caption: "11 State income tax withheld",
         decision: BoxDecision::NotRead("state income tax withheld; no Form1099G field holds it") },
-
-    // ── Form 1099-B (2025) — 22 boxes ─────────────────────────────────────────────────────────────
-    BoxEntry { stem: "f1099b", label: "1a", caption: "1a Description of property (Example: 100 sh. XYZ Co.)",
+    BoxEntry { stem: "f1099g", editions: &["2026"], label: "11a", caption: "11a State",
+        decision: BoxDecision::NotRead("the state's two-letter code; the federal return prints none. Numbered 10a before the Rev. December 2026 revision") },
+    BoxEntry { stem: "f1099g", editions: &["2026"], label: "11b", caption: "11b State identification no.",
+        decision: BoxDecision::NotRead("the payer's state identification number; the federal return prints none. Numbered 10b before the Rev. December 2026 revision") },
+    BoxEntry { stem: "f1099g", editions: &["2026"], label: "12", caption: "12 State income tax withheld",
+        decision: BoxDecision::NotRead("state income tax withheld; no Form1099G field holds it. Numbered 11 before the Rev. December 2026 revision") },
+    // ── Form 1099-B — 2024, 2025 and 2026 (22 boxes each) ───────────────────────────────────────────
+    BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "1a", caption: "1a Description of property (Example: 100 sh. XYZ Co.)",
         decision: BoxDecision::NotRead("btctax takes the Schedule D line 1a/8a TOTALS, which the form's own instruction permits when basis was reported and there are no adjustments; a per-transaction description belongs on Form 8949, and a row needing one is refused (Form1099BNeedsForm8949)") },
-    BoxEntry { stem: "f1099b", label: "1b", caption: "1b Date acquired",
+    BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "1b", caption: "1b Date acquired",
         decision: BoxDecision::NotRead("per-transaction, and Schedule D lines 1a/8a carry no dates; a row needing Form 8949 is refused") },
-    BoxEntry { stem: "f1099b", label: "1c", caption: "1c Date sold or disposed",
+    BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "1c", caption: "1c Date sold or disposed",
         decision: BoxDecision::NotRead("per-transaction, and Schedule D lines 1a/8a carry no dates; a row needing Form 8949 is refused") },
-    BoxEntry { stem: "f1099b", label: "1d", caption: "1d Proceeds",
+    BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "1d", caption: "1d Proceeds",
         decision: BoxDecision::Collected("Form1099B.short_term_proceeds / long_term_proceeds → Schedule D line 1a(d) / 8a(d)") },
-    BoxEntry { stem: "f1099b", label: "1e", caption: "1e Cost or other basis",
+    BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "1e", caption: "1e Cost or other basis",
         decision: BoxDecision::Collected("Form1099B.short_term_basis / long_term_basis → Schedule D line 1a(e) / 8a(e)") },
-    BoxEntry { stem: "f1099b", label: "1f", caption: "1f Accrued market discount",
+    BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "1f", caption: "1f Accrued market discount",
         decision: BoxDecision::NotRead("an ADJUSTMENT: a row carrying one fails basis_reported_and_no_adjustments, so the gate refuses Form1099BNeedsForm8949 rather than dropping the figure") },
-    BoxEntry { stem: "f1099b", label: "1g", caption: "1g Wash sale loss disallowed",
+    BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "1g", caption: "1g Wash sale loss disallowed",
         decision: BoxDecision::NotRead("an ADJUSTMENT: the row fails the 1a/8a gate and is refused to Form 8949") },
-    BoxEntry { stem: "f1099b", label: "2", caption: "2 Short-term gain or loss",
+    BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "2", caption: "2 Short-term gain or loss",
         decision: BoxDecision::Collected("Form1099B's short_term_* vs long_term_* pair — the box decides WHICH Schedule D lines a row's totals reach") },
-    BoxEntry { stem: "f1099b", label: "3", caption: "3 Check if proceeds from:",
+    BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "3", caption: "3 Check if proceeds from:",
         decision: BoxDecision::NotRead("collectibles or QOF proceeds; either is an adjustment case the gate refuses to Form 8949") },
-    BoxEntry { stem: "f1099b", label: "4", caption: "4 Federal income tax withheld",
+    BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "4", caption: "4 Federal income tax withheld",
         decision: BoxDecision::NotRead("backup withholding on broker proceeds would reach 1040 line 25b; no Form1099B field holds it, so a filer with backup withholding forgoes a credit — the OVERSTATEMENT direction, announced rather than silent") },
-    BoxEntry { stem: "f1099b", label: "5", caption: "5 Check if noncovered",
+    BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "5", caption: "5 Check if noncovered",
         decision: BoxDecision::NotRead("a noncovered security has no basis reported to the IRS, so the row fails the 1a/8a gate and is refused to Form 8949") },
-    BoxEntry { stem: "f1099b", label: "6", caption: "6 Reported to IRS:",
+    BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "6", caption: "6 Reported to IRS:",
         decision: BoxDecision::NotRead("gross versus net proceeds; either way box 1d is the figure Schedule D's total reads") },
-    BoxEntry { stem: "f1099b", label: "7", caption: "7 Check if loss is not allowed",
+    BoxEntry { stem: "f1099b", editions: &["2024", "2025"], label: "7", caption: "7 Check if loss is not allowed",
         decision: BoxDecision::NotRead("an ADJUSTMENT (a loss disallowed because proceeds are less than the amount reported); the row is refused to Form 8949") },
-    BoxEntry { stem: "f1099b", label: "8", caption: "8 Profit or (loss) realized in",
+    BoxEntry { stem: "f1099b", editions: &["2026"], label: "7", caption: "7 Check if loss is not",
+        decision: BoxDecision::NotRead("an ADJUSTMENT (a loss disallowed because proceeds are less than the amount reported); the row is refused to Form 8949") },
+    BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "8", caption: "8 Profit or (loss) realized in",
         decision: BoxDecision::NotRead("§1256 regulated futures and forward contracts, which reach Form 6781; an excluded family (§2.2)") },
-    BoxEntry { stem: "f1099b", label: "9", caption: "9 Unrealized profit or (loss) on",
+    BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "9", caption: "9 Unrealized profit or (loss) on",
         decision: BoxDecision::NotRead("§1256 open contracts at the prior year end, Form 6781; an excluded family (§2.2)") },
-    BoxEntry { stem: "f1099b", label: "10", caption: "10 Unrealized profit or (loss) on",
+    BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "10", caption: "10 Unrealized profit or (loss) on",
         decision: BoxDecision::NotRead("§1256 open contracts at this year end, Form 6781; an excluded family (§2.2)") },
-    BoxEntry { stem: "f1099b", label: "11", caption: "11 Aggregate profit or (loss)",
+    BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "11", caption: "11 Aggregate profit or (loss)",
         decision: BoxDecision::NotRead("the §1256 aggregate, Form 6781; an excluded family (§2.2)") },
-    BoxEntry { stem: "f1099b", label: "12", caption: "12 Check if basis reported to",
+    BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "12", caption: "12 Check if basis reported to",
         decision: BoxDecision::Collected("Form1099B.basis_reported_and_no_adjustments — the first half of the gate Schedule D lines 1a/8a require") },
-    BoxEntry { stem: "f1099b", label: "13", caption: "13 Bartering",
+    BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "13", caption: "13 Bartering",
         decision: BoxDecision::NotRead("barter exchange income, which reaches Schedule 1 line 8z or Schedule C; btctax models no line 8z inflow") },
-    BoxEntry { stem: "f1099b", label: "14", caption: "14 State name",
+    BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "14", caption: "14 State name",
         decision: BoxDecision::NotRead("the state's name; the federal return prints none") },
-    BoxEntry { stem: "f1099b", label: "15", caption: "15 State identification no.",
+    BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "15", caption: "15 State identification no.",
         decision: BoxDecision::NotRead("the payer's state identification number; the federal return prints none") },
-    BoxEntry { stem: "f1099b", label: "16", caption: "16 State tax withheld",
+    BoxEntry { stem: "f1099b", editions: &["2024", "2025", "2026"], label: "16", caption: "16 State tax withheld",
         decision: BoxDecision::NotRead("state income tax withheld; no Form1099B field holds it") },
-
-    // ── Form 1098 (Rev. April 2025) — 11 boxes ────────────────────────────────────────────────────
-    BoxEntry { stem: "f1098", label: "1", caption: "1 Mortgage interest received from payer(s)/borrower(s)",
+    // ── Form 1098 — Rev. January 2022 and Rev. April 2025 (11 boxes each) ───────────────────────────
+    BoxEntry { stem: "f1098", editions: &["2022", "2025"], label: "1", caption: "1 Mortgage interest received from payer(s)/borrower(s)",
         decision: BoxDecision::Collected("ScheduleAInputs.mortgage_interest_1098 → Schedule A line 8a; §5.2 replaces it with Form1098.box1_interest in T9") },
-    BoxEntry { stem: "f1098", label: "2", caption: "2 Outstanding mortgage",
+    BoxEntry { stem: "f1098", editions: &["2022", "2025"], label: "2", caption: "2 Outstanding mortgage",
         decision: BoxDecision::NotRead("T9: Form1098.box2_outstanding_principal feeds the AGGREGATE, status-adjusted §163(h)(3)(B) ceiling check; no field holds it at T2") },
-    BoxEntry { stem: "f1098", label: "3", caption: "3 Mortgage origination date",
+    BoxEntry { stem: "f1098", editions: &["2022", "2025"], label: "3", caption: "3 Mortgage origination date",
         decision: BoxDecision::NotRead("T9: Form1098.box3_origination_date decides the $750,000 versus $1,000,000 ceiling by whether it precedes 2017-12-16; no field holds it at T2") },
-    BoxEntry { stem: "f1098", label: "4", caption: "4 Refund of overpaid",
+    BoxEntry { stem: "f1098", editions: &["2022", "2025"], label: "4", caption: "4 Refund of overpaid",
         decision: BoxDecision::NotRead("T9 (fold I3): > 0 REFUSES MortgageInterestRefundNotComputed naming Schedule 1 line 8z — i1098 is explicit that the refund is not netted against the deduction, so a figure held with no reader would understate; no field holds it at T2") },
-    BoxEntry { stem: "f1098", label: "5", caption: "5 Mortgage insurance",
+    BoxEntry { stem: "f1098", editions: &["2022", "2025"], label: "5", caption: "5 Mortgage insurance",
         decision: BoxDecision::NotRead("T9: mortgage insurance premiums reach Schedule A line 8d only if a final reinstates the §163(h)(3)(E) deduction; no field holds it at T2") },
-    BoxEntry { stem: "f1098", label: "6", caption: "6 Points paid on purchase of principal residence",
+    BoxEntry { stem: "f1098", editions: &["2022", "2025"], label: "6", caption: "6 Points paid on purchase of principal residence",
         decision: BoxDecision::NotRead("T9: Form1098.box6_points is added to Schedule A line 8a with box 1; no field holds it at T2") },
-    BoxEntry { stem: "f1098", label: "7", caption: "7 If address of property securing mortgage is the same",
+    BoxEntry { stem: "f1098", editions: &["2022", "2025"], label: "7", caption: "7 If address of property securing mortgage is the same",
         decision: BoxDecision::NotRead("T9: Form1098.box7_property_address_same_as_payer, the checkbox box 8's address answers to; no field holds it at T2") },
-    BoxEntry { stem: "f1098", label: "8", caption: "8 Address or description of property securing mortgage (see",
+    BoxEntry { stem: "f1098", editions: &["2022", "2025"], label: "8", caption: "8 Address or description of property securing mortgage (see",
         decision: BoxDecision::NotRead("T9: Form1098.box8_property_address; no field holds it at T2") },
-    BoxEntry { stem: "f1098", label: "9", caption: "9 Number of properties securing the",
+    BoxEntry { stem: "f1098", editions: &["2022", "2025"], label: "9", caption: "9 Number of properties securing the",
         decision: BoxDecision::NotRead("the count of properties one mortgage secures; no Schedule A line reads it, and the ceiling check reads box 2's principal") },
-    BoxEntry { stem: "f1098", label: "10", caption: "10 Other",
+    BoxEntry { stem: "f1098", editions: &["2022", "2025"], label: "10", caption: "10 Other",
         decision: BoxDecision::NotRead("T9: Form1098.box10_other — free-text lender reporting (real estate taxes are the common one), which reaches no line until the filer identifies the item") },
-    BoxEntry { stem: "f1098", label: "11", caption: "11 Mortgage",
+    BoxEntry { stem: "f1098", editions: &["2022", "2025"], label: "11", caption: "11 Mortgage",
         decision: BoxDecision::NotRead("the mortgage ACQUISITION date — when the present lender acquired the loan, printed only on a transferred mortgage. The §163(h)(3)(B) ceiling test reads box 3, the ORIGINATION date, so this box reaches no line") },
-
-    // ── Form 1098-E (2025) — 2 boxes ──────────────────────────────────────────────────────────────
-    BoxEntry { stem: "f1098e", label: "1", caption: "1 Student loan interest received by lender",
+    // ── Form 1098-E — 2024, 2025 and 2026 (2 boxes each) ────────────────────────────────────────────
+    BoxEntry { stem: "f1098e", editions: &["2024", "2025", "2026"], label: "1", caption: "1 Student loan interest received by lender",
         decision: BoxDecision::Collected("Schedule1Inputs.student_loan_interest_paid → Schedule 1 line 21; §5.2 replaces it with Form1098E.box1_interest in T5") },
-    BoxEntry { stem: "f1098e", label: "2", caption: "2 Check if box 1 does not include loan origination fees",
+    BoxEntry { stem: "f1098e", editions: &["2024", "2025", "2026"], label: "2", caption: "2 Check if box 1 does not include loan origination fees",
         decision: BoxDecision::NotRead("a qualifier on box 1 for loans made before September 1, 2004: it says the lender left origination fees and capitalized interest OUT. Schedule 1 line 21 takes the box-1 amount as printed, and btctax does not compute the omitted fees") },
 ];
 
 // ── The enumerator ────────────────────────────────────────────────────────────────────────────────
 
 /// The `-layout` lines of the form's own box grid: strictly between the *Attention* preamble's last
-/// sentence and Copy A's `Cat. No.` footer.
-pub fn face_block(text: &str) -> Result<Vec<&str>, String> {
+/// sentence — **this edition's own**, see enumerator rule 1 — and Copy A's `Cat. No.` footer.
+pub fn face_block<'a>(text: &'a str, preamble_end: &str) -> Result<Vec<&'a str>, String> {
     let lines: Vec<&str> = text.lines().collect();
     let starts: Vec<usize> = lines
         .iter()
         .enumerate()
-        .filter(|(_, l)| l.contains(PREAMBLE_END))
+        .filter(|(_, l)| l.contains(preamble_end))
         .map(|(i, _)| i)
         .collect();
     if starts.len() != 1 {
         return Err(format!(
-            "the preamble marker {PREAMBLE_END:?} occurs {} times, expected exactly 1 — the face \
+            "the preamble marker {preamble_end:?} occurs {} times, expected exactly 1 — the face \
              block cannot be bounded and a hand-picked page range would be the hand-list this \
              census exists to avoid",
             starts.len()
@@ -442,11 +783,16 @@ pub fn face_block(text: &str) -> Result<Vec<&str>, String> {
     Ok(lines[start + 1..end].to_vec())
 }
 
-/// Is `s` exactly a box label — `1`, `2a`, `12b`, or one of the W-2's lettered boxes `a`..`f`?
+/// Is `s` exactly a box label — `1`, `2a`, `12b`, or a lettered box `a`..`z`?
+///
+/// ★ The single-letter arm runs the whole alphabet rather than stopping at `f` (the largest lettered
+/// box any archived edition prints). Stopping at the largest observed letter is the shape that makes
+/// a future box invisible *and* silences the contiguity guard, which builds its expected set from the
+/// largest letter it found. Enumerator rule 6 is what makes the widening safe.
 fn is_label(s: &str) -> bool {
     let b = s.as_bytes();
     match b.len() {
-        1 => b[0].is_ascii_digit() || (b'a'..=b'f').contains(&b[0]),
+        1 => b[0].is_ascii_digit() || b[0].is_ascii_lowercase(),
         2 => b[0].is_ascii_digit() && (b[1].is_ascii_digit() || b[1].is_ascii_lowercase()),
         3 => b[0].is_ascii_digit() && b[1].is_ascii_digit() && b[2].is_ascii_lowercase(),
         _ => false,
@@ -502,9 +848,10 @@ fn trim_furniture(caption: &str) -> &str {
 
 /// **Every box the form PRINTS, label → caption, read off the extract.** The caption includes the
 /// label, because that is how the form prints it and quoting half a printed run is not a quotation.
-pub fn printed_boxes(text: &str) -> Result<BTreeMap<String, String>, String> {
+pub fn printed_boxes(text: &str, preamble_end: &str) -> Result<BTreeMap<String, String>, String> {
     let mut found: BTreeMap<String, String> = BTreeMap::new();
-    for line in face_block(text)? {
+    let mut previous = "";
+    for line in face_block(text, preamble_end)? {
         let runs: Vec<&str> = line
             .split("  ")
             .map(str::trim)
@@ -512,6 +859,15 @@ pub fn printed_boxes(text: &str) -> Result<BTreeMap<String, String>, String> {
             .collect();
         for (i, run) in runs.iter().enumerate() {
             if is_label(run) {
+                // Rule 6: a bare LETTERED run is the vertical `Code` rail, not a box. Every
+                // captionless box these forms print carries a number.
+                if !run.bytes().any(|c| c.is_ascii_digit()) {
+                    continue;
+                }
+                // Rule 5: the blank year stub under `For calendar year` is the issuer's blank.
+                if previous.contains(YEAR_STUB) && runs.len() == 1 {
+                    continue;
+                }
                 // A bare label adopts the next run on its line — unless that run is itself a box.
                 let next = runs.get(i + 1).copied().unwrap_or_default();
                 let caption = if next.is_empty() || is_label(next) || label_head(next).is_some() {
@@ -536,6 +892,7 @@ pub fn printed_boxes(text: &str) -> Result<BTreeMap<String, String>, String> {
                 }
             }
         }
+        previous = line;
     }
     contiguous(&found)?;
     Ok(found)
@@ -543,8 +900,9 @@ pub fn printed_boxes(text: &str) -> Result<BTreeMap<String, String>, String> {
 
 /// ★★ **THE GUARD ON THE ENUMERATOR** — the numeric labels must run `1..=max` with no gap, and any
 /// lettered labels must run from `a`. A reader that drops a box otherwise returns a shorter list that
-/// still looks plausible; this turns that into a red. It has already caught one: the first
-/// run-splitter lost Form 1099-DIV boxes 3, 4, 5 and 6, which print with the label in its own column.
+/// still looks plausible; this turns that into a red. It has caught two: the first run-splitter lost
+/// Form 1099-DIV boxes 3, 4, 5 and 6, and the Rev. January 2022 Form 1098's blank *For calendar year*
+/// stub entered as a box 20 (enumerator rule 5).
 fn contiguous(found: &BTreeMap<String, String>) -> Result<(), String> {
     let mut numbers: BTreeSet<u32> = BTreeSet::new();
     let mut letters: BTreeSet<char> = BTreeSet::new();
@@ -618,27 +976,116 @@ pub fn verdict(printed: &BTreeMap<String, String>, entries: &[(&str, &str)]) -> 
     }
 }
 
-fn extract_path(root: &Path, stem: &str, year: &str) -> PathBuf {
-    root.join(format!("design/forms/extract/{stem}--{year}.txt"))
+fn extract_path(root: &Path, stem: &str, edition: &str) -> PathBuf {
+    root.join(format!("design/forms/extract/{stem}--{edition}.txt"))
+}
+
+/// The census entries in scope for one archived edition.
+#[must_use]
+pub fn entries_for(doc: &DocumentAuthority) -> Vec<&'static BoxEntry> {
+    BOXES
+        .iter()
+        .filter(|b| b.stem == doc.stem && b.editions.contains(&doc.edition))
+        .collect()
+}
+
+/// `(stem, edition)` pairs, forms and booklets — what [`archived_information_returns`] returns.
+pub type ArchivedEditions = (BTreeSet<(String, String)>, BTreeSet<(String, String)>);
+
+/// ★★★ **I2 — THE ARCHIVED W / 1098 / 1099 EDITIONS, READ OUT OF `MANIFEST.json`.**
+///
+/// Returns `(forms, booklets)` as `(stem, edition)` pairs. This is the join [`DOCUMENTS`] and
+/// [`BOOKLETS`] are asserted equal to, in both directions — the seam review deleted a whole archived
+/// form from the census and `box-census` plus all six census tests reported success, because the
+/// document set was a hand-list with no join to anything.
+pub fn archived_information_returns(root: &Path) -> Result<ArchivedEditions, String> {
+    let entries = crate::authority_manifest::load(root)?;
+    let (mut forms, mut booklets) = (BTreeSet::new(), BTreeSet::new());
+    for e in &entries {
+        let name = e.path.rsplit('/').next().unwrap_or_default();
+        let Some((stem, rest)) = name.split_once("--") else {
+            continue;
+        };
+        if !crate::archive_check::is_information_return_stem(stem) {
+            continue;
+        }
+        let edition = rest.trim_end_matches(".pdf").to_string();
+        match e.kind {
+            crate::authority_manifest::Kind::Form => {
+                forms.insert((stem.to_string(), edition));
+            }
+            crate::authority_manifest::Kind::Instructions => {
+                booklets.insert((stem.to_string(), edition));
+            }
+            _ => {}
+        }
+    }
+    Ok((forms, booklets))
+}
+
+/// The I2 assertion itself, so the operator command and the suite ask the archive the same question.
+pub fn check_document_set(root: &Path) -> Result<(), String> {
+    let (forms, booklets) = archived_information_returns(root)?;
+    if forms.len() < 7 {
+        return Err(format!(
+            "the manifest join found only {} information-return forms — the derivation itself is \
+             broken, and a census over nothing passes",
+            forms.len()
+        ));
+    }
+    let censused_forms: BTreeSet<(String, String)> = DOCUMENTS
+        .iter()
+        .map(|d| (d.stem.to_string(), d.edition.to_string()))
+        .collect();
+    let censused_booklets: BTreeSet<(String, String)> = BOOKLETS
+        .iter()
+        .map(|b| (b.stem.to_string(), b.edition.to_string()))
+        .collect();
+    let mut problems = Vec::new();
+    for (what, archived, censused) in [
+        ("form", &forms, &censused_forms),
+        ("instructions", &booklets, &censused_booklets),
+    ] {
+        for m in archived.difference(censused) {
+            problems.push(format!(
+                "{}--{} is archived as a {what} but nothing censuses it — an archived information \
+                 return outside the census is invisible to every box assertion",
+                m.0, m.1
+            ));
+        }
+        for m in censused.difference(archived) {
+            problems.push(format!(
+                "{}--{} is censused as a {what} but is not in MANIFEST.json — the census names a \
+                 document the archive does not hold",
+                m.0, m.1
+            ));
+        }
+    }
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(problems.join("\n  "))
+    }
 }
 
 /// `xtask box-census` — the operator-facing run.
 pub fn run() -> Result<(), String> {
     let root = repo_root();
+    check_document_set(&root)
+        .map_err(|e| format!("the censused document set is not the archive:\n  {e}"))?;
     let mut total = 0usize;
+    let mut decided = 0usize;
     let mut failures = Vec::new();
     for doc in DOCUMENTS {
-        let path = extract_path(&root, doc.stem, doc.year);
+        let path = extract_path(&root, doc.stem, doc.edition);
         let text = std::fs::read_to_string(&path)
             .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-        let printed = printed_boxes(&text).map_err(|e| format!("{}: {e}", doc.stem))?;
-        let entries: Vec<(&str, &str)> = BOXES
-            .iter()
-            .filter(|b| b.stem == doc.stem)
-            .map(|b| (b.label, b.caption))
-            .collect();
+        let printed = printed_boxes(&text, doc.preamble_end)
+            .map_err(|e| format!("{}--{}: {e}", doc.stem, doc.edition))?;
+        let in_scope = entries_for(doc);
+        let entries: Vec<(&str, &str)> = in_scope.iter().map(|b| (b.label, b.caption)).collect();
         let (mut collected, mut refusing, mut unread) = (0, 0, 0);
-        for b in BOXES.iter().filter(|b| b.stem == doc.stem) {
+        for b in &in_scope {
             match b.decision {
                 BoxDecision::Collected(_) => collected += 1,
                 BoxDecision::RefuseIfNonzero(_) => refusing += 1,
@@ -650,13 +1097,14 @@ pub fn run() -> Result<(), String> {
                 "  {}--{} ({} instructions): {} boxes — {collected} collected, {refusing} \
                  refuse-if-nonzero, {unread} not read",
                 doc.stem,
-                doc.year,
+                doc.edition,
                 doc.instructions,
                 printed.len()
             ),
-            Err(e) => failures.push(format!("{}--{}:\n  {e}", doc.stem, doc.year)),
+            Err(e) => failures.push(format!("{}--{}:\n  {e}", doc.stem, doc.edition)),
         }
         total += printed.len();
+        decided += in_scope.len();
     }
     if !failures.is_empty() {
         return Err(format!(
@@ -666,9 +1114,14 @@ pub fn run() -> Result<(), String> {
         ));
     }
     println!(
-        "box-census OK: {total} printed boxes across {} archived information returns, every one \
-         decided",
-        DOCUMENTS.len()
+        "box-census OK: {total} printed boxes across {} archived editions of {} information \
+         returns, every one decided ({decided} entries)",
+        DOCUMENTS.len(),
+        DOCUMENTS
+            .iter()
+            .map(|d| d.stem)
+            .collect::<BTreeSet<_>>()
+            .len()
     );
     Ok(())
 }
@@ -677,116 +1130,240 @@ pub fn run() -> Result<(), String> {
 mod tests {
     use super::*;
 
-    fn read(doc: &DocumentAuthority) -> String {
-        let p = extract_path(&repo_root(), doc.stem, doc.year);
+    fn read(stem: &str, edition: &str) -> String {
+        let p = extract_path(&repo_root(), stem, edition);
         std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("cannot read {}: {e}", p.display()))
     }
 
-    /// ★★★ **THE CENSUS ITSELF** — every printed box decided, every entry a box the form prints,
-    /// every caption verbatim. This is R4's kill in both directions at once.
+    /// ★★★ **THE CENSUS ITSELF** — every printed box of every archived EDITION decided, every entry
+    /// a box that edition prints, every caption verbatim. This is R4's kill in both directions at
+    /// once, now once per edition.
     #[test]
     fn every_printed_box_carries_exactly_one_entry() {
         let mut total = 0usize;
+        let mut decided = 0usize;
         let mut failures = Vec::new();
         for doc in DOCUMENTS {
-            let printed = printed_boxes(&read(doc)).unwrap_or_else(|e| panic!("{}: {e}", doc.stem));
-            let entries: Vec<(&str, &str)> = BOXES
-                .iter()
-                .filter(|b| b.stem == doc.stem)
-                .map(|b| (b.label, b.caption))
-                .collect();
+            let printed = printed_boxes(&read(doc.stem, doc.edition), doc.preamble_end)
+                .unwrap_or_else(|e| panic!("{}--{}: {e}", doc.stem, doc.edition));
+            let in_scope = entries_for(doc);
+            let entries: Vec<(&str, &str)> =
+                in_scope.iter().map(|b| (b.label, b.caption)).collect();
             if let Err(e) = verdict(&printed, &entries) {
-                failures.push(format!("{}--{}:\n  {e}", doc.stem, doc.year));
+                failures.push(format!("{}--{}:\n  {e}", doc.stem, doc.edition));
             }
             total += printed.len();
+            decided += in_scope.len();
         }
         assert!(
             failures.is_empty(),
-            "the box census failed for {} of {} documents:\n{}",
+            "the box census failed for {} of {} editions:\n{}",
             failures.len(),
             DOCUMENTS.len(),
             failures.join("\n")
         );
         // A census that walked nothing would pass by finding nothing — the F4 shape.
         assert_eq!(
-            total,
-            BOXES.len(),
-            "every entry must correspond to a printed box and vice versa"
+            total, decided,
+            "every entry must correspond to a printed box of an edition it lists, and vice versa"
         );
         assert!(
-            total >= 100,
-            "the census walked only {total} boxes across {} documents — it must actually read the \
+            total >= 200,
+            "the census walked only {total} boxes across {} editions — it must actually read the \
              forms",
             DOCUMENTS.len()
         );
         eprintln!(
-            "box census: {total} boxes across {} documents",
-            DOCUMENTS.len()
+            "box census: {total} boxes across {} editions, {} entries",
+            DOCUMENTS.len(),
+            BOXES.len()
         );
     }
 
-    /// ★ Every entry names a document the registry knows, so a typo'd stem cannot park an entry
-    /// where no extract will ever check it.
+    /// ★ Every entry names an EDITION the registry knows, so neither a typo'd stem nor a typo'd year
+    /// can park an entry where no extract will ever check it.
     #[test]
-    fn every_entry_belongs_to_an_archived_document() {
-        let known: BTreeSet<&str> = DOCUMENTS.iter().map(|d| d.stem).collect();
+    fn every_entry_belongs_to_an_archived_edition() {
+        let known: BTreeSet<(&str, &str)> = DOCUMENTS.iter().map(|d| (d.stem, d.edition)).collect();
         for b in BOXES {
             assert!(
-                known.contains(b.stem),
-                "box entry {}/{} names stem {:?}, which is in no DOCUMENTS row — nothing would ever \
-                 check it",
+                !b.editions.is_empty(),
+                "box entry {}/{} lists NO edition — nothing would ever check it",
                 b.stem,
-                b.label,
-                b.stem
+                b.label
             );
+            for ed in b.editions {
+                assert!(
+                    known.contains(&(b.stem, ed)),
+                    "box entry {}/{} names edition {}--{ed}, which is in no DOCUMENTS row — nothing \
+                     would ever check it",
+                    b.stem,
+                    b.label,
+                    b.stem
+                );
+            }
         }
     }
 
-    /// ★ The three furniture/bound markers are the DOCUMENTS' own text, so the enumerator's bounds
-    /// are a reading of the forms rather than a convention we assert about them.
+    /// ★ The bound and furniture markers are each EDITION's own text, so the enumerator's bounds are
+    /// a reading of that document rather than a convention we assert about all of them. The
+    /// preamble marker is required to occur **exactly once**, which is what turned the 2026 Form
+    /// W-2's rewritten preamble into a recorded per-edition bound instead of a hard failure.
     #[test]
     fn the_enumerator_markers_are_present_in_every_extract() {
         for doc in DOCUMENTS {
-            let text = read(doc);
-            for marker in [PREAMBLE_END, FACE_END, FURNITURE] {
+            let text = read(doc.stem, doc.edition);
+            assert_eq!(
+                text.lines()
+                    .filter(|l| l.contains(doc.preamble_end))
+                    .count(),
+                1,
+                "{}--{}: its recorded preamble marker {:?} does not occur exactly once; the face \
+                 block is being guessed",
+                doc.stem,
+                doc.edition,
+                doc.preamble_end
+            );
+            for marker in [FACE_END, FURNITURE] {
                 assert!(
                     text.contains(marker),
                     "{}--{} does not contain {marker:?}; the enumerator's bounds are not this \
-                     document's own furniture and the face block is being guessed",
+                     document's own furniture",
                     doc.stem,
-                    doc.year
+                    doc.edition
                 );
             }
         }
     }
 
     /// ★★ Both halves of the archive obligation: the extract AND the provenance note are on disk for
-    /// every document the census reads. Without the note the extract cannot be reproduced, and
-    /// "archived" would mean a text file nobody can re-derive.
+    /// every edition the census reads, form and booklet. Without the note the extract cannot be
+    /// reproduced, and "archived" would mean a text file nobody can re-derive.
     #[test]
     fn every_document_has_its_extract_and_its_note() {
         let root = repo_root();
+        let mut editions: Vec<(&str, &str)> =
+            DOCUMENTS.iter().map(|d| (d.stem, d.edition)).collect();
+        editions.extend(BOOKLETS.iter().map(|b| (b.stem, b.edition)));
+        for (stem, edition) in editions {
+            assert!(
+                extract_path(&root, stem, edition).is_file(),
+                "{stem}--{edition}: no committed extract"
+            );
+            let note = root.join(format!("design/forms/{edition}/{stem}--{edition}.pdf.txt"));
+            assert!(
+                note.is_file(),
+                "{stem}--{edition}: no provenance note at {} — the PDF is gitignored, so without \
+                 the note the text layer cannot be reproduced",
+                note.display()
+            );
+        }
+    }
+
+    /// ★★★ **C1c — WHICH EDITION GOVERNS WHICH TAX YEAR, pinned for all three years the interview
+    /// serves.** Every cell is the IRS's printed rule applied to a revision read off a document, and
+    /// the table is what `line-coverage` resolves a `DocBox` row's edition through.
+    ///
+    /// ★ The 1099-G row is the review's C1 in one line: TY2024 and TY2025 are the Rev. March 2024
+    /// grid, TY2026 is the Rev. December 2026 grid with its new income box 10.
+    #[test]
+    fn revision_in_force_pins_the_whole_table() {
+        // (stem, TY2024, TY2025, TY2026)
+        /// (stem, the edition in force for TY2024, for TY2025, for TY2026).
+        type Row = (
+            &'static str,
+            Option<&'static str>,
+            Option<&'static str>,
+            Option<&'static str>,
+        );
+        let expected: &[Row] = &[
+            // Annual forms: the edition IS the tax year.
+            ("fw2", Some("2024"), Some("2025"), Some("2026")),
+            ("iw2w3", Some("2024"), Some("2025"), Some("2026")),
+            ("f1099b", Some("2024"), Some("2025"), Some("2026")),
+            ("i1099b", Some("2024"), Some("2025"), Some("2026")),
+            ("f1098e", Some("2024"), Some("2025"), Some("2026")),
+            ("i1098et", Some("2024"), Some("2025"), Some("2026")),
+            // Periodic: Rev. January 2024, never superseded — one edition serves all three years.
+            ("f1099int", Some("2024"), Some("2024"), Some("2024")),
+            ("i1099int", Some("2024"), Some("2024"), Some("2024")),
+            ("f1099div", Some("2024"), Some("2024"), Some("2024")),
+            ("i1099div", Some("2024"), Some("2024"), Some("2024")),
+            // Periodic, DISPLACED: Rev. March 2024 → Rev. December 2026.
+            ("f1099g", Some("2024"), Some("2024"), Some("2026")),
+            ("i1099g", Some("2024"), Some("2024"), Some("2026")),
+            // Periodic: Rev. January 2022 governs TY2024; Rev. April 2025 takes over for TY2025.
+            ("f1098", Some("2022"), Some("2025"), Some("2025")),
+            // ★ The BOOKLET was revised for TY2026 when the form was not.
+            ("i1098", Some("2022"), Some("2025"), Some("2026")),
+        ];
+        for (stem, y24, y25, y26) in expected {
+            assert_eq!(revision_in_force(stem, 2024), *y24, "{stem} @ TY2024");
+            assert_eq!(revision_in_force(stem, 2025), *y25, "{stem} @ TY2025");
+            assert_eq!(revision_in_force(stem, 2026), *y26, "{stem} @ TY2026");
+        }
+        // ★ `None` is a real answer, in both directions.
+        assert_eq!(
+            revision_in_force("fw2", 2023),
+            None,
+            "no 2023 Form W-2 is archived, and an annual edition never governs a neighbouring year"
+        );
+        assert_eq!(
+            revision_in_force("f1098", 2021),
+            None,
+            "Rev. January 2022 is first used to report 2022 amounts, so it governs nothing earlier"
+        );
+        assert_eq!(
+            revision_in_force("f1099nec", 2024),
+            None,
+            "a document that is not archived governs nothing"
+        );
+    }
+
+    /// ★★★ **I2 — THE CENSUSED DOCUMENT SET IS DERIVED FROM THE ARCHIVE, both directions.**
+    ///
+    /// The seam review deleted the whole `f1098e` authority and its two entries, and `box-census`
+    /// plus all six census tests reported success: the document set was a hand-list with no join to
+    /// anything. It is now the `MANIFEST.json` W / 1098 / 1099 series — `kind: form` for
+    /// [`DOCUMENTS`], `kind: instructions` for [`BOOKLETS`] — so an archived edition that is never
+    /// censused reds, and a censused edition that is not archived reds.
+    #[test]
+    fn documents_equal_the_archived_information_returns() {
+        let root = repo_root();
+        let (forms, booklets) =
+            archived_information_returns(&root).expect("the manifest join must resolve");
+        assert!(
+            forms.len() >= 7 && booklets.len() >= 7,
+            "the derivation found {} forms and {} booklets — a census over nothing passes",
+            forms.len(),
+            booklets.len()
+        );
+        check_document_set(&root).expect("DOCUMENTS/BOOKLETS must equal the archived series");
+        // ★ Every form's booklet stem must itself be archived, or the `instructions` field names a
+        //   document nobody holds.
         for doc in DOCUMENTS {
             assert!(
-                extract_path(&root, doc.stem, doc.year).is_file(),
-                "{}--{}: no committed extract",
+                BOOKLETS.iter().any(|b| b.stem == doc.instructions),
+                "{}--{} names instructions {:?}, which is in no BOOKLETS row",
                 doc.stem,
-                doc.year
+                doc.edition,
+                doc.instructions
             );
-            for stem in [doc.stem, doc.instructions] {
-                let note = root.join(format!(
-                    "design/forms/{}/{stem}--{}.pdf.txt",
-                    doc.year, doc.year
-                ));
-                assert!(
-                    note.is_file(),
-                    "{stem}--{}: no provenance note at {} — the PDF is gitignored, so without the \
-                     note the text layer cannot be reproduced",
-                    doc.year,
-                    note.display()
-                );
-            }
         }
+        // ★★ B1 — the join watched RED on the exact defect the seam review planted: an archived
+        //    edition the census does not carry. Planted here rather than in the tree, so the kill
+        //    needs no mutation of a committed table.
+        let dropped: BTreeSet<(String, String)> = DOCUMENTS
+            .iter()
+            .skip(1)
+            .map(|d| (d.stem.to_string(), d.edition.to_string()))
+            .collect();
+        let missing: Vec<_> = forms.difference(&dropped).collect();
+        assert_eq!(
+            missing.len(),
+            1,
+            "dropping one authority must leave exactly one archived edition uncensused"
+        );
     }
 
     /// ★★★ **B1 — the gate watched going RED on every defect class it claims to catch.**
@@ -906,15 +1483,57 @@ mod tests {
              2 Early withdrawal penalty\n\
              3 Interest on U.S. Savings Bonds\n\
              Form 1099-INT   Cat. No. 14410K\n";
-        let boxes = printed_boxes(good).expect("the baseline must enumerate");
+        let boxes = printed_boxes(good, PREAMBLE_1141).expect("the baseline must enumerate");
         assert_eq!(boxes.len(), 3, "baseline: {boxes:?}");
 
         let gapped = good.replace("2 Early withdrawal penalty\n", "");
-        let err = printed_boxes(&gapped).expect_err("a dropped box must RED, not shorten the list");
+        let err = printed_boxes(&gapped, PREAMBLE_1141)
+            .expect_err("a dropped box must RED, not shorten the list");
         assert!(err.contains("not contiguous"), "wrong reason: {err}");
 
         let unbounded = good.replace("Cat. No. 14410K", "");
-        let err = printed_boxes(&unbounded).expect_err("an unbounded face block must RED");
+        let err =
+            printed_boxes(&unbounded, PREAMBLE_1141).expect_err("an unbounded face block must RED");
         assert!(err.contains("Copy A never closes"), "wrong reason: {err}");
+
+        // ★ A marker that is not this edition's own must red rather than silently fall back.
+        let err = printed_boxes(good, PREAMBLE_W2_2026)
+            .expect_err("a preamble marker absent from the document must RED");
+        assert!(err.contains("occurs 0 times"), "wrong reason: {err}");
+    }
+
+    /// ★★ **Enumerator rules 5 and 6, planted** — the two furniture readings that keep the widened
+    /// [`is_label`] honest. Both are lifted from real documents: the Rev. January 2022 Form 1098's
+    /// blank *For calendar year* stub, and the Form W-2's vertical *Code* rail.
+    #[test]
+    fn the_enumerator_reads_the_year_stub_and_the_code_rail_as_furniture() {
+        let with_stub = "See Publications 1141, 1167, and 1179 for more information.\n\
+             \x20                        For calendar year                 Statement\n\
+             \x20                              20\n\
+             1 Mortgage interest received\n\
+             2 Outstanding mortgage\n\
+             Form 1098   Cat. No. 14402K\n";
+        let boxes = printed_boxes(with_stub, PREAMBLE_1141)
+            .expect("the calendar-year stub must not be read as box 20");
+        assert_eq!(
+            boxes.keys().collect::<Vec<_>>(),
+            ["1", "2"],
+            "the blank year stub entered the census: {boxes:?}"
+        );
+
+        let with_rail = "See Publications 1141, 1167, and 1179 for more information.\n\
+             a Employee’s social security number\n\
+             1 Wages, tips, other compensation                 C\n\
+             \x20                                              o\n\
+             \x20                                              d\n\
+             \x20                                              e\n\
+             Form W-2   Cat. No. 10134D\n";
+        let boxes = printed_boxes(with_rail, PREAMBLE_1141)
+            .expect("the vertical Code rail must not be read as boxes o/d/e");
+        assert_eq!(
+            boxes.keys().collect::<Vec<_>>(),
+            ["1", "a"],
+            "the Code rail entered the census: {boxes:?}"
+        );
     }
 }

@@ -1,0 +1,25 @@
+https://web.archive.org/web/20240229054110id_/https://www.irs.gov/pub/irs-pdf/i1098.pdf
+
+# i1098--2022.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  a0de2cd965c5faf6209714145b4b1f69ceb0dd07fe2c4400a01494ad38a9d486
+# bytes   169482
+#
+# Fetch:    curl -sL -o i1098--2022.pdf https://web.archive.org/web/20240229054110id_/https://www.irs.gov/pub/irs-pdf/i1098.pdf
+# Verify:   sha256sum i1098--2022.pdf   # must equal the sha256 above
+#
+# ★ A DIFFERENT hash does not mean a corrupt download — it means the IRS REVISED this
+# document. That is a change to the authority: review it, never silently absorb it.
+#
+# The committed text layer is design/forms/extract/i1098--2022.txt — that is what the
+# conformance tests read, so they run with no PDF and no network.
+#
+# Archived 2026-09-07 folding the interview T2 seam review (C1): the archive is PER REVISION
+# and serves TY2024, TY2025 and TY2026, so `box_census::revision_in_force(stem, tax_year)`
+# resolves which edition a row's own tax year governs instead of pinning one.
+# REVISION, READ OFF THE DOCUMENT'S OWN TEXT (never assumed from the filename):
+#   "(Rev. January 2022)" (extract:6); footer "Instructions for Form 1098 (Rev. 01-2022)"
+#   (extract:260).
+# PERIODIC (continuous-use); the booklet that pairs with the Rev. January 2022 form.
+# ★★★ Same provenance as f1098--2022: irs-prior/i1098--2022.pdf is 404 (measured), and these
+# are the bytes the IRS served at https://www.irs.gov/pub/irs-pdf/i1098.pdf until Rev. April
+# 2025 replaced them, recovered from the Internet Archive's capture of that IRS URL.

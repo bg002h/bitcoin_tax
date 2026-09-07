@@ -83,6 +83,25 @@ fn irs_stem(name: &str) -> bool {
     matches!(rest.first(), Some('w')) && rest.get(1).is_some_and(char::is_ascii_digit)
 }
 
+/// ★★★ **Is this stem one of the W / 1098 / 1099 INFORMATION RETURNS?** — the series the interview
+/// transcribes boxes from, and the join `box_census` derives its censused document set through.
+///
+/// ★ It is a reading of how the IRS numbers the series, not a list of the seven documents we happen
+/// to hold: strip the `f`/`i` prefix, then the remainder is the wage series (`w` + a digit: `fw2`,
+/// `iw2w3`) or the 1098/1099 series (`f1098e`, `i1099int`). A hand-list would have to be edited to
+/// admit the 1099-NEC, 1099-R or 1099-DA, and forgetting to is exactly the silence I2 found — the
+/// review deleted a whole archived form from the census and every test still reported success.
+#[must_use]
+pub fn is_information_return_stem(stem: &str) -> bool {
+    let rest = match stem.as_bytes().first() {
+        Some(b'f') | Some(b'i') => &stem[1..],
+        _ => return false,
+    };
+    rest.starts_with("1098")
+        || rest.starts_with("1099")
+        || (rest.starts_with('w') && rest[1..].starts_with(|c: char| c.is_ascii_digit()))
+}
+
 /// `26USC_s1211.html`, `26CFR_1.1012-1_basis.xml` — statute and regulation, rungs 4 and 3.
 fn usc_or_cfr(name: &str) -> bool {
     if !ext_is_document(name) {

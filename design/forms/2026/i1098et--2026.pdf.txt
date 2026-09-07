@@ -1,0 +1,21 @@
+https://www.irs.gov/pub/irs-prior/i1098et--2026.pdf
+
+# i1098et--2026.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  a06256fece2bfc5352e8647856b3c1aca0a4c96a79a5a5dd1324f4049c2f5655
+# bytes   155690
+#
+# Fetch:    curl -sL -o i1098et--2026.pdf https://www.irs.gov/pub/irs-prior/i1098et--2026.pdf
+# Verify:   sha256sum i1098et--2026.pdf   # must equal the sha256 above
+#
+# ★ A DIFFERENT hash does not mean a corrupt download — it means the IRS REVISED this
+# document. That is a change to the authority: review it, never silently absorb it.
+#
+# The committed text layer is design/forms/extract/i1098et--2026.txt — that is what the
+# conformance tests read, so they run with no PDF and no network.
+#
+# Archived 2026-09-07 folding the interview T2 seam review (C1): the archive is PER REVISION
+# and serves TY2024, TY2025 and TY2026, so `box_census::revision_in_force(stem, tax_year)`
+# resolves which edition a row's own tax year governs instead of pinning one.
+# REVISION, READ OFF THE DOCUMENT'S OWN TEXT (never assumed from the filename):
+#   "2026 / Instructions for Forms / 1098-E and 1098-T" (extract:1,3-4).
+# ANNUAL cadence.

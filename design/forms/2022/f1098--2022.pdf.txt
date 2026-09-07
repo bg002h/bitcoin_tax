@@ -1,0 +1,34 @@
+https://web.archive.org/web/20240229054110id_/https://www.irs.gov/pub/irs-pdf/f1098.pdf
+
+# f1098--2022.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  3c77f5a0d5a97bd7bf882008afc1ef12e56b85888a36cb1b3f1643c927c0d607
+# bytes   510955
+#
+# Fetch:    curl -sL -o f1098--2022.pdf https://web.archive.org/web/20240229054110id_/https://www.irs.gov/pub/irs-pdf/f1098.pdf
+# Verify:   sha256sum f1098--2022.pdf   # must equal the sha256 above
+#
+# ★ A DIFFERENT hash does not mean a corrupt download — it means the IRS REVISED this
+# document. That is a change to the authority: review it, never silently absorb it.
+#
+# The committed text layer is design/forms/extract/f1098--2022.txt — that is what the
+# conformance tests read, so they run with no PDF and no network.
+#
+# Archived 2026-09-07 folding the interview T2 seam review (C1): the archive is PER REVISION
+# and serves TY2024, TY2025 and TY2026, so `box_census::revision_in_force(stem, tax_year)`
+# resolves which edition a row's own tax year governs instead of pinning one.
+# REVISION, READ OFF THE DOCUMENT'S OWN TEXT (never assumed from the filename):
+#   "(Rev. January 2022)" (extract:25); footer "Form 1098 (Rev. 1-2022)" (extract:60).
+# PERIODIC (continuous-use). First used to report amounts for calendar year 2022, so this is
+# the edition in force for TY2022, TY2023 and TY2024 — the Form 1098 a TY2024 filer holds.
+#
+# ★★★ NOT ON irs-prior, AND THAT IS MEASURED, NOT ASSUMED. irs-prior/f1098--2022.pdf,
+# --2023.pdf and --2024.pdf are all 404 (checked 2026-09-07), and the IRS prior-products
+# picklist for Form 1098 jumps straight from the 2021 annual edition to 2025. The IRS served
+# these exact bytes at its own moving URL https://www.irs.gov/pub/irs-pdf/f1098.pdf — the
+# third source in design/forms/README.md's cadence table — from 2022-02 until 2025-03, when
+# Rev. April 2025 replaced them. The bytes above are that IRS file, recovered from the
+# Internet Archive's capture of that IRS URL; the Wayback SHA-1 digest
+# HXH64KERYKEWLRJCZ5IA24CE6D2KBPG4 is identical across every capture from 2022-02-08 to
+# 2025-02-26, so the object did not change under the moving URL.
+# ★ Archiving the 2021 edition instead would have been a FALSE answer: Form 1098 was annual
+# through 2021, so f1098--2021 governs TY2021 and nothing later.

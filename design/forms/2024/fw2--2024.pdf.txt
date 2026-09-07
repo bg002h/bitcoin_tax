@@ -1,0 +1,23 @@
+https://www.irs.gov/pub/irs-prior/fw2--2024.pdf
+
+# fw2--2024.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  318af9431e372ef7b92c478ef76355312de70f09ac92072d48cdd025080ef526
+# bytes   1341097
+#
+# Fetch:    curl -sL -o fw2--2024.pdf https://www.irs.gov/pub/irs-prior/fw2--2024.pdf
+# Verify:   sha256sum fw2--2024.pdf   # must equal the sha256 above
+#
+# ★ A DIFFERENT hash does not mean a corrupt download — it means the IRS REVISED this
+# document. That is a change to the authority: review it, never silently absorb it.
+#
+# The committed text layer is design/forms/extract/fw2--2024.txt — that is what the
+# conformance tests read, so they run with no PDF and no network.
+#
+# Archived 2026-09-07 folding the interview T2 seam review (C1): the archive is PER REVISION
+# and serves TY2024, TY2025 and TY2026, so `box_census::revision_in_force(stem, tax_year)`
+# resolves which edition a row's own tax year governs instead of pinning one.
+# REVISION, READ OFF THE DOCUMENT'S OWN TEXT (never assumed from the filename):
+#   "2024", printed on the form face beside "Form W-2 Wage and Tax Statement"
+#   (extract:71) at extract:73.
+# ANNUAL cadence: Form W-2 carries a tax year, not a "Rev." date, so this edition is the
+# one a TY2024 filer holds.

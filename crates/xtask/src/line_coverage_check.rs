@@ -526,23 +526,222 @@ fn missing_cover_fns(rel: &str, src: &str, emitter_code: &str, cov_src: &str) ->
     errs
 }
 
-/// ★★★ **Rule (7) as a pure function** — `SPEC_interview.md` R2 mechanism 1 / R5, T2's kill.
+/// ★★★ **THE FORM → INSTRUCTIONS JOIN** — which booklet is *this* form's own.
 ///
-/// A [`Production::Collected`] row names its source, and the name is resolved against the archive:
+/// `design/forms/README.md`: *"Instructions follow the **identically-numbered** convention: form
+/// `fNNNN` has instructions `iNNNN` (`f6251`→`i6251`, `f1040sa`→`i1040sca`), with `i1040gi` carrying
+/// the 1040-family schedules that get no standalone booklet (Schedule 1-A, Schedules 2 and 3)."*
+/// This function is that paragraph, and the two exception families are the README's own rather than
+/// ours.
 ///
-/// - **`DocBox`** — the (stem, year) must be one of [`crate::box_census::DOCUMENTS`], that document
-///   must actually PRINT the named box, and `extract_line` must be the box's caption verbatim. The
-///   box set and the captions both come from the document's own extract, so this is a join between
-///   two independently-derived readings of the same paper, not a hand-list checked against itself.
-/// - **`FilerRecords`** — R5's lines have no issuing third party and therefore no box, so what is
-///   checked is the INSTRUCTION sentence that tells the filer where to get the figure: the stem must
-///   be an instructions document (`i…`), never the row's own form, and the sentence must occur
-///   verbatim (whitespace-normalised) in the archived extract.
+/// ★★ **It exists because `FilerRecords` used to let the AUTHOR name the booklet.** The seam review
+/// re-pointed Schedule A line 5b — state and local *real estate taxes* — at the Form 6251 sentence
+/// *"The AMTFTC is a credit that you can claim against the AMT."* and `line-coverage` printed OK.
+/// Nothing bound the booklet to the row's form, so any sentence in any archived `i*` booklet
+/// satisfied 36 of the 71 `Collected` rows. Deriving the booklet removes the choice.
 ///
-/// ★★ **The "never the row's own form" clause is the anti-tautology guard**, and it is the one rule
-/// here that exists because of how a builder under time pressure would satisfy this field: the row
-/// already carries its form's own printed text in `instruction`, and pasting that back in as the
-/// `instruction_line` would type-check, resolve, pass a `contains` check and prove nothing at all.
+/// ★ The anti-tautology guard (*"never the row's own form"*) is now **structural**: every value this
+/// returns begins `i`, so a row cannot quote its own printed text back at itself even by accident.
+fn booklet_for(form: &str) -> Option<&'static str> {
+    Some(match form {
+        // The 1040 itself and the schedules with no standalone booklet — the README's own exception.
+        "f1040" | "f1040s1" | "f1040s2" | "f1040s3" | "f1040s1a" => "i1040gi",
+        // Schedule A's booklet is `i1040sca`, not `i1040sa` — the second README exception.
+        "f1040sa" => "i1040sca",
+        "f1040sb" => "i1040sb",
+        "f1040sc" => "i1040sc",
+        "f1040sd" => "i1040sd",
+        "f1040sse" => "i1040sse",
+        "f1040s8" => "i1040s8",
+        // The identically-numbered convention, for every standalone form.
+        "f6251" => "i6251",
+        "f8949" => "i8949",
+        "f8959" => "i8959",
+        "f8960" => "i8960",
+        "f8995" => "i8995",
+        "f8995a" => "i8995a",
+        _ => return None,
+    })
+}
+
+/// The label region of a `Line <N>` / `Lines <A> and <B>` heading, or `None` if the line is not one.
+///
+/// ★★ **The blocks are enumerated from the booklet's own headings, never hand-listed** — the same
+/// rule the box census follows for captions. Three heading shapes occur across the archived
+/// booklets and all three are read here, because picking one would have silently emptied the others:
+///
+/// | shape | booklets |
+/// |---|---|
+/// | `Line 5b` alone on its line | `i1040sca`, `i1040gi`, `i6251`, `i8995`, `i1040sc`, `i1040sd`, `i8949` |
+/// | `Line 4. <sentence>` | `i8995a`, and the worksheet blocks of `i1040sca`/`i1040sc` |
+/// | `Line 7—<Title>` (em dash) | `i8960` |
+///
+/// A range (`Lines 5a–5d`, `Lines 1 through 3`) expands when both endpoints share a shape, so a
+/// sentence under a grouped heading still binds to the row's own line.
+fn line_block_labels(line: &str) -> Option<Vec<String>> {
+    let t = line.trim();
+    let rest = t
+        .strip_prefix("Lines ")
+        .or_else(|| t.strip_prefix("Line "))?;
+    // The label region ends at the first character that can only be prose.
+    let region: String = rest
+        .chars()
+        .take_while(|c| {
+            c.is_ascii_alphanumeric()
+                || matches!(c, ' ' | ',' | '-' | '\u{2013}' | '\u{2014}' | '&' | '/')
+        })
+        .collect();
+    let mut labels: Vec<String> = Vec::new();
+    let mut stop = false;
+    for tok in region
+        .split([' ', ',', '-', '\u{2013}', '\u{2014}', '&', '/'])
+        .filter(|t| !t.is_empty())
+    {
+        if matches!(tok, "and" | "through" | "or" | "to") {
+            continue;
+        }
+        if is_line_label(tok) {
+            if stop {
+                break;
+            }
+            labels.push(tok.to_string());
+        } else {
+            // The first non-label token ends the region: `Line 1 Taxable Interest` stops at
+            // `Taxable`. Anything after it is the heading's prose title.
+            stop = true;
+        }
+    }
+    if labels.is_empty() {
+        return None;
+    }
+    // A two-endpoint range covers everything between: `Lines 5a–5d`, `Lines 1 through 3`.
+    if labels.len() == 2 {
+        if let Some(expanded) = expand_range(&labels[0], &labels[1]) {
+            return Some(expanded);
+        }
+    }
+    Some(labels)
+}
+
+/// `1`, `5b`, `12` — digits then at most one lowercase letter.
+fn is_line_label(tok: &str) -> bool {
+    let digits = tok.chars().take_while(char::is_ascii_digit).count();
+    if digits == 0 {
+        return false;
+    }
+    let tail = &tok[digits..];
+    tail.is_empty() || (tail.len() == 1 && tail.chars().all(|c| c.is_ascii_lowercase()))
+}
+
+/// `5a`..`5d` → `5a 5b 5c 5d`; `1`..`3` → `1 2 3`. `None` when the endpoints do not form a range.
+fn expand_range(a: &str, b: &str) -> Option<Vec<String>> {
+    let split = |s: &str| -> (String, Option<char>) {
+        let d: String = s.chars().take_while(char::is_ascii_digit).collect();
+        (d.clone(), s[d.len()..].chars().next())
+    };
+    let (an, al) = split(a);
+    let (bn, bl) = split(b);
+    match (al, bl) {
+        (None, None) => {
+            let (x, y) = (an.parse::<u32>().ok()?, bn.parse::<u32>().ok()?);
+            (x < y && y - x < 40).then(|| (x..=y).map(|n| n.to_string()).collect())
+        }
+        (Some(x), Some(y)) if an == bn && x < y => {
+            Some((x..=y).map(|c| format!("{an}{c}")).collect())
+        }
+        _ => None,
+    }
+}
+
+/// **Every `Line <N>` block a booklet prints, label → the block's text** (a label can head more than
+/// one block: `i1040gi` carries the 1040 *and* Schedules 1, 2, 3 and 1-A, each with its own `Line 1a`).
+///
+/// ★★ **A block includes its own heading line**, because in `i8995a` the heading *is* the sentence
+/// (`Line 4. Enter your W-2 wages from the trade, business, or`).
+///
+/// ★★ **An EMPTY block extends to the next heading, and that is a measurement rather than a fudge.**
+/// `i1040gi` is a three-column booklet extracted with no `pdftotext` flags, so headings and bodies
+/// interleave across columns: `Line 26` is followed immediately by `Line 25a—Form(s) W-2` and only
+/// then by line 26's own body. A heading with no body at all cannot be the whole instruction, so the
+/// block runs on until a body appears — which pairs both headings with the shared body instead of
+/// pretending line 26 has no instructions at all.
+fn line_blocks(text: &str) -> BTreeMap<String, Vec<String>> {
+    let lines: Vec<&str> = text.lines().collect();
+    let heads: Vec<(usize, Vec<String>)> = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(i, l)| line_block_labels(l).map(|labels| (i, labels)))
+        .collect();
+    let mut blocks: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (n, (start, labels)) in heads.iter().enumerate() {
+        let mut j = n + 1;
+        let body = loop {
+            let end = heads.get(j).map_or(lines.len(), |(i, _)| *i);
+            let body = &lines[*start..end];
+            if j >= heads.len() || body[1..].iter().any(|l| !l.trim().is_empty()) {
+                break body.join("\n");
+            }
+            j += 1;
+        };
+        for l in labels {
+            blocks.entry(l.clone()).or_default().push(body.clone());
+        }
+    }
+    blocks
+}
+
+/// ★★ **Does the sentence NAME the row's own line?** — the second of the two binds, and the only one
+/// available where a booklet's extraction interleaves.
+///
+/// A sentence that says *"also enter this amount on Schedule D, line 6"* is bound to line 6 by its own
+/// words, which is a stronger statement than merely sitting in a block. It is a real bind rather than
+/// an escape hatch: 31 of the 36 `FilerRecords` rows satisfy the block clause, and each of the 5 that
+/// rely on this one names its line explicitly.
+fn names_the_line(sentence: &str, label: &str) -> bool {
+    if label.is_empty() {
+        return false;
+    }
+    let low = format!(" {} ", normalize(sentence).to_lowercase());
+    if !low.contains(" line ") && !low.contains(" lines ") {
+        return false;
+    }
+    let needle = label.to_lowercase();
+    low.match_indices(&needle).any(|(i, _)| {
+        let before = low[..i].chars().next_back();
+        let after = low[i + needle.len()..].chars().next();
+        !before.is_some_and(|c| c.is_ascii_alphanumeric())
+            && !after.is_some_and(|c| c.is_ascii_alphanumeric())
+    })
+}
+
+/// The row's line reduced to the booklet's own label: `1a(d)` → `1a`, `I-1(d)` → `1`, `14b` → `14b`.
+///
+/// ★ Form 8949's rows are labelled `<part>-<line>(<column>)` (`I-1(d)`), so the part prefix is
+/// dropped: the booklet numbers the FORM's lines, not the part's.
+fn line_label_of(line: &str) -> String {
+    line.rsplit('-')
+        .next()
+        .unwrap_or(line)
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || c.is_ascii_lowercase())
+        .collect()
+}
+
+/// ★★★ **Rule (7) as a pure function** — `SPEC_interview.md` R2 mechanism 1 / R5, T2's kill, as the
+/// seam review's C1/I1 rebuilt it.
+///
+/// A [`Production::Collected`] row names its source, and **the row's own TAX YEAR resolves which
+/// paper that source is**:
+///
+/// - **`DocBox`** — `box_census::revision_in_force(stem, row.year)` picks the archived edition in
+///   force for the row's year (`None` reds); that edition must actually PRINT the named box; and the
+///   box census's entry for it must quote that edition's own caption. So this is a join between two
+///   independently-derived readings of the same paper, resolved through the IRS's own
+///   revision-to-year rule rather than a year the author typed.
+/// - **`FilerRecords`** — the booklet is [`booklet_for`] the ROW's form at the row's year, and the
+///   sentence must fall inside that booklet's `Line <N>` block for the row's own line. Nothing about
+///   either join is the author's choice; only the quotation is, and it is checked verbatim
+///   (whitespace-normalised).
 ///
 /// ★ A `Collected` row with NEITHER source cannot reach this function: [`line_coverage::CollectedFrom`]
 /// has exactly two variants, so the omission is `E0061` at the call site.
@@ -551,94 +750,123 @@ fn check_collected_from(
     form: &str,
     line: &str,
     field: &str,
+    year: &str,
     from: line_coverage::CollectedFrom,
 ) -> Vec<String> {
     use line_coverage::CollectedFrom;
     let at = format!("{form}:{line} ({field})");
     match from {
-        CollectedFrom::DocBox {
-            stem,
-            year,
-            box_label,
-            extract_line,
-        } => {
-            let Some(doc) = crate::box_census::DOCUMENTS
-                .iter()
-                .find(|d| d.stem == stem && d.year == year)
-            else {
+        CollectedFrom::DocBox { stem, box_label } => {
+            let Ok(tax_year) = year.parse::<u32>() else {
+                return vec![format!("{at}: the row's year {year:?} is not a tax year")];
+            };
+            let Some(edition) = crate::box_census::revision_in_force(stem, tax_year) else {
                 return vec![format!(
-                    "{at} is Collected from {stem}--{year} box {box_label}, but no such information \
-                     return is archived — a DocBox must name a document the box census reads, or \
-                     nothing checks the caption"
+                    "{at} is Collected from {stem} box {box_label}, but no such information return \
+                     is archived for TY{year} — the edition a TY{year} filer HOLDS is what the box \
+                     caption must be checked against, and nothing governs that year"
                 )];
             };
-            let path = root.join(format!("design/forms/extract/{stem}--{year}.txt"));
+            let Some(doc) = crate::box_census::DOCUMENTS
+                .iter()
+                .find(|d| d.stem == stem && d.edition == edition)
+            else {
+                return vec![format!(
+                    "{at}: {stem}--{edition} is in force for TY{year} but is in no DOCUMENTS row"
+                )];
+            };
+            let path = root.join(format!("design/forms/extract/{stem}--{edition}.txt"));
             let text = match std::fs::read_to_string(&path) {
                 Ok(t) => t,
                 Err(e) => {
                     return vec![format!("{at}: cannot read {}: {e}", path.display())];
                 }
             };
-            let printed = match crate::box_census::printed_boxes(&text) {
+            let printed = match crate::box_census::printed_boxes(&text, doc.preamble_end) {
                 Ok(p) => p,
-                Err(e) => return vec![format!("{at}: {stem}--{year}: {e}")],
+                Err(e) => return vec![format!("{at}: {stem}--{edition}: {e}")],
             };
-            match printed.get(box_label) {
-                None => vec![format!(
-                    "{at} names {stem}--{year} box {box_label}, which that form does not print — the \
-                     box grid enumerated from its own extract has {:?}",
+            let Some(caption) = printed.get(box_label) else {
+                return vec![format!(
+                    "{at} names {stem}--{edition} box {box_label}, which that form does not print in \
+                     the edition in force for TY{year} — the box grid enumerated from its own \
+                     extract has {:?}",
                     printed.keys().collect::<Vec<_>>()
-                )],
-                Some(caption) if caption != extract_line => vec![format!(
-                    "{at} quotes {stem}--{year} box {box_label} as {extract_line:?}, but the extract \
-                     prints {caption:?} — the box caption is the document's text, never ours \
-                     (instructions: {})",
+                )];
+            };
+            let entries: Vec<&crate::box_census::BoxEntry> = crate::box_census::entries_for(doc)
+                .into_iter()
+                .filter(|b| b.label == box_label)
+                .collect();
+            match entries.as_slice() {
+                [] => vec![format!(
+                    "{at} names {stem}--{edition} box {box_label}, which that edition prints but the \
+                     box census does not decide — a collected figure with no decided box is the \
+                     'we forgot this box' defect one layer up (instructions: {})",
                     doc.instructions
                 )],
-                Some(_) => Vec::new(),
+                [entry] if normalize(entry.caption) != normalize(caption) => vec![format!(
+                    "{at} is Collected from {stem}--{edition} box {box_label}, whose census entry \
+                     quotes {:?}, but the extract prints {caption:?} — the box caption is the \
+                     document's text, never ours (instructions: {})",
+                    entry.caption, doc.instructions
+                )],
+                [_] => Vec::new(),
+                _ => vec![format!(
+                    "{at}: {stem}--{edition} box {box_label} has more than one census entry"
+                )],
             }
         }
-        CollectedFrom::FilerRecords {
-            stem,
-            year,
-            instruction_line,
-        } => {
-            let mut errs = Vec::new();
+        CollectedFrom::FilerRecords { instruction_line } => {
             if normalize(instruction_line).is_empty() {
-                errs.push(format!(
+                return vec![format!(
                     "{at} is Collected from the filer's records with an EMPTY instruction line — a \
                      blank quote passes every `contains` and states nothing"
-                ));
-                return errs;
+                )];
             }
-            if !stem.starts_with('i') {
-                errs.push(format!(
-                    "{at} names {stem:?} as its instructions document — a FilerRecords quotation is \
-                     the INSTRUCTION's own sentence, so the stem must be an `iNNNN` booklet"
-                ));
+            let Some(booklet) = booklet_for(form) else {
+                return vec![format!(
+                    "{at} is Collected from the filer's records, but `booklet_for({form:?})` knows \
+                     no instructions document — the booklet is DERIVED from the row's form, so an \
+                     unknown form has nowhere to check its quotation"
+                )];
+            };
+            let path = root.join(format!("design/forms/extract/{booklet}--{year}.txt"));
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                return vec![format!(
+                    "{at} needs {booklet}--{year}, this form's own instructions, which is not \
+                     archived: {}",
+                    path.display()
+                )];
+            };
+            let label = line_label_of(line);
+            let blocks = line_blocks(&text);
+            let wanted = normalize(instruction_line);
+            // (i) the sentence sits inside a `Line <N>` block for this line — its own label, or its
+            //     numeric parent where the booklet heads the group rather than the column
+            //     (`Line 22.` covers Schedule 1-A lines 22a and 22b).
+            let numeric: String = label.chars().take_while(char::is_ascii_digit).collect();
+            let bodies: Vec<&String> = blocks
+                .get(&label)
+                .or_else(|| blocks.get(&numeric))
+                .map(Vec::as_slice)
+                .unwrap_or_default()
+                .iter()
+                .collect();
+            if bodies.iter().any(|b| normalize(b).contains(&wanted)) {
+                return Vec::new();
             }
-            if stem == form {
-                errs.push(format!(
-                    "{at} quotes its own form back at itself — the row already carries the form's \
-                     printed text in `instruction`, so this proves nothing"
-                ));
+            // (ii) or the sentence NAMES this line, and is somewhere in this form's own booklet.
+            if names_the_line(instruction_line, &label) && normalize(&text).contains(&wanted) {
+                return Vec::new();
             }
-            let path = root.join(format!("design/forms/extract/{stem}--{year}.txt"));
-            match std::fs::read_to_string(&path) {
-                Err(e) => errs.push(format!(
-                    "{at} cites {stem}--{year}, which is not archived: {e}"
-                )),
-                Ok(text) => {
-                    if !normalize(&text).contains(&normalize(instruction_line)) {
-                        errs.push(format!(
-                            "{at} cites {stem}--{year} for {instruction_line:?} — NOT FOUND in that \
-                             extract. The sentence that says where a filer's-records figure comes \
-                             from is quoted, never summarised"
-                        ));
-                    }
-                }
-            }
-            errs
+            vec![format!(
+                "{at} cites {instruction_line:?} — it is neither inside a `Line {label}` block of \
+                 {booklet}--{year} ({} block(s) carry that heading) nor a sentence that NAMES line \
+                 {label}. A filer's-records figure is quoted from the sentence that tells the filer \
+                 where to get IT, under ITS OWN line — not from somewhere else in the booklet",
+                bodies.len()
+            )]
         }
     }
 }
@@ -832,7 +1060,9 @@ pub fn check(cov: &line_coverage::Coverage) -> Result<String, String> {
         //     well as in the box census — the line's claim about the document and the document's own
         //     text are checked against each other, not each against itself.
         if let Production::Collected(from) = e.production {
-            errs.extend(check_collected_from(&root, e.form, &e.line, e.field, from));
+            errs.extend(check_collected_from(
+                &root, e.form, &e.line, e.field, e.year, from,
+            ));
         }
     }
 
@@ -1286,8 +1516,6 @@ mod tests {
             "5b",
             "line5b",
             Production::filer_records(
-                "i1040gi",
-                "2024",
                 "Include on line 25c any federal income tax withheld on your Form(s) W-2G.",
             ),
             "Taxable interest",
@@ -1368,8 +1596,6 @@ mod tests {
             "25d",
             "line25d",
             Production::filer_records(
-                "i1040gi",
-                "2024",
                 "Include on line 25c any federal income tax withheld on your Form(s) W-2G.",
             ),
             "Federal income tax withheld from:",
@@ -1393,8 +1619,6 @@ mod tests {
                 "5",
                 "smuggled",
                 Production::filer_records(
-                    "i1040gi",
-                    "2024",
                     "Include on line 25c any federal income tax withheld on your Form(s) W-2G.",
                 ),
                 blank,
@@ -1455,8 +1679,6 @@ mod tests {
                 "QDCGT Worksheet, 3",
                 Box::leak(format!("filler{i}").into_boxed_str()),
                 Production::filer_records(
-                    "i1040gi",
-                    "2024",
                     "Include on line 25c any federal income tax withheld on your Form(s) W-2G.",
                 ),
                 "Qualified business income component. Multiply line 4 by 20% (0.20)",
@@ -1479,8 +1701,6 @@ mod tests {
                 "1",
                 Box::leak(format!("filler{i}").into_boxed_str()),
                 Production::filer_records(
-                    "i1040gi",
-                    "2024",
                     "Include on line 25c any federal income tax withheld on your Form(s) W-2G.",
                 ),
                 "anything",
@@ -1578,7 +1798,7 @@ mod tests {
                 "f1040",
                 "2b",
                 "line2b",
-                Production::doc_box("f1099int", "2024", "1", "1 Interest income"),
+                Production::doc_box("f1099int", "1"),
                 "Taxable interest",
             )
         };
@@ -1599,26 +1819,24 @@ mod tests {
         );
         use btctax_core::tax::line_coverage::CollectedFrom;
         let source_plants: &[SourcePlant] = &[
-            // (7a) ★★ ONE CHARACTER of a box caption — the transcription defect this repo's standing
-            //      rule exists for, now reachable through a printed line's own claim about a document.
+            // (7a) ★★★ THE C1 KILL — a box that EXISTS, on a row whose year it does not exist in.
+            //      Form 1099-G box 10 is "Family leave benefits" on the Rev. December 2026 grid and
+            //      is not printed at all on the Rev. March 2024 one, which is the edition a TY2024
+            //      filer holds. Before the fold, a row pinned its own document year and this passed.
             (
-                "a DocBox caption changed by one character",
+                "a DocBox naming a box only a LATER edition prints",
                 CollectedFrom::DocBox {
-                    stem: "f1099int",
-                    year: "2024",
-                    box_label: "1",
-                    extract_line: "1 Interest incom",
+                    stem: "f1099g",
+                    box_label: "10",
                 },
-                "but the extract prints",
+                "which that form does not print",
             ),
-            // (7b) A box the form does not print — the stale entry after a revision renumbers.
+            // (7b) A box no edition prints — the stale entry after a revision renumbers.
             (
-                "a DocBox naming a box the form does not print",
+                "a DocBox naming a box the form does not print at all",
                 CollectedFrom::DocBox {
                     stem: "f1099int",
-                    year: "2024",
                     box_label: "99",
-                    extract_line: "99 Something",
                 },
                 "which that form does not print",
             ),
@@ -1627,53 +1845,65 @@ mod tests {
                 "a DocBox naming an unarchived document",
                 CollectedFrom::DocBox {
                     stem: "f1099nec",
-                    year: "2024",
                     box_label: "1",
-                    extract_line: "1 Nonemployee compensation",
                 },
                 "no such information return is archived",
             ),
-            // (7d) ★★★ THE ANTI-TAUTOLOGY GUARD. The row already carries f1040's own printed text, so
-            //      quoting f1040 back at itself would resolve, pass a `contains`, and prove nothing.
+            // (7d) ★★★ THE I1 KILL, and it is the reviewer's own plant: Schedule A line 5b — state
+            //      and local REAL ESTATE TAXES — pointed at the Form 6251 sentence about the AMT
+            //      foreign tax credit. It passed green before the fold, because nothing bound the
+            //      booklet to the row's form. It cannot even be SPELLED now (the variant carries no
+            //      stem), so what is planted is the sentence itself: `i1040sca` does not contain it.
             (
-                "a FilerRecords quoting the row's own form",
+                "a FilerRecords sentence from another form's booklet",
                 CollectedFrom::FilerRecords {
-                    stem: "f1040",
-                    year: "2024",
-                    instruction_line: "Taxable interest",
+                    instruction_line: "The AMTFTC is a credit that you can claim against the AMT.",
                 },
-                "quotes its own form back at itself",
+                "NAMES line",
             ),
-            // (7e) A paraphrase of the instruction — the same rot rule (2) catches on the form side.
+            // (7e) A sentence that IS in this form's own booklet, but under another line's heading —
+            //      the second half of I1, and the harder one.
             (
-                "a FilerRecords sentence that is not in the instructions",
+                "a FilerRecords sentence from another LINE of the right booklet",
                 CollectedFrom::FilerRecords {
-                    stem: "i1040gi",
-                    year: "2024",
-                    instruction_line: "Write down whatever interest you think you got.",
+                    instruction_line: "Enter the total of your medical and dental expenses, after \
+                                       you reduce these expenses by any payments received from \
+                                       insurance or other sources.",
                 },
-                "NOT FOUND in that extract",
+                "neither inside a `Line",
             ),
             // (7f) An empty quote: `contains("")` is true for every haystack.
             (
                 "a FilerRecords with a blank instruction line",
                 CollectedFrom::FilerRecords {
-                    stem: "i1040gi",
-                    year: "2024",
                     instruction_line: "   ",
                 },
                 "EMPTY instruction line",
             ),
         ];
         for (what, from, needle) in source_plants {
+            // ★ The two `FilerRecords` plants are planted on the row the reviewer used — Schedule A
+            //   line 5b — because the booklet is now DERIVED FROM THE ROW'S FORM, so which row a
+            //   sentence is planted on is the whole question.
+            let filer = matches!(from, CollectedFrom::FilerRecords { .. });
+            let (form, line, field, instruction) = if filer {
+                (
+                    "f1040sa",
+                    "5b",
+                    "line5b",
+                    "State and local real estate taxes (see instructions)",
+                )
+            } else {
+                ("f1040", "2b", "line2b", "Taxable interest")
+            };
             let mut c = Coverage::default();
             c.line(
                 btctax_core::conventions::Usd::ZERO,
-                "f1040",
-                "2b",
-                "line2b",
+                form,
+                line,
+                field,
                 Production::Collected(*from),
-                "Taxable interest",
+                instruction,
             );
             let e = check(&c)
                 .err()
@@ -1684,6 +1914,26 @@ mod tests {
             );
         }
 
+        // ★★ The control for (7d)/(7e): the row's OWN sentence, under its OWN line, PASSES — so the
+        //    two reds above are the binding working, not Schedule A line 5b being unquotable.
+        let mut c = Coverage::default();
+        c.line(
+            btctax_core::conventions::Usd::ZERO,
+            "f1040sa",
+            "5b",
+            "line5b",
+            Production::filer_records(
+                "Enter on line 5b the state and local taxes you paid on real estate you own that \
+                 wasn't used for business",
+            ),
+            "State and local real estate taxes (see instructions)",
+        );
+        assert!(
+            check(&c).is_ok(),
+            "the FilerRecords control row must PASS: {:?}",
+            check(&c)
+        );
+
         // A form with neither an extract nor a map — a typo'd stem.
         let mut c = Coverage::default();
         c.line(
@@ -1692,8 +1942,6 @@ mod tests {
             "1",
             "line1",
             Production::filer_records(
-                "i1040gi",
-                "2024",
                 "Include on line 25c any federal income tax withheld on your Form(s) W-2G.",
             ),
             "anything",

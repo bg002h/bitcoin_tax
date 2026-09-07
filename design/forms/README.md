@@ -39,20 +39,38 @@ verified by round-trip (fetch `f8995--2025.pdf`, hash it, compare to the note: m
 when `periodic/` was retired into the year directories).
 
     design/forms/MANIFEST.json     every document: source URL, sha256, size  (the provenance record)
+    design/forms/2022/*.pdf.txt    the Form 1098 revision in force for TY2022–TY2024 (see below)
     design/forms/2024/*.pdf.txt    TY2024 notes — what btctax ships today
     design/forms/2025/*.pdf.txt    TY2025 notes — the B3 target
+    design/forms/2026/*.pdf.txt    TY2026 notes — the target year; `-DRAFT` names are IRS drafts
     design/forms/extract/*.txt     ★ THE COMMITTED TEXT LAYER — what everything actually reads
 
 ★★ **A different hash is not a corrupt download — it means the IRS REVISED the document.** That is a
 change to the *authority*: review it, never silently absorb it. This is the one thing the manifest exists
 to make impossible to miss.
 
+★★★ **And now it has a reader: `cargo run -p xtask -- authority-refresh --check`.** It re-fetches every
+`storage: note` entry's own URL, hashes it, and reports drift — plus, for every information return, it
+probes `irs-prior/<stem>--<newest archived + 1>.pdf` and reports a 200 as *a newer edition exists*.
+Network-gated and **on demand**: it is never in `make check` and never in the suite (what the suite
+holds is the pure drift comparison and its planted kill). Before it existed, the archive sat a whole tax
+year behind its own target with every instrument printing OK — the seam review's I3.
+
+★ **An edition the IRS no longer serves is archived from the Internet Archive's capture of the IRS's
+own URL, and the note says so.** Form 1098 went continuous-use after the 2021 annual edition, and the
+revision in force for TY2022–TY2024 is **Rev. January 2022** — which `irs-prior` does not hold
+(`f1098--2022/2023/2024.pdf` are all 404 and the IRS picklist jumps 2021 → 2025, both measured
+2026-09-07). Those are the bytes the IRS served at its own moving `irs-pdf/f1098.pdf` URL for three
+years, recovered from a capture of that URL, with the Wayback digest's constancy recorded in the note.
+Archiving the 2021 edition instead would have been a false answer: an ANNUAL edition governs its own
+tax year and nothing later.
+
 ## What is NOT done yet
 
 Archived ≠ extracted ≠ conformance-tested. These PDFs are step 1 of three:
 
-1. **archived** — done: **98** documents recorded, all in `design/forms/` (measured
-   `ls design/forms/*/*.pdf.txt | wc -l`, 2026-09-06), each as a URL note plus its extracted text.
+1. **archived** — done: **115** documents recorded, all in `design/forms/` (measured
+   `ls design/forms/*/*.pdf.txt | wc -l`, 2026-09-07), each as a URL note plus its extracted text.
    ★ The older `design/amt-form6251/` holds **no** notes — it was retired as an archive on
    2026-07-30.
 

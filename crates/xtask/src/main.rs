@@ -10,6 +10,7 @@
 mod archive_check;
 mod authority_conflicts;
 mod authority_manifest;
+mod authority_refresh;
 mod box_census;
 /// N1 — asserts `btctax_core::tax::capital_loss_carryover` is verbatim and complete against the 2025
 /// Schedule D instructions' text layer.
@@ -157,6 +158,25 @@ fn main() {
                 }
             }
         }
+        // ★ ON DEMAND ONLY — it needs the network, and `make check` must stay offline. See the
+        //   module doc: the suite tests the pure comparison, never the fetch.
+        Some("authority-refresh") => {
+            if !args.iter().any(|a| a == "--check") {
+                eprintln!(
+                    "usage: cargo run -p xtask -- authority-refresh --check [--from-dir <dir>]"
+                );
+                std::process::exit(2);
+            }
+            let from_dir = args
+                .iter()
+                .position(|a| a == "--from-dir")
+                .and_then(|i| args.get(i + 1))
+                .map(std::path::PathBuf::from);
+            if let Err(e) = authority_refresh::run(from_dir) {
+                eprintln!("xtask authority-refresh: {e}");
+                std::process::exit(1);
+            }
+        }
         Some("extract-geometry") => {
             let Some(stem) = args.get(1) else {
                 eprintln!(
@@ -247,7 +267,7 @@ fn main() {
         _ => {
             eprintln!(
                 "usage: cargo run -p xtask -- <docs [--pdf] | examples | subcommand-coverage | \
-                 check-isolation | line-coverage | box-census | cite-check | prompt-check | authority-conflicts | harness-check | archive-check | authority-manifest [--regen] | extract-geometry <stem> | label-census <stem> | label-proof <stem> | label-boxes <stem> | \
+                 check-isolation | line-coverage | box-census | cite-check | prompt-check | authority-conflicts | harness-check | archive-check | authority-manifest [--regen] | authority-refresh --check | extract-geometry <stem> | label-census <stem> | label-proof <stem> | label-boxes <stem> | \
                  classify-path <path> | \
                  extract-schedule-1a | dump-fields <pdf> | form-delta <old> <new> | \
                  port-status <prior-tag> <new-tag>>"

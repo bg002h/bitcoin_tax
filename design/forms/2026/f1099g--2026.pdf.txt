@@ -1,0 +1,24 @@
+https://www.irs.gov/pub/irs-prior/f1099g--2026.pdf
+
+# f1099g--2026.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  65a416c52508d8a3d77ee1734194767d1e1c8a607c778fd1914dd1a62da569a2
+# bytes   542657
+#
+# Fetch:    curl -sL -o f1099g--2026.pdf https://www.irs.gov/pub/irs-prior/f1099g--2026.pdf
+# Verify:   sha256sum f1099g--2026.pdf   # must equal the sha256 above
+#
+# ★ A DIFFERENT hash does not mean a corrupt download — it means the IRS REVISED this
+# document. That is a change to the authority: review it, never silently absorb it.
+#
+# The committed text layer is design/forms/extract/f1099g--2026.txt — that is what the
+# conformance tests read, so they run with no PDF and no network.
+#
+# Archived 2026-09-07 folding the interview T2 seam review (C1): the archive is PER REVISION
+# and serves TY2024, TY2025 and TY2026, so `box_census::revision_in_force(stem, tax_year)`
+# resolves which edition a row's own tax year governs instead of pinning one.
+# REVISION, READ OFF THE DOCUMENT'S OWN TEXT (never assumed from the filename):
+#   "(Rev. December 2026)" (extract:50); footer "Form 1099-G (Rev. 12-2026)" (extract:70).
+# PERIODIC (continuous-use). First used to report amounts for calendar year 2026.
+# ★★★ THE GRID MOVED, and it moved by adding an INCOME box: box 10 is now "Family leave
+# benefits" (extract:64) and the state boxes renumbered 10a/10b/11 → 11a/11b/12. The
+# Rev. March 2024 edition archived under design/forms/2024/ still governs TY2024 and TY2025.

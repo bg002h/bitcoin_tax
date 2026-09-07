@@ -1,0 +1,325 @@
+Instructions for Form 1099-G
+(Rev. December 2026)
+
+Certain Government Payments
+Section references are to the Internal Revenue Code unless
+otherwise noted.
+
+Future Developments
+
+For the latest information about developments related to Form
+1099-G and its instructions, such as legislation enacted after
+they were published, go to IRS.gov/Form1099G.
+You can get Pub. 1099, General Instructions for Certain
+Information Returns, at IRS.gov/1099GeneralInstructions.
+
+What’s New
+State paid family and medical leave programs. Rev. Rul.
+2025-4 requires states to file with the IRS and furnish to an
+employee a Form 1099 to report family leave benefits paid by
+state paid family and medical leave programs. Box 10, Family
+leave benefits, was added to Form 1099-G to facilitate this
+reporting requirement. Consequently, state information boxes
+10a, 10b, and 11 on Form 1099-G have been renumbered as
+11a, 11b, and 12, respectively. For more information, see Rev.
+Rul. 2025-4, 2025-7 I.R.B. 758.
+Address fields. For the Payer’s and Recipient’s information, we
+separated the address fields into individual entry boxes.
+Continuous-use revisions. Use the December 2026 revision
+of Form 1099-G and these instructions to file 2026 information
+with the IRS in early 2027. Also use them to furnish the
+information to the recipient. Continue to use these revisions for
+subsequent years until we issue a superseding revision. Do not
+use these revisions for prior years.
+E-filing returns. The Taxpayer First Act of 2019 authorized the
+Department of the Treasury and the IRS to issue regulations that
+reduce the 250-return e-file threshold. T.D. 9972, published
+February 23, 2023, lowered the e-file threshold to 10 (calculated
+by aggregating all information returns), effective for information
+returns required to be filed on or after January 1, 2024. Go to
+IRS.gov/InfoReturn for e-file options.
+Information Returns Intake System (IRIS). The IRS has
+developed IRIS, an online portal for e-filing information returns.
+Go to IRS.gov/IRIS for more information.
+
+Reminders
+
+In addition to these specific instructions, you should use the
+current Pub. 1099, General Instructions for Certain Information
+Returns. Those general instructions include information about
+the following topics.
+• Who must file.
+• When and where to file.
+• Electronic reporting.
+• Corrected and void returns.
+• Statements to recipients.
+• Taxpayer identification numbers (TINs).
+• Backup withholding.
+• Penalties.
+• Other general topics.
+
+Online PDF fillable Copies 1, B, and 2. To ease statement
+furnishing requirements, Copies 1, B, and 2 are fillable online in
+a PDF format available at IRS.gov/Form1099G. You can
+complete these copies online for furnishing statements to
+recipients and for retaining in your own files.
+Oct 10, 2025
+
+Continuous-use instructions. Use these instructions for tax
+year 2026 and subsequent years until a superseding revision is
+issued.
+Replacement of lead service lines. Announcement 2024-10
+addresses the federal income tax treatment of certain lead
+service line replacement programs for residential property
+owners. The replacement of lead service lines under the
+programs described in the announcement does not result in
+income. Water systems and state governments are not required
+to file information returns or furnish payee statements with
+respect to the replacement of lead service lines under these
+programs. For more information, see Announcement 2024-10,
+2024-11 I.R.B. 711.
+
+Specific Instructions
+
+File Form 1099-G, Certain Government Payments, if, as a unit of
+a federal, state, or local government, you made payments of
+unemployment compensation; state or local income tax refunds,
+credits, or offsets; family leave benefits; Reemployment Trade
+Adjustment Assistance (RTAA) payments; taxable grants; or
+agricultural payments. You must also file this form if you received
+payments on a Commodity Credit Corporation (CCC) loan. The
+officer or employee of the government unit having control of the
+payments, received or made, (or the designated officer or
+employee) must file Form 1099-G.
+You must also file Form 1099-G for each person from whom
+you have withheld any federal income tax (report in box 4) under
+the backup withholding rules regardless of the amount of the
+payment.
+Certain amounts that are not reportable on Form 1099-G,
+such as compensation for services, prizes, and certain
+incentives, may be reportable on Form 1099-MISC,
+Miscellaneous Information, or Form 1099-NEC, Nonemployee
+Compensation. See the Instructions for Forms 1099-MISC and
+1099-NEC for more information.
+
+Statements to Recipients
+
+If you are required to file Form 1099-G, you must furnish the
+same information to the recipient. Furnish a copy of Form
+1099-G or an acceptable substitute statement to each recipient,
+except as explained later under Box 2. State or Local Income Tax
+Refunds, Credits, or Offsets. Also, see part M in Pub. 1099.
+
+Truncating recipient’s TIN on payee statements. Pursuant to
+Regulations section 301.6109-4, all filers of this form may
+truncate a recipient’s TIN (social security number (SSN),
+individual taxpayer identification number (ITIN), adoption
+taxpayer identification number (ATIN), or employer identification
+number (EIN)) on payee statements. Truncation is not allowed on
+any documents filed with the IRS. A payer’s TIN may not be
+truncated on any form. See part J in Pub. 1099.
+
+Country
+
+For a list of country codes, go to IRS.gov/CountryCodes.
+
+Account Number
+
+The account number is required if you have multiple accounts for
+a recipient for whom you are filing more than one Form 1099-G.
+Additionally, the IRS encourages you to designate an account
+
+Instructions for Form 1099-G (Rev. 12-2026) Catalog Number 27979M
+Department of the Treasury Internal Revenue Service www.irs.gov
+
+number for all Forms 1099-G that you file. See part L in Pub.
+1099.
+
+2nd TIN Not.
+
+You may enter an “X” in this box if you were notified by the IRS
+twice within 3 calendar years that the taxpayer provided an
+incorrect TIN. If you mark this box, the IRS will not send you any
+further notices about this account.
+However, if you received both IRS notices in the same year, or
+if you received them in different years but they both related to
+information returns filed for the same year, do not check the box
+at this time. For purposes of the two-notices-in-3-years rule, you
+are considered to have received one notice and you are not
+required to send a second “B” notice to the taxpayer on receipt of
+the second notice. See part N in Pub. 1099.
+Tip: For information on the TIN Matching System offered by the
+IRS, see Items You Should Note in Pub. 1099.
+Caution: States have experienced a surge in fraudulent
+unemployment claims. Criminals are engaging in identity theft
+(IDT) to fraudulently collect benefits across multiple states. For
+information on reporting IDT and other types of unemployment
+fraud, including claimant fraud or employer fraud, go to DOL.gov/
+agencies/eta/UIIDtheft.
+
+Box 1. Unemployment Compensation
+
+Enter payments of $10 or more in unemployment compensation,
+including Railroad Retirement Board payments for
+unemployment. If you make payments from a contributory
+program that has been deemed to be in the nature of
+unemployment compensation, file a separate Form 1099-G for
+payments from each contributory program. Enter the total
+amount before any income tax was withheld. If you withhold
+federal income tax at the request of the recipient, enter it in
+box 4; see the instructions below.
+
+Box 2. State or Local Income Tax Refunds,
+Credits, or Offsets
+
+Enter refunds, credits, or offsets of state or local income tax of
+$10 or more you made to recipients. These include refunds or
+carryforward credits of overpayments of tax due to refundable
+state tax credits and incentive payments that are paid under an
+existing state tax law and administered by the state taxing
+agency. Filmmaker incentive credits, home improvement credits
+paid in low-income areas, and solar panel installation credits are
+some types of state programs which are generally reportable in
+box 2, to the extent a refund is paid by the state taxing agency or
+amount allowed as carryforward credit to the next tax year.
+Do not enter in box 2 payments that are not state income tax
+refunds, credits, or offsets. This may include payments made
+under state grant, incentive, subsidy, or other individual
+assistance programs. Taxable grants are reported in box 6; see
+the instructions below. If recipients deducted the tax paid to a
+state or local government on their federal income tax returns, any
+refunds, credits, or offsets may be taxable to them. You are not
+required to furnish a copy of Form 1099-G or a substitute
+statement to the recipient if you can determine that the recipient
+did not claim itemized deductions on the recipient’s federal
+income tax return for the tax year giving rise to the refund, credit,
+or offset. However, you must file Form 1099-G with the IRS in all
+cases.
+A tax on dividends, a tax on net gains from the sale or
+exchange of a capital asset, and a tax on the net taxable income
+of an unincorporated business are taxes on gain or profit rather
+than on gross receipts. Therefore, they are income taxes, and
+any refund, credit, or offset of $10 or more of these taxes is
+reportable on Form 1099-G. In the case of the dividends tax and
+2
+
+the capital gains tax, if you determine that the recipient did not
+itemize deductions, as explained above, you are not required to
+furnish a Form 1099-G or substitute statement to the recipient.
+However, in the case of the tax on unincorporated businesses,
+you must furnish a Form 1099-G or substitute statement to the
+recipient in all cases, as this is a tax that applies exclusively to
+income from a trade or business. See Box 8. Trade or Business
+Income (Checkbox), later, and Rev. Rul. 86-140, 1986-2 C.B.
+195.
+If you pay interest that meets or exceeds the applicable
+reporting threshold on a refund, you must file Form 1099-INT,
+Interest Income, and furnish a statement to the recipient. See
+Pub. 1099 for information on the applicable reporting threshold.
+
+Box 3. Box 2 Amount Is for Tax Year
+
+No entry is required in box 3 if the refund, credit, or offset is for
+the current tax year. If it is for any other tax year, enter the year
+for which the refund, credit, or offset was made. Also, if the
+refunds, credits, or offsets are for more than 1 tax year, report the
+amount for each year on a separate Form 1099-G. Use the
+format “YYYY” to make the entry in this box. For example, enter
+“2020,” not “20.”
+
+Box 4. Federal Income Tax Withheld
+Backup withholding. Enter backup withholding on payments
+required to be reported in box 5, 6, or 7. You must backup
+withhold on such payments at a rate of 24% if a recipient does
+not furnish its TIN to you or if you are notified by the IRS that the
+TIN is incorrect (Notice CP2100 or CP2100A). For more
+information on backup withholding, see part N in Pub. 1099.
+Voluntary withholding. Enter any voluntary federal withholding
+on unemployment compensation, CCC loans, and certain crop
+disaster payments. If you withhold state income tax, see Boxes
+11a Through 12. State Information, later. However, you are not
+required to report state withholding to the IRS.
+Caution: Voluntary withholding on RTAA payments is not
+permitted.
+
+Box 5. RTAA Payments
+
+Enter RTAA payments made to eligible individuals under the
+Reemployment Trade Adjustment Assistance program if the total
+amount paid meets or exceeds the applicable reporting
+threshold. See Pub. 1099 for information on the applicable
+reporting threshold.
+
+Box 6. Taxable Grants
+
+Enter any amount of a taxable grant administered by a federal,
+state, or local program to provide subsidized energy financing or
+grants for projects designed to conserve or produce energy, but
+only with respect to energy property or a dwelling unit located in
+the United States. Also, enter any amount of a taxable grant
+administered by an Indian tribal government.
+Report amounts of other taxable grants if the total amount
+paid meets or exceeds the reporting threshold. See Pub. 1099
+for information on the applicable reporting threshold. State and
+local grants are ordinarily taxable for federal income purposes. A
+federal grant is ordinarily taxable unless stated otherwise in the
+legislation authorizing the grant. Do not report scholarship or
+fellowship grants. See Scholarships in the Instructions for Forms
+1099-MISC and 1099-NEC.
+
+Box 7. Agriculture Payments
+
+Enter USDA agricultural subsidy payments made during the
+year, including market facilitation program payments. If you are a
+nominee that received subsidy payments for another person, file
+Instructions for Form 1099-G (Rev. 12-2026)
+
+Form 1099-G to report the actual owner of the payments and
+report the amount of the payments in box 7.
+
+Box 8. Trade or Business Income (Checkbox)
+
+If the amount in box 2 is a refund, credit, or offset attributable to
+an income tax that applies exclusively to income from a trade or
+business and is not a tax of general application, enter an “X” in
+this box.
+
+Box 9. Market Gain
+
+Report market gain associated with the repayment of a CCC
+loan whether repaid using cash or CCC certificates.
+
+Box 10. Family Leave Benefits
+
+If you make payments of family leave benefits under a
+governmental paid family and medical leave program, enter the
+total amount before any income tax was withheld if the total
+amount paid meets or exceeds the applicable reporting
+threshold. See Pub. 1099 for information on the applicable
+reporting threshold. If you withheld federal income tax at the
+request of the recipient, enter it in box 4.
+
+Instructions for Form 1099-G (Rev. 12-2026)
+
+Boxes 11a Through 12. State Information
+
+These boxes may be used by filers who participate in the
+Combined Federal/State Filing Program and/or who are required
+to file paper copies of this form with a state tax department. See
+Pub. 5717 for more information regarding the Combined Federal/
+State Filing Program. They are provided for your convenience
+only and need not be completed for the IRS. Use the state
+information boxes to report payments for up to two states. Keep
+the information for each state separated by the dash line. In
+box 11a, enter the abbreviated name of the state. In box 11b,
+enter the filer’s state identification number. The state number is
+the filer’s identification number assigned by the individual state.
+In box 12, enter the amount of any state income tax withheld.
+If a state tax department requires that you send them a paper
+copy of this form, use Copy 1 to provide information to the state
+tax department. Give Copy 2 to the recipient for use in filing the
+recipient’s state income tax return.
+
+3
+
+

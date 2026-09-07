@@ -1,0 +1,21 @@
+https://www.irs.gov/pub/irs-prior/i1099g--2026.pdf
+
+# i1099g--2026.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  e89dac8a60ad285af82a668aeb63e551481f2811b4633b49e09ec1d171031928
+# bytes   146879
+#
+# Fetch:    curl -sL -o i1099g--2026.pdf https://www.irs.gov/pub/irs-prior/i1099g--2026.pdf
+# Verify:   sha256sum i1099g--2026.pdf   # must equal the sha256 above
+#
+# ★ A DIFFERENT hash does not mean a corrupt download — it means the IRS REVISED this
+# document. That is a change to the authority: review it, never silently absorb it.
+#
+# The committed text layer is design/forms/extract/i1099g--2026.txt — that is what the
+# conformance tests read, so they run with no PDF and no network.
+#
+# Archived 2026-09-07 folding the interview T2 seam review (C1): the archive is PER REVISION
+# and serves TY2024, TY2025 and TY2026, so `box_census::revision_in_force(stem, tax_year)`
+# resolves which edition a row's own tax year governs instead of pinning one.
+# REVISION, READ OFF THE DOCUMENT'S OWN TEXT (never assumed from the filename):
+#   "(Rev. December 2026)" (extract:2).
+# PERIODIC (continuous-use).
