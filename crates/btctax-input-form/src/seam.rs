@@ -42,6 +42,20 @@ pub enum SectionId {
     B1099s,
     /// Form 1099-G rows — `ri.g_1099`.
     G1099s,
+    /// ★★★ R8 / T9 — Form 1098 rows — `ri.form_1098` (Schedule A line 8a). **Live iff
+    /// `schedule_a.is_some()`**: the document arrives whether or not the filer itemizes, but a
+    /// standard-deduction filer is never made to transcribe it (R8/I8).
+    Form1098s,
+    /// ★★★ R8 / T9 — Schedule A **line 8b** rows — `ri.schedule_a.mortgage_interest_not_on_1098`.
+    /// Its own repeating section rather than more `ScheduleA` leaves, because the line asks for an
+    /// IDENTITY beside each figure (name, identifying number, address) and there can be more than
+    /// one recipient.
+    NonForm1098Interest,
+    /// ★★★ R8 / T9 — the sale of a main home: `sold_main_home` and the three tests
+    /// (`i1040sd--2025.txt:313-347`). Its own singleton section rather than more `Declarations`
+    /// leaves, because the four answers are one flowchart with one printed outcome, and the filer
+    /// answers them together.
+    HomeSale,
     /// Form 1098-E rows — `ri.form_1098e` (Schedule 1 line 21).
     Form1098Es,
     /// ★ T16 — Form 1099-SA rows — `ri.sa_1099` (Form 8889 line 14a).
@@ -129,7 +143,6 @@ pub enum FieldId {
     SaSaltStateEst,
     SaSaltPriorYear,
     SaSaltSalesTaxAmt,
-    SaMortgage1098,
     SaSaltUseSalesTax,
     SaMortgageAllUsed,
     /// §163(h)(3)(B) — the acquisition-debt-ceiling declaration (`FORM_QUESTIONS` index 13).
@@ -473,6 +486,44 @@ pub enum FieldId {
     G1099Box9MarketGain,
     /// Box 10 — *Family leave benefits* (Rev. December 2026) — a refuse-guard.
     G1099Box10FamilyLeave,
+    // ── ★★★ R4 / R8 / T9 — Form 1098 (per row). ─────────────────────────────────────────────────
+    Form1098Lender,
+    Form1098LenderTin,
+    Form1098TranscribedOn,
+    /// Box 1 — *Mortgage interest received from payer(s)/borrower(s)* → Schedule A line 8a.
+    Form1098Box1Interest,
+    /// Box 2 — *Outstanding mortgage principal* → the AGGREGATE §163(h)(3)(B) ceiling warning.
+    Form1098Box2Principal,
+    /// Box 3 — *Mortgage origination date* → which ceiling the aggregate is tested against.
+    Form1098Box3OriginationDate,
+    /// Box 4 — *Refund of overpaid interest* — a refuse-guard (Schedule 1 line 8z).
+    Form1098Box4Refund,
+    /// Box 5 — *Mortgage insurance premiums* → Schedule A line 8d, reserved for TY2024/TY2025.
+    Form1098Box5MortgageInsurance,
+    /// Box 6 — *Points paid on purchase of principal residence* → Schedule A line 8a with box 1.
+    Form1098Box6Points,
+    /// Box 7 — the *address is the same as the borrower's* checkbox.
+    Form1098Box7AddressSame,
+    /// Box 8 — *Address or description of property securing mortgage*.
+    Form1098Box8PropertyAddress,
+    /// Box 10 — *Other*, the lender's free-text reporting.
+    Form1098Box10Other,
+    /// The per-row shared-interest gate — *"you can only deduct your share of the interest"*.
+    Form1098OtherBorrowerPaid,
+    // ── ★★★ R8 / T9 — Schedule A line 8b (per row). ─────────────────────────────────────────────
+    Sa8bRecipientName,
+    Sa8bRecipientTin,
+    Sa8bRecipientAddress,
+    Sa8bAmount,
+    /// ★★★ R8 / T9 — Schedule A **line 8c**, *"Points not reported to you on Form 1098"*.
+    SaPointsNotOn1098,
+    /// ★★★ R8 / T9 — Schedule A's Line 8a Caution: the §25 mortgage interest credit (Form 8396).
+    DeclClaimingMortgageInterestCredit,
+    // ── ★★★ R8 / T9 — the sale of a main home (four tri-states, no amount). ─────────────────────
+    HomeSaleSoldMainHome,
+    HomeSaleTest1,
+    HomeSaleTest2,
+    HomeSaleCanExcludeAllGain,
     // ── ★★★ R4 / T5 — Form 1098-E (per row). ────────────────────────────────────────────────────
     Form1098eLender,
     Form1098eLenderTin,

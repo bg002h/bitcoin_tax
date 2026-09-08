@@ -582,7 +582,7 @@ $ btctax --vault v.pgp income show --year 2024
     "div_1099": true,
     "b_1099": false,
     "g_1099": true,
-    "form_1098": null,
+    "form_1098": true,
     "form_1098e": false,
     "sa_1099": false,
     "sa_5498": false,
@@ -693,6 +693,26 @@ $ btctax --vault v.pgp income show --year 2024
   ],
   "b_1099": [],
   "form_1098e": [],
+  "form_1098": [
+    {
+      "lender": "Home Savings",
+      "lender_tin": "",
+      "transcribed_on": null,
+      "box1_interest": "22000",
+      "box2_outstanding_principal": "400000",
+      "box3_origination_date": [
+        2019,
+        152
+      ],
+      "box4_refund_overpaid_interest": "0",
+      "box5_mortgage_insurance": "0",
+      "box6_points": "0",
+      "box7_property_address_same_as_payer": false,
+      "box8_property_address": "",
+      "box10_other": "",
+      "other_borrower_paid_interest": false
+    }
+  ],
   "sa_1099": [],
   "sa_5498": [],
   "schedule_c": {
@@ -717,7 +737,8 @@ $ btctax --vault v.pgp income show --year 2024
     "salt_prior_year_balance_paid": "0",
     "salt_real_estate": "6000",
     "salt_personal_property": "0",
-    "mortgage_interest_1098": "22000",
+    "mortgage_interest_not_on_1098": [],
+    "points_not_on_1098": "0",
     "mortgage_all_used_to_buy_build_improve": true,
     "mortgage_within_debt_limit": true,
     "mortgage_dwelling_is_amt_qualified": true,
@@ -805,6 +826,13 @@ $ btctax --vault v.pgp income show --year 2024
   "itemized_prior_year": null,
   "digital_asset_activity": true,
   "schedule_b_filer_records": [],
+  "claiming_mortgage_interest_credit": false,
+  "home_sale": {
+    "sold_main_home": false,
+    "test1_owned_2_years_and_lived_2_years_of_last_5": null,
+    "test2_no_exclusion_on_another_home_in_2_years": null,
+    "can_exclude_all_gain": null
+  },
   "answer_log": {},
   "answer_log_history": []
 }

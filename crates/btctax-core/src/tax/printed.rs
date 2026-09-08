@@ -1539,11 +1539,20 @@ pub fn schedule_c_lines(ar: &AbsoluteReturn) -> Option<ScheduleCLines> {
 /// caps the *printed* line 5d, and line 17 sums the *printed* subtotals. That is what a human filling
 /// the paper form does, and it is why the form cross-foots.
 ///
-/// **Unmodeled lines are BLANK, not zero** (no field here at all): line 6 (other taxes), line 8b
-/// (mortgage interest not on a Form 1098) and 8c (points), line 9 (investment interest), line 15
+/// **Unmodeled lines are BLANK, not zero** (no field here at all): line 6 (other taxes), line 15
 /// (casualty and theft losses) and line 16 (other itemized deductions). Line 8d is the IRS's own
-/// "Reserved for future use" — a ReadOnly widget that must never be written.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// "Reserved for future use" on the TY2024 and TY2025 forms — a ReadOnly widget that must never be
+/// written. ★ Lines 8b, 8c and 9 are COLLECTED (8b/8c at T9, 9 earlier).
+///
+/// ★★ **Line 8d comes BACK for TY2026.** Pub. L. 119-21 (OBBBA) §70108(a)(1)(D) inserts
+/// §163(h)(3)(F)(i)(III), switching off §163(h)(3)(E)(iv)'s termination so mortgage insurance
+/// premiums are treated as interest again for tax years beginning after December 31, 2025 — and the
+/// draft TY2026 Schedule A prints *"8d Mortgage insurance premiums (see instructions)"* and *"8e
+/// Add lines 8a through 8d"* (`design/forms/extract/f1040sa--2026-DRAFT.txt:100-102`).
+/// [`crate::tax::return_inputs::Form1098::box5_mortgage_insurance`] already collects the figure; the
+/// TY2026 chain is that year's own work.
+/// ★ NOT `Copy` since T9 — [`ScheduleALines::line8b_payee`] is text the form prints.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduleALines {
     /// L5a's **checkbox** — §164(b)(5): "If you elect to include general sales taxes instead of income
     /// taxes, check this box". The election is already in the arithmetic; without the box the filed form
@@ -1580,7 +1589,20 @@ pub struct ScheduleALines {
     pub line7: Usd,
     /// L8a — home-mortgage interest reported on Form 1098.
     pub line8a: Usd,
-    /// L8e — add 8a through 8c (8b/8c blank) ⇒ `= line8a`.
+    /// L8b — ★★★ T9: *"Home mortgage interest not reported to you on Form 1098. If paid to the
+    /// person from whom you bought the home, see instructions and show that person's name,
+    /// identifying number, and address"*. The SUM of the `mortgage_interest_not_on_1098` rows, each
+    /// of which carries that identity (an empty one refuses).
+    pub line8b: Usd,
+    /// L8c — ★★★ T9: *"Points not reported to you on Form 1098. See instructions for special
+    /// rules"*.
+    pub line8c: Usd,
+    /// ★★★ **L8b's DOTTED LINES**, one entry per recipient, in the instruction's own order (name,
+    /// identifying number, address). Empty when there is no line 8b row, which is the common case.
+    /// The emitter places as many as the year's form has dotted lines and falls back to the
+    /// instruction's own *"See attached"* when there are more.
+    pub line8b_payee: Vec<String>,
+    /// L8e — add 8a through 8c. ★ T9: 8b and 8c are COLLECTED now; until then this printed `= 8a`.
     pub line8e: Usd,
     /// L9 — "Investment interest. Attach Form 4952 if required. See instructions"
     ///
@@ -1649,10 +1671,15 @@ pub fn schedule_a_lines(ar: &AbsoluteReturn, line11_1040: Usd) -> Option<Schedul
 
     // Interest.
     let line8a = round_dollar(p.mortgage_8a);
-    let line8e = line8a; // + 8b/8c, unmodeled ⇒ blank
-                         // ★ L9 is COLLECTED now (it was `unmodeled` and line 10 was simply `= line8e`). Sound at face
-                         //   value only because `RefuseReason::Form4952Required` stands in front of it — see
-                         //   `ScheduleAParts::investment_interest_9`.
+    // ★★★ T9 / R8 — 8b and 8c are COLLECTED (they were `unmodeled` census entries and 8e printed
+    //     `= 8a`). The form's own "Add lines 8a through 8c", over the PRINTED cells.
+    let line8b = round_dollar(p.mortgage_8b);
+    let line8c = round_dollar(p.mortgage_8c);
+    let line8b_payee = p.mortgage_8b_payee.clone();
+    let line8e = line8a + line8b + line8c;
+    // ★ L9 is COLLECTED now (it was `unmodeled` and line 10 was simply `= line8e`). Sound at face
+    //   value only because `RefuseReason::Form4952Required` stands in front of it — see
+    //   `ScheduleAParts::investment_interest_9`.
     let line9 = round_dollar(p.investment_interest_9);
     let line10 = line8e + line9; // the form's own "Add lines 8e and 9", over the PRINTED cells
 
@@ -1684,6 +1711,9 @@ pub fn schedule_a_lines(ar: &AbsoluteReturn, line11_1040: Usd) -> Option<Schedul
         line5e,
         line7,
         line8a,
+        line8b,
+        line8c,
+        line8b_payee,
         line8e,
         line9,
         line10,
@@ -1980,6 +2010,9 @@ mod tests {
             salt_cap: dec!(10000),
             salt_5e: dec!(4000),
             mortgage_8a: dec!(5000),
+            mortgage_8b: Usd::ZERO,
+            mortgage_8c: Usd::ZERO,
+            mortgage_8b_payee: Vec::new(),
             mortgage_mixed_use_box: false,
             charitable_cash_11: Usd::ZERO,
             charitable_noncash_12: Usd::ZERO,
@@ -2723,6 +2756,9 @@ mod tests {
             salt_5e,
             salt_cap,
             mortgage_8a: mortgage,
+            mortgage_8b: Usd::ZERO,
+            mortgage_8c: Usd::ZERO,
+            mortgage_8b_payee: Vec::new(),
             mortgage_mixed_use_box: false,
             charitable_cash_11: cash,
             charitable_noncash_12: noncash,
@@ -2734,10 +2770,110 @@ mod tests {
 
     fn ar_itemizing(p: crate::tax::return_1040::ScheduleAParts) -> AbsoluteReturn {
         let mut ar = ar_with(None, Usd::ZERO, Usd::ZERO);
-        ar.schedule_a = Some(p);
         ar.deduction_is_itemized = true;
         ar.itemized_deduction = Some(p.total_17);
+        ar.schedule_a = Some(p);
         ar
+    }
+
+    /// ★★★ **T9 / R8 — SCHEDULE A LINE 8e IS 8a + 8b + 8c, over the PRINTED cells.**
+    ///
+    /// The form's own words are *"Add lines 8a through 8c"*, and until T9 the chain printed
+    /// `line8e = line8a` because 8b and 8c were `unmodeled` census entries — a silent forgo of two
+    /// deductions the filer had no line to put anything on. This drives the WHOLE chain from
+    /// `ReturnInputs`, so the sum, line 10 (*"Add lines 8e and 9"*) and line 17 all move together.
+    ///
+    /// ★ Each of the three is DISTINCT and non-round, so a chain that summed the wrong pair, or
+    ///   dropped one, cannot land on the right total by arithmetic luck.
+    ///
+    /// **Mutations, each observed red:** `line8e = line8a` reds the 8e assertion; dropping
+    /// `mortgage_8b` from `total_17` reds line 17; reading `points_not_on_1098` into 8b reds both
+    /// 8b and 8c.
+    #[test]
+    fn schedule_a_line_8e_adds_8a_8b_and_8c_from_the_return() {
+        use crate::tax::return_inputs::{NonForm1098Interest, ReturnInputs, ScheduleAInputs};
+        use crate::tax::types::FilingStatus;
+
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            // 8a = Σ(box 1 + box 6) = 12,000 + 700.
+            form_1098: vec![crate::tax::return_inputs::Form1098 {
+                lender: "Home Savings".into(),
+                box1_interest: dec!(12000),
+                box6_points: dec!(700),
+                other_borrower_paid_interest: Some(false),
+                ..Default::default()
+            }],
+            schedule_a: Some(ScheduleAInputs {
+                mortgage_all_used_to_buy_build_improve: Some(true),
+                mortgage_within_debt_limit: Some(true),
+                mortgage_dwelling_is_amt_qualified: Some(true),
+                // 8b = 900 + 40 across two recipients.
+                mortgage_interest_not_on_1098: vec![
+                    NonForm1098Interest {
+                        recipient_name: "Pat Seller".into(),
+                        recipient_tin: "000-00-0000".into(),
+                        recipient_address: "1 Main St".into(),
+                        amount: dec!(900),
+                    },
+                    NonForm1098Interest {
+                        recipient_name: "Lee Lender".into(),
+                        recipient_tin: "00-0000000".into(),
+                        recipient_address: "2 Main St".into(),
+                        amount: dec!(40),
+                    },
+                ],
+                points_not_on_1098: dec!(300), // 8c
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let parts = crate::tax::return_1040::schedule_a_parts(
+            &ri,
+            dec!(100000),
+            &crate::tax::charitable::CharitableResult {
+                allowed_cash: Usd::ZERO,
+                allowed_noncash: Usd::ZERO,
+                allowed_carryover: Usd::ZERO,
+                allowed: Usd::ZERO,
+                carryover_out: Vec::new(),
+            },
+            &crate::tax::testonly::ty2024_params(),
+        )
+        .expect("this return has a Schedule A");
+        assert_eq!(parts.mortgage_8a, dec!(12700), "8a = box 1 + box 6");
+        assert_eq!(parts.mortgage_8b, dec!(940), "8b sums every recipient row");
+        assert_eq!(parts.mortgage_8c, dec!(300), "8c is the points scalar");
+        assert_eq!(
+            parts.mortgage_8b_payee,
+            vec![
+                "Pat Seller, 000-00-0000, 1 Main St".to_string(),
+                "Lee Lender, 00-0000000, 2 Main St".to_string(),
+            ],
+            "the dotted lines carry name, identifying number and address, in the instruction's order"
+        );
+
+        let ar = ar_itemizing(parts);
+        let l = schedule_a_lines(&ar, dec!(100000)).expect("an itemizing return prints Schedule A");
+        assert_eq!(l.line8a, dec!(12700));
+        assert_eq!(l.line8b, dec!(940));
+        assert_eq!(l.line8c, dec!(300));
+        assert_eq!(
+            l.line8e,
+            dec!(13940),
+            "★ THE KILL: \"Add lines 8a through 8c\" — 12,700 + 940 + 300"
+        );
+        assert_eq!(
+            l.line10,
+            l.line8e + l.line9,
+            "line 10 is \"Add lines 8e and 9\" over the PRINTED cells"
+        );
+        assert_eq!(
+            l.line17,
+            l.line4 + l.line7 + l.line10 + l.line14,
+            "and the total sums the printed subtotals, so the filed form cross-foots"
+        );
     }
 
     /// The printed Schedule A chain, end to end: the medical floor binds, the SALT cap binds, and the

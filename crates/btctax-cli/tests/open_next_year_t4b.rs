@@ -1548,6 +1548,77 @@ fn an_out_of_range_from_year_refuses_instead_of_overflowing() {
     }
 }
 
+/// ★★★ **T9 / R8 — THE FORM 1098 LENDER IS A PAYER IDENTITY, SEEDED WITH EVERY BOX BLANK.**
+///
+/// R10.4's sentence is as true of a Form 1098 as of a Form 1099-INT, and more so: a lender sends one
+/// for every year the loan is outstanding, so *"Last year Home Savings (TIN 00-0000000) issued you a
+/// Form 1098. Did they issue one for 2025?"* is a real prompt with a real answer.
+///
+/// What must NOT carry is any box — and on this document three of them are testimony a carried value
+/// would fabricate: **box 2**, whose SUM drives the §163(h)(3)(B) ceiling warning; **box 3**, the
+/// origination date that decides WHICH ceiling; and the **shared-interest gate**, whose carried
+/// `Some(false)` would answer *"nobody else paid interest on that mortgage"* for a year the filer has
+/// not looked at.
+///
+/// ★ Both halves, because only the pair is the guarantee: the identity IS carried, and everything
+/// else is `Default` — compared against the row's own identity-only seed rather than a hand-list of
+/// boxes, which is `row_is_pre_named`'s own rule, so a box added tomorrow is covered the day it is
+/// added.
+#[test]
+fn a_form_1098_lender_is_seeded_as_an_identity_with_every_box_blank() {
+    use btctax_core::tax::return_inputs::{Form1098, ScheduleAInputs};
+    let (_dir, vault) = vault_with_year_n(|ri| {
+        ri.schedule_a = Some(ScheduleAInputs {
+            mortgage_all_used_to_buy_build_improve: Some(true),
+            mortgage_within_debt_limit: Some(true),
+            mortgage_dwelling_is_amt_qualified: Some(true),
+            ..Default::default()
+        });
+        ri.documents.set(DocumentRow::Form1098, Some(true));
+        ri.form_1098 = vec![Form1098 {
+            lender: "Home Savings".into(),
+            lender_tin: "00-0000000".into(),
+            box1_interest: dec!(22000),
+            box2_outstanding_principal: dec!(400000),
+            box3_origination_date: Some(time::macros::date!(2019 - 06 - 01)),
+            box6_points: dec!(500),
+            box8_property_address: "1 Main St".into(),
+            other_borrower_paid_interest: Some(false),
+            ..Default::default()
+        }];
+    });
+    let opened = open(&vault, false);
+    let id = opened
+        .identities
+        .iter()
+        .find(|i| i.prompt.contains("Form 1098") && !i.prompt.contains("Form 1098-E"))
+        .unwrap_or_else(|| panic!("no identity prompt: {:#?}", opened.identities));
+    assert!(
+        id.prompt.contains("Home Savings") && id.prompt.contains("00-0000000"),
+        "the prompt names the lender and its TIN: {}",
+        id.prompt
+    );
+    assert_eq!(id.answer, None, "nothing answers for the filer");
+
+    let seed = draft(&vault);
+    assert_eq!(seed.form_1098.len(), 1, "the lender identity is carried");
+    assert_eq!(
+        seed.form_1098[0],
+        Form1098 {
+            lender: "Home Savings".into(),
+            lender_tin: "00-0000000".into(),
+            ..Default::default()
+        },
+        "★ every BOX is blank — including box 2's balance, box 3's origination date and the \
+         shared-interest gate, each of which would be testimony about a year the filer has not \
+         looked at. Compared against the identity-only seed, not a box list."
+    );
+    assert_eq!(
+        seed.documents.form_1098, None,
+        "…and the census row itself is UNANSWERED: the seed carries an identity, never an answer"
+    );
+}
+
 /// ★★★ **T16 / FR-76 — THE HSA TRUSTEE IS A PAYER IDENTITY, SEEDED WITH EVERY BOX BLANK.**
 ///
 /// R10.4's sentence is as true of a Form 1099-SA as of a Form 1099-INT: an HSA trustee that reported

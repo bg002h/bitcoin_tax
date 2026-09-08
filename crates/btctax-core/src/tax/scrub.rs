@@ -735,6 +735,9 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
         div_1099: _,
         g_1099: _,
         b_1099: _,
+        // ★ R4 / R8 / T9 — the Form 1098 rows carry a LENDER NAME, a lender TIN and a PROPERTY
+        //   ADDRESS (boxes 7/8). Scrubbed below.
+        form_1098: _,
         // ★ R4 / T5 — the 1098-E rows carry a LENDER NAME and a lender TIN, exactly the identity
         //   class the 1099 payers carry. Scrubbed below, through the same `EinMap`.
         form_1098e: _,
@@ -756,11 +759,19 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
         itemized_prior_year: _,
         // ★ R9 / T6 — one yes/no about the FILER'S OWN activity; carries no identity.
         digital_asset_activity: _,
+        // ★ R8 / T9 — the Form 8396 gate and the four sale-of-a-main-home answers. Yes/no facts
+        //   about the filer's own year; no name, no number, no address on either.
+        claiming_mortgage_interest_credit: _,
+        home_sale: _,
         schedule_c, // ★ business_description is FREE TEXT — scrubbed below
         // ★★ Sch 1-A: `vehicles[].description` is FREE TEXT — a filer writes "Dad's truck" or a
         //    plate. Scrubbed below. The eligibility bools and money carry no identity.
         schedule_1a,
-        schedule_a: _, // money only
+        // ★★★ R8 / T9 — **NO LONGER "money only".** Schedule A line 8b names a THIRD PARTY: the
+        //     instruction demands *"that person's name, identifying number, and address"*, and on a
+        //     seller-financed mortgage the identifying number is an individual's SSN. Scrubbed
+        //     below, through the same `EinMap` every payer TIN goes through.
+        schedule_a: _,
         // spec 1099-DA — provider tags (`Source::tag()`) and enum answers; no identity
         broker_reporting: _,
         itemize_election: _,
@@ -993,6 +1004,55 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
         } = f;
         f.payer = replace_preserving_emptiness(&f.payer, format!("Agency{}", i + 1));
         f.payer_tin = map_payer_tin(&mut eins, &f.payer_tin);
+    }
+    // ★ R4 / R8 / T9 — Form 1098: a lender NAME, a lender TIN and the PROPERTY ADDRESS in box 8.
+    for (i, f) in out.form_1098.iter_mut().enumerate() {
+        let crate::tax::return_inputs::Form1098 {
+            lender: _,
+            lender_tin: _, // mapped below, through the SAME `EinMap` as every other payer TIN
+            transcribed_on: _, // R10.2 — KEPT (see the 1099-INT loop)
+            box1_interest: _,
+            box2_outstanding_principal: _,
+            box3_origination_date: _,
+            box4_refund_overpaid_interest: _,
+            box5_mortgage_insurance: _,
+            box6_points: _,
+            // A checkbox — no identity.
+            box7_property_address_same_as_payer: _,
+            // ★★★ FREE TEXT and identifying: box 8 is the ADDRESS OF THE PROPERTY, which for the
+            //     overwhelming majority of 1098s is the filer's own home. Scrubbed below.
+            box8_property_address: _,
+            // ★★ FREE TEXT the lender writes ("Real estate taxes $4,210"). It can carry an escrow
+            //    or loan reference, so it is replaced rather than kept.
+            box10_other: _,
+            // A yes/no about the loan; carries no identity.
+            other_borrower_paid_interest: _,
+        } = f;
+        f.lender = replace_preserving_emptiness(&f.lender, format!("Lender{}", i + 1));
+        f.lender_tin = map_payer_tin(&mut eins, &f.lender_tin);
+        f.box8_property_address =
+            replace_preserving_emptiness(&f.box8_property_address, format!("Property{}", i + 1));
+        f.box10_other = replace_preserving_emptiness(&f.box10_other, format!("Box10Item{}", i + 1));
+    }
+    // ★★★ R8 / T9 — Schedule A line 8b's recipient block: a NAME, an SSN-or-EIN and an ADDRESS the
+    //     instruction requires the filer to print on the dotted lines. The most identifying rows on
+    //     the whole schedule.
+    if let Some(a) = out.schedule_a.as_mut() {
+        for (i, r) in a.mortgage_interest_not_on_1098.iter_mut().enumerate() {
+            let crate::tax::return_inputs::NonForm1098Interest {
+                recipient_name: _,
+                recipient_tin: _,
+                recipient_address: _,
+                amount: _,
+            } = r;
+            r.recipient_name =
+                replace_preserving_emptiness(&r.recipient_name, format!("Recipient{}", i + 1));
+            r.recipient_tin = map_payer_tin(&mut eins, &r.recipient_tin);
+            r.recipient_address = replace_preserving_emptiness(
+                &r.recipient_address,
+                format!("RecipientAddress{}", i + 1),
+            );
+        }
     }
     // ★ R4 / T5 — Form 1098-E: a lender NAME and a lender TIN, the 1099-payer identity class.
     for (i, f) in out.form_1098e.iter_mut().enumerate() {

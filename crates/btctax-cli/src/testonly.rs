@@ -140,6 +140,12 @@ digital_asset_activity = true
 long = "0"
 short = "0"
 
+# ★★★ R8 / T9 — the sale of a main home. ALWAYS asked, and a blank is not a "no": the Schedule D
+#     instructions' own answer is "You may not need to report the sale or exchange of your main
+#     home", and which branch a filer is on decides whether a Form 8949 belongs on the return.
+[home_sale]
+sold_main_home = false
+
 # ★★★ R3 / §5.1 — THE DOCUMENT CENSUS. One tri-state per document TYPE; an unanswered row refuses,
 # because "none" and "nobody asked" are the same blank on the printed page and are not the same
 # testimony. This household holds two W-2s and nothing else.
@@ -162,6 +168,9 @@ a_1095 = false
 t_1098 = false
 # ★ T5 — the 1098-E row opened when `Form1098E` replaced the `sch1.student_loan_interest_paid`
 #   scalar. This household holds no student loan, so the answer is a truthful "none".
+# ★ R8 / T9 — no Form 1098 (this household takes the standard deduction), so the row is not
+# even live; answered anyway, because a stated "none" is the honest record.
+form_1098 = false
 form_1098e = false
 # ★ T16 — the two HSA information returns opened with Form 8889. This household has no health
 #   savings account, so both answers are a truthful "none" — and `sch1.hsa_activity = false` below

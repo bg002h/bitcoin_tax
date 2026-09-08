@@ -137,6 +137,17 @@ fn ty2024_full_return() -> FullReturnParams {
         // ("the exemption amount referenced in § 152(d)(1)(B) is $5,050"), and the Step 4
         // flowchart prints the same figure: "Who had gross income of less than $5,050 in 2024"
         // (`design/forms/extract/i1040gi--2024.txt:1700`).
+        // ★★★ §163(h)(3)(B) — the four figures the Schedule A instructions print under "Limits on
+        //     home mortgage interest" (`design/forms/extract/i1040sca--2025.txt:1027-1046`; Pub.
+        //     936, Part II). Statute, not an indexed amount: Pub. L. 119-21 (OBBBA) §70108(a) made
+        //     the $750,000 limit permanent. They drive a WARNING over Σ Form 1098 box 2 and write
+        //     no line.
+        acquisition_debt_ceiling: btctax_core::tax::tables::AcquisitionDebtCeiling {
+            after_dec_15_2017: dec!(750000),
+            after_dec_15_2017_mfs: dec!(375000),
+            on_or_before_dec_15_2017: dec!(1000000),
+            on_or_before_dec_15_2017_mfs: dec!(500000),
+        },
         qualifying_relative_gross_income_limit: dec!(5050),
         // §24(h)(2) / §24(h)(4) — the TCJA figures, $2,000 per qualifying child and $500 for each
         // other dependent. ★ IN FORCE THROUGH TY2024 ONLY: Pub. L. 119-21 (OBBBA) §70104(a)(2)
@@ -261,6 +272,17 @@ pub fn ty2026_full_return() -> FullReturnParams {
         // "the exemption amount referred to in § 152(d)(1)(B) is $5,300"
         // (`legal/text/irs-guidance/RevProc_2025-32.txt:908-910`). Statute and Rev. Proc., not
         // form — so it settles now, like every other constant in this function.
+        // ★★★ §163(h)(3)(B) — the four figures the Schedule A instructions print under "Limits on
+        //     home mortgage interest" (`design/forms/extract/i1040sca--2025.txt:1027-1046`; Pub.
+        //     936, Part II). Statute, not an indexed amount: Pub. L. 119-21 (OBBBA) §70108(a) made
+        //     the $750,000 limit permanent. They drive a WARNING over Σ Form 1098 box 2 and write
+        //     no line.
+        acquisition_debt_ceiling: btctax_core::tax::tables::AcquisitionDebtCeiling {
+            after_dec_15_2017: dec!(750000),
+            after_dec_15_2017_mfs: dec!(375000),
+            on_or_before_dec_15_2017: dec!(1000000),
+            on_or_before_dec_15_2017_mfs: dec!(500000),
+        },
         qualifying_relative_gross_income_limit: dec!(5300),
         // §24(h)(2) as amended by Pub. L. 119-21 (OBBBA) §70104(a)(2). Rev. Proc. 2025-32 .05(1):
         // "For taxable years beginning in 2026, the maximum amount of the credit allowed under

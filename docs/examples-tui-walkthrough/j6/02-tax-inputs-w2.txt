@@ -15,16 +15,16 @@
  13││  ✓ Forms 1099-SA (HSA distribut││  19 Local income tax  [$0]                                                         │
  14││  ✓ Forms 5498-SA (HSA contribut││  8 Allocated tips  [$0]                                                            │
  15││  … Form 8889 (health savings ac││  10 Dependent care benefits  [$0]                                                  │
- 16││  … Schedule A (itemized deducti││  13 Statutory employee  [[ ]]                                                      │
- 17││  … Payments                    ││  14b Treasury Tipped Occupation Code(s)  []                                        │
- 18││  … Carryforwards from last year││  Box 12 entries (0) →                                                              │
- 19││  … §199A limitation (only if yo││                                                                                    │
- 20││  ✓ Declarations                ││  [Left/Esc] back to rows                                                           │
- 21││  ✓ Documents received          ││                                                                                    │
- 22││  … Income exclusions (§911/931/││                                                                                    │
- 23││  … Skippables                  ││                                                                                    │
- 24││                                ││                                                                                    │
- 25││                                ││                                                                                    │
+ 16││  ✓ Forms 1098 (home mortgage in││  13 Statutory employee  [[ ]]                                                      │
+ 17││  … Schedule A (itemized deducti││  14b Treasury Tipped Occupation Code(s)  []                                        │
+ 18││  ✓ Schedule A line 8b (mortgage││  Box 12 entries (0) →                                                              │
+ 19││  ✓ Sale of your main home      ││                                                                                    │
+ 20││  … Payments                    ││  [Left/Esc] back to rows                                                           │
+ 21││  … Carryforwards from last year││                                                                                    │
+ 22││  … §199A limitation (only if yo││                                                                                    │
+ 23││  ✓ Declarations                ││                                                                                    │
+ 24││  ✓ Documents received          ││                                                                                    │
+ 25││  … Income exclusions (§911/931/││                                                                                    │
  26│└────────────────────────────────┘└────────────────────────────────────────────────────────────────────────────────────┘
  27│┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
  28││  active source: full return   ·   screens clean, except what report computes                                         │

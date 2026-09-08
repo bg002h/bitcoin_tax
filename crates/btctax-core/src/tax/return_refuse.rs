@@ -792,6 +792,74 @@ pub enum RefuseReason {
     /// distributions), which stays `NotRead` because it is a BASIS ADJUSTMENT and reaches no line
     /// this year at all — the two look alike and are not the same. The payload is the box.
     LiquidationDistributionNotComputed(String),
+    // ── ★★★ R8 / T9 — REAL ESTATE: the Form 1098's two refusals, line 8b's identity, the Form
+    //     8396 gate and the sale of a main home. ────────────────────────────────────────────────
+    /// ★★★ **Form 1098 box 4 — *Refund of overpaid interest* — is > 0.**
+    ///
+    /// The Schedule A instruction is explicit that the refund is **not** netted against the
+    /// deduction: *"If your Form 1098 shows any refund of overpaid interest, don't reduce your
+    /// deduction by the refund. Instead, see the instructions for Schedule 1 (Form 1040), line 8z."*
+    /// (`i1040sca--2025.txt:1069-1072`.) So the figure is INCOME on a line btctax fills from
+    /// nothing, and it is a figure the tool already HOLDS — a typed number with no reader, in the
+    /// understatement direction. It refuses rather than sitting beside a blank 8z with a note.
+    MortgageInterestRefundNotComputed,
+    /// ★★★ **A Form 1098 row where someone other than the filer's spouse also paid the interest.**
+    ///
+    /// *"More than one borrower. If you and at least one other person (other than your spouse if you
+    /// file a joint return) were liable for and paid interest on a mortgage that was your home, you
+    /// can only deduct your share of the interest."* (`i1040sca--2025.txt:1073-1077`.) Schedule A
+    /// line 8a sums box 1 in FULL, and btctax does not hold the share, so the deduction would
+    /// include the co-borrower's interest — an overstatement.
+    SharedMortgageInterest,
+    /// ★★★ **A Form 1098 row whose shared-interest gate was never answered.**
+    ///
+    /// ★★ **Deliberately stricter than R8's letter, for the reason the 1099-B line-1a gate is**
+    /// (`Form1099BNeedsForm8949`, which refuses on `None` as well as on `Some(false)`): line 8a sums
+    /// box 1 **in full**, so a `None` read as *"no co-borrower"* would be btctax claiming the whole
+    /// deduction on the filer's behalf — testimony nobody gave, in the direction that UNDERSTATES
+    /// the tax. A blank and a *"no"* are the same on the printed page and are not the same thing.
+    ///
+    /// ★ Its exit is real rather than a wall: the gate is a field of the document ROW, so it is set
+    ///   exactly where the row is — the tax-inputs editor or the import TOML — which is why it may
+    ///   refuse at import.
+    SharedMortgageInterestUnanswered,
+    /// ★★★ **A Schedule A line 8b row whose recipient is unidentified.**
+    ///
+    /// *"write that person's name, identifying number, and address on the dotted lines next to line
+    /// 8b"*, and *"If you don't show the required information about the recipient or let the
+    /// recipient know your SSN, you may have to pay a $50 penalty."*
+    /// (`i1040sca--2025.txt:1109-1119`.) The identity is part of what the line asks for, so an
+    /// amount without it is not a completed line. The payload is the row's own name (or its index
+    /// when even that is blank).
+    NonForm1098InterestRecipientUnidentified(String),
+    /// ★★★ **The filer is claiming the §25 mortgage interest credit (Form 8396).**
+    ///
+    /// Schedule A's Line 8a Caution: *"If you are claiming the mortgage interest credit … subtract
+    /// the amount shown on Form 8396, line 3, from the total deductible interest you paid on your
+    /// home mortgage. Enter the result on line 8a."* (`i1040sca--2025.txt:1091-1096`.) btctax
+    /// bundles no Form 8396 and holds no line 3, so it cannot make that subtraction, and printing
+    /// line 8a unsubtracted OVERSTATES the deduction.
+    MortgageInterestCreditUnsupported,
+    /// ★★★ **A sale of a main home on any branch the instruction does not answer with a blank.**
+    ///
+    /// *"Report the sale or exchange of your main home on Form 8949 if: • You can't exclude all of
+    /// your gain from income, or • You received a Form 1099-S for the sale or exchange."*
+    /// (`i1040sd--2025.txt:318-325`.) btctax computes no home sale, so every branch the flowchart
+    /// sends to Form 8949 refuses, naming Pub. 523 and code H. The payload names WHICH answer sent
+    /// it there, so the filer can see the branch.
+    HomeSaleNotComputed(String),
+    /// ★★★ **One of the four sale-of-a-main-home questions is live and unanswered.** Raised by the
+    /// [`crate::tax::questions::FORM_QUESTIONS`] loop like every other class-(A) declaration.
+    ///
+    /// ★ `sold_main_home` is ALWAYS live — a return that never says whether a home was sold is a
+    ///   return with an unasked Schedule D question, and the answer *"no"* is the common case that
+    ///   must still be recorded rather than assumed.
+    HomeSaleGateUnanswered {
+        question: crate::tax::questions::QuestionId,
+    },
+    /// ★★★ **The Form 8396 gate is live and unanswered.** Live iff the return carries a Form 1098
+    /// row or a Schedule A line 8b row — the population Schedule A's Line 8a Caution addresses.
+    MortgageInterestCreditUnanswered,
     // ── ★★★ R9 / T6 — THE DIGITAL ASSETS QUESTION. ──────────────────────────────────────────────
     /// **A live `digital_asset_activity` is `None`** — UNANSWERED class, raised by the
     /// [`crate::tax::questions::FORM_QUESTIONS`] loop like every other class-(A) declaration.
@@ -883,6 +951,8 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         div_1099,
         g_1099,
         b_1099,
+        // ★ R4 / R8 / T9 — the Form 1098 carries five money boxes (1, 2, 4, 5, 6); screened below.
+        form_1098,
         form_1098e,
         // ★ R4 / T16 — the HSA information returns carry money (a distribution, an FMV, an
         //   earnings-on-excess figure); `screen_form_8889` screens all of it.
@@ -952,6 +1022,10 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         // ★ R9 / T6 — a yes/no declaration. No money leaf; its refusals are the registry's
         //   (unanswered) and `screen_compute_dependent`'s ledger cross-check.
         digital_asset_activity: _,
+        // ★ R8 / T9 — a yes/no declaration (the Form 8396 gate) and four more (the home sale). No
+        //   money leaf on either: the home sale deliberately asks for NO amount.
+        claiming_mortgage_interest_credit: _,
+        home_sale: _,
     } = ri;
 
     if form_8960_line9b.is_some_and(neg) {
@@ -1173,6 +1247,44 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             return Some("1099-G box 9 market gain");
         }
     }
+    // ★ R4 / R8 / T9 — Form 1098's five money boxes. Box 4 has its own refusal further down (it is
+    //   income routed to Schedule 1 line 8z); a NEGATIVE box 4 is still a corrupt import, and this
+    //   gate runs first so a negative can never offset an accumulator.
+    for m in form_1098 {
+        let crate::tax::return_inputs::Form1098 {
+            lender: _,
+            lender_tin: _,
+            transcribed_on: _,
+            box1_interest,
+            box2_outstanding_principal,
+            // A date, not a money leaf — it selects WHICH ceiling the aggregate is tested against.
+            box3_origination_date: _,
+            box4_refund_overpaid_interest,
+            box5_mortgage_insurance,
+            box6_points,
+            // A checkbox and two free-text boxes — no money leaf.
+            box7_property_address_same_as_payer: _,
+            box8_property_address: _,
+            box10_other: _,
+            // The per-row shared-interest gate; its `Some(true)` refuses further down.
+            other_borrower_paid_interest: _,
+        } = m;
+        if neg(*box1_interest) {
+            return Some("1098 box 1 mortgage interest received from payer(s)/borrower(s)");
+        }
+        if neg(*box2_outstanding_principal) {
+            return Some("1098 box 2 outstanding mortgage principal");
+        }
+        if neg(*box4_refund_overpaid_interest) {
+            return Some("1098 box 4 refund of overpaid interest");
+        }
+        if neg(*box5_mortgage_insurance) {
+            return Some("1098 box 5 mortgage insurance premiums");
+        }
+        if neg(*box6_points) {
+            return Some("1098 box 6 points paid on purchase of principal residence");
+        }
+    }
     // R4 / §5.2 — Form 1098-E box 1, the §221 chain's only figure.
     for e in form_1098e {
         let crate::tax::return_inputs::Form1098E {
@@ -1357,7 +1469,9 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             salt_prior_year_balance_paid,
             salt_real_estate,
             salt_personal_property,
-            mortgage_interest_1098,
+            // ★ R8 / T9 — Schedule A lines 8b and 8c.
+            mortgage_interest_not_on_1098,
+            points_not_on_1098,
             mortgage_all_used_to_buy_build_improve: _,
             mortgage_within_debt_limit: _, // a declaration, not money
             mortgage_dwelling_is_amt_qualified: _, // a declaration, not money
@@ -1382,8 +1496,19 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         if neg(*salt_personal_property) {
             return Some("Schedule A personal-property taxes");
         }
-        if neg(*mortgage_interest_1098) {
-            return Some("Schedule A mortgage interest");
+        for r in mortgage_interest_not_on_1098 {
+            let crate::tax::return_inputs::NonForm1098Interest {
+                recipient_name: _,
+                recipient_tin: _,
+                recipient_address: _,
+                amount,
+            } = r;
+            if neg(*amount) {
+                return Some("Schedule A line 8b mortgage interest not on a Form 1098");
+            }
+        }
+        if neg(*points_not_on_1098) {
+            return Some("Schedule A line 8c points not reported on a Form 1098");
         }
         if neg(*investment_interest) {
             return Some("Schedule A investment interest");
@@ -3068,6 +3193,158 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
             );
         }
     }
+    // ── ★★★ R8 / T9 — THE FORM 1098's TWO REFUSALS, per row. Both are param-free, so both fire at
+    //    IMPORT: a TOML carrying either writes nothing (`ScreenTier`).
+    for (i, m) in ri.form_1098.iter().enumerate() {
+        let who = if m.lender.trim().is_empty() {
+            format!("Form 1098 #{}", i + 1)
+        } else {
+            format!("the Form 1098 from {}", m.lender.trim())
+        };
+        // ★★★ Box 4 — the instruction is explicit that the refund is NOT netted against the
+        //     deduction, so the figure is INCOME on a line btctax fills from nothing. A number the
+        //     tool already holds may not sit beside a blank 8z with a census note.
+        if m.box4_refund_overpaid_interest > Usd::ZERO {
+            return refuse(
+                RefuseReason::MortgageInterestRefundNotComputed,
+                format!(
+                    "{who} reports a REFUND OF OVERPAID INTEREST in box 4. The Schedule A \
+                     instruction is explicit that it is not netted against your deduction: \"If \
+                     your Form 1098 shows any refund of overpaid interest, don't reduce your \
+                     deduction by the refund. Instead, see the instructions for Schedule 1 (Form \
+                     1040), line 8z.\" So it is INCOME on SCHEDULE 1 LINE 8z \u{2014} to the extent the \
+                     interest reduced your tax in an earlier year (Pub. 936, Refund of home \
+                     mortgage interest) \u{2014} and btctax fills line 8z from nothing. The amount would \
+                     simply vanish and understate your tax, so it refuses instead. File with a \
+                     preparer, who will list it on line 8z"
+                ),
+            );
+        }
+        // ★★★ The shared-interest gate. `Some(true)` and `None` BOTH refuse — see
+        //     `RefuseReason::SharedMortgageInterestUnanswered` for why the blank is not a "no".
+        match m.other_borrower_paid_interest {
+            Some(true) => {
+                return refuse(
+                    RefuseReason::SharedMortgageInterest,
+                    format!(
+                        "on {who} you said someone other than your spouse was also liable for and \
+                         paid interest on this mortgage. The Schedule A instruction is \"More than \
+                         one borrower \u{2026} you can only deduct your share of the interest\", and \
+                         where the shared interest was reported on YOUR Form 1098 it says \"deduct \
+                         only your share of the interest on line 8a. Let each of the other \
+                         borrowers know what their share is.\" btctax adds box 1 to line 8a IN \
+                         FULL and does not hold your share, so it would deduct the other \
+                         borrower's interest as well \u{2014} overstating the deduction. It refuses \
+                         instead. File with a preparer, who will enter your share on line 8a"
+                    ),
+                );
+            }
+            None => {
+                return refuse(
+                    RefuseReason::SharedMortgageInterestUnanswered,
+                    format!(
+                        "{who} does not say whether someone other than your spouse also paid \
+                         interest on that mortgage. btctax adds box 1 to Schedule A line 8a IN \
+                         FULL, and the instruction allows that only for interest that was yours \
+                         (\"you can only deduct your share of the interest\"), so a blank here is \
+                         not a \"no\" \u{2014} it is the whole deduction claimed on your behalf. Set \
+                         `other_borrower_paid_interest` on the row (in the tax-inputs editor, or in \
+                         the Form 1098 table of your import file)"
+                    ),
+                );
+            }
+            Some(false) => {}
+        }
+    }
+    // ★★★ R8 / T9 — Schedule A line 8b: the recipient's IDENTITY is part of what the line asks for.
+    if let Some(a) = ri.schedule_a.as_ref() {
+        for (i, r) in a.mortgage_interest_not_on_1098.iter().enumerate() {
+            if r.recipient_tin.trim().is_empty() {
+                let who = if r.recipient_name.trim().is_empty() {
+                    format!("line 8b row #{}", i + 1)
+                } else {
+                    format!("the line 8b payment to {}", r.recipient_name.trim())
+                };
+                return refuse(
+                    RefuseReason::NonForm1098InterestRecipientUnidentified(who.clone()),
+                    format!(
+                        "{who} carries no identifying number for the recipient. Schedule A line 8b \
+                         asks for the interest AND the identity together: \"write that person's \
+                         name, identifying number, and address on the dotted lines next to line \
+                         8b\" \u{2014} an SSN if the recipient is an individual, otherwise an EIN \u{2014} and \
+                         the instruction prices the omission: \"If you don't show the required \
+                         information about the recipient or let the recipient know your SSN, you \
+                         may have to pay a $50 penalty.\" Enter the recipient's identifying number \
+                         on the row, or remove the row"
+                    ),
+                );
+            }
+        }
+    }
+    // ★★★ R8 / T9 — the FORM 8396 gate. Schedule A's Line 8a Caution requires line 8a to be REDUCED
+    //     by Form 8396 line 3 for a mortgage-credit-certificate holder, and btctax holds no Form
+    //     8396, so it would print line 8a unsubtracted.
+    if crate::tax::questions::question_is_live(
+        crate::tax::questions::QuestionId::ClaimingMortgageInterestCredit,
+        ri,
+    ) && ri.claiming_mortgage_interest_credit == Some(true)
+    {
+        return refuse(
+            RefuseReason::MortgageInterestCreditUnsupported,
+            "you are claiming the MORTGAGE INTEREST CREDIT on Form 8396. Schedule A's Line 8a \
+             Caution says to \"subtract the amount shown on Form 8396, line 3, from the total \
+             deductible interest you paid on your home mortgage. Enter the result on line 8a.\" \
+             btctax builds no Form 8396 and holds no line 3, so it cannot make that subtraction and \
+             would print line 8a at the full Form 1098 figure \u{2014} overstating your itemized \
+             deduction while the credit itself (Schedule 3 line 6g) goes unclaimed. It refuses \
+             instead. File with a preparer, who will file Form 8396 and reduce line 8a by its line 3"
+                .to_string(),
+        );
+    }
+    // ★★★ R8 / T9 — THE SALE OF A MAIN HOME. The Schedule D instructions answer their own question:
+    //     *"You may not need to report the sale or exchange of your main home"*, and then
+    //     *"Report the sale or exchange of your main home on Form 8949 if: • You can't exclude all
+    //     of your gain from income, or • You received a Form 1099-S for the sale or exchange."*
+    //     Exactly one branch of the three tests × the 1099-S census row leaves the return blank; on
+    //     every other branch a Form 8949 belongs on it, and btctax builds none.
+    //
+    // ★ A `documents.s_1099 = Some(true)` is normally caught EARLIER, by the census's own §2.2
+    //   refusal, whose sentence already names Form 8949 code H and the Pub. 523 worksheet. It is
+    //   still a conjunct here so this rule is complete on its own terms at import.
+    if ri.home_sale.sold_main_home == Some(true) {
+        let h = &ri.home_sale;
+        let s_1099 = ri
+            .documents
+            .get(crate::tax::document_census::DocumentRow::S1099);
+        let branch = if h.can_exclude_all_gain == Some(false) {
+            Some("you said you cannot exclude all of your gain")
+        } else if h.test1_owned_2_years_and_lived_2_years_of_last_5 == Some(false) {
+            Some("you did not meet Test 1 (owned it 2 years and lived in it 2 of the last 5)")
+        } else if h.test2_no_exclusion_on_another_home_in_2_years == Some(false) {
+            Some("you did not meet Test 2 (no exclusion on another main home in the last 2 years)")
+        } else if s_1099 == Some(true) {
+            Some("you received a Form 1099-S for the sale")
+        } else if s_1099.is_none() {
+            Some("this return does not say whether a Form 1099-S arrived for the sale")
+        } else {
+            None
+        };
+        if let Some(branch) = branch {
+            return refuse(
+                RefuseReason::HomeSaleNotComputed(branch.to_string()),
+                format!(
+                    "you sold your main home and {branch}. The Schedule D instructions say to \
+                     \"Report the sale or exchange of your main home on Form 8949 if: \u{2022} You \
+                     can't exclude all of your gain from income, or \u{2022} You received a Form 1099-S \
+                     for the sale or exchange\" \u{2014} so this sale belongs on FORM 8949 with code H, \
+                     and the gain comes off the PUB. 523 worksheet. btctax does not compute a home \
+                     sale and builds no Form 8949 row for one, so it refuses rather than file a \
+                     return that omits it. File with a preparer, or complete Form 8949 and Schedule \
+                     D by hand from Pub. 523"
+                ),
+            );
+        }
+    }
     // ★ T4/R11 — the §904(j) ceiling is a FullReturnParams figure: it waits for the year's package.
     if let Some((_, p)) = tier.package {
         if foreign_tax > ftc_ceiling_for(p, ri.filing_status) {
@@ -3299,6 +3576,12 @@ mod tests {
                 cap_mfs: dec!(5000),
             },
             kiddie_unearned_threshold: dec!(2600),
+            acquisition_debt_ceiling: crate::tax::tables::AcquisitionDebtCeiling {
+                after_dec_15_2017: dec!(750000),
+                after_dec_15_2017_mfs: dec!(375000),
+                on_or_before_dec_15_2017: dec!(1000000),
+                on_or_before_dec_15_2017_mfs: dec!(500000),
+            },
             qualifying_relative_gross_income_limit: dec!(5050),
             // §24(h)(2) / §24(h)(4) — the TCJA figures. Nothing computes from them (btctax files
             // no Schedule 8812); the R12 panel sizes the line-19 forgo with them.
@@ -3364,6 +3647,15 @@ mod tests {
         // §G-22/B11 — the scope attestation. ANSWERED here, never defaulted: `None` refuses, which is
         // the whole point, and a `Default` that supplied it would restore the silence it exists to break.
         ri.other_out_of_scope_income = Some(false);
+        // ★★★ R8 / T9 — "did you sell your main home?", ALWAYS live and NOT neutral: a blank is not
+        //     a "no", so every computing fixture must state it. `false` = no sale, which leaves the
+        //     three Schedule D tests un-live and the return blank on that question by decision.
+        ri.home_sale.sold_main_home = Some(false);
+        // ★★★ R8 / T9 — Schedule A's Line 8a Caution (the §25 mortgage interest credit). Live only
+        //     on a return carrying a Form 1098 or a line 8b row; answered here so a fixture that
+        //     ADDS one is still testing its own rule rather than this gate. `false` = no
+        //     certificate, the answer that leaves line 8a at the full Form 1098 figure.
+        ri.claiming_mortgage_interest_credit = Some(false);
         // Schedule D line 20 / Schedule A line 9 — the Form 4952 declaration. Always live (line 20
         // prints on every both-gains Schedule D, which liveness cannot see), so every computing
         // fixture must state it; `false` = "not filing one", the answer that needs no form v1 lacks.
@@ -3434,6 +3726,387 @@ mod tests {
     /// starting shape each kill below perturbs in exactly one way.
     fn censused() -> ReturnInputs {
         ri() // `ri()` already answers all eighteen rows `Some(false)`
+    }
+
+    // ── ★★★ R8 / T9 — REAL ESTATE. ─────────────────────────────────────────────────────────────
+
+    /// An itemizing return carrying one Form 1098, everything answered, nothing refusing.
+    fn itemizing_with_1098(interest: Usd) -> ReturnInputs {
+        let mut r = ri();
+        r.schedule_a = Some(ScheduleAInputs {
+            mortgage_all_used_to_buy_build_improve: Some(true),
+            mortgage_within_debt_limit: Some(true),
+            mortgage_dwelling_is_amt_qualified: Some(true),
+            ..Default::default()
+        });
+        r.form_1098 = vec![crate::tax::testonly::form_1098_with_interest(interest)];
+        r.documents.set(
+            crate::tax::document_census::DocumentRow::Form1098,
+            Some(true),
+        );
+        r
+    }
+
+    /// ★★★ **BOX 4 IS THE REFUSAL, AND $0 IS NOT.**
+    ///
+    /// The Schedule A instruction is explicit that a refund of overpaid interest is NOT netted
+    /// against the deduction — *"don't reduce your deduction by the refund. Instead, see the
+    /// instructions for Schedule 1 (Form 1040), line 8z."* So the figure is INCOME on a line btctax
+    /// fills from nothing, and it is a figure the tool already HOLDS: a typed number with no reader,
+    /// in the understatement direction.
+    ///
+    /// **Both halves, because either alone is satisfiable by the wrong thing:** a rule that refused
+    /// every 1098 would pass the `$1` half while bricking every homeowner, and the `$0` half is what
+    /// tells them apart. The message must NAME line 8z — a refusal that does not say where the money
+    /// goes is a wall.
+    ///
+    /// Mutation: change `> Usd::ZERO` to `>= Usd::ZERO` and the box-4-is-zero assertion reds;
+    /// delete the rule and the `$1` assertion reds.
+    #[test]
+    fn a_1098_box_4_refund_refuses_naming_schedule_1_line_8z_and_a_zero_does_not() {
+        let clean = itemizing_with_1098(dec!(9000));
+        assert_eq!(
+            reason(&clean),
+            None,
+            "the premise: an ordinary Form 1098 with box 4 = $0 files"
+        );
+
+        let mut refunded = clean.clone();
+        refunded.form_1098[0].box4_refund_overpaid_interest = dec!(1);
+        let got = screen_param_free(&refunded).expect("a box-4 refund refuses on BOTH tiers");
+        assert_eq!(got.reason, RefuseReason::MortgageInterestRefundNotComputed);
+        assert!(
+            got.detail.contains("Schedule 1 (Form 1040), line 8z")
+                || got.detail.contains("SCHEDULE 1 LINE 8z"),
+            "the refusal must name where the refund goes: {}",
+            got.detail
+        );
+        assert_eq!(
+            reason(&refunded),
+            Some(RefuseReason::MortgageInterestRefundNotComputed),
+            "…and it refuses at the commit gate too"
+        );
+    }
+
+    /// ★★★ **THE SHARED-INTEREST GATE — `Some(true)` AND `None` BOTH REFUSE.**
+    ///
+    /// Schedule A line 8a sums box 1 IN FULL, and the instruction allows only *"your share of the
+    /// interest"* when another borrower paid. btctax does not hold the share.
+    ///
+    /// ★ The `None` half is the one worth having: a blank read as *"no co-borrower"* would be the
+    ///   whole deduction claimed on the filer's behalf — testimony nobody gave, understating the
+    ///   tax. Same shape as the Form 1099-B line-1a gate, which refuses on `None` for the same
+    ///   reason. Mutation: make the `None` arm a no-op and the third assertion reds.
+    #[test]
+    fn the_shared_interest_gate_refuses_on_yes_and_on_a_blank_but_not_on_no() {
+        let mut r = itemizing_with_1098(dec!(9000));
+        assert_eq!(reason(&r), None, "the premise: `Some(false)` files");
+
+        r.form_1098[0].other_borrower_paid_interest = Some(true);
+        let got = screen_param_free(&r).expect("a shared mortgage refuses on BOTH tiers");
+        assert_eq!(got.reason, RefuseReason::SharedMortgageInterest);
+        assert!(
+            got.detail.contains("only your share of the interest"),
+            "the refusal must quote the instruction: {}",
+            got.detail
+        );
+
+        r.form_1098[0].other_borrower_paid_interest = None;
+        assert_eq!(
+            screen_param_free(&r).map(|x| x.reason),
+            Some(RefuseReason::SharedMortgageInterestUnanswered),
+            "a BLANK is not a \"no\": line 8a sums box 1 in full, so silence would claim it all"
+        );
+    }
+
+    /// ★★★ **THE ITEMIZE ELECTION IS THE 1098's LIVENESS — the R8/I8 pair, on ONE fixture.**
+    ///
+    /// A standard-deduction filer holding a $900,000 2019 mortgage:
+    /// - is asked NONE of the three Form 1098 declarations (the mixed-use box, Form 6251 line 3, and
+    ///   the §163(h)(3)(B) debt limit),
+    /// - has no live `form_1098` census row, and
+    /// - **does not refuse** — even with `MortgageWithinDebtLimit` blank, which is what the old
+    ///   liveness would have bricked them on: a refusal over a deduction they are not claiming, and
+    ///   a return they could not file.
+    ///
+    /// The SAME return with a `ScheduleAInputs` present asks all three, and a truthful
+    /// `Some(false)` on the debt limit then refuses.
+    ///
+    /// Mutation: drop the `schedule_a.is_some()` conjunct from `mortgage_question_live` (or from
+    /// `row_is_live`) and the standard-deduction half reds.
+    #[test]
+    fn a_standard_deduction_filer_with_a_900k_1098_is_asked_nothing_and_refuses_nothing() {
+        use crate::tax::questions::{question_is_live, QuestionId};
+        let three = [
+            QuestionId::MortgageAllUsedToBuyBuildImprove,
+            QuestionId::AmtQualifiedDwelling,
+            QuestionId::MortgageWithinDebtLimit,
+        ];
+
+        // The filer, with the paper in hand and NO Schedule A.
+        let mut standard = ri();
+        standard.form_1098 = vec![crate::tax::return_inputs::Form1098 {
+            lender: "Home Savings".into(),
+            box1_interest: dec!(30000),
+            box2_outstanding_principal: dec!(900000),
+            box3_origination_date: Some(time::macros::date!(2019 - 06 - 01)),
+            other_borrower_paid_interest: Some(false),
+            ..Default::default()
+        }];
+        for q in three {
+            assert!(
+                !question_is_live(q, &standard),
+                "{q:?} must NOT be live on a standard-deduction return"
+            );
+        }
+        assert!(
+            !crate::tax::document_census::row_is_live(
+                &standard,
+                crate::tax::document_census::DocumentRow::Form1098
+            ),
+            "the `form_1098` census row is live iff the filer itemizes"
+        );
+        assert_eq!(
+            standard.schedule_a.as_ref().and_then(|a| a.mortgage_within_debt_limit),
+            None,
+            "the premise: the debt-limit question is UNANSWERED (there is no Schedule A to hold it)"
+        );
+        assert_eq!(
+            reason(&standard),
+            None,
+            "a standard-deduction filer is never refused over a limit on a deduction they are not \
+             claiming"
+        );
+
+        // The same return, itemizing.
+        let mut itemizing = standard.clone();
+        itemizing.schedule_a = Some(ScheduleAInputs::default());
+        itemizing.documents.set(
+            crate::tax::document_census::DocumentRow::Form1098,
+            Some(true),
+        );
+        for q in three {
+            assert!(
+                question_is_live(q, &itemizing),
+                "{q:?} IS live once the filer itemizes on a transcribed Form 1098"
+            );
+        }
+        assert_eq!(
+            reason(&itemizing),
+            Some(RefuseReason::MixedUseMortgageUnanswered),
+            "…and the three declarations, unanswered, now REFUSE — the same blanks that were \
+             lawful one line above"
+        );
+        let a = itemizing.schedule_a.as_mut().expect("just built");
+        a.mortgage_all_used_to_buy_build_improve = Some(true);
+        a.mortgage_dwelling_is_amt_qualified = Some(true);
+        a.mortgage_within_debt_limit = Some(false); // truthful: $900,000 is over the 2019 ceiling
+                                                    // ★ `MortgageOverDebtLimit` is a COMPUTE-tier rule (`screen_absolute`): it is scoped to a
+                                                    //   return that actually ITEMIZES, which liveness alone cannot see. $30,000 of box 1 clears
+                                                    //   the $14,600 single standard deduction, so this filer does.
+        let ar = assemble_absolute(&itemizing, &LedgerState::default(), &params(), &tbl(), 2024);
+        assert!(ar.deduction_is_itemized, "the premise: this filer itemizes");
+        assert_eq!(
+            crate::tax::return_1040::screen_absolute(
+                &itemizing,
+                &ar,
+                &params(),
+                &LedgerState::default(),
+                2024,
+                crate::forms::InformationReturnRegime::NONE,
+            )
+            .map(|r| r.reason),
+            Some(RefuseReason::MortgageOverDebtLimit),
+            "…and the truthful \"no\" refuses on the return that claims the deduction"
+        );
+    }
+
+    /// ★★★ **SCHEDULE A LINE 8b — THE IDENTITY IS PART OF THE LINE.**
+    ///
+    /// *"write that person's name, identifying number, and address on the dotted lines next to line
+    /// 8b"*, and the Caution prices the omission: *"If you don't show the required information about
+    /// the recipient … you may have to pay a $50 penalty."* So an amount with no identifying number
+    /// is not a completed line, and it refuses at IMPORT — where the row is created and can be
+    /// fixed.
+    ///
+    /// Mutation: drop the `recipient_tin.trim().is_empty()` rule and the first assertion reds.
+    #[test]
+    fn a_line_8b_row_with_no_identifying_number_refuses_and_one_with_a_number_files() {
+        let mut r = itemizing_with_1098(dec!(9000));
+        r.schedule_a
+            .as_mut()
+            .expect("just built")
+            .mortgage_interest_not_on_1098 = vec![crate::tax::return_inputs::NonForm1098Interest {
+            recipient_name: "Pat Seller".into(),
+            recipient_tin: String::new(),
+            recipient_address: "1 Main St".into(),
+            amount: dec!(4000),
+        }];
+        r.claiming_mortgage_interest_credit = Some(false);
+        let got =
+            screen_param_free(&r).expect("an unidentified 8b recipient refuses on BOTH tiers");
+        assert_eq!(
+            got.reason,
+            RefuseReason::NonForm1098InterestRecipientUnidentified(
+                "the line 8b payment to Pat Seller".into()
+            )
+        );
+        assert!(
+            got.detail.contains("$50 penalty"),
+            "the refusal must price the omission the way the instruction does: {}",
+            got.detail
+        );
+
+        r.schedule_a
+            .as_mut()
+            .expect("just built")
+            .mortgage_interest_not_on_1098[0]
+            .recipient_tin = "000-00-0000".into();
+        assert_eq!(
+            reason(&r),
+            None,
+            "…and the same row WITH the identifying number files"
+        );
+    }
+
+    /// ★★★ **THE FORM 8396 GATE.** Schedule A's Line 8a Caution requires line 8a to be REDUCED by
+    /// Form 8396 line 3 for a mortgage-credit-certificate holder. btctax holds no Form 8396, so it
+    /// would print line 8a unsubtracted — an overstated deduction.
+    ///
+    /// ★ Live only where there is a line 8a or 8b to modify, so a filer with no mortgage interest is
+    ///   never asked. Mutation: make the liveness `|_| true` and the third assertion reds.
+    #[test]
+    fn the_form_8396_gate_refuses_on_yes_and_is_not_even_asked_without_mortgage_interest() {
+        use crate::tax::questions::{question_is_live, QuestionId};
+        let mut r = itemizing_with_1098(dec!(9000));
+        assert!(question_is_live(
+            QuestionId::ClaimingMortgageInterestCredit,
+            &r
+        ));
+        assert_eq!(reason(&r), None, "the premise: \"no certificate\" files");
+
+        r.claiming_mortgage_interest_credit = Some(true);
+        let got =
+            screen_param_free(&r).expect("the mortgage interest credit refuses on BOTH tiers");
+        assert_eq!(got.reason, RefuseReason::MortgageInterestCreditUnsupported);
+        assert!(
+            got.detail.contains("Form 8396, line 3"),
+            "the refusal must name the line it cannot subtract: {}",
+            got.detail
+        );
+
+        r.claiming_mortgage_interest_credit = None;
+        assert_eq!(
+            reason(&r),
+            Some(RefuseReason::MortgageInterestCreditUnanswered),
+            "…and a live blank refuses, because a defaulted \"no\" would claim the full line 8a"
+        );
+
+        // A filer with no Form 1098 and no line 8b row is never asked at all.
+        let bare = ri();
+        assert!(!question_is_live(
+            QuestionId::ClaimingMortgageInterestCredit,
+            &bare
+        ));
+        assert_eq!(reason(&bare), None);
+    }
+
+    /// ★★★ **THE SALE-OF-A-MAIN-HOME TABLE: EIGHT BRANCHES OF THE THREE TESTS, PLUS THE 1099-S ROW.**
+    ///
+    /// The Schedule D instructions answer their own question — *"Report the sale or exchange of your
+    /// main home on Form 8949 if: • You can't exclude all of your gain from income, or • You
+    /// received a Form 1099-S for the sale or exchange."* — so **exactly one** branch leaves the
+    /// return blank: all three tests met and no Form 1099-S. Every other branch belongs on Form
+    /// 8949, which btctax does not build.
+    ///
+    /// ★ The blank is a DECISION with four answers behind it, not an absence: `sold_main_home` is
+    ///   always live and `answer_all_live_declarations` cannot reach the tests, so a filer who sold
+    ///   a home is asked all four.
+    ///
+    /// ★★ The `s_1099 = Some(true)` row refuses through the census's own §2.2 sentence, which names
+    ///    Form 8949 code H and the Pub. 523 worksheet — the same exit, reached one rule earlier
+    ///    because the census is screened before every value-dependent rule. Both are asserted, so a
+    ///    reordering that lost one is visible.
+    ///
+    /// Mutation: delete any one of the four `else if` arms in the branch selector and its row reds.
+    #[test]
+    fn the_home_sale_table_is_one_blank_and_seven_refusals_naming_pub_523() {
+        use crate::tax::document_census::DocumentRow;
+        let base = |t1: bool, t2: bool, exclude: bool| {
+            let mut r = ri();
+            r.home_sale = crate::tax::return_inputs::HomeSale {
+                sold_main_home: Some(true),
+                test1_owned_2_years_and_lived_2_years_of_last_5: Some(t1),
+                test2_no_exclusion_on_another_home_in_2_years: Some(t2),
+                can_exclude_all_gain: Some(exclude),
+            };
+            r
+        };
+        let mut blanks = 0usize;
+        for t1 in [true, false] {
+            for t2 in [true, false] {
+                for exclude in [true, false] {
+                    let r = base(t1, t2, exclude);
+                    match reason(&r) {
+                        None => {
+                            assert!(
+                                t1 && t2 && exclude,
+                                "({t1},{t2},{exclude}) must not be the blank branch"
+                            );
+                            blanks += 1;
+                        }
+                        Some(RefuseReason::HomeSaleNotComputed(_)) => {
+                            let detail = screen_param_free(&r)
+                                .expect("every refusing branch refuses on BOTH tiers")
+                                .detail;
+                            assert!(
+                                detail.contains("PUB. 523") && detail.contains("code H"),
+                                "({t1},{t2},{exclude}) must name Pub. 523 and Form 8949 code H: \
+                                 {detail}"
+                            );
+                        }
+                        other => panic!("({t1},{t2},{exclude}) refused unexpectedly: {other:?}"),
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            blanks, 1,
+            "exactly ONE of the eight branches is blank by decision"
+        );
+
+        // ★ The census dimension. A Form 1099-S on the blank branch still reaches Form 8949 —
+        //   through the census's own §2.2 refusal, whose sentence names the same exit.
+        let mut with_1099s = base(true, true, true);
+        with_1099s.documents.set(DocumentRow::S1099, Some(true));
+        let got = screen_param_free(&with_1099s).expect("a Form 1099-S refuses");
+        assert_eq!(
+            got.reason,
+            RefuseReason::DocumentTypeUnsupported {
+                kind: DocumentRow::S1099
+            }
+        );
+        assert!(
+            got.detail.contains("Pub. 523") && got.detail.contains("code H"),
+            "the 1099-S exit is the same one: {}",
+            got.detail
+        );
+
+        // ★ And an UNANSWERED 1099-S row on the blank branch does not print a blank either: the
+        //   census's unanswered rule refuses at commit, and the home-sale rule refuses at import,
+        //   where the unanswered tier does not run. Neither leaves the sale silently off the return.
+        let mut unanswered = base(true, true, true);
+        unanswered.documents.set(DocumentRow::S1099, None);
+        assert_eq!(
+            reason(&unanswered),
+            Some(RefuseReason::DocumentCensusUnanswered {
+                kind: DocumentRow::S1099
+            })
+        );
+        assert!(matches!(
+            screen_param_free(&unanswered).map(|x| x.reason),
+            Some(RefuseReason::HomeSaleNotComputed(_))
+        ));
     }
 
     fn raw(r: &ReturnInputs) -> Option<RefuseReason> {
@@ -4231,6 +4904,9 @@ mod tests {
                 DocumentRow::Div1099,
                 DocumentRow::B1099,
                 DocumentRow::G1099,
+                // ★ T9 — the 1098 gained a `Vec` when `Form1098` replaced the
+                //   `schedule_a.mortgage_interest_1098` scalar.
+                DocumentRow::Form1098,
                 // ★ T5 — the 1098-E gained a `Vec` when `Form1098E` replaced the
                 //   `sch1.student_loan_interest_paid` scalar.
                 DocumentRow::Form1098e,
@@ -4238,7 +4914,7 @@ mod tests {
                 DocumentRow::Sa1099,
                 DocumentRow::Sa5498,
             ],
-            "the eight `Vec`-bearing kinds, and only those, have a row count"
+            "the nine `Vec`-bearing kinds, and only those, have a row count"
         );
         let demanding: Vec<DocumentRow> = DocumentRow::ALL
             .iter()
@@ -4256,6 +4932,11 @@ mod tests {
                 //     1099-G had nowhere to be transcribed. T5 added `box2_state_refund`, so the
                 //     excuse expired with the field.
                 DocumentRow::G1099,
+                // ★★★ **T9 PUT THE 1098 IN, and for the 1099-G's exact reason**: it was out because
+                //     its amount lived on a Schedule A scalar and the row had nowhere to be
+                //     transcribed. `Form1098` replaced the scalar, so the excuse expired with it and
+                //     nothing else carries 1098 mortgage interest onto the return.
+                DocumentRow::Form1098,
                 // ★ And the 1098-E, whose rows replaced `sch1.student_loan_interest_paid`: nothing
                 //   else carries student-loan interest onto the return any more.
                 DocumentRow::Form1098e,
@@ -4519,13 +5200,30 @@ mod tests {
             QuestionId::MfsSpouseItemizes => r.filing_status = FilingStatus::Mfs,
             // ★ R10.4 / T4b — live ONLY on a year the opener made, which is what `opened_from` says.
             QuestionId::FilingStatusConfirmed => r.opened_from = Some(2024),
-            QuestionId::MortgageAllUsedToBuyBuildImprove
+            // ★★★ R8 / T9 — the Form 8396 gate shares the three declarations' precondition (a
+            //     transcribed Form 1098), so it shares their scenario. The three home-sale tests are
+            //     live iff `sold_main_home` is YES, which is a sibling registry entry's answer — so
+            //     the scenario sets it directly rather than relying on the neutral loop, which would
+            //     answer NO and switch all three off.
+            QuestionId::HomeSaleTest1OwnedAndLived
+            | QuestionId::HomeSaleTest2NoRecentExclusion
+            | QuestionId::HomeSaleCanExcludeAllGain => {
+                r.home_sale.sold_main_home = Some(true);
+            }
+            QuestionId::ClaimingMortgageInterestCredit
+            | QuestionId::MortgageAllUsedToBuyBuildImprove
             | QuestionId::AmtQualifiedDwelling
             | QuestionId::MortgageWithinDebtLimit => {
                 r.schedule_a = Some(ScheduleAInputs {
-                    mortgage_interest_1098: dec!(9000),
                     ..Default::default()
                 });
+                r.form_1098 = vec![crate::tax::testonly::form_1098_with_interest(dec!(9000))];
+                // ★ T9 — a transcribed row needs its census row answered, or the contradiction rule
+                //   (`Some(false)` beside rows) refuses first.
+                r.documents.set(
+                    crate::tax::document_census::DocumentRow::Form1098,
+                    Some(true),
+                );
             }
             // ★ All three carryforward-conditioned declarations share ONE liveness predicate
             //   (`questions::carryforward_in_present`), so they share one scenario.
@@ -5025,7 +5723,6 @@ mod tests {
         }];
         base.schedule_a = Some(ScheduleAInputs {
             salt_real_estate: dec!(5000), // itemized ≈ $5,000 (< $14,600 std) once the mixed-use 8a is zeroed
-            mortgage_interest_1098: dec!(12000),
             mortgage_all_used_to_buy_build_improve: Some(false),
             // Reporting 1098 interest also makes Form 6251 line 3's AMT-qualified-dwelling question
             // live (i6251 p.8). Answered AMT-neutral here so this test keeps testing the MIXED-USE
@@ -5036,6 +5733,13 @@ mod tests {
             mortgage_within_debt_limit: Some(true),
             ..Default::default()
         });
+        base.form_1098 = vec![crate::tax::testonly::form_1098_with_interest(dec!(12000))];
+        // ★ T9 — a transcribed row needs its census row answered, or the contradiction rule
+        //   (`Some(false)` beside rows) refuses first.
+        base.documents.set(
+            crate::tax::document_census::DocumentRow::Form1098,
+            Some(true),
+        );
 
         for (election, expect_itemized) in [
             (ItemizeElection::Auto, false), // zeroed 8a ⇒ the standard deduction wins
@@ -5562,6 +6266,8 @@ mod tests {
             r.state_refund_without_1099g = Some(false);
             // ★ R9 / T6 — Form 1040 page 1's Digital Assets question, always live (see `ri`).
             r.digital_asset_activity = Some(false);
+            // ★ R8 / T9 — "did you sell your main home?", always live (see `ri`).
+            r.home_sale.sold_main_home = Some(false);
             r
         };
         // I4: box 1b (qualified) > box 1a (ordinary) on a form ⇒ refuse (phantom preferential income).
@@ -6156,7 +6862,6 @@ mod tests {
         // line 3 — adverse, but no mortgage interest was deducted.
         let mut r = ri();
         r.schedule_a = Some(ScheduleAInputs {
-            mortgage_interest_1098: Usd::ZERO,
             mortgage_dwelling_is_amt_qualified: Some(false),
             salt_real_estate: dec!(4000),
             ..Default::default()
@@ -6209,7 +6914,6 @@ mod tests {
         use crate::tax::return_inputs::ScheduleAInputs;
         let mut r = ri();
         r.schedule_a = Some(ScheduleAInputs {
-            mortgage_interest_1098: Usd::ZERO, // nothing deducted ⇒ line 3 adds back nothing
             mortgage_dwelling_is_amt_qualified: Some(false), // …yet answered adversely
             salt_real_estate: dec!(4000),
             ..Default::default()
@@ -6305,7 +7009,6 @@ mod tests {
                 ..Default::default()
             }];
             r.schedule_a = Some(ScheduleAInputs {
-                mortgage_interest_1098: Usd::ZERO,
                 investment_interest: amount,
                 salt_real_estate: dec!(10000),
                 ..Default::default()
@@ -6429,12 +7132,18 @@ mod tests {
         let sched = |interest: Usd, ans: Option<bool>| {
             let mut r = ri();
             r.schedule_a = Some(ScheduleAInputs {
-                mortgage_interest_1098: interest,
                 mortgage_all_used_to_buy_build_improve: Some(true),
                 mortgage_dwelling_is_amt_qualified: Some(true),
                 mortgage_within_debt_limit: ans,
                 ..Default::default()
             });
+            r.form_1098 = vec![crate::tax::testonly::form_1098_with_interest(interest)];
+            // ★ T9 — a transcribed row needs its census row answered, or the contradiction rule
+            //   (`Some(false)` beside rows) refuses first.
+            r.documents.set(
+                crate::tax::document_census::DocumentRow::Form1098,
+                Some(true),
+            );
             r
         };
         // The [RAN] vector's notional $2,000,000 loan — $130,000 of interest itemizes easily.
@@ -6489,12 +7198,18 @@ mod tests {
         use crate::tax::return_inputs::ScheduleAInputs;
         let mut r = ri();
         r.schedule_a = Some(ScheduleAInputs {
-            mortgage_interest_1098: dec!(130000),
             mortgage_all_used_to_buy_build_improve: Some(true),
             mortgage_dwelling_is_amt_qualified: Some(true),
             mortgage_within_debt_limit: Some(false),
             ..Default::default()
         });
+        r.form_1098 = vec![crate::tax::testonly::form_1098_with_interest(dec!(130000))];
+        // ★ T9 — a transcribed row needs its census row answered, or the contradiction rule
+        //   (`Some(false)` beside rows) refuses first.
+        r.documents.set(
+            crate::tax::document_census::DocumentRow::Form1098,
+            Some(true),
+        );
         let st = LedgerState::default();
         let ar = assemble_absolute(&r, &st, &params(), &tbl(), 2024);
         assert!(
@@ -6540,7 +7255,6 @@ mod tests {
         use crate::tax::return_inputs::ScheduleAInputs;
         let mut r = ri();
         r.schedule_a = Some(ScheduleAInputs {
-            mortgage_interest_1098: Usd::ZERO, // nothing on line 8a to be capped
             mortgage_within_debt_limit: Some(false), // …yet a stale adverse answer
             salt_real_estate: dec!(4000),
             ..Default::default()
@@ -6572,7 +7286,6 @@ mod tests {
         let dwelling = |ans: Option<bool>| {
             let mut r = ri();
             r.schedule_a = Some(ScheduleAInputs {
-                mortgage_interest_1098: dec!(9000),
                 mortgage_all_used_to_buy_build_improve: Some(true),
                 // Reporting 1098 interest also makes the §163(h)(3)(B) debt-limit question live.
                 // Answered NEUTRAL here so this test keeps testing the Form 6251 declarations.
@@ -6580,6 +7293,13 @@ mod tests {
                 mortgage_dwelling_is_amt_qualified: ans,
                 ..Default::default()
             });
+            r.form_1098 = vec![crate::tax::testonly::form_1098_with_interest(dec!(9000))];
+            // ★ T9 — a transcribed row needs its census row answered, or the contradiction rule
+            //   (`Some(false)` beside rows) refuses first.
+            r.documents.set(
+                crate::tax::document_census::DocumentRow::Form1098,
+                Some(true),
+            );
             reason(&r)
         };
         assert_eq!(
@@ -7473,10 +8193,16 @@ mod param_free_tier {
         add("Form4952Required", &|r| r.filing_form_4952 = Some(true));
         add("AmtNonQualifiedDwelling", &|r| {
             r.schedule_a = Some(ScheduleAInputs {
-                mortgage_interest_1098: dec!(9000),
                 mortgage_dwelling_is_amt_qualified: Some(false),
                 ..Default::default()
             });
+            r.form_1098 = vec![crate::tax::testonly::form_1098_with_interest(dec!(9000))];
+            // ★ T9 — a transcribed row needs its census row answered, or the contradiction rule
+            //   (`Some(false)` beside rows) refuses first.
+            r.documents.set(
+                crate::tax::document_census::DocumentRow::Form1098,
+                Some(true),
+            );
         });
         add("AmtCarryoverDiverges", &|r| {
             r.capital_loss_carryforward_in.long = dec!(3000);
@@ -7747,6 +8473,56 @@ mod param_free_tier {
                 box10_family_leave_benefits: dec!(1200),
                 ..Default::default()
             });
+        });
+        // ── ★★★ R8 / T9 — the six real-estate rules, every one param-free and therefore firing at
+        //    IMPORT. Each starts from an ordinary, fully-answered Form 1098 return and breaks one
+        //    thing, so the rule under test is the only one standing.
+        let itemizing_1098 = |r: &mut ReturnInputs| {
+            r.documents.set(
+                crate::tax::document_census::DocumentRow::Form1098,
+                Some(true),
+            );
+            r.schedule_a = Some(crate::tax::return_inputs::ScheduleAInputs::default());
+            r.form_1098
+                .push(crate::tax::testonly::form_1098_with_interest(dec!(9000)));
+        };
+        add("MortgageInterestRefundNotComputed", &|r| {
+            itemizing_1098(r);
+            r.form_1098[0].box4_refund_overpaid_interest = dec!(1);
+        });
+        add("SharedMortgageInterest", &|r| {
+            itemizing_1098(r);
+            r.form_1098[0].other_borrower_paid_interest = Some(true);
+        });
+        add("SharedMortgageInterestUnanswered", &|r| {
+            itemizing_1098(r);
+            r.form_1098[0].other_borrower_paid_interest = None;
+        });
+        add("NonForm1098InterestRecipientUnidentified", &|r| {
+            itemizing_1098(r);
+            r.schedule_a
+                .as_mut()
+                .expect("the fixture just built one")
+                .mortgage_interest_not_on_1098
+                .push(crate::tax::return_inputs::NonForm1098Interest {
+                    recipient_name: "The Seller".into(),
+                    recipient_tin: String::new(), // the $50-penalty clause
+                    recipient_address: "1 Main St".into(),
+                    amount: dec!(4000),
+                });
+        });
+        add("MortgageInterestCreditUnsupported", &|r| {
+            itemizing_1098(r);
+            r.claiming_mortgage_interest_credit = Some(true);
+        });
+        add("HomeSaleNotComputed", &|r| {
+            r.home_sale = crate::tax::return_inputs::HomeSale {
+                sold_main_home: Some(true),
+                test1_owned_2_years_and_lived_2_years_of_last_5: Some(true),
+                test2_no_exclusion_on_another_home_in_2_years: Some(true),
+                // The one branch the Schedule D instructions send to Form 8949 by name.
+                can_exclude_all_gain: Some(false),
+            };
         });
         out
     }

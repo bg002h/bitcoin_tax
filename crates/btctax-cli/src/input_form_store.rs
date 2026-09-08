@@ -1419,6 +1419,9 @@ mod tests {
                 DocumentRow::G1099 => r.g_1099.push(Default::default()),
                 // ★ T5 — the 1098-E became countable when `Form1098E` replaced the
                 //   `sch1.student_loan_interest_paid` scalar.
+                // ★ T9 — the 1098 became countable when `Form1098` replaced the
+                //   `schedule_a.mortgage_interest_1098` scalar.
+                DocumentRow::Form1098 => r.form_1098.push(Default::default()),
                 DocumentRow::Form1098e => r.form_1098e.push(Default::default()),
                 // ★ T16 — the two HSA information returns became countable with Form 8889.
                 DocumentRow::Sa1099 => r.sa_1099.push(Default::default()),

@@ -581,6 +581,7 @@ fn every_shipped_full_return_params_equal_the_ones_the_corpus_validates() {
             salt: s_salt,
             kiddie_unearned_threshold: s_kiddie,
             qualifying_relative_gross_income_limit: s_qr_gross_income,
+            acquisition_debt_ceiling: s_debt_ceiling,
             child_tax_credit_per_child: s_ctc_per_child,
             credit_for_other_dependents_per_person: s_odc_per_person,
             elective_deferral_limit: s_deferral,
@@ -604,6 +605,7 @@ fn every_shipped_full_return_params_equal_the_ones_the_corpus_validates() {
             salt: v_salt,
             kiddie_unearned_threshold: v_kiddie,
             qualifying_relative_gross_income_limit: v_qr_gross_income,
+            acquisition_debt_ceiling: v_debt_ceiling,
             child_tax_credit_per_child: v_ctc_per_child,
             credit_for_other_dependents_per_person: v_odc_per_person,
             elective_deferral_limit: v_deferral,
@@ -727,6 +729,15 @@ fn every_shipped_full_return_params_equal_the_ones_the_corpus_validates() {
             "TY{year}: the §152(d)(1)(B) qualifying-relative gross income limit differs — it is \
              quoted verbatim in the Step 4 gate's prompt, so the two sides disagree about what the \
              filer was asked"
+        );
+        // ★★★ R8 / T9 — §163(h)(3)(B). Not a worksheet figure either: it is the limit the AGGREGATE
+        //     Form 1098 box-2 warning is measured against, shown beside the filer's own
+        //     `MortgageWithinDebtLimit` testimony, so a wrong figure warns the wrong household.
+        assert_eq!(
+            s_debt_ceiling, v_debt_ceiling,
+            "TY{year}: the §163(h)(3)(B) home acquisition-debt ceilings differ — they decide which \
+             households are told their mortgage balances are over the limit before they swear to \
+             Schedule A line 8a"
         );
         assert_eq!(
             s_hsa, v_hsa,

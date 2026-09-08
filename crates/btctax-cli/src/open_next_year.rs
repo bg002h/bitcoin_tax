@@ -537,6 +537,22 @@ pub fn seed(prior: &ReturnInputs, to: i32) -> ReturnInputs {
                 ..Default::default()
             })
             .collect(),
+        // ★★★ **T9 — the Form 1098 LENDER is a payer identity, and the strongest case of the
+        //     class: a lender sends one for every year the loan is outstanding, so R10.4's
+        //     sentence — *"Last year Home Savings (TIN 00-0000000) issued you a Form 1098. Did Home
+        //     Savings issue one for 2027?"* — is as true of them as of a bank. Every BOX is blank,
+        //     and three of them matter: box 2's balance drives the §163(h)(3)(B) ceiling warning,
+        //     box 3's date decides WHICH ceiling, and the shared-interest gate REFUSES until
+        //     answered — the fail-closed direction on a row the filer has not looked at.
+        form_1098: prior
+            .form_1098
+            .iter()
+            .map(|r| btctax_core::tax::return_inputs::Form1098 {
+                lender: r.lender.clone(),
+                lender_tin: r.lender_tin.clone(),
+                ..Default::default()
+            })
+            .collect(),
         // ★★★ **T16 — the HSA TRUSTEE is a payer identity like any other.** An HSA trustee sends a
         //     Form 1099-SA every year money leaves the account, so R10.4's sentence — *"Last year
         //     Fidelity (TIN 12-3456789) issued you a Form 1099-SA. Did they issue one for 2027?"* —
@@ -666,8 +682,11 @@ fn payer_of(ri: &ReturnInputs, row: DocumentRow, i: usize) -> (String, String) {
         DocumentRow::Sa5498 => ri.sa_5498.get(i).map_or_else(Default::default, |r| {
             (r.trustee.clone(), clause("TIN", &r.trustee_tin))
         }),
-        DocumentRow::Form1098
-        | DocumentRow::Form1098e
+        // ★ T9 — the Form 1098 LENDER, named the same way every other payer is.
+        DocumentRow::Form1098 => ri.form_1098.get(i).map_or_else(Default::default, |r| {
+            (r.lender.clone(), clause("TIN", &r.lender_tin))
+        }),
+        DocumentRow::Form1098e
         | DocumentRow::R1099
         | DocumentRow::Ssa1099
         | DocumentRow::NecMiscK1099

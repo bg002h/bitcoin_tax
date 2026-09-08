@@ -67,6 +67,10 @@ pub enum WarnedDocument {
     Form1099Int,
     Form1099Div,
     Form1099G,
+    /// ★ T9 — the Form 1098 rows. The §163(h)(3)(B) ceiling warning is AGGREGATE, so it is attached
+    ///   to the FIRST row: there is no single row it is about, and a warning attached to none would
+    ///   be a warning no surface can place a cursor on.
+    Form1098,
     Form1098E,
 }
 
@@ -79,6 +83,7 @@ impl WarnedDocument {
             WarnedDocument::Form1099Int => "Form 1099-INT",
             WarnedDocument::Form1099Div => "Form 1099-DIV",
             WarnedDocument::Form1099G => "Form 1099-G",
+            WarnedDocument::Form1098 => "Form 1098",
             WarnedDocument::Form1098E => "Form 1098-E",
         }
     }
@@ -104,8 +109,16 @@ pub struct TranscriptionWarning {
 pub fn transcription_warnings(
     ri: &ReturnInputs,
     ss_wage_base: Option<Usd>,
+    acquisition_debt_ceiling: Option<crate::tax::tables::AcquisitionDebtCeiling>,
 ) -> Vec<TranscriptionWarning> {
     let mut out = Vec::new();
+    if let Some(message) = acquisition_debt_ceiling_warning(ri, acquisition_debt_ceiling) {
+        out.push(TranscriptionWarning {
+            document: WarnedDocument::Form1098,
+            row: 0,
+            message,
+        });
+    }
     let mut warn = |document: WarnedDocument, row: usize, message: String| {
         out.push(TranscriptionWarning {
             document,
@@ -300,11 +313,262 @@ fn money(v: Usd) -> String {
     format!("${v:.2}")
 }
 
+/// ★★★ **THE §163(h)(3)(B) ACQUISITION-DEBT CEILING CHECK — the ONE derivation** (R8 / T9).
+///
+/// **AGGREGATE, and that is the whole point.** *"For qualifying debt taken out after December 15,
+/// 2017, you can only deduct home mortgage interest on up to $750,000 …"*
+/// (`i1040sca--2025.txt:1040-1042`) — the limit is on the filer's home acquisition debt **counted
+/// together**, so two mortgages at $500,000 each are over it while each row alone is silent. A
+/// per-row check would never warn on exactly the household the limit was written for.
+///
+/// **Which ceiling** comes from box 3, the origination date, per row: a loan taken out on or before
+/// 2017-12-15 is measured against $1,000,000 and a later one against $750,000, halved for MFS. Where
+/// the rows straddle the date, the ceiling used is the **SMALLEST** any row would earn — the
+/// instruction's own reduction rule (*"the $750,000 limit for debt taken out after December 15,
+/// 2017, is reduced by the amount of your qualifying debt subject to the $1,000,000 limit"*,
+/// `:1043-1046`) makes a mixed portfolio no more generous than the newer limit, and this is a
+/// warning, so the conservative bound is the honest one.
+///
+/// ★★ **It writes nothing, and it is not a refusal.** Line 8a stays the filer's own
+/// [`crate::tax::questions::QuestionId::MortgageWithinDebtLimit`] testimony, which refuses on `None`
+/// and on `Some(false)`. The warning exists because that question used to be asked with **no
+/// figure**: the filer was made to add up their own balances to answer it, and btctax was holding
+/// box 2 the whole time.
+///
+/// ★ `None` for the ceiling is a year whose package has not arrived (R11): the check simply does not
+///   run, exactly like every other params-gated rule, rather than guessing a limit.
+#[must_use]
+pub fn acquisition_debt_ceiling_warning(
+    ri: &ReturnInputs,
+    ceiling: Option<crate::tax::tables::AcquisitionDebtCeiling>,
+) -> Option<String> {
+    let ceiling = ceiling?;
+    if ri.form_1098.is_empty() {
+        return None;
+    }
+    let total = ri.form_1098_outstanding_principal();
+    // The smallest ceiling any transcribed row earns. `for_loan` already takes the stricter branch
+    // for a row whose box 3 was never transcribed.
+    let limit = ri
+        .form_1098
+        .iter()
+        .map(|r| ceiling.for_loan(ri.filing_status, r.box3_origination_date))
+        .min()?;
+    if total <= limit {
+        return None;
+    }
+    let rows = ri.form_1098.len();
+    let plural = if rows == 1 { "" } else { "s" };
+    Some(format!(
+        "the outstanding mortgage principal in box 2 of the {rows} Form{plural} 1098 on this return \
+         adds up to ${total}, which is more than the ${limit} the \u{a7}163(h)(3)(B) limit allows for \
+         your filing status and origination date{s} \u{2014} \"Limits on home mortgage interest\" in the \
+         Schedule A instructions. That does NOT mean line 8a is wrong: Pub. 936's Deductible Home \
+         Mortgage Interest Worksheet figures how much of your interest is still deductible, and \
+         btctax does not compute it. Check the figure against the limit before you answer \"were you \
+         inside EVERY home-mortgage debt limit this year?\" \u{2014} btctax takes your answer and \
+         changes nothing on its own",
+        s = if rows == 1 { "" } else { "s" }
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::tax::return_inputs::{Form1098E, Form1099Div, Form1099G, Form1099Int, W2};
+    use crate::tax::types::FilingStatus;
+    use time::macros::date;
 
+    // ── ★★★ R8 / T9 — the §163(h)(3)(B) ACQUISITION-DEBT CEILING WARNING. ──────────────────────
+
+    /// TY2024's ceilings, transcribed once for these tests from the same four printed figures
+    /// [`crate::tax::tables::AcquisitionDebtCeiling`] carries.
+    fn ceilings() -> crate::tax::tables::AcquisitionDebtCeiling {
+        crate::tax::tables::AcquisitionDebtCeiling {
+            after_dec_15_2017: dec!(750000),
+            after_dec_15_2017_mfs: dec!(375000),
+            on_or_before_dec_15_2017: dec!(1000000),
+            on_or_before_dec_15_2017_mfs: dec!(500000),
+        }
+    }
+
+    /// One Form 1098 with `principal` in box 2 and `origination` in box 3.
+    fn m1098(
+        principal: Usd,
+        origination: Option<time::Date>,
+    ) -> crate::tax::return_inputs::Form1098 {
+        crate::tax::return_inputs::Form1098 {
+            lender: "Home Savings".into(),
+            box1_interest: dec!(20000),
+            box2_outstanding_principal: principal,
+            box3_origination_date: origination,
+            other_borrower_paid_interest: Some(false),
+            ..Default::default()
+        }
+    }
+
+    fn warned(
+        rows: Vec<crate::tax::return_inputs::Form1098>,
+        status: FilingStatus,
+    ) -> Option<String> {
+        let ri = ReturnInputs {
+            filing_status: status,
+            form_1098: rows,
+            ..Default::default()
+        };
+        acquisition_debt_ceiling_warning(&ri, Some(ceilings()))
+    }
+
+    /// ★★★ **THE CEILING FIRES ON THE FIGURE, AND IS SILENT UNDER IT.**
+    ///
+    /// A 2019 loan is measured against $750,000: $900,000 warns, $700,000 does not. Both halves,
+    /// because a check that warned on every 1098 would pass the first and be worthless.
+    ///
+    /// Mutation: change `total <= limit` to `total < limit` and the $750,000-exactly row reds;
+    /// delete the comparison and the $700,000 row reds.
+    #[test]
+    fn the_acquisition_debt_warning_fires_over_the_ceiling_and_is_silent_under_it() {
+        let d2019 = Some(date!(2019 - 06 - 01));
+        assert!(
+            warned(vec![m1098(dec!(900000), d2019)], FilingStatus::Single)
+                .is_some_and(|w| w.contains("900000") && w.contains("750000")),
+            "$900,000 of post-2017 debt is over the $750,000 ceiling and must name both figures"
+        );
+        assert_eq!(
+            warned(vec![m1098(dec!(700000), d2019)], FilingStatus::Single),
+            None,
+            "$700,000 is under it and must be silent"
+        );
+        assert_eq!(
+            warned(vec![m1098(dec!(750000), d2019)], FilingStatus::Single),
+            None,
+            "AT the ceiling is not over it — the instruction says \"up to $750,000\""
+        );
+    }
+
+    /// ★★★ **IT IS AGGREGATE, AND THAT IS THE WHOLE POINT.**
+    ///
+    /// *"you can only deduct home mortgage interest on up to $750,000 … of that debt"* is a limit on
+    /// the filer's acquisition debt COUNTED TOGETHER. Two mortgages at $500,000 each are over it
+    /// while each row alone is silent — exactly the household the limit was written for, and exactly
+    /// the household a per-row check would never warn.
+    ///
+    /// Mutation: sum a single row instead of `form_1098_outstanding_principal()` and the two-row
+    /// assertion reds while the one-row assertion still passes.
+    #[test]
+    fn the_acquisition_debt_warning_sums_every_1098_row() {
+        let d2019 = Some(date!(2019 - 06 - 01));
+        assert_eq!(
+            warned(vec![m1098(dec!(500000), d2019)], FilingStatus::Single),
+            None,
+            "one $500,000 mortgage is under the $750,000 ceiling"
+        );
+        assert!(
+            warned(
+                vec![m1098(dec!(500000), d2019), m1098(dec!(500000), d2019)],
+                FilingStatus::Single
+            )
+            .is_some_and(|w| w.contains("1000000")),
+            "TWO of them are $1,000,000 of acquisition debt and must warn on the SUM"
+        );
+    }
+
+    /// ★★★ **MFS IS HALVED, AND THE DATE SELECTS THE CEILING.**
+    ///
+    /// The instruction prints the married-filing-separately amount beside each limit — *"$750,000
+    /// ($375,000 if you are married filing separately)"* — so a $400,000 balance warns an MFS filer
+    /// and not a Single one. And a loan taken out ON OR BEFORE December 15, 2017 is measured against
+    /// $1,000,000 instead, so the same $900,000 that warns a 2019 borrower is silent for a 2016 one.
+    ///
+    /// ★ A row whose box 3 was never transcribed takes the STRICTER later ceiling: an unknown date
+    ///   can make the warning fire sooner, never later. Mutation: default `None` to the pre-2018
+    ///   limit and the last assertion reds.
+    #[test]
+    fn the_acquisition_debt_warning_halves_for_mfs_and_reads_the_origination_date() {
+        let d2019 = Some(date!(2019 - 06 - 01));
+        let d2016 = Some(date!(2016 - 03 - 01));
+        assert!(
+            warned(vec![m1098(dec!(400000), d2019)], FilingStatus::Mfs).is_some(),
+            "$400,000 is over the $375,000 MFS ceiling"
+        );
+        assert_eq!(
+            warned(vec![m1098(dec!(400000), d2019)], FilingStatus::Single),
+            None,
+            "…and under the $750,000 unmarried one"
+        );
+        assert_eq!(
+            warned(vec![m1098(dec!(900000), d2016)], FilingStatus::Single),
+            None,
+            "a loan taken out on or before December 15, 2017 is measured against $1,000,000"
+        );
+        assert!(
+            warned(vec![m1098(dec!(900000), None)], FilingStatus::Single).is_some(),
+            "an UNTRANSCRIBED box 3 takes the stricter post-2017 ceiling — fail-closed"
+        );
+        // The instruction's own boundary, to the day.
+        assert_eq!(
+            warned(
+                vec![m1098(dec!(900000), Some(date!(2017 - 12 - 15)))],
+                FilingStatus::Single
+            ),
+            None,
+            "ON December 15, 2017 is \"on or before\" — the $1,000,000 ceiling"
+        );
+        assert!(
+            warned(
+                vec![m1098(dec!(900000), Some(date!(2017 - 12 - 16)))],
+                FilingStatus::Single
+            )
+            .is_some(),
+            "the NEXT day is \"after December 15, 2017\" — the $750,000 ceiling"
+        );
+    }
+
+    /// ★★★ **THE WARNING WRITES NOTHING, AND THE DECLARATION STILL REFUSES.**
+    ///
+    /// R8: the ceiling is *"displayed as a warning beside the existing `MortgageWithinDebtLimit`
+    /// declaration, which stays the filer's testimony"*. So an over-limit return with the question
+    /// unanswered still refuses — the figure never answers it — and line 8a is untouched by the
+    /// warning either way.
+    ///
+    /// ★ And on a year whose package has not arrived the check simply does not run (R11), rather
+    ///   than guessing a limit.
+    #[test]
+    fn the_ceiling_warning_answers_nothing_and_waits_for_the_years_package() {
+        use crate::tax::questions::QuestionId;
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs::default()),
+            form_1098: vec![m1098(dec!(900000), Some(date!(2019 - 06 - 01)))],
+            ..Default::default()
+        };
+        assert!(
+            acquisition_debt_ceiling_warning(&ri, Some(ceilings())).is_some(),
+            "the premise: this return is over the ceiling"
+        );
+        assert!(
+            crate::tax::questions::question_is_live(QuestionId::MortgageWithinDebtLimit, &ri),
+            "…and the declaration is live"
+        );
+        assert_eq!(
+            ri.schedule_a
+                .as_ref()
+                .and_then(|a| a.mortgage_within_debt_limit),
+            None,
+            "★ THE KILL: the warning wrote nothing — the answer is still the filer's to give"
+        );
+        assert_eq!(
+            acquisition_debt_ceiling_warning(&ri, None),
+            None,
+            "on a year with no package the check waits, exactly as every other params-gated rule does"
+        );
+        ri.form_1098.clear();
+        assert_eq!(
+            acquisition_debt_ceiling_warning(&ri, Some(ceilings())),
+            None,
+            "and a return with no Form 1098 has no aggregate to test"
+        );
+    }
     fn w2(f: impl FnOnce(&mut W2)) -> W2 {
         let mut w = W2 {
             employer: "ACME".into(),
@@ -351,7 +615,7 @@ mod tests {
                 ..Default::default()
             };
             assert_eq!(
-                transcription_warnings(&ri, Some(dec!(168600))).len(),
+                transcription_warnings(&ri, Some(dec!(168600)), None).len(),
                 1,
                 "the premise: a short {what} with NO box-12 code warns"
             );
@@ -370,7 +634,7 @@ mod tests {
                 ..Default::default()
             };
             assert_eq!(
-                transcription_warnings(&ri, Some(dec!(168600))),
+                transcription_warnings(&ri, Some(dec!(168600)), None),
                 Vec::new(),
                 "★ THE KILL: box 12 code {c} says the employer could not collect the tax on tips \
                  and must NOT include it in {what} — warning there trains the filer to ignore the \
@@ -387,7 +651,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            transcription_warnings(&ri, Some(dec!(168600))).len(),
+            transcription_warnings(&ri, Some(dec!(168600)), None).len(),
             1,
             "★ THE KILL: code A is about box 4 alone — a blanket \"has A or B\" suppression would \
              lose the box-6 check on this W-2"
@@ -402,7 +666,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            transcription_warnings(&ri, Some(dec!(168600))),
+            transcription_warnings(&ri, Some(dec!(168600)), None),
             Vec::new(),
             "a W-2 whose boxes agree must be silent"
         );
@@ -427,7 +691,7 @@ mod tests {
             ..Default::default()
         };
         let before = ri.clone();
-        let got = transcription_warnings(&ri, Some(dec!(168600)));
+        let got = transcription_warnings(&ri, Some(dec!(168600)), None);
         assert_eq!(
             got.len(),
             2,
@@ -465,11 +729,14 @@ mod tests {
             })],
             ..Default::default()
         };
-        assert_eq!(transcription_warnings(&ri, Some(dec!(168600))), Vec::new());
+        assert_eq!(
+            transcription_warnings(&ri, Some(dec!(168600)), None),
+            Vec::new()
+        );
         // …and a box 6 outside the bracket still warns, so the widening did not disarm the check.
         let mut broken = ri.clone();
         broken.w2s[0].box6_medicare_withheld = dec!(30000);
-        let got = transcription_warnings(&broken, Some(dec!(168600)));
+        let got = transcription_warnings(&broken, Some(dec!(168600)), None);
         assert_eq!(got.len(), 1, "{got:#?}");
         assert!(got[0].message.contains("Additional Medicare Tax"));
     }
@@ -486,11 +753,14 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            transcription_warnings(&ri, None),
+            transcription_warnings(&ri, None, None),
             Vec::new(),
             "with no table there is no base to compare against"
         );
-        assert_eq!(transcription_warnings(&ri, Some(dec!(168600))).len(), 1);
+        assert_eq!(
+            transcription_warnings(&ri, Some(dec!(168600)), None).len(),
+            1
+        );
     }
 
     /// ★★★ **THE ALL-ZERO ROW, on every document whose ISSUER has a threshold — and not on the W-2,
@@ -522,7 +792,7 @@ mod tests {
             ..Default::default()
         };
         let before = ri.clone();
-        let got = transcription_warnings(&ri, Some(dec!(168600)));
+        let got = transcription_warnings(&ri, Some(dec!(168600)), None);
         let docs: Vec<WarnedDocument> = got.iter().map(|w| w.document).collect();
         assert_eq!(
             docs,
@@ -556,6 +826,6 @@ mod tests {
             }],
             ..Default::default()
         };
-        assert_eq!(transcription_warnings(&ri, None), Vec::new());
+        assert_eq!(transcription_warnings(&ri, None, None), Vec::new());
     }
 }

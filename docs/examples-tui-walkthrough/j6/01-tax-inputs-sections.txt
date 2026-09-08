@@ -15,16 +15,16 @@
  13││  ✓ Forms 1099-SA (HSA distribut││                                                                                    │
  14││  ✓ Forms 5498-SA (HSA contribut││                                                                                    │
  15││  … Form 8889 (health savings ac││                                                                                    │
- 16││  … Schedule A (itemized deducti││                                                                                    │
- 17││  … Payments                    ││                                                                                    │
- 18││  … Carryforwards from last year││                                                                                    │
- 19││  … §199A limitation (only if yo││                                                                                    │
- 20││  ✓ Declarations                ││                                                                                    │
- 21││  ✓ Documents received          ││                                                                                    │
- 22││  … Income exclusions (§911/931/││                                                                                    │
- 23││  … Skippables                  ││                                                                                    │
- 24││                                ││                                                                                    │
- 25││                                ││                                                                                    │
+ 16││  ✓ Forms 1098 (home mortgage in││                                                                                    │
+ 17││  … Schedule A (itemized deducti││                                                                                    │
+ 18││  ✓ Schedule A line 8b (mortgage││                                                                                    │
+ 19││  ✓ Sale of your main home      ││                                                                                    │
+ 20││  … Payments                    ││                                                                                    │
+ 21││  … Carryforwards from last year││                                                                                    │
+ 22││  … §199A limitation (only if yo││                                                                                    │
+ 23││  ✓ Declarations                ││                                                                                    │
+ 24││  ✓ Documents received          ││                                                                                    │
+ 25││  … Income exclusions (§911/931/││                                                                                    │
  26│└────────────────────────────────┘└────────────────────────────────────────────────────────────────────────────────────┘
  27│┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
  28││  active source: full return   ·   screens clean, except what report computes                                         │

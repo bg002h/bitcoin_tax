@@ -654,6 +654,25 @@ pub fn answer_return_inputs(
                 // A MANDATORY declaration — silence with nothing on file is refused, never accepted (D-8).
                 Ask::Declaration(q) => {
                     let cur = (q.get)(&ri);
+                    // ★★★ R8 / T9 — THE §163(h)(3)(B) CEILING, BESIDE THE DECLARATION IT INFORMS.
+                    //
+                    //     R8: the aggregate box-2 check is *"displayed as a warning beside the
+                    //     existing `MortgageWithinDebtLimit` declaration, which stays the filer's
+                    //     testimony"*. The question used to be asked with NO FIGURE — the filer was
+                    //     made to add up their own balances while btctax was holding box 2.
+                    //
+                    // ★★ DISPLAY CHROME, printed BEFORE the prompt and never folded into it. T7's
+                    //    C-1 is the reason: `record_answer` hashes the words put to the filer, so a
+                    //    computed figure inside the prompt would change the hash whenever a balance
+                    //    changed and re-ask a question nobody's answer had gone stale on.
+                    if q.id == QuestionId::MortgageWithinDebtLimit {
+                        if let Some(w) = btctax_core::tax::transcription_warnings::acquisition_debt_ceiling_warning(
+                            &ri,
+                            params.as_ref().map(|p| p.acquisition_debt_ceiling),
+                        ) {
+                            writeln!(out, "  warning · {w}")?;
+                        }
+                    }
                     // ★★★ R10.4 — the words PUT TO THE FILER, rendered from the return. For the carried
                     //     filing status that sentence QUOTES the status, and it is what `record_answer`
                     //     hashes below, so editing the status changes the hash and R10.3's re-ask rule
@@ -1128,6 +1147,12 @@ mod tests {
                 // empty-vault filer too — the question is on the FORM, not on the ledger, and
                 // scoping it to "btctax saw crypto" would be the circular liveness §2.9 records.
                 QuestionId::DigitalAssetActivity,
+                // ★★★ R8 / T9 — "did you sell your main home?", always live and NOT neutral: the
+                //     Schedule D block's own answer is "You may not need to report the sale", and
+                //     which branch a filer is on decides whether a Form 8949 belongs on the return.
+                //     Its three tests are live only on a YES, and the Form 8396 gate only on a
+                //     return that carries a Form 1098 or a line 8b row — so neither appears here.
+                QuestionId::SoldMainHome,
             ]
         );
         assert!(!has_spouse_dob(&single()), "no spouse ⇒ no spouse DOB");
@@ -1828,13 +1853,26 @@ mod tests {
             QuestionId::MfsSpouseItemizes => r.filing_status = FilingStatus::Mfs,
             // ★ R10.4 / T4b — live only on a year the OPENER made.
             QuestionId::FilingStatusConfirmed => r.opened_from = Some(2024),
-            QuestionId::MortgageAllUsedToBuyBuildImprove
+            // ★★★ R8 / T9 — the Form 8396 gate shares the three mortgage declarations' precondition
+            //     (a transcribed Form 1098 on an itemizing return), so it shares their scenario.
+            QuestionId::ClaimingMortgageInterestCredit
+            | QuestionId::MortgageAllUsedToBuyBuildImprove
             | QuestionId::AmtQualifiedDwelling
             | QuestionId::MortgageWithinDebtLimit => {
                 r.schedule_a = Some(ScheduleAInputs {
-                    mortgage_interest_1098: dec!(9000),
                     ..Default::default()
                 });
+                r.form_1098 = vec![btctax_core::tax::testonly::form_1098_with_interest(dec!(
+                    9000
+                ))];
+            }
+            // ★★★ R8 / T9 — the three sale-of-a-main-home tests are live only on a YES to
+            //     `sold_main_home`, which is a SIBLING registry entry's answer — so the scenario
+            //     sets it directly rather than leaving it to the neutral loop, which answers NO.
+            QuestionId::HomeSaleTest1OwnedAndLived
+            | QuestionId::HomeSaleTest2NoRecentExclusion
+            | QuestionId::HomeSaleCanExcludeAllGain => {
+                r.home_sale.sold_main_home = Some(true);
             }
             // ★ The three carryforward-conditioned declarations share ONE liveness predicate
             //   (`questions::carryforward_in_present`), so they share one scenario.

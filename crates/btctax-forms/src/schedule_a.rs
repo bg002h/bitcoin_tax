@@ -28,7 +28,31 @@ const COL_AMOUNT: usize = 2;
 /// Hand-pinned column-x clusters, measured from the blank TY2024 PDF. Code-side oracle — never taken
 /// from the (distrusted) map. The AGI-inline band is deliberately tight: it is the whole reason a
 /// mis-mapped line 2 fails closed instead of silently printing the AGI in the wrong box.
-const SCHEDULE_A_CLUSTERS: &[(f32, f32)] = &[(331.0, 403.0), (417.0, 489.0), (504.0, 576.0)];
+const SCHEDULE_A_CLUSTERS: &[(f32, f32)] = &[
+    (331.0, 403.0),
+    (417.0, 489.0),
+    (504.0, 576.0),
+    (245.0, 266.0),
+];
+
+/// ★★★ T9 — line 8b's DOTTED LINES, a fourth cluster far to the LEFT of every money column.
+///
+/// Measured with `xtask dump-fields` on the bundled blanks rather than read off the render:
+/// TY2024's two rows are `f1_17` @ y=348 and `f1_18` @ y=336, both x = [115.2, 396.0] (x-centre
+/// 255.6); TY2025's one merged 24pt box is `Line8b_ReadOrder[0].f1_16[0]` at x = [122.4, 381.6]
+/// (x-centre 252.0). `verify_flat` bands the x-CENTRE, so the cluster is [245, 266] — well clear of
+/// the AGI-inline band at [331, 403], which is the nearest money column to its right.
+const COL_PAYEE: usize = 3;
+
+/// The descent group the dotted lines belong to. The money cells are group 0 (one strictly
+/// descending chain); the payee rows are their own chain, because they sit BETWEEN two money cells
+/// in y and would otherwise break the money chain's monotonicity.
+const GRP_PAYEE: u32 = 1;
+
+/// The Schedule A instruction's own words for a line 8b block that does not fit on the form:
+/// *"identify the person by attaching a statement to your paper return and printing "See attached"
+/// to the right of line 8b."* (`design/forms/extract/i1040sca--2025.txt:1126-1131`.)
+const SEE_ATTACHED: &str = "See attached";
 
 /// Fill Schedule A from the core-derived printed chain. The serialized bytes are read back through
 /// the geometric verifier (a mis-mapped cell FAILS CLOSED).
@@ -41,7 +65,7 @@ pub fn fill_schedule_a_with_map(
     let mut placements: Vec<FlatPlacement> = Vec::new();
 
     // Parallel to `map.lines()` — printed reading order, strictly descending y on page 1.
-    let plan: [(Usd, usize); 19] = [
+    let plan: [(Usd, usize); 21] = [
         (lines.line1, COL_MID),        // 1  medical expenses
         (lines.line2, COL_AGI_INLINE), // 2  ★ AGI — its own column, not MID
         (lines.line3, COL_MID),        // 3  the 7.5% floor
@@ -53,6 +77,8 @@ pub fn fill_schedule_a_with_map(
         (lines.line5e, COL_MID),       // 5e the §164(b) cap
         (lines.line7, COL_AMOUNT),     // 7  add 5e and 6
         (lines.line8a, COL_MID),       // 8a mortgage interest (Form 1098)
+        (lines.line8b, COL_MID),       // 8b mortgage interest NOT on a Form 1098
+        (lines.line8c, COL_MID),       // 8c points not on a Form 1098
         (lines.line8e, COL_MID),       // 8e add 8a-8c
         (lines.line9, COL_MID),        // 9  investment interest (§163(d))
         (lines.line10, COL_AMOUNT),    // 10 add 8e and 9
@@ -71,6 +97,35 @@ pub fn fill_schedule_a_with_map(
             col,
             Some((0, ord as u32)),
         );
+    }
+
+    // ★★★ T9 / R8 — LINE 8b's DOTTED LINES. The instruction makes the identity part of the line:
+    //     *"write that person's name, identifying number, and address on the dotted lines next to
+    //     line 8b"*, with its own Caution — *"If you don't show the required information about the
+    //     recipient … you may have to pay a $50 penalty."* So a printed 8b amount without this
+    //     block is an incomplete line, not a tidier one.
+    //
+    // ★★ When there are MORE recipients than the form has dotted lines, the escape is the
+    //    instruction's own, printed on this very line: *"identify the person by attaching a
+    //    statement to your paper return and printing \u{201c}See attached\u{201d} to the right of line 8b."*
+    //    The emitter chooses between two strings the form supplies; it composes neither.
+    if !lines.line8b_payee.is_empty() && !map.line8b_payee.is_empty() {
+        let fits = lines.line8b_payee.len() <= map.line8b_payee.len();
+        let printed: Vec<String> = if fits {
+            lines.line8b_payee.clone()
+        } else {
+            vec![SEE_ATTACHED.to_string()]
+        };
+        for (ord, (fqn, text)) in map.line8b_payee.iter().zip(printed).enumerate() {
+            writes.push((fqn.clone(), pdf::FieldValue::Text(text)));
+            placements.push(FlatPlacement::cell(
+                fqn.clone(),
+                crate::cells::page_of(fqn),
+                COL_PAYEE,
+                GRP_PAYEE,
+                ord as u32,
+            ));
+        }
     }
 
     let mut doc = pdf::load(pdf::schedule_a_pdf(map.year)?)?;

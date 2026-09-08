@@ -453,6 +453,66 @@ impl SaltLimitation {
     }
 }
 
+/// ★★★ **§163(h)(3)(B) — THE HOME ACQUISITION-DEBT CEILINGS**, transcribed from the four figures
+/// the Schedule A instructions print under *Limits on home mortgage interest* (R8 / T9).
+///
+/// > *"Limit on loans taken out on or before December 15, 2017. For qualifying debt taken out on or
+/// > before December 15, 2017, you can only deduct home mortgage interest on up to $1,000,000
+/// > ($500,000 if you are married filing separately) of that debt."*
+/// > *"Limit on loans taken out after December 15, 2017. For qualifying debt taken out after
+/// > December 15, 2017, you can only deduct home mortgage interest on up to $750,000 ($375,000 if
+/// > you are married filing separately) of that debt."*
+/// > (`design/forms/extract/i1040sca--2025.txt:1027-1046`; Pub. 936, *Part II — Limits on Home
+/// > Mortgage Interest Deduction*.)
+///
+/// ★★ **All four figures are TRANSCRIBED, not two figures and a halving rule.** The instruction
+/// prints the MFS amount beside each limit, so carrying it is following the form; deriving it would
+/// be the compression this repo's standing rule exists to refuse — and a year in which Congress
+/// moved one without the other would be silent.
+///
+/// ★ **Nothing here writes a line.** The ceilings drive a **WARNING** over Σ box 2; Schedule A line
+/// 8a stays the filer's own `MortgageWithinDebtLimit` testimony, because the deductible figure on an
+/// over-limit return is a nonzero output of Pub. 936's *Deductible Home Mortgage Interest Worksheet*
+/// that btctax does not model.
+///
+/// ★ Not indexed and not expiring: Pub. L. 119-21 (OBBBA) §70108(a) struck *", and before January 1,
+/// 2026"* from §163(h)(3)(F)(i) and re-headed it *"BEGINNING AFTER 2017"*, so the $750,000 limit is
+/// permanent (`legal/text/statute-irc/PLAW-119publ21_OBBBA.txt:5211-5229`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AcquisitionDebtCeiling {
+    /// *"up to $750,000"* — qualifying debt taken out AFTER December 15, 2017.
+    pub after_dec_15_2017: Usd,
+    /// *"($375,000 if you are married filing separately)"*.
+    pub after_dec_15_2017_mfs: Usd,
+    /// *"up to $1,000,000"* — qualifying debt taken out ON OR BEFORE December 15, 2017.
+    pub on_or_before_dec_15_2017: Usd,
+    /// *"($500,000 if you are married filing separately)"*.
+    pub on_or_before_dec_15_2017_mfs: Usd,
+}
+
+impl AcquisitionDebtCeiling {
+    /// The ceiling for `status` and a loan originated on `origination` (Form 1098 box 3).
+    ///
+    /// ★★ **`None` — an origination date the filer never transcribed — takes the STRICTER
+    /// post-2017 ceiling.** That is the fail-closed direction for a WARNING: an unknown date can
+    /// only make the warning fire sooner, never later, so a blank box 3 cannot silence it.
+    #[must_use]
+    pub fn for_loan(&self, status: FilingStatus, origination: Option<time::Date>) -> Usd {
+        // *"on or before December 15, 2017"* versus *"after December 15, 2017"* — the instruction's
+        // own boundary, so the older, larger limit needs a date at or before 2017-12-15.
+        let grandfathered = origination.is_some_and(|d| {
+            d <= time::Date::from_calendar_date(2017, time::Month::December, 15)
+                .expect("2017-12-15 is a valid date")
+        });
+        match (grandfathered, status) {
+            (true, FilingStatus::Mfs) => self.on_or_before_dec_15_2017_mfs,
+            (true, _) => self.on_or_before_dec_15_2017,
+            (false, FilingStatus::Mfs) => self.after_dec_15_2017_mfs,
+            (false, _) => self.after_dec_15_2017,
+        }
+    }
+}
+
 impl AmtParams {
     /// §55(d)(1) AMT exemption for `status` (worksheet line 6).
     pub fn exemption(&self, status: FilingStatus) -> Usd {
@@ -497,6 +557,10 @@ pub struct FullReturnParams {
     pub salt: SaltLimitation,
     /// §1(g)(4) kiddie-tax unearned-income threshold (Form 8615 refuse trigger, spec C1).
     pub kiddie_unearned_threshold: Usd,
+    /// ★★★ **§163(h)(3)(B) — the home acquisition-debt ceilings** (R8 / T9). See
+    /// [`AcquisitionDebtCeiling`]: they drive a WARNING over the SUM of Form 1098 box 2, never a
+    /// printed line.
+    pub acquisition_debt_ceiling: AcquisitionDebtCeiling,
     /// ★★★ **§152(d)(1)(B) — the qualifying-relative GROSS INCOME limit** (T7 / R6, Step 4).
     ///
     /// The flowchart states the test with the year's figure in it: *"Who had gross income of less

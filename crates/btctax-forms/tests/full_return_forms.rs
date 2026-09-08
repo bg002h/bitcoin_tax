@@ -1116,13 +1116,19 @@ fn sch_a_lines() -> ScheduleALines {
         line5e: dec!(10000),
         line7: dec!(10000),
         line8a: dec!(12000),
-        line8e: dec!(12000),
-        line10: dec!(12000),
+        // ★ T9 — lines 8b and 8c are COLLECTED now, so the fixture gives them real non-zero values
+        //   and its own dotted-line block: the geometric verifier must exercise the cells rather
+        //   than see them absent. 8e = 8a + 8b + 8c = 12,000 + 900 + 300 = 13,200; 10 = 8e + 9.
+        line8b: dec!(900),
+        line8c: dec!(300),
+        line8b_payee: vec!["JANE SELLER, 000-00-0000, 1 MAIN ST".to_string()],
+        line8e: dec!(13200),
+        line10: dec!(16200),
         line11: dec!(1000),
         line12: dec!(2000),
         line13: dec!(500),
         line14: dec!(3500),
-        line17: dec!(28000),
+        line17: dec!(32200),
     }
 }
 
@@ -1155,9 +1161,28 @@ fn schedule_a_fills_the_printed_chain_and_reads_back() {
         g("topmostSubform[0].Page1[0].f1_11[0]").as_deref(),
         Some("10000")
     ); // L5e — capped
+       // ★★★ T9 — lines 8b, 8c and their dotted-line block. 8e = 8a + 8b + 8c = 12,000 + 900 + 300.
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_19[0]").as_deref(),
+        Some("900")
+    ); // L8b (the AMOUNT — f1_19, ABOVE the two free-text rows; see the map header)
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_17[0]").as_deref(),
+        Some("JANE SELLER, 000-00-0000, 1 MAIN ST"),
+        "L8b's dotted line must carry the recipient's name, identifying number and address"
+    );
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_18[0]"),
+        None,
+        "the second dotted line stays blank with one recipient"
+    );
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_20[0]").as_deref(),
+        Some("300")
+    ); // L8c
     assert_eq!(
         g("topmostSubform[0].Page1[0].f1_22[0]").as_deref(),
-        Some("12000")
+        Some("13200")
     ); // L8e
     assert_eq!(
         g("topmostSubform[0].Page1[0].f1_28[0]").as_deref(),
@@ -1165,7 +1190,7 @@ fn schedule_a_fills_the_printed_chain_and_reads_back() {
     ); // L14
     assert_eq!(
         g("topmostSubform[0].Page1[0].f1_34[0]").as_deref(),
-        Some("28000")
+        Some("32200")
     ); // L17 → 1040 L12
 
     // ★ Line 8d (f1_21) is the IRS's own ReadOnly "Reserved for future use" widget — never written.
@@ -1185,8 +1210,9 @@ fn schedule_a_fills_the_printed_chain_and_reads_back() {
     );
     // (The line-10 = 8e + 9 DERIVATION is pinned in `printed.rs`, where `schedule_a_lines` computes
     //  it; this fixture is a hand-built `ScheduleALines` literal, so it would only re-assert itself.)
-    // Unmodeled lines stay BLANK: 6 (other taxes), 8b/8c, 15, 16.
-    for blank in ["f1_14[0]", "f1_19[0]", "f1_20[0]", "f1_29[0]", "f1_33[0]"] {
+    // Unmodeled lines stay BLANK: 6 (other taxes), 15, 16. ★ T9 — 8b (f1_19) and 8c (f1_20) LEFT
+    // this list: they are collected now, and their read-back is asserted above.
+    for blank in ["f1_14[0]", "f1_29[0]", "f1_33[0]"] {
         let fqn = format!("topmostSubform[0].Page1[0].{blank}");
         assert_eq!(g(&fqn), None, "{fqn} (unmodeled) must be blank");
     }

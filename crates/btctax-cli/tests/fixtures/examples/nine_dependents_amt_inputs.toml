@@ -48,6 +48,9 @@
 
 tax_year = 2024
 other_out_of_scope_income = false
+# ★ R8 / T9 — Schedule A's Line 8a Caution: no Form 8396 mortgage credit certificate, so line 8a
+#   keeps the whole Form 1098 figure. A `true` REFUSES (btctax holds no Form 8396 line 3).
+claiming_mortgage_interest_credit = false
 filing_status = "Single"
 itemize_election = "auto"
 dual_status_alien = false
@@ -113,6 +116,8 @@ sa_5498 = false
 t_1098 = false
 # ★ T5 — the 1098-E row opened when `Form1098E` replaced the `sch1.student_loan_interest_paid`
 #   scalar. This household holds no student loan, so the answer is a truthful "none".
+# ★ R8 / T9 — this return carries a Form 1098 and itemizes, so the row is live and answered YES.
+form_1098 = true
 form_1098e = false
 
 [capital_loss_carryforward_in]
@@ -363,10 +368,17 @@ ssns_valid_for_employment_issued_by_due_date = true
 payer = "Community Savings Bank"
 box1_interest = "45000"
 
+# ★★★ R8 / T9 — the mortgage interest is a DOCUMENT now, not a Schedule A scalar. $18,000 of box 1
+#     CLEARS the $14,600 standard deduction, so this Schedule A DOES file and the filer itemizes —
+#     which is what swings Form 6251 line 2a onto its Schedule-A-line-7 branch. See the header.
+#     Box 4 is absent (any refund of overpaid interest REFUSES, naming Schedule 1 line 8z), and the
+#     shared-interest gate is answered: a blank there refuses too, because line 8a sums box 1 in full.
+[[form_1098]]
+lender = "Community Savings Bank"
+box1_interest = "18000"
+other_borrower_paid_interest = false
+
 [schedule_a]
-# ★ $18,000 CLEARS the $14,600 standard deduction, so this Schedule A DOES file and the filer itemizes
-#   — which is what swings Form 6251 line 2a onto its Schedule-A-line-7 branch. See the header.
-mortgage_interest_1098 = "18000"
 mortgage_all_used_to_buy_build_improve = true
 # i6251 line 3 — a principal residence IS an AMT-qualified dwelling, so there is no add-back.
 # ★ DELETING THIS LINE REFUSES THE RETURN (AmtQualifiedDwellingUnanswered). That is the point.
@@ -374,3 +386,8 @@ mortgage_dwelling_is_amt_qualified = true
 # §163(h)(3)(B) — this filer is inside every i1040sca acquisition-debt ceiling, so Schedule A line 8a
 # keeps the whole $18,000. ★ DELETING THIS LINE ALSO REFUSES THE RETURN (MortgageDebtLimitUnanswered).
 mortgage_within_debt_limit = true
+
+# ★★★ R8 / T9 — the sale of a main home. ALWAYS asked, and a blank is not a "no" (Schedule D,
+#     "Sale of Your Home"). This household sold none, so the three tests are not live.
+[home_sale]
+sold_main_home = false

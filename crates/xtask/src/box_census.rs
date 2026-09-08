@@ -626,10 +626,9 @@ pub fn section_of_stem(stem: &str) -> Option<SectionId> {
         // ★ T16 — the two HSA information returns, each with its own repeating section.
         "f1099sa" => Some(SectionId::Sa1099s),
         "f5498sa" => Some(SectionId::Sa5498s),
-        // ★ Form 1098 has no section until **T9**: its one collected box is still the Schedule A
-        //   scalar `mortgage_interest_1098`, so every one of its entries is `CollectedElsewhere` or
-        //   `NotRead`.
-        "f1098" => None,
+        // ★ T9 — the Form 1098 gained its own repeating section when `Form1098` replaced the
+        //   `schedule_a.mortgage_interest_1098` scalar.
+        "f1098" => Some(SectionId::Form1098s),
         _ => None,
     }
 }
@@ -899,25 +898,33 @@ pub const BOXES: &[BoxEntry] = &[
         decision: BoxDecision::NotRead("state income tax withheld; no Form1099B field holds it") },
     // ── Form 1098 — Rev. January 2022 and Rev. April 2025 (11 boxes each) ───────────────────────────
     BoxEntry { stem: "f1098", editions: &["2022", "2025"], label: "1", caption: "1 Mortgage interest received from payer(s)/borrower(s)",
-        decision: BoxDecision::CollectedElsewhere { fields: &[FieldId::SaMortgage1098], note: "ScheduleAInputs.mortgage_interest_1098 → Schedule A line 8a; §5.2 replaces it with Form1098.box1_interest in T9" } },
+        decision: BoxDecision::Collected { fields: &[FieldId::Form1098Box1Interest],
+            note: "Form1098.box1_interest → Schedule A line 8a WITH box 6, as the SUM over every transcribed row — the line's own words are \"Home mortgage interest and points reported to you on Form 1098\". It replaced the `schedule_a.mortgage_interest_1098` scalar at T9: a bare Usd with no lender, no TIN, no transcription date and no room for boxes 2, 3 or 4 made $0 indistinguishable from 'never asked'" } },
     BoxEntry { stem: "f1098", editions: &["2022", "2025"], label: "2", caption: "2 Outstanding mortgage",
-        decision: BoxDecision::NotRead("T9: Form1098.box2_outstanding_principal feeds the AGGREGATE, status-adjusted §163(h)(3)(B) ceiling check; no field holds it at T2") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Form1098Box2Principal],
+            note: "Form1098.box2_outstanding_principal — it reaches NO printed line and is not meant to: SUMMED ACROSS EVERY ROW it is the quantity the §163(h)(3)(B) ceiling is tested against, and the excess drives a WARNING beside the filer's own MortgageWithinDebtLimit testimony. Collected rather than NotRead because a Field holds it and the return reads it; the deductible figure on an over-limit return comes off Pub. 936's worksheet, which btctax does not compute" } },
     BoxEntry { stem: "f1098", editions: &["2022", "2025"], label: "3", caption: "3 Mortgage origination date",
-        decision: BoxDecision::NotRead("T9: Form1098.box3_origination_date decides the $750,000 versus $1,000,000 ceiling by whether it precedes 2017-12-16; no field holds it at T2") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Form1098Box3OriginationDate],
+            note: "Form1098.box3_origination_date — it selects WHICH §163(h)(3)(B) ceiling the aggregate box-2 total is measured against: $1,000,000 ($500,000 MFS) for debt taken out on or before December 15, 2017, $750,000 ($375,000 MFS) after it. A row with no date transcribed takes the STRICTER later limit, so a blank can only make the warning fire sooner" } },
     BoxEntry { stem: "f1098", editions: &["2022", "2025"], label: "4", caption: "4 Refund of overpaid",
-        decision: BoxDecision::NotRead("T9 (fold I3): > 0 REFUSES MortgageInterestRefundNotComputed naming Schedule 1 line 8z — i1098 is explicit that the refund is not netted against the deduction, so a figure held with no reader would understate; no field holds it at T2") },
+        decision: BoxDecision::RefuseIfNonzero { field: FieldId::Form1098Box4Refund, reason: || RefuseReason::MortgageInterestRefundNotComputed, note: "the Schedule A instruction is explicit that the refund is NOT netted against the deduction — \"don't reduce your deduction by the refund. Instead, see the instructions for Schedule 1 (Form 1040), line 8z\" (i1040sca--2025.txt:1069-1072). So it is INCOME on line 8z, which btctax fills from nothing, and it is a figure the tool already HOLDS: a typed number with no reader in the understatement direction. > 0 REFUSES" } },
     BoxEntry { stem: "f1098", editions: &["2022", "2025"], label: "5", caption: "5 Mortgage insurance",
-        decision: BoxDecision::NotRead("T9: mortgage insurance premiums reach Schedule A line 8d only if a final reinstates the §163(h)(3)(E) deduction; no field holds it at T2") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Form1098Box5MortgageInsurance],
+            note: "Form1098.box5_mortgage_insurance — Schedule A line 8d, which the TY2024 and TY2025 forms print as \"Reserved for future use\", so the figure reaches no line for those years. Collected anyway, and not speculatively: Pub. L. 119-21 §70108(a) inserts §163(h)(3)(F)(i)(III), switching off §163(h)(3)(E)(iv)'s termination for tax years beginning after 2025, and the draft 2026 Schedule A prints \"8d Mortgage insurance premiums\" and \"8e Add lines 8a through 8d\" (f1040sa--2026-DRAFT.txt:100-102). The provenance is recorded now rather than the paper being re-read then" } },
     BoxEntry { stem: "f1098", editions: &["2022", "2025"], label: "6", caption: "6 Points paid on purchase of principal residence",
-        decision: BoxDecision::NotRead("T9: Form1098.box6_points is added to Schedule A line 8a with box 1; no field holds it at T2") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Form1098Box6Points],
+            note: "Form1098.box6_points → Schedule A line 8a WITH box 1: the line's caption is \"Home mortgage interest AND POINTS reported to you on Form 1098\" and its instruction says the same (i1040sca--2025.txt:1060-1061). Points NOT on a 1098 are line 8c instead (ScheduleAInputs.points_not_on_1098)" } },
     BoxEntry { stem: "f1098", editions: &["2022", "2025"], label: "7", caption: "7 If address of property securing mortgage is the same",
-        decision: BoxDecision::NotRead("T9: Form1098.box7_property_address_same_as_payer, the checkbox box 8's address answers to; no field holds it at T2") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Form1098Box7AddressSame],
+            note: "Form1098.box7_property_address_same_as_payer — the checkbox that says box 8 is blank because the property is at the borrower's own address. Transcribed as the lender printed it; it reaches no line" } },
     BoxEntry { stem: "f1098", editions: &["2022", "2025"], label: "8", caption: "8 Address or description of property securing mortgage (see",
-        decision: BoxDecision::NotRead("T9: Form1098.box8_property_address; no field holds it at T2") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Form1098Box8PropertyAddress],
+            note: "Form1098.box8_property_address — free text, blank when box 7 is checked (the form's own instruction). It reaches no line, and it is scrubbed as identity: for most filers it is their own home's address" } },
     BoxEntry { stem: "f1098", editions: &["2022", "2025"], label: "9", caption: "9 Number of properties securing the",
         decision: BoxDecision::NotRead("the count of properties one mortgage secures; no Schedule A line reads it, and the ceiling check reads box 2's principal") },
     BoxEntry { stem: "f1098", editions: &["2022", "2025"], label: "10", caption: "10 Other",
-        decision: BoxDecision::NotRead("T9: Form1098.box10_other — free-text lender reporting (real estate taxes are the common one), which reaches no line until the filer identifies the item") },
+        decision: BoxDecision::Collected { fields: &[FieldId::Form1098Box10Other],
+            note: "Form1098.box10_other — free-text lender reporting (real-estate taxes paid from escrow are the common one). It reaches no line BY ITSELF, because only the filer can say what the item is; the field's help points a filer whose lender reported property tax here at Schedule A line 5b" } },
     BoxEntry { stem: "f1098", editions: &["2022", "2025"], label: "11", caption: "11 Mortgage",
         decision: BoxDecision::NotRead("the mortgage ACQUISITION date — when the present lender acquired the loan, printed only on a transferred mortgage. The §163(h)(3)(B) ceiling test reads box 3, the ORIGINATION date, so this box reaches no line") },
     // ── Form 1098-E — 2024, 2025 and 2026 (2 boxes each) ────────────────────────────────────────────
@@ -1916,6 +1923,111 @@ mod tests {
         }
     }
 
+    /// ★★★ **T9 / R8 — THE FORM 1098's REAL ENTRIES, AGAINST THE REAL EDITIONS, WITH THE DEFECTS
+    ///     PLANTED.** (B1: no checker exists until it has been observed red on a planted defect.)
+    ///
+    /// [`the_gate_reds_on_every_planted_defect`] proves `verdict` discriminates on a SYNTHETIC
+    /// table. This proves it discriminates on **the eleven 1098 entries this task wrote**, read out
+    /// of **both archived editions** — Rev. January 2022 (in force TY2022–TY2024) and Rev. April
+    /// 2025 (TY2025 on) — because that is the pair a TY2024 filer and a TY2025 filer actually hold.
+    ///
+    /// Three plants, each a real failure mode of this task's own work:
+    ///
+    /// 1. **a deleted entry** — a box on the paper that nothing decided;
+    /// 2. **a caption changed by one character** — the transcription defect `CLAUDE.md`'s standing
+    ///    rule is written against;
+    /// 3. **an entry scoped to ONE edition** — the shape the T2 seam review's Critical had, where a
+    ///    census green on one revision was blind to a box the other prints. Both editions print the
+    ///    identical eleven captions, so narrowing an entry's edition list must red on the edition it
+    ///    no longer covers and stay silent on the one it does.
+    #[test]
+    fn the_1098_entries_red_on_a_deleted_box_a_drifted_caption_and_a_narrowed_edition() {
+        let root = repo_root();
+        let editions: Vec<&DocumentAuthority> =
+            DOCUMENTS.iter().filter(|d| d.stem == "f1098").collect();
+        assert_eq!(
+            editions.iter().map(|d| d.edition).collect::<Vec<_>>(),
+            ["2022", "2025"],
+            "the premise: BOTH archived Form 1098 revisions are in the census's document list"
+        );
+
+        for doc in &editions {
+            let text = std::fs::read_to_string(extract_path(&root, doc.stem, doc.edition))
+                .expect("the archived extract is on disk");
+            let printed = printed_boxes(&text, doc.preamble_end).expect("the face block parses");
+            assert_eq!(printed.len(), 11, "{}: eleven printed boxes", doc.edition);
+            let clean: Vec<(&str, &str)> = entries_for(doc)
+                .iter()
+                .map(|b| (b.label, b.caption))
+                .collect();
+            assert!(
+                verdict(&printed, &clean).is_ok(),
+                "{}: the committed entries must PASS, or every red below is meaningless",
+                doc.edition
+            );
+
+            // (1) A DELETED entry — box 4, the one that refuses.
+            let deleted: Vec<(&str, &str)> =
+                clean.iter().copied().filter(|(l, _)| *l != "4").collect();
+            let msg = verdict(&printed, &deleted)
+                .expect_err("deleting the box-4 entry must RED, and it did not");
+            assert!(
+                msg.contains("we forgot this box"),
+                "{}: deleting box 4 red for the wrong reason: {msg}",
+                doc.edition
+            );
+
+            // (2) ONE CHARACTER of a caption — "Outstanding" → "Outstandng".
+            let drifted: Vec<(&str, &str)> = clean
+                .iter()
+                .copied()
+                .map(|(l, c)| {
+                    if l == "2" {
+                        ("2", "2 Outstandng mortgage")
+                    } else {
+                        (l, c)
+                    }
+                })
+                .collect();
+            let msg = verdict(&printed, &drifted)
+                .expect_err("a one-character caption drift must RED, and it did not");
+            assert!(
+                msg.contains("caption does not match the extract"),
+                "{}: the drifted caption red for the wrong reason: {msg}",
+                doc.edition
+            );
+        }
+
+        // (3) AN ENTRY NARROWED TO ONE EDITION. `entries_for` filters on the edition list, so
+        //     dropping an edition from box 3's entry must leave that edition with an undecided
+        //     printed box while the other edition stays clean.
+        for doc in &editions {
+            let other = if doc.edition == "2022" {
+                "2025"
+            } else {
+                "2022"
+            };
+            let text = std::fs::read_to_string(extract_path(&root, doc.stem, doc.edition))
+                .expect("the archived extract is on disk");
+            let printed = printed_boxes(&text, doc.preamble_end).expect("the face block parses");
+            let narrowed: Vec<(&str, &str)> = BOXES
+                .iter()
+                .filter(|b| b.stem == "f1098")
+                // box 3's entry now covers only the OTHER edition
+                .filter(|b| b.label != "3" || b.editions.contains(&other) && other == doc.edition)
+                .map(|b| (b.label, b.caption))
+                .collect();
+            let msg = verdict(&printed, &narrowed).expect_err(
+                "narrowing box 3 to the other edition must RED on this one, and it did not",
+            );
+            assert!(
+                msg.contains("we forgot this box") && msg.contains("Mortgage origination date"),
+                "{}: the narrowed entry red for the wrong reason: {msg}",
+                doc.edition
+            );
+        }
+    }
+
     /// ★★ **The guard on the READER, planted.** A face block with box 2 removed must red rather than
     /// return a shorter, plausible list — the exact failure the first run-splitter produced on Form
     /// 1099-DIV.
@@ -2010,10 +2122,11 @@ mod tests {
             .collect();
         assert_eq!(
             without,
-            vec!["f1098"],
-            "Form 1098 is the only archived document with no form section (its one collected box is \
-             still the Schedule A scalar until T9). Anything else here is a document whose section \
-             landed without `section_of_stem` being told."
+            Vec::<&str>::new(),
+            "★ T9 — EVERY archived document now has a form section: the Form 1098 was the last one \
+             out, and its excuse (\"its one collected box is still the Schedule A scalar\") expired \
+             when `Form1098` replaced that scalar. Anything appearing here is a document whose \
+             section landed without `section_of_stem` being told."
         );
     }
 

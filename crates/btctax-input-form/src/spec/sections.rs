@@ -1037,11 +1037,17 @@ const SCHEDULE_A_FIELDS: &[Field] = &[
         "Sch A line 5a sales-tax amount — used iff the §164(b)(5) sales-tax election is Yes.",
         salt_sales_tax_amount
     ),
+    // ★★★ T9 — `SaMortgage1098` is GONE. Schedule A line 8a is now Σ(box 1 + box 6) over the Form
+    //     1098 rows (`SectionId::Form1098s`), so there is no scalar to type beside the document.
     scha_money!(
-        FieldId::SaMortgage1098,
-        "Home-mortgage interest (1098)",
-        "Sch A line 8a — mortgage interest reported on Form 1098.",
-        mortgage_interest_1098
+        FieldId::SaPointsNotOn1098,
+        "Points not on a Form 1098 (line 8c)",
+        "Sch A line 8c \u{2014} \u{201c}Points not reported to you on Form 1098. See instructions for special \
+         rules.\u{201d} Points are shown on your settlement statement; points you paid only to borrow \
+         money are \u{201c}generally deductible over the life of the loan\u{201d}, so enter THIS year's share, \
+         which Pub. 936 figures. Points that ARE on a Form 1098 belong in that document's box 6, \
+         not here.",
+        points_not_on_1098
     ),
     scha_money!(
         FieldId::SaInvestmentInterest,
@@ -1816,7 +1822,8 @@ mod tests {
             .iter()
             .find(|e| e.id == QuestionId::MortgageAllUsedToBuyBuildImprove)
             .unwrap();
-        ri.schedule_a.as_mut().unwrap().mortgage_interest_1098 = dec!(1); // make the mortgage question live
+        // ★ T9 — the mortgage questions are live iff `schedule_a.is_some() && !form_1098.is_empty()`.
+        ri.form_1098 = vec![btctax_core::tax::testonly::form_1098_with_interest(dec!(1))];
         (m_entry.set)(&mut ri, true);
         assert_eq!(
             (mortgage.get)(&ri, &RowAddr::default()),
@@ -2426,6 +2433,281 @@ pub(crate) const G_1099S: Section = Section {
     title: "Forms 1099-G",
     kind: doc_section_kind!(g_1099, btctax_core::tax::return_inputs::Form1099G),
     fields: G_1099_FIELDS,
+};
+
+// ── ★★★ R8 / T9 — Form 1098 ─────────────────────────────────────────────────────────────────────
+
+/// Every box's `help` is the CAPTION THE FORM PRINTS, verbatim from `xtask box-census`'s reading of
+/// `design/forms/extract/f1098--<edition>.txt`, plus what the box reaches. Both archived editions —
+/// **Rev. January 2022** (TY2022–TY2024) and **Rev. April 2025** (TY2025 on) — print the identical
+/// eleven captions, so one set of fields serves both.
+const FORM_1098_FIELDS: &[Field] = &[
+    doc_text!(FieldId::Form1098Lender, form_1098, "RECIPIENT'S/LENDER'S name", "The lender or servicer as printed on the Form 1098.", lender),
+    doc_text!(FieldId::Form1098LenderTin, form_1098, "RECIPIENT'S/LENDER'S TIN", PAYER_TIN_HELP, lender_tin),
+    doc_transcribed_on!(FieldId::Form1098TranscribedOn, form_1098),
+    doc_money!(FieldId::Form1098Box1Interest, form_1098, "1 Mortgage interest received from payer(s)/borrower(s)",
+        "Box 1 \u{201c}Mortgage interest received from payer(s)/borrower(s)\u{201d} \u{2014} Schedule A line 8a, ADDED TO box 6: the line's own words are \u{201c}Home mortgage interest and points reported to you on Form 1098\u{201d}. btctax adds box 1 + box 6 across every Form 1098 on this return.", box1_interest),
+    doc_money!(FieldId::Form1098Box2Principal, form_1098, "2 Outstanding mortgage principal",
+        "Box 2 \u{201c}Outstanding mortgage principal\u{201d} \u{2014} it reaches NO line. btctax adds box 2 across every Form 1098 and compares the total against the \u{a7}163(h)(3)(B) limit for your filing status and origination date ($750,000, or $1,000,000 for debt taken out on or before December 15, 2017; half of each if married filing separately). Over the limit it shows a WARNING and changes nothing: line 8a stays what you answered about the debt limits, because the deductible figure comes off Pub. 936's Deductible Home Mortgage Interest Worksheet, which btctax does not compute.", box2_outstanding_principal),
+    Field {
+        id: FieldId::Form1098Box3OriginationDate,
+        // ★ `None` is a real state (the box was not transcribed), and it is READ: an untranscribed
+        //   date is measured against the STRICTER post-2017 ceiling, so clearing it cannot silence
+        //   the warning.
+        clear: Some(|ri, a| {
+            ri.form_1098
+                .get_mut(a.0[0])
+                .ok_or(SetError::NoSuchRow)?
+                .box3_origination_date = None;
+            Ok(())
+        }),
+        label: "3 Mortgage origination date",
+        help: "Box 3 \u{201c}Mortgage origination date\u{201d} \u{2014} it decides WHICH \u{a7}163(h)(3)(B) limit your \
+               debt is measured against: a loan taken out ON OR BEFORE December 15, 2017 is measured \
+               against $1,000,000 ($500,000 if married filing separately), a later one against \
+               $750,000 ($375,000). Left blank, btctax uses the STRICTER later limit, so the warning \
+               can only come sooner, never later.",
+        kind: FieldKind::Date,
+        live: |_| true,
+        get: |ri, a| {
+            ri.form_1098
+                .get(a.0[0])
+                .map(|r| FieldValue::Date(r.box3_origination_date))
+        },
+        set: |ri, a, v| {
+            let FieldValue::Date(d) = v else {
+                return Err(SetError::WrongKind);
+            };
+            ri.form_1098
+                .get_mut(a.0[0])
+                .ok_or(SetError::NoSuchRow)?
+                .box3_origination_date = d;
+            Ok(())
+        },
+    },
+    doc_money!(FieldId::Form1098Box4Refund, form_1098, "4 Refund of overpaid interest",
+        "Box 4 \u{201c}Refund of overpaid interest\u{201d} \u{2014} any amount here REFUSES. The Schedule A instruction says \u{201c}don't reduce your deduction by the refund. Instead, see the instructions for Schedule 1 (Form 1040), line 8z\u{201d}: the refund is INCOME on line 8z to the extent the interest cut your tax in an earlier year, and btctax fills line 8z from nothing. Rather than hold the figure and print nothing, it refuses.", box4_refund_overpaid_interest),
+    doc_money!(FieldId::Form1098Box5MortgageInsurance, form_1098, "5 Mortgage insurance premiums",
+        "Box 5 \u{201c}Mortgage insurance premiums\u{201d} \u{2014} its line, Schedule A line 8d, is \u{201c}Reserved for future use\u{201d} on the 2024 and 2025 forms, so the figure reaches no line for those years. Transcribe it anyway: Pub. L. 119-21 \u{a7}70108 restores the deduction for tax years beginning after December 31, 2025, and the draft 2026 Schedule A prints line 8d as \u{201c}Mortgage insurance premiums\u{201d} again.", box5_mortgage_insurance),
+    doc_money!(FieldId::Form1098Box6Points, form_1098, "6 Points paid on purchase of principal residence",
+        "Box 6 \u{201c}Points paid on purchase of principal residence\u{201d} \u{2014} Schedule A line 8a, added to box 1. Points NOT reported on a Form 1098 go on line 8c instead, which btctax asks for on the Schedule A screen.", box6_points),
+    Field {
+        id: FieldId::Form1098Box7AddressSame,
+        clear: None,
+        label: "7 If address of property securing mortgage is the same as PAYER'S/BORROWER'S address, check the box",
+        help: "Box 7 \u{2014} the lender ticks it when the mortgaged property is at your own address, in \
+               which case box 8 is blank. Transcribed as printed; it reaches no line.",
+        kind: FieldKind::Bool,
+        live: |_| true,
+        get: |ri, a| {
+            ri.form_1098
+                .get(a.0[0])
+                .map(|r| FieldValue::Bool(r.box7_property_address_same_as_payer))
+        },
+        set: |ri, a, v| {
+            let FieldValue::Bool(b) = v else {
+                return Err(SetError::WrongKind);
+            };
+            ri.form_1098
+                .get_mut(a.0[0])
+                .ok_or(SetError::NoSuchRow)?
+                .box7_property_address_same_as_payer = b;
+            Ok(())
+        },
+    },
+    doc_text!(FieldId::Form1098Box8PropertyAddress, form_1098, "8 Address or description of property securing mortgage (see instructions)",
+        "Box 8 \u{201c}Address or description of property securing mortgage\u{201d} \u{2014} blank when box 7 is checked, which is the form's own instruction. It reaches no line.", box8_property_address),
+    doc_text!(FieldId::Form1098Box10Other, form_1098, "10 Other",
+        "Box 10 \u{201c}Other\u{201d} \u{2014} whatever the lender chose to report; real-estate taxes paid from escrow are the common one. It reaches no line by itself: if it is property tax you paid, enter it on Schedule A line 5b (\u{201c}Real-estate taxes\u{201d}) as well.", box10_other),
+    Field {
+        id: FieldId::Form1098OtherBorrowerPaid,
+        // ★ `None` is a real state and it REFUSES — clearing un-answers the gate rather than
+        //   writing "no", which would be the whole deduction claimed on the filer's behalf.
+        clear: Some(|ri, a| {
+            ri.form_1098
+                .get_mut(a.0[0])
+                .ok_or(SetError::NoSuchRow)?
+                .other_borrower_paid_interest = None;
+            Ok(())
+        }),
+        label: "Did anyone other than your spouse also pay interest on this mortgage?",
+        help: "Schedule A, \u{201c}More than one borrower\u{201d}: \u{201c}If you and at least one other person (other \
+               than your spouse if you file a joint return) were liable for and paid interest on a \
+               mortgage that was your home, you can only deduct your share of the interest \u{2026} deduct \
+               only your share of the interest on line 8a.\u{201d} btctax puts box 1 on line 8a IN FULL and \
+               does not hold your share, so a YES refuses. Leaving it blank refuses too: a blank is \
+               not a \u{201c}no\u{201d}, and btctax will not claim the whole deduction on your behalf.",
+        kind: FieldKind::TriState,
+        live: |_| true,
+        get: |ri, a| {
+            ri.form_1098
+                .get(a.0[0])
+                .map(|r| FieldValue::TriState(r.other_borrower_paid_interest))
+        },
+        set: |ri, a, v| {
+            let FieldValue::TriState(t) = v else {
+                return Err(SetError::WrongKind);
+            };
+            ri.form_1098
+                .get_mut(a.0[0])
+                .ok_or(SetError::NoSuchRow)?
+                .other_borrower_paid_interest = t;
+            Ok(())
+        },
+    },
+];
+
+pub(crate) const FORM_1098S: Section = Section {
+    id: SectionId::Form1098s,
+    title: "Forms 1098 (home mortgage interest)",
+    kind: doc_section_kind!(form_1098, btctax_core::tax::return_inputs::Form1098),
+    fields: FORM_1098_FIELDS,
+};
+
+// ── ★★★ R8 / T9 — Schedule A line 8b, one row per recipient ─────────────────────────────────────
+
+/// A repeating leaf over `ri.schedule_a.mortgage_interest_not_on_1098[addr.0[0]]`. It cannot use
+/// `doc_text!` / `doc_money!`: the `Vec` hangs off the OPTIONAL `schedule_a`, so every accessor has
+/// two hops and a missing Schedule A is `NoSuchRow`.
+macro_rules! sa8b_text {
+    ($id:expr, $label:literal, $help:expr, $field:ident) => {
+        Field {
+            id: $id,
+            clear: None,
+            label: $label,
+            help: $help,
+            kind: FieldKind::Text,
+            live: |_| true,
+            get: |ri, a| {
+                ri.schedule_a
+                    .as_ref()?
+                    .mortgage_interest_not_on_1098
+                    .get(a.0[0])
+                    .map(|r| FieldValue::Text(r.$field.clone()))
+            },
+            set: |ri, a, v| {
+                let FieldValue::Text(t) = v else {
+                    return Err(SetError::WrongKind);
+                };
+                ri.schedule_a
+                    .as_mut()
+                    .ok_or(SetError::NoSuchRow)?
+                    .mortgage_interest_not_on_1098
+                    .get_mut(a.0[0])
+                    .ok_or(SetError::NoSuchRow)?
+                    .$field = t;
+                Ok(())
+            },
+        }
+    };
+}
+
+const NON_FORM_1098_INTEREST_FIELDS: &[Field] = &[
+    sa8b_text!(FieldId::Sa8bRecipientName, "Recipient's name",
+        "Schedule A line 8b: \u{201c}write that person's name, identifying number, and address on the dotted lines next to line 8b\u{201d}. This is the person or institution you PAID the interest to, and who did not send you a Form 1098 \u{2014} most often the person you bought the home from.", recipient_name),
+    sa8b_text!(FieldId::Sa8bRecipientTin, "Recipient's identifying number",
+        "Schedule A line 8b: \u{201c}If the recipient of your home mortgage payment(s) is an individual, the identifying number is their social security number (SSN). Otherwise, it is the employer identification number (EIN).\u{201d} Leaving it blank REFUSES \u{2014} the instruction's own Caution is \u{201c}If you don't show the required information about the recipient or let the recipient know your SSN, you may have to pay a $50 penalty.\u{201d} You must also let the recipient know your own SSN; btctax cannot do that for you.", recipient_tin),
+    sa8b_text!(FieldId::Sa8bRecipientAddress, "Recipient's address",
+        "Schedule A line 8b \u{2014} the third of the three things the instruction says to write on the dotted lines beside the figure.", recipient_address),
+    Field {
+        id: FieldId::Sa8bAmount,
+        clear: None,
+        label: "Interest paid to this recipient",
+        help: "Schedule A line 8b \u{2014} \u{201c}If you paid home mortgage interest to a recipient who didn't \
+               provide you a Form 1098, report your deductible mortgage interest on line 8b.\u{201d} Your \
+               DEDUCTIBLE interest, which may be less than you paid if a limit applies (Pub. 936).",
+        kind: FieldKind::Money,
+        live: |_| true,
+        get: |ri, a| {
+            ri.schedule_a
+                .as_ref()?
+                .mortgage_interest_not_on_1098
+                .get(a.0[0])
+                .map(|r| FieldValue::Money(r.amount))
+        },
+        set: |ri, a, v| {
+            let FieldValue::Money(m) = v else {
+                return Err(SetError::WrongKind);
+            };
+            ri.schedule_a
+                .as_mut()
+                .ok_or(SetError::NoSuchRow)?
+                .mortgage_interest_not_on_1098
+                .get_mut(a.0[0])
+                .ok_or(SetError::NoSuchRow)?
+                .amount = m;
+            Ok(())
+        },
+    },
+];
+
+pub(crate) const NON_FORM_1098_INTEREST: Section = Section {
+    id: SectionId::NonForm1098Interest,
+    title: "Schedule A line 8b (mortgage interest NOT on a Form 1098)",
+    kind: SectionKind::Repeating {
+        len: |ri, _| {
+            ri.schedule_a
+                .as_ref()
+                .map_or(0, |a| a.mortgage_interest_not_on_1098.len())
+        },
+        add: |ri, _| {
+            ri.schedule_a
+                .as_mut()
+                .ok_or(SetError::NoSuchRow)?
+                .mortgage_interest_not_on_1098
+                .push(btctax_core::tax::return_inputs::NonForm1098Interest::default());
+            Ok(())
+        },
+        remove: |ri, a| {
+            let rows = &mut ri
+                .schedule_a
+                .as_mut()
+                .ok_or(SetError::NoSuchRow)?
+                .mortgage_interest_not_on_1098;
+            if a.0[0] < rows.len() {
+                rows.remove(a.0[0]);
+                Ok(())
+            } else {
+                Err(SetError::NoSuchRow)
+            }
+        },
+    },
+    fields: NON_FORM_1098_INTEREST_FIELDS,
+};
+
+// ── ★★★ R8 / T9 — the sale of a main home ───────────────────────────────────────────────────────
+
+/// One of the four sale-of-a-main-home tri-states, delegating to its `FORM_QUESTIONS` entry so the
+/// prompt, the help and the liveness have exactly one home.
+macro_rules! home_sale_tristate {
+    ($idx:expr, $id:expr, $field:ident) => {
+        decl_tristate!($idx, $id, |ri| {
+            ri.home_sale.$field = None;
+            Ok(())
+        })
+    };
+}
+
+const HOME_SALE_FIELDS: &[Field] = &[
+    home_sale_tristate!(62, FieldId::HomeSaleSoldMainHome, sold_main_home),
+    home_sale_tristate!(
+        63,
+        FieldId::HomeSaleTest1,
+        test1_owned_2_years_and_lived_2_years_of_last_5
+    ),
+    home_sale_tristate!(
+        64,
+        FieldId::HomeSaleTest2,
+        test2_no_exclusion_on_another_home_in_2_years
+    ),
+    home_sale_tristate!(65, FieldId::HomeSaleCanExcludeAllGain, can_exclude_all_gain),
+];
+
+pub(crate) const HOME_SALE: Section = Section {
+    id: SectionId::HomeSale,
+    title: "Sale of your main home",
+    kind: SectionKind::Singleton,
+    fields: HOME_SALE_FIELDS,
 };
 
 // ── 1098-E ───────────────────────────────────────────────────────────────────────────────────────

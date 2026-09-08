@@ -182,8 +182,10 @@ fn report_dual_report_absolute_refused_delta_computed_exits_zero() {
             filing_status: FilingStatus::Single,
             header: btctax_core::tax::testonly::not_a_dependent(),
             itemize_election: btctax_core::tax::return_inputs::ItemizeElection::ForceItemize,
+            form_1098: vec![btctax_core::tax::testonly::form_1098_with_interest(dec!(
+                50000
+            ))],
             schedule_a: Some(btctax_core::tax::return_inputs::ScheduleAInputs {
-                mortgage_interest_1098: dec!(50000),
                 ..Default::default()
             }),
             ..Default::default()

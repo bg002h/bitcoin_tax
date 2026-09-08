@@ -333,7 +333,9 @@ pub struct Schedule1Parts {
 ///
 /// Exact cents throughout (this is the computation, not the printed form; `printed::schedule_a_lines`
 /// rounds each line half-up and re-adds the ROUNDED lines so the filed form cross-foots — SPEC §3.1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// ★ NOT `Copy` since T9: Schedule A line 8b's dotted lines carry the recipient's name, identifying
+///   number and address, which are `String`s the form PRINTS. See [`ScheduleAParts::mortgage_8b_payee`].
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduleAParts {
     /// §164(b)(5): the filer ELECTED sales taxes instead of income taxes on line 5a. Core already honours
     /// this in the arithmetic; Schedule A's own 5a CHECKBOX must say so, or the filed form claims income
@@ -373,6 +375,26 @@ pub struct ScheduleAParts {
     /// is set — a mixed-use mortgage's non-acquisition portion is non-deductible (§163(h)(3)(F)) and v1
     /// cannot compute the Pub. 936 split, so it claims none of it.
     pub mortgage_8a: Usd,
+    /// L8b — ★★★ T9 / R8: *"Home mortgage interest not reported to you on Form 1098"*, the SUM of
+    /// [`crate::tax::return_inputs::ScheduleAInputs::mortgage_interest_not_on_1098`]. Each row
+    /// carries the recipient's name, identifying number and address, which the line's own
+    /// instruction demands beside the figure.
+    pub mortgage_8b: Usd,
+    /// L8c — ★★★ T9 / R8: *"Points not reported to you on Form 1098"*
+    /// ([`crate::tax::return_inputs::ScheduleAInputs::points_not_on_1098`]).
+    pub mortgage_8c: Usd,
+    /// ★★★ **L8b's DOTTED LINES — one entry per recipient** (T9 / R8).
+    ///
+    /// *"If you paid home mortgage interest to the person from whom you bought the home and that
+    /// person didn't provide you a Form 1098, write that person's name, identifying number, and
+    /// address on the dotted lines next to line 8b."* (`i1040sca--2025.txt:1109-1116`.) So the block
+    /// is part of what line 8b IS, not decoration: without it the instruction's own Caution applies
+    /// — *"If you don't show the required information about the recipient … you may have to pay a
+    /// $50 penalty."*
+    ///
+    /// ★ One string per row, in row order, and the ORDER of the three parts is the instruction's:
+    ///   name, identifying number, address.
+    pub mortgage_8b_payee: Vec<String>,
     /// ★ §2.7 — Schedule A **line 8's checkbox**: "If you didn't use all of your home mortgage loan(s) to
     /// buy, build, or improve your home, check this box." Set iff the filer declared a mixed-use mortgage
     /// (`mortgage_all_used_to_buy_build_improve == Some(false)`) on a Schedule A that reports 1098 interest —
@@ -461,9 +483,11 @@ pub fn nii_line9b_bound(ar: &AbsoluteReturn) -> Usd {
 
 pub fn mixed_use_mortgage_forgone(ri: &ReturnInputs) -> Option<Usd> {
     let a = ri.schedule_a.as_ref()?;
-    (a.mortgage_all_used_to_buy_build_improve == Some(false)
-        && a.mortgage_interest_1098 > Usd::ZERO)
-        .then_some(a.mortgage_interest_1098)
+    // ★ T9 — the ceiling is now Σ(box 1 + box 6) over the transcribed Form 1098 rows, which is
+    //   exactly what line 8a would otherwise print. The scalar it replaced held the same quantity.
+    let interest = ri.form_1098_interest_and_points();
+    (a.mortgage_all_used_to_buy_build_improve == Some(false) && interest > Usd::ZERO)
+        .then_some(interest)
 }
 
 pub fn schedule_a_parts(
@@ -495,15 +519,42 @@ pub fn schedule_a_parts(
     // which is idempotent once this holds the worksheet's own line 10 (5e ≤ 5d always).
     let salt_cap = salt_5e;
 
-    // Line 8a — home-mortgage interest (points/8b are refuse-or-advise). ★ §2.7: a MIXED-USE mortgage
-    // (`Some(false)`) zeroes 8a and checks the line-8 box — v1 cannot do the Pub. 936 split, so it deducts
-    // none of the interest. Both key on the SINGLE `mixed_use_mortgage_forgone` derivation.
+    // Line 8a — "Home mortgage interest and points reported to you on Form 1098", i.e. Σ(box 1 +
+    // box 6) over the rows (`i1040sca--2025.txt:1060-1061`). ★ §2.7: a MIXED-USE mortgage
+    // (`Some(false)`) zeroes 8a and checks the line-8 box — v1 cannot do the Pub. 936 split, so it
+    // deducts none of the interest. Both key on the SINGLE `mixed_use_mortgage_forgone` derivation.
     let mortgage_mixed_use_box = mixed_use_mortgage_forgone(ri).is_some();
     let mortgage_8a = if mortgage_mixed_use_box {
         Usd::ZERO
     } else {
-        a.mortgage_interest_1098
+        ri.form_1098_interest_and_points()
     };
+    // ★★★ T9 / R8 — lines 8b and 8c, which were `unmodeled` census entries until now. 8b is the SUM
+    //     of the non-1098 rows the filer identified by name, TIN and address; 8c is the points not
+    //     reported on a 1098. Neither is touched by the mixed-use box: that box and its $0 belong to
+    //     line 8a, which is the only line the §163(h)(3)(F) allocation would have to split.
+    let mortgage_8b = ri.mortgage_interest_not_on_1098_total();
+    let mortgage_8c = a.points_not_on_1098;
+    // ★ The dotted-line block, in the instruction's own order. `recipient_tin` cannot be empty on a
+    //   return that screens (`NonForm1098InterestRecipientUnidentified`), so no row can reach the
+    //   printed form as a name with no number.
+    let mortgage_8b_payee: Vec<String> = a
+        .mortgage_interest_not_on_1098
+        .iter()
+        .map(|r| {
+            [
+                r.recipient_name.trim(),
+                r.recipient_tin.trim(),
+                r.recipient_address.trim(),
+            ]
+            .iter()
+            .filter(|s| !s.is_empty())
+            .copied()
+            .collect::<Vec<_>>()
+            .join(", ")
+        })
+        .filter(|s| !s.is_empty())
+        .collect();
 
     Some(ScheduleAParts {
         salt_is_sales_tax: a.salt_use_sales_tax == Some(true),
@@ -518,6 +569,9 @@ pub fn schedule_a_parts(
         salt_5e,
         salt_cap,
         mortgage_8a,
+        mortgage_8b,
+        mortgage_8c,
+        mortgage_8b_payee,
         mortgage_mixed_use_box,
         investment_interest_9: a.investment_interest,
         charitable_cash_11: charitable.allowed_cash,
@@ -525,9 +579,12 @@ pub fn schedule_a_parts(
         charitable_carryover_13: charitable.allowed_carryover,
         charitable_14: charitable.allowed,
         // L17 = 4 + 7 + 10 + 14, and line 10 is "add 8e and 9" — so line 9 belongs in the total.
+        // L17 = 4 + 7 + 10 + 14, and line 10 is "Add lines 8e and 9" over line 8e = 8a + 8b + 8c.
         total_17: medical_allowed
             + salt_5e
             + mortgage_8a
+            + mortgage_8b
+            + mortgage_8c
             + a.investment_interest
             + charitable.allowed,
     })
@@ -2210,7 +2267,9 @@ pub fn assemble_absolute(
     gifts.extend(crypto_charitable_gifts(state, year));
     let charitable = apply_170b(agi, &gifts, &ri.charitable_carryover_in, year);
     let schedule_a = schedule_a_parts(ri, agi, &charitable, params);
-    let itemized = schedule_a.map(|p| p.total_17);
+    // ★ `as_ref()` since T9: `ScheduleAParts` is no longer `Copy` (line 8b's dotted lines carry the
+    //   recipient's name, number and address), and `schedule_a` is read again below.
+    let itemized = schedule_a.as_ref().map(|p| p.total_17);
     let deduction = choose_deduction(ri, standard, itemized); // L12
     let deduction_is_itemized = itemized_was_chosen(ri, standard, itemized);
 
@@ -3927,6 +3986,12 @@ mod tests {
                 cap_mfs: dec!(5000),
             },
             kiddie_unearned_threshold: dec!(2600),
+            acquisition_debt_ceiling: crate::tax::tables::AcquisitionDebtCeiling {
+                after_dec_15_2017: dec!(750000),
+                after_dec_15_2017_mfs: dec!(375000),
+                on_or_before_dec_15_2017: dec!(1000000),
+                on_or_before_dec_15_2017_mfs: dec!(500000),
+            },
             qualifying_relative_gross_income_limit: dec!(5050),
             // §24(h)(2) / §24(h)(4) — the TCJA figures. Nothing computes from them (btctax files
             // no Schedule 8812); the R12 panel sizes the line-19 forgo with them.
@@ -4058,9 +4123,9 @@ mod tests {
             // question. The donation here is well over $250, so the CWA gate is genuinely live.
             charitable_cwa_obtained: Some(true),
             // Force the itemized election so the §170 deduction is genuinely claimed.
+            form_1098: vec![crate::tax::testonly::form_1098_with_interest(dec!(20000))],
             schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
                 salt_state_estimated_payments: dec!(10000),
-                mortgage_interest_1098: dec!(20000),
                 ..Default::default()
             }),
             w2s: vec![w2(Owner::Taxpayer, wages, wages.min(dec!(168600)), wages)],
@@ -5122,9 +5187,9 @@ mod tests {
             medical: dec!(10000), // − 7.5%·100k = $2,500 allowed
             salt_state_estimated_payments: dec!(5000),
             salt_real_estate: dec!(8000), // 5d = 5,000 + 8,000 = 13,000 → capped $10,000
-            mortgage_interest_1098: dec!(12000),
             ..Default::default()
         });
+        r.form_1098 = vec![crate::tax::testonly::form_1098_with_interest(dec!(12000))];
         // $2,500 + $10,000 + $12,000 + $0 charitable = $24,500.
         assert_eq!(
             schedule_a_deduction(&r, dec!(100000), &no_charity(), &ty2024_params()),
@@ -5141,10 +5206,10 @@ mod tests {
     fn mixed_use_mortgage_zeroes_8a_and_checks_the_box() {
         let mut r = filer(FilingStatus::Single);
         r.schedule_a = Some(ScheduleAInputs {
-            mortgage_interest_1098: dec!(12000),
             mortgage_all_used_to_buy_build_improve: Some(false),
             ..Default::default()
         });
+        r.form_1098 = vec![crate::tax::testonly::form_1098_with_interest(dec!(12000))];
         let parts = schedule_a_parts(&r, dec!(100000), &no_charity(), &ty2024_params()).unwrap();
         assert_eq!(
             parts.mortgage_8a,
@@ -5170,10 +5235,10 @@ mod tests {
     fn acquisition_only_mortgage_keeps_full_8a_and_box_off() {
         let mut r = filer(FilingStatus::Single);
         r.schedule_a = Some(ScheduleAInputs {
-            mortgage_interest_1098: dec!(12000),
             mortgage_all_used_to_buy_build_improve: Some(true),
             ..Default::default()
         });
+        r.form_1098 = vec![crate::tax::testonly::form_1098_with_interest(dec!(12000))];
         let parts = schedule_a_parts(&r, dec!(100000), &no_charity(), &ty2024_params()).unwrap();
         assert_eq!(parts.mortgage_8a, dec!(12000));
         assert!(!parts.mortgage_mixed_use_box);
@@ -5187,7 +5252,6 @@ mod tests {
     fn zero_interest_mixed_use_checks_no_box() {
         let mut r = filer(FilingStatus::Single);
         r.schedule_a = Some(ScheduleAInputs {
-            mortgage_interest_1098: Usd::ZERO,
             mortgage_all_used_to_buy_build_improve: Some(false),
             ..Default::default()
         });
@@ -5258,10 +5322,10 @@ mod tests {
             dec!(200000),
         )];
         r.schedule_a = Some(ScheduleAInputs {
-            mortgage_interest_1098: dec!(30000),
             salt_real_estate: dec!(15000), // capped at $10k
             ..Default::default()
         });
+        r.form_1098 = vec![crate::tax::testonly::form_1098_with_interest(dec!(30000))];
         // Itemized $40,000 > std $14,600 → taxable = $200,000 − $40,000 = $160,000.
         assert_eq!(
             schedule_a_deduction(&r, dec!(200000), &no_charity(), &p).unwrap(),
@@ -5285,9 +5349,9 @@ mod tests {
             dec!(100000),
         )];
         r.schedule_a = Some(ScheduleAInputs {
-            mortgage_interest_1098: dec!(1000),
             ..Default::default()
         });
+        r.form_1098 = vec![crate::tax::testonly::form_1098_with_interest(dec!(1000))];
         r.itemize_election = ItemizeElection::ForceItemize;
         // Forced $1,000 (< std $14,600) → taxable = $100,000 − $1,000 = $99,000.
         assert_eq!(
@@ -6435,8 +6499,8 @@ mod tests {
                 dec!(160000),
                 dec!(200000),
             )],
+            form_1098: vec![crate::tax::testonly::form_1098_with_interest(dec!(5000))],
             schedule_a: Some(ScheduleAInputs {
-                mortgage_interest_1098: dec!(5000),
                 ..Default::default()
             }),
             ..Default::default()
@@ -6466,8 +6530,8 @@ mod tests {
                 dec!(160000),
                 dec!(200000),
             )],
+            form_1098: vec![crate::tax::testonly::form_1098_with_interest(dec!(5000))],
             schedule_a: Some(ScheduleAInputs {
-                mortgage_interest_1098: dec!(5000),
                 ..Default::default()
             }),
             ..Default::default()
@@ -8769,9 +8833,9 @@ mod tests {
                 dec!(168600),
                 dec!(300000),
             )],
+            form_1098: vec![crate::tax::testonly::form_1098_with_interest(dec!(40000))],
             schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
                 salt_real_estate: dec!(10000), // Sch A 5b → 5e capped at 10,000 → line 7
-                mortgage_interest_1098: dec!(40000), // AMT-ALLOWED, must NOT be added back
                 mortgage_all_used_to_buy_build_improve: Some(true),
                 charitable: vec![crate::tax::return_inputs::CharitableGift {
                     class: crate::tax::return_inputs::CharitableClass::Cash60,
@@ -8867,7 +8931,6 @@ mod tests {
                     if itemized {
                         ri.schedule_a = Some(crate::tax::return_inputs::ScheduleAInputs {
                             salt_real_estate: dec!(10000),
-                            mortgage_interest_1098: dec!(40000),
                             mortgage_all_used_to_buy_build_improve: Some(true),
                             mortgage_dwelling_is_amt_qualified: Some(true),
                             charitable: vec![crate::tax::return_inputs::CharitableGift {
@@ -8876,6 +8939,8 @@ mod tests {
                             }],
                             ..Default::default()
                         });
+                        ri.form_1098 =
+                            vec![crate::tax::testonly::form_1098_with_interest(dec!(40000))];
                     }
                     let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
                     let sch_a_line7 = ar.schedule_a.as_ref().map_or(Usd::ZERO, |x| x.salt_5e);
@@ -9389,9 +9454,9 @@ mod tests {
                 dec!(100000),
                 dec!(100000),
             )],
+            form_1098: vec![crate::tax::testonly::form_1098_with_interest(dec!(30000))],
             schedule_a: Some(ScheduleAInputs {
                 medical: dec!(20000),
-                mortgage_interest_1098: dec!(30000),
                 ..Default::default()
             }),
             ..Default::default()
@@ -9433,9 +9498,9 @@ mod tests {
                 dec!(100000),
                 dec!(100000),
             )],
+            form_1098: vec![crate::tax::testonly::form_1098_with_interest(dec!(30000))],
             schedule_a: Some(ScheduleAInputs {
                 medical: dec!(20000),
-                mortgage_interest_1098: dec!(30000),
                 ..Default::default()
             }),
             ..Default::default()
@@ -9712,8 +9777,8 @@ mod tests {
                 //   deadline still dies at this filing). Leaving it unanswered would make every row
                 //   below refuse for the other gate's reason and prove nothing about this one.
                 charitable_cwa_obtained: Some(true),
+                form_1098: vec![crate::tax::testonly::form_1098_with_interest(dec!(20000))],
                 schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
-                    mortgage_interest_1098: dec!(20000),
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -9768,8 +9833,8 @@ mod tests {
                 // §170(f)(8) neutral — the $50,000 contribution is over $250, so the CWA gate IS
                 // live here; this test is about the §G-21 8283-attachment band, not about it.
                 charitable_cwa_obtained: Some(true),
+                form_1098: vec![crate::tax::testonly::form_1098_with_interest(dec!(20000))],
                 schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
-                    mortgage_interest_1098: dec!(20000),
                     ..Default::default()
                 }),
                 w2s: vec![w2(Owner::Taxpayer, dec!(1600), dec!(1600), dec!(1600))],
@@ -9819,8 +9884,8 @@ mod tests {
                 donations_had_restrictions: answer,
                 // §170(f)(8) neutral — this test is about the §G-21 restriction question.
                 charitable_cwa_obtained: Some(true),
+                form_1098: vec![crate::tax::testonly::form_1098_with_interest(dec!(20000))],
                 schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
-                    mortgage_interest_1098: dec!(20000),
                     ..Default::default()
                 }),
                 w2s: vec![w2(Owner::Taxpayer, dec!(60000), dec!(60000), dec!(60000))],
@@ -9879,9 +9944,9 @@ mod tests {
                 filing_status: FilingStatus::Single,
                 donations_had_restrictions: Some(false),
                 charitable_cwa_obtained: answer,
+                form_1098: vec![crate::tax::testonly::form_1098_with_interest(dec!(20000))],
                 schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
                     salt_state_estimated_payments: dec!(10000),
-                    mortgage_interest_1098: dec!(20000),
                     ..Default::default()
                 }),
                 w2s: vec![w2(
@@ -9940,7 +10005,11 @@ mod tests {
     fn the_cwa_question_is_never_posed_to_a_standard_deduction_or_small_gift_filer() {
         let p = ty2024_params();
         let table = synthetic_table(2024);
+        // ★ T9 — the mortgage interest that used to be a `ScheduleAInputs` scalar is a Form 1098
+        //   ROW, which lives on `ReturnInputs`, so it is the closure's own argument. `Usd::ZERO`
+        //   means no row at all (an all-zero row would make the three 1098 declarations live).
         let run = |sched_a: Option<crate::tax::return_inputs::ScheduleAInputs>,
+                   mortgage: Usd,
                    wages: Usd,
                    st: LedgerState| {
             let ri = ReturnInputs {
@@ -9948,6 +10017,11 @@ mod tests {
                 donations_had_restrictions: Some(false),
                 charitable_cwa_obtained: None, // NEVER ANSWERED — the whole point
                 schedule_a: sched_a,
+                form_1098: if mortgage > Usd::ZERO {
+                    vec![crate::tax::testonly::form_1098_with_interest(mortgage)]
+                } else {
+                    Vec::new()
+                },
                 w2s: vec![w2(Owner::Taxpayer, wages, wages, wages)],
                 ..Default::default()
             };
@@ -9983,8 +10057,12 @@ mod tests {
             }],
             ..Default::default()
         };
-        let (itemized, reason, _detail) =
-            run(Some(loses_to_standard), dec!(200000), empty_ledger());
+        let (itemized, reason, _detail) = run(
+            Some(loses_to_standard),
+            Usd::ZERO,
+            dec!(200000),
+            empty_ledger(),
+        );
         assert!(!itemized, "fixture 1 must take the standard deduction");
         assert_eq!(
             reason, None,
@@ -9995,7 +10073,6 @@ mod tests {
         //     Per contribution, so the question is never posed.
         let small = crate::tax::return_inputs::ScheduleAInputs {
             salt_state_estimated_payments: dec!(10000),
-            mortgage_interest_1098: dec!(20000),
             charitable: vec![
                 CharitableGift {
                     class: CharitableClass::Cash60,
@@ -10008,7 +10085,8 @@ mod tests {
             ],
             ..Default::default()
         };
-        let (itemized, reason, _detail) = run(Some(small), dec!(200000), empty_ledger());
+        let (itemized, reason, _detail) =
+            run(Some(small), dec!(20000), dec!(200000), empty_ledger());
         assert!(itemized, "fixture 2 must itemize");
         assert_eq!(
             reason, None,
@@ -10032,11 +10110,13 @@ mod tests {
         //     lives on: this filer would file unasked, lose the acknowledgment permanently, and then
         //     deduct $50,000 across later years unsubstantiated. That is D4's own prong (3) — the
         //     silently lost right — reappearing on the gate built to close it.
-        let zeroed = crate::tax::return_inputs::ScheduleAInputs {
-            mortgage_interest_1098: dec!(20000),
-            ..Default::default()
-        };
-        let (itemized, reason, detail) = run(Some(zeroed), Usd::ZERO, donation_state(dec!(50000)));
+        let zeroed = crate::tax::return_inputs::ScheduleAInputs::default();
+        let (itemized, reason, detail) = run(
+            Some(zeroed),
+            dec!(20000),
+            Usd::ZERO,
+            donation_state(dec!(50000)),
+        );
         assert!(
             itemized,
             "fixture 3 must itemize on the mortgage interest alone"
@@ -10075,15 +10155,12 @@ mod tests {
 
         // ── The `Some(false)` arm's CURE must differ too: "remove that gift from the deduction" is
         //    meaningless to a filer whose return deducts nothing this year. ────────────────────────
-        let zeroed_no = crate::tax::return_inputs::ScheduleAInputs {
-            mortgage_interest_1098: dec!(20000),
-            ..Default::default()
-        };
         let ri_no = ReturnInputs {
             filing_status: FilingStatus::Single,
             donations_had_restrictions: Some(false),
             charitable_cwa_obtained: Some(false),
-            schedule_a: Some(zeroed_no),
+            schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs::default()),
+            form_1098: vec![crate::tax::testonly::form_1098_with_interest(dec!(20000))],
             ..Default::default()
         };
         let st_no = donation_state(dec!(50000));
@@ -10118,7 +10195,6 @@ mod tests {
     fn p8_return(salt: Usd, sales_tax: Option<Usd>, line9b: Option<Usd>) -> ReturnInputs {
         let mut a = crate::tax::return_inputs::ScheduleAInputs {
             salt_state_estimated_payments: salt,
-            mortgage_interest_1098: dec!(20000),
             mortgage_all_used_to_buy_build_improve: Some(true),
             mortgage_within_debt_limit: Some(true),
             mortgage_dwelling_is_amt_qualified: Some(true),
@@ -10144,6 +10220,8 @@ mod tests {
                 ..Default::default()
             }],
             schedule_a: Some(a),
+            // ★ T9 — the $20,000 of mortgage interest that used to be a `ScheduleAInputs` scalar.
+            form_1098: vec![crate::tax::testonly::form_1098_with_interest(dec!(20000))],
             form_8960_line9b: line9b,
             ..Default::default()
         }
@@ -10269,7 +10347,7 @@ mod tests {
         let p = ty2024_params();
         let table = synthetic_table(2024);
         let mut ri = p8_return(dec!(30000), None, Some(dec!(1)));
-        ri.schedule_a.as_mut().unwrap().mortgage_interest_1098 = Usd::ZERO;
+        ri.form_1098.clear();
         let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
         assert!(
             !ar.deduction_is_itemized,
@@ -10517,9 +10595,9 @@ mod tests {
                 charitable_cwa_obtained: answer,
                 schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
                     salt_state_estimated_payments: dec!(10000),
-                    mortgage_interest_1098: dec!(20000),
                     ..Default::default()
                 }),
+                form_1098: vec![crate::tax::testonly::form_1098_with_interest(dec!(20000))],
                 w2s: vec![w2(
                     Owner::Taxpayer,
                     dec!(200000),
@@ -10981,18 +11059,19 @@ mod tests {
         //   itemize, so the charitable deduction actually reaches `total_deductions` and therefore
         //   worksheet line 1. Without it the ceiling-limited gift loses to the standard deduction and
         //   the second half compares two identical returns.
-        let sched_a = || {
-            Some(crate::tax::return_inputs::ScheduleAInputs {
-                mortgage_interest_1098: dec!(18000),
-                ..Default::default()
-            })
-        };
+        // ★ T9 — the interest is a Form 1098 ROW now, so it travels beside the Schedule A rather
+        //   than inside it, and the non-itemizing arm carries neither.
         let build = |cwa: Option<bool>, gift: bool, itemize: bool| {
             let mut ri = ReturnInputs {
                 filing_status: FilingStatus::Single,
                 donations_had_restrictions: Some(false),
                 charitable_cwa_obtained: cwa,
-                schedule_a: if itemize { sched_a() } else { None },
+                schedule_a: itemize.then(crate::tax::return_inputs::ScheduleAInputs::default),
+                form_1098: if itemize {
+                    vec![crate::tax::testonly::form_1098_with_interest(dec!(18000))]
+                } else {
+                    Vec::new()
+                },
                 w2s: vec![w2(Owner::Taxpayer, dec!(20000), dec!(20000), dec!(20000))],
                 ..Default::default()
             };

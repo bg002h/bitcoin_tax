@@ -402,6 +402,21 @@ pub enum QuestionId {
     QssPaidOverHalfCostOfKeepingUpHome,
     /// **QSS condition 5** (`:1280-1283`).
     QssCouldHaveFiledJointlyInYearOfDeath,
+    // ── ★★★ R8 / T9 — REAL ESTATE: the Form 8396 gate and the sale of a main home. APPENDED AT THE
+    //    END for the `decl_tristate!` array-index reason recorded above.
+    /// **Schedule A Line 8a's Caution** (`i1040sca--2025.txt:1091-1096`) — is the filer claiming the
+    /// §25 mortgage interest credit? Live iff the return carries a Form 1098 row or a line 8b row;
+    /// a `Yes` REFUSES, because btctax holds no Form 8396 line 3 to subtract.
+    ClaimingMortgageInterestCredit,
+    /// **Schedule D, *Sale of Your Home*** (`i1040sd--2025.txt:313-316`) — always live.
+    SoldMainHome,
+    /// **Test 1** (`i1040sd--2025.txt:335-343`) — owned 2 of 5 years and lived in it 2 of 5.
+    HomeSaleTest1OwnedAndLived,
+    /// **Test 2** (`i1040sd--2025.txt:344-348`) — no exclusion on another main home in 2 years.
+    HomeSaleTest2NoRecentExclusion,
+    /// **The reporting rule's first bullet** (`i1040sd--2025.txt:321-322`), asked positively — can
+    /// the filer exclude ALL of the gain?
+    HomeSaleCanExcludeAllGain,
 }
 
 impl QuestionId {
@@ -471,6 +486,12 @@ impl QuestionId {
         QuestionId::QssChildLivedInYourHomeAllYear,
         QuestionId::QssPaidOverHalfCostOfKeepingUpHome,
         QuestionId::QssCouldHaveFiledJointlyInYearOfDeath,
+        // ★★★ R8 / T9 — indices 61..=65.
+        QuestionId::ClaimingMortgageInterestCredit,
+        QuestionId::SoldMainHome,
+        QuestionId::HomeSaleTest1OwnedAndLived,
+        QuestionId::HomeSaleTest2NoRecentExclusion,
+        QuestionId::HomeSaleCanExcludeAllGain,
     ];
 }
 
@@ -611,13 +632,25 @@ fn amt_depreciation_question_live(ri: &ReturnInputs) -> bool {
         .is_some_and(|c| c.expenses > Usd::ZERO)
 }
 
-/// Whether Schedule A carries mortgage interest — the mixed-use question's liveness. Deliberately an
-/// INPUT predicate (`schedule_a.is_some() ∧ mortgage_interest_1098 > 0`), NOT "Schedule A files" (which is
-/// compute-dependent and would brick the standard-deduction-wins filer — §2.7, r3 I-2).
+/// ★★★ **The liveness of the three Form 1098 DECLARATIONS** — the §163(h)(3)(F) mixed-use box, Form
+/// 6251 line 3's AMT-qualified dwelling, and the §163(h)(3)(B) debt-limit testimony.
+///
+/// **R8 / I8 — `schedule_a.is_some() && !form_1098.is_empty()`.** Both conjuncts are load-bearing and
+/// each was measured:
+///
+/// - **The itemize election.** Until T9 this read
+///   `.is_some_and(|a| a.mortgage_interest_1098 > Usd::ZERO)`, which already required a Schedule A.
+///   Keeping only the document half would refuse a **standard-deduction** filer on a truthful
+///   `MortgageWithinDebtLimit = Some(false)` for a $900,000 2019 loan — a refusal over a deduction
+///   they are not claiming, and a return they could not file. `AmtQualifiedDwelling` is Form 6251
+///   line 3, whose own text begins *"If you deducted home mortgage interest on Schedule A"*.
+/// - **The document.** An itemizer with no Form 1098 row has no line 8a for any of the three to
+///   modify, and the mixed-use checkbox is printed on line 8 beside it.
+///
+/// ★ Deliberately an INPUT predicate, never "Schedule A files": the latter is compute-dependent and
+///   would brick the standard-deduction-wins filer (§2.7, r3 I-2).
 fn mortgage_question_live(ri: &ReturnInputs) -> bool {
-    ri.schedule_a
-        .as_ref()
-        .is_some_and(|a| a.mortgage_interest_1098 > Usd::ZERO)
+    ri.schedule_a.is_some() && !ri.form_1098.is_empty()
 }
 
 /// ★ THE REGISTRY. Eleven declarations; the liveness lifted from the shipped refusals EXCEPT the two P9
@@ -2358,7 +2391,140 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         durability: Durability::PerYear,
         neutral: true,
     },
+    // ── ★★★ R8 / T9 — REAL ESTATE. Indices 61..=65, APPENDED AT THE END for the `decl_tristate!`
+    //    array-index reason recorded on `QuestionId::MortgageWithinDebtLimit`.
+    FormQuestion {
+        id: QuestionId::ClaimingMortgageInterestCredit,
+        prompt: "Schedule A line 8a \u{2014} are you claiming the MORTGAGE INTEREST CREDIT? (Form 8396, \
+                 for holders of a qualified mortgage credit certificate issued by a state or local \
+                 governmental unit or agency. Answer yes only if you hold such a certificate; an \
+                 ordinary mortgage is not one.)",
+        unanswered: RefuseReason::MortgageInterestCreditUnanswered,
+        unanswered_detail:
+            "this return reports home mortgage interest, and Schedule A's Line 8a Caution says \"If \
+             you are claiming the mortgage interest credit \u{2026} subtract the amount shown on Form \
+             8396, line 3, from the total deductible interest you paid on your home mortgage. Enter \
+             the result on line 8a\" (i1040sca--2025.txt:1091-1096). btctax builds no Form 8396 and \
+             holds no line 3, so if you hold a certificate it cannot make that subtraction and line \
+             8a would OVERSTATE your deduction \u{2014} run `btctax income answer`",
+        live: mortgage_interest_credit_question_live,
+        get: |ri| ri.claiming_mortgage_interest_credit,
+        set: |ri, v| ri.claiming_mortgage_interest_credit = Some(v),
+        durability: Durability::PerYear,
+        // ★ NEUTRAL AT `false`: "no, I hold no mortgage credit certificate" is the answer that needs
+        //   no adjustment — line 8a stays the full Form 1098 figure. A `true` REFUSES.
+        neutral: false,
+    },
+    FormQuestion {
+        id: QuestionId::SoldMainHome,
+        prompt: "Did you SELL OR EXCHANGE YOUR MAIN HOME during the year? (Schedule D, \"Sale of Your \
+                 Home\" \u{2014} answer for the home you lived in, not a rental, a piece of vacant \
+                 land or a second home.)",
+        unanswered: RefuseReason::HomeSaleGateUnanswered {
+            question: QuestionId::SoldMainHome,
+        },
+        unanswered_detail:
+            "every return must state whether a main home was sold: the Schedule D instructions' own \
+             answer is \"You may not need to report the sale or exchange of your main home\" \
+             (i1040sd--2025.txt:315-316), and which of its branches you are on decides whether a \
+             Form 8949 belongs on this return at all. A blank here is not \"no\" \u{2014} run \
+             `btctax income answer`",
+        live: |_ri| true,
+        get: |ri| ri.home_sale.sold_main_home,
+        set: |ri, v| ri.home_sale.sold_main_home = Some(v),
+        durability: Durability::PerYear,
+        // ★★ NOT neutral. "I sold no home this year" is an affirmative statement about the filer's
+        //    year; a default would answer a Schedule D question on their behalf.
+        neutral: false,
+    },
+    FormQuestion {
+        id: QuestionId::HomeSaleTest1OwnedAndLived,
+        prompt: "Sale of your home, Test 1: \"During the 5-year period ending on the date you sold or \
+                 exchanged your home, you owned it for 2 years or more (the ownership requirement) \
+                 and lived in it as your main home for 2 years or more (the use requirement).\" Is \
+                 that true?",
+        unanswered: RefuseReason::HomeSaleGateUnanswered {
+            question: QuestionId::HomeSaleTest1OwnedAndLived,
+        },
+        unanswered_detail:
+            "you sold your main home, so Schedule D's Test 1 must be answered \
+             (i1040sd--2025.txt:335-343). Run `btctax income answer`",
+        live: home_sale_test_live,
+        get: |ri| {
+            ri.home_sale
+                .test1_owned_2_years_and_lived_2_years_of_last_5
+        },
+        set: |ri, v| {
+            ri.home_sale
+                .test1_owned_2_years_and_lived_2_years_of_last_5 = Some(v);
+        },
+        durability: Durability::PerYear,
+        neutral: true,
+    },
+    FormQuestion {
+        id: QuestionId::HomeSaleTest2NoRecentExclusion,
+        prompt: "Sale of your home, Test 2: \"You haven't excluded gain on the sale or exchange of \
+                 another main home during the 2-year period ending on the date of the sale or \
+                 exchange of your home.\" Is that true?",
+        unanswered: RefuseReason::HomeSaleGateUnanswered {
+            question: QuestionId::HomeSaleTest2NoRecentExclusion,
+        },
+        unanswered_detail:
+            "you sold your main home, so Schedule D's Test 2 must be answered \
+             (i1040sd--2025.txt:344-348). Run `btctax income answer`",
+        live: home_sale_test_live,
+        get: |ri| ri.home_sale.test2_no_exclusion_on_another_home_in_2_years,
+        set: |ri, v| ri.home_sale.test2_no_exclusion_on_another_home_in_2_years = Some(v),
+        durability: Durability::PerYear,
+        neutral: true,
+    },
+    FormQuestion {
+        id: QuestionId::HomeSaleCanExcludeAllGain,
+        prompt: "Sale of your home: can you EXCLUDE ALL of your gain from income? (Schedule D reports \
+                 the sale on Form 8949 if \"You can't exclude all of your gain from income\". The \
+                 exclusion is up to $250,000 of gain, or $500,000 on a joint return where both of \
+                 you meet the tests \u{2014} Pub. 523 has the worksheet. Answer NO if you are unsure.)",
+        unanswered: RefuseReason::HomeSaleGateUnanswered {
+            question: QuestionId::HomeSaleCanExcludeAllGain,
+        },
+        unanswered_detail:
+            "you sold your main home, so Schedule D's own reporting rule must be answered: \"Report \
+             the sale or exchange of your main home on Form 8949 if: \u{2022} You can't exclude all of \
+             your gain from income\" (i1040sd--2025.txt:318-322). Run `btctax income answer`",
+        live: home_sale_test_live,
+        get: |ri| ri.home_sale.can_exclude_all_gain,
+        set: |ri, v| ri.home_sale.can_exclude_all_gain = Some(v),
+        durability: Durability::PerYear,
+        neutral: true,
+    },
 ];
+
+/// ★★★ **T9 / R8 — the Form 8396 gate's liveness.**
+///
+/// Schedule A's Caution sits under **Line 8a** and modifies it, so the question is live exactly
+/// where there is mortgage interest for it to modify: a Form 1098 row, or a line 8b row (interest
+/// paid to a recipient who issued none). A filer with neither has no line 8a and no line 8b, so the
+/// Caution addresses nobody.
+///
+/// ★ It does NOT read `schedule_a.is_some()` on its own: the 1098 SECTION is already gated on the
+///   itemize election, so a row can only exist on an itemizing return, and an 8b row lives on
+///   `ScheduleAInputs` by construction.
+fn mortgage_interest_credit_question_live(ri: &ReturnInputs) -> bool {
+    !ri.form_1098.is_empty()
+        || ri
+            .schedule_a
+            .as_ref()
+            .is_some_and(|a| !a.mortgage_interest_not_on_1098.is_empty())
+}
+
+/// ★★★ **T9 / R8 — the three home-sale tests are live iff a main home was sold.**
+///
+/// The Schedule D block opens *"You may not need to report the sale or exchange of your main
+/// home"* — every test under it is a question about **that sale**, so asking them of a filer who
+/// sold nothing would be asking about an event that did not happen.
+fn home_sale_test_live(ri: &ReturnInputs) -> bool {
+    ri.home_sale.sold_main_home == Some(true)
+}
 
 /// ★★★ **T16 — the ONE liveness predicate for every Form 8889 question.**
 ///
@@ -3488,6 +3654,12 @@ mod tests {
                 QuestionId::QssChildLivedInYourHomeAllYear => 58,
                 QuestionId::QssPaidOverHalfCostOfKeepingUpHome => 59,
                 QuestionId::QssCouldHaveFiledJointlyInYearOfDeath => 60,
+                // ★★★ R8 / T9 — real estate.
+                QuestionId::ClaimingMortgageInterestCredit => 61,
+                QuestionId::SoldMainHome => 62,
+                QuestionId::HomeSaleTest1OwnedAndLived => 63,
+                QuestionId::HomeSaleTest2NoRecentExclusion => 64,
+                QuestionId::HomeSaleCanExcludeAllGain => 65,
             };
             assert_eq!(idx, i, "QuestionId::ALL is out of order / missing {id:?}");
             assert_eq!(
@@ -3498,15 +3670,16 @@ mod tests {
         }
         assert_eq!(
             QuestionId::ALL.len(),
-            61,
+            66,
             "17 declarations + the 20 R3 document-census rows + R10.4's filing-status confirmation \
              + T5's four document-less-income-door questions + R9/T6's Digital Assets question \
              + T16's seven Form 8889 questions + the T16 seam review's two (the SPOUSE's HDHP \
              plan, and R3's document-less distribution door) + T7/R6's filer-TIN question \
              + R7/T8's eight (two HoH tests, FR-67's \u{a7}6013(g)/(h) election gate, five QSS \
-             conditions)"
+             conditions) + R8/T9's five (the Form 8396 gate and the four sale-of-a-main-home \
+             answers)"
         );
-        assert_eq!(FORM_QUESTIONS.len(), 61, "one entry per declaration");
+        assert_eq!(FORM_QUESTIONS.len(), 66, "one entry per declaration");
     }
 
     /// ★★★ §G-6/ISO — THE OUT-OF-SCOPE QUESTION MUST NAME THE ISO EXERCISE, WHICH IS NOT INCOME.

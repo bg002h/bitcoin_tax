@@ -1294,9 +1294,24 @@ mod map_label_join_tests {
                 .collect()
         };
         let mut section: Option<String> = None;
+        // ★★★ T9 — an ARRAY-valued line binding, which may span lines:
+        //     `line8b_payee = [ "…", "…" ]`. Until this existed the extractor read the `[` as an
+        //     empty right-hand side and silently produced ZERO bindings for the key — the exact
+        //     "partial silent drop" shape `map_reach_problem` exists to catch, and the reason it
+        //     caught this one. Schedule A line 8b's dotted lines are the first such binding.
+        let mut array: Option<String> = None;
         for l in text.lines() {
             let l = l.trim();
             if l.starts_with('#') {
+                continue;
+            }
+            if let Some(line) = &array {
+                for v in fqns(l) {
+                    out.push((line.clone(), v));
+                }
+                if l.contains(']') {
+                    array = None;
+                }
                 continue;
             }
             if let Some(rest) = l.strip_prefix('[') {
@@ -1323,6 +1338,13 @@ mod map_label_join_tests {
                 };
                 let rhs = rhs.trim();
                 let vals: Vec<String> = if rhs.starts_with('{') {
+                    fqns(rhs)
+                } else if rhs.starts_with('[') {
+                    // ★ T9 — an array value. Its FQNs may be on this line, on the lines that
+                    //   follow, or both; the `array` state above collects the continuation.
+                    if !rhs.contains(']') {
+                        array = Some(line.clone());
+                    }
                     fqns(rhs)
                 } else {
                     // ★ The FIRST quoted token on the right-hand side — not "the whole RHS is one

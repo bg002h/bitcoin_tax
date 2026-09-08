@@ -43,7 +43,15 @@ pub fn form_spec() -> &'static [Section] {
         sections::SA_1099S,
         sections::SA_5498S,
         sections::FORM_8889,
+        // ★★★ R8 / T9 — the Form 1098 rows, then Schedule A itself, then line 8b's recipient rows
+        //     and the sale of a main home. §4.1's order is "the 1040's page order with the document
+        //     screens where the form reads them": the 1098 is a DOCUMENT and is read by Schedule A,
+        //     so it precedes it; line 8b's rows are a Schedule A line and follow it; the home sale
+        //     is Schedule D's and sits after the itemized block, exactly as §4.1 lists it.
+        sections::FORM_1098S,
         sections::SCHEDULE_A,
+        sections::NON_FORM_1098_INTEREST,
+        sections::HOME_SALE,
         sections::SCHEDULE_A_CHARITABLE,
         sections::PAYMENTS,
         sections::CARRYFORWARDS,
@@ -140,9 +148,16 @@ mod tests {
             }
             if !decls.fields.iter().any(|f| f.id == fid) {
                 // A deduped declaration must be OWNED by the section that prints its line…
+                // ★★★ R8 / T9 — the four sale-of-a-main-home answers are owned by `HomeSale` for the
+                //     same reason the census rows are owned by `DocumentCensus`: they are ONE
+                //     flowchart with one printed outcome, and the filer answers them together.
                 assert!(
-                    sched_a.fields.iter().any(|f| f.id == fid),
-                    "deduped declaration {:?} must be a Schedule-A Field",
+                    sched_a.fields.iter().any(|f| f.id == fid)
+                        || section(SectionId::HomeSale)
+                            .fields
+                            .iter()
+                            .any(|f| f.id == fid),
+                    "deduped declaration {:?} must be a Schedule-A or HomeSale Field",
                     q.id
                 );
                 // …and must not ALSO appear here, or the filer would be asked it twice.
@@ -170,7 +185,7 @@ mod tests {
             );
         }
         assert_eq!(
-            decl_count, 39,
+            decl_count, 40,
             "29 declarations are Decl* fields (the other two dedup to Schedule A). ★ R10.4 / T4b \
              added the sixteenth (the carried filing status's confirmation); ★ R3 / T5 added the \
              four of the DOCUMENT-LESS INCOME DOOR — wages with no W-2, interest or dividends with \
@@ -183,22 +198,27 @@ mod tests {
              instructions' line 1 and line 3 rule 1 both read \"you or your spouse\") and M-1's \
              document-less HSA distribution door (line 14a). \u{2605}\u{2605}\u{2605} T7 / R6 added the \
              thirty-first: Step 5 question 1 of Who Qualifies as Your Dependent, the one dependent \
-             gate that is about the FILER rather than about a row. \u{2605}\u{2605}\u{2605} R7 / T8 added EIGHT: Head of household's two tests, FR-67's \u{a7}6013(g)/(h) nonresident-alien-spouse election gate, and Qualifying surviving spouse's five conditions."
+             gate that is about the FILER rather than about a row. \u{2605}\u{2605}\u{2605} R7 / T8 added EIGHT: Head of household's two tests, FR-67's \u{a7}6013(g)/(h) nonresident-alien-spouse election gate, and Qualifying surviving spouse's five conditions. \u{2605}\u{2605}\u{2605} R8 / T9 added the FORTIETH: Schedule A's Line 8a Caution \u{2014} the \u{a7}25 mortgage interest credit (Form 8396). Its four siblings, the sale-of-a-main-home answers, are deduped to the HomeSale section instead."
         );
         assert_eq!(
             deduped,
             vec![
                 QuestionId::MortgageAllUsedToBuyBuildImprove,
-                QuestionId::MortgageWithinDebtLimit
+                QuestionId::MortgageWithinDebtLimit,
+                // ★★★ R8 / T9 — the four sale-of-a-main-home answers, owned by `SectionId::HomeSale`.
+                QuestionId::SoldMainHome,
+                QuestionId::HomeSaleTest1OwnedAndLived,
+                QuestionId::HomeSaleTest2NoRecentExclusion,
+                QuestionId::HomeSaleCanExcludeAllGain,
             ],
-            "exactly the two Schedule-A-owned mortgage declarations dedup"
+            "the two Schedule-A-owned mortgage declarations and T9's four home-sale answers dedup"
         );
 
         // The delegating Decl* fields + the foreign_country_names Text field.
         assert_eq!(
             decls.fields.len(),
-            40,
-            "39 declarations + foreign_country_names"
+            41,
+            "40 declarations + foreign_country_names"
         );
         assert!(decls
             .fields
@@ -289,9 +309,11 @@ mod tests {
                 // Schedule A mortgage interest, line 2k's a capital-loss carryforward, line 2l's a
                 // Schedule C with a nonzero flat expense total.
                 ri.schedule_a = Some(btctax_core::tax::return_inputs::ScheduleAInputs {
-                    mortgage_interest_1098: rust_decimal_macros::dec!(1),
                     ..Default::default()
                 });
+                ri.form_1098 = vec![btctax_core::tax::testonly::form_1098_with_interest(
+                    rust_decimal_macros::dec!(1),
+                )];
                 ri.capital_loss_carryforward_in = btctax_core::tax::types::Carryforward {
                     short: rust_decimal_macros::dec!(1),
                     long: rust_decimal_macros::dec!(0),

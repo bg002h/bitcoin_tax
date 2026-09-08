@@ -610,6 +610,17 @@ mod tests {
                 cap_mfs: dec!(5000),
             },
             kiddie_unearned_threshold: dec!(2600),
+            // ★★★ §163(h)(3)(B) — the four figures the Schedule A instructions print under "Limits on
+            //     home mortgage interest" (`design/forms/extract/i1040sca--2025.txt:1027-1046`; Pub.
+            //     936, Part II). Statute, not an indexed amount: Pub. L. 119-21 (OBBBA) §70108(a) made
+            //     the $750,000 limit permanent. They drive a WARNING over Σ Form 1098 box 2 and write
+            //     no line.
+            acquisition_debt_ceiling: crate::tax::tables::AcquisitionDebtCeiling {
+                after_dec_15_2017: dec!(750000),
+                after_dec_15_2017_mfs: dec!(375000),
+                on_or_before_dec_15_2017: dec!(1000000),
+                on_or_before_dec_15_2017_mfs: dec!(500000),
+            },
             qualifying_relative_gross_income_limit: dec!(5050),
             // §24(h)(2) / §24(h)(4) — the TCJA figures. Nothing computes from them (btctax files
             // no Schedule 8812); the R12 panel sizes the line-19 forgo with them.

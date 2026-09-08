@@ -10717,7 +10717,7 @@ mod tests {
         }
         assert_eq!(
             app.tax_inputs_form.as_ref().unwrap().section_idx,
-            20,
+            23,
             "section cursor clamps at the last live section (18 on Single: Spouse hidden, \
              box12/charitable nested). ★ +1 for the §G-22 Carryforwards section — the two QBI loss \
              carryforwards were import-only, and omitting them UNDERSTATES tax. ★ +1 again for R3's \
@@ -10726,7 +10726,7 @@ mod tests {
              1099-B, 1099-G and 1098-E. ★ +3 for T16's: the Form 1099-SA and Form 5498-SA rows, and \
              Form 8889's own money leaves. ★ THE SCHEDULE-B FILER'S-RECORDS SECTION IS COUNTED even \
              though it is live only behind R3's door — the left pane lists every section and its \
-             fields report `live` individually, exactly as `Spouse` does on an MFJ return."
+             fields report `live` individually, exactly as `Spouse` does on an MFJ return. ★ +3 for T9's: the Form 1098 rows, Schedule A line 8b's recipient rows, and the sale of a main home."
         );
         // Left past the start clamps at 0.
         for _ in 0..50 {
@@ -11477,12 +11477,13 @@ mod tests {
             header: not_a_dependent(),
             ..Default::default()
         };
-        answer_all_live_declarations(&mut ri);
         // A SALT sales-tax amount with the election left unanswered → a screen refusal on Schedule A.
         ri.schedule_a = Some(ScheduleAInputs {
             salt_sales_tax_amount: dec!(500),
             ..Default::default()
         });
+        // ★ T9 — AFTER the Schedule A: see the sibling test above.
+        answer_all_live_declarations(&mut ri);
         let mut form =
             crate::edit::form::TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         form.working = Some(ri);
@@ -12505,7 +12506,6 @@ mod tests {
             header: not_a_dependent(),
             ..Default::default()
         };
-        answer_all_live_declarations(&mut ri);
         // The SALT sales-tax amount is set but the election is left unanswered (`None`, not `Some(true)`)
         // — a positive amount with the election not-on is an input error, not a silent drop (R3-M9). The
         // skippable SALT election is NOT among `FORM_QUESTIONS`, so `answer_all_live_declarations` (which
@@ -12514,6 +12514,10 @@ mod tests {
             salt_sales_tax_amount: dec!(500),
             ..Default::default()
         });
+        // ★ T9 — AFTER the Schedule A, not before: the `form_1098` census row is live iff
+        //   `schedule_a.is_some()`, so answering the declarations first would leave it unanswered
+        //   and the census would refuse ahead of the SALT rule this test is about.
+        answer_all_live_declarations(&mut ri);
         let mut form =
             crate::edit::form::TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
         form.working = Some(ri);

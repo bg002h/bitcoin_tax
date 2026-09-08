@@ -12,6 +12,7 @@ capital_loss_carryforward_in_provenance = "user"
 charitable_carryover_in = []
 charitable_carryover_in_provenance = "user"
 charitable_cwa_obtained = true
+claiming_mortgage_interest_credit = false
 digital_asset_activity = true
 donations_had_restrictions = false
 dual_status_alien = false
@@ -62,6 +63,7 @@ a_1095 = false
 b_1099 = false
 c_1099 = false
 div_1099 = true
+form_1098 = true
 form_1098e = false
 g_1099 = true
 int_1099 = true
@@ -77,6 +79,20 @@ ssa_1099 = false
 t_1098 = false
 w2 = true
 w2g = false
+
+[[form_1098]]
+box10_other = ""
+box1_interest = "22000"
+box2_outstanding_principal = "400000"
+box3_origination_date = [2019, 152]
+box4_refund_overpaid_interest = "0"
+box5_mortgage_insurance = "0"
+box6_points = "0"
+box7_property_address_same_as_payer = false
+box8_property_address = ""
+lender = "Home Savings"
+lender_tin = ""
+other_borrower_paid_interest = false
 
 [[g_1099]]
 box10_family_leave_benefits = "0"
@@ -135,6 +151,9 @@ last_name = "Doe"
 occupation = "Engineer"
 ssn = "123-45-6789"
 
+[home_sale]
+sold_main_home = false
+
 [hsa]
 employer_contributions_next_year = "0"
 employer_contributions_prior_year = "0"
@@ -183,8 +202,9 @@ investment_interest = "0"
 medical = "2000"
 mortgage_all_used_to_buy_build_improve = true
 mortgage_dwelling_is_amt_qualified = true
-mortgage_interest_1098 = "22000"
+mortgage_interest_not_on_1098 = []
 mortgage_within_debt_limit = true
+points_not_on_1098 = "0"
 salt_personal_property = "0"
 salt_prior_year_balance_paid = "0"
 salt_real_estate = "6000"

@@ -375,7 +375,13 @@ impl TaxInputsFormState {
         let Some(ri) = self.working.as_ref() else {
             return Vec::new();
         };
-        let all = transcription_warnings(ri, None);
+        // ★ T9 / R8 — the §163(h)(3)(B) ceilings are a `FullReturnParams` figure, so on a
+        //   params-less year the aggregate check waits exactly as the box-3 wage-base check does.
+        //   `report` runs the same function WITH the package.
+        let fr = btctax_adapters::tax_tables::BundledFullReturnTables::load();
+        let ceiling = btctax_core::tax::tables::FullReturnTables::full_return_for(&fr, ri.tax_year)
+            .map(|p| p.acquisition_debt_ceiling);
+        let all = transcription_warnings(ri, None, ceiling);
         if all.is_empty() {
             return Vec::new();
         }
@@ -388,6 +394,13 @@ impl TaxInputsFormState {
                 btctax_input_form::SectionId::Div1099s => Some(WarnedDocument::Form1099Div),
                 btctax_input_form::SectionId::G1099s => Some(WarnedDocument::Form1099G),
                 btctax_input_form::SectionId::Form1098Es => Some(WarnedDocument::Form1098E),
+                // ★★★ R8 / T9 — the §163(h)(3)(B) ceiling warning is AGGREGATE and is attached to
+                //     the FIRST Form 1098 row, so it reads in full on the 1098 screen. It is also
+                //     shown on SCHEDULE A, because that is where `MortgageWithinDebtLimit` — the
+                //     testimony it exists to inform — is answered, and R8's sentence is that it is
+                //     *"displayed beside"* that declaration.
+                btctax_input_form::SectionId::Form1098s
+                | btctax_input_form::SectionId::ScheduleA => Some(WarnedDocument::Form1098),
                 _ => None,
             });
         let row = self.addr.0.first().copied();

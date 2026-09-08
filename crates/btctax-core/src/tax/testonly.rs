@@ -9,6 +9,23 @@
 
 use crate::conventions::Usd;
 use crate::event::{BasisSource, DisposeKind, IncomeKind};
+
+/// ★★★ **T9 — one ORDINARY Form 1098 row carrying `interest` in box 1.**
+///
+/// The fixture form of `schedule_a.mortgage_interest_1098`, which T9 removed. "Ordinary" is stated,
+/// not defaulted: box 4 is zero (any amount refuses `MortgageInterestRefundNotComputed`) and the
+/// shared-interest gate is answered `no` (a blank refuses `SharedMortgageInterestUnanswered`,
+/// because line 8a sums box 1 in full). Box 2 is left at zero so no fixture picks up a
+/// §163(h)(3)(B) ceiling warning it was not written to exercise.
+#[must_use]
+pub fn form_1098_with_interest(interest: Usd) -> crate::tax::return_inputs::Form1098 {
+    crate::tax::return_inputs::Form1098 {
+        lender: "Fixture Mortgage".to_string(),
+        box1_interest: interest,
+        other_borrower_paid_interest: Some(false),
+        ..Default::default()
+    }
+}
 use crate::identity::{EventId, LotId, WalletId};
 use crate::state::{Disposal, DisposalLeg, IncomeRecord, LedgerState, Term};
 use crate::tax::questions::FORM_QUESTIONS;
@@ -186,6 +203,21 @@ pub fn reconcile_document_census(ri: &mut ReturnInputs) {
         {
             ri.documents.set(*row, Some(true));
         }
+        // ★★★ **T9 — a row whose LIVENESS the shape decides.** `form_1098` is live iff
+        //     `schedule_a.is_some()`, so a fixture builder that answers every live declaration
+        //     BEFORE its shape adds a Schedule A cannot reach it: the row was not live when the
+        //     answers were written and is live, and blank, by the time the screen runs. Answering
+        //     it here — with the honest *"none arrived"*, on a row that carries no transcribed
+        //     document — is the same one-direction reconciliation the branch above performs.
+        //
+        // ★ Only rows with a `Vec` to count are touched, so the §2.2 unsupported families (whose
+        //   `Some(true)` refuses by design) keep whatever the fixture stated.
+        if crate::tax::document_census::declared_rows(ri, *row) == Some(0)
+            && crate::tax::document_census::row_is_live(ri, *row)
+            && ri.documents.get(*row).is_none()
+        {
+            ri.documents.set(*row, Some(false));
+        }
     }
 }
 
@@ -265,6 +297,17 @@ pub fn ty2024_params() -> FullReturnParams {
         },
         kiddie_unearned_threshold: dec!(2600),
         // §152(d)(1)(B), Rev. Proc. 2023-34 §3.24; i1040gi--2024.txt:1700 prints it.
+        // ★★★ §163(h)(3)(B) — the four figures the Schedule A instructions print under "Limits on
+        //     home mortgage interest" (`design/forms/extract/i1040sca--2025.txt:1027-1046`; Pub.
+        //     936, Part II). Statute, not an indexed amount: Pub. L. 119-21 (OBBBA) §70108(a) made
+        //     the $750,000 limit permanent. They drive a WARNING over Σ Form 1098 box 2 and write
+        //     no line.
+        acquisition_debt_ceiling: crate::tax::tables::AcquisitionDebtCeiling {
+            after_dec_15_2017: dec!(750000),
+            after_dec_15_2017_mfs: dec!(375000),
+            on_or_before_dec_15_2017: dec!(1000000),
+            on_or_before_dec_15_2017_mfs: dec!(500000),
+        },
         qualifying_relative_gross_income_limit: dec!(5050),
         // §24(h)(2) / §24(h)(4) — the TCJA figures, in force through TY2024 (Pub. L. 119-21
         // §70104(a)(2)+(f) raises the child credit to $2,200 from TY2025). Nothing computes from
@@ -476,6 +519,15 @@ pub fn kitchen_sink_household() -> (ReturnInputs, LedgerState) {
         // §G-22/B11 — the scope attestation. ANSWERED, never defaulted: `None` refuses, and a fixture
         // that let it default would be re-asserting the silence the question exists to break.
         other_out_of_scope_income: Some(false),
+        // ★★★ R8 / T9 — Schedule A's Line 8a Caution: this household holds no mortgage credit
+        //     certificate, so line 8a keeps the whole Form 1098 figure.
+        claiming_mortgage_interest_credit: Some(false),
+        // ★★★ R8 / T9 — the sale-of-a-main-home question, always live and never defaulted. This
+        //     household sold no home; the three Schedule D tests are then not live at all.
+        home_sale: crate::tax::return_inputs::HomeSale {
+            sold_main_home: Some(false),
+            ..Default::default()
+        },
         header: HouseholdHeader {
             taxpayer: person("John", "Doe", "123-45-6789", "Engineer"),
             spouse: Some(person("Jane", "Doe", "987-65-4321", "Architect")),
@@ -567,6 +619,19 @@ pub fn kitchen_sink_household() -> (ReturnInputs, LedgerState) {
             box1_unemployment: dec!(1000),
             ..Default::default()
         }],
+        // ★ T9 — the mortgage interest that used to be the `mortgage_interest_1098` scalar, now the
+        //   document it was always copied off. Box 2 is under the §163(h)(3)(B) ceiling, box 4 is
+        //   zero, and the shared-interest gate is answered.
+        form_1098: vec![crate::tax::return_inputs::Form1098 {
+            lender: "Home Savings".into(),
+            box1_interest: dec!(22000),
+            box2_outstanding_principal: dec!(400000),
+            box3_origination_date: Some(
+                time::Date::from_calendar_date(2019, time::Month::June, 1).expect("a valid date"),
+            ),
+            other_borrower_paid_interest: Some(false),
+            ..Default::default()
+        }],
         // Business crypto (the ledger's SE-eligible income, below) ⇒ Schedule C ⇒ Schedule SE ⇒ Sch 2 L4.
         schedule_c: Some(ScheduleCInputs {
             owner: Owner::Taxpayer,
@@ -586,7 +651,6 @@ pub fn kitchen_sink_household() -> (ReturnInputs, LedgerState) {
             medical: dec!(2000),
             salt_state_estimated_payments: dec!(12000),
             salt_real_estate: dec!(6000),
-            mortgage_interest_1098: dec!(22000),
             charitable: vec![CharitableGift {
                 class: CharitableClass::Cash60,
                 amount: dec!(5000),
@@ -1150,7 +1214,6 @@ pub fn build_golden_return(i: &GoldenInputs) -> (ReturnInputs, LedgerState) {
             // Tax-Calculator's `e18400`, so all three see the same figure on the same line.
             salt_state_estimated_payments: golden_usd(i.state_income_tax),
             salt_real_estate: golden_usd(i.real_estate_tax),
-            mortgage_interest_1098: golden_usd(i.itemized_deductions + i.mortgage_interest),
             // Schedule A line 11 — OTS's `A11` (cash/check charity, NOT `A16` "other", which sails
             // past Schedule A's own handling of the gift) and Tax-Calculator's `e19800`.
             charitable: if i.charitable_cash > 0.0 {
@@ -1163,6 +1226,22 @@ pub fn build_golden_return(i: &GoldenInputs) -> (ReturnInputs, LedgerState) {
             },
             ..Default::default()
         });
+        // ★★★ T9 — the oracles' `e19200` / OTS `A8a` mortgage interest is now a Form 1098 ROW, and
+        //     `itemized_deductions` (the corpus's catch-all "other itemized") rides with it exactly
+        //     as it did on the scalar, so every engine still sees the same figure on line 8a.
+        let interest = golden_usd(i.itemized_deductions + i.mortgage_interest);
+        if interest > Usd::ZERO {
+            ri.form_1098.push(crate::tax::return_inputs::Form1098 {
+                lender: "ORACLE MORTGAGE".into(),
+                box1_interest: interest,
+                other_borrower_paid_interest: Some(false),
+                ..Default::default()
+            });
+            ri.documents.set(
+                crate::tax::document_census::DocumentRow::Form1098,
+                Some(true),
+            );
+        }
     }
     // ★ §170(f)(8) — an itemizing return claiming a gift of $250 or more must state whether it holds
     //   a contemporaneous written acknowledgment, and P4 refuses one that has not. This household

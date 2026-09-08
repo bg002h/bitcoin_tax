@@ -286,6 +286,180 @@ pub struct Form1098E {
     pub box1_interest: Usd,
 }
 
+/// **Form 1098 — *Mortgage Interest Statement*** (R4 / R8 / §5.2, new at T9).
+///
+/// ★★★ It REPLACES the scalar `ScheduleAInputs::mortgage_interest_1098`. A bare `Usd` with no
+/// lender, no TIN and no transcription date made `$0` indistinguishable from *never asked* — the
+/// D-8 trap one level below the form line — and it could hold only line 8a's total, so **every
+/// other box of the paper had nowhere to land**: box 2 and box 3 are the §163(h)(3)(B) ceiling
+/// test's own inputs, and box 4 is income the instruction routes to Schedule 1 line 8z.
+///
+/// ★★ **Two editions, one struct.** The archive holds **Rev. January 2022** (in force for TY2022
+/// through TY2024) and **Rev. April 2025** (TY2025 onward); `xtask box-census` reads the box grid
+/// out of each edition's own extract and both print the identical eleven captions, so one struct
+/// serves both and a caption that moves reds there rather than drifting here.
+///
+/// ★ **Liveness is the ITEMIZE ELECTION, not the paper** (R8/I8): the section and its census row
+/// are live iff `schedule_a.is_some()`. A standard-deduction filer holding a $900,000 1098 is never
+/// made to transcribe it and is never refused over a debt limit they are not deducting against.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct Form1098 {
+    /// *"RECIPIENT'S/LENDER'S name"* as printed on the form.
+    pub lender: String,
+    /// **R10.2 — document identity.** See [`Form1099Int::payer_tin`].
+    #[serde(default)]
+    pub lender_tin: String,
+    /// **R10.2 — when this row was transcribed.** See [`Form1099Int::transcribed_on`].
+    #[serde(default)]
+    pub transcribed_on: Option<Date>,
+    /// **Box 1 — *Mortgage interest received from payer(s)/borrower(s)*.** → Schedule A line 8a,
+    /// added to [`Self::box6_points`]: *"Enter on line 8a mortgage interest and points reported to
+    /// you on Form 1098"* (`i1040sca--2025.txt:1060-1061`). btctax adds box 1 + box 6 across every
+    /// Form 1098 on the return.
+    ///
+    /// ★ **No `#[serde(default)]`** (§4.3): a Form 1098 without box 1 is a mistyped row, not a
+    ///   lawful state.
+    pub box1_interest: Usd,
+    /// **Box 2 — *Outstanding mortgage principal*.** The §163(h)(3)(B) acquisition-debt ceiling is
+    /// tested against the **SUM of box 2 over every row** — the limit is on aggregate acquisition
+    /// debt, so two mortgages at $500,000 each are over the $750,000 ceiling while each alone is
+    /// silent. It drives a **warning** beside the filer's own `MortgageWithinDebtLimit` testimony
+    /// and never writes a line.
+    #[serde(default)]
+    pub box2_outstanding_principal: Usd,
+    /// **Box 3 — *Mortgage origination date*.** Which ceiling applies: *"Limit on loans taken out on
+    /// or before December 15, 2017 … up to $1,000,000 ($500,000 if you are married filing
+    /// separately)"* versus *"Limit on loans taken out after December 15, 2017 … up to $750,000
+    /// ($375,000 …)"* (`i1040sca--2025.txt:1027-1053`).
+    ///
+    /// ★ `Option`, and the `None` is load-bearing: a row whose origination date was never
+    ///   transcribed is tested against the **stricter** post-2017 ceiling, which is the fail-closed
+    ///   direction — it can only warn earlier, never later.
+    #[serde(default)]
+    pub box3_origination_date: Option<Date>,
+    /// **Box 4 — *Refund of overpaid interest*.** ★★★ A refuse-guard, and the instruction is explicit
+    /// that it is NOT netted against the deduction: *"If your Form 1098 shows any refund of overpaid
+    /// interest, don't reduce your deduction by the refund. Instead, see the instructions for
+    /// Schedule 1 (Form 1040), line 8z."* (`i1040sca--2025.txt:1069-1072`).
+    ///
+    /// So the figure is **income on Schedule 1 line 8z**, a line btctax fills from nothing. A number
+    /// the tool already holds may not sit beside a blank 8z with a census note: that is a typed
+    /// figure with no reader in the UNDERSTATEMENT direction, so `> 0` refuses
+    /// ([`super::return_refuse::RefuseReason::MortgageInterestRefundNotComputed`]). Same shape as
+    /// the 1099-INT's box 9.
+    #[serde(default)]
+    pub box4_refund_overpaid_interest: Usd,
+    /// **Box 5 — *Mortgage insurance premiums*.** Collected against Schedule A's **line 8d**, which
+    /// the TY2024 and TY2025 forms both print as *"Reserved for future use"*
+    /// (`i1040sca--2025.txt:1153-1155`). The §163(h)(3)(E) deduction is not in force for those
+    /// years, so the figure reaches no line — but the TY2026 Schedule A is a REBUILD
+    /// (`design/TY2026_WORK_LIST.md:36`), and if a final reinstates the line the field is already
+    /// here holding transcribed testimony rather than a gap.
+    #[serde(default)]
+    pub box5_mortgage_insurance: Usd,
+    /// **Box 6 — *Points paid on purchase of principal residence*.** → Schedule A line 8a WITH box 1
+    /// — the line's own caption is *"Home mortgage interest and points reported to you on Form
+    /// 1098"*. Points **not** on a 1098 are line 8c instead
+    /// ([`ScheduleAInputs::points_not_on_1098`]).
+    #[serde(default)]
+    pub box6_points: Usd,
+    /// **Box 7 — the checkbox** *"If address of property securing mortgage is the same as
+    /// PAYER'S/BORROWER'S address, check the box, or enter the address or description in box 8."*
+    #[serde(default)]
+    pub box7_property_address_same_as_payer: bool,
+    /// **Box 8 — *Address or description of property securing mortgage*.** Free text; empty when box
+    /// 7 is checked, which is the form's own instruction.
+    #[serde(default)]
+    pub box8_property_address: String,
+    /// **Box 10 — *Other*.** Free-text lender reporting (real-estate taxes are the common one). It
+    /// reaches no line until the filer identifies the item, and it is shown beside Schedule A line
+    /// 5b so a filer whose lender reported their property tax there can enter it.
+    #[serde(default)]
+    pub box10_other: String,
+    /// ★★★ **The per-row SHARED-INTEREST gate — not a box, a question the instruction asks of the
+    /// row.** *"More than one borrower. If you and at least one other person (other than your spouse
+    /// if you file a joint return) were liable for and paid interest on a mortgage that was your
+    /// home, you can only deduct your share of the interest. Shared interest reported on your Form
+    /// 1098. If the shared interest was reported on the Form 1098 you received, deduct only your
+    /// share of the interest on line 8a."* (`i1040sca--2025.txt:1073-1081`.)
+    ///
+    /// Line 8a sums box 1 **in full**, so a shared mortgage would deduct the co-borrower's interest
+    /// too — an OVERSTATED deduction btctax cannot apportion, because it does not hold the share.
+    /// `Some(true)` refuses ([`super::return_refuse::RefuseReason::SharedMortgageInterest`]).
+    #[serde(default)]
+    pub other_borrower_paid_interest: Option<bool>,
+}
+
+/// **Schedule A line 8b — home mortgage interest paid to a recipient who gave no Form 1098**
+/// (R8 / §5.5, new at T9).
+///
+/// ★★★ **A repeating struct, not a scalar, because the FORM demands an identity.** *"Seller financed
+/// mortgage. If you paid home mortgage interest to the person from whom you bought the home and that
+/// person didn't provide you a Form 1098, write that person's name, identifying number, and address
+/// on the dotted lines next to line 8b."* (`i1040sca--2025.txt:1109-1116`.) And the instruction
+/// prices the omission: *"If you don't show the required information about the recipient or let the
+/// recipient know your SSN, you may have to pay a $50 penalty."* (`:1117-1119`.)
+///
+/// So an empty `recipient_tin` **refuses**
+/// ([`super::return_refuse::RefuseReason::NonForm1098InterestRecipientUnidentified`]) rather than
+/// printing an amount on a line whose own instruction says the identity must accompany it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct NonForm1098Interest {
+    /// The recipient's name, printed on the dotted line beside 8b.
+    pub recipient_name: String,
+    /// The recipient's identifying number: *"If the recipient of your home mortgage payment(s) is an
+    /// individual, the identifying number is their social security number (SSN). Otherwise, it is
+    /// the employer identification number (EIN)."* (`i1040sca--2025.txt:1114-1116`.)
+    #[serde(default)]
+    pub recipient_tin: String,
+    /// The recipient's address, printed on the dotted line beside 8b.
+    #[serde(default)]
+    pub recipient_address: String,
+    /// The deductible interest paid to this recipient. ★ **No `#[serde(default)]`** (§4.3): a row
+    /// with no amount is a mistyped row, not a lawful state.
+    pub amount: Usd,
+}
+
+/// **Sale of a main home — three gates, no amount** (R8 / §5.5, new at T9).
+///
+/// ★★★ Transcribed from the Schedule D instructions' own *Sale of Your Home* block
+/// (`i1040sd--2025.txt:313-347`), which is a flowchart with a printed answer at the end:
+///
+/// > *"You may not need to report the sale or exchange of your main home. If you must report it,
+/// > complete Form 8949 before Schedule D. Report the sale or exchange of your main home on Form
+/// > 8949 if: • You can't exclude all of your gain from income, or • You received a Form 1099-S for
+/// > the sale or exchange."*
+///
+/// So the return prints **nothing** exactly when all three tests are met and no Form 1099-S arrived
+/// — and that blank is a DECISION with four answers behind it, not an absence. Every other branch
+/// refuses ([`super::return_refuse::RefuseReason::HomeSaleNotComputed`]), naming Pub. 523 and Form
+/// 8949 code H.
+///
+/// ★★ **No amount is ever asked.** btctax computes no home sale, so a proceeds or basis figure would
+/// be a number with no reader — and asking for one would imply the tool intends to use it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct HomeSale {
+    /// *"Sale of Your Home"* (`i1040sd--2025.txt:313`) — always live; the three tests hang off a
+    /// `Some(true)` here.
+    #[serde(default)]
+    pub sold_main_home: Option<bool>,
+    /// **Test 1** — *"During the 5-year period ending on the date you sold or exchanged your home,
+    /// you owned it for 2 years or more (the ownership requirement) and lived in it as your main
+    /// home for 2 years or more (the use requirement)."* (`i1040sd--2025.txt:335-343`.)
+    #[serde(default)]
+    pub test1_owned_2_years_and_lived_2_years_of_last_5: Option<bool>,
+    /// **Test 2** — *"You haven't excluded gain on the sale or exchange of another main home during
+    /// the 2-year period ending on the date of the sale or exchange of your home."*
+    /// (`i1040sd--2025.txt:344-348`.)
+    #[serde(default)]
+    pub test2_no_exclusion_on_another_home_in_2_years: Option<bool>,
+    /// The first bullet of the reporting rule, asked as the filer's own conclusion: *"• You can't
+    /// exclude all of your gain from income"* (`i1040sd--2025.txt:321-322`) — phrased positively
+    /// here, so `Some(true)` ("I can exclude all of it") is the answer that leaves the line blank.
+    #[serde(default)]
+    pub can_exclude_all_gain: Option<bool>,
+}
+
 /// **Form 1099-SA box 5 / Form 5498-SA box 6 — WHICH ACCOUNT the document reports.**
 ///
 /// ★ The two forms print the same three-way checkbox, and it is the one box on either that decides
@@ -1231,8 +1405,23 @@ pub struct ScheduleAInputs {
     pub salt_real_estate: Usd, // 5b
     #[serde(default)]
     pub salt_personal_property: Usd, // 5c
+    /// ★★★ **Schedule A line 8b — mortgage interest NOT reported on a Form 1098** (R8 / §5.5, new
+    /// at T9). One row per recipient, each carrying the name, identifying number and address the
+    /// instruction demands beside the line. See [`NonForm1098Interest`].
+    ///
+    /// ★ `#[serde(default)]`: an empty `Vec` is the lawful *"none"* for the overwhelming majority
+    ///   of filers — the itemizer with a bank mortgage and nothing else.
     #[serde(default)]
-    pub mortgage_interest_1098: Usd, // 8a only
+    pub mortgage_interest_not_on_1098: Vec<NonForm1098Interest>,
+    /// ★★★ **Schedule A line 8c — *Points not reported to you on Form 1098*** (R8 / §5.5, new at
+    /// T9). *"Points are shown on your settlement statement. Points you paid only to borrow money
+    /// are generally deductible over the life of the loan. See Pub. 936 to figure the amount you can
+    /// deduct."* (`i1040sca--2025.txt:1136-1140`.)
+    ///
+    /// ★ btctax does not amortize: the figure entered is the amount for THIS year, which the filer
+    ///   figures from Pub. 936 exactly as the instruction says.
+    #[serde(default)]
+    pub points_not_on_1098: Usd,
     /// §163(h)(3)(F) mixed-use mortgage — a class-(A) DECLARATION (P9 §2.7), live when this Schedule A carries
     /// mortgage interest. `None` ⇒ refuse (`MixedUseMortgageUnanswered`); `Some(false)` ⇒ 8a is zeroed, the
     /// line-8 box is checked, and `MixedUseMortgageNotAllocated` advises (v1 cannot do the Pub. 936 split);
@@ -1738,6 +1927,15 @@ pub struct ReturnInputs {
     /// it replaced the scalar `sch1.student_loan_interest_paid` at T5. See [`Form1098E`].
     #[serde(default)]
     pub form_1098e: Vec<Form1098E>,
+    /// ★★★ **R4 / R8 / §5.2 — Form 1098 rows** (T9). Schedule A line 8a reads the SUM of their box
+    /// 1 **plus box 6**; the §163(h)(3)(B) ceiling warning reads the SUM of their box 2 against the
+    /// year's params. It replaced the scalar `schedule_a.mortgage_interest_1098` at T9.
+    ///
+    /// ★★ **Top-level, not a `ScheduleAInputs` leaf** (R8): the document arrives whether or not the
+    /// filer itemizes. What the itemize election governs is its LIVENESS — the section and the
+    /// `form_1098` census row are live iff `schedule_a.is_some()` — never its home.
+    #[serde(default)]
+    pub form_1098: Vec<Form1098>,
     /// ★★★ **R4 / §5.2 — Form 1099-SA rows** (T16). Form 8889 line 14a reads the SUM of their box 1.
     /// See [`Form1099Sa`].
     #[serde(default)]
@@ -2217,6 +2415,25 @@ pub struct ReturnInputs {
     /// REQUIRED. See [`ScheduleBRecord`].
     #[serde(default)]
     pub schedule_b_filer_records: Vec<ScheduleBRecord>,
+    /// ★★★ **THE FORM 8396 GATE** (R8 / §5.5, new at T9). Schedule A's Line 8a Caution: *"If you are
+    /// claiming the mortgage interest credit (for holders of qualified mortgage credit certificates
+    /// issued by state or local governmental units or agencies), subtract the amount shown on Form
+    /// 8396, line 3, from the total deductible interest you paid on your home mortgage. Enter the
+    /// result on line 8a."* (`i1040sca--2025.txt:1091-1096`.)
+    ///
+    /// btctax bundles no Form 8396 and holds no line 3, so it cannot perform that subtraction — and
+    /// printing line 8a **unsubtracted** for a certificate holder overstates the deduction. A
+    /// `Some(true)` therefore refuses
+    /// ([`super::return_refuse::RefuseReason::MortgageInterestCreditUnsupported`]).
+    ///
+    /// ★ Live iff the return carries a Form 1098 row or a line 8b row — the Caution is printed under
+    ///   Line 8a, and a filer with no mortgage interest at all has no line for it to modify.
+    #[serde(default)]
+    pub claiming_mortgage_interest_credit: Option<bool>,
+    /// ★★★ **THE SALE OF A MAIN HOME** (R8 / §5.5, new at T9) — three gates and no amount. See
+    /// [`HomeSale`].
+    #[serde(default)]
+    pub home_sale: HomeSale,
     #[serde(default)]
     pub answer_log: std::collections::BTreeMap<
         crate::tax::provenance::AnswerKey,
@@ -2233,6 +2450,50 @@ pub struct ReturnInputs {
 }
 
 impl ReturnInputs {
+    /// ★★★ **Schedule A line 8a's Form 1098 component — the ONE derivation** (R8, T9).
+    ///
+    /// The line's own caption is *"Home mortgage interest and points reported to you on Form 1098"*
+    /// and its instruction is *"Enter on line 8a mortgage interest and points reported to you on
+    /// Form 1098"* (`i1040sca--2025.txt:1060-1061`) — so it is **box 1 + box 6**, summed over every
+    /// transcribed row. Points NOT on a 1098 are line 8c
+    /// ([`ScheduleAInputs::points_not_on_1098`]), never this.
+    ///
+    /// ★ It reads [`Self::form_1098`] and nothing else, so a return with no Schedule A still
+    ///   computes it — the itemize election gates the SECTION'S LIVENESS, and the deduction is
+    ///   gated where every other Schedule A figure is, by `schedule_a.is_some()`.
+    #[must_use]
+    pub fn form_1098_interest_and_points(&self) -> Usd {
+        self.form_1098
+            .iter()
+            .map(|r| r.box1_interest + r.box6_points)
+            .sum()
+    }
+
+    /// ★★★ **The §163(h)(3)(B) test's own quantity — Σ box 2 across every Form 1098 row.**
+    ///
+    /// *"For qualifying debt taken out after December 15, 2017, you can only deduct home mortgage
+    /// interest on up to $750,000 …"* (`i1040sca--2025.txt:1040-1042`) — the limit is on **aggregate
+    /// acquisition debt**, so two mortgages at $500,000 each are over it while each row alone is
+    /// silent. Summing per row would never warn on exactly the household the limit was written for.
+    #[must_use]
+    pub fn form_1098_outstanding_principal(&self) -> Usd {
+        self.form_1098
+            .iter()
+            .map(|r| r.box2_outstanding_principal)
+            .sum()
+    }
+
+    /// ★★★ **Schedule A line 8b — the SUM of the non-1098 rows' amounts** (R8, T9).
+    #[must_use]
+    pub fn mortgage_interest_not_on_1098_total(&self) -> Usd {
+        self.schedule_a.as_ref().map_or(Usd::ZERO, |a| {
+            a.mortgage_interest_not_on_1098
+                .iter()
+                .map(|r| r.amount)
+                .sum()
+        })
+    }
+
     /// §164(b)(7)(B)(iv) **modified** adjusted gross income — AGI plus the §911/931/933 exclusions.
     /// The same quantity Schedule 1-A Part I line 3 computes.
     ///
@@ -2336,6 +2597,12 @@ impl Default for ReturnInputs {
             //     which is the one direction this field exists to close.
             digital_asset_activity: None,
             schedule_b_filer_records: Vec::new(),
+            // ★ R8 / T9 — the 1098 rows, the Form 8396 gate (`None` = never asked, which REFUSES on
+            //   a return that carries mortgage interest) and the sale-of-a-main-home block, whose
+            //   own `Default` answers nothing either.
+            form_1098: Vec::new(),
+            claiming_mortgage_interest_credit: None,
+            home_sale: HomeSale::default(),
             schedule_c: None,
             schedule_a: None,
             itemize_election: ItemizeElection::Auto,

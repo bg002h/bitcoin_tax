@@ -144,9 +144,21 @@ fn maximal_fixture() -> ReturnInputs {
             class: CharitableClass::Cash60,
             amount: dec!(0),
         }],
-        mortgage_interest_1098: dec!(1), // liveness primer for SaMortgageAllUsed + DeclAmtQualifiedDwelling
         ..Default::default()
     });
+    // ★★★ R8 / T9 — one Form 1098 row, same reason as the four 1099 `Vec`s: an empty one would
+    //     realize no leaf at all and give FALSE drift-protection for every 1098 box. It doubles as
+    //     the LIVENESS PRIMER for `SaMortgageAllUsed`, `SaMortgageWithinDebtLimit`,
+    //     `DeclAmtQualifiedDwelling` and `DeclClaimingMortgageInterestCredit`, whose liveness is now
+    //     `schedule_a.is_some() && !form_1098.is_empty()`. Its three non-default leaves each differ
+    //     from their own field's sentinel, so every diff stays exact.
+    ri.form_1098 = vec![btctax_core::tax::testonly::form_1098_with_interest(dec!(1))];
+    // ★★★ R8 / T9 — one Schedule A line 8b row, for the same reason.
+    ri.schedule_a
+        .as_mut()
+        .expect("the fixture just built one")
+        .mortgage_interest_not_on_1098 =
+        vec![btctax_core::tax::return_inputs::NonForm1098Interest::default()];
     // Liveness primer for `DeclAmtCarryoverSame` (Form 6251 line 2k). The VALUE leaves stay exempt via
     // EXEMPT_PREFIXES; this only makes the declaration that guards them live.
     ri.capital_loss_carryforward_in = btctax_core::tax::types::Carryforward {
@@ -386,6 +398,15 @@ fn fixture_for(field: &Field, base: &ReturnInputs) -> ReturnInputs {
         //     §G-9 dates of death and the document-less income door above — one fixture cannot both
         //     satisfy a gate and cover it.
         FieldId::DeclHsaActivity => ri.sch1.hsa_activity = None,
+        // ★★★ R8 / T9 — the three sale-of-a-main-home TESTS are live only while `sold_main_home` is
+        //     YES, and `sold_main_home` itself must be covered on a fixture holding something OTHER
+        //     than the `TriState(Some(true))` sentinel. Same structural shape as `DeclHsaActivity`
+        //     above: one fixture cannot both satisfy the gate and cover it, so the gate is primed
+        //     here for the three it opens and left blank for its own row.
+        FieldId::HomeSaleTest1 | FieldId::HomeSaleTest2 | FieldId::HomeSaleCanExcludeAllGain => {
+            ri.home_sale.sold_main_home = Some(true)
+        }
+        FieldId::HomeSaleSoldMainHome => ri.home_sale.sold_main_home = None,
         // ★★★ FR-29 — the SPEC §6.3 dead-end fact is live ONLY once condition 4 is answered CANNOT
         //     KNOW. That is the owner ruling's first constraint discharged in the liveness predicate,
         //     so it is structural exactly like the §G-9 dates of death above: one fixture cannot both
@@ -480,6 +501,9 @@ fn addr_for(id: SectionId) -> RowAddr {
         | SectionId::B1099s
         | SectionId::G1099s
         | SectionId::Form1098Es
+        // ★ R4 / R8 / T9 — the Form 1098 rows and Schedule A line 8b's recipient rows.
+        | SectionId::Form1098s
+        | SectionId::NonForm1098Interest
         // ★ R4 / T16 — the two HSA information returns.
         | SectionId::Sa1099s
         | SectionId::Sa5498s
@@ -667,23 +691,15 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
         //   guessing — but this exemption is the reason it still fires for anyone who wants the boxes.
         "header.spouse_had_no_income",
         "header.spouse_not_filing_a_return",
-        // ★★★ **R3 — the two census rows shadowed by a scalar, exempt with the task that removes
-        //     the exemption named.** Both HAVE a `DocumentCensus` Field; neither is live, because
-        //     the amount is collected today by a scalar — `schedule_a.mortgage_interest_1098` and
-        //     `sch1.student_loan_interest_paid`. A `No` on the row would contradict a figure already
-        //     entered, and a `Yes` would demand a transcription section that does not exist, so the
-        //     row is deliberately unaskable until its section lands.
-        //
-        //     REMOVE `documents.form_1098` when **T9** replaces the mortgage scalar with a `Form1098`
-        //     section. Assertion (l) below already reds on a stale entry, and the mutate-and-diff
-        //     skip that pairs with it is derived from `row_is_live`, so neither half can go stale
-        //     silently.
-        //
-        //     ★★★ **`documents.form_1098e` LEFT THIS LIST AT T5**, which is the mechanism working:
-        //     `Form1098E` replaced the `sch1.student_loan_interest_paid` scalar, `row_is_live`
-        //     opened the row, the mutate-and-diff skip stopped skipping it, and assertion (3) below
-        //     then demanded a Field for the leaf. Nobody had to remember.
-        "documents.form_1098",
+        // ★★★ **R3 — THE SCALAR-SHADOWED CENSUS ROWS ARE GONE FROM THIS LIST, both of them, and
+        //     that is the mechanism working rather than an edit anyone had to remember.**
+        //     `documents.form_1098e` left at **T5** when `Form1098E` replaced the
+        //     `sch1.student_loan_interest_paid` scalar; `documents.form_1098` left at **T9** when
+        //     `Form1098` replaced `schedule_a.mortgage_interest_1098`. In each case `row_is_live`
+        //     opened the row, the mutate-and-diff skip (derived from that same predicate) stopped
+        //     skipping it, and assertion (3) below then demanded a Field for the leaf — while
+        //     assertion (l) reds on the stale exemption if it is left behind, which is how this one
+        //     was found.
         "capital_loss_carryforward_in_provenance",
         "charitable_carryover_in_provenance",
         "qbi.reit_ptp_carryforward_in_provenance",
@@ -793,7 +809,7 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     // change happened to keep the sets balanced.
     let field_count: usize = form_spec().iter().map(|s| s.fields.len()).sum();
     assert_eq!(
-        field_count, 249,
+        field_count, 271,
         "expected 216 Fields — 117 before T5, plus its FIFTY-EIGHT: the four document-less income \
          declarations (R3), W-2 boxes 13 and 14b, and the six document sections (1099-INT 14, \
          1099-DIV 14, 1099-B 8, 1099-G 7, 1098-E 4, and R5's five filer's-records leaves) — plus \
@@ -807,15 +823,18 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
          declaration (Form 8889 line 1 / line 3 rule 1) and M-1's document-less distribution door \
          (line 14a). ★★★ T7 / R6 added TWENTY-ONE: the twenty per-row §152 gates of Who \
          Qualifies as Your Dependent, plus Step 5 question 1 — the one gate that is about the \
-         FILER rather than about a row. \u{2605}\u{2605}\u{2605} R7 / T8 added TEN: Head of household's two tests, its MARITAL BASIS (a `Choice`, and the registry's first class-(A) skippable), the entry space for a non-dependent qualifying child, FR-67's \u{a7}6013(g)/(h) nonresident-alien-spouse election gate, and Qualifying surviving spouse's five conditions."
+         FILER rather than about a row. \u{2605}\u{2605}\u{2605} R7 / T8 added TEN: Head of household's two tests, its MARITAL BASIS (a `Choice`, and the registry's first class-(A) skippable), the entry space for a non-dependent qualifying child, FR-67's \u{a7}6013(g)/(h) nonresident-alien-spouse election gate, and Qualifying surviving spouse's five conditions. \u{2605}\u{2605}\u{2605} R8 / T9 added TWENTY-TWO: the Form 1098 section's THIRTEEN (lender, TIN, transcription date, boxes 1, 2, 3, 4, 5, 6, 7, 8 and 10, and the per-row shared-interest gate), Schedule A line 8b's FOUR (the recipient's name, identifying number and address, and the amount), the sale-of-a-main-home section's FOUR, and Schedule A's Line 8a Caution (the Form 8396 mortgage interest credit). Line 8c replaced `SaMortgage1098` on the Schedule A section, so that one is a swap and not a twenty-third."
     );
     assert_eq!(
         covered.len(),
-        248,
-        "expected 215 distinctly-covered in-scope leaves — every one of the 216 Fields but \
-         `DocForm1098`, whose row is still shadowed by the `schedule_a.mortgage_interest_1098` \
-         scalar (T9) and so is never live. It was 115 of 117 before T5, then 174 of 175, then 182 \
-         of 183; T16's thirty-three and the seam review's two are all covered; R7 / T8's ten likewise."
+        271,
+        "★★★ EVERY Field is now distinctly covered — 271 of 271, and the last gap closed at T9. \
+         It was 115 of 117 before T5, then 174 of 175, then 182 of 183, and the one always missing \
+         was `DocForm1098`, whose census row was shadowed by the \
+         `schedule_a.mortgage_interest_1098` scalar and so was never live. T9 replaced the scalar \
+         with the `form_1098` document rows, `row_is_live` opened the row on the itemize election, \
+         and the leaf became coverable. T16's thirty-three, the seam review's two, R7 / T8's ten \
+         and R8 / T9's twenty-two are all covered."
     );
 
     // ── 5. ★ I-6: PIN the observed FieldId → leaf-path map against a literal (kills TRANSPOSITION). ──
@@ -1016,7 +1035,75 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
         FieldId::SaSaltSalesTaxAmt,
         "schedule_a.salt_sales_tax_amount",
     ),
-    (FieldId::SaMortgage1098, "schedule_a.mortgage_interest_1098"),
+    (FieldId::SaPointsNotOn1098, "schedule_a.points_not_on_1098"),
+    // ★★★ R8 / T9 — Schedule A line 8b's rows, and the Form 1098 document rows.
+    (
+        FieldId::Sa8bRecipientName,
+        "schedule_a.mortgage_interest_not_on_1098[0].recipient_name",
+    ),
+    (
+        FieldId::Sa8bRecipientTin,
+        "schedule_a.mortgage_interest_not_on_1098[0].recipient_tin",
+    ),
+    (
+        FieldId::Sa8bRecipientAddress,
+        "schedule_a.mortgage_interest_not_on_1098[0].recipient_address",
+    ),
+    (
+        FieldId::Sa8bAmount,
+        "schedule_a.mortgage_interest_not_on_1098[0].amount",
+    ),
+    (FieldId::Form1098Lender, "form_1098[0].lender"),
+    (FieldId::Form1098LenderTin, "form_1098[0].lender_tin"),
+    (
+        FieldId::Form1098TranscribedOn,
+        "form_1098[0].transcribed_on",
+    ),
+    (FieldId::Form1098Box1Interest, "form_1098[0].box1_interest"),
+    (
+        FieldId::Form1098Box2Principal,
+        "form_1098[0].box2_outstanding_principal",
+    ),
+    (
+        FieldId::Form1098Box3OriginationDate,
+        "form_1098[0].box3_origination_date",
+    ),
+    (
+        FieldId::Form1098Box4Refund,
+        "form_1098[0].box4_refund_overpaid_interest",
+    ),
+    (
+        FieldId::Form1098Box5MortgageInsurance,
+        "form_1098[0].box5_mortgage_insurance",
+    ),
+    (FieldId::Form1098Box6Points, "form_1098[0].box6_points"),
+    (
+        FieldId::Form1098Box7AddressSame,
+        "form_1098[0].box7_property_address_same_as_payer",
+    ),
+    (
+        FieldId::Form1098Box8PropertyAddress,
+        "form_1098[0].box8_property_address",
+    ),
+    (FieldId::Form1098Box10Other, "form_1098[0].box10_other"),
+    (
+        FieldId::Form1098OtherBorrowerPaid,
+        "form_1098[0].other_borrower_paid_interest",
+    ),
+    // ★★★ R8 / T9 — the sale of a main home.
+    (FieldId::HomeSaleSoldMainHome, "home_sale.sold_main_home"),
+    (
+        FieldId::HomeSaleTest1,
+        "home_sale.test1_owned_2_years_and_lived_2_years_of_last_5",
+    ),
+    (
+        FieldId::HomeSaleTest2,
+        "home_sale.test2_no_exclusion_on_another_home_in_2_years",
+    ),
+    (
+        FieldId::HomeSaleCanExcludeAllGain,
+        "home_sale.can_exclude_all_gain",
+    ),
     (
         FieldId::SaInvestmentInterest,
         "schedule_a.investment_interest",
@@ -1334,6 +1421,12 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
     (
         FieldId::Form1098eBox1Interest,
         "form_1098e[0].box1_interest",
+    ),
+    // ★ T9 — the row opened when `Form1098` replaced the Schedule A scalar.
+    (FieldId::DocForm1098, "documents.form_1098"),
+    (
+        FieldId::DeclClaimingMortgageInterestCredit,
+        "claiming_mortgage_interest_credit",
     ),
     (FieldId::DocForm1098e, "documents.form_1098e"),
     // ── ★★★ R4 / T16 — the two HSA information returns, their census rows, and Form 8889's own

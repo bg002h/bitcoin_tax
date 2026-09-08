@@ -46,6 +46,10 @@ pub enum DocumentKind {
     Form1099Div,
     Form1099G,
     Form1099B,
+    /// ★ T9 — Form 1098, *Mortgage Interest Statement*. Its rows replaced the
+    /// `schedule_a.mortgage_interest_1098` scalar, which is why Schedule A line 8a's figure moved
+    /// from `FilerRecords` (the `schedule_a` prefix) to a document.
+    Form1098,
     /// ★ T5 — Form 1098-E, *Student Loan Interest Statement*. Its rows replaced the
     /// `sch1.student_loan_interest_paid` scalar, which is why Schedule 1 line 21's figure moved from
     /// `FilerRecords` (the `sch1` prefix) to a document.
@@ -94,13 +98,16 @@ pub const LEAF_SOURCE: &[(&str, Source)] = &[
     ("div_1099", Source::Document(DocumentKind::Form1099Div)),
     ("g_1099", Source::Document(DocumentKind::Form1099G)),
     ("b_1099", Source::Document(DocumentKind::Form1099B)),
+    ("form_1098", Source::Document(DocumentKind::Form1098)),
     ("form_1098e", Source::Document(DocumentKind::Form1098E)),
     ("sa_1099", Source::Document(DocumentKind::Form1099Sa)),
     ("sa_5498", Source::Document(DocumentKind::Form5498Sa)),
     // ── The filer's own records ──────────────────────────────────────────────────────────────────
     // Schedule A: medical, SALT, interest, gifts — every one a figure the filer reads off their own
-    // books or a statement btctax does not transcribe. (`mortgage_interest_1098` moves to a
-    // `Form1098` document row in task T9; the prefix follows it then.)
+    // books or a statement btctax does not transcribe. ★ T9 — `mortgage_interest_1098` HAS moved to
+    // the `form_1098` document rows above; what stays here is line 8b (interest paid to a recipient
+    // who issued no Form 1098) and line 8c (points off a settlement statement), which are
+    // `FilerRecords` by construction — the line exists BECAUSE no third party reported them.
     ("schedule_a", Source::FilerRecords),
     ("sch1", Source::FilerRecords),
     // ★★★ T16 — Form 8889's own money leaves. Every one is a figure the FORM asks for and no

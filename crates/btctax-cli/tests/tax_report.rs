@@ -910,7 +910,7 @@ fn report_tax_year_derives_and_computes_from_ty2024_return_inputs() {
     let toml = _dir.path().join("inputs.toml");
     std::fs::write(
         &toml,
-        "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\nfiling_form_4952 = false\n# R3 / T5 — the document-less income door, answered: no undocumented wages, interest,\n# dividends or state refund.\nw2_wages_without_w2 = false\ninterest_or_dividends_without_1099 = false\nstate_refund_without_1099g = false\n# R9 / T6 — Form 1040 page 1's Digital Assets question. This vault's only disposal is in 2025,\n# so 2024 saw no receipt and no disposition.\ndigital_asset_activity = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"90000\"\nbox2_fed_withheld = \"12000\"\nbox5_medicare_wages = \"90000\"\n\n\n# R3 — the document census: this household holds a W-2 and nothing else.\n[documents]\nw2 = true\nint_1099 = false\ndiv_1099 = false\nb_1099 = false\ng_1099 = false\nr_1099 = false\nssa_1099 = false\nnec_misc_k_1099 = false\nk1 = false\nschedule_e_rental = false\ns_1099 = false\noid_1099 = false\nw2g = false\nc_1099 = false\na_1095 = false\nt_1098 = false\nform_1098e = false\n# T16 — the two HSA information returns.\nsa_1099 = false\nsa_5498 = false\n",
+        "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\nfiling_form_4952 = false\n# R3 / T5 — the document-less income door, answered: no undocumented wages, interest,\n# dividends or state refund.\nw2_wages_without_w2 = false\ninterest_or_dividends_without_1099 = false\nstate_refund_without_1099g = false\n# R9 / T6 — Form 1040 page 1's Digital Assets question. This vault's only disposal is in 2025,\n# so 2024 saw no receipt and no disposition.\ndigital_asset_activity = false\n# R8 / T9 \u{2014} the sale of a main home: always asked, and a blank is not a \"no\".\n[home_sale]\nsold_main_home = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"90000\"\nbox2_fed_withheld = \"12000\"\nbox5_medicare_wages = \"90000\"\n\n\n# R3 — the document census: this household holds a W-2 and nothing else.\n[documents]\nw2 = true\nint_1099 = false\ndiv_1099 = false\nb_1099 = false\ng_1099 = false\nr_1099 = false\nssa_1099 = false\nnec_misc_k_1099 = false\nk1 = false\nschedule_e_rental = false\ns_1099 = false\noid_1099 = false\nw2g = false\nc_1099 = false\na_1095 = false\nt_1098 = false\nform_1098e = false\n# T16 — the two HSA information returns.\nsa_1099 = false\nsa_5498 = false\n",
     )
     .unwrap();
     // The CSV disposal is in 2025, but v1 full-return tables are TY2024-only; import for 2024 to exercise
@@ -961,7 +961,7 @@ fn report_tax_year_refuses_business_income_without_schedule_c() {
 
     // Full-return inputs for 2024 with NO Schedule C.
     let toml = _dir.path().join("inputs.toml");
-    std::fs::write(&toml, "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\nfiling_form_4952 = false\n# R3 / T5 — the document-less income door, answered: no undocumented wages, interest,\n# dividends or state refund.\nw2_wages_without_w2 = false\ninterest_or_dividends_without_1099 = false\nstate_refund_without_1099g = false\n# R9 / T6 — this household RECEIVED digital assets as mining income in 2024, so the Form 1040\n# page-1 question is answered YES; a NO here would be contradicted by the ledger.\ndigital_asset_activity = true\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n\n# R3 — the document census: this crypto-only household received no information return.\n[documents]\nw2 = false\nint_1099 = false\ndiv_1099 = false\nb_1099 = false\ng_1099 = false\nr_1099 = false\nssa_1099 = false\nnec_misc_k_1099 = false\nk1 = false\nschedule_e_rental = false\ns_1099 = false\noid_1099 = false\nw2g = false\nc_1099 = false\na_1095 = false\nt_1098 = false\nform_1098e = false\n# T16 — the two HSA information returns.\nsa_1099 = false\nsa_5498 = false\n").unwrap();
+    std::fs::write(&toml, "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\nfiling_form_4952 = false\n# R3 / T5 — the document-less income door, answered: no undocumented wages, interest,\n# dividends or state refund.\nw2_wages_without_w2 = false\ninterest_or_dividends_without_1099 = false\nstate_refund_without_1099g = false\n# R9 / T6 — this household RECEIVED digital assets as mining income in 2024, so the Form 1040\n# page-1 question is answered YES; a NO here would be contradicted by the ledger.\ndigital_asset_activity = true\n# R8 / T9 \u{2014} the sale of a main home: always asked, and a blank is not a \"no\".\n[home_sale]\nsold_main_home = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n\n# R3 — the document census: this crypto-only household received no information return.\n[documents]\nw2 = false\nint_1099 = false\ndiv_1099 = false\nb_1099 = false\ng_1099 = false\nr_1099 = false\nssa_1099 = false\nnec_misc_k_1099 = false\nk1 = false\nschedule_e_rental = false\ns_1099 = false\noid_1099 = false\nw2g = false\nc_1099 = false\na_1095 = false\nt_1098 = false\nform_1098e = false\n# T16 — the two HSA information returns.\nsa_1099 = false\nsa_5498 = false\n").unwrap();
     cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false, false).unwrap();
 
     let err = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap_err();
@@ -3387,6 +3387,124 @@ fn an_imported_toml_cannot_mint_an_answer_record_or_a_history_entry() {
 /// (they are in the TOML), so the return keeps standing as testimony while every trace of when and
 /// under which words it was given is gone — and because *"an absent record is not a mismatch"*,
 /// R10.3's wording-change refusal is thereafter permanently disarmed for that return.
+/// ★★★ **T9 / R8 — THE §163(h)(3)(B) CEILING IS SHOWN BESIDE THE DECLARATION IT INFORMS.**
+///
+/// R8: the aggregate box-2 check is *"displayed as a warning beside the existing
+/// `MortgageWithinDebtLimit` declaration, which stays the filer's testimony"*. Before T9 that
+/// question was asked with **no figure at all** — the filer was made to add up their own balances
+/// while btctax was holding box 2 on the row above.
+///
+/// ★★ **The warning is DISPLAY CHROME, printed before the prompt and never folded into it.** T7's
+/// C-1 is the reason: `record_answer` hashes the words put to the filer, so a computed figure inside
+/// the prompt would change the hash whenever a balance changed and re-ask a question whose answer had
+/// not gone stale. Both halves are asserted — the warning is on the screen, and the stored
+/// `prompt_hash` is the hash of the REGISTRY's words.
+///
+/// ★ It reads the AGGREGATE: two mortgages at $500,000 each are over the $750,000 ceiling while
+///   neither row alone is, which is exactly the household a per-row check would never warn.
+///
+/// **Mutation:** delete the `q.id == MortgageWithinDebtLimit` block from the ask loop and the first
+/// assertion reds; make the ceiling per-row and the fixture stops warning at all.
+#[test]
+fn the_acquisition_debt_ceiling_is_shown_beside_the_debt_limit_question() {
+    use btctax_core::tax::return_inputs::{Form1098, ReturnInputs, ScheduleAInputs};
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2025(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+
+    let mut ri = ReturnInputs {
+        tax_year: 2024,
+        filing_status: btctax_core::FilingStatus::Single,
+        header: btctax_core::tax::testonly::not_a_dependent(),
+        // TWO mortgages, $500,000 each: $1,000,000 of post-2017 acquisition debt against a
+        // $750,000 ceiling. Neither row alone is over it.
+        form_1098: vec![
+            Form1098 {
+                lender: "Home Savings".into(),
+                box1_interest: dec!(15000),
+                box2_outstanding_principal: dec!(500000),
+                box3_origination_date: Some(time::macros::date!(2019 - 06 - 01)),
+                other_borrower_paid_interest: Some(false),
+                ..Default::default()
+            },
+            Form1098 {
+                lender: "Second Bank".into(),
+                box1_interest: dec!(9000),
+                box2_outstanding_principal: dec!(500000),
+                box3_origination_date: Some(time::macros::date!(2020 - 03 - 01)),
+                other_borrower_paid_interest: Some(false),
+                ..Default::default()
+            },
+        ],
+        schedule_a: Some(ScheduleAInputs::default()),
+        ..Default::default()
+    };
+    btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+    btctax_core::tax::testonly::reconcile_document_census(&mut ri);
+    {
+        let mut s = btctax_cli::Session::open(&vault, &pp()).unwrap();
+        btctax_cli::input_form_store::save_draft(&mut s, 2024, &ri).unwrap();
+    }
+
+    let script = answer_script(&ri, &[]);
+    let mut keystrokes: &[u8] = &script;
+    let mut screen: Vec<u8> = Vec::new();
+    cmd::answer::answer_return_inputs(
+        &vault,
+        &pp(),
+        2024,
+        time::macros::date!(2026 - 09 - 01),
+        &mut keystrokes,
+        &mut screen,
+        false,
+    )
+    .expect("the draft is answerable");
+    let screen = String::from_utf8(screen).unwrap();
+
+    let warn = screen
+        .find("warning · the outstanding mortgage principal in box 2")
+        .unwrap_or_else(|| panic!("no ceiling warning on the screen:\n{screen}"));
+    assert!(
+        screen.contains("$1000000") && screen.contains("$750000"),
+        "…and it names the AGGREGATE and the ceiling: {screen}"
+    );
+    let prompt = screen
+        .find("were you inside EVERY home-mortgage debt limit")
+        .expect("the debt-limit question is asked");
+    assert!(
+        warn < prompt,
+        "the warning must be printed BESIDE the question it informs — before it, not after"
+    );
+
+    // ★★ The hash is the REGISTRY's words, not the words plus a figure. A run that folded the
+    //    warning into the prompt would store a hash of the composed string, and the next change in
+    //    a mortgage balance would re-ask a question nobody's answer had gone stale on.
+    let stored = {
+        let s = btctax_cli::Session::open(&vault, &pp()).unwrap();
+        btctax_cli::input_form_store::working_return(s.conn(), 2024)
+            .unwrap()
+            .0
+            .expect("the draft was written")
+    };
+    let rec = stored
+        .answer_log
+        .get(&btctax_core::tax::provenance::AnswerKey::Question(
+            btctax_core::tax::questions::QuestionId::MortgageWithinDebtLimit,
+        ))
+        .expect("the debt-limit answer was recorded");
+    let words = btctax_core::tax::questions::FORM_QUESTIONS
+        .iter()
+        .find(|q| q.id == btctax_core::tax::questions::QuestionId::MortgageWithinDebtLimit)
+        .expect("the registry entry exists")
+        .prompt;
+    assert_eq!(
+        rec.prompt_hash,
+        btctax_core::tax::provenance::prompt_hash(words),
+        "★ THE KILL: the recorded hash is the REGISTRY'S words — the warning is display chrome, \
+         never part of what was hashed"
+    );
+}
+
 #[test]
 fn a_re_import_keeps_every_answer_record_already_on_the_row() {
     let csv_dir = tempfile::tempdir().unwrap();
@@ -3433,14 +3551,17 @@ fn a_re_import_keeps_every_answer_record_already_on_the_row() {
     //   passes for the wrong reason, which is the whole failure class this file exists to catch.
     assert_eq!(
         before.len(),
-        37,
-        "the interview wrote {} records, not the 37 this kill was measured against — if the \
+        38,
+        "the interview wrote {} records, not the 38 this kill was measured against — if the \
          registry grew, update the number; if it SHRANK, the keystroke script is under-answering \
          and the survival assertion below has stopped meaning anything. ★ It was 30 before T5, \
          which added the 1098-E census row and R3's three document-less income questions, 34 \
          before T6, which added R9's Digital Assets question, and 35 before T16, which added the \
-         two HSA information-return census rows (Form 8889's own seven questions are NOT here: \
-         they are live only when the §223 trigger is affirmed, and this fixture answers it No)",
+         two HSA information-return census rows, and 37 before T9, which added R8's \
+         sale-of-a-main-home question (always live; the three tests under it are not, and neither \
+         is the Form 8396 gate on a return with no Form 1098) (Form 8889's own seven questions are \
+         NOT here: they are live only when the §223 trigger is affirmed, and this fixture answers \
+         it No)",
         before.len()
     );
 
@@ -3703,7 +3824,7 @@ fn answered_toml(dir: &Path) -> PathBuf {
     std::fs::write(
         &toml,
         "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\n\
-         dual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\nfiling_form_4952 = false\n# R3 / T5 — the document-less income door, answered: no undocumented wages, interest,\n# dividends or state refund.\nw2_wages_without_w2 = false\ninterest_or_dividends_without_1099 = false\nstate_refund_without_1099g = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n\
+         dual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\nfiling_form_4952 = false\n# R3 / T5 — the document-less income door, answered: no undocumented wages, interest,\n# dividends or state refund.\nw2_wages_without_w2 = false\ninterest_or_dividends_without_1099 = false\nstate_refund_without_1099g = false\n# R8 / T9 \u{2014} the sale of a main home: always asked, and a blank is not a \"no\".\n[home_sale]\nsold_main_home = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n\
          [sch1]\nhsa_activity = false\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\n\
          box1_wages = \"50000\"\nbox2_fed_withheld = \"6000\"\nbox5_medicare_wages = \"50000\"\n",
     )

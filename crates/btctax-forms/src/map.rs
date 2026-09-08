@@ -3350,6 +3350,15 @@ pub struct ScheduleAMap {
     pub line7: MoneyCell,
     /// L8a — mortgage interest on Form 1098, MID column.
     pub line8a: MoneyCell,
+    /// ★★★ T9 — L8b, mortgage interest NOT on a Form 1098, MID column.
+    pub line8b: MoneyCell,
+    /// ★★★ T9 — L8b's DOTTED LINES: the wide free-text cell(s) beside line 8b that carry the
+    /// recipient's *"name, identifying number, and address"*. **Two on the TY2024 form, ONE on
+    /// TY2025** (the IRS merged the two single rows into one 24pt box), so it is a `Vec` and the
+    /// emitter places as many entries as the year's form has lines.
+    pub line8b_payee: Vec<String>,
+    /// ★★★ T9 — L8c, points not reported on a Form 1098, MID column.
+    pub line8c: MoneyCell,
     /// L8e — add 8a-8c, MID column.
     pub line8e: MoneyCell,
     /// L9 — investment interest (§163(d) / Form 4952), MID column.
@@ -3413,7 +3422,7 @@ impl ScheduleAMap {
         }
     }
     /// The 19 filled cells in printed reading order (strictly descending y on page 1).
-    pub fn lines(&self) -> [&MoneyCell; 19] {
+    pub fn lines(&self) -> [&MoneyCell; 21] {
         [
             &self.line1,
             &self.line2,
@@ -3426,6 +3435,8 @@ impl ScheduleAMap {
             &self.line5e,
             &self.line7,
             &self.line8a,
+            &self.line8b,
+            &self.line8c,
             &self.line8e,
             &self.line9,
             &self.line10,

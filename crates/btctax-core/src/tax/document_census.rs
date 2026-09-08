@@ -569,8 +569,10 @@ pub fn declared_rows(
         // ★ T16 — both HSA information returns gained a `Vec` with the Form 8889 build.
         DocumentRow::Sa1099 => Some(ri.sa_1099.len()),
         DocumentRow::Sa5498 => Some(ri.sa_5498.len()),
-        DocumentRow::Form1098
-        | DocumentRow::R1099
+        // ★ T9 — the 1098 gained a `Vec` when `Form1098` replaced the
+        //   `schedule_a.mortgage_interest_1098` scalar.
+        DocumentRow::Form1098 => Some(ri.form_1098.len()),
+        DocumentRow::R1099
         | DocumentRow::Ssa1099
         | DocumentRow::NecMiscK1099
         | DocumentRow::K1
@@ -641,10 +643,17 @@ pub const fn requires_transcription(row: DocumentRow) -> bool {
         //     required — it is what makes "I hold one" recorded rather than blank — and the
         //     contradiction rule still runs, so a `Some(false)` beside a transcribed row refuses.
         DocumentRow::Sa5498 => false,
-        // The §2.2 families refuse on `Yes` before this is ever read, and the one scalar-shadowed
-        // row left (`form_1098`, until T9) is not live — none of them has rows to demand.
-        DocumentRow::Form1098
-        | DocumentRow::R1099
+        // ★★★ 1098 — **YES, from T9, and this flipped from `false`.** Schedule A line 8a reads the
+        //     SUM of the rows' box 1 plus box 6 and NOTHING ELSE carries mortgage interest reported
+        //     on a Form 1098 onto the return: the `schedule_a.mortgage_interest_1098` scalar that
+        //     used to is gone. A declared 1098 with no row is therefore exactly "nothing ever
+        //     populated it". ★ The DIRECTION is the forgiving one — a missing deduction only
+        //     overstates tax — but the row is also where the §163(h)(3)(B) ceiling warning and the
+        //     box-4 refusal live, and both of those move the other way.
+        DocumentRow::Form1098 => true,
+        // The §2.2 families refuse on `Yes` before this is ever read — none of them has rows to
+        // demand.
+        DocumentRow::R1099
         | DocumentRow::Ssa1099
         | DocumentRow::NecMiscK1099
         | DocumentRow::K1
@@ -672,18 +681,28 @@ pub fn row_of_question(id: crate::tax::questions::QuestionId) -> Option<Document
 
 /// ★ THE liveness predicate for one census row — the ONLY copy, read by the row's `FormQuestion`.
 ///
-/// Every row is live except `form_1098`, whose amount is still collected by a scalar
-/// (`schedule_a.mortgage_interest_1098`): a `No` there would contradict a figure already entered,
-/// and a `Yes` would demand a transcription section that does not exist. §5.1's
-/// `schedule_a.is_some()` liveness for it lands with **T9**.
+/// ★★★ **`form_1098` is live iff `schedule_a.is_some()`, and every other row is always live** (§5.1
+/// / R8 / I8). The 1098 arrives whether or not the filer itemizes — what the itemize election
+/// governs is the row's LIVENESS, not the document's home.
+///
+/// Making it always live would force **every homeowner** to transcribe a 1098 and would then refuse
+/// a **standard-deduction** filer on a truthful `MortgageWithinDebtLimit = Some(false)` for a
+/// $900,000 2019 loan: a refusal over a deduction they are not claiming, and a return they could not
+/// file (`SPEC_interview.md` R8). Their 1098 rows would also be a `Field` set nothing reads, which
+/// R2 mechanism 3's reverse join reds.
 ///
 /// ★ **`form_1098e` OPENED AT T5**, when [`crate::tax::return_inputs::Form1098E`] replaced the
 ///   `sch1.student_loan_interest_paid` scalar: it now has a `Vec` to count, a form section to
 ///   transcribe into and a Schedule 1 line 21 chain that reads the rows, so the row is askable and
-///   both its `Yes` and its `No` mean something.
+///   both its `Yes` and its `No` mean something. **`form_1098` OPENED AT T9** for the same reason —
+///   [`crate::tax::return_inputs::Form1098`] replaced `schedule_a.mortgage_interest_1098` — with the
+///   itemize election as its gate.
 #[must_use]
-pub fn row_is_live(_ri: &crate::tax::return_inputs::ReturnInputs, row: DocumentRow) -> bool {
-    !matches!(row, DocumentRow::Form1098)
+pub fn row_is_live(ri: &crate::tax::return_inputs::ReturnInputs, row: DocumentRow) -> bool {
+    match row {
+        DocumentRow::Form1098 => ri.schedule_a.is_some(),
+        _ => true,
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -772,10 +791,22 @@ pub fn row_is_pre_named(
                 ..Default::default()
             }
         }),
+        // ★★★ T9 — the Form 1098 LENDER **is** seeded: a lender that sent a Form 1098 last year
+        //     sends one again for every year the loan is outstanding, so R10.4's sentence — *"Last
+        //     year Acme Savings (TIN 00-0000000) issued you a Form 1098. Did Acme Savings issue one
+        //     for 2027?"* — is exactly as true of them as of a bank. Every BOX is blank, including
+        //     box 3's origination date and the shared-interest gate: the seed carries an identity,
+        //     never testimony.
+        DocumentRow::Form1098 => ri.form_1098.get(i).is_some_and(|r| {
+            *r == crate::tax::return_inputs::Form1098 {
+                lender: r.lender.clone(),
+                lender_tin: r.lender_tin.clone(),
+                ..Default::default()
+            }
+        }),
         DocumentRow::Form1098e
         // No section exists, so there is no row to be pre-named — and it is a `match`, so a kind
         // that GAINS a section reds here.
-        | DocumentRow::Form1098
         | DocumentRow::R1099
         | DocumentRow::Ssa1099
         | DocumentRow::NecMiscK1099
@@ -822,8 +853,9 @@ pub fn drop_pre_named_rows(
         //   and a kind whose rows CAN be pre-named must also be able to shed them.
         DocumentRow::Sa1099 => retain_by(&mut ri.sa_1099, &keep),
         DocumentRow::Sa5498 => retain_by(&mut ri.sa_5498, &keep),
-        DocumentRow::Form1098
-        | DocumentRow::Form1098e
+        // ★ T9 — the 1098's lender IS seeded, so this arm really removes rows.
+        DocumentRow::Form1098 => retain_by(&mut ri.form_1098, &keep),
+        DocumentRow::Form1098e
         | DocumentRow::R1099
         | DocumentRow::Ssa1099
         | DocumentRow::NecMiscK1099
@@ -974,6 +1006,15 @@ mod tests {
                     );
                     continue;
                 }
+                // ★ T9 — the Form 1098 HAS a section, and the opener DOES seed its LENDER (a lender
+                //   sends one every year the loan is outstanding), so a pre-named row is real here
+                //   and a `No` must drop it.
+                DocumentRow::Form1098 => {
+                    ri.form_1098.push(crate::tax::return_inputs::Form1098 {
+                        lender: "P".into(),
+                        ..Default::default()
+                    });
+                }
                 // ★ T16 — both HSA information returns HAVE a section, and the opener DOES seed
                 //   their trustee (an HSA trustee sends a Form 1099-SA every year money leaves the
                 //   account), so a pre-named row is real here and a `No` must drop it.
@@ -1078,6 +1119,15 @@ mod tests {
                          carried identity"
                     );
                     continue;
+                }
+                // ★ T9 — the Form 1098 HAS a section, and the opener DOES seed its LENDER (a lender
+                //   sends one every year the loan is outstanding), so a pre-named row is real here
+                //   and a `No` must drop it.
+                DocumentRow::Form1098 => {
+                    ri.form_1098.push(crate::tax::return_inputs::Form1098 {
+                        lender: "P".into(),
+                        ..Default::default()
+                    });
                 }
                 // ★ T16 — both HSA information returns HAVE a section, and the opener DOES seed
                 //   their trustee (an HSA trustee sends a Form 1099-SA every year money leaves the

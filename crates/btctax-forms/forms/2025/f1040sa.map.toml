@@ -128,6 +128,11 @@ line7  = "form1[0].Page1[0].f1_14[0]"    # "Add lines 5e and 6"                 
 
 # ── Interest You Paid ───────────────────────────────────────────────────────────────────────────
 line8a = "form1[0].Page1[0].f1_15[0]"    # "Home mortgage interest and points reported to you on Form 1098. See instructions if limited"  MID
+line8b = "form1[0].Page1[0].f1_17[0]"    # "Home mortgage interest not reported to you on Form 1098"  MID  ← T9
+# ★★★ T9 — line 8b's dotted lines. TY2025 merged TY2024's TWO single rows into ONE 24pt box, nested
+#     under `Line8b_ReadOrder[0]` (measured: x = [122.4, 381.6], y = [300, 324]).
+line8b_payee = ["form1[0].Page1[0].Line8b_ReadOrder[0].f1_16[0]"]
+line8c = "form1[0].Page1[0].f1_18[0]"    # "Points not reported to you on Form 1098. See instructions for special rules"  MID  ← T9
 line8e = "form1[0].Page1[0].f1_20[0]"    # "Add lines 8a through 8c"                                  MID
 line9  = "form1[0].Page1[0].f1_21[0]"    # "Investment interest. Attach Form 4952 if required. See instructions"  MID
 line10 = "form1[0].Page1[0].f1_22[0]"    # "Add lines 8e and 9"                                    AMOUNT
@@ -188,13 +193,13 @@ last_line    = "18"
 "form1[0].Page1[0].f1_12[0]" = { line = "6", rule = "unmodeled", reason = "\"Other taxes. List type and amount:\" — the write-in DESCRIPTION block, one 24pt-tall box in 2025 where TY2024 had two single rows. btctax collects only the enumerated SALT categories, lines 5a through 5c.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
 "form1[0].Page1[0].f1_13[0]" = { line = "6", rule = "unmodeled", reason = "Line 6 amount — same reason; line 7 therefore equals line 5e.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
 
-# ── Line 8b: mortgage interest NOT reported on a Form 1098, and its payee block ──────────────────
-# ★ Note the inversion recorded in the header: the AMOUNT (f1_17) sits ABOVE the payee block (f1_16).
-"form1[0].Page1[0].f1_17[0]" = { line = "8b", rule = "unmodeled", reason = "Line 8b AMOUNT — \"Home mortgage interest not reported to you on Form 1098.\" btctax collects mortgage_interest_1098 only, i.e. interest that IS on a 1098.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
-"form1[0].Page1[0].Line8b_ReadOrder[0].f1_16[0]" = { line = "8b", rule = "unmodeled", reason = "The 8b payee block — \"If paid to the person from whom you bought the home, see instructions and show that person's name, identifying no., and address.\" Free text, one 24pt-tall box in 2025 where TY2024 had two single rows. Nothing to write while 8b itself is unmodeled.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
-
-# ── Line 8c: points not reported on a Form 1098 ──────────────────────────────────────────────────
-"form1[0].Page1[0].f1_18[0]" = { line = "8c", rule = "unmodeled", reason = "\"Points not reported to you on Form 1098. See instructions for special rules.\" Not collected.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+# ── Lines 8b/8c: MAPPED at T9 ────────────────────────────────────────────────────────────────────
+# ★ The 8b amount (f1_17), its payee block (Line8b_ReadOrder[0].f1_16, one 24pt box where TY2024 had
+#   two single rows) and line 8c (f1_18) all left the census: btctax collects
+#   `schedule_a.mortgage_interest_not_on_1098` — a row per recipient carrying the name, identifying
+#   number and address the instruction demands, an empty number REFUSING — and
+#   `schedule_a.points_not_on_1098`. The inversion recorded in the header still holds: the AMOUNT
+#   (f1_17) sits ABOVE the payee block (f1_16).
 
 # ── Line 8d: the FORM reserves it ────────────────────────────────────────────────────────────────
 "form1[0].Page1[0].f1_19[0]" = { line = "8d", rule = "artifact", reason = "The form's own text is \"Reserved for future use\" — the IRS ships a live fillable box for a line it has explicitly reserved. No decision is encodable, by the form's own statement." }

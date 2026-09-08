@@ -389,6 +389,12 @@ const DECL_FIELDS: &[Field] = &[
         ri.header.qss_could_have_filed_jointly_in_year_of_death = None;
         Ok(())
     }),
+    // ★★★ Index 61 — R8 / T9's Form 8396 gate. Appended at the END for the array-index reason
+    //     above; 62..=65 are the sale-of-a-main-home answers, which live in `SectionId::HomeSale`.
+    decl_tristate!(61, FieldId::DeclClaimingMortgageInterestCredit, |ri| {
+        ri.claiming_mortgage_interest_credit = None;
+        Ok(())
+    }),
     FOREIGN_COUNTRY_NAMES,
 ];
 
@@ -741,6 +747,12 @@ pub fn field_to_question(id: FieldId) -> Option<QuestionId> {
         FieldId::DeclQssChildLivedAllYear => QuestionId::QssChildLivedInYourHomeAllYear,
         FieldId::DeclQssPaidOverHalfCost => QuestionId::QssPaidOverHalfCostOfKeepingUpHome,
         FieldId::DeclQssCouldHaveFiledJointly => QuestionId::QssCouldHaveFiledJointlyInYearOfDeath,
+        // ★★★ R8 / T9.
+        FieldId::DeclClaimingMortgageInterestCredit => QuestionId::ClaimingMortgageInterestCredit,
+        FieldId::HomeSaleSoldMainHome => QuestionId::SoldMainHome,
+        FieldId::HomeSaleTest1 => QuestionId::HomeSaleTest1OwnedAndLived,
+        FieldId::HomeSaleTest2 => QuestionId::HomeSaleTest2NoRecentExclusion,
+        FieldId::HomeSaleCanExcludeAllGain => QuestionId::HomeSaleCanExcludeAllGain,
         _ => return None,
     })
 }
@@ -838,6 +850,14 @@ pub fn question_to_field(id: QuestionId) -> FieldId {
         QuestionId::QssChildLivedInYourHomeAllYear => FieldId::DeclQssChildLivedAllYear,
         QuestionId::QssPaidOverHalfCostOfKeepingUpHome => FieldId::DeclQssPaidOverHalfCost,
         QuestionId::QssCouldHaveFiledJointlyInYearOfDeath => FieldId::DeclQssCouldHaveFiledJointly,
+        // ★★★ R8 / T9 — the Form 8396 gate lives in `Declarations` (it modifies Schedule A line 8a
+        //     but is not a Schedule-A leaf: it is a fact about a certificate the filer holds), and
+        //     the four sale-of-a-main-home answers live in their own `HomeSale` section.
+        QuestionId::ClaimingMortgageInterestCredit => FieldId::DeclClaimingMortgageInterestCredit,
+        QuestionId::SoldMainHome => FieldId::HomeSaleSoldMainHome,
+        QuestionId::HomeSaleTest1OwnedAndLived => FieldId::HomeSaleTest1,
+        QuestionId::HomeSaleTest2NoRecentExclusion => FieldId::HomeSaleTest2,
+        QuestionId::HomeSaleCanExcludeAllGain => FieldId::HomeSaleCanExcludeAllGain,
     }
 }
 

@@ -182,6 +182,12 @@ fn row_depth(id: SectionId) -> usize {
         | SectionId::B1099s
         | SectionId::G1099s
         | SectionId::Form1098Es
+        // ★ R4 / R8 / T9 — the Form 1098 rows, same shape.
+        | SectionId::Form1098s
+        // ★ R8 / T9 — Schedule A line 8b's recipient rows. Depth 1 too, even though the `Vec` hangs
+        //   off the OPTIONAL `schedule_a`: the depth is how many indices name a row, and there is
+        //   one. A missing Schedule A is `NoSuchRow` at the accessor, not another level.
+        | SectionId::NonForm1098Interest
         // ★ R4 / T16 — the two HSA information returns, same shape.
         | SectionId::Sa1099s
         | SectionId::Sa5498s
@@ -202,6 +208,8 @@ fn row_depth(id: SectionId) -> usize {
         // ★ T16 — Form 8889's money leaves are a SINGLETON: one HSA surface per return. (Two
         //   spouses with separate HSAs need two Forms 8889, which REFUSES.)
         | SectionId::Form8889
+        // ★ R8 / T9 — the sale of a main home is a SINGLETON: one main home, four answers.
+        | SectionId::HomeSale
         | SectionId::IncomeExclusions
         | SectionId::Skippables => 0,
     }
@@ -1230,17 +1238,12 @@ mod tests {
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
-        // Prime mortgage interest so SaMortgageAllUsed is live (its set/clear gate on `mortgage_question_live`).
-        apply(
-            &mut w,
-            Edit::SetField {
-                id: FieldId::SaMortgage1098,
-                addr: RowAddr::default(),
-                value: FieldValue::Money(dec!(1000)),
-            },
-            time::macros::date!(2026 - 09 - 01),
-        )
-        .unwrap();
+        // ★ T9 — prime a Form 1098 ROW so `SaMortgageAllUsed` is live (its set/clear gate on
+        //   `mortgage_question_live`, now `schedule_a.is_some() && !form_1098.is_empty()`).
+        w.as_mut().expect("materialized").form_1098 =
+            vec![btctax_core::tax::testonly::form_1098_with_interest(dec!(
+                1000
+            ))];
         for id in [FieldId::SaSaltUseSalesTax, FieldId::SaMortgageAllUsed] {
             apply(
                 &mut w,

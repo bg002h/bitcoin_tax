@@ -72,6 +72,64 @@ fn an_unsupported_census_declaration_refuses_at_import_and_writes_no_committed_r
     );
 }
 
+/// ★★★ **T9 / R8 — A FORM 1098 BOX 4 REFUND REFUSES AT IMPORT, NAMES LINE 8z, AND WRITES NOTHING.**
+///
+/// The rule is param-free — it reads a box, not a table — so it belongs in the tier `income import`
+/// runs BEFORE it writes. That placement is the whole point: `income import` is the only path that
+/// creates a committed row, and a box-4 amount stored unscreened is a figure the tool holds with no
+/// reader, sitting at `resolve.rs` precedence 1 until `report` finally says so.
+///
+/// ★ The exit is real rather than a wall: the refund's home is **Schedule 1 line 8z**, and the
+///   refusal names it, so the filer knows what a preparer has to do with the number.
+///
+/// ★★ **Both halves.** The SAME TOML with box 4 at zero imports and is stored — without that, a
+///    rule that refused every Form 1098 would pass the first half while bricking every homeowner.
+#[test]
+fn a_1098_box_4_refund_refuses_at_import_naming_line_8z_and_writes_no_row() {
+    let row = |refund: &str| {
+        format!(
+            "filing_status = \"Single\"\n\
+             [documents]\nform_1098 = true\n\
+             [schedule_a]\n\
+             [[form_1098]]\n\
+             lender = \"Home Savings\"\n\
+             box1_interest = \"9000\"\n\
+             box4_refund_overpaid_interest = \"{refund}\"\n\
+             other_borrower_paid_interest = false\n"
+        )
+    };
+
+    let (dir, vault) = fresh_vault();
+    let toml = write_toml(&dir, "refund.toml", &row("300"));
+    let err = cmd::tax::import_return_inputs(&vault, &pp(), NO_PACKAGE_YEAR, &toml, false, false)
+        .expect_err("a box-4 refund must refuse at import");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("line 8z"),
+        "the refusal names where the refund goes: {msg}"
+    );
+    assert!(
+        msg.contains("REFUND OF OVERPAID INTEREST"),
+        "…and what it is refusing on: {msg}"
+    );
+    assert_eq!(
+        cmd::tax::show_return_inputs(&vault, &pp(), NO_PACKAGE_YEAR).unwrap(),
+        None,
+        "★ THE KILL: a refused import leaves NO committed row"
+    );
+
+    // The other half — the same TOML with box 4 at zero imports and is stored.
+    let ok = write_toml(&dir, "no-refund.toml", &row("0"));
+    cmd::tax::import_return_inputs(&vault, &pp(), NO_PACKAGE_YEAR, &ok, false, false)
+        .expect("box 4 = 0 is an ordinary Form 1098 and imports");
+    assert!(
+        cmd::tax::show_return_inputs(&vault, &pp(), NO_PACKAGE_YEAR)
+            .unwrap()
+            .is_some(),
+        "…and it IS stored"
+    );
+}
+
 /// The other half: the SAME shape with every census row supported imports and is stored. Without
 /// this the test above would pass on an import that refuses everything.
 #[test]

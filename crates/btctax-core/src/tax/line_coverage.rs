@@ -155,8 +155,10 @@ pub enum CollectedFrom {
         stem: &'static str,
         /// The box's own label, e.g. `"1"`, `"2a"`, `"12b"`.
         box_label: &'static str,
-        /// ★★★ **Seam review N-1 — THE OTHER SLOTS THIS LINE READS, when a line reads a REPEATING
-        /// box rather than a single one.**
+        /// ★★★ **Seam review N-1 — THE OTHER BOXES THIS LINE READS, when a line reads more than
+        /// one.** Two shapes use it: a REPEATING box (Form W-2's four box-12 slots) and a line
+        /// whose own caption names two distinct boxes (★ T9 — Schedule A line 8a is *"Home
+        /// mortgage interest AND POINTS reported to you on Form 1098"*, i.e. box 1 + box 6).
         ///
         /// Form W-2 prints four box-12 slots (`12a`–`12d`) and btctax models them as one
         /// `Vec<Box12Entry>`; `form8889::employer_contributions_from_w2s` sums **every** slot whose
@@ -1286,6 +1288,11 @@ pub fn cover_schedulealines(l: &crate::tax::printed::ScheduleALines) -> Coverage
         line5e,
         line7,
         line8a,
+        line8b,
+        line8c,
+        // ★ Not a money leaf — the dotted-line identity block beside 8b. The instruction's own
+        //   sentence for it is quoted on the `8b` row below, which is where its coverage lives.
+        line8b_payee: _,
         line8e,
         line9,
         line10,
@@ -1376,8 +1383,33 @@ pub fn cover_schedulealines(l: &crate::tax::printed::ScheduleALines) -> Coverage
         f,
         "8a",
         "line8a",
-        Production::doc_box("f1098", "1"),
+        // ★★★ T9 — TWO boxes, and the line's own caption says so: *"Home mortgage interest AND
+        //     POINTS reported to you on Form 1098"*. `mortgage_8a` is Σ(box 1 + box 6) over the
+        //     rows, so naming box 1 alone would state a narrower provenance than the line has —
+        //     the same "the label is narrower than what is read" defect the `also_labels` slot was
+        //     added for. Both labels are census-checked against the edition in force for the year.
+        Production::doc_box_slots("f1098", "1", &["6"]),
         "Home mortgage interest and points reported to you on Form 1098.",
+    );
+    // ★★★ T9 / R8 — 8b and 8c, COLLECTED from the FILER'S OWN RECORDS. Neither has an issuing third
+    //     party by construction: 8b is interest paid to a recipient who gave no Form 1098, and 8c is
+    //     points shown on a settlement statement. So both are `FilerRecords`, quoting the sentence
+    //     the Schedule A instructions print under their own line headings.
+    c.line(
+        *line8b,
+        f,
+        "8b",
+        "line8b",
+        Production::filer_records("If you paid home mortgage interest to a recipient who didn\u{2019}t provide you a Form 1098, report your deductible mortgage interest on line 8b."),
+        "Home mortgage interest not reported to you on Form 1098. See instructions if limited. If paid to the person from whom you bought the home, see instructions and show that person\u{2019}s name, identifying no., and address",
+    );
+    c.line(
+        *line8c,
+        f,
+        "8c",
+        "line8c",
+        Production::filer_records("Points are shown on your settlement statement. Points you paid only to borrow money are generally deductible over the life of the loan."),
+        "Points not reported to you on Form 1098. See instructions for special rules",
     );
     c.line(
         *line8e,
@@ -1462,6 +1494,9 @@ fn zero_schedulealines() -> crate::tax::printed::ScheduleALines {
         line5e: Usd::ZERO,
         line7: Usd::ZERO,
         line8a: Usd::ZERO,
+        line8b: Usd::ZERO,
+        line8c: Usd::ZERO,
+        line8b_payee: Vec::new(),
         line8e: Usd::ZERO,
         line9: Usd::ZERO,
         line10: Usd::ZERO,

@@ -712,6 +712,9 @@ pub fn report_tax_year(
                             &btctax_core::tax::transcription_warnings::transcription_warnings(
                                 &ri,
                                 Some(table.ss_wage_base),
+                                // ★ T9 / R8 — the year's package is present on this branch, so the
+                                //   §163(h)(3)(B) aggregate ceiling check runs too.
+                                Some(params.acquisition_debt_ceiling),
                             ),
                         ));
                         Some(block)
@@ -1407,8 +1410,12 @@ mod tests {
             box1a_ordinary = "3400"
             box1b_qualified = "3100"
 
+            [[form_1098]]
+            lender = "Home Savings"
+            box1_interest = "11200"
+            other_borrower_paid_interest = false
+
             [schedule_a]
-            mortgage_interest_1098 = "11200"
             salt_real_estate = "6800"
 
             [[schedule_a.charitable]]
@@ -1424,8 +1431,10 @@ mod tests {
         assert_eq!(ri.w2s[0].box1_wages, dec!(82000));
         assert_eq!(ri.w2s[0].box5_medicare_wages, dec!(82000));
         assert_eq!(ri.div_1099[0].box1b_qualified, dec!(3100));
+        // ★ T9 — the mortgage interest is a DOCUMENT now, not a Schedule A scalar.
+        assert_eq!(ri.form_1098.len(), 1);
+        assert_eq!(ri.form_1098[0].box1_interest, dec!(11200));
         let a = ri.schedule_a.as_ref().unwrap();
-        assert_eq!(a.mortgage_interest_1098, dec!(11200));
         assert_eq!(a.charitable[0].class, CharitableClass::Cash60);
         assert_eq!(a.charitable[0].amount, dec!(2500));
         assert_eq!(ri.payments.estimated_tax_payments, dec!(6000));

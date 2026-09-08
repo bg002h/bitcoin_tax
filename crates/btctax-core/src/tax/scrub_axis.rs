@@ -345,6 +345,26 @@ pub fn maximal_sentinel() -> ReturnInputs {
         box13_bartering: dec!(0),
         basis_reported_and_no_adjustments: Some(true),
     };
+    // ★★★ R4 / R8 / T9 — Form 1098: a LENDER NAME, a lender TIN, the PROPERTY ADDRESS in box 8 and
+    //     the lender's free-text box 10. Four identity-class leaves, so the axis instantiates all
+    //     four or the guarantee is asserted over nothing.
+    let f1098 = |tag: &str, tin: &str| crate::tax::return_inputs::Form1098 {
+        lender: format!("SENTINEL_1098_lender_{tag}"),
+        lender_tin: tin.to_string(), // R10.2 — see `int_1099`
+        transcribed_on: Some(date!(2025 - 02 - 07)),
+        box1_interest: dec!(71),
+        box2_outstanding_principal: dec!(400000),
+        box3_origination_date: Some(date!(2019 - 06 - 01)),
+        // ★ ZERO on purpose: > 0 refuses `MortgageInterestRefundNotComputed`.
+        box4_refund_overpaid_interest: dec!(0),
+        box5_mortgage_insurance: dec!(72),
+        box6_points: dec!(73),
+        box7_property_address_same_as_payer: false,
+        box8_property_address: format!("SENTINEL_1098_property_{tag}"),
+        box10_other: format!("SENTINEL_1098_other_{tag}"),
+        // ★ `Some(false)` on purpose: `None` and `Some(true)` both refuse.
+        other_borrower_paid_interest: Some(false),
+    };
     // ★ R4 / T5 — Form 1098-E: a LENDER NAME and a lender TIN, the same identity class as a 1099
     //   payer, so the axis must instantiate both or the guarantee is asserted over nothing.
     let f1098e = |tag: &str, tin: &str| crate::tax::return_inputs::Form1098E {
@@ -459,6 +479,7 @@ pub fn maximal_sentinel() -> ReturnInputs {
         div_1099: vec![div_1099("one", "55-5555555"), div_1099("two", "66-6666666")],
         g_1099: vec![g_1099("one", "77-7777777"), g_1099("two", "88-8888888")],
         b_1099: vec![b_1099("one", "99-9999999"), b_1099("two", "10-1010101")],
+        form_1098: vec![f1098("one", "12-3456789"), f1098("two", "98-7654321")],
         form_1098e: vec![f1098e("one", "11-1111111"), f1098e("two", "99-9999999")],
         sa_1099: vec![sa_1099("one", "11-1111111"), sa_1099("two", "22-2222222")],
         sa_5498: vec![sa_5498("one", "33-3333333"), sa_5498("two", "44-4444444")],
@@ -504,7 +525,24 @@ pub fn maximal_sentinel() -> ReturnInputs {
             salt_prior_year_balance_paid: dec!(3),
             salt_real_estate: dec!(4),
             salt_personal_property: dec!(5),
-            mortgage_interest_1098: dec!(6),
+            // ★★★ R8 / T9 — line 8b's recipient block: a NAME, a THIRD PARTY'S SSN and their
+            //     street address, all of which the instruction requires beside the line. A real,
+            //     canonicalizable SSN for the reason `sb_record` uses one.
+            mortgage_interest_not_on_1098: vec![
+                crate::tax::return_inputs::NonForm1098Interest {
+                    recipient_name: "SENTINEL_8b_recipient_one".into(),
+                    recipient_tin: "000-66-6666".into(),
+                    recipient_address: "SENTINEL_8b_address_one".into(),
+                    amount: dec!(6),
+                },
+                crate::tax::return_inputs::NonForm1098Interest {
+                    recipient_name: "SENTINEL_8b_recipient_two".into(),
+                    recipient_tin: "000-77-7777".into(),
+                    recipient_address: "SENTINEL_8b_address_two".into(),
+                    amount: dec!(7),
+                },
+            ],
+            points_not_on_1098: dec!(8),
             mortgage_all_used_to_buy_build_improve: Some(true),
             mortgage_within_debt_limit: Some(true),
             mortgage_dwelling_is_amt_qualified: Some(true),
@@ -525,6 +563,17 @@ pub fn maximal_sentinel() -> ReturnInputs {
         //   Digital Assets answer carries none either way. `Some` rather than `None` keeps the
         //   fixture a return that could file.
         digital_asset_activity: Some(false),
+        // ★ R8 / T9 — LIVE (this fixture carries 1098 rows and 8b rows) and answered the neutral
+        //   `false`: a `Some(true)` would refuse and mask every cell of the matrix.
+        claiming_mortgage_interest_credit: Some(false),
+        // ★ R8 / T9 — the sale-of-a-main-home block, answered on its BLANK branch (all three tests
+        //   met, no Form 1099-S) so the fixture stays a return that could file. It carries no PII.
+        home_sale: crate::tax::return_inputs::HomeSale {
+            sold_main_home: Some(true),
+            test1_owned_2_years_and_lived_2_years_of_last_5: Some(true),
+            test2_no_exclusion_on_another_home_in_2_years: Some(true),
+            can_exclude_all_gain: Some(true),
+        },
         mfs_spouse_itemizes: Some(false),
         // ★ T16 — Form 8889's answers carry no identity, so the axis fixture only needs them
         //   present; `Default` is an empty surface, which is what a scrub must leave untouched.
@@ -1209,6 +1258,100 @@ mod matrix {
                 Fixture(|r| {
                     for f in &mut r.div_1099 {
                         f.payer_tin = String::new();
+                    }
+                }),
+                NoSuchState(NO_READER),
+            ),
+            // ── ★★★ R4 / R8 / T9 — the Form 1098's four identity leaves. The lender and its TIN are
+            //    the 1099-payer class; box 8 is the PROPERTY ADDRESS (the filer's own home, for most
+            //    1098s) and box 10 is the lender's free text, which can carry an escrow or loan
+            //    reference. ──
+            (
+                "form_1098[].lender",
+                Fixture(|r| r.form_1098.clear()),
+                Fixture(|r| {
+                    for f in &mut r.form_1098 {
+                        f.lender = String::new();
+                    }
+                }),
+                NoSuchState(NO_READER),
+            ),
+            (
+                "form_1098[].lender_tin",
+                Fixture(|r| r.form_1098.clear()),
+                Fixture(|r| {
+                    for f in &mut r.form_1098 {
+                        f.lender_tin = String::new();
+                    }
+                }),
+                NoSuchState(NO_READER),
+            ),
+            (
+                "form_1098[].box8_property_address",
+                Fixture(|r| r.form_1098.clear()),
+                Fixture(|r| {
+                    for f in &mut r.form_1098 {
+                        f.box8_property_address = String::new();
+                    }
+                }),
+                NoSuchState(NO_READER),
+            ),
+            (
+                "form_1098[].box10_other",
+                Fixture(|r| r.form_1098.clear()),
+                Fixture(|r| {
+                    for f in &mut r.form_1098 {
+                        f.box10_other = String::new();
+                    }
+                }),
+                NoSuchState(NO_READER),
+            ),
+            // ── ★★★ R8 / T9 — Schedule A line 8b's recipient block: a name, a THIRD PARTY'S SSN and
+            //    their street address, all of which the instruction says to print beside the line. ──
+            (
+                "schedule_a.mortgage_interest_not_on_1098[].recipient_name",
+                Fixture(|r| {
+                    if let Some(a) = r.schedule_a.as_mut() {
+                        a.mortgage_interest_not_on_1098.clear();
+                    }
+                }),
+                Fixture(|r| {
+                    if let Some(a) = r.schedule_a.as_mut() {
+                        for x in &mut a.mortgage_interest_not_on_1098 {
+                            x.recipient_name = String::new();
+                        }
+                    }
+                }),
+                NoSuchState(NO_READER),
+            ),
+            (
+                "schedule_a.mortgage_interest_not_on_1098[].recipient_tin",
+                Fixture(|r| {
+                    if let Some(a) = r.schedule_a.as_mut() {
+                        a.mortgage_interest_not_on_1098.clear();
+                    }
+                }),
+                Fixture(|r| {
+                    if let Some(a) = r.schedule_a.as_mut() {
+                        for x in &mut a.mortgage_interest_not_on_1098 {
+                            x.recipient_tin = "000-44-444".into();
+                        }
+                    }
+                }),
+                NoSuchState(NO_READER),
+            ),
+            (
+                "schedule_a.mortgage_interest_not_on_1098[].recipient_address",
+                Fixture(|r| {
+                    if let Some(a) = r.schedule_a.as_mut() {
+                        a.mortgage_interest_not_on_1098.clear();
+                    }
+                }),
+                Fixture(|r| {
+                    if let Some(a) = r.schedule_a.as_mut() {
+                        for x in &mut a.mortgage_interest_not_on_1098 {
+                            x.recipient_address = String::new();
+                        }
                     }
                 }),
                 NoSuchState(NO_READER),

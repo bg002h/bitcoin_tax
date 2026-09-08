@@ -15,16 +15,16 @@
  13││  ✓ Forms 1099-SA (HSA d│                                                                    │                        │
  14││  ✓ Forms 5498-SA (HSA c│  filing status: Mfj                                                │                        │
  15││  … Form 8889 (health sa│  2 W-2(s) · Schedule A: yes · 1 dependent(s)                       │                        │
- 16││  … Schedule A (itemized│                                                                    │                        │
- 17││  … Payments            │                                                                    │                        │
- 18││  … Carryforwards from l│  NO STANDING ORDER (§1.1012-1(j) — outside Notice 2026-20's relief │                        │
- 19││  … §199A limitation (on│    period):                                                        │                        │
- 20││  ✓ Declarations        │  • exchange:river:default: your first custodial disposition of 2024│                        │
- 21││  ✓ Documents received  │    is dated 2024-05-01, and no dated method election was in force  │                        │
- 22││  … Income exclusions (§│    for it. Notice 2026-20's relief period BEGINS 2025-01-01        │                        │
- 23││  … Skippables          │    (§3.03), so §4.02(2)'s standing-order relief does not reach this│                        │
- 24││                        │    sale, and btctax refuses an election effective before that date │                        │
- 25││                        │    as back-dated — the pre-2025 method is a declaration you attest │                        │
+ 16││  ✓ Forms 1098 (home mor│                                                                    │                        │
+ 17││  … Schedule A (itemized│                                                                    │                        │
+ 18││  ✓ Schedule A line 8b (│  NO STANDING ORDER (§1.1012-1(j) — outside Notice 2026-20's relief │                        │
+ 19││  ✓ Sale of your main ho│    period):                                                        │                        │
+ 20││  … Payments            │  • exchange:river:default: your first custodial disposition of 2024│                        │
+ 21││  … Carryforwards from l│    is dated 2024-05-01, and no dated method election was in force  │                        │
+ 22││  … §199A limitation (on│    for it. Notice 2026-20's relief period BEGINS 2025-01-01        │                        │
+ 23││  ✓ Declarations        │    (§3.03), so §4.02(2)'s standing-order relief does not reach this│                        │
+ 24││  ✓ Documents received  │    sale, and btctax refuses an election effective before that date │                        │
+ 25││  … Income exclusions (§│    as back-dated — the pre-2025 method is a declaration you attest │                        │
  26│└────────────────────────│    to instead                                                      │────────────────────────┘
  27│┌────────────────────────│                                                                    │────────────────────────┐
  28││  active source: full re└────────────────────────────────────────────────────────────────────┘                        │

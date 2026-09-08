@@ -62,6 +62,16 @@ line7  = "topmostSubform[0].Page1[0].f1_15[0]"   # "Add lines 5e and 6"         
 
 # ── Interest You Paid ───────────────────────────────────────────────────────────────────────────
 line8a = "topmostSubform[0].Page1[0].f1_16[0]"   # "Home mortgage interest and points reported to you on Form 1098"  MID
+line8b = "topmostSubform[0].Page1[0].f1_19[0]"   # "Home mortgage interest not reported to you on Form 1098"  MID  ← T9
+# ★★★ T9 — line 8b's DOTTED LINES, in printed order (y=348 then y=336). MEASURED with
+#     `xtask dump-fields`, not read off the render: f1_17 and f1_18 are BOTH 8b's free-text rows and
+#     sit BELOW the 8b amount (f1_19, y=360). The `[census]` entries used to call f1_18 "line 8c
+#     description"; line 8c has no description cell on this form at all.
+line8b_payee = [
+  "topmostSubform[0].Page1[0].f1_17[0]",
+  "topmostSubform[0].Page1[0].f1_18[0]",
+]
+line8c = "topmostSubform[0].Page1[0].f1_20[0]"   # "Points not reported to you on Form 1098"  MID  ← T9
 line8e = "topmostSubform[0].Page1[0].f1_22[0]"   # "Add lines 8a through 8c"                              MID
 line9  = "topmostSubform[0].Page1[0].f1_23[0]"   # "Investment interest. Attach Form 4952 if required"    MID
 line10 = "topmostSubform[0].Page1[0].f1_24[0]"   # "Add lines 8e and 9"                                AMOUNT
@@ -116,11 +126,15 @@ last_line    = "18"
 "topmostSubform[0].Page1[0].f1_13[0]" = { line = "6", rule = "unmodeled", reason = "Second write-in description line for line 6 — same reason.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
 "topmostSubform[0].Page1[0].f1_14[0]" = { line = "6", rule = "unmodeled", reason = "Line 6 amount — same reason; line 7 therefore equals line 5e.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
 
-# ── Lines 8b/8c: mortgage interest and points NOT on a Form 1098 ─────────────────────────────────
-"topmostSubform[0].Page1[0].f1_17[0]" = { line = "8b", rule = "unmodeled", reason = "\"Home mortgage interest not reported to you on Form 1098\" — description. btctax collects `mortgage_interest_1098` only, i.e. interest that IS on a 1098.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
-"topmostSubform[0].Page1[0].f1_19[0]" = { line = "8b", rule = "unmodeled", reason = "Line 8b amount — same reason.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
-"topmostSubform[0].Page1[0].f1_18[0]" = { line = "8c", rule = "unmodeled", reason = "\"Points not reported to you on Form 1098\" — description. Not collected.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
-"topmostSubform[0].Page1[0].f1_20[0]" = { line = "8c", rule = "unmodeled", reason = "Line 8c amount — same reason.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+# ── Lines 8b/8c: MAPPED at T9 ────────────────────────────────────────────────────────────────────
+# ★ All four cells left the census: f1_19 is the 8b AMOUNT, f1_17/f1_18 are 8b's two dotted lines
+#   (the recipient's name, identifying number and address), and f1_20 is line 8c. btctax now
+#   collects `schedule_a.mortgage_interest_not_on_1098` (a row per recipient, an empty identifying
+#   number REFUSES) and `schedule_a.points_not_on_1098`, and line 8e is 8a + 8b + 8c.
+# ★★ The reasons this block used to carry were WRONG about the geometry: they called f1_18 "line 8c
+#    description", and line 8c has no description cell on this form. Measured with
+#    `xtask dump-fields`: f1_17 y=348 and f1_18 y=336 are both wide (x = [115.2, 396.0]) and both
+#    sit BELOW the 8b amount at y=360.
 
 # ── Line 8d: the FORM reserves it ────────────────────────────────────────────────────────────────
 "topmostSubform[0].Page1[0].f1_21[0]" = { line = "8d", rule = "artifact", reason = "The form's own text is \"Reserved for future use\" — the IRS ships a fillable box for a line it has explicitly reserved. No decision is encodable, by the form's own statement." }

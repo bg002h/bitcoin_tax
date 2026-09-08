@@ -120,6 +120,7 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         div_1099,
         g_1099,
         b_1099,
+        form_1098,
         form_1098e,
         sa_1099,
         sa_5498,
@@ -130,6 +131,8 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         hsa_distribution_without_1099sa,
         itemized_prior_year,
         digital_asset_activity,
+        claiming_mortgage_interest_credit,
+        home_sale,
         schedule_c,
         schedule_a,
         itemize_election,
@@ -306,6 +309,9 @@ pub fn classify(ri: &ReturnInputs) -> Census {
     for b in b_1099 {
         classify_1099b(&mut c, b);
     }
+    for m in form_1098 {
+        classify_1098(&mut c, m);
+    }
     for e in form_1098e {
         classify_1098e(&mut c, e);
     }
@@ -349,6 +355,15 @@ pub fn classify(ri: &ReturnInputs) -> Census {
     //     the ledger predicate, which could only ever say *Yes* or leave a mandatory question
     //     blank on a §6065-signed page.
     c.declaration(digital_asset_activity, QuestionId::DigitalAssetActivity);
+    // ★★★ R8 / T9 — the Form 8396 gate. Class (A): a `false` btctax assumed rather than asked would
+    //     leave Schedule A line 8a at the full Form 1098 figure for a certificate holder, whose
+    //     line 8a the Caution says must be REDUCED by Form 8396 line 3 — an overstated deduction
+    //     the filer never claimed.
+    c.declaration(
+        claiming_mortgage_interest_credit,
+        QuestionId::ClaimingMortgageInterestCredit,
+    );
+    classify_home_sale(&mut c, home_sale);
     if let Some(sc) = schedule_c {
         classify_schedule_c(&mut c, sc);
     }
@@ -804,6 +819,70 @@ fn classify_1099g(_c: &mut Census, g: &Form1099G) {
 
 /// R4 / §5.2 — Form 1098-E. Four leaves, none of them an answered-ness shape: a lender, a TIN, a
 /// transcription date and one box the §221 chain reads.
+/// ★★★ R8 / T9 — one Form 1098 row. Every box is a transcribed figure (data, never a defaulted
+/// answer); the ONE `Option<bool>` is the per-row shared-interest gate, which is class (A): line 8a
+/// sums box 1 in FULL, so a `false` btctax assumed rather than asked would deduct a co-borrower's
+/// interest — *"you can only deduct your share"* (`i1040sca--2025.txt:1073-1077`).
+///
+/// ★ `box7_property_address_same_as_payer` is a plain `bool` and is DATA: it is a checkbox the
+///   LENDER ticked on the paper, transcribed as printed, not a question put to the filer. It reaches
+///   no line, so an unticked box claims nothing.
+fn classify_1098(c: &mut Census, m: &crate::tax::return_inputs::Form1098) {
+    let crate::tax::return_inputs::Form1098 {
+        lender: _,
+        lender_tin: _,
+        transcribed_on: _,
+        box1_interest: _,
+        box2_outstanding_principal: _,
+        box3_origination_date: _,
+        box4_refund_overpaid_interest: _,
+        box5_mortgage_insurance: _,
+        box6_points: _,
+        box7_property_address_same_as_payer,
+        box8_property_address: _,
+        box10_other: _,
+        other_borrower_paid_interest,
+    } = m;
+    c.exempt(
+        box7_property_address_same_as_payer,
+        Class::DataDerived,
+        "Form 1098 box 7 is a checkbox the LENDER ticked, transcribed as printed — it says whether \
+         box 8 carries an address, reaches no line, and is not a question put to the filer",
+    );
+    // ★★★ The condition the Line 8a instruction itself imposes on a shared mortgage: *"you can only
+    //     deduct your share of the interest"* (`i1040sca--2025.txt:1073-1077`). `None` and
+    //     `Some(true)` BOTH refuse, so this can never answer for the filer — which is why it is a
+    //     `BenefitClaim` rather than an exemption: entering box 1 IN FULL on line 8a IS the claim
+    //     that the whole of it was yours. Exactly the shape of the Form 1099-B line-1a gate.
+    c.exempt(
+        other_borrower_paid_interest,
+        Class::BenefitClaim,
+        "Schedule A line 8a's own shared-interest condition — \"you can only deduct your share of \
+         the interest\". Not a default: `None` and `Some(true)` both REFUSE, because line 8a sums \
+         box 1 in full and btctax does not hold the share",
+    );
+}
+
+/// ★★★ R8 / T9 — the sale of a main home: four class-(A) declarations and no amount at all.
+fn classify_home_sale(c: &mut Census, h: &crate::tax::return_inputs::HomeSale) {
+    let crate::tax::return_inputs::HomeSale {
+        sold_main_home,
+        test1_owned_2_years_and_lived_2_years_of_last_5,
+        test2_no_exclusion_on_another_home_in_2_years,
+        can_exclude_all_gain,
+    } = h;
+    c.declaration(sold_main_home, QuestionId::SoldMainHome);
+    c.declaration(
+        test1_owned_2_years_and_lived_2_years_of_last_5,
+        QuestionId::HomeSaleTest1OwnedAndLived,
+    );
+    c.declaration(
+        test2_no_exclusion_on_another_home_in_2_years,
+        QuestionId::HomeSaleTest2NoRecentExclusion,
+    );
+    c.declaration(can_exclude_all_gain, QuestionId::HomeSaleCanExcludeAllGain);
+}
+
 fn classify_1098e(_c: &mut Census, e: &crate::tax::return_inputs::Form1098E) {
     let crate::tax::return_inputs::Form1098E {
         lender: _,
@@ -1077,7 +1156,12 @@ fn classify_schedule_a(c: &mut Census, a: &ScheduleAInputs) {
         salt_prior_year_balance_paid: _,
         salt_real_estate: _,
         salt_personal_property: _,
-        mortgage_interest_1098: _,
+        // ★ R8 / T9 — lines 8b and 8c. `mortgage_interest_not_on_1098` rows carry only strings and a
+        //   `Usd`, and `points_not_on_1098` is a money scalar: no answered-ness leaf in either, so
+        //   the `_` rule applies. The 8b row's own refusal (an empty `recipient_tin`) is a
+        //   COMPLETENESS rule about the line, not a defaulted answer.
+        mortgage_interest_not_on_1098: _,
+        points_not_on_1098: _,
         mortgage_all_used_to_buy_build_improve,
         mortgage_within_debt_limit,
         mortgage_dwelling_is_amt_qualified,

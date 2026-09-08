@@ -393,6 +393,31 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
             Anchor::Field(FieldId::Int1099Box13BondPremiumTaxExempt),
         ],
         R::StatutoryEmployeeW2 => vec![Anchor::Field(FieldId::W2Box13StatutoryEmployee)],
+        // ── ★★★ R8 / T9 — real estate. Each anchors on the leaf the filer must change. ──
+        R::MortgageInterestRefundNotComputed => {
+            vec![Anchor::Field(FieldId::Form1098Box4Refund)]
+        }
+        R::SharedMortgageInterest | R::SharedMortgageInterestUnanswered => {
+            vec![Anchor::Field(FieldId::Form1098OtherBorrowerPaid)]
+        }
+        // ★ The remedy is the TIN cell itself: entering it clears the refusal, and removing the row
+        //   is the other exit — both live on this section.
+        R::NonForm1098InterestRecipientUnidentified(_) => {
+            vec![Anchor::Field(FieldId::Sa8bRecipientTin)]
+        }
+        R::MortgageInterestCreditUnanswered | R::MortgageInterestCreditUnsupported => {
+            vec![decl(QuestionId::ClaimingMortgageInterestCredit)]
+        }
+        // ★ The unanswered case anchors on the gate the registry named; the adverse case anchors on
+        //   ALL FOUR, because any one of them (or the 1099-S census row) can be the branch that
+        //   sent the sale to Form 8949, and the message names which.
+        R::HomeSaleGateUnanswered { question } => vec![decl(*question)],
+        R::HomeSaleNotComputed(_) => vec![
+            Anchor::Field(FieldId::HomeSaleSoldMainHome),
+            Anchor::Field(FieldId::HomeSaleTest1),
+            Anchor::Field(FieldId::HomeSaleTest2),
+            Anchor::Field(FieldId::HomeSaleCanExcludeAllGain),
+        ],
         R::FamilyLeaveBenefits => vec![Anchor::Field(FieldId::G1099Box10FamilyLeave)],
         // ★★★ Seam review M-1 — the three "income box with no reader" reasons. Each carries the box
         //   in its payload for the MESSAGE, and anchors on every box that raises it, the same shape
