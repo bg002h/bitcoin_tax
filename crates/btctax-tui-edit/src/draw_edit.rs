@@ -2173,9 +2173,37 @@ fn draw_tax_inputs_panel(frame: &mut Frame, area: Rect, form: &mut TaxInputsForm
             lines.push(w);
         }
     }
-    // border(2) + the footer(1).
-    let view_h = usize::from(rect.height.saturating_sub(3)).max(1);
     let total = lines.len();
+    // ★★★ **T12 fold, seam review M-2 — THE FOOTER IS PRE-WRAPPED AND COUNTED, like the modal's.**
+    //
+    //     The footer was one unwrapped `Line` on a `Paragraph` with no `Wrap`, so below about 76
+    //     columns it was simply cut at the box edge and `[p/Esc] close` — the only printed way OUT
+    //     of a full-screen read-only overlay — went with it (measured false at 72×16, 60×12 and
+    //     40×10). The commit modal solved the identical problem correctly in this same commit, in
+    //     `legend_of`; the pane did not. Sizing against the SCROLLING footer at its widest `first`
+    //     makes the window conservative rather than one row short, which is the T6 lesson: a
+    //     pre-wrapped count is the row count actually drawn.
+    let footer_of = |first: usize, last: usize, scrolls: bool| -> Vec<String> {
+        let text = if scrolls {
+            format!(
+                "showing {}–{last} of {total} lines · [↑/↓ · PgUp/PgDn] scroll · [p/Esc] close",
+                first + 1
+            )
+        } else {
+            "[p/Esc] close".to_string()
+        };
+        // ★ Wrapped THEN indented, exactly as the body is — `wrap_to` normalizes whitespace, so an
+        //   indent baked into the text is eaten on the first row and kept on the rest.
+        wrap_to(&text, inner_w)
+            .into_iter()
+            .map(|w| format!("  {w}"))
+            .collect()
+    };
+    // border(2) + however many rows the footer actually takes.
+    let view_h = usize::from(rect.height)
+        .saturating_sub(2)
+        .saturating_sub(footer_of(total, total, true).len())
+        .max(1);
     // ★★★ **THE CLAMP LIVES HERE, and it is why this function takes `&mut`.** The scroll counts
     //     WRAPPED rows, and how many a line wraps to is a fact about the pane's width — which the
     //     key handler does not know. Clamping there would bound the cursor by the number of LOGICAL
@@ -2189,22 +2217,21 @@ fn draw_tax_inputs_panel(frame: &mut Frame, area: Rect, form: &mut TaxInputsForm
         .iter()
         .map(|l| Line::from(format!("  {l}")))
         .collect();
-    let more = if total > view_h {
-        format!(
-            "  showing {}–{} of {total} lines · [↑/↓ · PgUp/PgDn] scroll · [p/Esc] close",
-            first + 1,
-            last
-        )
-    } else {
-        "  [p/Esc] close".to_string()
-    };
     while out.len() < view_h {
         out.push(Line::from(""));
     }
-    out.push(Line::from(Span::styled(
-        more,
-        Style::default().fg(Color::DarkGray),
-    )));
+    for w in footer_of(first, last, total > view_h) {
+        out.push(Line::from(Span::styled(
+            w,
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+    debug_assert!(
+        out.len() + 2 <= usize::from(rect.height).max(3),
+        "the pane must fit its own box: {} rows in a height of {}",
+        out.len() + 2,
+        rect.height
+    );
     let p = Paragraph::new(out).block(
         Block::default()
             .title(" Answer panel ")
@@ -2265,17 +2292,6 @@ fn draw_tax_inputs_modal(frame: &mut Frame, area: Rect, form: &mut TaxInputsForm
             body.push(w);
         }
     }
-    // ★★★ **T12 — A PAYLOAD TALLER THAN THE TERMINAL SCROLLS; IT IS NEVER CUT.**
-    //
-    //     `centered_rect` clamps the box to the terminal, so before T12 a summary longer than the
-    //     screen simply lost its tail — and once the forgoing list rode along (J-12) the tail was
-    //     the last forgone benefits **and the `[Enter] commit / [Esc] cancel` legend**, on the one
-    //     screen that writes the vault. The header and the legend are now drawn from OUTSIDE the
-    //     window, so they cannot be scrolled away, and the footer names the range so a filer knows
-    //     there is more. It is the same rule as the answer-panel pane, for the same reason.
-    //
-    //     ★ The clamp lives HERE, and it is why this function takes `&mut`: how many rows a line
-    //       wraps to is a fact about the box's width, which the key handler does not know.
     // ★★★ **T12 — A PAYLOAD TALLER THAN THE TERMINAL SCROLLS; IT IS NEVER CUT.**
     //
     //     `centered_rect` clamps the box to the terminal, so before T12 a summary longer than the
@@ -6865,6 +6881,61 @@ mod tests {
             "the LAST panel line must be reachable by scrolling.\n  wanted: {want_flat}\n  \
              screen: {flat}"
         );
+    }
+
+    /// ★★★ **T12 fold / seam review M-2 — THE PANE'S OWN `[p/Esc] close` LEGEND SURVIVES A NARROW
+    ///     TERMINAL.**
+    ///
+    /// The pane is a FULL-SCREEN read-only overlay and its footer is the only printed way out of it.
+    /// That footer was one unwrapped `Line` on a `Paragraph` with no `Wrap`, so below roughly 76
+    /// columns it was cut at the box edge and `[p/Esc] close` went with it — measured absent at
+    /// 72×16, 60×12 and 40×10, while the commit modal in the same commit ran its legend through
+    /// `wrap_to` and kept it. Same class as C-1: a chrome element the filer needs, lost to layout.
+    ///
+    /// ★ 80×24 is this repo's documented floor and the narrower sizes are recorded rather than
+    ///   supported — but the fix costs nothing there, so they are asserted too.
+    #[test]
+    fn the_answer_panel_pane_keeps_its_close_legend_at_every_terminal_width() {
+        use crate::edit::form::TaxInputsFormState;
+
+        for (w, h) in [
+            (120u16, 40u16),
+            (100, 30),
+            (80, 24),
+            (80, 20),
+            (72, 16),
+            (60, 12),
+            (40, 10),
+        ] {
+            let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
+            form.working = Some(btctax_core::tax::return_inputs::ReturnInputs {
+                tax_year: 2024,
+                filing_status: btctax_core::FilingStatus::Single,
+                ..Default::default()
+            });
+            form.panel_open = true;
+            form.panel_scroll = usize::MAX / 2; // past the end — the renderer normalizes it
+            let backend = TestBackend::new(w, h);
+            let mut terminal = Terminal::new(backend).unwrap();
+            let area = terminal.get_frame().area();
+            terminal
+                .draw(|f| draw_tax_inputs_form(f, area, &mut form, None))
+                .unwrap();
+            let buf = terminal.backend().buffer().clone();
+            let screen: String = (0..buf.area.height)
+                .map(|y| {
+                    (0..buf.area.width)
+                        .map(|x| buf[(x, y)].symbol().chars().next().unwrap_or(' '))
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            let flat: String = screen.split_whitespace().collect::<Vec<_>>().join(" ");
+            assert!(
+                flat.contains("[p/Esc] close"),
+                "at {w}×{h} the only printed way OUT of a full-screen overlay was cut off:\n{screen}"
+            );
+        }
     }
 
     /// ★★★ **T12 / R12 — A `Declined` BENEFIT IS STILL FORGONE, MARKED, AND NEVER BLOCKING.**

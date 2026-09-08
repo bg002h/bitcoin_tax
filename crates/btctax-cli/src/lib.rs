@@ -59,7 +59,7 @@ pub use cmd::admin::IrsPdfReport;
 // gate's intent is honored, not evaded. Re-exporting them is what makes "one derivation, two
 // surfaces" structural — a second renderer in the TUI would be a second chance to word one forgo
 // differently.
-pub use cmd::answer::{forgoing_lines, panel_lines, refusing_lines};
+pub use cmd::answer::{forgoing_lines, not_computed_lines, panel_lines, refusing_lines};
 // Re-exported at the crate root (Defensive Filing Wizard Task 8, ★ C-3) so the TUI Declare flow
 // (`btctax-tui-edit`'s `edit/declare_flow.rs` + `edit/persist.rs`) can drive the DECLARE chokepoint
 // WITHOUT the `cmd::` token its KAT-G1 source gate forbids in non-test code — mirrors

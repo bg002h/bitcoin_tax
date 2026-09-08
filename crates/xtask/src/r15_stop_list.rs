@@ -4,12 +4,14 @@
 //! is exactly what the shapes below crept back in past. So each sentence gets a grep, and each grep
 //! gets a planted defect it has been watched going RED on (harness B1).
 //!
-//! **Three checks, three sentences:**
+//! **Four checks, three sentences** — *"no progress bar; no persisted 'what remains'"* is two
+//! different claims about two different things, and needs a grep each:
 //!
 //! | R15 sentence | check |
 //! |---|---|
 //! | *"No representation of the form exists outside the Rust structs and the map census"* | [`serde_json_reflection`] — no `serde_json::Value` reflection in `btctax-input-form`'s PRODUCTION code |
 //! | *"No progress bar; no persisted 'what remains'"* | [`progress_shaped_fields`] — no `progress` / `remaining` / `position` field on the persisted input surfaces or the panel |
+//! | *"No progress bar; no persisted 'what remains'"* | [`progress_widgets`] — no `Gauge` / `LineGauge` and no formatted percentage in the files that RENDER the answer panel |
 //! | *"No `reconcile` question in a return registry"* | [`ledger_words_in_registry_prompts`] — no registry prompt says *transfer*, *lot* or *FMV* |
 //!
 //! ★ **Why it lives in xtask.** It reads across crate boundaries (`btctax-input-form`'s sources,
@@ -320,17 +322,32 @@ fn state_bearing_sources() -> Vec<(String, String)> {
 
 /// ★★★ **T12 — the RENDERER sources, for [`progress_widgets`].** The panel is drawn here; a
 /// progress bar, if one were ever written, would be drawn here too.
+///
+/// ★★ **T12 fold, seam review N-3 — the CLI renderers are in the field of view too.** The list held
+///    `draw_edit.rs` alone, and the SAME panel is rendered by `cmd/answer.rs` (`panel_lines`, what
+///    `income answer` prints), printed by `render.rs` (§4.4's block) and written to paper by
+///    `cmd/admin.rs` (the packet manifest) — so a hand-rolled `format!("{pct}% done")` on any of
+///    them was caught by nothing. A checker whose scope no longer matches its subject is this
+///    repo's dominant defect shape (harness B1: *"green because it never ran"*), and the fix is one
+///    line of source list rather than a note about the limit.
 fn renderer_sources() -> Vec<(String, String)> {
     let root = repo_root();
-    ["crates/btctax-tui-edit/src/draw_edit.rs"]
-        .iter()
-        .map(|f| {
-            (
-                (*f).to_string(),
-                std::fs::read_to_string(root.join(f)).unwrap_or_default(),
-            )
-        })
-        .collect()
+    [
+        "crates/btctax-tui-edit/src/draw_edit.rs",
+        "crates/btctax-tui-edit/src/edit/form.rs",
+        "crates/btctax-tui-edit/src/main.rs",
+        "crates/btctax-cli/src/cmd/answer.rs",
+        "crates/btctax-cli/src/render.rs",
+        "crates/btctax-cli/src/cmd/admin.rs",
+    ]
+    .iter()
+    .map(|f| {
+        (
+            (*f).to_string(),
+            std::fs::read_to_string(root.join(f)).unwrap_or_default(),
+        )
+    })
+    .collect()
 }
 
 /// Every prompt in both return registries, labelled by its registry identity — **including the
@@ -456,7 +473,7 @@ pub fn run() -> Result<String, String> {
 mod tests {
     use super::*;
 
-    /// The three checks, run against the real tree. Each must be silent.
+    /// The four checks, run against the real tree. Each must be silent.
     #[test]
     fn the_r15_stop_list_holds_on_the_committed_tree() {
         match run() {
@@ -465,11 +482,54 @@ mod tests {
         }
     }
 
-    /// ★★★ **B1 — each of the three greps watched going RED on the exact defect it exists to
+    /// ★★★ **B1 — each of the four greps watched going RED on the exact defect it exists to
     ///     catch, and staying green on the near-miss beside it.**
     ///
     /// The near-misses are the whole test: a checker that reds on everything is deleted by the next
     /// person who trips it, and a checker that reds on nothing was never watched discriminating.
+    /// ★★★ **T12 fold, seam review N-3 — THE RENDERER SOURCE LIST IS DERIVED FROM WHO ACTUALLY
+    ///     RENDERS THE PANEL, not from what someone remembered to type.**
+    ///
+    /// The list held `draw_edit.rs` alone while five other files render, print or write the same
+    /// panel — a checker green over a region it could not see, which is this repo's dominant
+    /// instrument failure (harness B1). Extending the list would have fixed today; this reds the day
+    /// a SIXTH surface starts rendering it, which is the only version of the fix worth having.
+    #[test]
+    fn every_file_that_renders_the_panel_is_in_the_progress_widget_checks_field_of_view() {
+        const RENDERS: &[&str] = &[
+            "panel_lines(",
+            "forgoing_lines(",
+            "refusing_lines(",
+            "not_computed_lines(",
+        ];
+        let scanned: std::collections::BTreeSet<String> =
+            renderer_sources().into_iter().map(|(f, _)| f).collect();
+        let mut missing: Vec<String> = Vec::new();
+        for crate_src in ["crates/btctax-cli/src", "crates/btctax-tui-edit/src"] {
+            for path in rs_files(&repo_root().join(crate_src)) {
+                let rel = path
+                    .strip_prefix(repo_root())
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                let src = std::fs::read_to_string(&path).unwrap_or_default();
+                if RENDERS.iter().any(|r| src.contains(r)) && !scanned.contains(&rel) {
+                    missing.push(rel);
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "these files render the answer panel and the progress-widget check cannot see them, so \
+             a hand-rolled bar there is caught by nothing: {missing:?}"
+        );
+        // A broken walk must be LOUD: the set it scans is not empty and not everything.
+        assert!(
+            scanned.len() >= 6,
+            "the renderer source list has stopped being populated: {scanned:?}"
+        );
+    }
+
     /// ★★★ **B1 — the progress-WIDGET check, watched red on a planted defect and green on its near
     ///     misses.** T12 added it because the field-name check reads the persisted-state modules,
     ///     where a progress bar was never going to be written; this reads the file that draws the

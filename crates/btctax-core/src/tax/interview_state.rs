@@ -1,9 +1,19 @@
-//! ★★★ **R12 — THE ANSWER PANEL, derived from the REGISTRIES rather than from `screen_inputs`.**
+//! ★★★ **R12 — THE ANSWER PANEL, derived from the REGISTRIES, and CLOSED by `screen_inputs`.**
 //!
 //! `SPEC_input_form.md` §7 forbids refactoring `screen_inputs` to collect all refusals — its
 //! early-return tiers are semantic, and each tier's precedence is load-bearing. The panel needs none
-//! of that: every question already declares its own liveness, its own prompt and its own refusal, so
-//! the panel is a WALK, not a second screen.
+//! of that for the items it can address: every question already declares its own liveness, its own
+//! prompt and its own refusal, so the walk is a walk and not a second screen.
+//!
+//! ★★ **But the walk is not the gate**, and pretending otherwise is what the T12 seam review found
+//! (I-1). The registries can produce five of `RefuseReason`'s 126 variants; `screen_inputs` — what
+//! `input_form_store::commit` runs before it writes — raises all of them. So the walk ENDS by
+//! running that screen at its value tier ([`crate::tax::return_refuse::screen_param_free`]) and
+//! taking any refusal the registries did not already model. The panel's list is therefore empty only
+//! when the screen raises nothing at that tier, which is the only thing that makes the zero-open
+//! sentence *"no answer refuses"* true rather than merely usually true. What it still cannot see is
+//! stated where that sentence is printed, and in `LIMITATIONS.md`: the five package-gated rules,
+//! which compare a figure against the year's TaxTable and which this walk does not hold.
 //!
 //! **Seven states, exactly R12's table:**
 //!
@@ -85,7 +95,11 @@ pub struct Forgo {
 /// instead of at commit (J-32).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Refusing {
-    pub item: PanelItem,
+    /// The answer to go and change — `None` for a refusal the COMMIT SCREEN raises that no single
+    /// registry answer owns (T12 fold, seam review I-1). A screen rule can read several fields at
+    /// once (the home sale reads four), and inventing a key for it would point the filer's cursor
+    /// at one of them as though it were the cause.
+    pub item: Option<PanelItem>,
     pub prompt: std::borrow::Cow<'static, str>,
     /// Derived from the question's own refusal, never re-decided here.
     pub reason: RefuseReason,
@@ -282,7 +296,7 @@ fn interview_state_with(
                 //    met at commit (J-32). Derived from the question's own refusal.
                 if let Some(r) = refusal_of_answer(ri, q.id, v) {
                     st.refusing.push(Refusing {
-                        item,
+                        item: Some(item),
                         prompt: q.prompt_text(ri),
                         reason: r.0,
                         exit: r.1,
@@ -457,7 +471,7 @@ fn interview_state_with(
         };
         if let Some((item, prompt, reason, exit, rule)) = stopped {
             st.refusing.push(Refusing {
-                item,
+                item: Some(item),
                 prompt,
                 reason,
                 exit: format!(
@@ -502,6 +516,47 @@ fn interview_state_with(
             each: params.map(|p| p.child_tax_credit_per_child),
             sized_from: YEAR_PACKAGE,
         });
+    }
+
+    // ── 6. ★★★ **THE COMMIT SCREEN ITSELF — so `refusing` is TOTAL over `RefuseReason`.** ────────
+    //
+    //    T12 seam review I-1. Sections 1–4 above build `refusing` out of the registries, and they
+    //    can produce exactly FIVE of the 126 `RefuseReason` variants. `screen_inputs` — the gate
+    //    `input_form_store::commit` runs before it writes the vault — raises all of them. So a
+    //    return stopped by any of the other 121 (`HomeSaleNotComputed` is the one T9 shipped and
+    //    §4.4 asks `report` to print) had an EMPTY refusing list, the commit modal showed nothing at
+    //    all, and with nothing else open `panel_lines` printed *"no answer refuses"* — an
+    //    affirmatively false sentence beside a gate that refuses the write, against the promise
+    //    `LIMITATIONS.md` makes that a filer meets a refusal *"while you are still authoring rather
+    //    than at commit"* (J-32).
+    //
+    // ★★ **Derived, not extended.** Five hand-written variants standing beside a set of 126 is this
+    //    arc's dominant defect shape (FOLLOWUPS FR-99), and the fix for that shape is never to add
+    //    the missing entries — it is to run the deciding function. This is the same move T12 made
+    //    for the home sale itself: one decider, two readers.
+    //
+    // ★★ **The VALUE tier, not the unanswered tier**, and that is the panel's own vocabulary rather
+    //    than a convenience: `Refusing` is documented as *"an answer you have ALREADY GIVEN that
+    //    stops the return"*, and an unanswered class-(A) declaration is already listed — with its
+    //    own heading, its own prompt and its own cursor target — as `blocking`. Running
+    //    `unanswered_refuses: true` here would print every blocking item a second time under a
+    //    heading that told the filer their answer was wrong when they have not given one.
+    //
+    // ★ It reports the FIRST refusal only, because `screen_inputs_tiered` is a first-refusal-wins
+    //   gate by construction (`SPEC_input_form.md` §7 forbids refactoring it to collect them all —
+    //   its tier precedence is load-bearing). That is enough for the guarantee this exists to make:
+    //   *the panel's refusing list is empty only if the screen raises nothing at this tier.*
+    if let Some(r) = crate::tax::return_refuse::screen_param_free(ri) {
+        // ★ Already modelled by the walk above ⇒ keep the registry's version: it carries the panel
+        //   ITEM (the answer to go and change), which a screen refusal does not have.
+        if !st.refusing.iter().any(|x| x.reason == r.reason) {
+            st.refusing.push(Refusing {
+                item: None,
+                prompt: std::borrow::Cow::Borrowed(""),
+                reason: r.reason,
+                exit: r.detail,
+            });
+        }
     }
 
     st
@@ -592,7 +647,7 @@ fn census_row_invariant(ri: &ReturnInputs, row: DocumentRow) -> Option<Refusing>
             if rows == 0 && requires_transcription(row) && row.exit_sentence().is_none() =>
         {
             Some(Refusing {
-            item,
+            item: Some(item),
             prompt: std::borrow::Cow::Borrowed(row.prompt()),
             reason: RefuseReason::DocumentDeclaredNotTranscribed { kind: row },
                 exit: format!(
@@ -602,7 +657,7 @@ fn census_row_invariant(ri: &ReturnInputs, row: DocumentRow) -> Option<Refusing>
             })
         }
         Some(false) if rows > 0 => Some(Refusing {
-            item,
+            item: Some(item),
             prompt: std::borrow::Cow::Borrowed(row.prompt()),
             reason: RefuseReason::DocumentCensusContradicted { kind: row },
             exit: format!(
@@ -870,7 +925,7 @@ mod tests {
         let r = st
             .refusing
             .iter()
-            .find(|r| r.item == AnswerKey::Question(QuestionId::DocK1))
+            .find(|r| r.item == Some(AnswerKey::Question(QuestionId::DocK1)))
             .expect("a Schedule K-1 declared must be listed as refusing");
         assert_eq!(
             r.reason,

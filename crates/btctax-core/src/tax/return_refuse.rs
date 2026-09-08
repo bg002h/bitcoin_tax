@@ -8982,6 +8982,55 @@ mod param_free_tier {
         }
     }
 
+    /// ★★★ **T12 fold / seam review I-1 — THE ANSWER PANEL SEES EVERY REFUSAL THIS TIER RAISES.**
+    ///
+    /// The defect: `InterviewState::refusing` was assembled from the registries alone and could
+    /// produce **five** of `RefuseReason`'s 126 variants, while `screen_inputs` — the gate
+    /// `input_form_store::commit` runs before it writes the vault — raises all of them. On a return
+    /// stopped by any of the other 121 the panel printed *"no answer refuses"*, the commit modal
+    /// showed nothing at all, and the write was refused after Enter: the exact opposite of J-32's
+    /// *"meet it before the write"*, and against a promise `LIMITATIONS.md` ships.
+    ///
+    /// ★★ **The expectation is DERIVED, and derived from the SCREEN'S OWN SOURCE.**
+    ///    [`param_free_fixtures`] is pinned against a census read out of `screen_inputs_tiered`'s
+    ///    body by `every_param_free_rule_is_censused_from_the_source_and_fires_on_both_paths`, so a
+    ///    rule added to this tier tomorrow arrives here with a fixture already attached and this
+    ///    test covers it on the day. Nothing is enumerated by hand — which is the whole point, since
+    ///    a hand list beside a growing set is the defect being repaired.
+    #[test]
+    fn the_answer_panel_lists_every_refusal_the_value_tier_of_the_screen_raises() {
+        use crate::tax::interview_state::interview_state;
+        let fixtures = param_free_fixtures();
+        assert!(
+            fixtures.len() > 30,
+            "the fixture table has stopped being populated: {}",
+            fixtures.len()
+        );
+        let mut blind: Vec<&str> = Vec::new();
+        for (name, r) in &fixtures {
+            let st = interview_state(r);
+            if st.refusing.is_empty() {
+                blind.push(name);
+                continue;
+            }
+            // …and it is not merely non-empty by accident: the panel must carry the exit sentence
+            // the screen would have given, so the filer reads the same words at both moments.
+            let detail = screen_param_free(r).expect("the fixture refuses").detail;
+            assert!(
+                st.refusing.iter().any(|x| x.exit == detail)
+                    || st.refusing.iter().any(|x| name_of(&x.reason) == *name),
+                "{name}: the panel lists a refusal, but not THIS one — {:?}",
+                st.refusing.iter().map(|x| &x.exit).collect::<Vec<_>>()
+            );
+        }
+        assert!(
+            blind.is_empty(),
+            "the commit screen refuses these returns and the answer panel says nothing is \
+             refusing, so the filer meets the refusal at the write instead of while authoring: \
+             {blind:?}"
+        );
+    }
+
     /// ★★★ **T4 fold, seam review M-2 — NO REFUSAL IN THE IMPORT TIER MAY PRESCRIBE
     ///     `income answer`.**
     ///

@@ -3022,6 +3022,19 @@ fn the_manifest_lists_the_forgone_benefits_marking_the_declined_ones_and_names_t
             time::macros::date!(2026 - 02 - 03),
             AnswerState::Declined,
         );
+        // ★ T12 fold, seam review M-1 — one dependent with a credit box, so `not_computed` is
+        //   non-empty and the manifest has to say what 1040 line 19 is. Without a dependent the
+        //   block is absent and the M-1 assertions below are vacuous.
+        ri.header.dependents = vec![btctax_core::tax::return_inputs::Dependent {
+            name: "Kid One".into(),
+            ssn: "111223333".into(),
+            relationship: "Child".into(),
+            ..Default::default()
+        }];
+        // ★ A dependent row makes `FilerTinIssuedByDueDate` live (Step 5 of *Who Qualifies as Your
+        //   Dependent*), so the gates AND the return-level declarations are answered — through the
+        //   registry, at each question's own neutral, never by hand.
+        btctax_core::tax::testonly::answer_all_live_declarations(ri);
     });
     cmd::admin::export_irs_pdf(
         &vault,
@@ -3079,6 +3092,41 @@ fn the_manifest_lists_the_forgone_benefits_marking_the_declined_ones_and_names_t
         manifest.contains("Form 1099-INT #1 (First Bank) — transcribed without a date"),
         "the undated row is named beside them: {manifest}"
     );
+
+    // ── ★★★ T12 fold, seam review M-1 — a NOT COMPUTED item is not a forgo, and the heading is
+    //    the actionable half. Appended under the FORGONE heading with `n.line()` alone, 1040
+    //    line 19 read on paper as a benefit the filer CHOSE to skip, and the sentence telling
+    //    them to enter an amount by hand was gone — on the artifact they follow while assembling
+    //    the envelope. The expectation is the panel's own rendering, never re-typed here.
+    let st = btctax_core::tax::interview_state::interview_state_with_params(&ri, params);
+    assert!(
+        !st.not_computed.is_empty(),
+        "the fixture must have a credit-box dependent or the M-1 assertions are vacuous"
+    );
+    // ★ The manifest wraps every line and prefixes each with `#`, so the comparison is made on the
+    //   COMMENT-STRIPPED, whitespace-flattened text — otherwise a `#` from the continuation row
+    //   lands in the middle of the sentence and the assertion passes or fails for the wrong reason.
+    let flat: String = manifest
+        .lines()
+        .map(|l| l.trim_start().trim_start_matches('#'))
+        .collect::<Vec<_>>()
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    for line in btctax_cli::not_computed_lines(&st) {
+        let want: String = line
+            .trim()
+            .trim_start_matches("• ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            flat.contains(&want),
+            "the manifest must carry the NOT COMPUTED block the panel renders — heading and \
+             instruction included.\n  wanted: {want}\n  manifest: {manifest}"
+        );
+    }
 }
 
 /// ★★★ **R4 / §4.4 / T5 — A DOCUMENT ROW WITH NO `transcribed_on` IS NAMED ON THE MANIFEST.**

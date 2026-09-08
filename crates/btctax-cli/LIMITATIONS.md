@@ -223,7 +223,13 @@ read it in `btctax report --tax-year N`. It lists, at once:
 
 - **BLOCKING** — questions that must be answered before the return can be committed;
 - **REFUSING** — an answer you have *already given* that stops the return, each with its exit, so you meet
-  it while you are still authoring rather than at commit;
+  it while you are still authoring rather than at commit. This list is the *same screen* the commit gate
+  runs, so a refusal that gate would raise is shown here first — with one stated exception: the handful of
+  checks that compare an amount you entered against a figure in **the year's tax table** (a Social Security
+  wage base, an elective-deferral cap, the no-Form-1116 foreign-tax ceiling, an HSA contribution limit).
+  Those need the year's published figures, which the panel does not hold, so they are met at commit and
+  nowhere earlier. When the panel says *nothing refuses*, it says so with that qualification printed
+  beside it;
 - **FORGOING** — benefits you are lawfully entitled to skip and have skipped. **Each one costs you, not
   the Treasury.** An item marked *(declined)* is one you were asked about and passed over — it stays on
   the list, because a forgo becoming final is not a reason to stop showing it;

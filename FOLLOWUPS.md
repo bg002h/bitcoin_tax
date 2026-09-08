@@ -6646,9 +6646,13 @@ build, each with an owning phase.
   instead: `progress_widgets` over `draw_edit.rs`, banning ratatui's `Gauge`/`LineGauge` and a
   formatted percentage (B1 kill:
   `the_progress_widget_check_reds_on_a_gauge_and_not_on_its_near_misses`, three plants and three
-  near misses). What is still unwalked is a *stored* progress field on a TUI struct. Closing it
-  properly means typing the mechanism — a banned name is a finding only on a bare counter type —
-  rather than naming the exception.
+  near misses). ★ **Widened 2026-09-07 (T12 fold, seam review N-3)**: `progress_widgets` scanned
+  `draw_edit.rs` alone while five other files render, print or write the same panel, so it now reads
+  all **six**, and `every_file_that_renders_the_panel_is_in_the_progress_widget_checks_field_of_view`
+  derives that list from who actually calls `panel_lines` / `forgoing_lines` / `refusing_lines` /
+  `not_computed_lines` — a sixth surface reds it rather than escaping it. What is still unwalked is a
+  *stored* progress field on a TUI struct. Closing it properly means typing the mechanism — a banned
+  name is a finding only on a bare counter type — rather than naming the exception.
 - **FR-82 — `tax_tables.rs`'s TY2026 doc comment cites Rev. Proc. 2025-32 §2.14 / §2.10 for figures
   that sit in its Section 4 (T7 build, follow-up 2; pre-existing). Owning phase: ownerless residue
   (doc-consistency).** The new §4.23 cite beside them is accurate.

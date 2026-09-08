@@ -327,6 +327,19 @@ pub fn panel_lines(
              refuses."
                 .to_string(),
         );
+        // ★★★ **AND THE BOUNDARY, STATED** (T12 fold, seam review I-1). `interview_state` now ends
+        //     by running the commit screen's VALUE tier, so the sentence above is true of every
+        //     `RefuseReason` that tier raises rather than of the five the registries happened to
+        //     model. What it still cannot run is the tier that needs the year's TAX TABLE — the
+        //     walk holds `FullReturnParams` at most, never a `TaxTable` — so those rules are met at
+        //     commit and nowhere earlier. A surface that asserted completeness it does not have is
+        //     the finding; saying which half it has is the fix, and the sentence rides WITH the
+        //     claim so neither can be edited away without the other.
+        out.push(
+            "  (the commit screen runs a few further checks that compare an amount against a \
+             figure in the year's tax table; those run at commit, and only there.)"
+                .to_string(),
+        );
     }
     if !st.blocking.is_empty() {
         out.push(format!(
@@ -356,14 +369,7 @@ pub fn panel_lines(
     //     to answer, which is why they are their own heading rather than a `FORGOING` row: telling a
     //     filer to "answer" 1040 line 19 would send them looking for a question that does not exist.
     if !st.not_computed.is_empty() {
-        out.push(format!(
-            "  NOT COMPUTED ({}) — btctax does not file the schedule these are figured on; the \
-             credit boxes on your return are printed, the amount is yours to enter:",
-            st.not_computed.len()
-        ));
-        for n in &st.not_computed {
-            out.push(format!("    • {}", n.line()));
-        }
+        out.extend(not_computed_lines(st));
     }
     out.push(format!(
         "  ({} answered, {} not applicable to this return)",
@@ -386,6 +392,29 @@ pub fn refusing_lines(st: &btctax_core::tax::interview_state::InterviewState) ->
     )];
     for r in &st.refusing {
         out.push(format!("    • {}", r.exit));
+    }
+    out
+}
+
+/// ★★★ **T12 fold / R12 — THE *NOT COMPUTED* LIST, one rendering for the panel AND the manifest.**
+///
+/// ★★ **The heading is the actionable half, and it is why this is a function** (T12 seam review
+///    M-1). The manifest's FORGONE block used to append `st.not_computed` under
+///    *"FORGONE — benefits you are lawfully entitled to skip, and did"* using `n.line()` alone, so
+///    on PAPER — the artifact the filer follows while assembling the envelope — 1040 line 19 read
+///    as something they chose to skip, and the sentence telling them *the credit boxes on your
+///    return are printed, the amount is yours to enter* was gone. A benefit the FORM computes
+///    elsewhere is not a forgo: there is nothing to answer, and the instruction is the whole point
+///    of listing it.
+#[must_use]
+pub fn not_computed_lines(st: &btctax_core::tax::interview_state::InterviewState) -> Vec<String> {
+    let mut out = vec![format!(
+        "  NOT COMPUTED ({}) — btctax does not file the schedule these are figured on; the \
+         credit boxes on your return are printed, the amount is yours to enter:",
+        st.not_computed.len()
+    )];
+    for n in &st.not_computed {
+        out.push(format!("    • {}", n.line()));
     }
     out
 }
@@ -2104,6 +2133,123 @@ mod tests {
             )
             .is_none(),
             "with the panel empty, `screen_inputs` must report no UNANSWERED-class refusal"
+        );
+    }
+
+    /// ★★★ **T12 fold / seam review I-1 — THE PANEL NEVER SAYS *"no answer refuses"* ON A RETURN
+    ///     THE COMMIT GATE REFUSES.**
+    ///
+    /// J-32's filer, one refusal on: every live declaration answered, nothing forgone — and a main
+    /// home sold that they cannot exclude all the gain on. `screen_inputs`, which
+    /// `input_form_store::commit` runs before it writes the vault, refuses with
+    /// `HomeSaleNotComputed`. The panel's `refusing` list used to be assembled from the registries
+    /// alone, five of `RefuseReason`'s 126 variants, so it printed *"nothing is open: … and no
+    /// answer refuses"* — an affirmatively false sentence, on the surface `LIMITATIONS.md` promises
+    /// will show the filer a refusal *"while you are still authoring rather than at commit"*.
+    ///
+    /// ★★ Asserted on the RENDERED LINES, not on the walk: the sentence is the artifact, and the
+    ///    commit modal (which shows forgoing + refusing only) would otherwise be blank on this
+    ///    return and the write refused after Enter.
+    #[test]
+    fn the_panel_does_not_claim_nothing_refuses_when_the_commit_screen_refuses() {
+        use btctax_core::tax::document_census::DocumentRow;
+        use btctax_core::tax::interview_state::interview_state_with_params;
+
+        let mut ri = ReturnInputs {
+            tax_year: 2024,
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        // …and every live SKIPPABLE answered too, so `forgoing` empties and `open_items() == 0` —
+        // which is the state in which the panel prints its zero-open sentence at all. Driven off
+        // the registry to a fixpoint (answering one can make another live), never a hand list.
+        for _ in 0..8 {
+            for sk in btctax_core::tax::questions::SKIPPABLE_QUESTIONS {
+                if !(sk.live)(&ri) {
+                    continue;
+                }
+                match sk.kind {
+                    btctax_core::tax::questions::SkippableKind::YesNo => {
+                        (sk.set_bool)(&mut ri, false)
+                    }
+                    btctax_core::tax::questions::SkippableKind::Date => {
+                        (sk.set_date)(&mut ri, time::macros::date!(1980 - 01 - 01));
+                    }
+                    btctax_core::tax::questions::SkippableKind::Choice(opts) => {
+                        if let Some(first) = opts.first() {
+                            (sk.set_choice)(&mut ri, first);
+                        }
+                    }
+                }
+            }
+        }
+        ri.home_sale.sold_main_home = Some(true);
+        ri.home_sale.test1_owned_2_years_and_lived_2_years_of_last_5 = Some(true);
+        ri.home_sale.test2_no_exclusion_on_another_home_in_2_years = Some(true);
+        ri.home_sale.can_exclude_all_gain = Some(false);
+        ri.documents.set(DocumentRow::S1099, Some(false));
+
+        // The gate refuses — read off the gate, never asserted from memory.
+        let refusal = btctax_core::tax::return_refuse::screen_inputs(
+            &ri,
+            &btctax_core::tax::testonly::ty2024_table(),
+            &btctax_core::tax::testonly::ty2024_params(),
+        )
+        .expect("the fixture must be one the commit screen refuses, or this test asserts nothing");
+
+        let st = interview_state_with_params(&ri, &btctax_core::tax::testonly::ty2024_params());
+        let lines = panel_lines(&st, "tax year 2024");
+        // ★ The fixture must actually reach the zero-open sentence's branch, or the headline
+        //   assertion below is vacuous — a forgone benefit alone would suppress the sentence.
+        assert_eq!(
+            st.blocking.len() + st.forgoing.len() + st.waiting.len() + st.not_computed.len(),
+            0,
+            "nothing but the refusal may be open, or this test does not reach the sentence: \
+             {lines:#?}"
+        );
+        assert!(
+            !lines.iter().any(|l| l.contains("no answer refuses")),
+            "the commit gate refuses this return ({:?}) and the panel told the filer nothing \
+             refuses: {lines:#?}",
+            refusal.reason
+        );
+        // …and it says WHAT refuses, in the words the gate would have used.
+        assert!(
+            lines.iter().any(|l| l.contains("REFUSING (")),
+            "the refusal has its own heading: {lines:#?}"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains(&refusal.detail)),
+            "…carrying the gate's own exit sentence, so the filer reads the same words while \
+             authoring as they would at the write:\n  wanted: {}\n  lines: {lines:#?}",
+            refusal.detail
+        );
+        // The commit modal shows forgoing + refusing only — on this return it must not be blank.
+        assert!(
+            !refusing_lines(&st).is_empty(),
+            "the last screen before the write must carry the refusal"
+        );
+
+        // ── …and the SAME return without the sale reaches the zero-open sentence, which must
+        //    carry its boundary beside it. A surface that asserts completeness it does not have is
+        //    the finding; the qualifier is the half that makes the claim true, so it is asserted
+        //    here rather than trusted to survive the next edit.
+        let mut clean = ri.clone();
+        clean.home_sale.sold_main_home = Some(false);
+        let st = interview_state_with_params(&clean, &btctax_core::tax::testonly::ty2024_params());
+        assert_eq!(st.open_items(), 0, "nothing is open on the clean return");
+        let lines = panel_lines(&st, "tax year 2024");
+        assert!(
+            lines.iter().any(|l| l.contains("no answer refuses")),
+            "the zero-open sentence is printed: {lines:#?}"
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("a figure in the year's tax table")),
+            "…and never on its own: the one tier the panel cannot run must be named beside it, or \
+             the sentence claims a completeness it does not have: {lines:#?}"
         );
     }
 

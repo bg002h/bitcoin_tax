@@ -1309,9 +1309,23 @@ fn handle_tax_inputs_key(app: &mut EditorApp, key: KeyEvent) {
             KeyCode::PageUp => form.panel_scroll = form.panel_scroll.saturating_sub(10),
             _ => {}
         }
-        // Clamp against the CURRENT panel so a scroll can never run past the last line.
-        let last = form.panel_lines().len().saturating_sub(1);
-        form.panel_scroll = form.panel_scroll.min(last);
+        // ★★★ **NO CLAMP HERE — and the absence is the fix, not an omission** (T12 fold, C-1).
+        //
+        // These arms only MOVE the cursor; `draw_tax_inputs_panel` clamps it and writes the
+        // clamped value back, exactly as the commit modal's arms above only move `m.scroll`. The
+        // clamp that stood here bounded the cursor by `panel_lines().len()` — the count of LOGICAL
+        // lines — while the renderer's window counts WRAPPED ROWS, and the tighter bound therefore
+        // won on every keypress: measured 39 logical against 141 wrapped on a fresh TY2024 Single
+        // at 120×40, so 500 × PageDown left the pane stuck at `showing 39–75 of 141 lines` with
+        // 47% of the panel — the tail that carries FORGOING, NOT COMPUTED and the
+        // `(n answered, m not applicable)` summary — unreachable by any keystroke, under a footer
+        // still inviting the filer to press ↑/↓/PgUp/PgDn. That is the FR-63 defect the renderer's
+        // own comment names, committed one file away from it.
+        //
+        // ★ How many rows a line wraps to is a fact about the PANE'S WIDTH, which this handler does
+        //   not know and must not guess. Held by
+        //   `the_filer_can_scroll_the_answer_panel_to_its_last_line_through_the_key_handler`, which
+        //   presses the keys a filer presses and reads the drawn frame.
         return;
     }
     if key.code == KeyCode::Char('p') {
@@ -10407,6 +10421,122 @@ mod tests {
             0,
             "the pane is derived fresh each time it opens; a remembered offset points at a \
              different item"
+        );
+    }
+
+    /// ★★★ **T12 fold / C-1 — THE FILER CAN SCROLL THE ANSWER PANEL TO ITS LAST LINE, BY PRESSING
+    ///     THE KEYS THE FOOTER TELLS THEM TO PRESS.**
+    ///
+    /// The pane's existing reachability kill (`draw_edit.rs`,
+    /// `the_answer_panel_pane_draws_every_line_it_renders_and_names_the_blocking_items`) assigns
+    /// `form.panel_scroll = usize::MAX / 2` and draws — so it exercises the RENDERER's clamp and
+    /// nothing else. A second clamp in `handle_tax_inputs_key`, against the count of LOGICAL lines,
+    /// sat one layer above it and won on every keypress: 39 logical against 141 wrapped rows at
+    /// 120×40, so the pane stopped dead at `showing 39–75 of 141 lines` and 47% of the panel —
+    /// FORGOING, NOT COMPUTED and the `(n answered, m not applicable)` summary — was unreachable
+    /// while the footer kept inviting ↑/↓/PgUp/PgDn.
+    ///
+    /// ★★ **This test enters where the FILER enters**: `handle_key` for the keystroke and
+    ///    `draw_edit::draw` for the frame, interleaved exactly as the event loop at `main`'s
+    ///    `terminal.draw(|f| draw_edit::draw(f, &mut app))` runs them. Four shadow kills in twelve
+    ///    tasks (T8 I-1, T9 C-1, T10 I-1, this) were all one thing — a test reaching PAST the layer
+    ///    the defect lives on. A clamp restored to the handler reds this; no assignment to
+    ///    `panel_scroll` appears anywhere in it.
+    #[test]
+    fn the_filer_can_scroll_the_answer_panel_to_its_last_line_through_the_key_handler() {
+        use crate::edit::form::TaxInputsFormState;
+        use ratatui::{backend::TestBackend, Terminal};
+
+        let mut app = browse_app_with_empty_snapshot();
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
+        // A FRESH return — nothing answered, so the blocking list is long and the panel is far
+        // taller than the pane. The same fixture the renderer's own reachability kill uses.
+        form.working = Some(btctax_core::tax::return_inputs::ReturnInputs {
+            tax_year: 2024,
+            filing_status: btctax_core::FilingStatus::Single,
+            ..Default::default()
+        });
+        app.tax_inputs_form = Some(form);
+
+        // The filer opens the pane with `p`, as §4.1 says they may from any section.
+        handle_key(&mut app, press(KeyCode::Char('p')));
+        assert!(app.tax_inputs_form.as_ref().unwrap().panel_open);
+
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        let mut frame = |app: &mut EditorApp| -> String {
+            terminal.draw(|f| draw_edit::draw(f, app)).unwrap();
+            let buf = terminal.backend().buffer().clone();
+            (0..buf.area.height)
+                .map(|y| {
+                    (0..buf.area.width)
+                        .map(|x| buf[(x, y)].symbol().chars().next().unwrap_or(' '))
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        // ★ The footer's range line exists ONLY on the `total > view_h` branch, so finding it is
+        //   what proves the panel is taller than the pane — without it this test asserts nothing.
+        //   (Matching on a bare " of " would be satisfied by a prompt's own prose; it was, once.)
+        let footer_of = |screen: &str| -> String {
+            screen
+                .lines()
+                .find(|l| l.contains("showing ") && l.contains(" lines"))
+                .unwrap_or_else(|| {
+                    panic!("the pane must be TALLER than the window to scroll:\n{screen}")
+                })
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let first = frame(&mut app);
+        assert!(first.contains("Answer panel"), "the pane is drawn: {first}");
+        assert!(
+            footer_of(&first).contains("showing 1–"),
+            "…and it opens at the TOP: {}",
+            footer_of(&first)
+        );
+
+        // ── The event loop, as it actually runs: draw, key, draw, key … ──────────────────────
+        //
+        // ★ 40 presses of PgDn is far more than the ~11 the 141-row panel needs, and the excess is
+        //   the point: a cursor that is only ever MOVED here and clamped by the renderer converges
+        //   on the tail and stays there, while one re-clamped by a second, tighter bound never
+        //   reaches it however long the filer holds the key down.
+        let mut screen = first;
+        for _ in 0..40 {
+            handle_key(&mut app, press(KeyCode::PageDown));
+            screen = frame(&mut app);
+        }
+
+        let want = app
+            .tax_inputs_form
+            .as_ref()
+            .unwrap()
+            .panel_lines()
+            .last()
+            .cloned()
+            .expect("the panel has lines");
+        let flat = |t: &str| t.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            flat(&screen).contains(&flat(&want)),
+            "PgDn must reach the LAST panel line — the pane's own guarantee is that a line which \
+             does not fit is REACHABLE, never clipped, and its footer tells the filer to press \
+             exactly this key.\n  wanted: {}\n  screen: {}",
+            flat(&want),
+            flat(&screen)
+        );
+        // …and the footer says so: the window's last row IS the total. Read off the footer line
+        // itself, so no prompt's prose can satisfy it.
+        let foot = footer_of(&screen);
+        let total = foot
+            .split_once(" of ")
+            .and_then(|(_, r)| r.split_whitespace().next().map(str::to_string))
+            .expect("the footer names the total");
+        assert!(
+            foot.contains(&format!("\u{2013}{total} of {total} lines")),
+            "the last window must END at the total, not partway down it: {foot}"
         );
     }
 

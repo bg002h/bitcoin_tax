@@ -64,6 +64,34 @@ pub enum DocumentKind {
     Form5498Sa,
 }
 
+impl DocumentKind {
+    /// ★★★ **EVERY DOCUMENT FAMILY, so a walk over the families is a walk over the ENUM.**
+    ///
+    /// [`undated_document_rows`] used to hand-enumerate five of them, and the set grew underneath it
+    /// twice — T9 added [`DocumentKind::Form1098`], T16 added [`DocumentKind::Form1099Sa`] and
+    /// [`DocumentKind::Form5498Sa`], and three families' undated rows went silently missing from
+    /// both the §4.4 block and the packet manifest (T12 seam review I-2). A hand-written list
+    /// standing beside a set that grows is this arc's dominant defect (FOLLOWUPS FR-99); the fix is
+    /// never to extend the list, it is to delete it.
+    ///
+    /// ★ A new variant is a compile error in [`document_row_facts`], which is the only place a
+    ///   family's rows are named, and
+    ///   `every_document_family_that_carries_a_transcription_date_is_named` pins that `ALL` lists it
+    ///   too — including the case the compiler CANNOT see, an existing family that GAINS a
+    ///   `transcribed_on` column (the W-2 is one `pub transcribed_on` away from being that case).
+    pub const ALL: &'static [DocumentKind] = &[
+        DocumentKind::W2,
+        DocumentKind::Form1099Int,
+        DocumentKind::Form1099Div,
+        DocumentKind::Form1099G,
+        DocumentKind::Form1099B,
+        DocumentKind::Form1098,
+        DocumentKind::Form1098E,
+        DocumentKind::Form1099Sa,
+        DocumentKind::Form5498Sa,
+    ];
+}
+
 /// Where one money leaf's figure comes from (R10 part 1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -156,44 +184,42 @@ pub const LEAF_SOURCE: &[(&str, Source)] = &[
 ///   not lawful is hiding it, because the manifest is the artifact a filer follows while assembling
 ///   paper, and a row with no date is one they cannot vouch for from the manifest alone.
 ///
-/// One line per undated row, in `LEAF_SOURCE` document order, each naming the document, the row's
+/// ★★★ **THE WALK IS THE ENUM** (T12 seam review I-2). This function used to hand-enumerate five
+/// families and carry a prose exception for the W-2 — an excuse list, and it went stale exactly the
+/// way `CLAUDE.md` predicts: T9's Form 1098 and T16's Form 1099-SA and Form 5498-SA each landed a
+/// `transcribed_on` column and none of them was ever visited, so their undated rows were silently
+/// absent from BOTH surfaces that present this list as complete (§4.4's block and the packet
+/// manifest). Adding three loops would have fixed today and re-armed tomorrow; the walk now runs
+/// over [`DocumentKind::ALL`] and reads each family's date column out of the one exhaustive match in
+/// [`document_row_facts`], so the ninth family cannot be forgotten — it does not compile until it is
+/// named, and `the_transcription_date_columns_in_the_source_are_all_walked` covers the half the
+/// compiler cannot see.
+///
+/// One line per undated row, in [`DocumentKind::ALL`] order, each naming the document, the row's
 /// one-based number and its issuer.
 #[must_use]
 pub fn undated_document_rows(ri: &ReturnInputs) -> Vec<String> {
     let mut out = Vec::new();
-    let mut add = |kind: &str, i: usize, issuer: &str, dated: bool| {
-        if dated {
-            return;
+    for kind in DocumentKind::ALL {
+        for i in 0..document_row_facts(ri, *kind, 0).rows {
+            let f = document_row_facts(ri, *kind, i);
+            // ★ `NoColumn` is a family that has DECLARED it holds no transcription date, not one
+            //   nobody walked — the difference this whole finding was about.
+            if !matches!(f.transcribed_on, TranscribedOn::Row(None)) {
+                continue;
+            }
+            let who = issuer_of(&f);
+            let who = if who.is_empty() {
+                String::new()
+            } else {
+                format!(" ({who})")
+            };
+            out.push(format!(
+                "{} #{}{who} — transcribed without a date",
+                f.designation,
+                i + 1
+            ));
         }
-        let who = if issuer.trim().is_empty() {
-            String::new()
-        } else {
-            format!(" ({})", issuer.trim())
-        };
-        out.push(format!(
-            "{kind} #{}{who} — transcribed without a date",
-            i + 1
-        ));
-    };
-    // ★ NO W-2 LOOP, and the absence is deliberate: the W-2 row carries no `transcribed_on` of its
-    //   own (R10.2 gave it to the 1099 families and the 1098-E, whose rows arrive by TOML). When the
-    //   W-2 gains one, it is reported here, beside the five families below. (Seam review N-1: this
-    //   used to be an empty `for` loop ending in `let _ = (i, w);` — the comment was worth keeping,
-    //   the loop was not.)
-    for (i, r) in ri.int_1099.iter().enumerate() {
-        add("Form 1099-INT", i, &r.payer, r.transcribed_on.is_some());
-    }
-    for (i, r) in ri.div_1099.iter().enumerate() {
-        add("Form 1099-DIV", i, &r.payer, r.transcribed_on.is_some());
-    }
-    for (i, r) in ri.g_1099.iter().enumerate() {
-        add("Form 1099-G", i, &r.payer, r.transcribed_on.is_some());
-    }
-    for (i, r) in ri.b_1099.iter().enumerate() {
-        add("Form 1099-B", i, &r.payer, r.transcribed_on.is_some());
-    }
-    for (i, r) in ri.form_1098e.iter().enumerate() {
-        add("Form 1098-E", i, &r.lender, r.transcribed_on.is_some());
     }
     out
 }
@@ -304,75 +330,146 @@ fn row_index_of(path: &str) -> Option<usize> {
     idx.parse().ok()
 }
 
-/// ★★★ **One document row's identity, with the payer TIN ALREADY MASKED.**
+/// Whether one document family's ROW STRUCT carries a `transcribed_on` column at all.
+///
+/// ★★★ **`NoColumn` is a DECLARATION, not an omission.** Two blanks look identical on the page and
+/// are not the same thing (`CLAUDE.md`, *"blank is the normal case"*): a family whose rows simply
+/// have no date field is one fact, and a family whose date field nobody remembered to walk is a
+/// defect. Stating it in the type is what lets [`undated_document_rows`] be TOTAL — it walks every
+/// family and skips only the ones that have declared they have nothing to say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TranscribedOn {
+    /// The family's row struct has no `transcribed_on` field. Today only the W-2: R10.2 gave the
+    /// column to the 1099 families, the 1098 and the 1098-E, whose rows arrive by TOML. When the
+    /// W-2 gains one, this arm changes and the row is reported with the rest — and until someone
+    /// changes it, `the_transcription_date_columns_in_the_source_are_all_walked` reds.
+    NoColumn,
+    /// This row's date — `None` meaning *transcribed without a date*, which is the thing being hunted.
+    Row(Option<Date>),
+}
+
+/// One document row's facts, from the ONE exhaustive match over [`DocumentKind`].
+struct DocumentRowFacts {
+    designation: &'static str,
+    /// How many rows of this family the return holds — so a caller can walk them without naming the
+    /// `Vec` a second time.
+    rows: usize,
+    issuer: Option<String>,
+    tin: Option<String>,
+    transcribed_on: TranscribedOn,
+}
+
+/// ★★★ **EVERY FACT A SURFACE NEEDS ABOUT ONE DOCUMENT ROW, NAMED IN ONE PLACE.**
 ///
 /// The match is exhaustive over [`DocumentKind`], so a document family added tomorrow is a compile
-/// error here until its issuer field is named — the blast radius `CLAUDE.md` asks for.
-fn document_identity(ri: &ReturnInputs, kind: DocumentKind, i: usize) -> String {
-    let (designation, issuer, tin) = match kind {
+/// error here until its designation, its issuer field, its TIN field, its row count **and its
+/// transcription date** are named. That is the blast radius `CLAUDE.md` asks for, and it is why the
+/// date column joined this match rather than getting a second walk of its own: I-2 was two hand
+/// lists over one set, and a second list would have gone stale the same way the first did.
+fn document_row_facts(ri: &ReturnInputs, kind: DocumentKind, i: usize) -> DocumentRowFacts {
+    let (designation, rows, issuer, tin, transcribed_on) = match kind {
         DocumentKind::W2 => (
             "Form W-2",
+            ri.w2s.len(),
             ri.w2s.get(i).map(|r| r.employer.clone()),
             // ★ The W-2's issuer identifier is the employer's EIN, and it is masked like a payer's.
             //   `Option<String>` on this row alone — an untranscribed EIN flattens to empty, which
             //   `mask_payer_tin` then leaves empty: *not transcribed* is not *masked*.
             ri.w2s.get(i).and_then(|r| r.ein.clone()),
+            TranscribedOn::NoColumn,
         ),
         DocumentKind::Form1099Int => (
             "Form 1099-INT",
+            ri.int_1099.len(),
             ri.int_1099.get(i).map(|r| r.payer.clone()),
             ri.int_1099.get(i).map(|r| r.payer_tin.clone()),
+            TranscribedOn::Row(ri.int_1099.get(i).and_then(|r| r.transcribed_on)),
         ),
         DocumentKind::Form1099Div => (
             "Form 1099-DIV",
+            ri.div_1099.len(),
             ri.div_1099.get(i).map(|r| r.payer.clone()),
             ri.div_1099.get(i).map(|r| r.payer_tin.clone()),
+            TranscribedOn::Row(ri.div_1099.get(i).and_then(|r| r.transcribed_on)),
         ),
         DocumentKind::Form1099G => (
             "Form 1099-G",
+            ri.g_1099.len(),
             ri.g_1099.get(i).map(|r| r.payer.clone()),
             ri.g_1099.get(i).map(|r| r.payer_tin.clone()),
+            TranscribedOn::Row(ri.g_1099.get(i).and_then(|r| r.transcribed_on)),
         ),
         DocumentKind::Form1099B => (
             "Form 1099-B",
+            ri.b_1099.len(),
             ri.b_1099.get(i).map(|r| r.payer.clone()),
             ri.b_1099.get(i).map(|r| r.payer_tin.clone()),
+            TranscribedOn::Row(ri.b_1099.get(i).and_then(|r| r.transcribed_on)),
         ),
         DocumentKind::Form1098 => (
             "Form 1098",
+            ri.form_1098.len(),
             ri.form_1098.get(i).map(|r| r.lender.clone()),
             ri.form_1098.get(i).map(|r| r.lender_tin.clone()),
+            TranscribedOn::Row(ri.form_1098.get(i).and_then(|r| r.transcribed_on)),
         ),
         DocumentKind::Form1098E => (
             "Form 1098-E",
+            ri.form_1098e.len(),
             ri.form_1098e.get(i).map(|r| r.lender.clone()),
             ri.form_1098e.get(i).map(|r| r.lender_tin.clone()),
+            TranscribedOn::Row(ri.form_1098e.get(i).and_then(|r| r.transcribed_on)),
         ),
         DocumentKind::Form1099Sa => (
             "Form 1099-SA",
+            ri.sa_1099.len(),
             ri.sa_1099.get(i).map(|r| r.payer.clone()),
             ri.sa_1099.get(i).map(|r| r.payer_tin.clone()),
+            TranscribedOn::Row(ri.sa_1099.get(i).and_then(|r| r.transcribed_on)),
         ),
         DocumentKind::Form5498Sa => (
             "Form 5498-SA",
+            ri.sa_5498.len(),
             ri.sa_5498.get(i).map(|r| r.trustee.clone()),
             ri.sa_5498.get(i).map(|r| r.trustee_tin.clone()),
+            TranscribedOn::Row(ri.sa_5498.get(i).and_then(|r| r.transcribed_on)),
         ),
     };
-    let who = issuer.unwrap_or_default();
-    let who = if who.trim().is_empty() {
+    DocumentRowFacts {
+        designation,
+        rows,
+        issuer,
+        tin,
+        transcribed_on,
+    }
+}
+
+/// The issuer of one row, trimmed — empty when it was never transcribed.
+fn issuer_of(f: &DocumentRowFacts) -> String {
+    f.issuer.clone().unwrap_or_default().trim().to_string()
+}
+
+/// ★★★ **One document row's identity, with the payer TIN ALREADY MASKED.**
+///
+/// A thin formatter over [`document_row_facts`], which is where the exhaustive match lives — so a
+/// document family added tomorrow is a compile error there until its issuer field is named, exactly
+/// as before, and now until its transcription date is named too.
+fn document_identity(ri: &ReturnInputs, kind: DocumentKind, i: usize) -> String {
+    let f = document_row_facts(ri, kind, i);
+    let who = issuer_of(&f);
+    let who = if who.is_empty() {
         String::new()
     } else {
-        format!(" {}", who.trim())
+        format!(" {who}")
     };
     // ★ MASKED HERE. There is no branch of this function that returns an unmasked TIN.
-    let tin = mask_payer_tin(&tin.unwrap_or_default());
+    let tin = mask_payer_tin(&f.tin.unwrap_or_default());
     let tin = if tin.is_empty() {
         String::new()
     } else {
         format!(" · TIN {tin}")
     };
-    format!("{designation} #{}{who}{tin}", i + 1)
+    format!("{} #{}{who}{tin}", f.designation, i + 1)
 }
 
 /// Resolve one serde leaf path to its [`Source`], or `None` when no [`LEAF_SOURCE`] prefix claims it.
@@ -1012,6 +1109,150 @@ mod tests {
     use crate::tax::scrub_axis::maximal_sentinel;
     use std::collections::BTreeSet;
     use time::macros::date;
+
+    /// `return_inputs.rs`'s own text. The transcription-date census is DERIVED from it, never typed
+    /// a second time — the same discipline `return_refuse.rs` applies to its tier census.
+    const RETURN_INPUTS_SRC: &str = include_str!("return_inputs.rs");
+
+    /// Push ONE row of `kind` onto `ri`, with an issuer and **no** `transcribed_on`.
+    ///
+    /// ★★ Exhaustive over [`DocumentKind`] on purpose: this is the FIXTURE, and FR-88 is three
+    ///    consecutive tasks losing a guard to a hand-written fixture that decided what the guard
+    ///    could see. A family added tomorrow does not compile until it is given a row here, so the
+    ///    kill below covers it on the day rather than the day someone remembers.
+    fn push_undated_row(ri: &mut crate::tax::return_inputs::ReturnInputs, kind: DocumentKind) {
+        use crate::tax::return_inputs as t;
+        match kind {
+            DocumentKind::W2 => ri.w2s.push(t::W2 {
+                employer: "Employer".into(),
+                ..Default::default()
+            }),
+            DocumentKind::Form1099Int => ri.int_1099.push(t::Form1099Int {
+                payer: "Bank A".into(),
+                ..Default::default()
+            }),
+            DocumentKind::Form1099Div => ri.div_1099.push(t::Form1099Div {
+                payer: "Fund B".into(),
+                ..Default::default()
+            }),
+            DocumentKind::Form1099G => ri.g_1099.push(t::Form1099G {
+                payer: "State C".into(),
+                ..Default::default()
+            }),
+            DocumentKind::Form1099B => ri.b_1099.push(t::Form1099B {
+                payer: "Broker D".into(),
+                ..Default::default()
+            }),
+            DocumentKind::Form1098 => ri.form_1098.push(t::Form1098 {
+                lender: "Lender E".into(),
+                ..Default::default()
+            }),
+            DocumentKind::Form1098E => ri.form_1098e.push(t::Form1098E {
+                lender: "Servicer F".into(),
+                ..Default::default()
+            }),
+            DocumentKind::Form1099Sa => ri.sa_1099.push(t::Form1099Sa {
+                payer: "Custodian G".into(),
+                ..Default::default()
+            }),
+            DocumentKind::Form5498Sa => ri.sa_5498.push(t::Form5498Sa {
+                trustee: "Trustee H".into(),
+                ..Default::default()
+            }),
+        }
+    }
+
+    /// ★★★ **T12 fold / seam review I-2 — EVERY FAMILY THAT CARRIES A TRANSCRIPTION DATE IS NAMED
+    ///     WHEN ONE OF ITS ROWS HAS NONE.**
+    ///
+    /// The defect this replaces: [`undated_document_rows`] walked five families by hand while eight
+    /// carried `transcribed_on`, so an undated Form 1098 / 1099-SA / 5498-SA row was silently absent
+    /// from the §4.4 block AND the packet manifest — two surfaces that present themselves as
+    /// complete lists. Both of the tests that covered the function populated `int_1099` and only
+    /// `int_1099`, so neither could see it (FR-88's shape).
+    ///
+    /// ★★ **The expectation is DERIVED**: the families come from [`DocumentKind::ALL`], and which of
+    ///    them carry a date column comes from [`document_row_facts`]'s own match — not from a list
+    ///    typed here. A ninth family is a compile error in that match and in `push_undated_row`
+    ///    before it can ever be a silent gap.
+    #[test]
+    fn every_document_family_that_carries_a_transcription_date_is_named() {
+        let mut ri = crate::tax::return_inputs::ReturnInputs::default();
+        let mut want: Vec<String> = Vec::new();
+        for kind in DocumentKind::ALL {
+            push_undated_row(&mut ri, *kind);
+            let f = document_row_facts(&ri, *kind, 0);
+            assert_eq!(f.rows, 1, "{kind:?}: the fixture pushed exactly one row");
+            if matches!(f.transcribed_on, TranscribedOn::Row(None)) {
+                want.push(format!(
+                    "{} #1 ({}) — transcribed without a date",
+                    f.designation,
+                    issuer_of(&f)
+                ));
+            }
+        }
+        // The fixture must actually exercise something, and MORE than the five the hand list had.
+        assert!(
+            want.len() >= 8,
+            "every family but the W-2 carries a transcription date today: {want:#?}"
+        );
+        assert_eq!(
+            undated_document_rows(&ri),
+            want,
+            "every undated row of every family that HAS a date column must be named, in ALL order"
+        );
+    }
+
+    /// ★★★ **THE HALF THE COMPILER CANNOT SEE — a family that GAINS a `transcribed_on` column.**
+    ///
+    /// The exhaustive match in [`document_row_facts`] reds when a new [`DocumentKind`] appears. It
+    /// says nothing at all when an EXISTING family's row struct gains the column — and the W-2 is
+    /// exactly one `pub transcribed_on: Option<Date>` away from being that case, with a prose
+    /// comment in the old code promising *"when the W-2 gains one, it is reported here"*. A promise
+    /// is not a mechanism. This counts the columns in the source and requires the walk to declare
+    /// the same number.
+    #[test]
+    fn the_transcription_date_columns_in_the_source_are_all_walked() {
+        let declared = RETURN_INPUTS_SRC
+            .matches("pub transcribed_on: Option<Date>,")
+            .count();
+        // A broken parse must be LOUD, not silently permissive.
+        assert!(
+            declared >= 8,
+            "the source scan found {declared} `transcribed_on` columns — it has stopped parsing"
+        );
+        let ri = crate::tax::return_inputs::ReturnInputs::default();
+        let walked = DocumentKind::ALL
+            .iter()
+            .filter(|k| {
+                matches!(
+                    document_row_facts(&ri, **k, 0).transcribed_on,
+                    TranscribedOn::Row(_)
+                )
+            })
+            .count();
+        assert_eq!(
+            walked, declared,
+            "`return_inputs.rs` declares {declared} `transcribed_on` columns and \
+             `undated_document_rows` walks {walked} families that have one. A column that nothing \
+             walks is an undated row nobody is told about, on two surfaces that call themselves \
+             complete."
+        );
+    }
+
+    /// [`DocumentKind::ALL`] lists every variant — the exhaustive matches make a new variant a
+    /// compile error, this pins that `ALL` carries it too (the `DocumentRow::ALL` pattern).
+    #[test]
+    fn every_document_kind_is_listed_once() {
+        assert_eq!(
+            DocumentKind::ALL.len(),
+            9,
+            "the W-2, the four 1099 families `income import` fills, the 1098 and 1098-E, and \
+             T16's two HSA information returns"
+        );
+        let ids: BTreeSet<_> = DocumentKind::ALL.iter().collect();
+        assert_eq!(ids.len(), DocumentKind::ALL.len(), "no duplicate kinds");
+    }
 
     /// What a [`LEAF_SOURCE`] audit found. Empty on every count = the guarantee holds.
     #[derive(Debug, Default, PartialEq, Eq)]

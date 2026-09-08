@@ -629,8 +629,20 @@ fn forgoing_block(
             }
         }
     }
-    for n in &st.not_computed {
-        push(&mut s, &n.line());
+    // ★★★ **T12 fold / seam review M-1 — the NOT COMPUTED heading rides along too.** These items
+    //     are not forgos: nothing the filer can answer changes them, and the heading carries the
+    //     instruction (*"the credit boxes on your return are printed, the amount is yours to
+    //     enter"*) without which line 19 reads on paper as a benefit they chose to skip. Rendered
+    //     by the same function the panel uses, for the same reason the forgoing list is.
+    if !st.not_computed.is_empty() {
+        for line in crate::not_computed_lines(&st) {
+            match line.trim().strip_prefix("\u{2022} ") {
+                Some(item) => push(&mut s, item),
+                None => {
+                    let _ = writeln!(s, "# {}", line.trim());
+                }
+            }
+        }
     }
     s
 }
