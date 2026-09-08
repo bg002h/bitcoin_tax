@@ -6344,11 +6344,26 @@ build, each with an owning phase.
   part-year.** Every path to it refuses naming it (part-year eligibility, Medicare, the last-month
   rule); transcribing the worksheet (`i8889`) lets a part-year or Medicare filer file.
 - **FR-81 — two dependent rows with empty SSNs share one `answer_log` key space (T7 build
-  `282a8a32`, follow-up 1; pre-existing from T1's `dependent_ssn_hash`). Owning task: interview T8
-  (the row's identity is printed there), reconciled before the T7 seam review closes if the review
-  finds it reachable before the packet boundary.** `dependent_ssn_hash("")` is a valid hash, so a
+  `282a8a32`, follow-up 1; pre-existing from T1's `dependent_ssn_hash`). ✅ CLOSED 2026-09-07 by
+  the T7 fold (`2213eeb5`, seam review I-2): a blank SSN refuses `DependentIdentityUnanswered`
+  before any gate, a duplicated SSN refuses `DependentSsnDuplicated` on both tiers, and the session's
+  `asked` set is keyed by `(row, gate)`.** `dependent_ssn_hash("")` is a valid hash, so a
   gate answer for one blank-SSN row can be read as the other's; the SSN gate sits at the packet
   boundary, not at authoring.
+- **FR-84 — the TY2025 dependents grid's rows (1)–(4) are deliberately UNMAPPED (T8 build). Owning
+  task: the TY2025 identity block, before the simulated real return prints a TY2025 dependents
+  grid.** The form asks first and last name in two cells while `Dependent` holds one `name` string;
+  splitting at a space would invent testimony, so rows (1)/(2) carry a COLLECTION gap, and rows
+  (3)/(4) wait with them. Fail-closed today: with no mapped cell, an SSN beside a blank name is not
+  expressible; `xtask dependents-grid` prints the measured names commented and unquoted so the
+  census does not shrink by cells nothing writes.
+- **FR-85 — the child tax credit is $2,200 from TY2025, not TY2026 (T8 build; OBBBA §70104(f)
+  applies the amendment to taxable years beginning after 2024, and Rev. Proc. 2025-32 .03 says it in
+  words, .05(1) republishing $2,200 for TY2026). Owning phase: the TY2025 package (S1).**
+  `advisories.rs`'s `ctc_provably_zero` multiplied by a bare `2000`; T8 named the literal and pinned
+  it against the year's package so the test REDS the moment TY2025's package lands — correct,
+  because at $2,200 that ceiling is too low. The controller's own T8 brief carried the wrong year;
+  the builder found it in the statute.
 - **FR-82 — `tax_tables.rs`'s TY2026 doc comment cites Rev. Proc. 2025-32 §2.14 / §2.10 for figures
   that sit in its Section 4 (T7 build, follow-up 2; pre-existing). Owning phase: ownerless residue
   (doc-consistency).** The new §4.23 cite beside them is accurate.
@@ -6356,6 +6371,26 @@ build, each with an owning phase.
   params-less year while the R12 panel says *waiting* (T7 build, follow-up 3). Owning task:
   interview T12 (the render pass).** `Field.live` has no package; the fallback names the missing
   package, so it is honest, but it is a second wording of the same gate.
+- **FR-84 — the TY2025 dependents grid asks FIRST NAME and LAST NAME in two cells and `Dependent`
+  holds one `name` string (T8 build, follow-up 1). Owning task: the TY2025 IDENTITY BLOCK (the
+  `[header]` section of `forms/2025/f1040.map.toml`).** TY2024's form has ONE widget spanning
+  *"(1) First name / Last name"*; TY2025 re-parted the block and prints *"(1) First name"* and
+  *"(2) Last name"* as separate rows (`f1040--2025.txt:39-41`). Splitting the stored `name` at a
+  space would invent testimony (*"Jane Van Der Berg"* splits four ways), so T8 mapped neither cell
+  and left all sixteen row-(1)–(4) cells on the field census's `UNCENSUSED` register with their
+  measured names printed, commented and unquoted, in the map. **Fail-closed today**: there is no
+  mapped cell for a name, so a half-identified dependent — an SSN printed beside a blank name — is
+  not expressible. The fix is to COLLECT first and last separately, which is the identity block's
+  own work.
+- **FR-85 — `answer_all_live_declarations` left every dependent gate blank on a fixture that did
+  not pre-answer `can_be_claimed_as_dependent_taxpayer` (found by T8, FIXED in the same build).**
+  Recorded because the shape recurs: the flowchart WAITS on two return-level declarations (Step 2
+  question 4, Step 5 question 1) and stops at `DependentVerdict::WaitingOnQuestion`, which is not
+  `Unanswered` — so the helper's fixpoint loop broke and the rest of the row was never answered. The
+  helper reported nothing, and a TY2025 fixture with two dependents got `CreditColumn::Neither` on
+  both children. Fixed by sweeping the gates again after the `FORM_QUESTIONS` loop. **No owning
+  phase — closed.** The reason to keep the entry is the class: a fixture helper that half-answers is
+  a green-and-blind instrument, and this one was silent for as long as no test read what it wrote.
   Owner-driven; the assistant prepares the walk (a checklist of moments from `SPEC_interview.md` §6)
   and records the findings verbatim.
 - **FR-47 — `AmtParams` / `FullReturnParams` TY2026 is a NOW item, not a post-finals one.**
