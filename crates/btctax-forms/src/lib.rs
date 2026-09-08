@@ -329,6 +329,24 @@ pub fn fill_schedule_a(
     schedule_a::fill_schedule_a_with_map(lines, header, &map)
 }
 
+/// ★★★ **The line 8b recipients `year`'s Schedule A cannot print** — empty in the ordinary case.
+///
+/// When it is non-empty, [`fill_schedule_a`] prints the instruction's own escape — *"identify the
+/// person by attaching a statement to your paper return and printing "See attached" to the right of
+/// line 8b"* (`i1040sca--2025.txt:1126-1131`) — and the **statement is the filer's to write**. The
+/// packet manifest calls this so its *"COMPLETE BY HAND"* block can say so; both surfaces then read
+/// the SAME condition, so the page cannot assert an attachment the manifest does not name.
+///
+/// ★ The trigger is closer than the TY2024 form suggests: TY2025 merged TY2024's two dotted rows
+///   into ONE 24pt box, so **two** recipients overflow there.
+pub fn schedule_a_line8b_overflow(
+    lines: &btctax_core::tax::printed::ScheduleALines,
+    year: i32,
+) -> Result<Vec<String>, FormsError> {
+    let map = ScheduleAMap::for_year(year)?;
+    Ok(schedule_a::line8b_overflow(lines, &map).to_vec())
+}
+
 /// Fill the **FULL-RETURN Form 1040** for `year` from the core-derived printed chain
 /// (`btctax_core::tax::printed::form_1040_lines`) — every line, not just the capital-gain cluster.
 ///

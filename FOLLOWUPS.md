@@ -6400,6 +6400,19 @@ build, each with an owning phase.
   ★ Note: two entries in this file also carry the number FR-84 — this one's neighbours above (the
   TY2025 grid name cells) and the T12 render-pass entry below. Same collision as FR-85; renumber both
   pairs when the ownerless residue is next swept.
+- **FR-87 — the home-sale rule's own `s_1099 == Some(true)` arm is UNREACHABLE (T9 fold, 2026-09-07).
+  Owning task: interview T12 (the render pass), with FR-86's B1 sweep.**
+  `return_refuse.rs`'s home-sale branch selector carries an `s_1099 == Some(true)` arm, but the
+  document census screens first on **both** tiers, so a filer meets the census's §2.2 refusal — which
+  names Form 8949 code H and the Pub. 523 worksheet, the same exit — one rule earlier. Planting
+  `false &&` onto the arm reds nothing (measured by the folding agent while widening M-2's cross to
+  all 24 combinations). The arm was KEPT as a documented fail-closed backstop rather than deleted
+  mid-fold, and it is labelled in two places as *"a documented fail-closed backstop, not a tested
+  guard"* — which is the honest disposition, and exactly why it needs an owner. Decide at T12: either
+  reach it (a tier or ordering where the census has not yet screened) so B1 can hold it, or delete it
+  and let the census own the outcome alone. A guard nothing can red is the shape this repo keeps
+  finding (`design/HARNESS.md` B1); leaving it undecided is what turns it into the next green-and-
+  blind instrument.
 - **FR-82 — `tax_tables.rs`'s TY2026 doc comment cites Rev. Proc. 2025-32 §2.14 / §2.10 for figures
   that sit in its Section 4 (T7 build, follow-up 2; pre-existing). Owning phase: ownerless residue
   (doc-consistency).** The new §4.23 cite beside them is accurate.

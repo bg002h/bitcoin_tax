@@ -54,6 +54,32 @@ const GRP_PAYEE: u32 = 1;
 /// to the right of line 8b."* (`design/forms/extract/i1040sca--2025.txt:1126-1131`.)
 const SEE_ATTACHED: &str = "See attached";
 
+/// ★★★ **THE LINE 8b RECIPIENTS THE YEAR'S FORM CANNOT PRINT — the ONE decision, read twice.**
+///
+/// Empty in the ordinary case (every recipient fits, and the form carries their identities). When it
+/// is **not** empty the emitter prints [`SEE_ATTACHED`] instead, and *every* recipient's identity is
+/// off the page — not just the ones past the last dotted line — because the escape replaces the
+/// whole block with one string. So this returns them **all**: they are all on the statement.
+///
+/// ★★ **Why it is a function and not an inline `len()` comparison** (the T9 seam review's I-1). The
+///    printed *"See attached"* asserts, on a page the filer signs under §6065, that a statement is
+///    attached — and T9 shipped it with nothing anywhere producing, requesting or naming that
+///    statement. The packet manifest's *"COMPLETE BY HAND"* block, which frames itself as the closed
+///    list of marks btctax deliberately did not make, has to name it; and the manifest's condition
+///    and the emitter's condition must be the SAME condition, or the packet can print the assertion
+///    while the manifest stays silent. `btctax_forms::schedule_a_line8b_overflow` is the manifest's
+///    door onto this function.
+///
+/// ★ `map.line8b_payee` is empty only for a year whose map does not carry the cells at all; nothing
+///   is printed then, so nothing overflows.
+pub(crate) fn line8b_overflow<'a>(lines: &'a ScheduleALines, map: &ScheduleAMap) -> &'a [String] {
+    if map.line8b_payee.is_empty() || lines.line8b_payee.len() <= map.line8b_payee.len() {
+        &[]
+    } else {
+        &lines.line8b_payee
+    }
+}
+
 /// Fill Schedule A from the core-derived printed chain. The serialized bytes are read back through
 /// the geometric verifier (a mis-mapped cell FAILS CLOSED).
 pub fn fill_schedule_a_with_map(
@@ -110,8 +136,8 @@ pub fn fill_schedule_a_with_map(
     //    statement to your paper return and printing \u{201c}See attached\u{201d} to the right of line 8b."*
     //    The emitter chooses between two strings the form supplies; it composes neither.
     if !lines.line8b_payee.is_empty() && !map.line8b_payee.is_empty() {
-        let fits = lines.line8b_payee.len() <= map.line8b_payee.len();
-        let printed: Vec<String> = if fits {
+        // ★ ONE condition, shared with the packet manifest — see `line8b_overflow`.
+        let printed: Vec<String> = if line8b_overflow(lines, map).is_empty() {
             lines.line8b_payee.clone()
         } else {
             vec![SEE_ATTACHED.to_string()]

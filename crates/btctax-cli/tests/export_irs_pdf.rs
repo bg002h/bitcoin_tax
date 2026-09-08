@@ -1941,6 +1941,117 @@ fn a_crypto_packet_does_not_list_marks_btctax_already_made() {
     );
 }
 
+/// ★★★ **THE MANIFEST NAMES THE LINE 8b STATEMENT THE PRINTED PAGE SAYS IS ATTACHED**
+/// (the T9 seam review's I-1).
+///
+/// With more line 8b recipients than the TY2024 form's two dotted lines, Schedule A prints the
+/// instruction's own escape — *"See attached"* — and btctax generates no statement. T9 shipped that
+/// with nothing anywhere producing, requesting or naming it, so the filer signed under §6065 a page
+/// asserting an attachment they were never told to write, while the manifest's *"COMPLETE BY HAND"*
+/// block — which frames itself as the **closed** list of marks btctax deliberately did not make —
+/// said nothing.
+///
+/// **Both halves on the same journey**, because a list that always says the same thing signals
+/// nothing: three recipients overflow and the mark appears naming every one of them; two fit, their
+/// identities print, and the mark is gone.
+///
+/// Mutation: delete the `line8b_overflow` block from `hand_marks` and the first half reds.
+#[test]
+fn the_manifest_names_the_line_8b_statement_when_the_identities_do_not_fit() {
+    use btctax_core::tax::return_inputs::{NonForm1098Interest, Owner, ScheduleAInputs, W2};
+    let vault_with = |n: usize| {
+        full_return_vault(&[], move |ri| {
+            ri.w2s = vec![W2 {
+                owner: Owner::Taxpayer,
+                employer: "ACME".into(),
+                box1_wages: dec!(80000),
+                box2_fed_withheld: dec!(9000),
+                box3_ss_wages: dec!(80000),
+                box5_medicare_wages: dec!(80000),
+                ..Default::default()
+            }];
+            // Seller-financed mortgages: the recipient is an individual, so the identifying number
+            // is an SSN — from the never-issued 000 area.
+            ri.schedule_a = Some(ScheduleAInputs {
+                mortgage_interest_not_on_1098: (0..n)
+                    .map(|i| NonForm1098Interest {
+                        recipient_name: format!("SELLER {i}"),
+                        recipient_tin: format!("000-00-000{i}"),
+                        recipient_address: format!("{i} MAIN ST"),
+                        amount: dec!(9000),
+                    })
+                    .collect(),
+                ..Default::default()
+            });
+            // Live only once there is an 8b row, so `answer_all_live_declarations` (which runs
+            // BEFORE this shape) could not have reached it.
+            ri.claiming_mortgage_interest_credit = Some(false);
+        })
+    };
+
+    // ── THREE recipients: the TY2024 form has two dotted lines. ──────────────────────────────
+    let (_d, vault, out) = vault_with(3);
+    let rep = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        &[],
+        None,
+        Default::default(),
+    )
+    .expect("an itemizing packet with three line 8b recipients exports");
+    let manifest = std::fs::read_to_string(out.path().join("manifest.txt")).unwrap();
+    let mark = rep
+        .hand_marks
+        .iter()
+        .find(|m| m.contains("line 8b"))
+        .unwrap_or_else(|| {
+            panic!(
+                "★ THE KILL: the page printed \"See attached\" and the manifest must say so: {:?}",
+                rep.hand_marks
+            )
+        });
+    assert!(
+        mark.contains("See attached") && mark.contains("attaching a statement"),
+        "the mark must quote what the page asserts and what the instruction asks for: {mark}"
+    );
+    for i in 0..3 {
+        assert!(
+            mark.contains(&format!("SELLER {i}")) && mark.contains(&format!("000-00-000{i}")),
+            "…and name recipient {i}, whose identity left the page: {mark}"
+        );
+    }
+    assert!(
+        manifest.contains("line 8b") && manifest.contains("COMPLETE BY HAND"),
+        "…in the manifest the filer follows while assembling paper: {manifest}"
+    );
+
+    // ── TWO recipients: they fit, their identities print, and nothing is owed. ───────────────
+    let (_d, vault, out) = vault_with(2);
+    let rep = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        &[],
+        None,
+        Default::default(),
+    )
+    .expect("…and the same packet with two exports");
+    let manifest = std::fs::read_to_string(out.path().join("manifest.txt")).unwrap();
+    assert!(
+        !rep.hand_marks.iter().any(|m| m.contains("line 8b")),
+        "two recipients FIT — telling this filer to attach a statement would be worse than \
+         silence: {:?}",
+        rep.hand_marks
+    );
+    assert!(
+        !manifest.contains("line 8b"),
+        "…and the manifest says nothing about it either: {manifest}"
+    );
+}
+
 /// ★★★ **P5 / §170(f)(11)(D) — THE MANIFEST MUST NAME THE APPRAISAL, END TO END.**
 ///
 /// Over $500,000 claimed for donated property the qualified appraisal is not a record to keep, it is

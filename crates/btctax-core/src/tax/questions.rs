@@ -649,8 +649,12 @@ fn amt_depreciation_question_live(ri: &ReturnInputs) -> bool {
 ///
 /// ★ Deliberately an INPUT predicate, never "Schedule A files": the latter is compute-dependent and
 ///   would brick the standard-deduction-wins filer (§2.7, r3 I-2).
+///
+/// ★★ Both conjuncts are read through [`ReturnInputs::form_1098_deducted`], which IS the itemize
+///    election — see its doc comment for why the conjunct lives in one reader rather than at each
+///    site (the T9 seam review's C-1).
 fn mortgage_question_live(ri: &ReturnInputs) -> bool {
-    ri.schedule_a.is_some() && !ri.form_1098.is_empty()
+    !ri.form_1098_deducted().is_empty()
 }
 
 /// ★ THE REGISTRY. Eleven declarations; the liveness lifted from the shipped refusals EXCEPT the two P9
@@ -2506,11 +2510,18 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
 /// paid to a recipient who issued none). A filer with neither has no line 8a and no line 8b, so the
 /// Caution addresses nobody.
 ///
-/// ★ It does NOT read `schedule_a.is_some()` on its own: the 1098 SECTION is already gated on the
-///   itemize election, so a row can only exist on an itemizing return, and an 8b row lives on
-///   `ScheduleAInputs` by construction.
+/// ★★★ **It carries the ITEMIZE ELECTION, and T9 shipped without it** (the T9 seam review's C-1).
+///   The premise here used to read *"the 1098 SECTION is already gated on the itemize election, so a
+///   row can only exist on an itemizing return"* — and that was **false**: `SectionId::Form1098s`
+///   has no arm in `section_is_live` and falls through `_ => true`, so the section is offered to
+///   every filer (which is what R8 intends — the document arrives whether or not they itemize), and
+///   `open_next_year` seeds a prior lender onto a year carrying no `schedule_a` with no filer action
+///   at all. A standard-deduction filer was therefore asked this question and refused
+///   `MortgageInterestCreditUnanswered` over a line 8a their return does not have — journey J-24.
+///   The election is read through [`ReturnInputs::form_1098_deducted`]; the 8b half needs no
+///   conjunct of its own because an 8b row lives ON `ScheduleAInputs` by construction.
 fn mortgage_interest_credit_question_live(ri: &ReturnInputs) -> bool {
-    !ri.form_1098.is_empty()
+    !ri.form_1098_deducted().is_empty()
         || ri
             .schedule_a
             .as_ref()

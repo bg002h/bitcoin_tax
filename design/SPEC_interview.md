@@ -607,10 +607,20 @@ joint rates. The no-brick property (`answer.rs:412`) covers every one of them.
   REBUILT, `design/TY2026_WORK_LIST.md:36` — the field is already there); **7/8** the property address;
   **10** other (informational, shown beside 5b).
   `ScheduleAInputs.mortgage_interest_1098` (`:613`) is **removed**; 8a = Σ(box 1 + box 6) over the rows.
-  **Liveness is keyed on the itemize election, not on the document's presence:** the `form_1098` census
-  row and the 1098 section are live iff `schedule_a.is_some()`, and the `MortgageAllUsed` /
-  `AmtQualifiedDwelling` / `MortgageWithinDebtLimit` declarations key on
-  `schedule_a.is_some() && !form_1098.is_empty()`. Today's condition is
+  **Liveness is keyed on the itemize election, not on the document's presence** — and the election gates
+  the **consequences of a row, never the section**: ★ *(corrected in the T9 fold; this paragraph
+  previously said both that the document is top-level and that the 1098 SECTION is live iff
+  `schedule_a.is_some()`, and the build followed the first)*. The **section stays top-level and is
+  offered to every filer**, because the document arrives whether or not they itemize and `open_next_year`
+  seeds a prior lender onto a year that has elected nothing yet. What carries `schedule_a.is_some()` is
+  the `form_1098` **census row**, and **every rule that reads a row for a Schedule A line 8 purpose**: the
+  `MortgageAllUsed` / `AmtQualifiedDwelling` / `MortgageWithinDebtLimit` declarations, the **Form 8396
+  gate**, the **`other_borrower_paid_interest` refusal**, and the **§163(h)(3)(B) ceiling warning**. All
+  of them read the conjunct through the single accessor `ReturnInputs::form_1098_deducted()` rather than
+  re-typing it, so the next such rule cannot forget it. **Box 4 is the one deliberate exception**: a
+  refund of overpaid interest is income on Schedule 1 line 8z, owed whether or not the filer itemizes, so
+  its refusal reads every transcribed row. This is what journey **J-24** asserts — a standard-deduction
+  filer holding a $900k 2019 1098 is asked nothing and refused nothing. Today's condition is
   `.is_some_and(|a| a.mortgage_interest_1098 > Usd::ZERO)` (`questions.rs:280`), which already requires a
   Schedule A; dropping that half would make an always-live census row force every homeowner to transcribe
   a 1098, then refuse a **standard-deduction** filer on a truthful `MortgageWithinDebtLimit = Some(false)`
@@ -622,10 +632,18 @@ joint rates. The no-brick property (`answer.rs:412`) covers every one of them.
 - **Schedule A 8b** — interest paid to a recipient who gave no 1098: a repeating
   `mortgage_interest_not_on_1098: Vec<{ recipient_name, recipient_tin, recipient_address, amount }>`
   on `ScheduleAInputs`, because the instruction demands the recipient's *"name, identifying number, and
-  address on the dotted lines"* (`i1040sca--2025.txt:1109-1116`) — the four TY2024 map cells
-  `f1_17`/`f1_19` become mapped (`f1040sa.map.toml:99-100`). **8c** — points not on a 1098: one `Usd`
-  (`f1_18`/`f1_20`, `:101-102`), with the instruction's *"generally deductible over the life of the
-  loan"* (`:1137-1139`) in its help. 8e = 8a + 8b + 8c (the printed chain, today `= 8a`).
+  address on the dotted lines"* (`i1040sca--2025.txt:1109-1116`). ★ *(Cell pairing corrected in the T9
+  fold; this sentence previously paired `f1_17`/`f1_19` for 8b and `f1_18`/`f1_20` for 8c, and both
+  years were re-measured with `xtask dump-fields` against it.)* On **TY2024**, 8b is `f1_19` (the
+  AMOUNT) with `f1_17` and `f1_18` as its **two dotted description lines**, both wide free-text cells at
+  x = [115.2, 396.0] below the amount; **8c is `f1_20`**, which has **no description cell on either
+  form**. On **TY2025** the IRS merged the two dotted rows into ONE 24pt box,
+  `Line8b_ReadOrder[0].f1_16`, so a return with **two** recipients already overflows — and an overflow
+  prints the instruction's own escape, *"See attached"* (`:1126-1131`), which makes the **statement a
+  packet-manifest hand mark**: btctax cannot write it, and a page that asserts an attachment nobody was
+  told to write is testimony the filer never gave. **8c** — points not on a 1098: one `Usd`, with the
+  instruction's *"generally deductible over the life of the loan"* (`:1137-1139`) in its help.
+  8e = 8a + 8b + 8c (the printed chain, today `= 8a`).
 - **The Form 8396 gate** — *"If you are claiming the mortgage interest credit … subtract the amount
   shown on Form 8396, line 3"* (`:1091-1096`): `FormQuestion` `claiming_mortgage_interest_credit`, live
   iff any 1098 or 8b row; `Some(true)` refuses `MortgageInterestCreditUnsupported` (Form 8396 is not
@@ -1201,7 +1219,7 @@ persisted brief; TDD; the kill red before green; **once** = code that survives e
 | **T6** | **The exchange seam** (R9): Step 0 panel function + TUI pane; `digital_asset_activity` + the cross-check against the **existing** `digital_asset_activity(state, year)` predicate (`return_1040.rs:2468-2475`), refusing a contradicted `No` and **warning, never refusing**, an unwitnessed `Yes`; the standing-order warning; venue-vs-answer listing | once | the **five-row** DA table (a buy-only ledger answered `No` prints `No`; an empty-ledger `Yes` prints `Yes` with the off-ledger warning and no refusal); the standing-order fixture pair; the unnamed-venue fixture; the grep-KAT on registry prompts |
 | **T7** | **Dependents gates** (R6 gates): `Dependent` fields including `younger_than_you_or_spouse` and the **required** `date_of_birth`; row (5)(a)'s help carrying `:1905-1913` verbatim; `DEPENDENT_GATES` registry with the I-4 per-row liveness emulation (M3, no seam change); `screen_inputs` rows × gates; `live_questions` + the Dependents section per row; the `filer_tin` question; the §152(d) figure in `FullReturnParams` (TY2024/25/26) and `gross_income_under_limit`'s params-gated liveness | once (the figure per-year) | every gate `None` ⇒ refuses; **`date_of_birth = None` refuses and the row is not printed**; a `Declined` taxpayer-DOB skippable still resolves Step 1; every REFUSE edge names its rule; classifier compiles only when classified; `Single`-no-dependents asks nothing; `gross_income_under_limit` waits, not blocks, on a params-less year |
 | **T8** | **Row (7), HoH/QSS, the TY2025+ grid emitter and its MAP** (R6 computed, R7): the age / under-17 / row-(7) computation; `form1040_full.rs` fills rows (5)–(7) on TY2025+; **T8 maps the TY2025 `f1040` dependents grid itself** — rows (1)–(7) × four dependents plus the *more than four dependents* box (`f1040--2025.txt:38-52`, read through the label reader) into `crates/btctax-forms/forms/2025/f1040.map.toml`, which today is 17 lines of capital-gains cells only (`line7a`, `da_yes`, `da_no`), so r1's kill had no map to run on; the rest of the form stays in the `UNCENSUSED` register; `hoh_marital_basis` + the two HoH tests + `hoh_qualifying_child_name`, the five QSS gates, and (optionally, in the same task) the five *Married persons who live apart* conditions; the line-19 forgo sized in the panel | once + per-year map cells (TY2026 ports the cells after finals) | the flowchart truth table **including the born-in-year row landing on CTC**; TY2024 emitter byte-identical; TY2025 fixture rows filled — now runnable — with the `UNCENSUSED` register's `f1040` count falling by **exactly** the cells mapped; HoH kills incl. `MarriedLivedApart` refusing with the rule's name; QSS `None`/`No` kills; the forgo size present/absent |
-| **T9** | **Real estate** (R8): `Form1098` section replacing `mortgage_interest_1098`, **live iff `schedule_a.is_some()`** with the three declarations keyed the same way (I8); 8b rows + 8c + the TY2024 map cells; 8e chain; the **aggregate, status-adjusted** ceiling warning + `other_borrower_paid_interest` (M5); **box 4 > 0 refusing to Schedule 1 line 8z** (I3); the 8396 gate; `HomeSale` gates | once (map cells per-year) | 8e sum; the sweep reconciles; the ceiling fixture set (one row under, two rows summing over, MFS at half); `other_borrower_paid_interest = Yes` refuses; **box 4 = $1 refuses and box 4 = 0 does not**; **a standard-deduction fixture with a $900k 1098 asks nothing and refuses nothing, the same fixture with a Schedule A does**; 8396 refuses; the 8-branch home-sale table; empty `recipient_tin` refuses |
+| **T9** | **Real estate** (R8): `Form1098` section replacing `mortgage_interest_1098` — the section itself **top-level**, with the `form_1098` census row and **every line-8 consequence of a row** keyed on `schedule_a.is_some()` through `form_1098_deducted()` (I8; box 4 the one exception); 8b rows + 8c + the TY2024 map cells; 8e chain; the **aggregate, status-adjusted** ceiling warning + `other_borrower_paid_interest` (M5); **box 4 > 0 refusing to Schedule 1 line 8z** (I3); the 8396 gate; `HomeSale` gates | once (map cells per-year) | 8e sum; the sweep reconciles; the ceiling fixture set (one row under, two rows summing over, MFS at half); `other_borrower_paid_interest = Yes` refuses; **box 4 = $1 refuses and box 4 = 0 does not**; **a standard-deduction fixture with a $900k 1098 asks nothing and refuses nothing — with the shared-interest gate and the 8396 gate each at BLANK and at a truthful *yes*, and differentially: adding the rows changes neither the live-question set nor the refusal — while the same fixture with a Schedule A refuses on each in turn**; **the opener's own seed onto a standard-deduction year refuses nothing**; 8396 refuses; the home-sale table crossed over all 24 combinations; empty `recipient_tin` refuses; **more 8b recipients than the year's dotted lines prints "See attached" on BOTH years and the packet manifest names the statement** |
 | **T10** | **Trailer** (§5.4): direct deposit 35b–d + map + emitter + `RefundByPaperCheck` conditional; phone; spouse IP PIN; foreign address | once (map cells per-year) | the routing validator; the advisory silent when a deposit is given; spouse-PIN asymmetry (`get` never returns digits); foreign block printed on a fixture |
 | **T11** | **Oracle path** (R13): `GoldenInputs` gains the dependents block (`n24`, `nu18`, `n1820`, `n21`, `age_head`/`age_spouse`, `blind_head`/`blind_spouse`, the EIC count) and `gen_goldens.py` + the OTS template carry it (I12); `project_to_golden`; `income project`; `check_return.py`; `ORACLE_INVISIBLE` | once | the projection inverse over every golden **and over a household with two dependents**; the invisible list complete; on a one-CTC-child fixture `oracle_line19 > 0` and the excuse equals it exactly, any other size failing; deleting the dependents block reds the inverse |
 | **T12** | **The panel in the TUI + docs** (R12 render): the pane, the commit modal's forgoing **and refusing** lists, the manifest block (with `(declined)` marks and undated document rows named); man pages (`docs/man/btctax-income-answer.1` and siblings via `make docs`); `LIMITATIONS.md` | once | snapshots (N blocking; forgo sizes); `make docs` clean; the manifest block present on a fixture packet |

@@ -337,31 +337,41 @@ fn money(v: Usd) -> String {
 ///
 /// ★ `None` for the ceiling is a year whose package has not arrived (R11): the check simply does not
 ///   run, exactly like every other params-gated rule, rather than guessing a limit.
+///
+/// ★★★ **It reads [`ReturnInputs::form_1098_deducted`], so it is SILENT for a standard-deduction
+///   filer** (the T9 seam review's M-1). The warning's closing sentence tells the filer to *"check
+///   the figure against the limit before you answer"* the `MortgageWithinDebtLimit` declaration —
+///   a question that is not live for them and that they will never be asked. Pointing a filer at a
+///   question the product never puts to them is worse than saying nothing.
 #[must_use]
 pub fn acquisition_debt_ceiling_warning(
     ri: &ReturnInputs,
     ceiling: Option<crate::tax::tables::AcquisitionDebtCeiling>,
 ) -> Option<String> {
     let ceiling = ceiling?;
-    if ri.form_1098.is_empty() {
+    let deducted = ri.form_1098_deducted();
+    if deducted.is_empty() {
         return None;
     }
     let total = ri.form_1098_outstanding_principal();
     // The smallest ceiling any transcribed row earns. `for_loan` already takes the stricter branch
     // for a row whose box 3 was never transcribed.
-    let limit = ri
-        .form_1098
+    let limit = deducted
         .iter()
         .map(|r| ceiling.for_loan(ri.filing_status, r.box3_origination_date))
         .min()?;
     if total <= limit {
         return None;
     }
-    let rows = ri.form_1098.len();
+    let rows = deducted.len();
     let plural = if rows == 1 { "" } else { "s" };
+    // ★ N-1 (T9 seam review) — through the module's own `money()`, like every other warning here.
+    //   This is the one warning whose whole content is a comparison of two large numbers, and raw
+    //   interpolation printed it as `$900000`.
+    let (total, limit) = (money(total), money(limit));
     Some(format!(
         "the outstanding mortgage principal in box 2 of the {rows} Form{plural} 1098 on this return \
-         adds up to ${total}, which is more than the ${limit} the \u{a7}163(h)(3)(B) limit allows for \
+         adds up to {total}, which is more than the {limit} the \u{a7}163(h)(3)(B) limit allows for \
          your filing status and origination date{s} \u{2014} \"Limits on home mortgage interest\" in the \
          Schedule A instructions. That does NOT mean line 8a is wrong: Pub. 936's Deductible Home \
          Mortgage Interest Worksheet figures how much of your interest is still deductible, and \
@@ -414,6 +424,11 @@ mod tests {
         let ri = ReturnInputs {
             filing_status: status,
             form_1098: rows,
+            // ★★★ The ITEMIZE ELECTION, stated. The ceiling is a limit on a DEDUCTION, so the
+            //     warning is silent without a Schedule A (the T9 seam review's M-1) — a fixture
+            //     that left this `None` would be measuring the gate instead of the arithmetic, and
+            //     `the_ceiling_warning_is_silent_for_a_standard_deduction_filer` measures the gate.
+            schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs::default()),
             ..Default::default()
         };
         acquisition_debt_ceiling_warning(&ri, Some(ceilings()))
@@ -569,6 +584,67 @@ mod tests {
             "and a return with no Form 1098 has no aggregate to test"
         );
     }
+
+    /// ★★★ **THE WARNING IS SILENT FOR A STANDARD-DEDUCTION FILER** (the T9 seam review's M-1).
+    ///
+    /// The same $900,000 2019 loan that warns an itemizer must say nothing to a filer with no
+    /// Schedule A, because the warning's own closing sentence points at a question they are never
+    /// asked: *"before you answer 'were you inside EVERY home-mortgage debt limit this year?'"* —
+    /// and [`crate::tax::questions::QuestionId::MortgageWithinDebtLimit`] is not live without the
+    /// itemize election. Telling a filer to check a figure against a limit on a deduction they are
+    /// not claiming, for a question the product will never put to them, is worse than silence.
+    ///
+    /// **Both halves on one fixture**, because a check that never warned would pass the first alone.
+    ///
+    /// Mutation: read `ri.form_1098` instead of `ri.form_1098_deducted()` in
+    /// `acquisition_debt_ceiling_warning` and the standard-deduction half reds.
+    #[test]
+    fn the_ceiling_warning_is_silent_for_a_standard_deduction_filer() {
+        use crate::tax::questions::QuestionId;
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            form_1098: vec![m1098(dec!(900000), Some(date!(2019 - 06 - 01)))],
+            ..Default::default()
+        };
+        assert!(
+            ri.schedule_a.is_none(),
+            "the premise: this filer takes the standard deduction"
+        );
+        assert!(
+            !crate::tax::questions::question_is_live(QuestionId::MortgageWithinDebtLimit, &ri),
+            "…so the question the warning points at is not even asked"
+        );
+        assert_eq!(
+            acquisition_debt_ceiling_warning(&ri, Some(ceilings())),
+            None,
+            "★ THE KILL: a limit on a deduction they are not claiming warns them about nothing"
+        );
+        // The same paper, the same loan, on a return that DOES claim the deduction.
+        ri.schedule_a = Some(crate::tax::return_inputs::ScheduleAInputs::default());
+        assert!(
+            acquisition_debt_ceiling_warning(&ri, Some(ceilings())).is_some(),
+            "…and the itemizer, holding the identical Form 1098, is warned"
+        );
+    }
+
+    /// ★ N-1 (T9 seam review) — the two figures go through the module's own [`money`], like every
+    /// other warning in this file. The filer read `$900000` before; this is the one warning whose
+    /// entire content is a comparison of two large numbers.
+    ///
+    /// Mutation: interpolate `${total}` / `${limit}` raw again and both assertions red.
+    #[test]
+    fn the_ceiling_warning_formats_both_figures_as_money() {
+        let w = warned(
+            vec![m1098(dec!(900000), Some(date!(2019 - 06 - 01)))],
+            FilingStatus::Single,
+        )
+        .expect("the premise: $900,000 of post-2017 debt is over the $750,000 ceiling");
+        assert!(
+            w.contains("$900000.00") && w.contains("$750000.00"),
+            "both figures print through `money()`: {w}"
+        );
+    }
+
     fn w2(f: impl FnOnce(&mut W2)) -> W2 {
         let mut w = W2 {
             employer: "ACME".into(),

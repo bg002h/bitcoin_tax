@@ -3195,12 +3195,23 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
     }
     // ── ★★★ R8 / T9 — THE FORM 1098's TWO REFUSALS, per row. Both are param-free, so both fire at
     //    IMPORT: a TOML carrying either writes nothing (`ScreenTier`).
-    for (i, m) in ri.form_1098.iter().enumerate() {
-        let who = if m.lender.trim().is_empty() {
+    //
+    // ★★★ THE TWO ITERATE DIFFERENT ROW SETS, and that is the T9 seam review's C-1. Box 4 is INCOME
+    //     on Schedule 1 line 8z — owed whether or not the filer itemizes — so it reads every
+    //     transcribed row. The shared-interest gate is about SCHEDULE A LINE 8a summing box 1 in
+    //     full, which a standard-deduction return does not have, so it reads only
+    //     `form_1098_deducted()`. Do not "tidy" these back into one loop: it would refuse a
+    //     standard-deduction filer over a deduction they are not claiming (journey J-24), which is
+    //     exactly what shipped and had to be fixed.
+    let who_of = |i: usize, m: &crate::tax::return_inputs::Form1098| {
+        if m.lender.trim().is_empty() {
             format!("Form 1098 #{}", i + 1)
         } else {
             format!("the Form 1098 from {}", m.lender.trim())
-        };
+        }
+    };
+    for (i, m) in ri.form_1098.iter().enumerate() {
+        let who = who_of(i, m);
         // ★★★ Box 4 — the instruction is explicit that the refund is NOT netted against the
         //     deduction, so the figure is INCOME on a line btctax fills from nothing. A number the
         //     tool already holds may not sit beside a blank 8z with a census note.
@@ -3220,8 +3231,13 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
                 ),
             );
         }
-        // ★★★ The shared-interest gate. `Some(true)` and `None` BOTH refuse — see
-        //     `RefuseReason::SharedMortgageInterestUnanswered` for why the blank is not a "no".
+    }
+    // ★★★ The shared-interest gate, over the rows that reach LINE 8a only. `Some(true)` and `None`
+    //     BOTH refuse — see `RefuseReason::SharedMortgageInterestUnanswered` for why the blank is
+    //     not a "no". Its own message says *"btctax adds box 1 to Schedule A line 8a IN FULL"*,
+    //     which is a sentence about a return that HAS a line 8a.
+    for (i, m) in ri.form_1098_deducted().iter().enumerate() {
+        let who = who_of(i, m);
         match m.other_borrower_paid_interest {
             Some(true) => {
                 return refuse(
@@ -3308,9 +3324,18 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
     //     Exactly one branch of the three tests × the 1099-S census row leaves the return blank; on
     //     every other branch a Form 8949 belongs on it, and btctax builds none.
     //
-    // ★ A `documents.s_1099 = Some(true)` is normally caught EARLIER, by the census's own §2.2
-    //   refusal, whose sentence already names Form 8949 code H and the Pub. 523 worksheet. It is
-    //   still a conjunct here so this rule is complete on its own terms at import.
+    // ★ A `documents.s_1099 = Some(true)` is caught EARLIER, by the census's own §2.2 refusal, whose
+    //   sentence already names Form 8949 code H and the Pub. 523 worksheet. It is still a conjunct
+    //   here so this rule is complete on its own terms.
+    //
+    // ★★ **MEASURED WHILE FOLDING THE T9 SEAM REVIEW (M-2): that conjunct is UNREACHABLE, and it is
+    //    kept deliberately.** The census screen runs inside `screen_inputs_tiered` ahead of this
+    //    rule on BOTH tiers — `screen_param_free` is the same body — so `Some(true)` never arrives
+    //    here, and planting `false &&` onto this arm reds nothing in the suite. That is a fact about
+    //    rule ORDER, not about the rule: the observable guarantee is the one the home-sale table
+    //    test asserts, that a `Some(true)` row refuses with `DocumentTypeUnsupported` naming the
+    //    same exit. The arm stays as the fail-closed backstop for a future reordering that put a
+    //    value rule ahead of the census; it must not be read as a tested guard.
     if ri.home_sale.sold_main_home == Some(true) {
         let h = &ri.home_sale;
         let s_1099 = ri
@@ -3822,38 +3847,71 @@ mod tests {
     /// ★★★ **THE ITEMIZE ELECTION IS THE 1098's LIVENESS — the R8/I8 pair, on ONE fixture.**
     ///
     /// A standard-deduction filer holding a $900,000 2019 mortgage:
-    /// - is asked NONE of the three Form 1098 declarations (the mixed-use box, Form 6251 line 3, and
-    ///   the §163(h)(3)(B) debt limit),
+    /// - is asked NONE of the **four** Form 1098 declarations (the mixed-use box, Form 6251 line 3,
+    ///   the §163(h)(3)(B) debt limit, and the Form 8396 mortgage-interest-credit gate),
     /// - has no live `form_1098` census row, and
-    /// - **does not refuse** — even with `MortgageWithinDebtLimit` blank, which is what the old
-    ///   liveness would have bricked them on: a refusal over a deduction they are not claiming, and
-    ///   a return they could not file.
+    /// - **does not refuse** — with `MortgageWithinDebtLimit` blank, with the row's shared-interest
+    ///   gate blank AND at a truthful *yes*, and with the 8396 gate blank AND at a truthful *yes*.
+    ///   Every one of those is a refusal over a deduction they are not claiming, on a return they
+    ///   could not then file.
     ///
-    /// The SAME return with a `ScheduleAInputs` present asks all three, and a truthful
+    /// The SAME return with a `ScheduleAInputs` present asks all of them, and a truthful
     /// `Some(false)` on the debt limit then refuses.
     ///
-    /// Mutation: drop the `schedule_a.is_some()` conjunct from `mortgage_question_live` (or from
-    /// `row_is_live`) and the standard-deduction half reds.
+    /// ★★★ **THIS TEST WAS A SHADOW, AND THE SHAPE IS WORTH KEEPING IN MIND** (the T9 seam review's
+    ///   C-1). As shipped it enumerated only the three OLDER declarations, and its fixture
+    ///   **pre-answered both of the gates T9 added** — `other_borrower_paid_interest: Some(false)`
+    ///   on the row, and `claiming_mortgage_interest_credit = Some(false)` from [`ri`]. Its
+    ///   `assert_eq!(reason(&standard), None)` was therefore true of a return in which the new gates
+    ///   had already been answered, so **no mutation of either new rule could red it** while it
+    ///   carried the name of the guarantee they broke. Both are blank here, and both truthful
+    ///   *yes* answers are crossed in.
+    ///
+    /// ★★ **The differential is the part that survives the NEXT rule.** Naming four questions is a
+    ///    hand-list, and a hand-list is what went stale: the fix is the last two assertions, which
+    ///    say that on a return with no Schedule A, **adding the Form 1098 rows changes nothing at
+    ///    all** — not the set of live questions, not the refusal. A future rule that reads
+    ///    `ri.form_1098` instead of `ri.form_1098_deducted()` reds here without anyone remembering
+    ///    to add it to a list. (Box 4 is the one deliberate exception — that refund is income on
+    ///    Schedule 1 line 8z whether or not the filer itemizes — so the rows here carry no refund,
+    ///    and `a_1098_box_4_refund_refuses_naming_schedule_1_line_8z_and_a_zero_does_not` holds
+    ///    that arm ungated.)
+    ///
+    /// Mutation: drop the itemize election from `mortgage_question_live`,
+    /// `mortgage_interest_credit_question_live`, `row_is_live`, or the shared-interest loop, and the
+    /// standard-deduction half reds.
     #[test]
     fn a_standard_deduction_filer_with_a_900k_1098_is_asked_nothing_and_refuses_nothing() {
         use crate::tax::questions::{question_is_live, QuestionId};
-        let three = [
+        let four = [
             QuestionId::MortgageAllUsedToBuyBuildImprove,
             QuestionId::AmtQualifiedDwelling,
             QuestionId::MortgageWithinDebtLimit,
+            QuestionId::ClaimingMortgageInterestCredit,
         ];
+        /// The live-question SET, for the differential below.
+        fn live_set(ri: &ReturnInputs) -> Vec<QuestionId> {
+            QuestionId::ALL
+                .iter()
+                .copied()
+                .filter(|q| question_is_live(*q, ri))
+                .collect()
+        }
 
-        // The filer, with the paper in hand and NO Schedule A.
+        // The filer, with the paper in hand and NO Schedule A. The row's shared-interest gate is
+        // BLANK — the shape `open_next_year` seeds and the shape a filer who has just transcribed
+        // the paper is in — and the 8396 gate is blank too.
         let mut standard = ri();
+        standard.claiming_mortgage_interest_credit = None;
         standard.form_1098 = vec![crate::tax::return_inputs::Form1098 {
             lender: "Home Savings".into(),
             box1_interest: dec!(30000),
             box2_outstanding_principal: dec!(900000),
             box3_origination_date: Some(time::macros::date!(2019 - 06 - 01)),
-            other_borrower_paid_interest: Some(false),
+            other_borrower_paid_interest: None,
             ..Default::default()
         }];
-        for q in three {
+        for q in four {
             assert!(
                 !question_is_live(q, &standard),
                 "{q:?} must NOT be live on a standard-deduction return"
@@ -3871,35 +3929,91 @@ mod tests {
             None,
             "the premise: the debt-limit question is UNANSWERED (there is no Schedule A to hold it)"
         );
+        // ★★★ THE CROSS. Each of the four states is a truthful answer a standard-deduction filer
+        //     could hold, and none of them may refuse: they are all statements about SCHEDULE A
+        //     LINE 8a, which this return does not have.
+        for shared in [None, Some(true)] {
+            for credit in [None, Some(true)] {
+                let mut r = standard.clone();
+                r.form_1098[0].other_borrower_paid_interest = shared;
+                r.claiming_mortgage_interest_credit = credit;
+                assert_eq!(
+                    reason(&r),
+                    None,
+                    "a standard-deduction filer is never refused over line 8a \
+                     (shared={shared:?}, 8396={credit:?})"
+                );
+            }
+        }
+        // ★★★ THE DIFFERENTIAL — the assertion that outlives the hand-list above. Same return,
+        //     Form 1098 rows removed: nothing about it may change.
+        let mut bare = standard.clone();
+        bare.form_1098.clear();
+        assert_eq!(
+            live_set(&standard),
+            live_set(&bare),
+            "★ THE KILL: on a return with NO Schedule A, transcribing a Form 1098 must not make one \
+             single question live"
+        );
         assert_eq!(
             reason(&standard),
-            None,
-            "a standard-deduction filer is never refused over a limit on a deduction they are not \
-             claiming"
+            reason(&bare),
+            "★ THE KILL: …and it must not change what the return refuses. Box 4 is the one \
+             deliberate exception and these rows carry no refund"
         );
+        assert_eq!(reason(&bare), None, "the premise: neither refuses at all");
 
-        // The same return, itemizing.
+        // ★★★ THE OTHER HALF — the gates are not DEAD, they are SCOPED. The identical paper on a
+        //     return that claims the deduction refuses on the blank the standard-deduction filer was
+        //     allowed to hold. Without this, deleting the two rules outright would pass everything
+        //     above.
         let mut itemizing = standard.clone();
         itemizing.schedule_a = Some(ScheduleAInputs::default());
         itemizing.documents.set(
             crate::tax::document_census::DocumentRow::Form1098,
             Some(true),
         );
-        for q in three {
+        for q in four {
             assert!(
                 question_is_live(q, &itemizing),
                 "{q:?} IS live once the filer itemizes on a transcribed Form 1098"
             );
         }
+        // The refusals arrive in TIER order — the unanswered declarations first (`screen_inputs`
+        // walks the registry), then the param-free per-row rules — so each is answered in turn and
+        // the next blank is what surfaces.
         assert_eq!(
             reason(&itemizing),
             Some(RefuseReason::MixedUseMortgageUnanswered),
             "…and the three declarations, unanswered, now REFUSE — the same blanks that were \
              lawful one line above"
         );
+        {
+            let a = itemizing.schedule_a.as_mut().expect("just built");
+            a.mortgage_all_used_to_buy_build_improve = Some(true);
+            a.mortgage_dwelling_is_amt_qualified = Some(true);
+            a.mortgage_within_debt_limit = Some(true);
+        }
+        assert_eq!(
+            reason(&itemizing),
+            Some(RefuseReason::MortgageInterestCreditUnanswered),
+            "the SAME blank Form 8396 gate refuses once Schedule A's Line 8a Caution addresses this \
+             return"
+        );
+        itemizing.claiming_mortgage_interest_credit = Some(false);
+        assert_eq!(
+            reason(&itemizing),
+            Some(RefuseReason::SharedMortgageInterestUnanswered),
+            "…and the SAME blank shared-interest gate refuses once there is a line 8a summing box 1 \
+             in full"
+        );
+        itemizing.form_1098[0].other_borrower_paid_interest = Some(false);
+        assert_eq!(
+            reason(&itemizing),
+            None,
+            "every blank answered, the itemizing return files"
+        );
         let a = itemizing.schedule_a.as_mut().expect("just built");
-        a.mortgage_all_used_to_buy_build_improve = Some(true);
-        a.mortgage_dwelling_is_amt_qualified = Some(true);
         a.mortgage_within_debt_limit = Some(false); // truthful: $900,000 is over the 2019 ceiling
                                                     // ★ `MortgageOverDebtLimit` is a COMPUTE-tier rule (`screen_absolute`): it is scoped to a
                                                     //   return that actually ITEMIZES, which liveness alone cannot see. $30,000 of box 1 clears
@@ -4011,28 +4125,46 @@ mod tests {
         assert_eq!(reason(&bare), None);
     }
 
-    /// ★★★ **THE SALE-OF-A-MAIN-HOME TABLE: EIGHT BRANCHES OF THE THREE TESTS, PLUS THE 1099-S ROW.**
+    /// ★★★ **THE SALE-OF-A-MAIN-HOME TABLE: THE THREE TESTS × THE THREE STATES OF THE 1099-S ROW —
+    ///     ALL 24 COMBINATIONS, EXACTLY ONE BLANK.**
     ///
     /// The Schedule D instructions answer their own question — *"Report the sale or exchange of your
     /// main home on Form 8949 if: • You can't exclude all of your gain from income, or • You
-    /// received a Form 1099-S for the sale or exchange."* — so **exactly one** branch leaves the
-    /// return blank: all three tests met and no Form 1099-S. Every other branch belongs on Form
-    /// 8949, which btctax does not build.
+    /// received a Form 1099-S for the sale or exchange."* — so **exactly one** of the 24 leaves the
+    /// return blank: all three tests met and the 1099-S row a stated *no*. Every other combination
+    /// belongs on Form 8949, which btctax does not build.
     ///
     /// ★ The blank is a DECISION with four answers behind it, not an absence: `sold_main_home` is
     ///   always live and `answer_all_live_declarations` cannot reach the tests, so a filer who sold
     ///   a home is asked all four.
     ///
-    /// ★★ The `s_1099 = Some(true)` row refuses through the census's own §2.2 sentence, which names
-    ///    Form 8949 code H and the Pub. 523 worksheet — the same exit, reached one rule earlier
-    ///    because the census is screened before every value-dependent rule. Both are asserted, so a
-    ///    reordering that lost one is visible.
+    /// ★★ **The census dimension is CROSSED, not sampled** (the T9 seam review's M-2). As shipped
+    ///    this test ran the eight test-triples at `s_1099 = Some(false)` only and then added the
+    ///    other two states on the blank branch alone — 10 of 24 — while the build report and the
+    ///    brief both described a full cross. The gap was benign (every refusing triple refuses on
+    ///    its own arm, and the census screens first regardless) but the described coverage was not
+    ///    the delivered coverage, so the loop now carries the dimension.
     ///
-    /// Mutation: delete any one of the four `else if` arms in the branch selector and its row reds.
+    /// ★★ The two answered 1099-S states exit through DIFFERENT rules and both are asserted, so a
+    ///    reordering that lost one is visible: `Some(true)` refuses through the census's own §2.2
+    ///    sentence — which names Form 8949 code H and the Pub. 523 worksheet, the same exit, one
+    ///    rule earlier because the census is screened before every value-dependent rule — and `None`
+    ///    refuses `DocumentCensusUnanswered` at commit while the home-sale rule still refuses at
+    ///    import, where the unanswered tier does not run.
+    ///
+    /// ★★ **What the cross does NOT hold, stated plainly.** The home-sale rule's own
+    ///    `s_1099 == Some(true)` arm is unreachable: the census screens first on both tiers, so
+    ///    planting `false &&` onto that arm reds nothing (measured while folding M-2). The rows here
+    ///    hold the *census's* refusal and its wording, which is what a filer actually meets; the arm
+    ///    itself is a documented fail-closed backstop, not a tested guard — see the comment beside
+    ///    it in `screen_inputs_tiered`.
+    ///
+    /// Mutation: delete the `can_exclude_all_gain` / Test 1 / Test 2 arms of the branch selector and
+    /// their rows red; delete the census's own §2.2 rule and the eight `Some(true)` rows red.
     #[test]
     fn the_home_sale_table_is_one_blank_and_seven_refusals_naming_pub_523() {
         use crate::tax::document_census::DocumentRow;
-        let base = |t1: bool, t2: bool, exclude: bool| {
+        let base = |t1: bool, t2: bool, exclude: bool, s_1099: Option<bool>| {
             let mut r = ri();
             r.home_sale = crate::tax::return_inputs::HomeSale {
                 sold_main_home: Some(true),
@@ -4040,73 +4172,77 @@ mod tests {
                 test2_no_exclusion_on_another_home_in_2_years: Some(t2),
                 can_exclude_all_gain: Some(exclude),
             };
+            r.documents.set(DocumentRow::S1099, s_1099);
             r
         };
         let mut blanks = 0usize;
-        for t1 in [true, false] {
-            for t2 in [true, false] {
-                for exclude in [true, false] {
-                    let r = base(t1, t2, exclude);
-                    match reason(&r) {
-                        None => {
-                            assert!(
-                                t1 && t2 && exclude,
-                                "({t1},{t2},{exclude}) must not be the blank branch"
-                            );
-                            blanks += 1;
+        let mut rows = 0usize;
+        for s_1099 in [Some(false), Some(true), None] {
+            for t1 in [true, false] {
+                for t2 in [true, false] {
+                    for exclude in [true, false] {
+                        rows += 1;
+                        let r = base(t1, t2, exclude, s_1099);
+                        let at = format!("({t1},{t2},{exclude},s_1099={s_1099:?})");
+                        match (s_1099, reason(&r)) {
+                            // ── The stated "no 1099-S arrived": the three tests decide. ──────
+                            (Some(false), None) => {
+                                assert!(t1 && t2 && exclude, "{at} must not be the blank branch");
+                                blanks += 1;
+                            }
+                            (Some(false), Some(RefuseReason::HomeSaleNotComputed(_))) => {
+                                let detail = screen_param_free(&r)
+                                    .expect("every refusing branch refuses on BOTH tiers")
+                                    .detail;
+                                assert!(
+                                    detail.contains("PUB. 523") && detail.contains("code H"),
+                                    "{at} must name Pub. 523 and Form 8949 code H: {detail}"
+                                );
+                            }
+                            // ── A 1099-S DID arrive: the census's §2.2 sentence, one rule
+                            //    earlier, naming the same exit. ────────────────────────────────
+                            (
+                                Some(true),
+                                Some(RefuseReason::DocumentTypeUnsupported {
+                                    kind: DocumentRow::S1099,
+                                }),
+                            ) => {
+                                let detail = screen_param_free(&r)
+                                    .expect("a Form 1099-S refuses on both tiers")
+                                    .detail;
+                                assert!(
+                                    detail.contains("Pub. 523") && detail.contains("code H"),
+                                    "{at} — the 1099-S exit is the same one: {detail}"
+                                );
+                            }
+                            // ── UNANSWERED: refused at commit by the census, and at import by
+                            //    the home-sale rule itself, where the unanswered tier does not
+                            //    run. Neither leaves the sale silently off the return. ─────────
+                            (
+                                None,
+                                Some(RefuseReason::DocumentCensusUnanswered {
+                                    kind: DocumentRow::S1099,
+                                }),
+                            ) => {
+                                assert!(
+                                    matches!(
+                                        screen_param_free(&r).map(|x| x.reason),
+                                        Some(RefuseReason::HomeSaleNotComputed(_))
+                                    ),
+                                    "{at} — and the import tier refuses on its own terms"
+                                );
+                            }
+                            (_, other) => panic!("{at} refused unexpectedly: {other:?}"),
                         }
-                        Some(RefuseReason::HomeSaleNotComputed(_)) => {
-                            let detail = screen_param_free(&r)
-                                .expect("every refusing branch refuses on BOTH tiers")
-                                .detail;
-                            assert!(
-                                detail.contains("PUB. 523") && detail.contains("code H"),
-                                "({t1},{t2},{exclude}) must name Pub. 523 and Form 8949 code H: \
-                                 {detail}"
-                            );
-                        }
-                        other => panic!("({t1},{t2},{exclude}) refused unexpectedly: {other:?}"),
                     }
                 }
             }
         }
+        assert_eq!(rows, 24, "the full cross, not a sample");
         assert_eq!(
             blanks, 1,
-            "exactly ONE of the eight branches is blank by decision"
+            "exactly ONE of the twenty-four combinations is blank by decision"
         );
-
-        // ★ The census dimension. A Form 1099-S on the blank branch still reaches Form 8949 —
-        //   through the census's own §2.2 refusal, whose sentence names the same exit.
-        let mut with_1099s = base(true, true, true);
-        with_1099s.documents.set(DocumentRow::S1099, Some(true));
-        let got = screen_param_free(&with_1099s).expect("a Form 1099-S refuses");
-        assert_eq!(
-            got.reason,
-            RefuseReason::DocumentTypeUnsupported {
-                kind: DocumentRow::S1099
-            }
-        );
-        assert!(
-            got.detail.contains("Pub. 523") && got.detail.contains("code H"),
-            "the 1099-S exit is the same one: {}",
-            got.detail
-        );
-
-        // ★ And an UNANSWERED 1099-S row on the blank branch does not print a blank either: the
-        //   census's unanswered rule refuses at commit, and the home-sale rule refuses at import,
-        //   where the unanswered tier does not run. Neither leaves the sale silently off the return.
-        let mut unanswered = base(true, true, true);
-        unanswered.documents.set(DocumentRow::S1099, None);
-        assert_eq!(
-            reason(&unanswered),
-            Some(RefuseReason::DocumentCensusUnanswered {
-                kind: DocumentRow::S1099
-            })
-        );
-        assert!(matches!(
-            screen_param_free(&unanswered).map(|x| x.reason),
-            Some(RefuseReason::HomeSaleNotComputed(_))
-        ));
     }
 
     fn raw(r: &ReturnInputs) -> Option<RefuseReason> {

@@ -3038,6 +3038,105 @@ fn schedule_a_prints_the_mixed_use_mortgage_box() {
     assert!(!box_on(&pdf, MIXED_USE_BOX));
 }
 
+/// ★★★ **LINE 8b's OVERFLOW — THE FIRST TIME THIS BRANCH HAS BEEN OBSERVED DOING ANYTHING**
+/// (the T9 seam review's I-1; B1).
+///
+/// More recipients than the year's form has dotted lines and the emitter prints the instruction's
+/// own escape — *"identify the person by attaching a statement to your paper return and printing
+/// 'See attached' to the right of line 8b"* (`i1040sca--2025.txt:1126-1131`). T9 shipped the branch
+/// with **no test at all**: `schedule_a_fills_the_printed_chain_and_reads_back` drives one recipient
+/// and asserts the second dotted line stays blank, so nothing ever exercised `fits == false`.
+///
+/// **Both years, because the trigger is not where the TY2024 form suggests.** TY2024 has two dotted
+/// rows, so three recipients overflow; TY2025 merged them into ONE 24pt box, so **two** do.
+///
+/// ★★ And when it overflows, **every** identity leaves the page — the escape replaces the whole
+///    block with one string rather than the tail of it — which is why
+/// [`btctax_forms::schedule_a_line8b_overflow`] returns them all: they are all on the statement, and
+///    that list is what the packet manifest tells the filer to write.
+///
+/// Mutation: return `&[]` unconditionally from `line8b_overflow` and the "See attached" assertions
+/// red on both years.
+#[test]
+fn line_8b_overflows_to_see_attached_on_both_years_and_names_every_recipient() {
+    const P24_1: &str = "topmostSubform[0].Page1[0].f1_17[0]";
+    const P24_2: &str = "topmostSubform[0].Page1[0].f1_18[0]";
+    const P25: &str = "form1[0].Page1[0].Line8b_ReadOrder[0].f1_16[0]";
+    let payees = |n: usize| -> Vec<String> {
+        (0..n)
+            .map(|i| format!("SELLER {i}, 000-00-000{i}, {i} MAIN ST"))
+            .collect()
+    };
+    let with = |n: usize| {
+        let mut l = sch_a_lines();
+        l.line8b_payee = payees(n);
+        l
+    };
+
+    // ── TY2024: two dotted rows. TWO fit; THREE do not. ──────────────────────────────────────
+    let two = with(2);
+    assert!(
+        btctax_forms::schedule_a_line8b_overflow(&two, 2024)
+            .unwrap()
+            .is_empty(),
+        "the premise: two recipients FIT on the TY2024 form"
+    );
+    let pdf = btctax_forms::fill_schedule_a(&two, &kitchen_sink_header(), 2024).unwrap();
+    assert_eq!(
+        tv(&pdf, P24_1).as_deref(),
+        Some("SELLER 0, 000-00-0000, 0 MAIN ST")
+    );
+    assert_eq!(
+        tv(&pdf, P24_2).as_deref(),
+        Some("SELLER 1, 000-00-0001, 1 MAIN ST")
+    );
+
+    let three = with(3);
+    assert_eq!(
+        btctax_forms::schedule_a_line8b_overflow(&three, 2024).unwrap(),
+        payees(3),
+        "★ every recipient is on the statement, not just the third — the escape takes the whole block"
+    );
+    let pdf = btctax_forms::fill_schedule_a(&three, &kitchen_sink_header(), 2024).unwrap();
+    assert_eq!(
+        tv(&pdf, P24_1).as_deref(),
+        Some("See attached"),
+        "★ THE KILL: the instruction's own escape, printed on the first dotted line"
+    );
+    assert_eq!(
+        tv(&pdf, P24_2),
+        None,
+        "…and nothing else: no identity survives the escape"
+    );
+
+    // ── TY2025: ONE merged 24pt box. One fits; TWO do not. ───────────────────────────────────
+    let one = with(1);
+    assert!(
+        btctax_forms::schedule_a_line8b_overflow(&one, 2025)
+            .unwrap()
+            .is_empty(),
+        "the premise: one recipient fits in TY2025's merged box"
+    );
+    let pdf = btctax_forms::fill_schedule_a(&one, &kitchen_sink_header(), 2025).unwrap();
+    assert_eq!(
+        tv(&pdf, P25).as_deref(),
+        Some("SELLER 0, 000-00-0000, 0 MAIN ST")
+    );
+
+    let two = with(2);
+    assert_eq!(
+        btctax_forms::schedule_a_line8b_overflow(&two, 2025).unwrap(),
+        payees(2),
+        "★ TWO is already the overflow on TY2025 — the IRS merged the two dotted rows into one box"
+    );
+    let pdf = btctax_forms::fill_schedule_a(&two, &kitchen_sink_header(), 2025).unwrap();
+    assert_eq!(
+        tv(&pdf, P25).as_deref(),
+        Some("See attached"),
+        "★ THE KILL: and two recipients is all it takes to reach it"
+    );
+}
+
 /// Schedule C's lines A, B and F — captured expressly for those cells. A Schedule C with a blank
 /// "Principal business or profession" is incomplete on its face.
 #[test]

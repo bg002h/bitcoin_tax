@@ -446,8 +446,49 @@ const DIGITAL_ASSET_HAND_MARK: &str =
 /// Each entry is CONDITIONED on the mark actually being blank in THIS packet, because a list that
 /// always says the same thing signals nothing — and telling a filer to hand-mark a box on a
 /// correctly-filed form is worse than silence.
-fn hand_marks(printed: &btctax_core::tax::packet::PrintedReturn) -> Vec<String> {
+///
+/// ★ `line8b_overflow` is [`btctax_forms::schedule_a_line8b_overflow`]'s answer for THIS packet's
+///   year, passed in rather than recomputed here so the mark and the printed page read one
+///   condition (see that function, and the T9 seam review's I-1).
+fn hand_marks(
+    printed: &btctax_core::tax::packet::PrintedReturn,
+    tax_year: i32,
+    line8b_overflow: &[String],
+) -> Vec<String> {
     let mut marks = Vec::new();
+    // ★★★ T9 / R8 — SCHEDULE A LINE 8b's *"See attached"*: the one mark on this list that the
+    //     PRINTED PAGE has already asserted. When there are more line 8b recipients than the year's
+    //     form has dotted lines, the emitter prints the instruction's own escape — *"identify the
+    //     person by attaching a statement to your paper return and printing "See attached" to the
+    //     right of line 8b"* — and btctax generates no statement. Without this entry the filer signs,
+    //     under §6065, a Schedule A asserting an attachment nobody ever told them to write, and the
+    //     instruction prices the omission at the same $50 penalty the 8b-identity refusal quotes.
+    //
+    // ★★ It is CONDITIONED on the overflow having actually happened, like every other mark here: a
+    //    packet whose recipients all fit prints their identities and owes no statement.
+    //
+    // ★★ **And it is the ONLY surface, deliberately.** No advisory and no transcription warning is
+    //    owed: a transcription warning is about a transcribed ROW being suspect, and nothing here is
+    //    (the recipients are entered correctly — the FORM is too small); and an advisory would land
+    //    on stderr, which is the surface N4's own rationale rejects and which the Form 8283
+    //    signatures mark above was moved OFF for exactly this reason. The manifest is the artifact
+    //    the filer follows while assembling the envelope, and the statement goes in the envelope.
+    if !line8b_overflow.is_empty() {
+        marks.push(format!(
+            "Schedule A line 8b — the STATEMENT the form now says is attached: btctax printed \"See \
+             attached\" beside line 8b because this return has {n} recipients of mortgage interest \
+             not reported on a Form 1098 and the {year} Schedule A has room for fewer. The \
+             instruction is \"identify the person by attaching a statement to your paper return and \
+             printing 'See attached' to the right of line 8b\" — btctax printed the second half and \
+             CANNOT write the first. Attach a sheet listing each recipient's name, identifying \
+             number and address, exactly as entered here, and put it in the envelope: {who}. \
+             Without it the printed page asserts an attachment that is not there, and the \
+             instruction prices a missing recipient identity at a $50 penalty.",
+            n = line8b_overflow.len(),
+            year = tax_year,
+            who = line8b_overflow.join("; "),
+        ));
+    }
     // ★★★ R9 / T6 — the mark is now conditioned on the question being UNANSWERED, not on the box
     //     being unchecked. Before T6 the box came from a ledger predicate that could only say
     //     *Yes*, so this mark fired on every no-crypto return and the filer was told to hand-mark a
@@ -1935,7 +1976,14 @@ fn export_full_return(
     manifest.push_str(&undated_rows_block(
         &btctax_core::tax::provenance::undated_document_rows(&ri),
     ));
-    let marks = hand_marks(&printed);
+    // ★★★ T9 / I-1 — the line 8b recipients this year's form cannot print. Read from the SAME
+    //     function the emitter uses, so the manifest cannot fall silent while the page asserts an
+    //     attachment.
+    let line8b_overflow = match printed.forms.sch_a.as_ref() {
+        Some(a) => btctax_forms::schedule_a_line8b_overflow(a, tax_year)?,
+        None => Vec::new(),
+    };
+    let marks = hand_marks(&printed, tax_year, &line8b_overflow);
     manifest.push_str(&hand_marks_block(&marks));
     let manifest_path = out_dir.join("manifest.txt");
     write_bytes_owner_only(&manifest_path, manifest.as_bytes())?;

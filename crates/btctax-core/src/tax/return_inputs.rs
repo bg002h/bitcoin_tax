@@ -2450,6 +2450,38 @@ pub struct ReturnInputs {
 }
 
 impl ReturnInputs {
+    /// ★★★ **THE ITEMIZE-ELECTION CONJUNCT, IN ONE PLACE — the Form 1098 rows that reach a
+    /// SCHEDULE A LINE 8** (R8 / T9; the T9 seam review's C-1).
+    ///
+    /// Empty on a return with no `schedule_a`, however many Forms 1098 the filer transcribed. The
+    /// document is **top-level** — it arrives whether or not the filer itemizes, and its section is
+    /// offered to everyone — but every line-8 consequence of a row (the three mortgage declarations,
+    /// the Form 8396 gate, the shared-interest refusal, the §163(h)(3)(B) ceiling warning) exists
+    /// only where there is a line 8a to be about. A standard-deduction filer holding a $900,000 2019
+    /// 1098 is asked nothing and refused nothing: journey **J-24**.
+    ///
+    /// ★★ **Why an accessor and not a conjunct re-typed at each site.** T9 shipped three new rules
+    ///    beside the two that already carried `schedule_a.is_some()`, each with a doc comment
+    ///    asserting the conjunct was redundant, and the assertion was false — `SectionId::Form1098s`
+    ///    is not gated anywhere, so the rows exist on standard-deduction returns and all three fired.
+    ///    (The same shape as T8's I-1 one task earlier.) A rule that reads the rows through **this**
+    ///    reader cannot forget it, and
+    ///    `a_standard_deduction_filer_with_a_900k_1098_is_asked_nothing_and_refuses_nothing` reds on
+    ///    the *next* rule that reads [`Self::form_1098`] directly, differentially: adding the row to
+    ///    a standard-deduction return must change neither the live-question set nor `reason()`.
+    ///
+    /// ★ **Box 4 is deliberately NOT read through this.** A refund of overpaid interest is INCOME on
+    ///   Schedule 1 line 8z, owed whether or not the filer itemizes, so its refusal iterates
+    ///   [`Self::form_1098`] itself.
+    #[must_use]
+    pub fn form_1098_deducted(&self) -> &[Form1098] {
+        if self.schedule_a.is_some() {
+            &self.form_1098
+        } else {
+            &[]
+        }
+    }
+
     /// ★★★ **Schedule A line 8a's Form 1098 component — the ONE derivation** (R8, T9).
     ///
     /// The line's own caption is *"Home mortgage interest and points reported to you on Form 1098"*
@@ -2459,8 +2491,10 @@ impl ReturnInputs {
     /// ([`ScheduleAInputs::points_not_on_1098`]), never this.
     ///
     /// ★ It reads [`Self::form_1098`] and nothing else, so a return with no Schedule A still
-    ///   computes it — the itemize election gates the SECTION'S LIVENESS, and the deduction is
-    ///   gated where every other Schedule A figure is, by `schedule_a.is_some()`.
+    ///   computes a figure — and that is harmless here because the figure has no reader off
+    ///   Schedule A: `schedule_a_lines` is `None` unless the return itemizes, which is where every
+    ///   other Schedule A figure is gated too. A rule that DECIDES something from the rows reads
+    ///   [`Self::form_1098_deducted`] instead.
     #[must_use]
     pub fn form_1098_interest_and_points(&self) -> Usd {
         self.form_1098
@@ -2475,9 +2509,12 @@ impl ReturnInputs {
     /// interest on up to $750,000 …"* (`i1040sca--2025.txt:1040-1042`) — the limit is on **aggregate
     /// acquisition debt**, so two mortgages at $500,000 each are over it while each row alone is
     /// silent. Summing per row would never warn on exactly the household the limit was written for.
+    ///
+    /// ★ Over [`Self::form_1098_deducted`], not every transcribed row: the §163(h)(3)(B) limit is a
+    ///   limit on a **deduction**, and a return with no Schedule A claims none.
     #[must_use]
     pub fn form_1098_outstanding_principal(&self) -> Usd {
-        self.form_1098
+        self.form_1098_deducted()
             .iter()
             .map(|r| r.box2_outstanding_principal)
             .sum()

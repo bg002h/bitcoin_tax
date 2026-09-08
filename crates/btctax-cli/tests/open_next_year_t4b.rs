@@ -1619,6 +1619,84 @@ fn a_form_1098_lender_is_seeded_as_an_identity_with_every_box_blank() {
     );
 }
 
+/// ★★★ **THE OPENER'S OWN SEED, ON A YEAR THAT TAKES THE STANDARD DEDUCTION, REFUSES NOTHING**
+/// (the T9 seam review's C-1 — the reachable path).
+///
+/// A filer who itemized last year and takes the standard deduction this one does not have to do
+/// anything to reach this: `open_next_year` carries the prior lender forward as an identity, and it
+/// carries **no `schedule_a`** (`grep -c schedule_a crates/btctax-cli/src/open_next_year.rs` → 0).
+/// So the opener itself manufactures the exact shape T9 shipped broken — a Form 1098 row with a
+/// blank shared-interest gate on a return with no line 8a — and the filer, having answered nothing,
+/// was told that *"btctax adds box 1 to Schedule A line 8a IN FULL"* on a row whose box 1 is $0.
+///
+/// ★ This is the SECOND kill for C-1 and it is deliberately not a unit fixture: the first
+/// (`a_standard_deduction_filer_with_a_900k_1098_is_asked_nothing_and_refuses_nothing`) builds the
+/// shape by hand, this one takes whatever the shipped opener actually produces. A change to `seed`
+/// that started carrying a `schedule_a`, or a new box seeded non-blank, is visible here and nowhere
+/// else.
+///
+/// Mutation: read `ri.form_1098` instead of `ri.form_1098_deducted()` in the shared-interest loop
+/// (or in `mortgage_interest_credit_question_live`) and this reds.
+#[test]
+fn the_opener_seeds_a_1098_onto_a_standard_deduction_year_and_nothing_refuses() {
+    use btctax_core::tax::questions::{question_is_live, QuestionId};
+    use btctax_core::tax::return_inputs::{Form1098, ScheduleAInputs};
+    let (_dir, vault) = vault_with_year_n(|ri| {
+        // Year N itemized — which is the only reason there is a lender to carry forward at all.
+        ri.schedule_a = Some(ScheduleAInputs {
+            mortgage_all_used_to_buy_build_improve: Some(true),
+            mortgage_within_debt_limit: Some(true),
+            mortgage_dwelling_is_amt_qualified: Some(true),
+            ..Default::default()
+        });
+        ri.documents.set(DocumentRow::Form1098, Some(true));
+        ri.form_1098 = vec![Form1098 {
+            lender: "Home Savings".into(),
+            lender_tin: "00-0000000".into(),
+            box1_interest: dec!(22000),
+            box2_outstanding_principal: dec!(900000),
+            box3_origination_date: Some(time::macros::date!(2019 - 06 - 01)),
+            other_borrower_paid_interest: Some(false),
+            ..Default::default()
+        }];
+    });
+    open(&vault, false);
+    let seed = draft(&vault);
+
+    // The premises, both measured off the shipped opener rather than assumed.
+    assert!(
+        seed.schedule_a.is_none(),
+        "the premise: the opener carries no Schedule A — year N+1 has not elected anything yet"
+    );
+    assert_eq!(
+        seed.form_1098.len(),
+        1,
+        "the premise: it DOES carry the lender identity"
+    );
+    assert_eq!(
+        seed.form_1098[0].other_borrower_paid_interest, None,
+        "the premise: the row's shared-interest gate is blank — the seed answers nothing"
+    );
+
+    for q in [
+        QuestionId::MortgageAllUsedToBuyBuildImprove,
+        QuestionId::AmtQualifiedDwelling,
+        QuestionId::MortgageWithinDebtLimit,
+        QuestionId::ClaimingMortgageInterestCredit,
+    ] {
+        assert!(
+            !question_is_live(q, &seed),
+            "★ THE KILL: {q:?} must not be asked of a filer with no Schedule A"
+        );
+    }
+    assert_eq!(
+        btctax_core::tax::return_refuse::screen_param_free(&seed).map(|r| r.reason),
+        None,
+        "★ THE KILL: the seeded row refuses nothing — a filer who has done NOTHING but open the \
+         year cannot be blocked over a Schedule A line 8a their return does not have"
+    );
+}
+
 /// ★★★ **T16 / FR-76 — THE HSA TRUSTEE IS A PAYER IDENTITY, SEEDED WITH EVERY BOX BLANK.**
 ///
 /// R10.4's sentence is as true of a Form 1099-SA as of a Form 1099-INT: an HSA trustee that reported
