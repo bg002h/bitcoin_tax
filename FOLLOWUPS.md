@@ -6331,6 +6331,18 @@ build, each with an owning phase.
   same-day case honestly (*"on or before"*) and adds the fixture; the fix — a timestamped
   `effective_from` or an "after the last same-day sale" rule read off the Notice — needs its own
   spec sentence and a kill on the filed basis.
+- **FR-78 — two hash lists over one tree (T16 build `86bc9171`). Owning phase: ownerless residue.**
+  `legal/SHA256SUMS` covers 50 of the 58 files under `legal/primary-sources/`; the other eight are
+  hashed in `design/forms/MANIFEST.json`. Both hash everything, but the 2026-07-30 hybrid decision
+  meant to end the duplication; named in `legal/SOURCES.md`. One list, one checker.
+- **FR-79 — TY2025 cannot compute a Form 8889 because the year is PAUSED (`full_return_for(2025)` is
+  `None`); the TY2025 map and emitter are exercised only by direct-fill tests (T16 build). Owning
+  phase: the S1 ruling (unpause TY2025).** The §223(b) TY2025 figures ($4,300 / $8,550, Rev. Proc.
+  2024-25) are archived and ready.
+- **FR-80 — the Form 8889 Line 3 Limitation Chart and Worksheet is not carried (T16 build). Owning
+  task: interview T16 residue, before the simulated real return if the owner's eligibility was
+  part-year.** Every path to it refuses naming it (part-year eligibility, Medicare, the last-month
+  rule); transcribing the worksheet (`i8889`) lets a part-year or Medicare filer file.
   Owner-driven; the assistant prepares the walk (a checklist of moments from `SPEC_interview.md` §6)
   and records the findings verbatim.
 - **FR-47 — `AmtParams` / `FullReturnParams` TY2026 is a NOW item, not a post-finals one.**
