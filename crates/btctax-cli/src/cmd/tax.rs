@@ -813,12 +813,17 @@ pub fn report_tax_year(
                 let ar = btctax_core::assemble_absolute(&ri, &state, params, table, year);
                 let regime = crate::year_readiness::regime_or_refuse(year)?;
                 match btctax_core::screen_absolute(&ri, &ar, params, &state, year, regime) {
+                    // ★★★ §4.4 / T12 — THE INTERVIEW BLOCK RIDES THE REFUSAL BRANCH TOO, and this
+                    //     is the branch where it earns its keep: a return that will not compute is
+                    //     exactly when a filer needs the panel, the census and the home-sale
+                    //     decision in one place rather than one refusal at a time.
                     Some(refusal) => Some(format!(
                         "\n═══ Absolute filed return (Form 1040) — tax year {year} ═══\n  \
-                         Profile source: {}\n  NOT COMPUTABLE [{:?}]: {}\n",
+                         Profile source: {}\n  NOT COMPUTABLE [{:?}]: {}\n{}",
                         crate::render::provenance_label(provenance),
                         refusal.reason,
-                        refusal.detail
+                        refusal.detail,
+                        crate::render::render_interview_block(&ri, Some(params)),
                     )),
                     None => {
                         // P5: the full-return block carries the §3.4 conservative-omission advisories
@@ -861,6 +866,12 @@ pub fn report_tax_year(
                                 Some(params.acquisition_debt_ceiling),
                             ),
                         ));
+                        // ★★★ §4.4 / T12 — the census, the answer panel, the home-sale decision,
+                        //     row (7) per dependent, and where every collected figure came from.
+                        //     LAST, *"after the existing chains"*, because it is about the INPUTS
+                        //     rather than the figures — the filer reads it having just seen what
+                        //     was computed from them.
+                        block.push_str(&crate::render::render_interview_block(&ri, Some(params)));
                         Some(block)
                     }
                 }

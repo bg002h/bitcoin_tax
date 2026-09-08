@@ -1748,6 +1748,94 @@ fn tax_profile_negative_w2_medicare_wages_rejected() {
     );
 }
 
+/// ★★★ **T12 / §4.4 — `report --tax-year N` PRINTS THE INTERVIEW BLOCK, END TO END.**
+///
+/// The block's contents have their own unit kills (`render::interview_block_tests`); this asserts
+/// the thing those cannot — that the block is **wired into the command a filer runs**. A renderer
+/// that is correct and never called is the shape this repo keeps finding.
+#[test]
+fn report_tax_year_prints_the_interview_block_after_the_existing_chains() {
+    use btctax_core::tax::return_inputs::{Form1099Int, Owner, ReturnInputs, W2};
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2024(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: adult_filer_header(),
+            w2s: vec![W2 {
+                owner: Owner::Taxpayer,
+                box1_wages: dec!(80000),
+                box3_ss_wages: dec!(80000),
+                box5_medicare_wages: dec!(80000),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        ri.documents.set(
+            btctax_core::tax::document_census::DocumentRow::Int1099,
+            Some(true),
+        );
+        ri.int_1099 = vec![Form1099Int {
+            payer: "First Bank".into(),
+            payer_tin: "12-3456789".into(),
+            box1_interest: dec!(200),
+            transcribed_on: None,
+            ..Default::default()
+        }];
+        btctax_cli::return_inputs::set(s.conn(), 2024, &answered_for(&s, 2024, ri)).unwrap();
+        s.save().unwrap();
+    }
+    let TaxYearReport {
+        dual_report: dual, ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap();
+    let dual = dual.expect("a ReturnInputs-provenance year must produce the §6 dual report");
+
+    assert!(
+        dual.contains("The interview — tax year 2024"),
+        "the §4.4 block reaches the command's output: {dual}"
+    );
+    assert!(
+        dual.contains("Documents received (the census)"),
+        "…with the census: {dual}"
+    );
+    assert!(
+        dual.contains("The answer panel"),
+        "…the answer panel: {dual}"
+    );
+    assert!(
+        dual.contains("Sale of your main home"),
+        "…the home-sale decision: {dual}"
+    );
+    assert!(
+        dual.contains("Where each figure came from"),
+        "…and the provenance of every collected figure: {dual}"
+    );
+    // ★ THE KILL the brief names: a payer TIN must never reach the report unmasked.
+    assert!(
+        dual.contains("**-***6789"),
+        "the payer TIN is masked: {dual}"
+    );
+    assert!(
+        !dual.contains("12-3456789") && !dual.contains("123456789"),
+        "NO unmasked payer TIN reaches the report: {dual}"
+    );
+    assert!(
+        dual.contains("Form 1099-INT #1 (First Bank) — transcribed without a date"),
+        "…and an undated row is named rather than omitted: {dual}"
+    );
+    // ★ It comes AFTER the existing chains (§4.4: *"after the existing chains"*).
+    let i_return = dual.find("Absolute filed return").expect("the §6 block");
+    let i_interview = dual
+        .find("The interview — tax year")
+        .expect("the §4.4 block");
+    assert!(
+        i_return < i_interview,
+        "the interview block follows the figures it explains"
+    );
+}
+
 /// §6 DUAL REPORT: a `ReturnInputs`-provenance TY2024 year renders the absolute filed 1040 (income →
 /// total tax → refund/owed) side-by-side with the crypto delta, carrying the §6 "different questions /
 /// not reconciled" labels + the §4.12 provenance line. A non-ReturnInputs (stored-profile) year does not.

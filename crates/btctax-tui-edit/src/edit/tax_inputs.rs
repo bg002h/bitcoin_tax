@@ -720,10 +720,18 @@ fn optional_present(ri: &ReturnInputs, id: SectionId) -> bool {
 /// year's Form 8949 and no Form 1099-DA answer is what J-4 and J-7 are about — the filer who forgot
 /// River — and the commit modal is the last screen before the row is written. The rows come from the
 /// SAME `step0_panel` the entry screen and `income answer` print, never a second derivation.
+///
+/// ★★★ **T12 / R12 — THE FORGOING AND REFUSING LISTS RIDE HERE TOO (J-12, J-17, J-32).**
+/// The modal is the last screen before the vault is written, and R12 says it prints both lists.
+/// J-32 is the filer who answered `k1 = Yes` at the census, saw nothing blocking and committed:
+/// the refusal is already decided, and this is where they meet it with its exit. J-12 is line 19's
+/// forgo, visible with its size before filing. Both come from `panel` — the SAME
+/// `interview_state()` walk the pane renders — never a second derivation.
 pub fn commit_summary_with_step0(
     ri: &ReturnInputs,
     shadows: bool,
     step0: &btctax_cli::step0::Step0Panel,
+    panel: &[String],
 ) -> String {
     let mut s = commit_summary(ri, shadows);
     let unanswered: Vec<&btctax_cli::step0::Step0Row> = step0
@@ -750,6 +758,15 @@ pub fn commit_summary_with_step0(
         ));
         for so in &step0.standing_orders {
             s.push_str(&format!("\n  • {}", so.what));
+        }
+    }
+    // ★★★ T12 / R12 — the panel's FORGOING and REFUSING lists, verbatim. A `Declined` benefit is
+    //     still forgone and still listed *(declined)*: dropping it exactly when the forgo becomes
+    //     final is backwards.
+    if !panel.is_empty() {
+        s.push('\n');
+        for line in panel {
+            s.push_str(&format!("\n{line}"));
         }
     }
     s

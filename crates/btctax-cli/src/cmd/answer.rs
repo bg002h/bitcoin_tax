@@ -295,79 +295,125 @@ pub fn write_panel(
     st: &btctax_core::tax::interview_state::InterviewState,
     when: &str,
 ) -> std::io::Result<()> {
-    writeln!(out, "\n── The answer panel ({when}) ──")?;
+    // ★ The leading blank line is the CLI's own framing (it separates the panel from whatever the
+    //   command printed above it) and is deliberately not part of [`panel_lines`], which a pane
+    //   draws inside a bordered block where a stray first row would be a hole.
+    writeln!(out)?;
+    for line in panel_lines(st, when) {
+        writeln!(out, "{line}")?;
+    }
+    Ok(())
+}
+
+/// ★★★ **T12 / R12 — THE PANEL'S LINES, BUILT ONCE FOR EVERY SURFACE THAT SHOWS IT.**
+///
+/// `income answer` writes them to stdout, the TUI draws them in a pane, and the commit modal takes
+/// two of the sections verbatim. The T12 rule is the one every task before it learned: **render,
+/// never recompute.** A second renderer beside this one would be a second chance to word the same
+/// forgo differently — the exact shape `step0::tui_lines` exists to prevent for the ledger panel,
+/// one surface up.
+///
+/// The first line is the heading (`── The answer panel (when) ──`, blank-prefixed by the caller's
+/// own framing rather than here, so a pane can draw it without a stray leading row).
+#[must_use]
+pub fn panel_lines(
+    st: &btctax_core::tax::interview_state::InterviewState,
+    when: &str,
+) -> Vec<String> {
+    let mut out = vec![format!("── The answer panel ({when}) ──")];
     if st.open_items() == 0 {
-        writeln!(
-            out,
+        out.push(
             "  nothing is open: every live question is answered, nothing is forgone, and no answer \
              refuses."
-        )?;
+                .to_string(),
+        );
     }
     if !st.blocking.is_empty() {
-        writeln!(
-            out,
+        out.push(format!(
             "  BLOCKING ({}) — commit waits on these:",
             st.blocking.len()
-        )?;
+        ));
         for b in &st.blocking {
-            writeln!(out, "    • {} [{}]", b.prompt, b.reason)?;
+            out.push(format!("    • {} [{}]", b.prompt, b.reason));
         }
     }
     if !st.refusing.is_empty() {
-        writeln!(
-            out,
-            "  REFUSING ({}) — an answer already given that stops the return:",
-            st.refusing.len()
-        )?;
-        for r in &st.refusing {
-            writeln!(out, "    • {}", r.exit)?;
-        }
+        out.extend(refusing_lines(st));
     }
     if !st.forgoing.is_empty() {
-        writeln!(
-            out,
-            "  FORGOING ({}) — lawful to skip; each one costs YOU, not the Treasury:",
-            st.forgoing.len()
-        )?;
-        for f in &st.forgoing {
-            let mark = if f.declined { " (declined)" } else { "" };
-            // ★ Plain `$N` rather than `advisories::fmt_usd`, which is `pub(crate)` to core.
-            let size = f
-                .size
-                .map_or_else(String::new, |s| format!(" — up to ${s}"));
-            writeln!(out, "    • {}{mark}{size}", f.prompt)?;
-        }
+        out.extend(forgoing_lines(st));
     }
     if !st.waiting.is_empty() {
-        writeln!(
-            out,
+        out.push(format!(
             "  WAITING ({}) — these cannot be asked until a year package arrives:",
             st.waiting.len()
-        )?;
+        ));
         for w in &st.waiting {
-            writeln!(out, "    • {} [waiting on {}]", w.prompt, w.waiting_on)?;
+            out.push(format!("    • {} [waiting on {}]", w.prompt, w.waiting_on));
         }
     }
     // ★★★ R6 / T8 — benefits the FORM computes on a schedule btctax does not file. There is nothing
     //     to answer, which is why they are their own heading rather than a `FORGOING` row: telling a
     //     filer to "answer" 1040 line 19 would send them looking for a question that does not exist.
     if !st.not_computed.is_empty() {
-        writeln!(
-            out,
+        out.push(format!(
             "  NOT COMPUTED ({}) — btctax does not file the schedule these are figured on; the \
              credit boxes on your return are printed, the amount is yours to enter:",
             st.not_computed.len()
-        )?;
+        ));
         for n in &st.not_computed {
-            writeln!(out, "    • {}", n.line())?;
+            out.push(format!("    • {}", n.line()));
         }
     }
-    writeln!(
-        out,
+    out.push(format!(
         "  ({} answered, {} not applicable to this return)",
         st.answered, st.not_live
-    )?;
-    Ok(())
+    ));
+    out
+}
+
+/// ★★★ **T12 / R12 — THE REFUSING LIST, one rendering for the panel AND the commit modal (J-32).**
+///
+/// The commit modal shows it because J-32 is a filer who answered `k1 = Yes` at the census, saw
+/// nothing blocking, and committed: the refusal is already decided and the modal is the last screen
+/// before the write. Sharing the lines with the panel is what keeps the two from describing one
+/// refusal in two ways.
+#[must_use]
+pub fn refusing_lines(st: &btctax_core::tax::interview_state::InterviewState) -> Vec<String> {
+    let mut out = vec![format!(
+        "  REFUSING ({}) — an answer already given that stops the return:",
+        st.refusing.len()
+    )];
+    for r in &st.refusing {
+        out.push(format!("    • {}", r.exit));
+    }
+    out
+}
+
+/// ★★★ **T12 / R12 — THE FORGOING LIST, one rendering for the panel, the commit modal (J-12) AND
+/// the packet manifest (J-15).**
+///
+/// ★★ **A `Declined` benefit is STILL FORGONE and is still listed, marked *(declined)*.** Dropping
+///    it from the list exactly when the forgo becomes FINAL is backwards — declining is provenance
+///    (asked, refused), not absence. Only `Given` removes an item.
+///
+/// ★ The size is printed only where the year's package could compute it: a figure invented from no
+///   package is worse than a gap the filer can see.
+#[must_use]
+pub fn forgoing_lines(st: &btctax_core::tax::interview_state::InterviewState) -> Vec<String> {
+    let mut out = vec![format!(
+        "  FORGOING ({}) — lawful to skip; each one costs YOU, not the Treasury:",
+        st.forgoing.len()
+    )];
+    for f in &st.forgoing {
+        let mark = if f.declined { " (declined)" } else { "" };
+        // ★ Plain `$N` rather than `advisories::fmt_usd`, which is `pub(crate)` to core.
+        let size = f
+            .size
+            .map_or_else(String::new, |s| format!(" — up to ${s}"));
+        out.push(format!("    • {}{mark}{size}", f.prompt));
+    }
+    out
 }
 
 /// The R12 panel for `ri`, with the year's package where there is one.

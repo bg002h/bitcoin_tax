@@ -18,6 +18,7 @@
 //! "what remains", superseded *values*, half-typed tokens. A record says *when* an answer was given and
 //! *which words were asked* — never how far through the interview the filer got.
 
+use crate::conventions::Usd;
 use crate::tax::questions::{QuestionId, SkippableId, FORM_QUESTIONS, SKIPPABLE_QUESTIONS};
 use crate::tax::return_inputs::ReturnInputs;
 use serde::{Deserialize, Serialize};
@@ -197,6 +198,183 @@ pub fn undated_document_rows(ri: &ReturnInputs) -> Vec<String> {
     out
 }
 
+/// ★★★ **R10.2 / §4.4 — A PAYER'S TIN, MASKED, and masked HERE rather than by each surface.**
+///
+/// `report` prints the provenance of every collected figure *"with payer TIN masked"*, and the
+/// packet's own artifacts name payers too. Making the masking a property of the FUNCTION that
+/// produces the identity — rather than a discipline each renderer remembers — is the same move
+/// `Ssn`'s `Debug` makes one struct over: there is no unmasked string for a caller to print by
+/// accident, because none is ever handed out.
+///
+/// An EIN is `NN-NNNNNNN`, so the last four digits are kept and everything before them is starred.
+/// A TIN that was never transcribed is empty, and empty stays empty — *"not transcribed"* is not
+/// *"masked"*, and printing `**-***` for a blank would invent a document identity.
+#[must_use]
+pub fn mask_payer_tin(tin: &str) -> String {
+    let digits: String = tin.chars().filter(char::is_ascii_digit).collect();
+    if digits.is_empty() {
+        return String::new();
+    }
+    if digits.len() < 4 {
+        return "**-***????".to_string();
+    }
+    format!("**-***{}", &digits[digits.len() - 4..])
+}
+
+/// ★★★ **§4.4 — ONE COLLECTED FIGURE, WITH THE PROVENANCE THE FORM GIVES IT.**
+///
+/// Produced by [`collected_figures`]; printed by `report`. A figure is *collected* when the filer
+/// put it there — off a document they hold, or out of their own books — as opposed to computed by
+/// btctax or carried from a prior year.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CollectedFigure {
+    /// The serde leaf path the walk found it at (`int_1099[0].box1_interest`).
+    pub path: String,
+    /// The [`LEAF_SOURCE`] source for that path.
+    pub source: Source,
+    /// The amount on the return.
+    pub amount: Usd,
+    /// For a [`Source::Document`] figure, the ROW's identity — designation, one-based row number,
+    /// issuer, and the payer TIN **already masked**. `None` for a filer's-records figure, which has
+    /// no document behind it by definition (R5).
+    pub document: Option<String>,
+}
+
+/// ★★★ **§4.4 — THE `LEAF_SOURCE` PROVENANCE OF EVERY COLLECTED FIGURE ON THE RETURN.**
+///
+/// *"`report --tax-year N` prints … the `LEAF_SOURCE` provenance of every collected figure
+/// (document with payer TIN masked / filer's records)"*. Two blanks look identical on the printed
+/// page and are not the same thing; this is the surface that says which figures have a piece of
+/// paper behind them and which came out of the filer's own books.
+///
+/// ★★ **The set is DERIVED, never a list.** It is [`leaf_walk::money_leaves`] — the type-driven
+///    detector, which classifies a leaf by whether `Decimal`'s own deserializer accepts it — joined
+///    to [`LEAF_SOURCE`]. A money box added tomorrow is printed the day it is populated, with
+///    nobody having remembered to add it here. That is deliberately the same instrument the
+///    `LEAF_SOURCE` KAT runs on, so this surface cannot describe a leaf the KAT does not police.
+///
+/// ★★ **A ZERO IS NOT LISTED, and the reason is the answered-ness rule rather than tidiness.** A
+///    `Usd` serializes as `"0"` whether the filer transcribed a zero box or nothing ever touched it
+///    — the two are the same bytes — so listing zeroes would assert a provenance for boxes that
+///    carry none. *Blank is the normal case*: the figures a filer needs to see the provenance of
+///    are the ones that move the return.
+///
+/// ★ Only [`Source::Document`] and [`Source::FilerRecords`] are collected. A [`Source::Computed`]
+///   carryover and a [`Source::Ledger`] figure are btctax's own arithmetic, and calling them
+///   *collected* would be false; [`Source::Answer`] is a figure that IS an answer, and the answer
+///   log is its provenance.
+#[must_use]
+pub fn collected_figures(ri: &ReturnInputs) -> Vec<CollectedFigure> {
+    let doc = serde_json::to_value(ri).expect("ReturnInputs serializes");
+    let mut out = Vec::new();
+    for path in leaf_walk::money_leaves(ri) {
+        let Some(source) = source_of_leaf(&path) else {
+            continue;
+        };
+        if !matches!(source, Source::Document(_) | Source::FilerRecords) {
+            continue;
+        }
+        let Some(v) = leaf_walk::at(&doc, &path) else {
+            continue;
+        };
+        let Some(amount) = v.as_str().and_then(|s| s.parse::<Usd>().ok()) else {
+            continue;
+        };
+        if amount == Usd::ZERO {
+            continue;
+        }
+        let document = match source {
+            Source::Document(kind) => row_index_of(&path).map(|i| document_identity(ri, kind, i)),
+            _ => None,
+        };
+        out.push(CollectedFigure {
+            path,
+            source,
+            amount,
+            document,
+        });
+    }
+    out
+}
+
+/// The `[i]` of the FIRST index in a walked leaf path — the document row a box belongs to.
+fn row_index_of(path: &str) -> Option<usize> {
+    let (_, rest) = path.split_once('[')?;
+    let (idx, _) = rest.split_once(']')?;
+    idx.parse().ok()
+}
+
+/// ★★★ **One document row's identity, with the payer TIN ALREADY MASKED.**
+///
+/// The match is exhaustive over [`DocumentKind`], so a document family added tomorrow is a compile
+/// error here until its issuer field is named — the blast radius `CLAUDE.md` asks for.
+fn document_identity(ri: &ReturnInputs, kind: DocumentKind, i: usize) -> String {
+    let (designation, issuer, tin) = match kind {
+        DocumentKind::W2 => (
+            "Form W-2",
+            ri.w2s.get(i).map(|r| r.employer.clone()),
+            // ★ The W-2's issuer identifier is the employer's EIN, and it is masked like a payer's.
+            //   `Option<String>` on this row alone — an untranscribed EIN flattens to empty, which
+            //   `mask_payer_tin` then leaves empty: *not transcribed* is not *masked*.
+            ri.w2s.get(i).and_then(|r| r.ein.clone()),
+        ),
+        DocumentKind::Form1099Int => (
+            "Form 1099-INT",
+            ri.int_1099.get(i).map(|r| r.payer.clone()),
+            ri.int_1099.get(i).map(|r| r.payer_tin.clone()),
+        ),
+        DocumentKind::Form1099Div => (
+            "Form 1099-DIV",
+            ri.div_1099.get(i).map(|r| r.payer.clone()),
+            ri.div_1099.get(i).map(|r| r.payer_tin.clone()),
+        ),
+        DocumentKind::Form1099G => (
+            "Form 1099-G",
+            ri.g_1099.get(i).map(|r| r.payer.clone()),
+            ri.g_1099.get(i).map(|r| r.payer_tin.clone()),
+        ),
+        DocumentKind::Form1099B => (
+            "Form 1099-B",
+            ri.b_1099.get(i).map(|r| r.payer.clone()),
+            ri.b_1099.get(i).map(|r| r.payer_tin.clone()),
+        ),
+        DocumentKind::Form1098 => (
+            "Form 1098",
+            ri.form_1098.get(i).map(|r| r.lender.clone()),
+            ri.form_1098.get(i).map(|r| r.lender_tin.clone()),
+        ),
+        DocumentKind::Form1098E => (
+            "Form 1098-E",
+            ri.form_1098e.get(i).map(|r| r.lender.clone()),
+            ri.form_1098e.get(i).map(|r| r.lender_tin.clone()),
+        ),
+        DocumentKind::Form1099Sa => (
+            "Form 1099-SA",
+            ri.sa_1099.get(i).map(|r| r.payer.clone()),
+            ri.sa_1099.get(i).map(|r| r.payer_tin.clone()),
+        ),
+        DocumentKind::Form5498Sa => (
+            "Form 5498-SA",
+            ri.sa_5498.get(i).map(|r| r.trustee.clone()),
+            ri.sa_5498.get(i).map(|r| r.trustee_tin.clone()),
+        ),
+    };
+    let who = issuer.unwrap_or_default();
+    let who = if who.trim().is_empty() {
+        String::new()
+    } else {
+        format!(" {}", who.trim())
+    };
+    // ★ MASKED HERE. There is no branch of this function that returns an unmasked TIN.
+    let tin = mask_payer_tin(&tin.unwrap_or_default());
+    let tin = if tin.is_empty() {
+        String::new()
+    } else {
+        format!(" · TIN {tin}")
+    };
+    format!("{designation} #{}{who}{tin}", i + 1)
+}
+
 /// Resolve one serde leaf path to its [`Source`], or `None` when no [`LEAF_SOURCE`] prefix claims it.
 ///
 /// A prefix matches `p` exactly, or `p.` (a nested field), or `p[` (a row of a `Vec`) — the same
@@ -215,7 +393,7 @@ fn prefix_matches(prefix: &str, path: &str) -> bool {
         || path.starts_with(&format!("{prefix}["))
 }
 
-/// ★★★ **THE LEAF WALK — test scaffolding, in the library on purpose.**
+/// ★★★ **THE LEAF WALK — the type-driven money detector, in the library on purpose.**
 ///
 /// [`money_leaves`] is the type-driven money detector the [`LEAF_SOURCE`] KAT is built on, and
 /// **T4b's kill needs the same walk from another crate**: *"no `Usd` leaf of the year-N+1 seed is
@@ -224,7 +402,16 @@ fn prefix_matches(prefix: &str, path: &str) -> bool {
 /// `btctax-cli` would be a second thing to keep true — so this lives here, `#[doc(hidden)]`, for
 /// the same reason [`crate::tax::testonly`] does: one walk, one detector, two callers.
 ///
-/// It contains no tax logic and nothing production reads it.
+/// It contains no tax logic.
+///
+/// ★★ **T12 amended the sentence that used to stand here.** It said *"nothing production reads
+/// it"*, and that is no longer true: §4.4's provenance block on `report` is
+/// [`super::collected_figures`], which is this walk joined to [`super::LEAF_SOURCE`]. That is the
+/// point rather than a compromise — the surface that tells a filer which figures have a document
+/// behind them must enumerate the same leaves the `LEAF_SOURCE` KAT polices, or it can fall silent
+/// about a box the KAT is happily checking. Measured on the maximal household
+/// (`every_money_leaf_household`, 170 non-zero leaves): **30.5 ms**, against a `report` run that
+/// projects the whole ledger and computes a return.
 #[doc(hidden)]
 pub mod leaf_walk {
     use super::ReturnInputs;
@@ -858,6 +1045,86 @@ mod tests {
             }
         }
         a
+    }
+
+    /// ★★★ **§4.4 — EVERY COLLECTED FIGURE IS LISTED, AND THE SET IS DERIVED FROM THE SAME WALK
+    ///     THE `LEAF_SOURCE` KAT POLICES.**
+    ///
+    /// The fixture is `maximal_sentinel` — the repo's every-`Option`-`Some`, two-rows-of-every-`Vec`,
+    /// every-leaf-non-default return, written as an exhaustive struct literal — so this is a
+    /// derived checker fed a fixture derived from the same set it walks (FOLLOWUPS FR-88). A money
+    /// box added to any document is `E0063` in that fixture and appears here the same day.
+    #[test]
+    fn every_collected_money_leaf_is_listed_with_its_source() {
+        let ri = maximal_sentinel();
+        let listed: BTreeSet<String> = collected_figures(&ri).into_iter().map(|f| f.path).collect();
+        // The expectation is COMPUTED from the same two primitives the function is built on, so it
+        // cannot go stale: every non-zero money leaf whose source is Document or FilerRecords.
+        let doc = serde_json::to_value(&ri).unwrap();
+        let want: BTreeSet<String> = money_leaves(&ri)
+            .into_iter()
+            .filter(|p| {
+                matches!(
+                    source_of_leaf(p),
+                    Some(Source::Document(_) | Source::FilerRecords)
+                ) && super::leaf_walk::at(&doc, p)
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse::<Usd>().ok())
+                    .is_some_and(|a| a != Usd::ZERO)
+            })
+            .collect();
+        assert!(
+            !want.is_empty(),
+            "the fixture must actually carry collected figures or this test asserts nothing"
+        );
+        assert_eq!(listed, want, "the listed set IS the derived set");
+        // Every DOCUMENT figure names its row; no filer's-records figure claims one (R5: the line
+        // exists BECAUSE no third party reported it).
+        for f in collected_figures(&ri) {
+            match f.source {
+                Source::Document(_) => assert!(
+                    f.document.is_some(),
+                    "a document figure names its row: {}",
+                    f.path
+                ),
+                _ => assert!(
+                    f.document.is_none(),
+                    "a filer's-records figure has no document behind it: {}",
+                    f.path
+                ),
+            }
+        }
+    }
+
+    /// ★★★ **§4.4 — THE PAYER TIN IS MASKED, AND THERE IS NO UNMASKED PATH OUT.**
+    ///
+    /// The kill is over the RENDERED identity rather than over `mask_payer_tin` alone: a masking
+    /// function that is correct and not called is the shape this repo keeps finding.
+    #[test]
+    fn a_documents_payer_tin_is_masked_in_every_collected_figure() {
+        let mut ri = maximal_sentinel();
+        ri.int_1099[0].payer = "First Bank".into();
+        ri.int_1099[0].payer_tin = "12-3456789".into();
+        let figures = collected_figures(&ri);
+        let ident: Vec<String> = figures.iter().filter_map(|f| f.document.clone()).collect();
+        assert!(
+            ident.iter().any(|d| d.contains("First Bank")),
+            "the payer is named: {ident:?}"
+        );
+        assert!(
+            ident.iter().any(|d| d.contains("**-***6789")),
+            "…with the TIN MASKED: {ident:?}"
+        );
+        for d in &ident {
+            assert!(
+                !d.contains("12-3456789") && !d.contains("123456789"),
+                "no collected figure may carry an unmasked TIN: {d}"
+            );
+        }
+        // An untranscribed TIN stays EMPTY — "not transcribed" is not "masked", and printing a
+        // masked shape for a blank would invent a document identity.
+        assert_eq!(mask_payer_tin(""), "");
+        assert_eq!(mask_payer_tin("12-3456789"), "**-***6789");
     }
 
     /// ★★★ **THE LEAF_SOURCE KAT — BOTH DIRECTIONS** (§8: *"no `Money` field outside a document or

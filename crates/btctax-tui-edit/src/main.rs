@@ -886,6 +886,8 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
             refused_section: None,
             broker_census: broker_census.clone(),
             broker_regime: regime,
+            panel_open: false,
+            panel_scroll: 0,
             step0: btctax_cli::step0::Step0Panel::default(),
             now,
         },
@@ -913,6 +915,8 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 refused_section: None,
                 broker_census: broker_census.clone(),
                 broker_regime: regime,
+                panel_open: false,
+                panel_scroll: 0,
                 step0: btctax_cli::step0::Step0Panel::default(),
                 now,
             }
@@ -941,6 +945,8 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 refused_section: None,
                 broker_census: broker_census.clone(),
                 broker_regime: regime,
+                panel_open: false,
+                panel_scroll: 0,
                 step0: btctax_cli::step0::Step0Panel::default(),
                 now,
             }
@@ -981,6 +987,8 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 refused_section: None,
                 broker_census: broker_census.clone(),
                 broker_regime: regime,
+                panel_open: false,
+                panel_scroll: 0,
                 step0: btctax_cli::step0::Step0Panel::default(),
                 now,
             }
@@ -1244,6 +1252,20 @@ fn handle_tax_inputs_key(app: &mut EditorApp, key: KeyEvent) {
                     form.modal = None; // cancel — writes nothing
                 }
             }
+            // ★★★ T12 — the commit payload carries the FORGOING and REFUSING lists (J-12/J-17/J-32)
+            //     and can be taller than the terminal, so it scrolls. The renderer clamps the
+            //     cursor against its own wrapped row count; these arms only move it. Every other
+            //     key is still swallowed — this is a payload-confirm.
+            KeyCode::Down | KeyCode::Up | KeyCode::PageDown | KeyCode::PageUp => {
+                if let Some(m) = app.tax_inputs_form.as_mut().and_then(|f| f.modal.as_mut()) {
+                    m.scroll = match key.code {
+                        KeyCode::Down => m.scroll.saturating_add(1),
+                        KeyCode::Up => m.scroll.saturating_sub(1),
+                        KeyCode::PageDown => m.scroll.saturating_add(10),
+                        _ => m.scroll.saturating_sub(10),
+                    };
+                }
+            }
             _ => {}
         }
         return;
@@ -1263,6 +1285,38 @@ fn handle_tax_inputs_key(app: &mut EditorApp, key: KeyEvent) {
             KeyCode::Esc => app.tax_inputs_form = None,
             _ => {}
         }
+        return;
+    }
+
+    // ★★★ **T12 / R12 — `p` TOGGLES THE ANSWER PANEL PANE.**
+    //
+    // Handled here, above the field keymap, so it works from the ENTRY screen (no filing status
+    // yet) and from every section — §4.1: *"a pane visible from every section"*. While the pane is
+    // open, Up/Down/PageUp/PageDown scroll it and `p`/Esc close it; nothing else is dispatched, so
+    // a keystroke aimed at the panel can never land on a field underneath it.
+    //
+    // ★ Opening resets the scroll: the panel is derived fresh each frame, and a remembered offset
+    //   into a list that has changed points at a different item.
+    if form.panel_open {
+        match key.code {
+            KeyCode::Char('p') | KeyCode::Esc => {
+                form.panel_open = false;
+                form.panel_scroll = 0;
+            }
+            KeyCode::Down => form.panel_scroll = form.panel_scroll.saturating_add(1),
+            KeyCode::Up => form.panel_scroll = form.panel_scroll.saturating_sub(1),
+            KeyCode::PageDown => form.panel_scroll = form.panel_scroll.saturating_add(10),
+            KeyCode::PageUp => form.panel_scroll = form.panel_scroll.saturating_sub(10),
+            _ => {}
+        }
+        // Clamp against the CURRENT panel so a scroll can never run past the last line.
+        let last = form.panel_lines().len().saturating_sub(1);
+        form.panel_scroll = form.panel_scroll.min(last);
+        return;
+    }
+    if key.code == KeyCode::Char('p') {
+        form.panel_open = true;
+        form.panel_scroll = 0;
         return;
     }
 
@@ -1449,14 +1503,25 @@ fn open_tax_inputs_commit_modal(app: &mut EditorApp) {
     let shadows =
         edit::persist::form_shadows_profile(app.session.as_ref().unwrap(), year).unwrap_or(false);
     if let Some(form) = app.tax_inputs_form.as_mut() {
+        // ★ Built BEFORE the `ri` borrow: `commit_panel_lines` takes `&self`, and the summary call
+        //   below already holds a borrow of `form.working` (disjoint-borrow discipline, review I-1).
+        let panel = form.commit_panel_lines();
         let ri = form.working.as_ref().unwrap();
         let modal = crate::edit::form::TaxInputsModalState {
             kind: crate::edit::form::TaxInputsModalKind::Commit,
             year,
             filing_status_label: crate::edit::form::filing_status_label(ri),
             // ★ R9 / T6 — the venue-vs-answer listing rides in the commit modal (J-4, J-7).
-            summary: crate::edit::tax_inputs::commit_summary_with_step0(ri, shadows, &form.step0),
+            // ★★★ T12 / R12 — the FORGOING and REFUSING lists ride in the commit modal (J-12,
+            //     J-17, J-32), from the SAME walk the `p` pane renders.
+            summary: crate::edit::tax_inputs::commit_summary_with_step0(
+                ri,
+                shadows,
+                &form.step0,
+                &panel,
+            ),
             shadows,
+            scroll: 0,
         };
         form.modal = Some(modal);
     }
@@ -1664,6 +1729,7 @@ fn toggle_source(app: &mut EditorApp) {
                          Reinstate it later with 't' (use full return), or discard it with 'X'."
                     ),
                     shadows: false,
+                    scroll: 0,
                 });
             }
         }
@@ -1793,6 +1859,7 @@ fn open_discard_parked_modal(app: &mut EditorApp) {
                  return) on the next open. This cannot be undone."
             ),
             shadows: false,
+            scroll: 0,
         });
     }
 }
@@ -10269,6 +10336,78 @@ mod tests {
             kind: KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         }
+    }
+
+    /// ★★★ **T12 / R12 — `p` OPENS THE ANSWER PANEL, FROM THE ENTRY AND FROM ANY SECTION, AND THE
+    ///     PANE SWALLOWS THE KEYS WHILE IT IS OPEN.**
+    ///
+    /// The pane's CONTENT kills live in `draw_edit.rs` and set `panel_open` directly; this is the
+    /// half they cannot hold — that the key a filer presses actually reaches it. A renderer that is
+    /// correct and never called is the shape this repo keeps finding.
+    ///
+    /// Three properties, and the third is the one that bites: while the pane is open, `Esc` must
+    /// close the PANE and not the flow. Esc's flow-closing arm sits a few lines below the panel
+    /// block, so an ordering slip would drop the filer out of the editor from inside a read-only
+    /// overlay.
+    #[test]
+    fn p_opens_the_answer_panel_from_the_entry_and_from_a_section_and_esc_closes_the_pane_only() {
+        use crate::edit::form::TaxInputsFormState;
+
+        let mut app = browse_app_with_empty_snapshot();
+        // (1) THE ENTRY — no filing status yet (NI-2, `working: None`).
+        app.tax_inputs_form = Some(TaxInputsFormState::fresh(
+            2024,
+            time::macros::date!(2026 - 09 - 01),
+        ));
+        handle_key(&mut app, press(KeyCode::Char('p')));
+        assert!(
+            app.tax_inputs_form.as_ref().unwrap().panel_open,
+            "`p` opens the pane at the entry screen too — §4.1 says it is visible from every section"
+        );
+
+        // (2) WHILE OPEN, the pane takes the keys: `s` must NOT open the commit modal underneath it.
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        assert!(
+            app.tax_inputs_form.as_ref().unwrap().modal.is_none(),
+            "a keystroke aimed at the panel must never land on the surface underneath it"
+        );
+        assert!(app.tax_inputs_form.as_ref().unwrap().panel_open);
+
+        // (3) ESC CLOSES THE PANE, NOT THE FLOW.
+        handle_key(&mut app, press(KeyCode::Esc));
+        assert!(
+            app.tax_inputs_form.is_some(),
+            "Esc inside a read-only overlay must not drop the filer out of the editor"
+        );
+        assert!(
+            !app.tax_inputs_form.as_ref().unwrap().panel_open,
+            "…it closes the pane"
+        );
+
+        // (4) …and again from a materialized return, i.e. from a SECTION.
+        let mut ri = btctax_core::tax::return_inputs::ReturnInputs {
+            tax_year: 2024,
+            filing_status: btctax_core::FilingStatus::Single,
+            ..Default::default()
+        };
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        app.tax_inputs_form.as_mut().unwrap().working = Some(ri);
+        app.tax_inputs_form.as_mut().unwrap().section_idx = 3;
+        handle_key(&mut app, press(KeyCode::Char('p')));
+        assert!(
+            app.tax_inputs_form.as_ref().unwrap().panel_open,
+            "`p` opens the pane from a section as well as from the entry"
+        );
+        // `p` again closes it — a toggle, and the scroll resets so a reopened pane starts at the top.
+        app.tax_inputs_form.as_mut().unwrap().panel_scroll = 7;
+        handle_key(&mut app, press(KeyCode::Char('p')));
+        assert!(!app.tax_inputs_form.as_ref().unwrap().panel_open);
+        assert_eq!(
+            app.tax_inputs_form.as_ref().unwrap().panel_scroll,
+            0,
+            "the pane is derived fresh each time it opens; a remembered offset points at a \
+             different item"
+        );
     }
 
     /// UX-P4-7 wiring: the void list / bulk-void preview summary of a `ClassifyInbound` payload is

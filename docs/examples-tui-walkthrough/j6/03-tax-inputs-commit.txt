@@ -1,95 +1,96 @@
 ── glyphs ──
-  0│┌ Sections ──────────────────────┐┌ Return options ────────────────────────────────────────────────────────────────────┐
-  1││> ✓ Return options              ││  Filing status  [Mfj]                                                              │
-  2││  … Taxpayer                    ││  Itemize election  [Auto]                                                          │
-  3││  … Spouse                      ││                                                                                    │
-  4││  … Address                     ││                                                                                    │
-  5││  ✓ Dependents                  ││                                                                                    │
-  6││  ✓ W-2s                        ││                                                                                    │
-  7││  ✓ Forms 1099-INT              ││                                                                                    │
-  8││  ✓ Forms 1099-DIV              ││                                                                                    │
-  9││  ✓ Interest and dividends from ││                                                                                    │
- 10││  ✓ Forms 1099-B (Schedule D sum││                                                                                    │
- 11││  ✓ Forms 1099-G        ┌ Confirm commit for 2024 ───────────────────────────────────────────┐                        │
- 12││  ✓ Forms 1098-E (studen│  Commit tax inputs for 2024 — WRITES THE VAULT                     │                        │
- 13││  ✓ Forms 1099-SA (HSA d│                                                                    │                        │
- 14││  ✓ Forms 5498-SA (HSA c│  filing status: Mfj                                                │                        │
- 15││  … Form 8889 (health sa│  2 W-2(s) · Schedule A: yes · 1 dependent(s)                       │                        │
- 16││  ✓ Forms 1098 (home mor│                                                                    │                        │
- 17││  … Schedule A (itemized│                                                                    │                        │
- 18││  ✓ Schedule A line 8b (│  NO STANDING ORDER (§1.1012-1(j) — outside Notice 2026-20's relief │                        │
- 19││  ✓ Sale of your main ho│    period):                                                        │                        │
- 20││  … Direct deposit      │  • exchange:river:default: your first custodial disposition of 2024│                        │
- 21││  … Payments            │    is dated 2024-05-01, and no dated method election was in force  │                        │
- 22││  … Carryforwards from l│    for it. Notice 2026-20's relief period BEGINS 2025-01-01        │                        │
- 23││  … §199A limitation (on│    (§3.03), so §4.02(2)'s standing-order relief does not reach this│                        │
- 24││  ✓ Declarations        │    sale, and btctax refuses an election effective before that date │                        │
- 25││  ✓ Documents received  │    as back-dated — the pre-2025 method is a declaration you attest │                        │
- 26│└────────────────────────│    to instead                                                      │────────────────────────┘
- 27│┌────────────────────────│                                                                    │────────────────────────┐
- 28││  active source: full re└────────────────────────────────────────────────────────────────────┘                        │
- 29││  Step 0 (2024): 2 blocker kind(s) · 0 answer(s) the ledger contradicts · 0 venue(s) needing a Form 1099-DA           │
- 30││      answer · 1 venue(s) with no standing order · 0 owner action(s). `btctax verify` and `btctax income answer`      │
- 31││      print them in full.                                                                                             │
- 32││  • exchange:river:default: your first custodial disposition of 2024 is dated 2024-05-01, and no dated method         │
- 33││        election was in force for it. Notice 2026-20's relief period BEGINS 2025-01-01 (§3.03), so §4.02(2)'s         │
- 34││        standing-order relief does not reach this sale, and btctax refuses an election effective before that date     │
- 35││        as back-dated — the pre-2025 method is a declaration you attest to instead                                    │
- 36││  interview: complete · return: computable                                                                            │
- 37││   [↑/↓] field · [←/→ or Tab] section · [s] commit · [t] source · [Esc/q] close (autosaved)                           │
- 38││                                                                                                                      │
- 39│└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  0│┌ Sections ──────────────┌ Confirm commit for 2024 ───────────────────────────────────────────┐────────────────────────┐
+  1││> ✓ Return options      │  Commit tax inputs for 2024 — WRITES THE VAULT                     │                        │
+  2││  … Taxpayer            │                                                                    │                        │
+  3││  … Spouse              │  filing status: Mfj                                                │                        │
+  4││  … Address             │  2 W-2(s) · Schedule A: yes · 1 dependent(s)                       │                        │
+  5││  ✓ Dependents          │                                                                    │                        │
+  6││  ✓ W-2s                │  NO STANDING ORDER (§1.1012-1(j) — outside Notice 2026-20's relief │                        │
+  7││  ✓ Forms 1099-INT      │    period):                                                        │                        │
+  8││  ✓ Forms 1099-DIV      │  • exchange:river:default: your first custodial disposition of 2024│                        │
+  9││  ✓ Interest and dividen│    is dated 2024-05-01, and no dated method election was in force  │                        │
+ 10││  ✓ Forms 1099-B (Schedu│    for it. Notice 2026-20's relief period BEGINS 2025-01-01        │                        │
+ 11││  ✓ Forms 1099-G        │    (§3.03), so §4.02(2)'s standing-order relief does not reach this│                        │
+ 12││  ✓ Forms 1098-E (studen│    sale, and btctax refuses an election effective before that date │                        │
+ 13││  ✓ Forms 1099-SA (HSA d│    as back-dated — the pre-2025 method is a declaration you attest │                        │
+ 14││  ✓ Forms 5498-SA (HSA c│    to instead                                                      │                        │
+ 15││  … Form 8889 (health sa│                                                                    │                        │
+ 16││  ✓ Forms 1098 (home mor│  FORGOING (8) — lawful to skip; each one costs YOU, not the        │                        │
+ 17││  … Schedule A (itemized│    Treasury:                                                       │                        │
+ 18││  ✓ Schedule A line 8b (│  • Are YOU legally blind? (§63(f) additional deduction) — up to    │                        │
+ 19││  ✓ Sale of your main ho│    $1550                                                           │                        │
+ 20││  … Direct deposit      │  • Is YOUR SPOUSE legally blind? (§63(f) additional deduction) — up│                        │
+ 21││  … Payments            │    to $1550                                                        │                        │
+ 22││  … Carryforwards from l│  • Deduct general SALES taxes instead of state/local income taxes? │                        │
+ 23││  … §199A limitation (on│    (§164(b)(5))                                                    │                        │
+ 24││  ✓ Declarations        │  • YOUR date of birth — up to $1550                                │                        │
+ 25││  ✓ Documents received  │  • YOUR SPOUSE's date of birth — up to $1550                       │                        │
+ 26│└────────────────────────│  • Did YOU (the taxpayer named on this return) die during the tax  │────────────────────────┘
+ 27│┌────────────────────────│    year? (A final return is filed by a personal representative or  │────────────────────────┐
+ 28││  active source: full re│    surviving spouse. 1040 line 12a: a taxpayer who died before     │                        │
+ 29││  Step 0 (2024): 2 block│    reaching age 65 does not get the age-65 addition to the standard│ Form 1099-DA           │
+ 30││      answer · 1 venue(s│    deduction, however early in the year they were born.)           │tax income answer`      │
+ 31││      print them in full│  • Did YOUR SPOUSE die during the tax year? (You may still file    │                        │
+ 32││  • exchange:river:defau│    jointly for the year of death. 1040 line 12a: a spouse who died │no dated method         │
+ 33││        election was in │    before reaching age 65 does not get the age-65 addition to the  │, so §4.02(2)'s         │
+ 34││        standing-order r│    standard deduction, however early in the year they were born.)  │ve before that date     │
+ 35││        as back-dated — │  • Schedule C line I: did you make any payments this year that     │                        │
+ 36││  interview: complete · │                                                                    │                        │
+ 37││   [↑/↓] field · [←/→ or│  [Enter] commit [Esc] cancel — writes nothing · showing 1–33 of 36 │lose (autosaved)        │
+ 38││                        │    lines, [↑/↓ · PgUp/PgDn] scroll                                 │                        │
+ 39│└────────────────────────└────────────────────────────────────────────────────────────────────┘────────────────────────┘
 ── styles (runs; terminal-default fg=Reset bg=Reset no-modifier omitted) ──
-  0│ 0..34 fg=Cyan mod=BOLD
-  0│ 34..120 fg=Yellow
+  0│ 0..25 fg=Cyan mod=BOLD
+  0│ 25..95 fg=Red
+  0│ 95..120 fg=Yellow
   1│ 0..1 fg=Cyan mod=BOLD
   1│ 1..19 fg=Yellow mod=BOLD
-  1│ 33..34 fg=Cyan mod=BOLD
-  1│ 34..35 fg=Yellow
-  1│ 35..57 fg=Yellow mod=BOLD
+  1│ 25..26 fg=Red
+  1│ 26..73 fg=Red mod=BOLD
+  1│ 94..95 fg=Red
   1│ 119..120 fg=Yellow
   2│ 0..1 fg=Cyan mod=BOLD
-  2│ 33..34 fg=Cyan mod=BOLD
-  2│ 34..35 fg=Yellow
+  2│ 25..26 fg=Red
+  2│ 94..95 fg=Red
   2│ 119..120 fg=Yellow
   3│ 0..1 fg=Cyan mod=BOLD
-  3│ 33..34 fg=Cyan mod=BOLD
-  3│ 34..35 fg=Yellow
+  3│ 25..26 fg=Red
+  3│ 94..95 fg=Red
   3│ 119..120 fg=Yellow
   4│ 0..1 fg=Cyan mod=BOLD
-  4│ 33..34 fg=Cyan mod=BOLD
-  4│ 34..35 fg=Yellow
+  4│ 25..26 fg=Red
+  4│ 94..95 fg=Red
   4│ 119..120 fg=Yellow
   5│ 0..1 fg=Cyan mod=BOLD
-  5│ 33..34 fg=Cyan mod=BOLD
-  5│ 34..35 fg=Yellow
+  5│ 25..26 fg=Red
+  5│ 94..95 fg=Red
   5│ 119..120 fg=Yellow
   6│ 0..1 fg=Cyan mod=BOLD
-  6│ 33..34 fg=Cyan mod=BOLD
-  6│ 34..35 fg=Yellow
+  6│ 25..26 fg=Red
+  6│ 94..95 fg=Red
   6│ 119..120 fg=Yellow
   7│ 0..1 fg=Cyan mod=BOLD
-  7│ 33..34 fg=Cyan mod=BOLD
-  7│ 34..35 fg=Yellow
+  7│ 25..26 fg=Red
+  7│ 94..95 fg=Red
   7│ 119..120 fg=Yellow
   8│ 0..1 fg=Cyan mod=BOLD
-  8│ 33..34 fg=Cyan mod=BOLD
-  8│ 34..35 fg=Yellow
+  8│ 25..26 fg=Red
+  8│ 94..95 fg=Red
   8│ 119..120 fg=Yellow
   9│ 0..1 fg=Cyan mod=BOLD
-  9│ 33..34 fg=Cyan mod=BOLD
-  9│ 34..35 fg=Yellow
+  9│ 25..26 fg=Red
+  9│ 94..95 fg=Red
   9│ 119..120 fg=Yellow
  10│ 0..1 fg=Cyan mod=BOLD
- 10│ 33..34 fg=Cyan mod=BOLD
- 10│ 34..35 fg=Yellow
+ 10│ 25..26 fg=Red
+ 10│ 94..95 fg=Red
  10│ 119..120 fg=Yellow
  11│ 0..1 fg=Cyan mod=BOLD
- 11│ 25..95 fg=Red
+ 11│ 25..26 fg=Red
+ 11│ 94..95 fg=Red
  11│ 119..120 fg=Yellow
  12│ 0..1 fg=Cyan mod=BOLD
  12│ 25..26 fg=Red
- 12│ 26..73 fg=Red mod=BOLD
  12│ 94..95 fg=Red
  12│ 119..120 fg=Yellow
  13│ 0..1 fg=Cyan mod=BOLD
@@ -154,33 +155,64 @@
  27│ 95..120 fg=DarkGray
  28│ 0..1 fg=DarkGray
  28│ 18..25 fg=Cyan
- 28│ 25..95 fg=Red
+ 28│ 25..26 fg=Red
+ 28│ 94..95 fg=Red
  28│ 119..120 fg=DarkGray
  29│ 0..1 fg=DarkGray
- 29│ 1..108 fg=Yellow
+ 29│ 1..25 fg=Yellow
+ 29│ 25..26 fg=Red
+ 29│ 94..95 fg=Red
+ 29│ 95..108 fg=Yellow
  29│ 119..120 fg=DarkGray
  30│ 0..1 fg=DarkGray
- 30│ 1..113 fg=Yellow
+ 30│ 1..25 fg=Yellow
+ 30│ 25..26 fg=Red
+ 30│ 94..95 fg=Red
+ 30│ 95..113 fg=Yellow
  30│ 119..120 fg=DarkGray
  31│ 0..1 fg=DarkGray
- 31│ 1..26 fg=Yellow
+ 31│ 1..25 fg=Yellow
+ 31│ 25..26 fg=Red
+ 31│ 94..95 fg=Red
  31│ 119..120 fg=DarkGray
  32│ 0..1 fg=DarkGray
- 32│ 1..110 fg=Yellow
+ 32│ 1..25 fg=Yellow
+ 32│ 25..26 fg=Red
+ 32│ 94..95 fg=Red
+ 32│ 95..110 fg=Yellow
  32│ 119..120 fg=DarkGray
  33│ 0..1 fg=DarkGray
- 33│ 1..110 fg=Yellow
+ 33│ 1..25 fg=Yellow
+ 33│ 25..26 fg=Red
+ 33│ 94..95 fg=Red
+ 33│ 95..110 fg=Yellow
  33│ 119..120 fg=DarkGray
  34│ 0..1 fg=DarkGray
- 34│ 1..114 fg=Yellow
+ 34│ 1..25 fg=Yellow
+ 34│ 25..26 fg=Red
+ 34│ 94..95 fg=Red
+ 34│ 95..114 fg=Yellow
  34│ 119..120 fg=DarkGray
  35│ 0..1 fg=DarkGray
- 35│ 1..83 fg=Yellow
+ 35│ 1..25 fg=Yellow
+ 35│ 25..26 fg=Red
+ 35│ 94..95 fg=Red
  35│ 119..120 fg=DarkGray
- 36│ 0..43 fg=DarkGray
+ 36│ 0..25 fg=DarkGray
+ 36│ 25..26 fg=Red
+ 36│ 94..95 fg=Red
  36│ 119..120 fg=DarkGray
- 37│ 0..92 fg=DarkGray
+ 37│ 0..25 fg=DarkGray
+ 37│ 25..26 fg=Red
+ 37│ 26..93 fg=DarkGray
+ 37│ 94..95 fg=Red
+ 37│ 95..111 fg=DarkGray
  37│ 119..120 fg=DarkGray
  38│ 0..1 fg=DarkGray
+ 38│ 25..26 fg=Red
+ 38│ 26..61 fg=DarkGray
+ 38│ 94..95 fg=Red
  38│ 119..120 fg=DarkGray
- 39│ 0..120 fg=DarkGray
+ 39│ 0..25 fg=DarkGray
+ 39│ 25..95 fg=Red
+ 39│ 95..120 fg=DarkGray

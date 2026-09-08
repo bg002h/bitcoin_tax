@@ -282,6 +282,21 @@ pub struct TaxInputsFormState {
     /// <section>` segment (else `screens clean, except what report computes`). Stores a `SectionId` — a
     /// FormSpec section key, NEVER a `ReturnInputs` leaf (the never-name-a-leaf seam holds).
     pub refused_section: Option<btctax_input_form::SectionId>,
+    /// ★★★ **T12 / R12 — IS THE ANSWER PANEL PANE OPEN?** `p` toggles it, from the entry screen
+    /// and from every section (§4.1: *"a pane visible from every section"*).
+    ///
+    /// ★ A view bit, and nothing else: the panel itself is DERIVED per frame from the registries
+    ///   (`panel_lines`) and nothing about it is stored. R15 forbids a persisted "what remains", and
+    ///   a cached panel would be exactly that with a different name.
+    pub panel_open: bool,
+    /// ★★ The first panel line drawn, for scrolling a list longer than the pane.
+    ///
+    /// **Why a scroll at all.** A fresh return's blocking list is longer than a terminal, and the
+    /// FR-63 lesson is that a fact which does not fit must be reachable rather than clipped: the
+    /// pane draws a contiguous WINDOW and names the range, so a filer can always see that there is
+    /// more and get to it. It is a cursor into a rendered list, not a record of how far through the
+    /// interview anyone is (R15) — it resets to 0 every time the pane opens.
+    pub panel_scroll: usize,
     /// ★★★ **R10.3 — the date every answer this session records is stamped with.**
     ///
     /// Read ONCE at open from `app.clock` (the `BTCTAX_NOW` seam), never from a wall clock inside the
@@ -326,6 +341,15 @@ pub struct TaxInputsModalState {
     pub summary: String,
     /// Whether a raw `tax_profile` is shadowed by this commit (`shadows_profile(conn, year)`).
     pub shadows: bool,
+    /// ★★★ **T12 — the first PAYLOAD row drawn.** The summary grew a forgoing and a refusing list
+    /// (J-12/J-17/J-32) and can now be taller than the terminal, so the box draws a WINDOW of it
+    /// and keeps the header and the `[Enter] commit / [Esc] cancel` legend pinned. Up/Down and
+    /// PageUp/PageDown move it; the renderer clamps it, because how many rows a line wraps to is a
+    /// fact about the box's width.
+    ///
+    /// ★ A cursor into a rendered payload, not a record of anything (R15). It is 0 every time the
+    ///   modal opens.
+    pub scroll: usize,
 }
 
 /// A staged repeating-row removal awaiting its payload-confirm (Task 5). Built from the CURRENT row cursor
@@ -349,6 +373,61 @@ impl TaxInputsFormState {
     #[must_use]
     pub fn step0_lines(&self) -> Vec<String> {
         self.step0.tui_lines()
+    }
+
+    /// ★★★ **T12 / R12 — THE ANSWER PANEL'S LINES FOR THIS FRAME.**
+    ///
+    /// Derived, per frame, from the registries through [`btctax_core::tax::interview_state`] and
+    /// rendered by [`btctax_cli::panel_lines`] — **the same function `income answer`
+    /// prints**, for the reason `step0_lines` reads `step0.tui_lines()`: two surfaces describing one
+    /// forgo in two wordings is the defect, not the duplication.
+    ///
+    /// ★★ **The year's package decides `waiting` vs `blocking`**, so it is read here (the one place
+    ///    that knows whether it is in hand) exactly as `transcription_warning_lines` reads the
+    ///    §163(h)(3)(B) ceiling: with the package, a params-quoting gate BLOCKS and a forgo carries
+    ///    its size; without it, the gate WAITS and the size is blank rather than invented.
+    ///
+    /// ★ `working: None` (NI-2, no filing status yet) has no return to walk, so there is no panel —
+    ///   the year gate already says *"interview: not started"* on that screen.
+    #[must_use]
+    pub fn panel_lines(&self) -> Vec<String> {
+        let Some(ri) = self.working.as_ref() else {
+            return vec![
+                "── The answer panel ──".to_string(),
+                "  no return yet — choose a filing status to begin (NI-2).".to_string(),
+            ];
+        };
+        let fr = btctax_adapters::tax_tables::BundledFullReturnTables::load();
+        let st = match btctax_core::tax::tables::FullReturnTables::full_return_for(&fr, self.year) {
+            Some(p) => btctax_core::tax::interview_state::interview_state_with_params(ri, p),
+            None => btctax_core::tax::interview_state::interview_state(ri),
+        };
+        btctax_cli::panel_lines(&st, &format!("tax year {}", self.year))
+    }
+
+    /// ★★★ **T12 / R12 — the FORGOING and REFUSING lists for the commit modal (J-12, J-17, J-32).**
+    ///
+    /// Read off the same walk [`Self::panel_lines`] renders, and rendered by the same two functions,
+    /// so a benefit the panel says is forgone cannot be worded differently on the screen that writes
+    /// the vault. Empty when there is nothing to say.
+    #[must_use]
+    pub fn commit_panel_lines(&self) -> Vec<String> {
+        let Some(ri) = self.working.as_ref() else {
+            return Vec::new();
+        };
+        let fr = btctax_adapters::tax_tables::BundledFullReturnTables::load();
+        let st = match btctax_core::tax::tables::FullReturnTables::full_return_for(&fr, self.year) {
+            Some(p) => btctax_core::tax::interview_state::interview_state_with_params(ri, p),
+            None => btctax_core::tax::interview_state::interview_state(ri),
+        };
+        let mut out = Vec::new();
+        if !st.forgoing.is_empty() {
+            out.extend(btctax_cli::forgoing_lines(&st));
+        }
+        if !st.refusing.is_empty() {
+            out.extend(btctax_cli::refusing_lines(&st));
+        }
+        out
     }
 
     pub fn year_gate_lines(&self) -> Vec<String> {
@@ -458,6 +537,8 @@ impl TaxInputsFormState {
             step0: Default::default(),
             broker_census: Default::default(),
             broker_regime: None,
+            panel_open: false,
+            panel_scroll: 0,
             now,
         }
     }

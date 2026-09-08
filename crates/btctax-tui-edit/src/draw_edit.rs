@@ -265,10 +265,13 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
     if let Some(form) = app.profile_form.as_ref() {
         draw_profile_form(frame, area, form);
     }
-    if let Some(form) = app.tax_inputs_form.as_ref() {
+    if let Some(form) = app.tax_inputs_form.as_mut() {
         // ★ I-2: thread `app.status` INTO the overlay — this full-frame overlay clears the Browse footer
         // that normally renders it, so an in-flow status is invisible unless the flow draws it itself.
-        draw_tax_inputs_form(frame, area, form, app.status.as_deref());
+        // ★ `as_mut` (T12): the answer-panel pane normalizes its own scroll against the pane width,
+        //   which only the renderer knows. `app.status` is a DISJOINT field, so the two borrows coexist.
+        let status = app.status.clone();
+        draw_tax_inputs_form(frame, area, form, status.as_deref());
     }
     if let Some(modal) = app.mutation_modal.as_ref() {
         draw_mutation_modal(frame, area, modal);
@@ -1995,7 +1998,7 @@ fn draw_void_modal(frame: &mut Frame, area: Rect, modal: &VoidModalState) {
 fn draw_tax_inputs_form(
     frame: &mut Frame,
     area: Rect,
-    form: &TaxInputsFormState,
+    form: &mut TaxInputsFormState,
     status: Option<&str>,
 ) {
     frame.render_widget(Clear, area);
@@ -2078,6 +2081,10 @@ fn draw_tax_inputs_form(
         frame.render_widget(right, right_area);
 
         draw_tax_inputs_status(frame, status_area, form, status);
+        // ★★★ T12 / R12 — the pane is reachable from THE ENTRY too, not only from a section.
+        if form.panel_open {
+            draw_tax_inputs_panel(frame, area, form);
+        }
         return;
     };
 
@@ -2133,12 +2140,84 @@ fn draw_tax_inputs_form(
     if form.modal.is_some() {
         draw_tax_inputs_modal(frame, area, form);
     }
+
+    // ★★★ T12 / R12 — the ANSWER PANEL pane, drawn last so it sits above everything.
+    if form.panel_open {
+        draw_tax_inputs_panel(frame, area, form);
+    }
+}
+
+/// ★★★ **T12 / R12 — THE ANSWER PANEL PANE.**
+///
+/// Every blocking, refusing, forgoing and waiting item on this return, derived from the registries
+/// through `interview_state()` and rendered by the SAME `panel_lines` `income answer` prints
+/// (`TaxInputsFormState::panel_lines`). §4.1: *"a pane visible from every section"*.
+///
+/// ★★ **No progress bar, and no "N of M"** (R15). The panel lists ITEMS. A count of items is not a
+///    measure of how far through anything a filer is, and the moment it is drawn as a bar it starts
+///    answering a question about the FILER rather than about the return.
+///
+/// ★★ **A line that does not fit is REACHABLE, never clipped** (the FR-63 rule). The pane draws a
+///    contiguous WINDOW of the rendered lines and its footer names the range and the total, so a
+///    blocking list longer than the terminal says so and scrolls; it never ends silently mid-list.
+///    Each logical line is PRE-WRAPPED here, so the row count the window is computed from is the
+///    row count actually drawn — the same discipline `draw_tax_inputs_modal` learned at T6.
+fn draw_tax_inputs_panel(frame: &mut Frame, area: Rect, form: &mut TaxInputsFormState) {
+    let rect = centered_rect(area.width.saturating_sub(4).max(20), area.height, area);
+    frame.render_widget(Clear, rect);
+    let inner_w = usize::from(rect.width.saturating_sub(4)).max(20);
+    // Pre-wrap so `lines.len()` is the number of ROWS, not the number of logical entries.
+    let mut lines: Vec<String> = Vec::new();
+    for l in form.panel_lines() {
+        for w in wrap_to(&l, inner_w) {
+            lines.push(w);
+        }
+    }
+    // border(2) + the footer(1).
+    let view_h = usize::from(rect.height.saturating_sub(3)).max(1);
+    let total = lines.len();
+    // ★★★ **THE CLAMP LIVES HERE, and it is why this function takes `&mut`.** The scroll counts
+    //     WRAPPED rows, and how many a line wraps to is a fact about the pane's width — which the
+    //     key handler does not know. Clamping there would bound the cursor by the number of LOGICAL
+    //     lines, and a panel whose prompts each wrap to twenty rows would then stop scrolling a
+    //     fifth of the way down with the rest unreachable: the FR-63 defect, one surface on. The
+    //     last window always shows the TAIL, so the final line is always reachable.
+    form.panel_scroll = form.panel_scroll.min(total.saturating_sub(view_h));
+    let first = form.panel_scroll;
+    let last = (first + view_h).min(total);
+    let mut out: Vec<Line> = lines[first..last]
+        .iter()
+        .map(|l| Line::from(format!("  {l}")))
+        .collect();
+    let more = if total > view_h {
+        format!(
+            "  showing {}–{} of {total} lines · [↑/↓ · PgUp/PgDn] scroll · [p/Esc] close",
+            first + 1,
+            last
+        )
+    } else {
+        "  [p/Esc] close".to_string()
+    };
+    while out.len() < view_h {
+        out.push(Line::from(""));
+    }
+    out.push(Line::from(Span::styled(
+        more,
+        Style::default().fg(Color::DarkGray),
+    )));
+    let p = Paragraph::new(out).block(
+        Block::default()
+            .title(" Answer panel ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan)),
+    );
+    frame.render_widget(p, rect);
 }
 
 /// ★ Task 7: the commit payload-confirm modal — the summary (filing status, sections present, and the
 /// shadow/all-zero warning when a tax-profile is shadowed) + the `[Enter] commit / [Esc] cancel` legend.
 /// Mirrors `draw_mutation_modal`'s centered-`Clear` shape.
-fn draw_tax_inputs_modal(frame: &mut Frame, area: Rect, form: &TaxInputsFormState) {
+fn draw_tax_inputs_modal(frame: &mut Frame, area: Rect, form: &mut TaxInputsFormState) {
     use crate::edit::form::TaxInputsModalKind;
     let Some(m) = form.modal.as_ref() else {
         return;
@@ -2180,31 +2259,107 @@ fn draw_tax_inputs_modal(frame: &mut Frame, area: Rect, form: &TaxInputsFormStat
     //     that fell off the bottom. Wrapping HERE makes `lines.len()` exact and the `Wrap` below a
     //     no-op rather than a second, uncounted layout.
     let inner_w = usize::from(70u16.min(area.width).saturating_sub(4)).max(20);
+    let mut body: Vec<String> = Vec::new();
     for s in m.summary.lines() {
         for w in wrap_to(s, inner_w) {
-            lines.push(Line::from(format!("  {w}")));
+            body.push(w);
         }
     }
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        format!("  [Enter] {verb}   [Esc] cancel — writes nothing"),
-        Style::default().fg(Color::DarkGray),
-    )));
+    // ★★★ **T12 — A PAYLOAD TALLER THAN THE TERMINAL SCROLLS; IT IS NEVER CUT.**
+    //
+    //     `centered_rect` clamps the box to the terminal, so before T12 a summary longer than the
+    //     screen simply lost its tail — and once the forgoing list rode along (J-12) the tail was
+    //     the last forgone benefits **and the `[Enter] commit / [Esc] cancel` legend**, on the one
+    //     screen that writes the vault. The header and the legend are now drawn from OUTSIDE the
+    //     window, so they cannot be scrolled away, and the footer names the range so a filer knows
+    //     there is more. It is the same rule as the answer-panel pane, for the same reason.
+    //
+    //     ★ The clamp lives HERE, and it is why this function takes `&mut`: how many rows a line
+    //       wraps to is a fact about the box's width, which the key handler does not know.
+    // ★★★ **T12 — A PAYLOAD TALLER THAN THE TERMINAL SCROLLS; IT IS NEVER CUT.**
+    //
+    //     `centered_rect` clamps the box to the terminal, so before T12 a summary longer than the
+    //     screen simply lost its tail — and once the forgoing list rode along (J-12) the tail was
+    //     the last forgone benefits **and the `[Enter] commit / [Esc] cancel` legend**, on the one
+    //     screen that writes the vault. The header and the legend are drawn from OUTSIDE the
+    //     window, so they cannot be scrolled away, and the footer names the range so a filer knows
+    //     there is more. Same rule as the answer-panel pane, for the same reason.
+    //
+    //     ★ **Everything is PRE-WRAPPED and then COUNTED, and the box is assembled from the counts**
+    //       — `Paragraph`'s own `Wrap` is a second, uncounted layout, and sizing against a legend
+    //       that then wrapped to two rows put the very line this block exists to keep on screen
+    //       back off it.
+    //
+    //     ★ The clamp lives HERE, and it is why this function takes `&mut`: how many rows a line
+    //       wraps to is a fact about the box's width, which the key handler does not know.
+    let head = std::mem::take(&mut lines);
+    let total = body.len();
+    let legend_of = |first: usize, last: usize, scrolls: bool| -> Vec<String> {
+        let text = if scrolls {
+            format!(
+                "[Enter] {verb}   [Esc] cancel — writes nothing   ·   showing {}–{last} of \
+                 {total} lines, [↑/↓ · PgUp/PgDn] scroll",
+                first + 1
+            )
+        } else {
+            format!("[Enter] {verb}   [Esc] cancel — writes nothing")
+        };
+        // ★ Wrapped THEN indented, exactly as the body is: `wrap_to` normalizes whitespace, so a
+        //   leading indent baked into the text is eaten on the first row and kept on the rest.
+        wrap_to(&text, inner_w)
+            .into_iter()
+            .map(|w| format!("  {w}"))
+            .collect()
+    };
+    // Size against the SCROLLING legend, which is the longer of the two, so the window can only be
+    // conservative — never one row too tall.
+    let max_lines = usize::from(area.height).max(8).saturating_sub(2);
+    let view_h = max_lines
+        .saturating_sub(head.len() + 1 + legend_of(0, total, true).len())
+        .max(1);
+    let scrolls = total > view_h;
+    let first = if scrolls {
+        m.scroll.min(total - view_h)
+    } else {
+        0
+    };
+    form.modal.as_mut().expect("checked above").scroll = first;
+    let last = (first + view_h).min(total);
 
+    lines = head;
+    for b in &body[first..last] {
+        lines.push(Line::from(format!("  {b}")));
+    }
+    lines.push(Line::from(""));
+    for w in legend_of(first, last, scrolls) {
+        lines.push(Line::from(Span::styled(
+            w,
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+    debug_assert!(
+        lines.len() + 2 <= usize::from(area.height).max(10),
+        "the modal must fit the terminal it is drawn in: {} lines in {} rows",
+        lines.len(),
+        area.height
+    );
     let height = (u16::try_from(lines.len())
         .unwrap_or(u16::MAX)
         .saturating_add(2))
     .max(10);
     let rect = centered_rect(70, height, area);
     frame.render_widget(Clear, rect);
-    let p = Paragraph::new(lines)
-        .block(
-            Block::default()
-                .title(title)
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Red)),
-        )
-        .wrap(Wrap { trim: false });
+    // ★★★ **NO `Wrap` — every line above is already wrapped, and `Wrap` is a SECOND layout whose
+    //     rows nobody counted.** With it, a line exactly as wide as the box was pushed onto a
+    //     second row and the last line of the paragraph fell off the bottom: measured, on this very
+    //     modal, with the legend as the casualty. Pre-wrapped means `lines.len()` IS the row count,
+    //     and that is the only way the box can be sized to fit what it holds.
+    let p = Paragraph::new(lines).block(
+        Block::default()
+            .title(title)
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Red)),
+    );
     frame.render_widget(p, rect);
 }
 
@@ -2340,10 +2495,12 @@ fn draw_tax_inputs_status(
         "[Esc/q] close (autosaved)"
     };
     // `X` discard-parked is offered only when a parked draft is loaded (else the store would refuse it).
+    // ★★★ T12 / R12 — `[p] answer panel` is on the legend of EVERY section, because that is where
+    //     a filer looks for it; the pane itself is reachable from all of them (§4.1).
     let legend = if form.parked {
-        format!("   [↑/↓] field · [←/→ or Tab] section · [s] commit · [t] source · [X] discard-parked · {close_hint}")
+        format!("   [↑/↓] field · [←/→ or Tab] section · [p] answer panel · [s] commit · [t] source · [X] discard-parked · {close_hint}")
     } else {
-        format!("   [↑/↓] field · [←/→ or Tab] section · [s] commit · [t] source · {close_hint}")
+        format!("   [↑/↓] field · [←/→ or Tab] section · [p] answer panel · [s] commit · [t] source · {close_hint}")
     };
     // ★★★ **T4 / `SPEC_interview.md` R11 — THE YEAR GATE, on the entry screen.**
     //
@@ -6570,7 +6727,7 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         let area = terminal.get_frame().area();
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .draw(|f| draw_tax_inputs_form(f, area, &mut form, None))
             .unwrap();
         let buf = terminal.backend().buffer().clone();
         let rows: Vec<String> = (0..buf.area.height)
@@ -6607,6 +6764,556 @@ mod tests {
                  read it.\n  wanted: {want}\n  screen: {flat}"
             );
         }
+    }
+
+    /// ★★★ **T12 / R12 — THE ANSWER PANEL PANE: every line it renders is REACHABLE.**
+    ///
+    /// Two guarantees, and neither alone is worth anything (the `step0` lesson, one pane up): a pane
+    /// that drew nothing would satisfy *"no line is cut"*, and one that ran off the bottom would
+    /// satisfy *"the blocking items are named"*.
+    ///
+    /// ★★ **The fixture is DERIVED, not hand-written** (FOLLOWUPS FR-88 — three consecutive tasks
+    ///    lost a guard to a fixture that decided what the guard could see). The expected blocking
+    ///    COUNT comes from `interview_state()` over the same working return the pane walks, so a
+    ///    pane that dropped a row reds, and a registry that grows tomorrow is covered on the day.
+    #[test]
+    fn the_answer_panel_pane_draws_every_line_it_renders_and_names_the_blocking_items() {
+        use crate::edit::form::TaxInputsFormState;
+
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
+        // A FRESH return: nothing answered, so the blocking list is long — which is the case that
+        // exercises the scroll. The count is read off the walk, never typed here.
+        form.working = Some(btctax_core::tax::return_inputs::ReturnInputs {
+            tax_year: 2024,
+            filing_status: btctax_core::FilingStatus::Single,
+            ..Default::default()
+        });
+        form.panel_open = true;
+        let st = btctax_core::tax::interview_state::interview_state_with_params(
+            form.working.as_ref().unwrap(),
+            &btctax_core::tax::testonly::ty2024_params(),
+        );
+        let n_blocking = st.blocking.len();
+        assert!(
+            n_blocking > 1,
+            "the fixture must actually have blocking items or this test asserts nothing"
+        );
+
+        let lines = form.panel_lines();
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains(&format!("BLOCKING ({n_blocking})"))),
+            "the pane's own lines carry the count the walk found: {lines:#?}"
+        );
+        // Every blocking prompt has its own row — N unanswered ⇒ N listed (R12's headline kill,
+        // asserted HERE on the rendered surface rather than only in core).
+        for b in &st.blocking {
+            assert!(
+                lines.iter().any(|l| l.contains(b.prompt.as_ref())),
+                "a blocking item was not rendered: {}",
+                b.prompt
+            );
+        }
+        assert!(
+            !lines.iter().any(|l| l.contains('%')),
+            "R15 — no progress bar, ever: {lines:#?}"
+        );
+
+        // ── And the DRAWN pane is a contiguous window of those lines that can reach all of them ──
+        let render = |form: &mut TaxInputsFormState| -> String {
+            let backend = TestBackend::new(120, 40);
+            let mut terminal = Terminal::new(backend).unwrap();
+            let area = terminal.get_frame().area();
+            terminal
+                .draw(|f| draw_tax_inputs_form(f, area, form, None))
+                .unwrap();
+            let buf = terminal.backend().buffer().clone();
+            (0..buf.area.height)
+                .map(|y| {
+                    (0..buf.area.width)
+                        .map(|x| buf[(x, y)].symbol().chars().next().unwrap_or(' '))
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let first_screen = render(&mut form);
+        assert!(
+            first_screen.contains("Answer panel"),
+            "the pane is drawn: {first_screen}"
+        );
+        assert!(
+            first_screen.contains("of ") && first_screen.contains("lines"),
+            "a list longer than the pane SAYS so rather than ending silently: {first_screen}"
+        );
+
+        // Scroll to the end and assert the LAST rendered line is on screen — i.e. nothing at the
+        // bottom of the panel is unreachable.
+        //
+        // ★ The scroll is deliberately set PAST the end and left for the draw to normalize. That is
+        //   the contract: the pane clamps against its own wrapped row count, because how many rows
+        //   a line occupies is a fact about the pane's width. Clamping here — against the count of
+        //   LOGICAL lines — is exactly the bug this test caught the first time it ran.
+        form.panel_scroll = usize::MAX / 2;
+        let end_screen = render(&mut form);
+        let want = form.panel_lines().last().cloned().unwrap();
+        let flat: String = end_screen.split_whitespace().collect::<Vec<_>>().join(" ");
+        let want_flat: String = want.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            flat.contains(&want_flat),
+            "the LAST panel line must be reachable by scrolling.\n  wanted: {want_flat}\n  \
+             screen: {flat}"
+        );
+    }
+
+    /// ★★★ **T12 / R12 — A `Declined` BENEFIT IS STILL FORGONE, MARKED, AND NEVER BLOCKING.**
+    ///
+    /// Dropping the item from the pane exactly when the forgo becomes FINAL is backwards, which is
+    /// why this is asserted on the rendered surface and not only in the walk.
+    #[test]
+    fn the_pane_marks_a_declined_benefit_declined_and_never_lists_it_as_blocking() {
+        use btctax_core::tax::provenance::{record_answer, AnswerKey, AnswerState};
+        use btctax_core::tax::questions::{SkippableId, SKIPPABLE_QUESTIONS};
+
+        let mut form =
+            crate::edit::form::TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
+        let mut ri = btctax_core::tax::return_inputs::ReturnInputs {
+            tax_year: 2024,
+            filing_status: btctax_core::FilingStatus::Single,
+            ..Default::default()
+        };
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        let sk = SKIPPABLE_QUESTIONS
+            .iter()
+            .find(|s| s.id == SkippableId::BlindTaxpayer)
+            .expect("the blindness skippable is in the registry");
+        record_answer(
+            &mut ri,
+            AnswerKey::Skippable(SkippableId::BlindTaxpayer),
+            sk.prompt,
+            time::macros::date!(2026 - 09 - 01),
+            AnswerState::Declined,
+        );
+        form.working = Some(ri);
+        form.panel_open = true;
+
+        let lines = form.panel_lines();
+        let declined: Vec<&String> = lines.iter().filter(|l| l.contains("(declined)")).collect();
+        assert_eq!(
+            declined.len(),
+            1,
+            "the declined benefit is listed once, marked: {lines:#?}"
+        );
+        assert!(
+            declined[0].contains(sk.prompt),
+            "…and it is THAT benefit: {declined:?}"
+        );
+        // The forgo carries its size, because TY2024's package is bundled — R12's *"present with
+        // params, absent without"*. The figure comes from the walk, never from this test.
+        let st = btctax_core::tax::interview_state::interview_state_with_params(
+            form.working.as_ref().unwrap(),
+            &btctax_core::tax::testonly::ty2024_params(),
+        );
+        let size = st
+            .forgoing
+            .iter()
+            .find(|f| f.item == AnswerKey::Skippable(SkippableId::BlindTaxpayer))
+            .and_then(|f| f.size)
+            .expect("the §63(f) add-on is sized from TY2024's package");
+        assert!(
+            declined[0].contains(&format!("${size}")),
+            "the size the package computes is on the line: {declined:?} (wanted ${size})"
+        );
+
+        // Never blocking. Everything else on this return IS answered, so the blocking heading must
+        // be absent entirely — the strongest form of the assertion.
+        assert!(
+            !lines.iter().any(|l| l.contains("BLOCKING")),
+            "a declined class-(B) prompt must NEVER be blocking: {lines:#?}"
+        );
+    }
+
+    /// ★★★ **T12 / R12 / J-12 — ON A PARAMS-LESS YEAR THE SIZE IS BLANK AND THE GATE *WAITS*.**
+    ///
+    /// The other half of the pair, and it must be asserted or a pane with a hardcoded figure passes
+    /// the test above. TY2026 has no bundled `FullReturnParams`, so the panel invents nothing.
+    #[test]
+    fn on_a_params_less_year_the_pane_sizes_nothing_and_lists_the_waiting_gate() {
+        let mut form =
+            crate::edit::form::TaxInputsFormState::fresh(2026, time::macros::date!(2026 - 09 - 01));
+        let mut ri = btctax_core::tax::return_inputs::ReturnInputs {
+            tax_year: 2026,
+            filing_status: btctax_core::FilingStatus::Single,
+            ..Default::default()
+        };
+        // A row Step 1 sends to STEP 4 — the qualifying-RELATIVE path, which is where the one
+        // params-quoting gate lives. Answered exactly as T7's own waiting fixture answers it, so
+        // this test exercises the state rather than asserting over a row that never reaches it.
+        ri.header.dependents = vec![btctax_core::tax::return_inputs::Dependent {
+            name: "Parent Example".into(),
+            ssn: "000-00-1111".into(),
+            relationship: "Mother".into(),
+            date_of_birth: Some(time::macros::date!(1950 - 03 - 04)),
+            qc_relationship: Some(false),
+            younger_than_you_or_spouse: Some(false),
+            full_time_student: Some(false),
+            permanently_and_totally_disabled: Some(false),
+            provided_over_half_own_support: Some(false),
+            filing_joint_return: Some(false),
+            lived_with_you_over_half_year: Some(true),
+            lived_with_you_in_us: Some(true),
+            ..Default::default()
+        }];
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        form.working = Some(ri);
+        form.panel_open = true;
+
+        assert!(
+            btctax_core::tax::tables::FullReturnTables::full_return_for(
+                &btctax_adapters::tax_tables::BundledFullReturnTables::load(),
+                2026
+            )
+            .is_none(),
+            "the premise: TY2026 has no bundled package, so `waiting` is reachable at all"
+        );
+        let lines = form.panel_lines();
+        assert!(
+            lines.iter().any(|l| l.contains("WAITING")),
+            "a params-quoting gate WAITS rather than blocks: {lines:#?}"
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains(btctax_core::tax::interview_state::YEAR_PACKAGE)),
+            "…and the pane names what it waits ON: {lines:#?}"
+        );
+        // ★ The assertion is about the SIZE the panel would print, not about dollar signs in
+        //   general: several registry PROMPTS quote a statutory figure of their own (the §170(f)(8)
+        //   $250 gift, the §1(g) $2,600 threshold), and those are the form's own words, not a forgo
+        //   the panel sized.
+        assert!(
+            !lines.iter().any(|l| l.contains("— up to $")),
+            "no package ⇒ no invented forgo size: {lines:#?}"
+        );
+        assert!(
+            !lines
+                .iter()
+                .any(|l| l.contains("(size waiting on") && l.contains('$')),
+            "…and the NOT COMPUTED row names its wait rather than a figure: {lines:#?}"
+        );
+    }
+
+    /// ★★★ **FOLLOWUPS FR-83, CLOSED AT T12 — THE FORM SEAM AND THE PANEL SHOW ONE WORDING.**
+    ///
+    /// `Field.live` has no year package (`SPEC_interview.md` §10 freezes the seam), so on a
+    /// params-less year the dependents pane drew `gross_income_under_limit`'s figureless fallback
+    /// as an ordinary answerable label while the answer panel — two keystrokes away, on the same
+    /// screen — listed the same gate as *waiting*. The fallback is now the WAITING wording, and
+    /// this holds the two surfaces to it.
+    ///
+    /// ★★ The assertion compares the two RENDERED surfaces rather than two constants: it takes the
+    ///    prompt out of the panel's own `waiting` row and looks for that exact sentence on the
+    ///    drawn dependents pane. A change to either wording alone reds.
+    #[test]
+    fn the_dependents_pane_and_the_panel_word_the_waiting_gate_identically() {
+        use crate::edit::form::TaxInputsFormState;
+        use btctax_input_form::SectionId;
+
+        let mut form = TaxInputsFormState::fresh(2026, time::macros::date!(2026 - 09 - 01));
+        let mut ri = btctax_core::tax::return_inputs::ReturnInputs {
+            tax_year: 2026,
+            filing_status: btctax_core::FilingStatus::Single,
+            ..Default::default()
+        };
+        // The qualifying-RELATIVE path, where the one params-quoting gate lives.
+        ri.header.dependents = vec![btctax_core::tax::return_inputs::Dependent {
+            name: "Parent Example".into(),
+            ssn: "000-00-1111".into(),
+            relationship: "Mother".into(),
+            date_of_birth: Some(time::macros::date!(1950 - 03 - 04)),
+            qc_relationship: Some(false),
+            younger_than_you_or_spouse: Some(false),
+            full_time_student: Some(false),
+            permanently_and_totally_disabled: Some(false),
+            provided_over_half_own_support: Some(false),
+            filing_joint_return: Some(false),
+            lived_with_you_over_half_year: Some(true),
+            lived_with_you_in_us: Some(true),
+            ..Default::default()
+        }];
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        form.working = Some(ri);
+
+        // What the PANEL calls it.
+        let st = btctax_core::tax::interview_state::interview_state(form.working.as_ref().unwrap());
+        let waiting = st
+            .waiting
+            .first()
+            .expect("the params-quoting gate waits on a params-less year")
+            .prompt
+            .clone();
+
+        // What the FORM SEAM shows, on the Dependents section, inside the row.
+        form.section_idx = live_sections(form.working.as_ref().unwrap())
+            .iter()
+            .position(|s| s.id == SectionId::Dependents)
+            .expect("the Dependents section is live");
+        form.addr = btctax_input_form::RowAddr(vec![0]);
+        let pane = tax_inputs_pane_lines_for_test(&form);
+
+        let flat = |t: &str| t.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            flat(&pane).contains(&flat(&waiting)),
+            "the dependents pane must show the panel's own WAITING wording, not a second question \
+             for the same gate.\n  panel: {waiting}\n  pane: {pane}"
+        );
+        assert!(
+            flat(&pane).contains("WAITING ON THE TAX YEAR'S PARAMETER PACKAGE"),
+            "…and it must read as a wait rather than as something to answer: {pane}"
+        );
+    }
+
+    /// ★★★ **T12 / R12 / J-32 — THE COMMIT MODAL PRINTS THE FORGOING *AND* REFUSING LISTS.**
+    ///
+    /// J-32 is the filer who answered `k1 = Yes` at the document census, saw nothing blocking, and
+    /// pressed `s`. The refusal is already decided; the modal is the last screen before the write,
+    /// and it must show it with its exit rather than let the filer meet it as a bare refusal.
+    #[test]
+    fn the_commit_modal_prints_the_forgoing_and_refusing_lists_with_the_exit() {
+        use crate::edit::form::{TaxInputsFormState, TaxInputsModalKind, TaxInputsModalState};
+
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
+        let mut ri = btctax_core::tax::return_inputs::ReturnInputs {
+            tax_year: 2024,
+            filing_status: btctax_core::FilingStatus::Single,
+            ..Default::default()
+        };
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        // J-32's own act: a census row on an unsupported type, answered YES.
+        btctax_core::tax::document_census::answer_row(
+            &mut ri,
+            btctax_core::tax::document_census::DocumentRow::K1,
+            true,
+        );
+        form.working = Some(ri);
+
+        let panel = form.commit_panel_lines();
+        assert!(
+            panel.iter().any(|l| l.contains("REFUSING")),
+            "the modal's payload carries the refusing list: {panel:#?}"
+        );
+        let st = btctax_core::tax::interview_state::interview_state_with_params(
+            form.working.as_ref().unwrap(),
+            &btctax_core::tax::testonly::ty2024_params(),
+        );
+        assert_eq!(st.refusing.len(), 1, "one refusal on this fixture");
+        let exit = st.refusing[0].exit.clone();
+
+        let ri = form.working.as_ref().unwrap();
+        let summary =
+            crate::edit::tax_inputs::commit_summary_with_step0(ri, false, &form.step0, &panel);
+        form.modal = Some(TaxInputsModalState {
+            kind: TaxInputsModalKind::Commit,
+            year: 2024,
+            filing_status_label: "Single".into(),
+            summary,
+            shadows: false,
+            scroll: 0,
+        });
+
+        let backend = TestBackend::new(160, 60);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &mut form, None))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let screen: String = (0..buf.area.height)
+            .map(|y| {
+                (0..buf.area.width)
+                    .map(|x| buf[(x, y)].symbol().chars().next().unwrap_or(' '))
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let flat: String = screen.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            flat.contains("REFUSING"),
+            "the refusing heading is DRAWN, not merely built: {screen}"
+        );
+        // The row's own EXIT sentence — the thing the filer needs — reaches the glass.
+        let want: String = exit
+            .split_whitespace()
+            .take(8)
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            flat.contains(&want),
+            "the refusal's exit must be on the modal.\n  wanted: {want}\n  screen: {flat}"
+        );
+    }
+
+    /// ★★★ **T12 — THE COMMIT MODAL NEVER RUNS OFF THE BOTTOM OF THE TERMINAL.**
+    ///
+    /// ★★ **This is a defect T12 INTRODUCED and this test caught.** The modal sized itself as
+    ///    `lines.len() + 2` and `centered_rect` clamps to the terminal — so once the forgoing list
+    ///    rode along (J-12), a household with eight forgone benefits pushed the box past 40 rows and
+    ///    the tail was silently cut: the last benefits vanished **and so did
+    ///    `[Enter] commit / [Esc] cancel`**, on the screen that writes the vault. It was found by
+    ///    regenerating the J-6 walkthrough golden and reading it, which is what those goldens are
+    ///    for.
+    ///
+    /// The guarantee now: the legend is ALWAYS drawn, and a body that does not fit says so and
+    /// scrolls, so every line is reachable. Both halves are asserted, on a fixture whose panel is
+    /// deliberately far taller than the terminal.
+    #[test]
+    fn the_commit_modal_keeps_its_legend_on_screen_and_reaches_its_last_line() {
+        use crate::edit::form::{TaxInputsFormState, TaxInputsModalKind, TaxInputsModalState};
+
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01));
+        // A JOINT return with every class-(A) declaration answered — the J-6 walkthrough's own
+        // household, which forgoes eight §63(f)-and-friends benefits and is what made the clipping
+        // visible in the first place.
+        let mut ri = btctax_core::tax::return_inputs::ReturnInputs {
+            tax_year: 2024,
+            filing_status: btctax_core::FilingStatus::Mfj,
+            ..Default::default()
+        };
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        form.working = Some(ri);
+        // ★ And the R9 standing-order row the same household carries — the modal's payload is the
+        //   SUM of the two blocks, and the walkthrough household has both.
+        form.step0 = btctax_cli::step0::Step0Panel {
+            year: 2024,
+            standing_orders: vec![btctax_cli::step0::Step0Row {
+                what: "exchange:river:default: your first custodial disposition of 2024 is dated \
+                       2024-05-01, and no dated method election was in force for it. Notice \
+                       2026-20's relief period BEGINS 2025-01-01 (§3.03), so §4.02(2)'s \
+                       standing-order relief does not reach this sale, and btctax refuses an \
+                       election effective before that date as back-dated — the pre-2025 method is \
+                       a declaration you attest to instead"
+                    .into(),
+                handoff: "btctax config --set-forward-method hifo".into(),
+            }],
+            ..Default::default()
+        };
+        let panel = form.commit_panel_lines();
+        let summary = {
+            let ri = form.working.as_ref().unwrap();
+            crate::edit::tax_inputs::commit_summary_with_step0(ri, false, &form.step0, &panel)
+        };
+        // ★ The premise, measured at the width the modal actually wraps to: the payload must not
+        //   fit in a 40-row terminal, or the assertions below hold on nothing.
+        let rows: usize = summary.lines().map(|l| wrap_to(l, 66).len()).sum();
+        assert!(
+            rows > 40,
+            "the fixture's payload must be taller than the terminal ({rows} rows)"
+        );
+        form.modal = Some(TaxInputsModalState {
+            kind: TaxInputsModalKind::Commit,
+            year: 2024,
+            filing_status_label: "Mfj".into(),
+            summary,
+            shadows: false,
+            scroll: 0,
+        });
+
+        let render = |form: &mut TaxInputsFormState| -> String {
+            let backend = TestBackend::new(120, 40);
+            let mut terminal = Terminal::new(backend).unwrap();
+            let area = terminal.get_frame().area();
+            terminal
+                .draw(|f| draw_tax_inputs_form(f, area, form, None))
+                .unwrap();
+            let buf = terminal.backend().buffer().clone();
+            (0..buf.area.height)
+                .map(|y| {
+                    (0..buf.area.width)
+                        .map(|x| buf[(x, y)].symbol().chars().next().unwrap_or(' '))
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        // (1) The legend is on screen at the TOP of the list — a filer must always be able to see
+        //     how to confirm and how to get out.
+        let top = render(&mut form);
+        assert!(
+            top.contains("[Enter] commit") && top.contains("[Esc] cancel"),
+            "the modal that WRITES THE VAULT must always show how to confirm and how to cancel:\n{top}"
+        );
+        assert!(
+            top.contains("of ") && top.contains("scroll"),
+            "a payload taller than the box must SAY it is taller and how to move:\n{top}"
+        );
+
+        // (2) …and at the BOTTOM, where the last forgone benefit is reachable.
+        form.modal.as_mut().unwrap().scroll = usize::MAX / 2;
+        let end = render(&mut form);
+        assert!(
+            end.contains("[Enter] commit") && end.contains("[Esc] cancel"),
+            "…including after scrolling to the end:\n{end}"
+        );
+        let flat = |t: &str| t.split_whitespace().collect::<Vec<_>>().join(" ");
+        let last = panel.last().cloned().unwrap();
+        // The last panel line's final words — the tail is what a clipped box loses first.
+        let tail: String = last
+            .split_whitespace()
+            .rev()
+            .take(6)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            flat(&end).contains(&tail),
+            "the LAST line of the commit payload must be reachable.\n  wanted: {tail}\n  \
+             screen: {}",
+            flat(&end)
+        );
+    }
+
+    /// ★★★ **T12 — A COMMIT WITH A NON-EMPTY `refusing` IS REFUSED BY THE EXISTING GATE.**
+    ///
+    /// R12's brief says *assert, do not add*: `screen_inputs` already stops this return, and the
+    /// panel's job is to show the filer the same refusal while they are still authoring (J-32).
+    /// What must not happen is the two disagreeing — a panel that lists a refusal on a return the
+    /// screen would let through, or the reverse.
+    #[test]
+    fn a_return_the_panel_lists_as_refusing_is_refused_by_the_commit_screen_too() {
+        let mut ri = btctax_core::tax::return_inputs::ReturnInputs {
+            tax_year: 2024,
+            filing_status: btctax_core::FilingStatus::Single,
+            ..Default::default()
+        };
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        assert!(
+            btctax_core::tax::interview_state::interview_state(&ri)
+                .refusing
+                .is_empty(),
+            "the baseline refuses nothing, or the comparison below is vacuous"
+        );
+        btctax_core::tax::document_census::answer_row(
+            &mut ri,
+            btctax_core::tax::document_census::DocumentRow::K1,
+            true,
+        );
+        let st = btctax_core::tax::interview_state::interview_state(&ri);
+        assert!(!st.refusing.is_empty(), "the panel lists it as refusing");
+        let tables = btctax_adapters::BundledTaxTables::load();
+        let table = btctax_core::TaxTables::table_for(&tables, 2024).expect("TY2024 is bundled");
+        let refusal = btctax_core::tax::return_refuse::screen_inputs(
+            &ri,
+            table,
+            &btctax_core::tax::testonly::ty2024_params(),
+        );
+        assert!(
+            refusal.is_some(),
+            "…and the EXISTING commit gate refuses it — the panel adds no gate, it shows one"
+        );
     }
 
     /// ★★★ **R9 / T6 — the commit modal's venue-vs-answer listing is DRAWN, not just built.**
@@ -6647,15 +7354,16 @@ mod tests {
             kind: TaxInputsModalKind::Commit,
             year: 2024,
             filing_status_label: "Single".into(),
-            summary: crate::edit::tax_inputs::commit_summary_with_step0(ri, false, &step0),
+            summary: crate::edit::tax_inputs::commit_summary_with_step0(ri, false, &step0, &[]),
             shadows: false,
+            scroll: 0,
         });
 
         let backend = TestBackend::new(120, 40);
         let mut terminal = Terminal::new(backend).unwrap();
         let area = terminal.get_frame().area();
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .draw(|f| draw_tax_inputs_form(f, area, &mut form, None))
             .unwrap();
         let flat: String = flatten(terminal.backend().buffer())
             .split_whitespace()
@@ -6718,15 +7426,16 @@ mod tests {
             kind: TaxInputsModalKind::Commit,
             year: 2024,
             filing_status_label: "Single".into(),
-            summary: crate::edit::tax_inputs::commit_summary_with_step0(ri, false, &step0),
+            summary: crate::edit::tax_inputs::commit_summary_with_step0(ri, false, &step0, &[]),
             shadows: false,
+            scroll: 0,
         });
 
         let backend = TestBackend::new(120, 40);
         let mut terminal = Terminal::new(backend).unwrap();
         let area = terminal.get_frame().area();
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .draw(|f| draw_tax_inputs_form(f, area, &mut form, None))
             .unwrap();
         let flat: String = flatten(terminal.backend().buffer())
             .split_whitespace()
@@ -6750,10 +7459,10 @@ mod tests {
         use crate::edit::form::TaxInputsFormState;
         let backend = TestBackend::new(120, 40);
         let mut terminal = Terminal::new(backend).unwrap();
-        let form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01)); // working = None
+        let mut form = TaxInputsFormState::fresh(2024, time::macros::date!(2026 - 09 - 01)); // working = None
         let area = terminal.get_frame().area();
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .draw(|f| draw_tax_inputs_form(f, area, &mut form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
         assert!(
@@ -6837,7 +7546,7 @@ mod tests {
 
         let area = terminal.get_frame().area();
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .draw(|f| draw_tax_inputs_form(f, area, &mut form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
         assert!(
@@ -6887,7 +7596,7 @@ mod tests {
 
         let area = terminal.get_frame().area();
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .draw(|f| draw_tax_inputs_form(f, area, &mut form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
         assert!(r.contains("***-**-"), "a set SSN renders its masked form");
@@ -6938,7 +7647,7 @@ mod tests {
 
         let area = terminal.get_frame().area();
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .draw(|f| draw_tax_inputs_form(f, area, &mut form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
         assert!(
@@ -6978,7 +7687,7 @@ mod tests {
         .unwrap();
         let area = terminal.get_frame().area();
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .draw(|f| draw_tax_inputs_form(f, area, &mut form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
 
@@ -7072,7 +7781,7 @@ mod tests {
         form.active_source_label = "tax-profile"; // the cache the opener/park handler sets
         let area = terminal.get_frame().area();
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .draw(|f| draw_tax_inputs_form(f, area, &mut form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
         assert!(
@@ -7127,7 +7836,7 @@ mod tests {
 
         let area = terminal.get_frame().area();
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .draw(|f| draw_tax_inputs_form(f, area, &mut form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
         assert!(r.contains("#1"), "the row list shows the first row's index");
@@ -7182,7 +7891,7 @@ mod tests {
         form.addr = RowAddr(vec![0]);
         let area = terminal.get_frame().area();
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .draw(|f| draw_tax_inputs_form(f, area, &mut form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
         assert!(
@@ -7194,7 +7903,7 @@ mod tests {
         form.descent = Some(SectionId::W2Box12);
         form.field_focus = 0;
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .draw(|f| draw_tax_inputs_form(f, area, &mut form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
         assert!(
@@ -7247,7 +7956,7 @@ mod tests {
 
         let area = terminal.get_frame().area();
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .draw(|f| draw_tax_inputs_form(f, area, &mut form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
         assert!(
@@ -7344,7 +8053,7 @@ mod tests {
         // and the left pane now lists Spouse (hidden on Single).
         let area = terminal.get_frame().area();
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .draw(|f| draw_tax_inputs_form(f, area, &mut form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
         assert!(
@@ -7357,12 +8066,14 @@ mod tests {
         );
 
         // Render 2: select the W2s section — both rows appear in the row list.
-        form.section_idx = live_sections(ri)
+        // ★ `ri` is re-borrowed here rather than held across the draw: `draw_tax_inputs_form` takes
+        //   `&mut` since T12 (the answer pane normalizes its own scroll against the pane width).
+        form.section_idx = live_sections(form.working.as_ref().unwrap())
             .iter()
             .position(|s| s.id == SectionId::W2s)
             .unwrap();
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .draw(|f| draw_tax_inputs_form(f, area, &mut form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
         assert!(r.contains("#1"), "the first W-2 row renders");
@@ -7411,11 +8122,12 @@ mod tests {
             filing_status_label: "Single".to_string(),
             summary,
             shadows: false,
+            scroll: 0,
         });
 
         let area = terminal.get_frame().area();
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .draw(|f| draw_tax_inputs_form(f, area, &mut form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
         assert!(
@@ -7479,7 +8191,7 @@ mod tests {
 
         let area = terminal.get_frame().area();
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .draw(|f| draw_tax_inputs_form(f, area, &mut form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
         assert!(

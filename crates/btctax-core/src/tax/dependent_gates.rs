@@ -1228,11 +1228,21 @@ pub const DEPENDENT_GATES: &[DependentGateQuestion] = &[
     },
     DependentGateQuestion {
         gate: DependentGate::GrossIncomeUnderLimit,
-        // ★ The FIGURELESS fallback. It is a LABEL for R12's *waiting* item and is never put to a
-        //   filer: `prompt_from_params` is what a surface asks, and it exists on this entry alone.
-        prompt: "Did this person have gross income of less than the §152(d)(1)(B) limit for the tax \
-                 year? (Form 1040 instructions, Step 4. The year's figure arrives with its tax \
-                 package; until then this question cannot be stated.)",
+        // ★★★ **THE FIGURELESS FALLBACK — A LABEL, NOT A QUESTION** (FOLLOWUPS FR-83, closed at
+        //     T12). `prompt_from_params` renders what a surface actually ASKS, and it exists on
+        //     this entry alone; this string is what stands in its place before the package lands,
+        //     which is R12's *waiting* row.
+        //
+        //     It used to be phrased as a question with a parenthetical excuse — and the form seam
+        //     puts it on screen as a `Field` LABEL beside an answerable tri-state, so a filer on a
+        //     params-less year was shown an answerable question while the answer panel, two
+        //     keystrokes away, listed the same gate as *waiting*. Two wordings of one gate. It is
+        //     now the waiting wording in both places: a statement of what is being waited on, with
+        //     no question mark to answer.
+        prompt: "Step 4's gross income test (§152(d)(1)(B), Form 1040 instructions) — WAITING ON \
+                 THE TAX YEAR'S PARAMETER PACKAGE. This question quotes the year's own dollar \
+                 limit, and that figure arrives with its tax package; until then the question \
+                 cannot be stated, so it is not yet yours to answer.",
         prompt_from_params: Some(gross_income_prompt),
         // ★★★ **SEAM REVIEW M-5 — NO FIGURE HERE.** The limit is §152(d)(1)(B)'s exemption amount,
         //     republished for every tax year, and it lives in exactly one place:
@@ -2304,6 +2314,59 @@ mod tests {
             q.prompt_text(&ri, None)
                 .contains("arrives with its tax package"),
             "the fallback says WHY it cannot be asked"
+        );
+    }
+
+    /// ★★★ **FOLLOWUPS FR-83 — ONE WORDING FOR ONE GATE: the figureless fallback is the WAITING
+    ///     label, never a second question.**
+    ///
+    /// The form seam puts a gate's `prompt` on screen as a `Field` LABEL beside an answerable
+    /// tri-state, and R12's panel puts the *same string* in its `waiting` list. Before T12 that
+    /// string was phrased as a question, so a filer on a params-less year met an answerable question
+    /// on one surface and *"cannot be asked yet"* on the other — two wordings of one gate.
+    ///
+    /// ★★ **Derived over the registry, not written for one entry.** Every gate that carries a
+    ///    `prompt_from_params` renderer is held: the fallback must read as a wait and the RENDERED
+    ///    prompt must read as a question. A second params-quoting gate added tomorrow is covered on
+    ///    the day, and neither half alone would catch a regression — a fallback that is always a
+    ///    statement would pass the first with a rendered prompt that had also stopped asking.
+    #[test]
+    fn a_params_quoting_gates_fallback_is_a_waiting_label_and_its_rendered_prompt_is_the_question()
+    {
+        let mut ri = one_dependent(2026);
+        ri.header.dependents[0].date_of_birth = Some(date!(1950 - 03 - 04));
+        let p = crate::tax::testonly::ty2024_params();
+        let mut seen = 0usize;
+        for q in DEPENDENT_GATES {
+            if !q.needs_params() {
+                continue;
+            }
+            seen += 1;
+            let fallback = q.prompt_text(&ri, None);
+            assert!(
+                !fallback.contains('?'),
+                "the figureless fallback must not read as a question a filer can answer — it is \
+                 the label of a WAITING item: {fallback}"
+            );
+            assert!(
+                fallback.to_ascii_uppercase().contains("WAITING"),
+                "…and it must say what it is waiting on: {fallback}"
+            );
+            let asked = q.prompt_text(&ri, Some(&p));
+            assert!(
+                asked.contains('?'),
+                "…while the words actually put to a filer, once the package is in hand, ARE a \
+                 question: {asked}"
+            );
+            assert_ne!(
+                fallback, asked,
+                "the two are different sentences by construction"
+            );
+        }
+        assert!(
+            seen > 0,
+            "no params-quoting gate was examined — a check that scans nothing passes by finding \
+             nothing"
         );
     }
 

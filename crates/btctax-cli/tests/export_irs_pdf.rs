@@ -2966,6 +2966,121 @@ fn no_code_path_pushes_the_4868_or_the_voucher_into_the_stapled_packet() {
     assert_eq!(btctax_forms::attachment_sequence("f1040v", 2025), None);
 }
 
+/// ★★★ **T12 / R12 / §4.4 / J-15 — THE MANIFEST LISTS EVERY FORGONE BENEFIT, `(declined)` MARKED,
+///     BESIDE THE UNDATED ROWS.**
+///
+/// The `COMPLETE BY HAND` block frames itself as the closed list of blanks btctax left on purpose.
+/// A forgone benefit missing from the manifest makes that block LIE — and unlike an unsigned
+/// signature line, a forgone credit is invisible on the page. J-15 is the filer assembling paper
+/// with the manifest in hand; this is the surface that has to be complete for them.
+///
+/// ★★ **A `Declined` benefit is still listed, MARKED.** Declining is provenance — asked, passed
+///    over — so dropping the item exactly when the forgo becomes FINAL is backwards.
+///
+/// ★ Both halves: a packet with a declined skippable carries the block with its mark and its size,
+///   and the sizes come from the YEAR'S package rather than a literal here.
+#[test]
+fn the_manifest_lists_the_forgone_benefits_marking_the_declined_ones_and_names_the_undated_rows() {
+    use btctax_core::tax::provenance::{record_answer, AnswerKey, AnswerState};
+    use btctax_core::tax::questions::{SkippableId, SKIPPABLE_QUESTIONS};
+    use btctax_core::tax::return_inputs::{Form1099Int, Owner, W2};
+
+    let sk = SKIPPABLE_QUESTIONS
+        .iter()
+        .find(|s| s.id == SkippableId::BlindTaxpayer)
+        .expect("the blindness skippable is in the registry");
+
+    let (_d, vault, out) = full_return_vault(&[], |ri| {
+        ri.w2s = vec![W2 {
+            owner: Owner::Taxpayer,
+            employer: "ACME".into(),
+            box1_wages: dec!(40000),
+            box2_fed_withheld: dec!(3000),
+            box3_ss_wages: dec!(40000),
+            box4_ss_withheld: dec!(2480),
+            box5_medicare_wages: dec!(40000),
+            box6_medicare_withheld: dec!(580),
+            ..Default::default()
+        }];
+        ri.documents.set(
+            btctax_core::tax::document_census::DocumentRow::Int1099,
+            Some(true),
+        );
+        // ★ Undated ON PURPOSE — the two blocks are asserted together because a filer assembling
+        //   paper meets them together.
+        ri.int_1099 = vec![Form1099Int {
+            payer: "First Bank".into(),
+            box1_interest: dec!(200),
+            transcribed_on: None,
+            ..Default::default()
+        }];
+        // The filer was ASKED about the §63(f) blindness add-on and passed over it.
+        record_answer(
+            ri,
+            AnswerKey::Skippable(SkippableId::BlindTaxpayer),
+            sk.prompt,
+            time::macros::date!(2026 - 02 - 03),
+            AnswerState::Declined,
+        );
+    });
+    cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        &[],
+        None,
+        Default::default(),
+    )
+    .expect("a wage-and-interest packet exports");
+    let manifest = std::fs::read_to_string(out.path().join("manifest.txt")).unwrap();
+
+    assert!(
+        manifest.contains("FORGONE"),
+        "the manifest carries the forgone block: {manifest}"
+    );
+    // ★★★ **ON THE BENEFIT'S OWN ROW, not merely somewhere in the block.** The block's header
+    //     explains what *(declined)* means, so a whole-file `contains("(declined)")` passes even
+    //     with the mark deleted from every row — measured by planting `let mark = "";`. The
+    //     assertion is therefore: one BULLET line carries both the mark and the words the benefit
+    //     was asked in.
+    let asked = sk.prompt.split(' ').take(4).collect::<Vec<_>>().join(" ");
+    assert!(
+        manifest
+            .lines()
+            .any(|l| l.contains('•') && l.contains("(declined)") && l.contains(&asked)),
+        "…and MARKS the benefit the filer was asked about and passed over, ON ITS OWN ROW, in the \
+         words it was asked in: {manifest}"
+    );
+    // The size is the YEAR'S own figure, read from the package rather than typed here.
+    let fr = btctax_adapters::BundledFullReturnTables::load();
+    let params = btctax_core::tax::tables::FullReturnTables::full_return_for(&fr, 2024)
+        .expect("TY2024's package is bundled");
+    let ri = btctax_cli::return_inputs::get(
+        btctax_cli::session::Session::open(&vault, &pp())
+            .unwrap()
+            .conn(),
+        2024,
+    )
+    .unwrap()
+    .unwrap();
+    let size = btctax_core::tax::interview_state::interview_state_with_params(&ri, params)
+        .forgoing
+        .iter()
+        .find(|f| f.item == AnswerKey::Skippable(SkippableId::BlindTaxpayer))
+        .and_then(|f| f.size)
+        .expect("the §63(f) add-on is sized from TY2024's package");
+    assert!(
+        manifest.contains(&format!("${size}")),
+        "…with the size the year's package computes (${size}): {manifest}"
+    );
+    // Both blocks, together — the paper-assembly surface must be complete on both counts.
+    assert!(
+        manifest.contains("Form 1099-INT #1 (First Bank) — transcribed without a date"),
+        "the undated row is named beside them: {manifest}"
+    );
+}
+
 /// ★★★ **R4 / §4.4 / T5 — A DOCUMENT ROW WITH NO `transcribed_on` IS NAMED ON THE MANIFEST.**
 ///
 /// *"A row that arrives by TOML with `transcribed_on = None` is not silently tidied away — the

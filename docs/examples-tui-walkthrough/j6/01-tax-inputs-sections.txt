@@ -36,7 +36,7 @@
  34││        standing-order relief does not reach this sale, and btctax refuses an election effective before that date     │
  35││        as back-dated — the pre-2025 method is a declaration you attest to instead                                    │
  36││  interview: complete · return: computable                                                                            │
- 37││   [↑/↓] field · [←/→ or Tab] section · [s] commit · [t] source · [Esc/q] close (autosaved)                           │
+ 37││   [↑/↓] field · [←/→ or Tab] section · [p] answer panel · [s] commit · [t] source · [Esc/q] close (autosaved)        │
  38││                                                                                                                      │
  39│└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ── styles (runs; terminal-default fg=Reset bg=Reset no-modifier omitted) ──
@@ -174,7 +174,7 @@
  35│ 119..120 fg=DarkGray
  36│ 0..43 fg=DarkGray
  36│ 119..120 fg=DarkGray
- 37│ 0..92 fg=DarkGray
+ 37│ 0..111 fg=DarkGray
  37│ 119..120 fg=DarkGray
  38│ 0..1 fg=DarkGray
  38│ 119..120 fg=DarkGray

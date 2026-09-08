@@ -6301,8 +6301,19 @@ build, each with an owning phase.
   *(T5 fold `2fe4ba5f`: claiming tips with any of the three conditions `false` now REFUSES
   `QualifiedTipsCautionNotMet`, fail-closed; the compute gating remains this item.)*
 - **FR-73 — the venue/account granularity note has no docs home (T6 build `a79492ee`). Owning task:
-  interview T12.** `step0.rs::VENUE_GRANULARITY_NOTE` is printed by `income answer`; T12 carries it
-  into `LIMITATIONS.md` with the rest of the interview's stop list.
+  interview T12. ★ CLOSED 2026-09-07 (T12 build).** `step0.rs::VENUE_GRANULARITY_NOTE` is printed by
+  `income answer`; T12 carried it into `crates/btctax-cli/LIMITATIONS.md` with the rest of the
+  interview's stop list (a new section, *"The interview — what it asks you, and exactly where it
+  stops"*: the answer panel's five states, §2.2's excluded families with their exits, the home-sale
+  decision, the 1099-DA keystroke, no self-custody import, and what the interview never does).
+  **Held by two derived kills, not by prose**: `limitations_carries_the_venue_account_granularity_note`
+  takes the two load-bearing tokens (`exchange:<venue>:default`, `§1012(c)(1)`) **out of the shipped
+  constant at test time**, so a change to either surface reds; and
+  `limitations_names_every_excluded_document_family_the_census_refuses` enumerates the expectation
+  from `DocumentRow::ALL` filtered by `exit_sentence().is_some()`, so a family added to the census
+  tomorrow reds until the filer-facing doc names it. That second kill immediately found three
+  designations the hand-written table had paraphrased (*"Form SSA-1099 / RRB-1099"* for
+  *"Form SSA-1099 or RRB-1099"*, and two more).
 - **FR-74 — `hand_marks`' Digital Assets entry is unreachable in production (T6 build `a79492ee`).
   Owning phase: ownerless residue.** `screen_inputs` refuses a `None`, so no filed packet carries an
   unanswered box; the entry was kept as a fail-closed backstop with a rewritten sentence. A later
@@ -6397,6 +6408,19 @@ build, each with an owning phase.
   FR-67's `Yes`, the row-(7) credit arms), and `every_slot_caption_is_the_forms_own_words` was watched
   PASSING beside the new order assertion's RED on the same plant — which is its correct behaviour, not
   evidence it discriminates. Burn down by planting each one once.
+  **★ CLOSED 2026-09-07 (T12 build) — all six planted once, each observed RED, each restored green
+  (`touch` after every plant AND every restore, per FR-90):**
+
+  | kill | the defect planted (in PRODUCTION code, never in the test) | the red |
+  |---|---|---|
+  | `only_the_two_credit_arms_check_a_box` | `DependentVerdict::credit_column` maps `NoCreditBox` to `CreditForOtherDependents` | *"assertion `left == right` failed: NoCreditBox / left: CreditForOtherDependents / right: Neither"* |
+  | `single_and_mfj_ask_no_hoh_or_qss_question` | `HohQualifyingPerson`'s `live` becomes `\|_ri\| true` | *"HohQualifyingPerson must not be live on Single — a filing-status test asked of a filer who did not claim that status is a question with no answer"* |
+  | `a_hoh_test_answered_no_refuses_with_the_exit` | the HoH refusal loses *"CHOOSE ANOTHER FILING STATUS"* | *"a refusal with no exit is a brick: you are filing as HEAD OF HOUSEHOLD and answered NO…"* |
+  | `the_qss_window_is_derived_from_the_tax_year` | `qss_window_prompt`'s `a = y - 2, b = y - 1` becomes the literal `2023, 2024` | *"TY2026: Qualifying surviving spouse, condition 1: \"Your spouse died in 2023 or 2024…\""* |
+  | `the_ty2025_grid_checks_the_more_than_four_box_with_its_statement` | the TY2025 emitter's `check(w, p, &cells.more_than_four_dependents, !overflow.is_empty())` becomes `…, false)` | *"assertion `left == right` failed / left: None / right: Some(\"1\")"* |
+  | `every_slot_caption_is_the_forms_own_words` | `SLOT_CAPTIONS`' `"And in the U.S."` paraphrased to `"And in the United States"` | *"LivedWithYouInUs's caption is not in design/forms/extract/f1040--2025.txt: \"And in the United States\""* |
+
+  All six discriminate. No checker needed changing.
   ★ Note: two entries in this file also carry the number FR-84 — this one's neighbours above (the
   TY2025 grid name cells) and the T12 render-pass entry below. Same collision as FR-85; renumber both
   pairs when the ownerless residue is next swept.
@@ -6413,6 +6437,18 @@ build, each with an owning phase.
   and let the census own the outcome alone. A guard nothing can red is the shape this repo keeps
   finding (`design/HARNESS.md` B1); leaving it undecided is what turns it into the next green-and-
   blind instrument.
+  **★ CLOSED 2026-09-07 (T12 build) — DECIDED: DELETED, and the census owns the outcome with a kill
+  on it.** Reaching the arm would mean reordering the document census behind a value rule, i.e.
+  changing which refusal a filer meets in order to make a redundant arm testable — the wrong trade.
+  The whole branch selector moved into a named `return_refuse::home_sale_decision(ri) ->
+  HomeSaleDecision` (which §4.4's `report` block also reads, so the rule and the surface that prints
+  it are one function), and the `s_1099 == Some(true)` arm is gone from it. **The outcome is now
+  held by a kill that was watched red**: planting the census's own §2.2 rule away gives
+  `the_home_sale_table_is_one_blank_and_seven_refusals_naming_pub_523` →
+  *"(true,true,true,s_1099=Some(true)) refused unexpectedly: None"* — the exact case that would file
+  a home sale with a Form 1099-S and no Form 8949. The `s_1099.is_none()` arm STAYS: it is reachable
+  at the param-free (import) tier, where the census's unanswered rule does not run. Both *"a
+  documented fail-closed backstop, not a tested guard"* labels are gone from the tree.
 - **FR-88 — ★ THREE CONSECUTIVE TASKS' defects were a well-built guard blinded by its own hand-written
   FIXTURE (T8 I-1, T9 C-1, T10 I-1). Proposed `HARNESS.md` B1 amendment — OWNER'S CALL, filed not
   actioned. Owning phase: the harness (owner), before the interview branch's whole-branch review.**
@@ -6548,13 +6584,54 @@ build, each with an owning phase.
   12, reported). `LedgerState` has no type-driven leaf walk the way `ReturnInputs` does, so a NEW
   top-level ledger channel that started reaching the printed return would not red. Closing it means
   giving `LedgerState` the same `leaf_walk` treatment.
+- **FR-97 — ★ the TUI writes a dependent-gate answer with NO `AnswerRecord` (found by T12 while
+  closing FR-83; PRE-EXISTING since T7). Owning task: whichever task next touches the answer-log
+  writer — proposed interview T7-follow-up, before the interview branch's whole-branch review.**
+  `btctax-input-form`'s `apply.rs::answer_key_for` maps a `FieldId` to `AnswerKey::Question` or
+  `AnswerKey::Skippable` and **returns `None` for all twenty `DepGate*` fields**, so
+  `Edit::SetField` on any dependent gate sets the leaf and records nothing. `income answer` DOES
+  record them (`cmd/answer.rs` calls `record_answer` directly with
+  `AnswerKey::DependentGate { ssn_hash, gate }`), so the same answer given on the two surfaces
+  produces different provenance — which is exactly what T1's *"identical records via `apply` and
+  `income answer`"* kill exists to forbid, and that kill does not reach the dependent gates.
+  **Consequences, in order of severity:** (a) R10.3's re-ask rule is disabled for a TUI-answered
+  gate — `interview_state` reads `ri.answer_log.get(&item)`, finds nothing, and counts the row
+  *answered* under words it may never have shown; (b) the answer carries no date and no prompt hash,
+  so §6065 testimony given in the editor has no recorded provenance at all. **Not blocking T12**: it
+  is a writer defect, T12 is a render pass that adds no writer, and the panel's answered-ness is the
+  LEAF (`gate_is_answered`), which is correct either way. The fix needs the row's `ssn` to build the
+  key, so `answer_key_for` has to take the `RowAddr` and the return — a seam change, which is why
+  this is filed rather than done. A kill exists to copy: T1's identical-records test, widened to the
+  dependent gates.
+- **FR-98 — the interview's own render surfaces are NOT in the R15 `progress_shaped_fields` walk,
+  and the reason is a false positive worth recording (T12 build). Owning phase: ownerless residue
+  (harness).** `xtask stop-list`'s field-name check reads four `btctax-core` modules. T12 tried to
+  extend it to `btctax-tui-edit/src/edit/form.rs`, where the panel pane's own view bits live — and
+  it reds on `LotPickFormRow::remaining_sat`, the sats left in a LEDGER LOT, which has nothing to do
+  with how far through an interview a filer is. Adding that name to an excuse list is the shape
+  `CLAUDE.md` forbids, so T12 added a **different** check aimed at the renderer's own question
+  instead: `progress_widgets` over `draw_edit.rs`, banning ratatui's `Gauge`/`LineGauge` and a
+  formatted percentage (B1 kill:
+  `the_progress_widget_check_reds_on_a_gauge_and_not_on_its_near_misses`, three plants and three
+  near misses). What is still unwalked is a *stored* progress field on a TUI struct. Closing it
+  properly means typing the mechanism — a banned name is a finding only on a bare counter type —
+  rather than naming the exception.
 - **FR-82 — `tax_tables.rs`'s TY2026 doc comment cites Rev. Proc. 2025-32 §2.14 / §2.10 for figures
   that sit in its Section 4 (T7 build, follow-up 2; pre-existing). Owning phase: ownerless residue
   (doc-consistency).** The new §4.23 cite beside them is accurate.
 - **FR-83 — the form seam shows `gross_income_under_limit`'s figureless fallback prompt on a
   params-less year while the R12 panel says *waiting* (T7 build, follow-up 3). Owning task:
-  interview T12 (the render pass).** `Field.live` has no package; the fallback names the missing
-  package, so it is honest, but it is a second wording of the same gate.
+  interview T12 (the render pass). ★ CLOSED 2026-09-07 (T12 build).** `Field.live` has no package;
+  the fallback named the missing package, so it was honest — and it was phrased as a **question**,
+  which the form seam then drew as a `Field` LABEL beside an answerable tri-state. A filer on a
+  params-less year met an answerable question on one surface and *"cannot be asked yet"* on the
+  other. **The fallback is now the waiting wording itself** (*"Step 4's gross income test
+  (§152(d)(1)(B), Form 1040 instructions) — WAITING ON THE TAX YEAR'S PARAMETER PACKAGE…"*), so both
+  surfaces show one sentence. Two kills, both watched red: the registry-level
+  `a_params_quoting_gates_fallback_is_a_waiting_label_and_its_rendered_prompt_is_the_question`
+  (derived over every `prompt_from_params` gate, so a second one added later is covered), and the
+  two-surface `the_dependents_pane_and_the_panel_word_the_waiting_gate_identically`, which takes the
+  sentence out of the PANEL's `waiting` row and looks for it on the DRAWN dependents pane.
 - **FR-84 — the TY2025 dependents grid asks FIRST NAME and LAST NAME in two cells and `Dependent`
   holds one `name` string (T8 build, follow-up 1). Owning task: the TY2025 IDENTITY BLOCK (the
   `[header]` section of `forms/2025/f1040.map.toml`).** TY2024's form has ONE widget spanning

@@ -1312,6 +1312,50 @@ Schedule D (raw pre-netting part totals) — tax year 2024
     invent them, and your tax may be OVERSTATED. Check last year's return and enter them
     with `btctax income import` if you have them.
   (Advisories never change a number and never fail the command. See `btctax limitations`.)
+
+═══ The interview — tax year 2024 ═══
+
+  Documents received (the census)
+    Form W-2                                     YES        1 row(s) transcribed
+    Form 1099-INT                                no         0 row(s) transcribed
+    Form 1099-DIV                                no         0 row(s) transcribed
+    Form 1099-B                                  no         0 row(s) transcribed
+    Form 1099-G                                  no         0 row(s) transcribed
+    Form 1098                                    no         0 row(s) transcribed
+    Form 1098-E                                  no         0 row(s) transcribed
+    Form 1099-SA                                 no         0 row(s) transcribed
+    Form 5498-SA                                 no         0 row(s) transcribed
+    Form 1099-R                                  no         no section holds rows of this type
+    Form SSA-1099 or RRB-1099                    no         no section holds rows of this type
+    Form 1099-NEC, 1099-MISC or 1099-K           no         no section holds rows of this type
+    Schedule K-1                                 no         no section holds rows of this type
+    a rental or royalty statement (Schedule E)   no         no section holds rows of this type
+    Form 1099-S                                  no         no section holds rows of this type
+    Form 1099-OID                                no         no section holds rows of this type
+    Form W-2G                                    no         no section holds rows of this type
+    Form 1099-C                                  no         no section holds rows of this type
+    Form 1095-A                                  no         no section holds rows of this type
+    Form 1098-T                                  no         no section holds rows of this type
+  ── The answer panel (tax year 2024) ──
+    FORGOING (5) — lawful to skip; each one costs YOU, not the Treasury:
+      • Are YOU legally blind? (§63(f) additional deduction) — up to $1550
+      • Is YOUR SPOUSE legally blind? (§63(f) additional deduction) — up to $1550
+      • YOUR date of birth — up to $1550
+      • YOUR SPOUSE's date of birth — up to $1550
+      • For EVERY charitable gift of $250 or more that this return DEDUCTS — this year, or in a later year because it exceeded its §170(b) percentage-of-income ceiling and is carrying forward — do you already hold — or will you obtain before you file — a CONTEMPORANEOUS WRITTEN ACKNOWLEDGMENT from the charity showing (1) the amount of money and a description (but not the value) of any property donated, and (2) whether the organization gave you any goods or services in return, with a description and estimate of their value if it did? (Schedule A lines 11 and 12: "If you made any gift of $250 or more, see instructions." In figuring whether a gift is $250 or more, don't combine separate donations — so answer YES if you made no single gift that large. Don't attach the acknowledgment to your return; keep it for your records. ★ ANSWER FOR THE CARRYOVER TOO: a gift held back by the ceiling is DEFERRED, not denied, and §170(f)(8)(C)'s deadline still runs from THIS return — so "I am deducting nothing this year" is not a reason to answer yes.)
+    (35 answered, 46 not applicable to this return)
+
+  Sale of your main home
+    sold your main home during the year: no
+    DECISION: no sale to report
+
+  Where each figure came from (6 figure(s) with an amount; a box left at zero carries no testimony and is not listed)
+    w2s[0].box1_wages                              $400000         Form W-2 #1 Front Range Health
+    w2s[0].box2_fed_withheld                       $96000          Form W-2 #1 Front Range Health
+    w2s[0].box3_ss_wages                           $168600         Form W-2 #1 Front Range Health
+    w2s[0].box4_ss_withheld                        $10453.20       Form W-2 #1 Front Range Health
+    w2s[0].box5_medicare_wages                     $400000         Form W-2 #1 Front Range Health
+    w2s[0].box6_medicare_withheld                  $7150           Form W-2 #1 Front Range Health
 ```
 
 The **Alternative Minimum Tax** block above is the point: it shows the comparison that

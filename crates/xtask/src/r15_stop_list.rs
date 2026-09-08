@@ -174,6 +174,50 @@ pub fn progress_shaped_fields(files: &[(String, String)]) -> Vec<String> {
     out
 }
 
+/// ★★★ **R15 — NO PROGRESS BAR, checked where a progress bar can actually be DRAWN (T12).**
+///
+/// [`progress_shaped_fields`] reads the four persisted-state modules, which is the right walk for
+/// *"no persisted 'what remains'"* — and it is the wrong walk for *"no progress bar"*, because a
+/// progress bar is not a stored field. It is a **widget**, and it lands in the renderer.
+///
+/// ★★ **Scoped by MECHANISM rather than by an exemption list.** The obvious extension — pointing the
+///    field-name check at `btctax-tui-edit` — reds on `LotPickFormRow::remaining_sat`, the sats left
+///    in a ledger lot, which has nothing to do with how far through an interview anyone is. Adding
+///    that name to an excuse list is the shape `CLAUDE.md` refuses (*"state the mechanism, let it
+///    decide, never enumerate the outcomes you happened to see"*), so the check aimed at the
+///    renderer asks the renderer's own question instead: **is a progress widget instantiated, or is
+///    a percentage formatted?** ratatui draws a progress bar with `Gauge` / `LineGauge` and nothing
+///    else; a hand-rolled one formats a `%`.
+///
+/// ★ The panel is the one surface in this product whose whole temptation is a bar — it holds four
+///   lists of countable items — which is exactly why the check exists on the file that draws it.
+#[must_use]
+pub fn progress_widgets(files: &[(String, String)]) -> Vec<String> {
+    const BANNED: &[&str] = &["LineGauge", "Gauge"];
+    let mut out = Vec::new();
+    for (label, src) in files {
+        for (n, raw) in src.lines().enumerate() {
+            let line = match raw.find("//") {
+                Some(i) => &raw[..i],
+                None => raw,
+            };
+            // ★ One finding per LINE: `LineGauge` contains `Gauge`, and a check that reports the
+            //   same line twice makes its own output harder to read than the defect.
+            if let Some(b) = BANNED.iter().find(|b| line.contains(**b)) {
+                out.push(format!("{label}:{}: {b}", n + 1));
+            }
+            // A hand-rolled bar: a percentage FORMATTED into a string. `{}%` / `{:.0}%` / `{pct}%`.
+            if let Some(i) = line.find('%') {
+                let before = &line[..i];
+                if before.ends_with('}') && before.contains('{') && line.contains("format") {
+                    out.push(format!("{label}:{}: a formatted percentage", n + 1));
+                }
+            }
+        }
+    }
+    out
+}
+
 /// ★★★ **R15 — no `reconcile` question in a return registry.**
 ///
 /// The ledger's questions (*which transfer is this?*, *which lot?*, *what was the FMV?*) belong to
@@ -274,6 +318,21 @@ fn state_bearing_sources() -> Vec<(String, String)> {
     .collect()
 }
 
+/// ★★★ **T12 — the RENDERER sources, for [`progress_widgets`].** The panel is drawn here; a
+/// progress bar, if one were ever written, would be drawn here too.
+fn renderer_sources() -> Vec<(String, String)> {
+    let root = repo_root();
+    ["crates/btctax-tui-edit/src/draw_edit.rs"]
+        .iter()
+        .map(|f| {
+            (
+                (*f).to_string(),
+                std::fs::read_to_string(root.join(f)).unwrap_or_default(),
+            )
+        })
+        .collect()
+}
+
 /// Every prompt in both return registries, labelled by its registry identity — **including the
 /// RENDERED ones**.
 ///
@@ -308,7 +367,7 @@ fn registry_prompts() -> Vec<(String, String)> {
     out
 }
 
-/// ★★★ The three checks, over the committed tree. `Ok` carries the counts it actually scanned, so a
+/// ★★★ The four checks, over the committed tree. `Ok` carries the counts it actually scanned, so a
 /// walk that found nothing cannot report success quietly.
 pub fn run() -> Result<String, String> {
     let form = input_form_sources();
@@ -320,6 +379,15 @@ pub fn run() -> Result<String, String> {
         ));
     }
     let state = state_bearing_sources();
+    // ★ T12 — the RENDERER, for the progress-WIDGET half of R15's no-progress-bar sentence.
+    let renderers = renderer_sources();
+    if renderers.iter().any(|(_, src)| src.len() < 1000) {
+        return Err(
+            "a renderer source came back empty — a check that scans nothing passes by finding \
+             nothing"
+                .to_string(),
+        );
+    }
     let prompts = registry_prompts();
     if prompts.len() < 50 {
         return Err(format!(
@@ -356,6 +424,11 @@ pub fn run() -> Result<String, String> {
             progress_shaped_fields(&state),
         ),
         (
+            "R15: a PROGRESS WIDGET is drawn — the panel lists ITEMS, and a count of items is not a \
+             measure of how far through their return a filer is",
+            progress_widgets(&renderers),
+        ),
+        (
             "R15/R9: a return-registry prompt asks a LEDGER question — those belong to `reconcile`, \
              and the interview never re-asks one",
             ledger_words_in_registry_prompts(&prompts),
@@ -367,10 +440,11 @@ pub fn run() -> Result<String, String> {
     }
     if findings.is_empty() {
         Ok(format!(
-            "R15 stop list: {} btctax-input-form sources, {} state-bearing sources and {} registry \
-             prompts scanned; no forbidden shape",
+            "R15 stop list: {} btctax-input-form sources, {} state-bearing sources, {} renderer \
+             source(s) and {} registry prompts scanned; no forbidden shape",
             form.len(),
             state.len(),
+            renderers.len(),
             prompts.len()
         ))
     } else {
@@ -396,6 +470,49 @@ mod tests {
     ///
     /// The near-misses are the whole test: a checker that reds on everything is deleted by the next
     /// person who trips it, and a checker that reds on nothing was never watched discriminating.
+    /// ★★★ **B1 — the progress-WIDGET check, watched red on a planted defect and green on its near
+    ///     misses.** T12 added it because the field-name check reads the persisted-state modules,
+    ///     where a progress bar was never going to be written; this reads the file that draws the
+    ///     answer panel, which is the one surface in the product whose whole temptation is a bar.
+    #[test]
+    fn the_progress_widget_check_reds_on_a_gauge_and_not_on_its_near_misses() {
+        let at =
+            |src: &str| progress_widgets(&[("draw_edit.rs".to_string(), src.to_string())]).len();
+        // ── The plants ──
+        assert_eq!(
+            at("    let g = Gauge::default().ratio(0.5);"),
+            1,
+            "ratatui's progress widget must be a finding"
+        );
+        assert_eq!(
+            at("    frame.render_widget(LineGauge::default(), rect);"),
+            1,
+            "…and so must its thin sibling"
+        );
+        assert_eq!(
+            at(r#"    lines.push(format!("  {done}% complete"));"#),
+            1,
+            "a HAND-ROLLED bar is a formatted percentage, and it must be a finding too"
+        );
+        // ── The near misses, which must stay green or the check reds on everything and gets
+        //    deleted by the next person ──
+        assert_eq!(
+            at("    // a Gauge would be a progress bar, and R15 forbids one"),
+            0,
+            "a mention in a comment is not a widget"
+        );
+        assert_eq!(
+            at(r#"    let pct = "7.5% of AGI";"#),
+            0,
+            "a literal percentage in prose — the §213 medical floor — is not a bar"
+        );
+        assert_eq!(
+            at(r#"    let s = format!("{a} of {b} lines");"#),
+            0,
+            "the panel's own scroll footer counts LINES, not progress"
+        );
+    }
+
     #[test]
     fn each_r15_grep_reds_on_a_planted_line_and_not_on_its_near_miss() {
         // ── (1) serde_json reflection. ──────────────────────────────────────────────────────────

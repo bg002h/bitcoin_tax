@@ -2335,6 +2335,75 @@ pub fn screen_param_free(ri: &ReturnInputs) -> Option<Refusal> {
 
 /// The one screen body. See [`ScreenTier`]; the rule ORDER is unchanged from the pre-T4
 /// `screen_inputs`, so a caller holding the package gets byte-identical behaviour.
+/// ★★★ **R8 / T9 / §4.4 — WHAT THE FORM SAYS ABOUT THIS RETURN'S HOME SALE.**
+///
+/// The Schedule D instructions answer their own question — *"You may not need to report the sale or
+/// exchange of your main home"*, then *"Report the sale or exchange of your main home on Form 8949
+/// if: • You can't exclude all of your gain from income, or • You received a Form 1099-S for the
+/// sale or exchange."* Exactly one branch of the three tests leaves the return blank; on every other
+/// one a Form 8949 belongs on it, and btctax builds none.
+///
+/// ★★ **Extracted at T12 so the SCREEN and the REPORT read one decider.** §4.4 makes `report` print
+///    *"the home-sale decision and its answers"*, and re-deriving that beside the rule which already
+///    decides it is precisely the shape T9's and T11's folds were for. `screen_inputs_tiered` calls
+///    this; so does the report block. Nothing about the refusal changed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HomeSaleDecision {
+    /// `sold_main_home` is not a stated *yes* — there is no sale to decide about. (An UNANSWERED
+    /// `sold_main_home` refuses one rule earlier, on its own `HomeSaleGateUnanswered`.)
+    NoSale,
+    /// All three tests met and no Form 1099-S: **the sale is not reported**, and the return is blank
+    /// for it. The blank is a decision with four answers behind it, not an absence.
+    NotReported,
+    /// A Form 8949 belongs on this return, for the reason named. btctax builds none, so it refuses.
+    Reported(&'static str),
+}
+
+/// See [`HomeSaleDecision`].
+///
+/// ★★★ **FOLLOWUPS FR-87, decided at T12: the `s_1099 == Some(true)` arm is GONE.**
+///
+/// It was kept through the T9 fold as a documented fail-closed backstop, and it was measured
+/// unreachable in the same breath — the document census screens a `Some(true)` on **both** tiers
+/// ahead of every value-dependent rule, so planting `false &&` on it reds nothing. A guard that
+/// nothing can turn red is the exact shape `design/HARNESS.md` B1 refuses, and the honest choice
+/// between *"reach it"* and *"delete it"* is delete: reaching it would mean reordering the census
+/// behind a value rule, which changes which refusal a filer meets in order to make a redundant arm
+/// testable. **The census owns the outcome, and it is held**: the home-sale cross test asserts all
+/// eight `Some(true)` triples refuse `DocumentTypeUnsupported` with §2.2's own sentence — which
+/// names Form 8949 code H and the Pub. 523 worksheet, the same exit this rule would have given —
+/// and deleting the census's rule reds those eight rows.
+///
+/// ★ The `s_1099.is_none()` arm STAYS and is reachable: at the param-free (import) tier the census's
+///   own unanswered rule does not run, so this is what stops a sale whose 1099-S state is unstated.
+#[must_use]
+pub fn home_sale_decision(ri: &ReturnInputs) -> HomeSaleDecision {
+    if ri.home_sale.sold_main_home != Some(true) {
+        return HomeSaleDecision::NoSale;
+    }
+    let h = &ri.home_sale;
+    let s_1099 = ri
+        .documents
+        .get(crate::tax::document_census::DocumentRow::S1099);
+    if h.can_exclude_all_gain == Some(false) {
+        HomeSaleDecision::Reported("you said you cannot exclude all of your gain")
+    } else if h.test1_owned_2_years_and_lived_2_years_of_last_5 == Some(false) {
+        HomeSaleDecision::Reported(
+            "you did not meet Test 1 (owned it 2 years and lived in it 2 of the last 5)",
+        )
+    } else if h.test2_no_exclusion_on_another_home_in_2_years == Some(false) {
+        HomeSaleDecision::Reported(
+            "you did not meet Test 2 (no exclusion on another main home in the last 2 years)",
+        )
+    } else if s_1099.is_none() {
+        HomeSaleDecision::Reported(
+            "this return does not say whether a Form 1099-S arrived for the sale",
+        )
+    } else {
+        HomeSaleDecision::NotReported
+    }
+}
+
 pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<Refusal> {
     // Data integrity FIRST: any negative money is a corrupt import — refuse before any accumulation, so a
     // negative can never offset a §402(g) / §904(j) threshold into passing (R2-I1 / M4, now one gate).
@@ -3441,58 +3510,24 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
                 .to_string(),
         );
     }
-    // ★★★ R8 / T9 — THE SALE OF A MAIN HOME. The Schedule D instructions answer their own question:
-    //     *"You may not need to report the sale or exchange of your main home"*, and then
-    //     *"Report the sale or exchange of your main home on Form 8949 if: • You can't exclude all
-    //     of your gain from income, or • You received a Form 1099-S for the sale or exchange."*
-    //     Exactly one branch of the three tests × the 1099-S census row leaves the return blank; on
-    //     every other branch a Form 8949 belongs on it, and btctax builds none.
-    //
-    // ★ A `documents.s_1099 = Some(true)` is caught EARLIER, by the census's own §2.2 refusal, whose
-    //   sentence already names Form 8949 code H and the Pub. 523 worksheet. It is still a conjunct
-    //   here so this rule is complete on its own terms.
-    //
-    // ★★ **MEASURED WHILE FOLDING THE T9 SEAM REVIEW (M-2): that conjunct is UNREACHABLE, and it is
-    //    kept deliberately.** The census screen runs inside `screen_inputs_tiered` ahead of this
-    //    rule on BOTH tiers — `screen_param_free` is the same body — so `Some(true)` never arrives
-    //    here, and planting `false &&` onto this arm reds nothing in the suite. That is a fact about
-    //    rule ORDER, not about the rule: the observable guarantee is the one the home-sale table
-    //    test asserts, that a `Some(true)` row refuses with `DocumentTypeUnsupported` naming the
-    //    same exit. The arm stays as the fail-closed backstop for a future reordering that put a
-    //    value rule ahead of the census; it must not be read as a tested guard.
-    if ri.home_sale.sold_main_home == Some(true) {
-        let h = &ri.home_sale;
-        let s_1099 = ri
-            .documents
-            .get(crate::tax::document_census::DocumentRow::S1099);
-        let branch = if h.can_exclude_all_gain == Some(false) {
-            Some("you said you cannot exclude all of your gain")
-        } else if h.test1_owned_2_years_and_lived_2_years_of_last_5 == Some(false) {
-            Some("you did not meet Test 1 (owned it 2 years and lived in it 2 of the last 5)")
-        } else if h.test2_no_exclusion_on_another_home_in_2_years == Some(false) {
-            Some("you did not meet Test 2 (no exclusion on another main home in the last 2 years)")
-        } else if s_1099 == Some(true) {
-            Some("you received a Form 1099-S for the sale")
-        } else if s_1099.is_none() {
-            Some("this return does not say whether a Form 1099-S arrived for the sale")
-        } else {
-            None
-        };
-        if let Some(branch) = branch {
-            return refuse(
-                RefuseReason::HomeSaleNotComputed(branch.to_string()),
-                format!(
-                    "you sold your main home and {branch}. The Schedule D instructions say to \
-                     \"Report the sale or exchange of your main home on Form 8949 if: \u{2022} You \
-                     can't exclude all of your gain from income, or \u{2022} You received a Form 1099-S \
-                     for the sale or exchange\" \u{2014} so this sale belongs on FORM 8949 with code H, \
-                     and the gain comes off the PUB. 523 worksheet. btctax does not compute a home \
-                     sale and builds no Form 8949 row for one, so it refuses rather than file a \
-                     return that omits it. File with a preparer, or complete Form 8949 and Schedule \
-                     D by hand from Pub. 523"
-                ),
-            );
-        }
+    // ★★★ R8 / T9 — THE SALE OF A MAIN HOME. The decision itself is [`home_sale_decision`], and it
+    //     lives there rather than here because §4.4's `report` block PRINTS it: a rule that decides
+    //     a thing and a surface that re-derives the same thing beside it is the defect T9 and T11
+    //     were both folded for. One decider, two readers.
+    if let HomeSaleDecision::Reported(branch) = home_sale_decision(ri) {
+        return refuse(
+            RefuseReason::HomeSaleNotComputed(branch.to_string()),
+            format!(
+                "you sold your main home and {branch}. The Schedule D instructions say to \
+                 \"Report the sale or exchange of your main home on Form 8949 if: \u{2022} You \
+                 can't exclude all of your gain from income, or \u{2022} You received a Form 1099-S \
+                 for the sale or exchange\" \u{2014} so this sale belongs on FORM 8949 with code H, \
+                 and the gain comes off the PUB. 523 worksheet. btctax does not compute a home \
+                 sale and builds no Form 8949 row for one, so it refuses rather than file a \
+                 return that omits it. File with a preparer, or complete Form 8949 and Schedule \
+                 D by hand from Pub. 523"
+            ),
+        );
     }
     // ★ T4/R11 — the §904(j) ceiling is a FullReturnParams figure: it waits for the year's package.
     if let Some((_, p)) = tier.package {
@@ -4276,15 +4311,18 @@ mod tests {
     ///    refuses `DocumentCensusUnanswered` at commit while the home-sale rule still refuses at
     ///    import, where the unanswered tier does not run.
     ///
-    /// ★★ **What the cross does NOT hold, stated plainly.** The home-sale rule's own
-    ///    `s_1099 == Some(true)` arm is unreachable: the census screens first on both tiers, so
-    ///    planting `false &&` onto that arm reds nothing (measured while folding M-2). The rows here
-    ///    hold the *census's* refusal and its wording, which is what a filer actually meets; the arm
-    ///    itself is a documented fail-closed backstop, not a tested guard — see the comment beside
-    ///    it in `screen_inputs_tiered`.
+    /// ★★ **FOLLOWUPS FR-87, CLOSED AT T12: this test is now the SOLE holder of the `Some(true)`
+    ///    outcome, and it holds it.** The home-sale rule used to carry an `s_1099 == Some(true)` arm
+    ///    of its own that nothing could red — the census screens first on both tiers — so T12
+    ///    DELETED it rather than reorder the census behind a value rule to make a redundant arm
+    ///    testable. The eight `Some(true)` rows below are what stands in its place, and they were
+    ///    watched RED: planting the census's §2.2 rule away gives
+    ///    `(true,true,true,s_1099=Some(true)) refused unexpectedly: None` — the case that would
+    ///    otherwise file a home sale with a Form 1099-S and no Form 8949.
     ///
-    /// Mutation: delete the `can_exclude_all_gain` / Test 1 / Test 2 arms of the branch selector and
-    /// their rows red; delete the census's own §2.2 rule and the eight `Some(true)` rows red.
+    /// Mutation: delete the `can_exclude_all_gain` / Test 1 / Test 2 arms of
+    /// [`super::home_sale_decision`] and their rows red; delete the census's own §2.2 rule and the
+    /// eight `Some(true)` rows red (measured, above).
     #[test]
     fn the_home_sale_table_is_one_blank_and_seven_refusals_naming_pub_523() {
         use crate::tax::document_census::DocumentRow;

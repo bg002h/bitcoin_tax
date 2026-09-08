@@ -207,6 +207,97 @@ The form removes the fiddly-TOML pain for the common case; it does not expand wh
 
 ---
 
+## The interview — what it asks you, and exactly where it stops
+
+btctax asks you about the **pieces of paper you hold** and about **conditions the form states**, and it
+never asks you to work anything out. Two things follow from that, and both are worth knowing before you
+start.
+
+**It will not answer for you, and it will not guess.** Every question is a line of an IRS form or its
+instructions, quoted in the form's own words. A blank you never answered is not a "no": it either blocks
+the return or is listed as something you are giving up. Which of the two it is, is printed.
+
+**The answer panel is the whole picture, on one screen.** Press `p` in the tax-inputs editor, or run
+`btctax income answer --year N` (it prints the panel before the first question and after the last), or
+read it in `btctax report --tax-year N`. It lists, at once:
+
+- **BLOCKING** — questions that must be answered before the return can be committed;
+- **REFUSING** — an answer you have *already given* that stops the return, each with its exit, so you meet
+  it while you are still authoring rather than at commit;
+- **FORGOING** — benefits you are lawfully entitled to skip and have skipped. **Each one costs you, not
+  the Treasury.** An item marked *(declined)* is one you were asked about and passed over — it stays on
+  the list, because a forgo becoming final is not a reason to stop showing it;
+- **WAITING** — a question whose wording quotes a dollar figure the IRS has not published for your year
+  yet. It cannot be *stated*, so it is not asked and it does not block; it becomes a blocking question the
+  moment the year's figures arrive;
+- **NOT COMPUTED** — a benefit figured on a schedule btctax does not file (today: the child tax credit and
+  the credit for other dependents, 1040 line 19, from Schedule 8812). The credit **boxes** on your return
+  are printed from your answers; the **amount** is yours to enter.
+
+There is **no progress bar and no "N of M"**, deliberately. A count of questions is not a measure of how
+far through your return you are, and nothing about where you got to is stored.
+
+The **packet manifest** repeats the forgone list and the undated document rows, so you have them on paper
+while you assemble the envelope.
+
+### Documents it cannot take — the census, and each exit
+
+The first thing the interview asks is which information returns you received. Answering **yes** to any of
+these **refuses the return** and tells you where to go. Nothing is stored and no forms are written:
+
+| You received | btctax says |
+|---|---|
+| **Form 1099-R** (IRA, pension, annuity) | Form 1040 lines 4a–5b and the Simplified Method are not built. File with a preparer. |
+| **Form SSA-1099 or RRB-1099** | the Social Security Benefits Worksheet is not built. |
+| **Form 1099-NEC, 1099-MISC or 1099-K** | Schedule C Part II is not built, and 1099-MISC box 3 (prizes, awards, research-study pay) is Schedule 1 line 8z, which is not built either. A crypto-only Schedule C still fills from the ledger. |
+| **Schedule K-1** (any flavour) | partnership, S-corporation, estate and trust items reach nothing. A preparer is the exit. |
+| **a rental or royalty statement (Schedule E)** | btctax has no Schedule E. |
+| **Form 1099-S** (sale of real property) | Form 8949 and Schedule D are the exit — for a main home, Form 8949 code H and the Pub. 523 worksheet. |
+| **Form 1099-OID** | btctax takes Form 1099-INT only; a 1099-OID's boxes differ. |
+| **Form W-2G** (gambling) | btctax cannot take gambling winnings or losses. |
+| **Form 1099-C** (canceled debt) | Form 982 is not built. |
+| **Form 1095-A** (Marketplace) | Form 8962 is not built. |
+| **Form 1098-T** (education) | Form 8863 is not built. |
+
+Answering **no** is testimony too, and it is recorded as such. "Not yet received" is neither — leave it
+unanswered and it stays a blocking question until you know.
+
+### Selling your main home
+
+You are asked whether you sold your main home, and if you did, the Schedule D instructions' own three
+tests plus whether a Form 1099-S arrived. **Exactly one combination leaves your return blank for it**: all
+three tests met and no Form 1099-S. On every other combination the sale belongs on **Form 8949 with code
+H**, with the gain figured on the **Pub. 523** worksheet — btctax builds neither, so it refuses. `btctax
+report` prints the decision and all four answers behind it, so you can see which branch you are on.
+
+### The crypto questions
+
+- **Form 1099-DA answers are a keystroke, not a transcription.** btctax asks, per venue, whether the
+  broker reported your basis and whether it matches — `BasisMatches` / `BasisDiffers` is a comparison
+  **you** swear to. There is no 1099-DA entry screen in this version, and btctax never answers it for you.
+- **btctax models ONE account per venue** (`exchange:<venue>:default`). §1012(c)(1) applies the basis
+  conventions account by account, so if you hold **more than one account at the same venue**, a standing
+  order (a dated method election) is recorded for the venue and not per account — check that your broker
+  applied the same method to each. btctax does not ask how many accounts you have, because it would be
+  collecting an answer nothing reads.
+- **No self-custody wallet is importable.** If you were paid in Bitcoin to your own wallet, there is no
+  export to bring in, and that receipt is not on this return: Schedule 1 line 8v and Form 8949 come only
+  from the ledger. This is why answering the **Digital Assets** question *Yes* on a year your ledger looks
+  empty gets you a **warning and not a refusal** — your truthful answer is never turned into a false one
+  to get you through a gate.
+
+### What the interview never does
+
+- **No OCR, and no model reads your documents.** You type what the paper says.
+- **No amount is ever pre-filled from a prior year.** Opening next year seeds the *names* of your payers,
+  dependents and venues with every box blank, and every durable fact — a date of birth — is shown for you
+  to confirm, never entered on your behalf.
+- **It never re-asks a ledger question.** Which transfer, which lot, what the price was — those belong to
+  `btctax reconcile` and the interview does not touch them.
+- **It stores no "what remains".** The panel is computed fresh every time you look at it.
+
+---
+
 ## (i) OMISSIONS — favorable-only, omitted conservatively (your tax is OVERSTATED at worst)
 
 These are benefits you may be entitled to that v1 does **not** compute. Leaving them out can only make your

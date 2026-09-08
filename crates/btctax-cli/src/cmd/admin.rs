@@ -567,6 +567,74 @@ fn undated_rows_block(rows: &[String]) -> String {
     s
 }
 
+/// ★★★ **T12 / R12 / §4.4 / J-15 — THE FORGOING LIST IN THE PACKET MANIFEST.**
+///
+/// *"The packet's `manifest.txt` \"COMPLETE BY HAND\" block gains the forgoing list, each
+/// `Declined` item marked *(declined)*, so the filer sees it while assembling paper."*
+///
+/// ★★★ **The `COMPLETE BY HAND` block frames itself as a closed list of the blanks btctax left on
+///     purpose — so a forgone benefit missing from it makes that block LIE.** A benefit the filer
+///     was asked about and passed over is a blank on the page exactly like an unsigned signature
+///     line, and it is worth money; the difference is that the signature line is obviously empty and
+///     the forgone credit is not. This is the same rule T10's I-1 was: a surface that says
+///     *"everything else is accounted for"* must be true.
+///
+/// ★★ **A `Declined` benefit is STILL LISTED, marked.** Declining is provenance — asked, refused —
+///    and dropping the item exactly when the forgo becomes FINAL is backwards. Only `Given` removes
+///    one.
+///
+/// ★ Rendered by `crate::forgoing_lines`, the SAME function the answer panel and the TUI's commit
+///   modal print, so a benefit cannot be worded one way on screen and another on paper. Empty when
+///   nothing is forgone, so a filer who answered everything sees no block at all.
+///
+/// ★ `params` is the year's package: with it the sizes are the year's own figures, without it they
+///   are blank rather than invented. A packet is only ever written for a year that HAS a package,
+///   so in practice they are always sized — the `Option` is here because the renderer is shared.
+fn forgoing_block(
+    ri: &btctax_core::tax::return_inputs::ReturnInputs,
+    params: Option<&btctax_core::tax::tables::FullReturnParams>,
+) -> String {
+    use std::fmt::Write as _;
+    let st = match params {
+        Some(p) => btctax_core::tax::interview_state::interview_state_with_params(ri, p),
+        None => btctax_core::tax::interview_state::interview_state(ri),
+    };
+    if st.forgoing.is_empty() && st.not_computed.is_empty() {
+        return String::new();
+    }
+    let mut s = String::from(
+        "\n# ── FORGONE — benefits you are lawfully entitled to skip, and did ──\n\
+         #\n\
+         # None of these makes the return wrong. Each one costs YOU, not the Treasury, and each is\n\
+         # here because a blank you chose looks exactly like a blank nobody asked about. An item\n\
+         # marked (declined) is one you were asked about and passed over \u{2014} that is provenance,\n\
+         # not absence, so it stays on the list.\n#\n",
+    );
+    // ★ The shared renderer already carries the panel's own `•` and its heading; `wrap_bulleted`
+    //   adds a bullet of its own, so the marker is stripped here and the heading is written as a
+    //   plain comment line. Without this the manifest printed `#  • • Are YOU legally blind?` under
+    //   a bulleted heading — the lists are shared, the CHROME is each surface's own.
+    fn push(s: &mut String, text: &str) {
+        use std::fmt::Write as _;
+        for wrapped in crate::render::wrap_bulleted(text).lines() {
+            let _ = writeln!(s, "#{wrapped}");
+        }
+    }
+    for line in crate::forgoing_lines(&st) {
+        match line.trim().strip_prefix("\u{2022} ") {
+            Some(item) => push(&mut s, item),
+            // The heading (`FORGOING (n) — …`) — not an item, so not a bullet.
+            None => {
+                let _ = writeln!(s, "# {}", line.trim());
+            }
+        }
+    }
+    for n in &st.not_computed {
+        push(&mut s, &n.line());
+    }
+    s
+}
+
 /// Render [`hand_marks`] as the packet manifest's closing section — the manifest is the artifact the
 /// filer is told to follow while assembling paper, which is why the marks live there (decision 13)
 /// rather than only on a stderr line that scrolls away.
@@ -1985,6 +2053,12 @@ fn export_full_return(
     };
     let marks = hand_marks(&printed, tax_year, &line8b_overflow);
     manifest.push_str(&hand_marks_block(&marks));
+    // ★★★ T12 / R12 / J-15 — the FORGOING list, immediately after the hand-marks block it
+    //     completes. The two are different categories and the order encodes it: the marks above are
+    //     blanks btctax could not fill and the filer MUST, while these are blanks the filer is
+    //     entitled to leave and chose to. Without this the hand-marks block reads as a closed list
+    //     of every deliberate blank in the packet, and it was not one.
+    manifest.push_str(&forgoing_block(&ri, Some(params)));
     let manifest_path = out_dir.join("manifest.txt");
     write_bytes_owner_only(&manifest_path, manifest.as_bytes())?;
 

@@ -51,6 +51,15 @@ pub use cmd::admin::promote_export_gate;
 // its KAT-G1 source gate forbids in non-test code (mirrors `promote_export_gate` above). `IrsPdfReport`
 // is a plain data struct (no `Session`, no lock, no I/O) — the gate's intent is honored, not evaded.
 pub use cmd::admin::IrsPdfReport;
+// ★★★ Re-exported at the crate root (T12 / R12) so the TUI's answer-panel pane and commit modal can
+// render the panel with the SAME functions `income answer` prints, WITHOUT the `cmd::` token its
+// KAT-G1 source gate forbids in non-test code — mirrors `guard_allocation_vs_tranche` and
+// `promote_export_gate` above. All three are PURE `&InterviewState -> Vec<String>` renderers: no
+// `Session`, no lock, no I/O, and nothing that could hold or drop the editor's vault lock. The
+// gate's intent is honored, not evaded. Re-exporting them is what makes "one derivation, two
+// surfaces" structural — a second renderer in the TUI would be a second chance to word one forgo
+// differently.
+pub use cmd::answer::{forgoing_lines, panel_lines, refusing_lines};
 // Re-exported at the crate root (Defensive Filing Wizard Task 8, ★ C-3) so the TUI Declare flow
 // (`btctax-tui-edit`'s `edit/declare_flow.rs` + `edit/persist.rs`) can drive the DECLARE chokepoint
 // WITHOUT the `cmd::` token its KAT-G1 source gate forbids in non-test code — mirrors

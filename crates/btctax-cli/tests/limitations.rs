@@ -166,3 +166,67 @@ fn the_schedule_8812_row_is_conditional_on_the_24b_phase_out() {
          advisory they actually saw: {row}"
     );
 }
+
+/// ★★★ **T12 / FOLLOWUPS FR-73 — THE INTERVIEW'S STOP LIST IS IN THE FILER-FACING DOC, AND IT IS
+///     DERIVED FROM THE CENSUS RATHER THAN TYPED.**
+///
+/// `LIMITATIONS.md` is the document a filer reads to find out where btctax stops. §2.2's excluded
+/// families are exactly the document-census rows that carry an exit sentence — so the expectation
+/// here is `DocumentRow::ALL` filtered by `exit_sentence().is_some()`, not a hand-list. A family
+/// added to the census tomorrow reds this test until the filer-facing doc names it, which is the
+/// only mechanism that keeps the doc from going quietly stale behind the code.
+///
+/// ★ It asserts the row's own **designation** — the filer's words for the piece of paper in their
+///   hand — because that is what they are holding when they go looking.
+#[test]
+fn limitations_names_every_excluded_document_family_the_census_refuses() {
+    use btctax_core::tax::document_census::DocumentRow;
+    let doc = shipped_doc();
+    let mut checked = 0usize;
+    for row in DocumentRow::ALL {
+        if row.exit_sentence().is_none() {
+            continue; // transcribable today — not an excluded family, and saying so would be false
+        }
+        checked += 1;
+        // The designation as the census words it, with the markdown emphasis stripped out of the
+        // haystack so a bolded name still counts as named.
+        let hay = doc.replace("**", "");
+        assert!(
+            hay.contains(row.designation()),
+            "LIMITATIONS.md must name the excluded family {:?} in the filer's own words ({:?}) — \
+             the interview refuses it and the doc is where a filer looks to find out why",
+            row,
+            row.designation()
+        );
+    }
+    assert!(
+        checked >= 8,
+        "only {checked} excluded families were checked — a walk that finds nothing passes by \
+         finding nothing"
+    );
+}
+
+/// ★★★ **T12 / FOLLOWUPS FR-73 — THE VENUE/ACCOUNT GRANULARITY NOTE HAS A DOCS HOME.**
+///
+/// `step0::VENUE_GRANULARITY_NOTE` is printed by `income answer` and by the TUI's Step 0 panel, and
+/// until T12 it appeared nowhere a filer could read it outside a live session. The two load-bearing
+/// tokens are taken **out of the shipped constant at test time**, so this reds if either surface
+/// drifts: change the venue-key shape or the statutory cite in the code and the doc stops matching.
+#[test]
+fn limitations_carries_the_venue_account_granularity_note() {
+    let doc = shipped_doc();
+    let note = btctax_cli::step0::VENUE_GRANULARITY_NOTE;
+    for token in ["exchange:<venue>:default", "§1012(c)(1)"] {
+        assert!(
+            note.contains(token),
+            "the shipped constant must still carry {token:?} — if it does not, this test is \
+             checking the wrong thing: {note}"
+        );
+        assert!(
+            doc.contains(token),
+            "LIMITATIONS.md must carry the venue/account granularity note's {token:?} (FR-73): a \
+             filer with two accounts at one venue has no other way to learn that the standing \
+             order is recorded per VENUE"
+        );
+    }
+}

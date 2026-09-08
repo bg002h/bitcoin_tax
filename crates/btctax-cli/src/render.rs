@@ -3090,6 +3090,390 @@ pub fn render_verify(r: &VerifyReport) -> String {
     out
 }
 
+/// ★★★ **§4.4 — THE INTERVIEW BLOCK ON `report --tax-year N`.**
+///
+/// *"`report --tax-year N` prints, after the existing chains: the document census (type → declared
+/// / rows), the answer panel, the home-sale decision and its answers, row (7) per dependent, and the
+/// `LEAF_SOURCE` provenance of every collected figure (document with payer TIN masked / filer's
+/// records), naming any document row that carries no `transcribed_on` as *transcribed without a
+/// date* rather than omitting it."*
+///
+/// ★★★ **Every section RENDERS something already decided; none of them decides anything.** The
+///     panel is `interview_state()`, the home-sale line is `home_sale_decision()` — the same call
+///     `screen_inputs` makes — row (7) is `credit_column()`, the provenance is `collected_figures()`,
+///     and the undated rows are `undated_document_rows()`, the same list the packet manifest prints.
+///     A `report` that re-derived any of them beside the rule that owns it is the defect T9's and
+///     T11's folds were both for.
+///
+/// ★ `params` is the year's package where there is one. Without it the panel's sizes are blank and
+///   a params-quoting gate is listed as *waiting* rather than *blocking* — R12's rule, unchanged
+///   here.
+#[must_use]
+pub fn render_interview_block(
+    ri: &btctax_core::tax::return_inputs::ReturnInputs,
+    params: Option<&btctax_core::tax::tables::FullReturnParams>,
+) -> String {
+    use btctax_core::tax::document_census::{declared_rows, DocumentRow};
+    use btctax_core::tax::provenance::Source;
+    use btctax_core::tax::return_refuse::{home_sale_decision, HomeSaleDecision};
+    use std::fmt::Write as _;
+
+    let mut s = String::new();
+    let year = ri.tax_year;
+    let _ = writeln!(s, "\n═══ The interview — tax year {year} ═══");
+
+    // ── 1. The document census: type → declared / rows ────────────────────────────────────────
+    //
+    // ★ Every row of `DocumentRow::ALL`, including the ones answered NO: *"not received"* is
+    //   testimony the filer gave, and a census that printed only the yeses would look identical to
+    //   one nobody had answered.
+    let _ = writeln!(s, "\n  Documents received (the census)");
+    for row in DocumentRow::ALL {
+        let declared = match ri.documents.get(*row) {
+            Some(true) => "YES",
+            Some(false) => "no",
+            None => "NOT STATED",
+        };
+        let rows = match declared_rows(ri, *row) {
+            Some(n) => format!("{n} row(s) transcribed"),
+            None => "no section holds rows of this type".to_string(),
+        };
+        // ★ 44 columns: the longest designation the census carries is *"a rental or royalty
+        //   statement (Schedule E)"* at 42, so every row's state starts in the same place.
+        let _ = writeln!(s, "    {:<44} {:<10} {rows}", row.designation(), declared);
+    }
+
+    // ── 2. The answer panel (R12), rendered by the SAME function `income answer` prints ────────
+    let st = match params {
+        Some(p) => btctax_core::tax::interview_state::interview_state_with_params(ri, p),
+        None => btctax_core::tax::interview_state::interview_state(ri),
+    };
+    for line in crate::panel_lines(&st, &format!("tax year {year}")) {
+        let _ = writeln!(s, "  {line}");
+    }
+
+    // ── 3. The home-sale decision and its answers (R8) ────────────────────────────────────────
+    let _ = writeln!(s, "\n  Sale of your main home");
+    let tri = |v: Option<bool>| match v {
+        Some(true) => "yes",
+        Some(false) => "no",
+        None => "not stated",
+    };
+    let _ = writeln!(
+        s,
+        "    sold your main home during the year: {}",
+        tri(ri.home_sale.sold_main_home)
+    );
+    if ri.home_sale.sold_main_home == Some(true) {
+        let _ = writeln!(
+            s,
+            "    Test 1 (owned 2 years and lived in it 2 of the last 5): {}",
+            tri(ri.home_sale.test1_owned_2_years_and_lived_2_years_of_last_5)
+        );
+        let _ = writeln!(
+            s,
+            "    Test 2 (no exclusion on another main home in the last 2 years): {}",
+            tri(ri.home_sale.test2_no_exclusion_on_another_home_in_2_years)
+        );
+        let _ = writeln!(
+            s,
+            "    can exclude ALL of your gain from income: {}",
+            tri(ri.home_sale.can_exclude_all_gain)
+        );
+        let _ = writeln!(
+            s,
+            "    a Form 1099-S arrived for the sale: {}",
+            tri(ri.documents.get(DocumentRow::S1099))
+        );
+    }
+    let _ = writeln!(
+        s,
+        "    DECISION: {}",
+        match home_sale_decision(ri) {
+            HomeSaleDecision::NoSale => "no sale to report".to_string(),
+            HomeSaleDecision::NotReported =>
+                "the sale is NOT reported — all three tests are met and no Form 1099-S arrived, so \
+                 the Schedule D instructions leave this return blank for it"
+                    .to_string(),
+            HomeSaleDecision::Reported(why) => format!(
+                "the sale BELONGS ON FORM 8949 (code H) because {why} — btctax builds none, so the \
+                 return refuses"
+            ),
+        }
+    );
+
+    // ── 4. Row (7) per dependent — the credit box the flowchart computed ───────────────────────
+    if !ri.header.dependents.is_empty() {
+        let _ = writeln!(
+            s,
+            "\n  Dependents — row (7), the credit box the Form 1040 flowchart computes"
+        );
+        for (i, d) in ri.header.dependents.iter().enumerate() {
+            let col = btctax_core::tax::dependent_gates::credit_column(ri, i);
+            let _ = writeln!(
+                s,
+                "    ({}) {:<28} {}",
+                i + 1,
+                d.name,
+                match col {
+                    btctax_core::tax::dependent_gates::CreditColumn::ChildTaxCredit =>
+                        "Child tax credit",
+                    btctax_core::tax::dependent_gates::CreditColumn::CreditForOtherDependents =>
+                        "Credit for other dependents",
+                    btctax_core::tax::dependent_gates::CreditColumn::Neither =>
+                        "neither box (the instruction's own forgo)",
+                }
+            );
+        }
+    }
+
+    // ── 5. The `LEAF_SOURCE` provenance of every collected figure ─────────────────────────────
+    //
+    // ★★ A ZERO IS NOT LISTED and the heading says so, because a `Usd` of zero and an untouched box
+    //    are the same bytes: listing zeroes would assert a provenance for boxes that carry none.
+    let figures = btctax_core::tax::provenance::collected_figures(ri);
+    let _ = writeln!(
+        s,
+        "\n  Where each figure came from ({} figure(s) with an amount; a box left at zero carries \
+         no testimony and is not listed)",
+        figures.len()
+    );
+    for f in &figures {
+        let from = match (&f.source, &f.document) {
+            (Source::Document(_), Some(doc)) => doc.clone(),
+            _ => "your own records (no information return reports it)".to_string(),
+        };
+        let _ = writeln!(s, "    {:<46} ${:<14} {from}", f.path, f.amount);
+    }
+
+    // ── 6. The undated document rows, NAMED (M8/R4) ───────────────────────────────────────────
+    //
+    // ★ The SAME list the packet manifest prints. An absent date is a fact about the EVIDENCE, not
+    //   the absence of a fact, and a row with no date is one the filer cannot vouch for.
+    let undated = btctax_core::tax::provenance::undated_document_rows(ri);
+    if !undated.is_empty() {
+        let _ = writeln!(s, "\n  Transcribed without a date");
+        for u in &undated {
+            let _ = writeln!(s, "    {u}");
+        }
+    }
+    s
+}
+
+#[cfg(test)]
+mod interview_block_tests {
+    //! ★★★ **T12 / §4.4 — the interview block `report --tax-year N` prints.** Synthetic identifiers
+    //! only.
+    use super::*;
+    use btctax_core::tax::document_census::DocumentRow;
+    use btctax_core::tax::return_inputs::{Form1099Int, Owner, ReturnInputs, W2};
+    use btctax_core::tax::types::FilingStatus;
+    use rust_decimal_macros::dec;
+
+    /// A wage-and-interest return with one undated 1099-INT whose payer TIN IS transcribed.
+    fn ri() -> ReturnInputs {
+        let mut ri = ReturnInputs {
+            tax_year: 2024,
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        ri.documents.set(DocumentRow::W2, Some(true));
+        ri.w2s = vec![W2 {
+            owner: Owner::Taxpayer,
+            employer: "ACME".into(),
+            box1_wages: dec!(40000),
+            ..Default::default()
+        }];
+        ri.documents.set(DocumentRow::Int1099, Some(true));
+        ri.int_1099 = vec![Form1099Int {
+            payer: "First Bank".into(),
+            payer_tin: "12-3456789".into(),
+            box1_interest: dec!(200),
+            transcribed_on: None,
+            ..Default::default()
+        }];
+        // ★ A FILER'S-RECORDS figure too (1040 line 26 — an estimated payment no information
+        //   return reports), so the block's two provenance kinds are BOTH exercised. A fixture that
+        //   carried only documents would let a block that never learned to say *"your own records"*
+        //   pass.
+        ri.payments.estimated_tax_payments = dec!(1500);
+        ri
+    }
+
+    /// ★★★ **§4.4 — THE CENSUS IS PRINTED IN FULL, AND A PAYER TIN NEVER IS.**
+    ///
+    /// The census half is asserted over `DocumentRow::ALL` rather than over a hand-list of rows: a
+    /// document family added tomorrow is covered on the day, and a block that quietly stopped
+    /// printing one reds (FOLLOWUPS FR-88 — a derived checker gets a derived expectation).
+    ///
+    /// The TIN half is the kill the brief names: **plant an unmasked TIN → red.**
+    #[test]
+    fn the_report_block_prints_the_census_and_masks_every_payer_tin() {
+        let ri = ri();
+        let p = btctax_core::tax::testonly::ty2024_params();
+        let out = render_interview_block(&ri, Some(&p));
+
+        // ★★★ **SCOPED TO THE CENSUS SECTION, and the scoping is the finding.** The first version
+        //     of this assertion searched the WHOLE block — and dropping `DocumentRow::W2` from the
+        //     census loop reds nothing, because the PROVENANCE section a few lines down prints
+        //     *"Form W-2 #1 ACME"* and the designation is found there. A checker that can be
+        //     satisfied by a different section than the one it is about is FR-88's trap with the
+        //     haystack too wide; measured by planting `.skip(1)` on the census loop.
+        let census = out
+            .split("  Documents received (the census)")
+            .nth(1)
+            .and_then(|t| t.split("── The answer panel").next())
+            .expect("the census section is delimited by its own heading");
+        for row in DocumentRow::ALL {
+            // ★★ **Per-ROW, not `contains`, and that is the second finding.** With a whole-section
+            //    `contains`, dropping `DocumentRow::W2` STILL passes — because *"Form W-2G"* is two
+            //    rows further down and *"Form W-2"* is a prefix of it. A check that reds on nothing
+            //    when the first row of a census disappears is not a census check. Measured by
+            //    planting `.skip(1)` twice: once to find the section scope was too wide, and once
+            //    to find `contains` was too loose.
+            assert!(
+                census.lines().any(|l| {
+                    l.trim_start()
+                        .strip_prefix(row.designation())
+                        .is_some_and(|rest| rest.starts_with(' '))
+                }),
+                "the census gives every row of `DocumentRow::ALL` its OWN line; {} is missing:\n{census}",
+                row.designation()
+            );
+        }
+        assert!(
+            census.contains("YES") && census.contains("NOT STATED"),
+            "…with each row's declared state, both answered and not: {census}"
+        );
+        assert!(
+            census.contains("1 row(s) transcribed"),
+            "…and the row count beside it: {census}"
+        );
+
+        // ── The provenance, with the TIN MASKED ──
+        assert!(
+            out.contains("First Bank"),
+            "the payer of a collected figure is named: {out}"
+        );
+        assert!(out.contains("**-***6789"), "…with its TIN masked: {out}");
+        assert!(
+            !out.contains("12-3456789") && !out.contains("123456789"),
+            "NO unmasked payer TIN may reach the report: {out}"
+        );
+        assert!(
+            out.contains("int_1099[0].box1_interest"),
+            "every collected figure is named by the leaf it lives on: {out}"
+        );
+        assert!(
+            out.contains("your own records"),
+            "…and a filer's-records figure says so — the two blanks are not the same thing: {out}"
+        );
+
+        // ── The undated row, named rather than tidied away ──
+        assert!(
+            out.contains("Form 1099-INT #1 (First Bank) — transcribed without a date"),
+            "an undated row is NAMED: {out}"
+        );
+
+        // ── The panel, rendered by the same function `income answer` prints ──
+        assert!(
+            out.contains("The answer panel"),
+            "the panel is in the block: {out}"
+        );
+        assert!(!out.contains('%'), "R15 — no progress bar, ever: {out}");
+    }
+
+    /// ★★★ **§4.4 — THE HOME-SALE DECISION IS THE SCREEN'S OWN, AND THE ANSWERS ARE BESIDE IT.**
+    ///
+    /// All three states are crossed, so a block that hardcoded any one of them reds. The decision
+    /// is compared against `home_sale_decision` — the function `screen_inputs` calls — so the report
+    /// cannot describe a different sale from the one the gate refuses.
+    #[test]
+    fn the_report_block_states_the_home_sale_decision_and_the_answers_behind_it() {
+        use btctax_core::tax::return_refuse::{home_sale_decision, HomeSaleDecision};
+        let p = btctax_core::tax::testonly::ty2024_params();
+
+        // (a) No sale.
+        let mut no_sale = ri();
+        no_sale.home_sale.sold_main_home = Some(false);
+        assert_eq!(home_sale_decision(&no_sale), HomeSaleDecision::NoSale);
+        let out = render_interview_block(&no_sale, Some(&p));
+        assert!(out.contains("DECISION: no sale to report"), "{out}");
+
+        // (b) Sold, all three tests met, no 1099-S — the ONE blank branch.
+        let mut blank = ri();
+        blank.home_sale = btctax_core::tax::return_inputs::HomeSale {
+            sold_main_home: Some(true),
+            test1_owned_2_years_and_lived_2_years_of_last_5: Some(true),
+            test2_no_exclusion_on_another_home_in_2_years: Some(true),
+            can_exclude_all_gain: Some(true),
+        };
+        blank.documents.set(DocumentRow::S1099, Some(false));
+        assert_eq!(home_sale_decision(&blank), HomeSaleDecision::NotReported);
+        let out = render_interview_block(&blank, Some(&p));
+        assert!(out.contains("the sale is NOT reported"), "{out}");
+        // Every answer behind the blank is printed — the blank is a DECISION with four answers, and
+        // a surface that showed only the verdict would make it look like an absence.
+        assert!(out.contains("Test 1") && out.contains("Test 2"), "{out}");
+        assert!(
+            out.contains("a Form 1099-S arrived for the sale: no"),
+            "the census answer is beside the tests: {out}"
+        );
+
+        // (c) Sold and cannot exclude — Form 8949, code H.
+        let mut reported = blank.clone();
+        reported.home_sale.can_exclude_all_gain = Some(false);
+        assert!(matches!(
+            home_sale_decision(&reported),
+            HomeSaleDecision::Reported(_)
+        ));
+        let out = render_interview_block(&reported, Some(&p));
+        assert!(
+            out.contains("BELONGS ON FORM 8949 (code H)")
+                && out.contains("cannot exclude all of your gain"),
+            "{out}"
+        );
+    }
+
+    /// ★★★ **§4.4 — ROW (7) PER DEPENDENT, READ OFF THE FLOWCHART THAT COMPUTES IT.**
+    ///
+    /// The expectation is `credit_column()` — the one entry point the packet's grid emitter uses —
+    /// so the report and the printed page cannot disagree about which box a dependent earns.
+    #[test]
+    fn the_report_block_prints_row_7_for_every_dependent_from_the_flowchart() {
+        let mut ri = ri();
+        ri.header.dependents = vec![btctax_core::tax::return_inputs::Dependent {
+            name: "Kid Example".into(),
+            ssn: "000-00-1111".into(),
+            relationship: "Daughter".into(),
+            ..Default::default()
+        }];
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        let want = btctax_core::tax::dependent_gates::credit_column(&ri, 0);
+        assert_eq!(
+            want,
+            btctax_core::tax::dependent_gates::CreditColumn::ChildTaxCredit,
+            "the fixture's row really does earn a box, or the assertion below is vacuous"
+        );
+        let out = render_interview_block(&ri, Some(&btctax_core::tax::testonly::ty2024_params()));
+        assert!(
+            out.contains("(1) Kid Example") && out.contains("Child tax credit"),
+            "row (7) is printed per dependent: {out}"
+        );
+        // A row the instruction gives NEITHER box says so in the instruction's own words.
+        let mut neither = ri.clone();
+        neither.header.dependents[0].tin_issued_by_due_date = Some(false);
+        assert_eq!(
+            btctax_core::tax::dependent_gates::credit_column(&neither, 0),
+            btctax_core::tax::dependent_gates::CreditColumn::Neither
+        );
+        let out =
+            render_interview_block(&neither, Some(&btctax_core::tax::testonly::ty2024_params()));
+        assert!(out.contains("neither box"), "{out}");
+    }
+}
+
 #[cfg(test)]
 mod gift_advisory_tests {
     //! P2-C Task 3 KATs — `render_gift_advisory` (per-donee §2503(b) refactor, Chunk 2).
