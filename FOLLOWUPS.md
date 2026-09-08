@@ -6413,6 +6413,25 @@ build, each with an owning phase.
   and let the census own the outcome alone. A guard nothing can red is the shape this repo keeps
   finding (`design/HARNESS.md` B1); leaving it undecided is what turns it into the next green-and-
   blind instrument.
+- **FR-88 — ★ THREE CONSECUTIVE TASKS' defects were a well-built guard blinded by its own hand-written
+  FIXTURE (T8 I-1, T9 C-1, T10 I-1). Proposed `HARNESS.md` B1 amendment — OWNER'S CALL, filed not
+  actioned. Owning phase: the harness (owner), before the interview branch's whole-branch review.**
+
+  | task | defect | why the guard was green |
+  |---|---|---|
+  | T8 I-1 | a stale row (5)(b) printed under an unchecked (5)(a) | the test hand-set the leaf to `None`, so it tested `None ⇒ false`, never *not-demanded ⇒ blank* |
+  | T9 C-1 | a standard-deduction filer was asked and refused over a mortgage they do not deduct | the fixture **pre-answered** both new gates, so no mutation of either rule could red it |
+  | T10 I-1 | a foreign address crosses years while the opener says nothing crosses | the fixture **never populates** the leaves the guard walks |
+
+  Each checker was correctly designed and each was blind for the same structural reason: **a derived
+  checker was paired with a hand-written fixture, and the fixture decided what the checker could see.**
+  B1 as written requires a checker be observed RED on a planted defect; it does **not** require the
+  fixture to exercise every leaf/branch/question the checker walks — which is the gap all three fell
+  through. A candidate wording: *"a checker that walks a derived set must be fed a fixture derived from
+  that same set, or must assert that its fixture covers it; a hand-written fixture beside a derived
+  walk is the `1..=38` trap one level down."* Amending harness doctrine is the owner's decision, so this
+  is recorded rather than applied. Related: [[FR-86]] (six T8 kills never watched red) and [[FR-87]] (an
+  unreachable guard arm) — the same family, all owned by T12 or the owner.
 - **FR-82 — `tax_tables.rs`'s TY2026 doc comment cites Rev. Proc. 2025-32 §2.14 / §2.10 for figures
   that sit in its Section 4 (T7 build, follow-up 2; pre-existing). Owning phase: ownerless residue
   (doc-consistency).** The new §4.23 cite beside them is accurate.
