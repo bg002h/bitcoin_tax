@@ -6464,6 +6464,20 @@ build, each with an owning phase.
   masked in `Debug` (`RoutingNumber(*********)` / `AccountNumber(*****)`), and never carried across a
   year (`the_trailer_splits_identity_from_the_per_year_credentials`). What is unbounded is only the
   on-screen echo in the editor and whatever a terminal scrollback keeps of it.
+- **FR-90 — ★ a stale `target/` can make the build gate report a FALSE result after a plant/restore
+  cycle (found by the T10 fold, 2026-09-07). Owning phase: the harness (owner) / every build agent,
+  from now.** The folding agent lost about an hour to `cargo`/`nextest` silently reusing old artifacts:
+  it first appeared as a phantom *pre-existing red at HEAD* that was really the T10 builder's own
+  reverted plant still compiled into the `btctax-core` rlib. The mechanism is mtime-based staleness
+  losing a race with rapid plant → measure → restore edits — which is precisely the loop **B1 mandates**,
+  so every agent that follows B1 is exposed, on every task. It bit as a false RED here; nothing prevents
+  the symmetric false GREEN, which would be a gate that cannot fail (`design/HARNESS.md`'s own class-β,
+  and the thing this repo guards hardest against). Mitigation used and verified: `touch` the file after
+  every restore, and `find crates -name '*.rs' -exec touch {} +` before any closing gate. The controller
+  re-ran `make check` after that full touch and got 3496/3496 green, so the T10 fold's result is a full
+  recompile and not a cached one. What to decide: whether the mitigation belongs in every build/fold
+  brief as a rule, inside `make check` itself, or in a wrapper. Related: [[FR-88]] — both are ways an
+  instrument reports something other than what it measured.
 - **FR-82 — `tax_tables.rs`'s TY2026 doc comment cites Rev. Proc. 2025-32 §2.14 / §2.10 for figures
   that sit in its Section 4 (T7 build, follow-up 2; pre-existing). Owning phase: ownerless residue
   (doc-consistency).** The new §4.23 cite beside them is accurate.
