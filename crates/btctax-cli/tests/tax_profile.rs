@@ -283,6 +283,208 @@ fn income_project_prints_the_oracle_row_and_no_identity() {
         serde_json::from_value(doc["row"].clone()).expect("the row round-trips as GoldenInputs");
 }
 
+/// ★★★ **T11 seam review C-1 — a return btctax REFUSES must say so in the projection.**
+///
+/// `scripts/oracle/check_return.py` promised `Exit 2 = … a refused return` and could not deliver it:
+/// it hands the projected ROW to the harness, and the harness rebuilds a household with
+/// `build_golden_return` — a fixture builder that sets the tax year, answers every live declaration
+/// and both Schedule B Part III questions. So the refusal was answered away in the round trip and a
+/// return `btctax report` refuses came back *"Every compared line reconciles"* at exit 0. The
+/// refusal has to be taken where the filer's own `ReturnInputs` are in hand, which is here.
+///
+/// ★ The row still PRINTS — a filer is entitled to see what the engines would be told — so the only
+///   thing this test can hold is the block itself. Deleting it leaves every other assertion in this
+///   file green, which is exactly why it is written down.
+#[test]
+fn income_project_reports_the_screen_that_refuses_the_filers_own_return() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    // A return with an UNANSWERED Schedule B Part III (FBAR) gate: `btctax report` refuses it.
+    let toml = dir.path().join("inputs.toml");
+    std::fs::write(
+        &toml,
+        "filing_status = \"Single\"\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\n\n\
+         [header.taxpayer]\nfirst_name = \"Pat\"\nlast_name = \"Doe\"\nssn = \"123-45-6789\"\n\n\
+         [[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"82000\"\n\
+         box2_fed_withheld = \"9100\"\n\n\
+         [[int_1099]]\npayer = \"BANK\"\nbox1_interest = \"2000\"\n",
+    )
+    .unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false, false).unwrap();
+
+    let out = cmd::tax::project_return_inputs(&vault, &pp(), 2024)
+        .unwrap()
+        .expect("inputs were imported");
+    let doc: serde_json::Value = serde_json::from_str(&out).expect("the projection is JSON");
+
+    // The premise, measured rather than assumed: the COMPUTING path really does refuse this return.
+    let refusal = doc["refused"].as_object().unwrap_or_else(|| {
+        panic!("this fixture must be a return btctax refuses, else the test proves nothing:\n{out}")
+    });
+    let screen = refusal["screen"].as_str().expect("the screen is named");
+    assert!(
+        screen.starts_with("ScheduleBPart3Unanswered"),
+        "the block must name the screen that fired, not merely that one did: {screen}"
+    );
+    assert!(
+        refusal["detail"]
+            .as_str()
+            .expect("the refusal carries its own sentence")
+            .contains("foreign financial account"),
+        "the filer needs the refusal's own words, not a code:\n{out}"
+    );
+    // …and the row is STILL printed, so the filer can see what the engines would have been told.
+    assert!(doc["row"]["w2_income"].as_f64() == Some(82_000.0), "{out}");
+
+    // …and the block is not a CONSTANT: the same command on a FULLY ANSWERED return carries none.
+    // A refusal that never lifts is no more use to `check_return.py` than one that never fires.
+    let answered = dir.path().join("answered.toml");
+    std::fs::write(&answered, ANSWERED_MFJ_RETURN).unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &answered, false, true).unwrap();
+    let clean = cmd::tax::project_return_inputs(&vault, &pp(), 2024)
+        .unwrap()
+        .expect("inputs were imported");
+    let clean: serde_json::Value = serde_json::from_str(&clean).expect("the projection is JSON");
+    assert!(
+        clean["refused"].is_null(),
+        "a return btctax computes must carry no refusal block: {}",
+        clean["refused"]
+    );
+    // The premise of THAT half, measured: this household really does itemize and really does claim
+    // a child — the two routing facts the T11 fold added to the row (C-2, and the dependents block).
+    assert_eq!(clean["row"]["standard_or_itemized"], "Itemized");
+    assert_eq!(clean["row"]["dependents"][0]["credit"], "child_tax_credit");
+}
+
+/// A COMPLETE MFJ return — every live declaration, the whole document census, all fifteen §152
+/// dependent gates — so `income project` on it carries no refusal. Kept as a literal because the
+/// point of the fixture is that nothing is left unanswered, and a builder that filled the blanks
+/// would be answering for the filer, which is the defect this whole seam exists to prevent.
+const ANSWERED_MFJ_RETURN: &str = r#"filing_status = "Mfj"
+tax_year = 2024
+charitable_cwa_obtained = true
+foreign_accounts = false
+foreign_trust = false
+dual_status_alien = false
+has_income_exclusion = false
+other_out_of_scope_income = false
+excluded_canceled_debt = false
+filing_form_4952 = false
+claiming_mortgage_interest_credit = false
+digital_asset_activity = false
+state_refund_without_1099g = false
+interest_or_dividends_without_1099 = false
+amt_carryover_same_as_regular = true
+amt_depreciation_same_as_regular = true
+carryover_includes_spouses_joint_loss = false
+
+[sch1]
+hsa_activity = false
+
+[header]
+filer_tin_issued_by_due_date = true
+nra_spouse_resident_election = false
+can_be_claimed_as_dependent_taxpayer = false
+can_be_claimed_as_dependent_spouse = false
+taxpayer_died_during_year = false
+spouse_died_during_year = false
+
+[header.taxpayer]
+first_name = "Robin"
+last_name = "Hale"
+ssn = "111-22-3333"
+date_of_birth = "1979-04-04"
+
+[header.spouse]
+first_name = "Sam"
+last_name = "Hale"
+ssn = "222-33-4444"
+date_of_birth = "1981-08-08"
+
+[[header.dependents]]
+name = "Kim Hale"
+ssn = "333-44-5555"
+relationship = "Daughter"
+date_of_birth = "2015-03-03"
+lived_with_you_over_half_year = true
+lived_with_you_in_us = true
+full_time_student = false
+permanently_and_totally_disabled = false
+qc_relationship = true
+younger_than_you_or_spouse = true
+provided_over_half_own_support = false
+filing_joint_return = false
+joint_return_only_to_claim_refund = false
+qualifying_child_of_another_person = false
+citizen_national_resident_or_canada_mexico = true
+married = false
+tin_issued_by_due_date = true
+citizen_national_or_resident_alien = true
+ssns_valid_for_employment_issued_by_due_date = true
+qr_relationship_or_member_of_household = true
+qualifying_child_of_any_taxpayer = false
+gross_income_under_limit = true
+you_provided_over_half_support = true
+divorced_separated_multiple_support_or_kidnapped_rule_applies = false
+
+[[w2s]]
+owner = "taxpayer"
+employer = "NORTHWIND"
+box1_wages = "420000"
+box3_ss_wages = "420000"
+box5_medicare_wages = "420000"
+box2_fed_withheld = "90000"
+box17_state_tax_withheld = "6000"
+
+[[int_1099]]
+payer = "BIG BANK"
+box1_interest = "9000"
+
+[schedule_a]
+mortgage_all_used_to_buy_build_improve = true
+mortgage_dwelling_is_amt_qualified = true
+mortgage_within_debt_limit = true
+salt_use_sales_tax = false
+salt_state_estimated_payments = "1000"
+salt_real_estate = "5000"
+
+[[schedule_a.charitable]]
+class = "cash60"
+amount = "2000"
+
+[[form_1098]]
+lender = "BIG BANK"
+box1_interest = "30000"
+other_borrower_paid_interest = false
+
+[documents]
+w2 = true
+int_1099 = true
+div_1099 = false
+b_1099 = false
+g_1099 = false
+form_1098 = true
+form_1098e = false
+sa_1099 = false
+sa_5498 = false
+r_1099 = false
+ssa_1099 = false
+nec_misc_k_1099 = false
+k1 = false
+schedule_e_rental = false
+s_1099 = false
+oid_1099 = false
+w2g = false
+c_1099 = false
+a_1095 = false
+t_1098 = false
+
+[home_sale]
+sold_main_home = false
+"#;
+
 /// M-1 blast-radius tripwire (spec §4/§9.6, "pin that enumeration in the KAT"): the workspace-global
 /// `preserve_order` flip is SAFE only because every PRODUCTION `serde_json::Value` construction is
 /// DISPLAYED or PARSED, never serialized into PERSISTED/FINGERPRINTED bytes — those use typed serde

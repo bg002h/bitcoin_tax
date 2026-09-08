@@ -751,25 +751,87 @@ struct CryptoIncome {
     nonbusiness_lending_interest: Usd,
 }
 
+/// ★★★ **Where ONE ledger income record lands on the printed return** — the classification
+/// [`unprojected_ledger_lines`] censuses by (T11 fold, M-1).
+///
+/// ★★ **It exists to make the census DERIVED rather than a hand list of two.** The census used to
+///    enumerate its two lines directly, which is exactly the shape `ORACLE_INVISIBLE` was built NOT
+///    to be: a list written by the author of the projection, with nothing to red if a third ledger
+///    quantity started reaching the printed return. The match below is `_`-free over
+///    `(IncomeKind, business)`, so a sixth [`IncomeKind`] — or a change of sink for an existing one
+///    — fails to COMPILE until a human says where it lands and whether an engine can be told.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LedgerSink {
+    /// Schedule C line 1 → line 31 → the row's `self_employment_income` (`e00900` / OTS `S1_3`).
+    /// Both engines are told; nothing to report.
+    ScheduleCProjects,
+    /// Schedule 1 line 8v — *"Digital assets received as ordinary income not reported elsewhere"*.
+    /// REPORTED, never carried: see the census entry's own note.
+    Schedule1Line8vReported,
+    /// Business lending interest, which `screen_inputs` refuses upstream
+    /// (`RefuseReason::BusinessInterestIncome`), so no filed return carries one.
+    RefusedUpstream,
+}
+
+/// The sink one income record reaches — `_`-free on purpose. See [`LedgerSink`].
+#[must_use]
+pub fn ledger_income_sink(kind: IncomeKind, business: bool) -> LedgerSink {
+    match (kind, business) {
+        // §1402(a) trade-or-business crypto income: Schedule C, and it projects.
+        (IncomeKind::Mining, true)
+        | (IncomeKind::Staking, true)
+        | (IncomeKind::Airdrop, true)
+        | (IncomeKind::Reward, true) => LedgerSink::ScheduleCProjects,
+        // Business LENDING interest is not Schedule C receipts and btctax refuses it outright.
+        (IncomeKind::Interest, true) => LedgerSink::RefusedUpstream,
+        // Everything hobby-side is Schedule 1 line 8v.
+        (IncomeKind::Mining, false)
+        | (IncomeKind::Staking, false)
+        | (IncomeKind::Interest, false)
+        | (IncomeKind::Airdrop, false)
+        | (IncomeKind::Reward, false) => LedgerSink::Schedule1Line8vReported,
+    }
+}
+
 /// ★★★ **T11 — the LEDGER's contribution to the return that the oracle row cannot carry**, by the
 /// line it lands on: `(1040 line, amount, why no engine can take it)`.
 ///
-/// [`ORACLE_INVISIBLE`](crate::tax::testonly::ORACLE_INVISIBLE) censuses the `Usd` leaves of
+/// [`ORACLE_INVISIBLE`](crate::tax::testonly::ORACLE_INVISIBLE) censuses the leaves of
 /// `ReturnInputs`, and the ledger is not one of them — so without this the crypto side of a btctax
 /// return could be silently truncated on its way to an engine, which is precisely the failure the
-/// census exists to prevent on the other side. Schedule D and the Schedule C net profit DO project;
-/// these two do not.
+/// census exists to prevent on the other side.
+///
+/// ★★ **The income half is DERIVED** (T11 fold, M-1): every record is classified by
+/// [`ledger_income_sink`], whose match is `_`-free, so a new [`IncomeKind`] cannot be silently
+/// omitted from the census — it fails to compile until it is given a sink.
+///
+/// ★ **What it does NOT derive, stated plainly.** The other two ledger channels are named here
+///   rather than enumerated by a walk: `state.disposals` (→ Schedule D → the row's
+///   `short_term_capital_gains`/`long_term_capital_gains`, so they project) and `state.removals`'
+///   `claimed_deduction` (→ Schedule A line 12, reported below). `LedgerState` has no type-driven
+///   leaf walk the way `ReturnInputs` does, so a NEW top-level ledger channel that started reaching
+///   the printed return would not red here. That is the residual, and it is FR-96.
 #[must_use]
 pub fn unprojected_ledger_lines(
     state: &LedgerState,
     year: i32,
 ) -> Vec<(&'static str, Usd, &'static str)> {
     let mut out = Vec::new();
-    let crypto = crypto_income(state, year);
-    if crypto.nonbusiness_ordinary > Usd::ZERO {
+    let mut line_8v = Usd::ZERO;
+    for i in state
+        .income_recognized
+        .iter()
+        .filter(|i| i.recognized_at.year() == year)
+    {
+        match ledger_income_sink(i.kind, i.business) {
+            LedgerSink::Schedule1Line8vReported => line_8v += i.usd_fmv,
+            LedgerSink::ScheduleCProjects | LedgerSink::RefusedUpstream => {}
+        }
+    }
+    if line_8v > Usd::ZERO {
         out.push((
             "Schedule 1 line 8v (non-business crypto ordinary income)",
-            crypto.nonbusiness_ordinary,
+            line_8v,
             "OpenTaxSolver has `S1_8z` (its \"other income\" line) but Tax-Calculator's `Records` \
              has no generic other-income variable at all — its income categories are fixed. \
              Carrying it would make AGI a ONE-witness figure on the most btctax-specific line \
@@ -786,7 +848,9 @@ pub fn unprojected_ledger_lines(
         out.push((
             "Schedule A line 12 (crypto donations, §170(e))",
             donated,
-            "a NON-cash gift: Tax-Calculator's `e20100` and OTS's `A12` would take it, but the              oracle row models only the cash class (`e19800` / `A11`) and a non-cash gift carries              its own §170(b) 30%-of-AGI ceiling that OTS 2024 does not apply",
+            "a NON-cash gift: Tax-Calculator's `e20100` and OTS's `A12` would take it, but the \
+             oracle row models only the cash class (`e19800` / `A11`) and a non-cash gift carries \
+             its own §170(b) 30%-of-AGI ceiling that OTS 2024 does not apply",
         ));
     }
     out

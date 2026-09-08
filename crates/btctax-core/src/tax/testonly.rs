@@ -1109,6 +1109,39 @@ fn golden_adult_age() -> Option<u32> {
 /// against the same year the fixture was built in.
 pub const GOLDEN_TAX_YEAR: i32 = 2024;
 
+/// ★★★ **THE DEDUCTION ACTUALLY CLAIMED ON 1040 LINE 12 — a NON-`Usd` fact that ROUTES money**
+/// (T11 fold, C-2).
+///
+/// `scripts/oracle/ots_direct.py` gates its **entire** Schedule A block — `A5a`/`A5b`/`A8a`/`A11`/
+/// `A16`/`A18` — on `standard_or_itemized == "Itemized"`. `scripts/oracle/corpus.py:164` has written
+/// that key since the SALT axis landed, with the note *"read by the Python oracles (not a
+/// `GoldenInputs` field)"* — and it was not one, so **no projected row could ever carry it**. An
+/// itemizing filer was handed to OpenTaxSolver with no Schedule A at all: 1040 line 12 DIVERGED on a
+/// correct return, the run exited 1 telling the filer to adjudicate against the form, and Schedule A
+/// line 5e silently lost its OTS witness while the census reported *"only one engine models this
+/// line"*.
+///
+/// ★★ **It is written from btctax's OWN line-12 decision** ([`crate::tax::return_1040::AbsoluteReturn::deduction_is_itemized`]),
+///    never re-derived — which is why [`project_to_golden`] takes the assembled return. And
+///    [`build_golden_return`] deliberately IGNORES it: btctax decides §63(e)/(c)(6) for itself from
+///    the amounts, exactly as the corpus intends. That is what makes the inverse KAT a real check —
+///    a corpus cell claiming `Itemized` whose amounts lose to the standard deduction describes a
+///    household btctax and the drivers disagree about, and the round trip reds.
+///
+/// ★ **The §G-9 residual, stated rather than hidden.** OTS's `A18` is *"Elect to itemize, even when
+///   less than standard deduction"*, so handing it this token makes OTS's line-12 BRANCH an input
+///   rather than an independent opinion; only the AMOUNT stays independently computed. Tax-Calculator
+///   still chooses the branch for itself, so line 12 keeps a genuine second witness on the choice —
+///   but a divergence on the branch alone is a one-witness finding. Filed as FR-94.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum GoldenDeduction {
+    /// §63(c) — the standard deduction was claimed on 1040 line 12.
+    #[default]
+    Standard,
+    /// The Schedule A total was claimed on 1040 line 12 (larger, or elected under §63(e)).
+    Itemized,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GoldenInputs {
     pub filing_status: String,
@@ -1152,6 +1185,16 @@ pub struct GoldenInputs {
     /// own `why`.
     #[serde(default)]
     pub charitable_cash: f64,
+    /// ★★★ **1040 line 12 — WHICH deduction was claimed** (T11 fold, C-2). See [`GoldenDeduction`]
+    /// for the whole mechanism: it is the one key `ots_direct.py` gates its entire Schedule A block
+    /// on, `corpus.py` has written it since the SALT axis landed, and until this field existed no
+    /// projected row could express it.
+    ///
+    /// ★ `#[serde(default)]` ⇒ `Standard`, which is what the 80 corpus cells with no Schedule A
+    ///   already mean; the 27 that write `"Itemized"` now deserialize into it rather than being
+    ///   dropped on the floor.
+    #[serde(default)]
+    pub standard_or_itemized: GoldenDeduction,
     /// ★★★ **Schedule 1 line 13 — the §223 HSA DEDUCTION** (T16 / FR-76).
     ///
     /// The figure the filer CONTRIBUTED to their own HSA, which Form 8889 line 13 deducts after its
@@ -1317,6 +1360,23 @@ impl GoldenInputs {
         }
         c
     }
+
+    /// ★★★ **The row as the AMOUNT partition compares it** — every ROUTING fact normalised away
+    /// (T11 fold).
+    ///
+    /// `oracle_projection.rs`'s money probe asks one question: *does this `Usd` leaf's FIGURE reach
+    /// an oracle box?* Without this, the answer would be contaminated by a leaf's side effects on a
+    /// routing fact — perturbing `schedule_a.medical` to $777,777 flips 1040 line 12 from the
+    /// standard deduction to the itemized one, which moves [`Self::standard_or_itemized`] and would
+    /// make medical read as "visible" even though **not one dollar of it** reaches any oracle box.
+    /// The routing dimension has its own partition, which asks the right question about it.
+    #[must_use]
+    pub fn money_view(&self) -> GoldenInputs {
+        GoldenInputs {
+            standard_or_itemized: GoldenDeduction::default(),
+            ..self.clone()
+        }
+    }
 }
 
 pub fn golden_usd(v: f64) -> Usd {
@@ -1340,6 +1400,51 @@ pub fn not_a_dependent() -> HouseholdHeader {
     }
 }
 
+/// ★★★ **THE FIVE FILING-STATUS TOKENS BOTH DRIVERS AGREE ON** (T11 fold, I-4).
+///
+/// OpenTaxSolver's `Status` field takes exactly these five words
+/// (`tax_form_files/US_1040/US_1040_template.txt`), and `scripts/oracle/gen_goldens.py`'s
+/// `TAXCALC_MARS` is keyed by the same five (`"Single"`, `"Married/Joint"`, `"Married/Sep"`,
+/// `"Head_of_House"`, `"Widow(er)"` → `MARS` 1–5). So the token set is the drivers', not ours.
+///
+/// ★★ **The match is `_`-free on purpose.** [`project_to_golden`] used to fall through
+///    `other => format!("{other:?}")`, emitting the enum's own `Debug` name — `"HoH"`, `"Mfs"`,
+///    `"Qss"` — which matches no `TAXCALC_MARS` key and which [`build_golden_return`] then panicked
+///    on. `income project` exited 0 and printed a full row, and the failure surfaced three steps
+///    later as a Rust panic inside the harness. That is the standing *"no decision keys on a list
+///    you typed beside derived data"* rule, written against a status set T8 had just widened; a
+///    sixth `FilingStatus` variant now fails to COMPILE here until a human gives it a token.
+#[must_use]
+pub fn golden_filing_status_token(status: FilingStatus) -> &'static str {
+    match status {
+        FilingStatus::Single => "Single",
+        FilingStatus::Mfj => "Married/Joint",
+        FilingStatus::Mfs => "Married/Sep",
+        FilingStatus::HoH => "Head_of_House",
+        FilingStatus::Qss => "Widow(er)",
+    }
+}
+
+/// Every filing status the oracle row models, in one place so a KAT can round-trip all of them.
+/// Paired with [`golden_filing_status_token`], whose exhaustive match is the compiler's net.
+pub const GOLDEN_FILING_STATUSES: [FilingStatus; 5] = [
+    FilingStatus::Single,
+    FilingStatus::Mfj,
+    FilingStatus::Mfs,
+    FilingStatus::HoH,
+    FilingStatus::Qss,
+];
+
+/// The inverse of [`golden_filing_status_token`], DERIVED from it rather than retyped: a token is
+/// looked up by emitting each status's own word and comparing. `None` ⇒ a token neither driver
+/// knows, which [`build_golden_return`] refuses rather than guessing at.
+#[must_use]
+pub fn golden_filing_status(token: &str) -> Option<FilingStatus> {
+    GOLDEN_FILING_STATUSES
+        .into_iter()
+        .find(|s| golden_filing_status_token(*s) == token)
+}
+
 /// Build the SAME household in btctax's own input model.
 ///
 /// The mapping is deliberately literal: the oracle's `w2_income` is a W-2's box 1 (and its box 3 / box 5,
@@ -1357,11 +1462,10 @@ pub fn build_golden_household(h: &GoldenHousehold) -> (ReturnInputs, LedgerState
 /// `h.inputs` — so `build_golden_household(h)` is now exactly `build_golden_return(&h.inputs)`, and the
 /// two produce an IDENTICAL return by construction.
 pub fn build_golden_return(i: &GoldenInputs) -> (ReturnInputs, LedgerState) {
-    let status = match i.filing_status.as_str() {
-        "Single" => FilingStatus::Single,
-        "Married/Joint" => FilingStatus::Mfj,
-        other => panic!("unmapped filing status {other:?}"),
-    };
+    // ★ T11 fold (I-4) — all five statuses, through the drivers' own token table. The `Single`/`Mfj`
+    //   hand-list this replaced is what made `income project` emit a row that panicked here.
+    let status = golden_filing_status(&i.filing_status)
+        .unwrap_or_else(|| panic!("unmapped filing status {:?}", i.filing_status));
 
     let mut ri = ReturnInputs {
         filing_status: status,
@@ -1761,12 +1865,38 @@ fn golden_dependent_row(n: usize, d: GoldenDependent) -> Dependent {
 /// | `long_term_capital_gains` | `p23250` | 8949 rows | Schedule D Part II gain + Σ `div_1099[].box2a` |
 /// | `self_employment_income` | `e00900` | `S1_3` | Schedule C line 31 |
 /// | `unemployment` | `e02300` | `S1_7` | Σ `g_1099[].box1` |
-/// | `state_income_tax` | `e18400` | `A5a` | Schedule A line 5a (the §164(b)(5) election's live path) |
-/// | `real_estate_tax` | `e18500` | `A5b` | `schedule_a.salt_real_estate` |
-/// | `mortgage_interest` | `e19200` | `A8a` | Schedule A 8a + 8b + 8c |
-/// | `charitable_cash` | `e19800` | `A11` | Σ `schedule_a.charitable[]` of class `Cash60` |
-/// | `hsa_deduction` | `e03290` | `S1_13` | Form 8889 line 2 |
+/// | `state_income_tax` | `e18400` | `A5a` | **the filed Schedule A's own line 5a** |
+/// | `real_estate_tax` | `e18500` | `A5b` | **the filed Schedule A's own line 5b** |
+/// | `mortgage_interest` | `e19200` | `A8a` | **the filed Schedule A's own 8a + 8b + 8c** |
+/// | `charitable_cash` | `e19800` | `A11` | Σ `schedule_a.charitable[]` on Schedule A **line 11** |
+/// | `standard_or_itemized` | (taxcalc decides) | `A5a…A18` gate | `ar.deduction_is_itemized` |
+/// | `hsa_deduction` | `e03290` | `S1_13` | Form 8889 line 2, iff `sch1.hsa_activity` |
 /// | the dependents block | `n24`/`XTOT`/`EIC`/ages/blindness | `Dependents`/`You_65+Over?`/… | the T7/T8 answers |
+///
+/// ★★★ **The four Schedule A figures are READ OFF THE FILED SCHEDULE A** ([`crate::tax::return_1040::ScheduleAParts`]),
+///     which is why this takes the assembled [`crate::tax::return_1040::AbsoluteReturn`]. They used
+///     to be re-derived here from `ReturnInputs`, and all three re-derivations were WRONG in the
+///     taxpayer's favour — each one described a household with a bigger deduction than the return
+///     btctax files, so both engines would have been asked a different question and 1040 line 12
+///     would have diverged on a correct return:
+///
+///  1. **State income tax.** `schedule_a_line5a` summed `salt_state_estimated_payments +
+///     salt_prior_year_balance_paid`; the filed line 5a is
+///     [`crate::tax::return_1040::income_tax_salt`], which ALSO includes W-2 box 17 + box 19.
+///  2. **Mortgage interest.** It summed Form 1098 box 1 only; the filed line 8a is
+///     Σ(box 1 + box 6 points) — and is **$0** on a MIXED-USE mortgage
+///     (`mortgage_all_used_to_buy_build_improve == Some(false)`, §163(h)(3)(F)), which the
+///     re-derivation ignored entirely.
+///  3. Both were invisible to every KAT, because a leaf that reaches the row **at the wrong value**
+///     is still "visible" to the amount partition. They were found by the T11-fold routing probe.
+///
+/// ★★ **`charitable_cash` carries Schedule A LINE 11 only** — a §170 gift *by cash or check*
+///    (`Cash60`/`Cash30`). A line-12 gift (`CapGainProp30`, `OrdinaryProp50`, …) has its own
+///    §170(b) ceiling that OTS 2024 does not apply, so carrying it into `e19800`/`A11` would invite
+///    a false divergence on a correct return; it is REPORTED by
+///    [`unprojected_nonzero_leaves`] instead, exactly as
+///    [`crate::tax::return_1040::unprojected_ledger_lines`] already reports a crypto donation on the
+///    same line. [`charitable_gift_projects`] is the single predicate both readers share.
 ///
 /// ★★ **`itemized_deductions` is deliberately always $0.** It is the corpus's catch-all *"other
 ///    itemized"* lump, which `build_golden_return` folds into the Form 1098 row; a real return has
@@ -1776,10 +1906,16 @@ fn golden_dependent_row(n: usize, d: GoldenDependent) -> Dependent {
 ///    [`GoldenInputs::canonical`], which is why the inverse KAT compares canonical forms.
 ///
 /// ★ **What it does NOT carry** is [`ORACLE_INVISIBLE`], asserted complete by
-///   `oracle_projection.rs`: every `Usd` leaf of `ReturnInputs` either moves this projection or is
-///   named there with a reason.
+///   `oracle_projection.rs` in BOTH dimensions: every `Usd` leaf of `ReturnInputs` either moves this
+///   projection or is named there with a reason (the AMOUNT partition), and every non-`Usd` leaf
+///   whose perturbation makes the described household stop reproducing the filed return is named
+///   there too (the ROUTING partition — T11 fold).
 #[must_use]
-pub fn project_to_golden(ri: &ReturnInputs, state: &LedgerState) -> GoldenInputs {
+pub fn project_to_golden(
+    ri: &ReturnInputs,
+    state: &LedgerState,
+    ar: &crate::tax::return_1040::AbsoluteReturn,
+) -> GoldenInputs {
     use crate::tax::dependent_gates::{credit_column, walk_dependent, CreditColumn};
     use crate::tax::return_1040 as r1040;
 
@@ -1791,6 +1927,10 @@ pub fn project_to_golden(ri: &ReturnInputs, state: &LedgerState) -> GoldenInputs
     let sched_d = crate::forms::schedule_d(state, year);
     let (b1099_st, b1099_lt) = r1040::form_1099b_gains(ri);
     let a = ri.schedule_a.as_ref();
+    // ★★★ THE FILED SCHEDULE A, not a second derivation of it — see the doc comment's three
+    //     measured defects. `None` on a return with no Schedule A, in which case every one of its
+    //     four figures is $0 and no engine is told about a deduction it does not take.
+    let sa = ar.schedule_a.as_ref();
 
     let dependents = (0..ri.header.dependents.len())
         .filter(|row| walk_dependent(ri, *row).verdict.is_claimable())
@@ -1823,11 +1963,8 @@ pub fn project_to_golden(ri: &ReturnInputs, state: &LedgerState) -> GoldenInputs
         .collect();
 
     GoldenInputs {
-        filing_status: match ri.filing_status {
-            FilingStatus::Single => "Single".to_string(),
-            FilingStatus::Mfj => "Married/Joint".to_string(),
-            other => format!("{other:?}"),
-        },
+        // ★ I-4 — the drivers' own token, from an exhaustive match. Never the enum's `Debug` name.
+        filing_status: golden_filing_status_token(ri.filing_status).to_string(),
         w2_income: f(r1040::sum_wages(ri)),
         taxable_interest: f(r1040::sum_taxable_interest(ri)),
         qualified_dividends: f(r1040::sum_qualified_dividends(ri)),
@@ -1846,21 +1983,39 @@ pub fn project_to_golden(ri: &ReturnInputs, state: &LedgerState) -> GoldenInputs
         // See the note above: the corpus's "other itemized" lump has no counterpart on a real
         // return, and line 8a already carries everything the projection can see.
         itemized_deductions: 0.0,
-        state_income_tax: f(schedule_a_line5a(ri)),
-        real_estate_tax: f(a.map_or(Usd::ZERO, |a| a.salt_real_estate)),
-        mortgage_interest: f(schedule_a_line8(ri)),
+        state_income_tax: f(sa.map_or(Usd::ZERO, |s| s.salt_5a)),
+        real_estate_tax: f(sa.map_or(Usd::ZERO, |s| s.salt_5b)),
+        mortgage_interest: f(
+            sa.map_or(Usd::ZERO, |s| s.mortgage_8a + s.mortgage_8b + s.mortgage_8c)
+        ),
         charitable_cash: f(a.map_or(Usd::ZERO, |a| {
             a.charitable
                 .iter()
-                .filter(|g| g.class == CharitableClass::Cash60)
+                .filter(|g| charitable_gift_projects(g.class))
                 .map(|g| g.amount)
                 .sum()
         })),
+        // ★ T11 fold — WHICH deduction 1040 line 12 actually claimed, from btctax's own decision.
+        //   `ots_direct.py` gates its whole Schedule A block on this; see [`GoldenDeduction`].
+        standard_or_itemized: if ar.deduction_is_itemized {
+            GoldenDeduction::Itemized
+        } else {
+            GoldenDeduction::Standard
+        },
         // Form 8889 line 2 — the CONTRIBUTION. Both engines take a DEDUCTION and neither applies
         // the §223(b) limit, and the two are equal exactly while the contribution is inside it;
         // btctax REFUSES an over-limit return (excess contributions need Form 5329), so a return
         // that reaches this projection is inside the limit by construction.
-        hsa_deduction: f(ri.hsa.line2_contributions_you_made),
+        //
+        // ★ T11 fold — gated on `sch1.hsa_activity`, the declaration Form 8889 files on. Without
+        //   the gate a filer who answered "no HSA activity" but still had a stale line-2 figure was
+        //   described to both engines WITH a §223 deduction btctax does not take. Found by the
+        //   routing probe, which watched the described return stop reproducing the filed one.
+        hsa_deduction: if ri.sch1.hsa_activity == Some(true) {
+            f(ri.hsa.line2_contributions_you_made)
+        } else {
+            0.0
+        },
         unemployment: f(r1040::sum_unemployment(ri)),
         dependents,
         age_head: age_of(ri.header.taxpayer.date_of_birth, year),
@@ -1903,6 +2058,20 @@ pub enum InvisibleBecause {
     /// ★ This is the variant that must never become a dumping ground. Each entry's `note` names the
     ///   oracle variable that WOULD take the figure, or says why neither engine has one.
     NotInTheOracleRow,
+    /// ★★★ **A NON-`Usd` fact that ROUTES money, and is not carried** (T11 fold).
+    ///
+    /// The other three variants are all about an AMOUNT. This one is about a fact BESIDE an amount
+    /// that decides where — or whether — the amount goes: a gift's §170 class, an election, a
+    /// declaration that gates a form. It is a separate variant because its failure mode is the
+    /// worst of the four and looks like none of them: the amount beside it is perfectly "visible"
+    /// to the amount partition, and the row still describes a household the filer is not. The whole
+    /// gift is simply absent from the description, and nothing about the row looks wrong.
+    ///
+    /// ★ Its completeness is derived by `oracle_projection.rs`'s ROUTING partition, which perturbs
+    ///   every non-`Usd` leaf to every alternative the TYPE admits (serde's own `unknown variant`
+    ///   list; `true`/`false` for a boolean) and asks whether `build_golden_return(project(ri))`
+    ///   still reproduces the return `ri` files.
+    RoutingFactNotCarried,
 }
 
 /// One entry of [`ORACLE_INVISIBLE`].
@@ -1917,8 +2086,27 @@ pub struct OracleInvisibleLeaf {
     pub note: &'static str,
 }
 
-/// ★★★ **EVERY `Usd` LEAF OF [`ReturnInputs`] THAT DOES NOT REACH THE ORACLE ROW, WITH ITS REASON**
-/// (SPEC_interview.md R13).
+/// ★★★ **EVERY LEAF OF [`ReturnInputs`] THAT DOES NOT REACH THE ORACLE ROW, WITH ITS REASON**
+/// (SPEC_interview.md R13; the routing half added by the T11 fold).
+///
+/// ★★★ **TWO partitions, and the second one exists because the first cannot see it.** The AMOUNT
+///     partition asks *"does this `Usd` leaf's figure reach an oracle box?"*. The ROUTING partition
+///     asks *"does this non-`Usd` fact reach the drivers?"* — and it is a different question, because
+///     a fact that ROUTES money is invisible to a probe that only watches figures. Two Criticals of
+///     the T11 seam review were one defect of exactly that shape: the itemize election (now the row's
+///     `standard_or_itemized`) and a charitable gift's §170 class, both of which decide where money
+///     goes without being money.
+///
+/// ★★★ **§G-9 — NOTHING BELOW IS VALIDATED BY ORACLE AGREEMENT, AND NEITHER ARE THE GATES**
+///     (T11 seam review M-3). *"A value the oracles take as INPUT is never validated by their
+///     agreement."* Every fact this table names is either absent from the description (so no engine
+///     has an opinion at all) or handed to the drivers AS AN INPUT — the filing status, the
+///     dependents block, the aged/blind boxes, the itemize election. Their agreement on a line those
+///     facts feed is agreement about a household we described; it is never evidence that the fact
+///     itself is right. What validates the gates is R2's transcription checks — the census, the
+///     answered-ness classifier, `cite_check`, the line-coverage ratchet — and `check_return.py`
+///     says the same thing for 1040 lines 19/27/28 in its own docstring. A reader of this path must
+///     take no comfort from a green run about any answer btctax put INTO the row.
 ///
 /// ★★ **The partition is DERIVED, never declared.** `oracle_projection.rs` walks the money leaves of
 ///    the maximal sentinel with `leaf_walk::money_leaves` — by TYPE, through `Decimal`'s own
@@ -1957,17 +2145,11 @@ pub const ORACLE_INVISIBLE: &[OracleInvisibleLeaf] = &[
         because: InvisibleBecause::PaymentOrWithholding,
         note: "W-2 box 6 → Form 8959 line 24 → 1040 line 25c",
     },
-    OracleInvisibleLeaf {
-        prefix: "w2s[].box17_state_tax_withheld",
-        because: InvisibleBecause::PaymentOrWithholding,
-        note: "W-2 box 17 — a STATE payment; btctax is federal-only and neither engine is asked \
-               for a state return",
-    },
-    OracleInvisibleLeaf {
-        prefix: "w2s[].box19_local_tax",
-        because: InvisibleBecause::PaymentOrWithholding,
-        note: "W-2 box 19 — a LOCAL payment; see box 17",
-    },
+    // ★ T11 fold — `w2s[].box17_state_tax_withheld` and `w2s[].box19_local_tax` USED to sit here,
+    //   as PaymentOrWithholding, on the ground that "btctax is federal-only and neither engine is
+    //   asked for a state return". Both halves were false: `income_tax_salt` puts them on Schedule A
+    //   line 5a, so they reach `e18400`/`A5a` on every itemizing return. The projection now reads
+    //   the FILED line 5a, so both are VISIBLE and the KAT reds if either is listed again.
     OracleInvisibleLeaf {
         prefix: "int_1099[].box4_fed_withheld",
         because: InvisibleBecause::PaymentOrWithholding,
@@ -2179,12 +2361,10 @@ pub const ORACLE_INVISIBLE: &[OracleInvisibleLeaf] = &[
         note: "§163(h)(3)(E) mortgage insurance premiums — the deduction expired after 2021 and \
                Schedule A no longer carries the line",
     },
-    OracleInvisibleLeaf {
-        prefix: "form_1098[].box6_points",
-        because: InvisibleBecause::NotInTheOracleRow,
-        note: "points REPORTED on a Form 1098; Schedule A line 8a takes them inside box 1's figure, \
-               and `schedule_a.points_not_on_1098` (line 8c) is the box that projects",
-    },
+    // ★ T11 fold — `form_1098[].box6_points` USED to sit here, claiming *"Schedule A line 8a takes
+    //   them inside box 1's figure"*. It does not: line 8a is Σ(box 1 + box 6)
+    //   (`i1040sca--2025.txt:1060-1061`), which `schedule_a_parts` implements and the old
+    //   re-derivation in this file did not. Reading the FILED 8a makes the box visible.
     OracleInvisibleLeaf {
         prefix: "form_1098e[].box1_interest",
         because: InvisibleBecause::NotInTheOracleRow,
@@ -2223,6 +2403,35 @@ pub const ORACLE_INVISIBLE: &[OracleInvisibleLeaf] = &[
         note: "Schedule A line 5c. OTS has `A5c`; taxcalc's `e18400`/`e18500` split is income/sales \
                versus real estate with no personal-property slot, so carrying it would be a \
                single-witness figure",
+    },
+    // ── Facts that ROUTE money and are not carried (T11 fold) ────────────────────────────────────
+    OracleInvisibleLeaf {
+        prefix: "header.taxpayer_died_during_year",
+        because: InvisibleBecause::RoutingFactNotCarried,
+        note: "§G-9 — a filer who died during the year FORGOES §63(f)'s age-65 addition (class (B): \
+               silence forgoes), so 1040 line 12 falls by the addition. The oracle row carries an \
+               AGE and neither engine models a death: OTS asks only `You_65+Over?` and taxcalc only \
+               `age_head`, so the described household keeps the box the filed return gives up. \
+               FR-93 records the consequence — such a filer diverges from BOTH engines on line 12 \
+               by a multiple of the addition, deliberately NOT excused, because answering the \
+               question is the filer's own remedy",
+    },
+    OracleInvisibleLeaf {
+        prefix: "header.spouse_died_during_year",
+        because: InvisibleBecause::RoutingFactNotCarried,
+        note: "the spouse's half of the §G-9 death gate — see `header.taxpayer_died_during_year`; \
+               OTS's `Spouse_65+Over?` and taxcalc's `age_spouse` are ages, never a death",
+    },
+    OracleInvisibleLeaf {
+        prefix: "schedule_a.charitable[].class",
+        because: InvisibleBecause::RoutingFactNotCarried,
+        note: "the §170 class decides Schedule A line 11 (cash: taxcalc `e19800`, OTS `A11` — the \
+               row's `charitable_cash`) from line 12 (property: `e20100` / `A12`). A line-12 gift \
+               is REPORTED rather than carried: it has its own §170(b) 30%/50%-of-AGI ceiling and \
+               OTS 2024 applies no §170(b) ceiling at all, so putting it into `A12` would hand \
+               OpenTaxSolver a deduction btctax caps and OTS does not — a false divergence on a \
+               correct return. `charitable_gift_projects` is the one predicate that decides, and \
+               `unprojected_nonzero_leaves` reports the dropped gift's amount under this entry",
     },
     OracleInvisibleLeaf {
         prefix: "schedule_c.qbi_ubia",
@@ -2358,14 +2567,38 @@ pub fn normalize_leaf_path(path: &str) -> String {
 /// expenses would be projected as a filer with none, both engines would answer a DIFFERENT
 /// household's question, and the resulting divergence on 1040 line 12 would read as a btctax defect.
 /// Naming the omission is what makes a divergence attributable.
+///
+/// ★★★ **AND the gifts a ROUTING fact drops** (T11 fold, I-1). A money leaf can be "visible" —
+/// `schedule_a.charitable[].amount` reaches `charitable_cash` — and still be dropped on a particular
+/// return, because a non-`Usd` fact beside it decides whether it rides at all. The class is that
+/// fact. So a gift [`charitable_gift_projects`] rejects is reported here, by the SAME predicate the
+/// projection sums by; a hand-list would be a second thing to keep true.
 #[must_use]
 pub fn unprojected_nonzero_leaves(
     ri: &ReturnInputs,
 ) -> Vec<(String, Usd, &'static OracleInvisibleLeaf)> {
-    crate::tax::provenance::leaf_walk::nonzero_money_leaves(ri)
-        .into_iter()
-        .filter_map(|(path, amount)| oracle_invisible_entry(&path).map(|e| (path, amount, e)))
-        .collect()
+    let mut out: Vec<(String, Usd, &'static OracleInvisibleLeaf)> =
+        crate::tax::provenance::leaf_walk::nonzero_money_leaves(ri)
+            .into_iter()
+            .filter_map(|(path, amount)| oracle_invisible_entry(&path).map(|e| (path, amount, e)))
+            .collect();
+    let class_entry = oracle_invisible_entry("schedule_a.charitable[0].class")
+        .expect("ORACLE_INVISIBLE names the charitable class");
+    for (i, g) in ri
+        .schedule_a
+        .iter()
+        .flat_map(|a| a.charitable.iter())
+        .enumerate()
+    {
+        if !charitable_gift_projects(g.class) && g.amount != Usd::ZERO {
+            out.push((
+                format!("schedule_a.charitable[{i}].amount"),
+                g.amount,
+                class_entry,
+            ));
+        }
+    }
+    out
 }
 
 fn age_of(dob: Option<time::Date>, year: i32) -> Option<u32> {
@@ -2373,37 +2606,35 @@ fn age_of(dob: Option<time::Date>, year: i32) -> Option<u32> {
         .and_then(|a| u32::try_from(a).ok())
 }
 
-/// **Schedule A line 5a**, following the §164(b)(5) election rather than assuming a path: `Some(true)`
-/// ⇒ the sales-tax amount alone; anything else ⇒ the income-tax path (estimated payments plus the
-/// prior-year balance paid).
+/// ★★★ **Does a §170 gift of this class reach the oracle row?** — the ONE predicate
+/// [`project_to_golden`] sums by and [`unprojected_nonzero_leaves`] reports by, so the two can never
+/// disagree about which gift was carried (T11 fold, I-1).
 ///
-/// ★ Both engines model line 5a as ONE figure (`e18400` / `A5a`), so the election has to be resolved
-///   here or the projection would hand them the wrong branch's number.
-fn schedule_a_line5a(ri: &ReturnInputs) -> Usd {
-    let Some(a) = ri.schedule_a.as_ref() else {
-        return Usd::ZERO;
-    };
-    if a.salt_use_sales_tax == Some(true) {
-        a.salt_sales_tax_amount
-    } else {
-        a.salt_state_estimated_payments + a.salt_prior_year_balance_paid
+/// ★★ **Only Schedule A line 11's cash class projects.** `charitable_cash` is Tax-Calculator's
+///    `e19800` and OTS's `A11` — *"Gifts by cash or check"*. A line-12 gift of PROPERTY
+///    (`CapGainProp30` for long-term capital-gain property, `OrdinaryProp50` for ordinary-income or
+///    basis property — the two classes a filed btctax return can carry) has its own §170(b)
+///    30%/50%-of-AGI ceiling, and **OTS 2024 applies no §170(b) ceiling at all**: putting such a
+///    gift into `A12` would hand OpenTaxSolver a deduction btctax caps and OTS does not, i.e. a
+///    FALSE divergence on a correct return. That is the V2b shape `charitable_cash`'s own doc
+///    records. So it is reported instead — the same disposition
+///    [`crate::tax::return_1040::unprojected_ledger_lines`] already gives a crypto donation, which
+///    lands on the identical line.
+///
+/// ★ The remaining three classes (`Cash30`, `CapGainProp20`, `OrdinaryProp30`) are non-50%-
+///   organization gifts, which `RefuseReason::NonPublicCharityContribution` refuses upstream, so no
+///   filed return reaches this function with one. The match is `_`-free: a seventh class must be
+///   given an answer by a human.
+#[must_use]
+pub fn charitable_gift_projects(class: CharitableClass) -> bool {
+    match class {
+        CharitableClass::Cash60 => true,
+        CharitableClass::Cash30
+        | CharitableClass::CapGainProp30
+        | CharitableClass::CapGainProp20
+        | CharitableClass::OrdinaryProp50
+        | CharitableClass::OrdinaryProp30 => false,
     }
-}
-
-/// **Schedule A line 8a + 8b + 8c** — Form 1098 interest, interest paid to a recipient who issued no
-/// 1098, and points off a settlement statement. R13: *"`e19200` = 8a + 8b + 8c"*; Tax-Calculator's
-/// `e19200` is *"interest paid"* as one figure, and OTS's `A8a`/`A8b` split only the first two.
-fn schedule_a_line8(ri: &ReturnInputs) -> Usd {
-    let f1098: Usd = ri.form_1098.iter().map(|r| r.box1_interest).sum();
-    let Some(a) = ri.schedule_a.as_ref() else {
-        return f1098;
-    };
-    let not_on_1098: Usd = a
-        .mortgage_interest_not_on_1098
-        .iter()
-        .map(|r| r.amount)
-        .sum();
-    f1098 + not_on_1098 + a.points_not_on_1098
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════

@@ -355,9 +355,10 @@ fn run_check(stdin: &str, known_defect: Option<&KnownDefect>) -> Value {
     // VALUE is adjudicated separately by verdict_l16 (with its provenance/methodology class). Keeps L24
     // reconciled on the §5.1 pinned cells while still catching a real cross-foot / Sch-2-leg / L16 bug.
     let l24_target = pr.forms.f1040.line16 + se_l12_ots + f8959_l18_ots + round_leaf(e.niit);
-    let mut l24 = verdict_ots(
+    let mut l24 = verdict_engine(
         "1040.line24",
         "TOTAL TAX (L24)",
+        "OTS",
         paper("1040.line24"),
         pr.forms.f1040.line24,
         l24_target,
@@ -374,7 +375,21 @@ fn run_check(stdin: &str, known_defect: Option<&KnownDefect>) -> Value {
     }
     verdicts.push(l24);
 
-    // ── Schedule SE line 12 — the cross-foot reproduction. OTS single-witness. Only for an SE household. ─
+    // ── Schedule SE line 12, Form 8959 line 18, Form 8960 line 17 — the cross-foot reproductions.
+    //
+    // ★★★ **T11 fold (I-3) — TAX-CALCULATOR IS A WITNESS ON ALL THREE, and used not to be asked.**
+    //     Each of these lines was held against OTS alone, and `check_return.py`'s census then told
+    //     the filer *"only one engine models this line"* — which is FALSE. `gen_goldens.taxcalc_run`
+    //     bakes `se_tax` (`setax`), `additional_medicare_tax` (`ptax_amc`) and `niit`, the script
+    //     already holds that dict, and `golden_returns.rs`'s cent-exact block has compared btctax
+    //     against BOTH engines on all three across the whole corpus since T7. So the figure was in
+    //     hand and the filer was told a divergence there was ambiguous — the inverse of the census's
+    //     purpose, and the *"never enumerate the outcomes you happened to see"* rule pointed at the
+    //     wrong half.
+    //
+    // ★ The OTS leg keeps its `sum_round(legs)` cross-foot (the lawful §6102 Σround≠roundΣ residual
+    //   is dissolved by summing the oracle's OWN printed legs); taxcalc publishes no legs, so its
+    //   leg is `round_leaf(total)` — the same target `golden_returns.rs` holds it to.
     if h.inputs.self_employment_income > 0.0 {
         if let Some(p) = paper("schedule_se.line12") {
             let internal = pr
@@ -383,29 +398,44 @@ fn run_check(stdin: &str, known_defect: Option<&KnownDefect>) -> Value {
                 .as_ref()
                 .expect("an SE household has a printed Schedule SE")
                 .line12;
-            verdicts.push(verdict_ots(
+            verdicts.push(verdict_engine(
                 "schedule_se.line12",
-                "Sch SE L12 (SE tax)",
+                "Sch SE L12 (SE tax) [OTS]",
+                "OTS",
                 Some(p),
                 internal,
                 se_l12_ots,
             ));
+            verdicts.push(verdict_engine(
+                "schedule_se.line12",
+                "Sch SE L12 (SE tax) [taxcalc]",
+                "taxcalc",
+                Some(p),
+                internal,
+                round_leaf(t.se_tax),
+            ));
         }
     }
 
-    // ── Form 8959 line 18 — the cross-foot reproduction. OTS single-witness. ──────────────────────────
     if let Some(p) = paper("8959.line18") {
-        verdicts.push(verdict_ots(
+        verdicts.push(verdict_engine(
             "8959.line18",
-            "8959 L18 (Add'l Medicare)",
+            "8959 L18 (Add'l Medicare) [OTS]",
+            "OTS",
             Some(p),
             pr.forms.f8959.line18,
             f8959_l18_ots,
         ));
+        verdicts.push(verdict_engine(
+            "8959.line18",
+            "8959 L18 (Add'l Medicare) [taxcalc]",
+            "taxcalc",
+            Some(p),
+            pr.forms.f8959.line18,
+            round_leaf(t.additional_medicare_tax),
+        ));
     }
 
-    // ── Form 8960 line 17 — NIIT. `round_leaf(oracle_niit)`, OTS single-witness (±cents epsilon by
-    //    nature → §10 triage, never a class; cent-exact on the anchors today). ─────────────────────────
     if let Some(p) = paper("8960.line17") {
         let internal = pr
             .forms
@@ -413,12 +443,21 @@ fn run_check(stdin: &str, known_defect: Option<&KnownDefect>) -> Value {
             .as_ref()
             .expect("a NIIT household has a printed Form 8960")
             .line17;
-        verdicts.push(verdict_ots(
+        verdicts.push(verdict_engine(
             "8960.line17",
-            "8960 L17 (NIIT)",
+            "8960 L17 (NIIT) [OTS]",
+            "OTS",
             Some(p),
             internal,
             round_leaf(e.niit),
+        ));
+        verdicts.push(verdict_engine(
+            "8960.line17",
+            "8960 L17 (NIIT) [taxcalc]",
+            "taxcalc",
+            Some(p),
+            internal,
+            round_leaf(t.niit),
         ));
     }
 
@@ -428,18 +467,20 @@ fn run_check(stdin: &str, known_defect: Option<&KnownDefect>) -> Value {
     if let Some(p) = paper("1040.line12") {
         let internal = round_dollar(ar.deduction);
         if let Some(o) = e.deduction_taken {
-            verdicts.push(verdict_ots(
+            verdicts.push(verdict_engine(
                 "1040.line12",
                 "deduction (L12) [OTS]",
+                "OTS",
                 Some(p),
                 internal,
                 round_leaf(o),
             ));
         }
         if let Some(tc) = t.deduction_taken {
-            verdicts.push(verdict_ots(
+            verdicts.push(verdict_engine(
                 "1040.line12",
                 "deduction (L12) [taxcalc]",
+                "taxcalc",
                 Some(p),
                 internal,
                 round_leaf(tc),
@@ -455,18 +496,20 @@ fn run_check(stdin: &str, known_defect: Option<&KnownDefect>) -> Value {
             .expect("a Schedule-A household has a printed Schedule A")
             .line5e;
         if let Some(o) = e.salt_capped {
-            verdicts.push(verdict_ots(
+            verdicts.push(verdict_engine(
                 "1040sa.line5e",
                 "SALT (Sch A L5e) [OTS]",
+                "OTS",
                 Some(p),
                 internal,
                 round_leaf(o),
             ));
         }
         if let Some(tc) = t.salt_capped {
-            verdicts.push(verdict_ots(
+            verdicts.push(verdict_engine(
                 "1040sa.line5e",
                 "SALT (Sch A L5e) [taxcalc]",
+                "taxcalc",
                 Some(p),
                 internal,
                 round_leaf(tc),
@@ -477,18 +520,20 @@ fn run_check(stdin: &str, known_defect: Option<&KnownDefect>) -> Value {
     if let Some(p) = paper("1040.line7a") {
         let internal = round_dollar(ar.capital_gain);
         if let Some(o) = e.sch_d_to_l7 {
-            verdicts.push(verdict_ots(
+            verdicts.push(verdict_engine(
                 "1040.line7a",
                 "Sch D -> L7 [OTS]",
+                "OTS",
                 Some(p),
                 internal,
                 round_leaf(o),
             ));
         }
         if let Some(tc) = t.sch_d_to_l7 {
-            verdicts.push(verdict_ots(
+            verdicts.push(verdict_engine(
                 "1040.line7a",
                 "Sch D -> L7 [taxcalc]",
+                "taxcalc",
                 Some(p),
                 internal,
                 round_leaf(tc),
@@ -504,9 +549,10 @@ fn run_check(stdin: &str, known_defect: Option<&KnownDefect>) -> Value {
             .expect("an 8995 household has a printed Form 8995")
             .line12;
         if let Some(o) = e.qbi_cap_l12 {
-            verdicts.push(verdict_ots(
+            verdicts.push(verdict_engine(
                 "8995.line12",
                 "8995 L12 net-cap-gain (WEAK)",
+                "OTS",
                 Some(p),
                 internal,
                 round_leaf(o),
@@ -710,18 +756,35 @@ fn verdict_amt(
     verdict(line, label, on_paper, internal, o, tc, reconciled, class)
 }
 
-/// A line witnessed by OTS alone (a cross-foot or a WEAK/NIIT leaf; taxcalc exposes no comparable
-/// figure). `target` is the already-reproduced OTS figure (a `Usd`). Reconciled iff the paper matches.
-fn verdict_ots(
+/// A line held against ONE named engine — a cross-foot, a WEAK/NIIT leaf, or one leg of a twin-row
+/// pair. `target` is that engine's already-reproduced figure (a `Usd`). Reconciled iff the paper
+/// matches.
+///
+/// ★ T11 fold (N-1) — the ENGINE is a parameter. Every twin-row `[taxcalc]` leg used to be built by
+///   a function hardwired to `"agree-ots"`, so a taxcalc row printed `class: agree-ots` and the only
+///   thing saying which engine had spoken was a substring of the human label. The verdict now
+///   carries an `engine` field, and `check_return.py`'s witness census reads THAT rather than
+///   parsing `[taxcalc]` out of a display string.
+fn verdict_engine(
     line: &str,
     label: &str,
+    engine: &str,
     on_paper: Option<i64>,
     internal: Usd,
     target: Usd,
 ) -> Value {
     let p = on_paper.map(Usd::from);
     let reconciled = p == Some(target);
-    verdict(
+    let class = if reconciled {
+        if engine == "taxcalc" {
+            "agree-taxcalc"
+        } else {
+            "agree-ots"
+        }
+    } else {
+        "diverge"
+    };
+    let mut v = verdict(
         line,
         label,
         on_paper,
@@ -729,8 +792,12 @@ fn verdict_ots(
         Some(target),
         None,
         reconciled,
-        if reconciled { "agree-ots" } else { "diverge" },
-    )
+        class,
+    );
+    if let Value::Object(m) = &mut v {
+        m.insert("engine".into(), json!(engine));
+    }
+    v
 }
 
 /// Assemble one verdict object. Money is emitted as exact whole-dollar TEXT (never a float), so the

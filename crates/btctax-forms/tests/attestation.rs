@@ -120,6 +120,9 @@ fn zero_inputs(filing_status: &str) -> GoldenInputs {
         real_estate_tax: 0.0,
         mortgage_interest: 0.0,
         charitable_cash: 0.0,
+        // ★ T11 fold — the STANDARD deduction, said rather than inherited: these households carry
+        //   no Schedule A at all, so 1040 line 12 can only be §63(c)'s figure.
+        standard_or_itemized: btctax_core::tax::testonly::GoldenDeduction::Standard,
         // ★ T16 — no HSA on these households, said rather than inherited.
         hsa_deduction: 0.0,
         // ★ T11 — no unemployment, and no DEPENDENTS BLOCK. Said rather than inherited, for the

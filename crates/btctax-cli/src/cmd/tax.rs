@@ -492,7 +492,45 @@ pub fn project_return_inputs(
         return Ok(None);
     };
     let (state, _cfg) = s.project()?;
-    let row = btctax_core::tax::testonly::project_to_golden(&ri, &state);
+    // ★★★ **C-1 — THE FILER'S OWN REFUSE SCREENS, on the return in hand.**
+    //
+    //     `check_return.py`'s docstring promises `Exit 2 = … a refused return`, and that contract
+    //     could not fire: the script hands the projected ROW to the harness, which rebuilds a
+    //     household with `build_golden_return` — a fixture builder that answers every live
+    //     declaration and both Schedule B Part III questions on the filer's behalf. So a return
+    //     `btctax report` REFUSES (an unanswered FBAR gate, say) came back *"Every compared line
+    //     reconciles"* at exit 0. The refusal has to be taken HERE, where the filer's own
+    //     `ReturnInputs` are in hand and nothing has answered anything for them.
+    //
+    // ★ The chain is the one every computing consumer composes — input → compute-dependent →
+    //   absolute — and it is NOT fatal: the row still prints, so a filer can see what the engines
+    //   would be told. `check_return.py` is what exits 2 on it, because it is the thing that would
+    //   otherwise report success.
+    let tables = BundledTaxTables::load();
+    let fr_tables = BundledFullReturnTables::load();
+    let (Some(params), Some(table)) = (fr_tables.full_return_for(year), tables.table_for(year))
+    else {
+        return Err(CliError::Usage(
+            crate::year_readiness::uncomputable_sentence(year, false),
+        ));
+    };
+    let refusal =
+        btctax_core::tax::return_refuse::screen_inputs(&ri, table, params).or_else(|| {
+            btctax_core::tax::return_1040::screen_compute_dependent(&ri, &state, year, params)
+        });
+    let ar = btctax_core::assemble_absolute(&ri, &state, params, table, year);
+    let refusal = match refusal {
+        Some(r) => Some(r),
+        None => btctax_core::screen_absolute(
+            &ri,
+            &ar,
+            params,
+            &state,
+            year,
+            crate::year_readiness::regime_or_refuse(year)?,
+        ),
+    };
+    let row = btctax_core::tax::testonly::project_to_golden(&ri, &state, &ar);
     let not_carried: Vec<serde_json::Value> =
         btctax_core::tax::testonly::unprojected_nonzero_leaves(&ri)
             .into_iter()
@@ -522,6 +560,11 @@ pub fn project_return_inputs(
     let out = serde_json::json!({
         "tax_year": year,
         "row": row,
+        // ★ C-1 — present iff btctax will not COMPUTE this return. `check_return.py` exits 2 on it
+        //   rather than reconciling a household the round trip answered into existence.
+        "refused": refusal.map(|r| {
+            serde_json::json!({ "screen": format!("{:?}", r.reason), "detail": r.detail })
+        }),
         "not_carried": not_carried,
         "not_carried_from_the_ledger": not_carried_ledger,
     });

@@ -6512,6 +6512,42 @@ build, each with an owning phase.
   fix is a recognizer in `check_return.py` (line-12 gap equal to a whole multiple of the year's
   §63(f) addition on a filer aged 65+ ⇒ print the advisory's own sentence). `build_golden_return`
   answers both gates, so no corpus cell is exposed.
+- **FR-94 — telling OpenTaxSolver WHICH deduction btctax claimed makes the line-12 BRANCH an oracle
+  INPUT (T11 seam-review fold, C-2). Owning phase: ownerless residue (oracle-path independence).**
+  `ots_direct.py` gates its whole Schedule A block on `standard_or_itemized == "Itemized"` and sets
+  OTS's `A18` — *"Elect to itemize, even when less than standard deduction"* — so the row now carries
+  btctax's own `deduction_is_itemized`. That closes the Critical (an itemizing filer had NO Schedule
+  A at OTS and got a false DIVERGES on a correct return), and it costs a witness on the CHOICE:
+  §G-9's *"a value the oracles take as INPUT is never validated by their agreement"* applies to the
+  branch, though not to the AMOUNT, which OTS still computes from the components. Tax-Calculator
+  chooses the branch for itself, so line 12 keeps a genuine second opinion on it — a disagreement
+  about the branch alone would be a one-witness finding. Closing it properly means giving OTS the
+  Schedule A components UNCONDITIONALLY and setting `A18` from the filer's own §63(e)
+  `itemize_election` instead, so OTS makes the max(standard, itemized) choice itself. That is a
+  change to how all 27 itemizing corpus cells are driven, so it needs a re-bake and its own cycle.
+- **FR-95 — the AMOUNT partition cannot see a money leaf that reaches the row at the WRONG VALUE
+  (T11 seam-review fold, root). Owning phase: ownerless residue (oracle-path fidelity).**
+  `oracle_projection.rs`'s money probe asks *"does this `Usd` leaf move the projection?"*, so a leaf
+  that moves it — but by the wrong amount, or into the wrong box — reads as VISIBLE and needs no
+  entry. Three such defects were live at HEAD and were found only by the new ROUTING probe's
+  fidelity measure, all three understating the description against the filed return: Schedule A line
+  5a omitted W-2 box 17 + box 19 (`income_tax_salt` includes them), line 8a omitted Form 1098 box 6
+  points **and** ignored the mixed-use §163(h)(3)(F) zeroing. All three are fixed by reading the
+  FILED `ScheduleAParts`, so no re-derivation remains today — but nothing structurally prevents the
+  next one. The fix is to run the fidelity measure over MONEY leaves too, which needs
+  `build_golden_return`'s deliberate many-to-one collapses (one wage figure, one interest figure —
+  FR-91) modelled first, or it reports 56 false positives on the maximal sentinel. Measured, not
+  estimated.
+- **FR-96 — the ledger census derives its INCOME half and names its other two channels (T11
+  seam-review fold, M-1). Owning phase: whichever cycle next touches the ledger→1040 seam.**
+  `unprojected_ledger_lines` now classifies every income record through `ledger_income_sink`, whose
+  match over `(IncomeKind, business)` is `_`-free — so a sixth `IncomeKind` cannot be silently
+  omitted, and `oracle_projection.rs` proves each sink is reachable on a planted record. The other
+  two ledger channels are still named rather than walked: `state.disposals` (→ Schedule D → the row's
+  capital-gain fields, so they project) and `state.removals`' `claimed_deduction` (→ Schedule A line
+  12, reported). `LedgerState` has no type-driven leaf walk the way `ReturnInputs` does, so a NEW
+  top-level ledger channel that started reaching the printed return would not red. Closing it means
+  giving `LedgerState` the same `leaf_walk` treatment.
 - **FR-82 — `tax_tables.rs`'s TY2026 doc comment cites Rev. Proc. 2025-32 §2.14 / §2.10 for figures
   that sit in its Section 4 (T7 build, follow-up 2; pre-existing). Owning phase: ownerless residue
   (doc-consistency).** The new §4.23 cite beside them is accurate.
