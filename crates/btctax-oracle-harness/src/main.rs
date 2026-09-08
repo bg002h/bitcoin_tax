@@ -70,6 +70,13 @@ const YEAR: i32 = 2024;
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let check = args.iter().any(|a| a == "--check");
+    // ★★★ T11 — `--row-counts` reads a `GoldenInputs` on stdin and prints the DERIVED dependent
+    //     counts both engines take (`XTOT`, `n24`, `nu18`, `n1820`, `n21`, `EIC`). It exists so
+    //     `check_return.py` never has to re-derive them in Python: Schedule 8812's other-dependent
+    //     leg is `ODC_c × max(0, XTOT − childnum − num)`, so a Python `XTOT` that drifted from the
+    //     Rust one would silently change the $500-per-dependent credit that the whole line-19
+    //     excuse is measured against. One derivation, in the language that owns the row.
+    let row_counts = args.iter().any(|a| a == "--row-counts");
     // T7-m2: an OPTIONAL `--known-defect 1040.line16=<value>@<fu-id>` pin (only meaningful with --check).
     let known_defect = match parse_known_defect(&args) {
         Ok(kd) => kd,
@@ -85,7 +92,9 @@ fn main() {
         std::process::exit(2);
     }
 
-    let out = if check {
+    let out = if row_counts {
+        run_row_counts(&stdin)
+    } else if check {
         run_check(&stdin, known_defect.as_ref())
     } else {
         run_default(&stdin)
@@ -138,6 +147,35 @@ fn parse_known_defect(args: &[String]) -> Result<Option<KnownDefect>, String> {
 }
 
 // ── DEFAULT mode ───────────────────────────────────────────────────────────────────────────────────
+
+/// `--row-counts` — the oracle row's DERIVED dependent counts, straight off `GoldenInputs`'s own
+/// accessors. See the flag's note in `main`.
+fn run_row_counts(stdin: &str) -> Value {
+    let i: GoldenInputs = match serde_json::from_str(stdin) {
+        Ok(i) => i,
+        Err(e) => {
+            eprintln!("oracle_harness --row-counts: stdin is not a GoldenInputs row: {e}");
+            std::process::exit(2);
+        }
+    };
+    json!({
+        "XTOT": i.xtot(),
+        "n24": i.n24(),
+        "nu18": i.nu18(),
+        "n1820": i.n1820(),
+        "n21": i.n21(),
+        "EIC": i.eic_qualifying_children(),
+        // ★ The TAX-CALCULATOR-READY form, not the row's `Option`: taxcalc has no "declined" state
+        //   and its aged tests are `age >= 65`, so a declined date of birth is 0 — which forgoes the
+        //   §63(f) addition exactly as silence must. Emitting `null` here made the first live
+        //   cross-check in `check_return.py` fail on a Single household, with Python saying `0` and
+        //   Rust saying `None` about the same absent spouse.
+        "age_head": i.age_head.unwrap_or(0),
+        "age_spouse": i.age_spouse.unwrap_or(0),
+        "blind_head": u8::from(i.blind_head),
+        "blind_spouse": u8::from(i.blind_spouse),
+    })
+}
 
 fn run_default(stdin: &str) -> Value {
     let inputs: GoldenInputs = match serde_json::from_str(stdin) {

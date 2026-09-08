@@ -317,6 +317,13 @@ fn run() -> Result<ExitCode, CliError> {
                     None => println!("No full-return inputs set for tax year {year}."),
                 }
             }
+            IncomeCmd::Project { year } => {
+                let pp = passphrase(false)?;
+                match cmd::tax::project_return_inputs(vault, &pp, year)? {
+                    Some(json) => println!("{json}"),
+                    None => println!("No full-return inputs set for tax year {year}."),
+                }
+            }
             IncomeCmd::Answer {
                 year,
                 discard_draft,

@@ -645,8 +645,31 @@ fn itemized_was_chosen(ri: &ReturnInputs, standard: Usd, itemized: Option<Usd>) 
     itemized > standard
 }
 
+/// ★★★ **SCHEDULE C LINE 1 — gross receipts, and the ONE place it is formed** (§G-28/B3): the
+/// ledger's SE-eligible business crypto (`se_net_income`) plus the filer's non-ledger receipts.
+///
+/// Hoisted out of [`assemble_absolute`] at T11 so the oracle PROJECTION reads the same computation
+/// the return does. `GoldenInputs::self_employment_income` is *"Schedule C net profit"* — the figure
+/// both engines take (`e00900` / OTS `S1_3`) — and a second copy of it in the projection is exactly
+/// the shape `CLAUDE.md`'s two-chain rule forbids: `total_tax` was once short by the whole AMT with
+/// every test green because two chains computed it separately.
+pub(crate) fn schedule_c_gross_receipts(ri: &ReturnInputs, state: &LedgerState, year: i32) -> Usd {
+    crate::tax::se::se_net_income(state, year)
+        + ri.schedule_c
+            .as_ref()
+            .map_or(Usd::ZERO, |c| c.other_gross_receipts)
+}
+
+/// **Schedule C line 31 — net profit**, floored at zero (a loss REFUSES upstream, so the floor is
+/// never the operative branch on an admitted return). See [`schedule_c_gross_receipts`].
+pub(crate) fn schedule_c_net_profit(ri: &ReturnInputs, state: &LedgerState, year: i32) -> Usd {
+    (schedule_c_gross_receipts(ri, state, year)
+        - ri.schedule_c.as_ref().map_or(Usd::ZERO, |c| c.expenses))
+    .max(Usd::ZERO)
+}
+
 // ── Non-crypto income-line sums (shared by the derivation, the refuse screen, and the absolute 1040) ──
-fn sum_wages(ri: &ReturnInputs) -> Usd {
+pub(crate) fn sum_wages(ri: &ReturnInputs) -> Usd {
     ri.w2s.iter().map(|w| w.box1_wages).sum()
 }
 /// 1040 2b taxable interest = box 1 + box 3 (Treasury) + **box 10 (market discount)**, plus the
@@ -659,7 +682,7 @@ fn sum_wages(ri: &ReturnInputs) -> Usd {
 /// ★★★ The `FilerRecords` half is R3's document-less income door: *"Report on line 1 all of your
 /// taxable interest"*. A bank paying under $10, a seller-financed mortgage and a nominee
 /// distribution have no 1099 behind them, and dropping them understates by exactly their amount.
-fn sum_taxable_interest(ri: &ReturnInputs) -> Usd {
+pub(crate) fn sum_taxable_interest(ri: &ReturnInputs) -> Usd {
     let documented: Usd = ri
         .int_1099
         .iter()
@@ -688,7 +711,7 @@ fn sum_filer_record_dividends(ri: &ReturnInputs) -> Usd {
 /// 1040 3b ordinary dividends = Σ box 1a (ALREADY includes box 1b qualified — "strip once"), plus
 /// the filer's own dividend records (R5 — *"if you received dividends not reported on Form
 /// 1099-DIV"*, `i1040gi--2025.txt:2521`).
-fn sum_ordinary_dividends(ri: &ReturnInputs) -> Usd {
+pub(crate) fn sum_ordinary_dividends(ri: &ReturnInputs) -> Usd {
     let documented: Usd = ri.div_1099.iter().map(|d| d.box1a_ordinary).sum();
     documented + sum_filer_record_dividends(ri)
 }
@@ -702,15 +725,15 @@ pub fn sum_student_loan_interest(ri: &ReturnInputs) -> Usd {
     ri.form_1098e.iter().map(|e| e.box1_interest).sum()
 }
 /// 1040 3a qualified dividends = Σ box 1b (the preferential split ONLY — never added to income again).
-fn sum_qualified_dividends(ri: &ReturnInputs) -> Usd {
+pub(crate) fn sum_qualified_dividends(ri: &ReturnInputs) -> Usd {
     ri.div_1099.iter().map(|d| d.box1b_qualified).sum()
 }
 /// Σ box 2a capital-gain distributions (LT character; enters AGI once via Sch D → 1040 L7).
-fn sum_cap_gain_distr(ri: &ReturnInputs) -> Usd {
+pub(crate) fn sum_cap_gain_distr(ri: &ReturnInputs) -> Usd {
     ri.div_1099.iter().map(|d| d.box2a_capgain_distr).sum()
 }
 /// Sch 1 L7 unemployment compensation = Σ 1099-G box 1.
-fn sum_unemployment(ri: &ReturnInputs) -> Usd {
+pub(crate) fn sum_unemployment(ri: &ReturnInputs) -> Usd {
     ri.g_1099.iter().map(|g| g.box1_unemployment).sum()
 }
 
@@ -726,6 +749,47 @@ struct CryptoIncome {
     /// interest subset of `nonbusiness_ordinary` that enters Form 8960 NII (as a line-7 modification, R3-M5;
     /// it rides Sch 1 L8v, NOT 1040 2b). Hobby mining/staking/airdrop/reward stays OUT of NII.
     nonbusiness_lending_interest: Usd,
+}
+
+/// ★★★ **T11 — the LEDGER's contribution to the return that the oracle row cannot carry**, by the
+/// line it lands on: `(1040 line, amount, why no engine can take it)`.
+///
+/// [`ORACLE_INVISIBLE`](crate::tax::testonly::ORACLE_INVISIBLE) censuses the `Usd` leaves of
+/// `ReturnInputs`, and the ledger is not one of them — so without this the crypto side of a btctax
+/// return could be silently truncated on its way to an engine, which is precisely the failure the
+/// census exists to prevent on the other side. Schedule D and the Schedule C net profit DO project;
+/// these two do not.
+#[must_use]
+pub fn unprojected_ledger_lines(
+    state: &LedgerState,
+    year: i32,
+) -> Vec<(&'static str, Usd, &'static str)> {
+    let mut out = Vec::new();
+    let crypto = crypto_income(state, year);
+    if crypto.nonbusiness_ordinary > Usd::ZERO {
+        out.push((
+            "Schedule 1 line 8v (non-business crypto ordinary income)",
+            crypto.nonbusiness_ordinary,
+            "OpenTaxSolver has `S1_8z` (its \"other income\" line) but Tax-Calculator's `Records` \
+             has no generic other-income variable at all — its income categories are fixed. \
+             Carrying it would make AGI a ONE-witness figure on the most btctax-specific line \
+             there is, and a figure validated on one oracle is not validated (CLAUDE.md)",
+        ));
+    }
+    let donated: Usd = state
+        .removals
+        .iter()
+        .filter(|r| r.removed_at.year() == year)
+        .filter_map(|r| r.claimed_deduction)
+        .sum();
+    if donated > Usd::ZERO {
+        out.push((
+            "Schedule A line 12 (crypto donations, §170(e))",
+            donated,
+            "a NON-cash gift: Tax-Calculator's `e20100` and OTS's `A12` would take it, but the              oracle row models only the cash class (`e19800` / `A11`) and a non-cash gift carries              its own §170(b) 30%-of-AGI ceiling that OTS 2024 does not apply",
+        ));
+    }
+    out
 }
 
 fn crypto_income(state: &LedgerState, year: i32) -> CryptoIncome {
@@ -2159,8 +2223,12 @@ pub fn assemble_absolute(
     // ★★★ §G-28/B3 — SCHEDULE C LINE 1, and the ONE place it is formed. The ledger's SE-eligible
     //     business crypto PLUS the filer's non-ledger receipts. Everything below reads this: net
     //     profit, Schedule 1 line 3, Schedule SE, and the §199A QBI base.
-    let schedule_c_gross = crypto.business_se_gross + other_gross_receipts;
-    let schedule_c_net = (schedule_c_gross - schedule_c_expenses).max(Usd::ZERO);
+    let schedule_c_gross = schedule_c_gross_receipts(ri, state, year);
+    debug_assert_eq!(
+        schedule_c_gross,
+        crypto.business_se_gross + other_gross_receipts
+    );
+    let schedule_c_net = schedule_c_net_profit(ri, state, year);
     // ★★★ T16 — FORM 8889, computed ONCE. Schedule 1 lines 8f and 13, Schedule 2 lines 17c and
     //     17d, and the packet's attached PDF all read this. It files exactly when the §223 trigger
     //     declaration is affirmed (`Form8889::must_file`), never on a threshold: an all-zero Part II

@@ -122,6 +122,19 @@ fn zero_inputs(filing_status: &str) -> GoldenInputs {
         charitable_cash: 0.0,
         // ★ T16 — no HSA on these households, said rather than inherited.
         hsa_deduction: 0.0,
+        // ★ T11 — no unemployment, and no DEPENDENTS BLOCK. Said rather than inherited, for the
+        //   reason the whole function exists: these KATs assert what a childless household's 1040
+        //   line 19 prints, and a dependent that arrived by `..Default::default()` would change the
+        //   answer they are pinning. The rows each test wants are added by `with_dependents`, which
+        //   builds them on the RETURN rather than on the oracle row.
+        unemployment: 0.0,
+        dependents: Vec::new(),
+        // The FR-29 adult sentinel, restated: `build_golden_return`'s taxpayer has always been 44,
+        // and these fixtures inherit nothing.
+        age_head: Some(btctax_core::tax::testonly::GOLDEN_ADULT_AGE),
+        age_spouse: None,
+        blind_head: false,
+        blind_spouse: false,
     }
 }
 

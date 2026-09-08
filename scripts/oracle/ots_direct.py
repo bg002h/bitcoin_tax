@@ -79,6 +79,29 @@ OTS_DIR = Path(os.environ.get("OTS_DIR", "")).expanduser()
 OTS_YEAR = int(os.environ.get("OTS_YEAR", "2024"))
 
 
+def _rust_const(name: str) -> int:
+    """Read a `pub const <name>: u32 = <n>;` out of `testonly.rs` — the ONE definition.
+
+    ★★★ It is read rather than retyped because a Python copy of a Rust constant is precisely the
+        shape `CLAUDE.md` records going stale twice in this harness already ("an excuse list keyed by
+        VECTOR NAME is a liability"). If the Rust file moves or the constant is renamed this raises,
+        which is the fail-loud direction: a silently-wrong sentinel age would change which households
+        get the §63(f) addition in one engine and not the other.
+    """
+    src = Path(__file__).resolve().parents[2] / "crates/btctax-core/src/tax/testonly.rs"
+    m = re.search(rf"^pub const {re.escape(name)}: u32 = (\d+);", src.read_text(), re.M)
+    if not m:
+        raise RuntimeError(
+            f"could not read `pub const {name}: u32` from {src} — the Python side of the oracle "
+            f"path must not carry its own copy of that number"
+        )
+    return int(m.group(1))
+
+
+# The FR-29 adult sentinel age (`GoldenInputs::age_head`'s serde default). See `_rust_const`.
+GOLDEN_ADULT_AGE = _rust_const("GOLDEN_ADULT_AGE")
+
+
 def _bin(form: str, year: int | None = None) -> Path:
     year = OTS_YEAR if year is None else year
     p = OTS_DIR / "bin" / f"taxsolve_{form}_{year}"
@@ -142,7 +165,12 @@ def _fill(template: str, values: dict[str, object], capgains: list[str] | None =
     remaining = dict(values)
     out: list[str] = []
     for line in template.splitlines():
-        m = re.match(r"^\s*([A-Za-z][A-Za-z0-9_#/]*:?)(?=\s|;|\{|$)(.*)$", line, re.S)
+        # ★ T11 — `+` and `?` joined the key class. The 1040's aged/blind parameters are literally
+        #   named `You_65+Over?` / `Spouse_Blind?`, and without those two characters the regex
+        #   matched `You_65`, failed its own lookahead on the `+`, and left the line untouched —
+        #   so passing the key raised "keys not found in template" and the §63(f) additions could
+        #   not be driven at all. No existing key contains either character, so nothing else moves.
+        m = re.match(r"^\s*([A-Za-z][A-Za-z0-9_#/+?]*:?)(?=\s|;|\{|$)(.*)$", line, re.S)
         key = m.group(1) if m else None
         if key not in remaining:
             out.append(line)
@@ -416,6 +444,36 @@ def run_form(
     return _parse(text), out_path
 
 
+def _ots_aged_blind(h: dict) -> dict[str, str]:
+    """The four §63(f) parameters the 1040 template names, from the household's dependents block.
+
+    OTS asks the question the FORM asks — *"Were you born before January 2, 1960?"* — which for a
+    tax year Y is exactly "considered age at the end of Y is 65 or more", the same boundary
+    `btctax_core::tax::return_1040::considered_age_at_year_end` encodes and the same one
+    Tax-Calculator's `age_head >= 65` uses. An age the filer DECLINED is `None`, and a declined date
+    of birth FORGOES the addition (class (B)), so `None` answers "No" — never "Yes".
+
+    ★ The four `Dep{n}_FirstName/LastName/SocSec#/Relation` lines are deliberately LEFT BLANK: the
+      projection carries no identity by type, and those lines are echoed to OTS's output for the PDF
+      only (`taxsolve_US_1040_2024.c:2835-2844`) — no line of the return reads them. Filling them
+      would mean inventing a name.
+    """
+
+    def yn(v: bool) -> str:
+        return "Yes" if v else "No"
+
+    # The absent-key default matches `GoldenInputs`'s serde default (`GOLDEN_ADULT_AGE` = 44, the
+    # FR-29 adult sentinel); an explicit `null` is a DECLINED date of birth and stays `None`.
+    age_head = h["age_head"] if "age_head" in h else GOLDEN_ADULT_AGE
+    age_spouse = h.get("age_spouse")
+    return {
+        "You_65+Over?": yn(age_head is not None and age_head >= 65),
+        "You_Blind?": yn(bool(h.get("blind_head"))),
+        "Spouse_65+Over?": yn(age_spouse is not None and age_spouse >= 65),
+        "Spouse_Blind?": yn(bool(h.get("blind_spouse"))),
+    }
+
+
 def evaluate(h: dict) -> dict[str, float | None]:
     """Compute one household's federal return by driving OTS end to end."""
     status = h.get("filing_status", "Single")
@@ -492,6 +550,25 @@ def evaluate(h: dict) -> dict[str, float | None]:
             "S1_13": h.get("hsa_deduction", 0),
             "S2_4": se_tax,
             "S2_11": addl_medicare,
+            # ★★★ T11 / SPEC_interview.md R13 — Schedule 1 line 7, unemployment compensation.
+            "S1_7": h.get("unemployment", 0),
+            # ── T11: THE DEPENDENTS BLOCK, as much of it as this engine reads. ────────────────
+            #
+            # ★★★ **OpenTaxSolver computes NO child tax credit and NO earned income credit.** Its
+            #     1040 solver reads `L19`, `L27` and `L28` with `GetLine(...)` — they are INPUTS —
+            #     and `NumDependents` is parsed at `taxsolve_US_1040_2024.c:1928` and then never
+            #     used. So it is NOT a witness on 1040 lines 19, 27 or 28, and its agreement with
+            #     btctax there would be `0 == 0` between two engines neither of which computed
+            #     anything. That is §G-9 exactly: *a value the oracles take as INPUT is never
+            #     validated by their agreement.* `check_return.py` states it rather than counting
+            #     OTS as a second witness.
+            #
+            # ★★ What OTS DOES read is the §63(f) chart: `taxsolve_US_1040_2024.c:2012`, *"Std.
+            #    Deduction chart for People who were Born Before January 2, 1960, or Were Blind"*.
+            #    So the four aged/blind parameters are a genuine second witness on 1040 line 12,
+            #    which is the two-oracle content of the dependents block.
+            **_ots_aged_blind(h),
+            "Dependents": len(h.get("dependents", [])),
         }
         if h.get("standard_or_itemized") == "Itemized":
             # OTS applies the $10,000 §164(b)(5) cap itself, on Schedule A line 5e — so the components

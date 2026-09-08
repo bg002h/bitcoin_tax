@@ -6478,6 +6478,40 @@ build, each with an owning phase.
   recompile and not a cached one. What to decide: whether the mitigation belongs in every build/fold
   brief as a rule, inside `make check` itself, or in a wrapper. Related: [[FR-88]] — both are ways an
   instrument reports something other than what it measured.
+- **FR-91 — the oracle projection carries ONE wage figure, so W-2 box 3 and box 5 are modelled as
+  equal to box 1 (T11 build, follow-up 1). Owning phase: ownerless residue (oracle-path fidelity).**
+  `GoldenInputs.w2_income` is a single number and both drivers reuse it for the §1402(b)(1) OASDI
+  channel (OTS Schedule SE line 8a) and the Form 8959 Part I channel (taxcalc `e00200p`). A filer
+  whose box 3 differs from box 1 — a §401(k) deferral, or wages over the OASDI base — is therefore
+  described to BOTH engines with box 1 in all three places, and Schedule SE / Form 8959 are checked
+  against a household slightly unlike theirs. It is **reported, never silent**: both boxes appear in
+  `income project`'s `not_carried` with this mechanism ([[ORACLE_INVISIBLE]]), and the two golden
+  corpus fixtures set them equal deliberately. Closing it means splitting `w2_income` into box 1 /
+  box 3 / box 5 across `GoldenInputs`, `build_golden_return`, `_taxcalc_row` and the OTS driver, and
+  re-baking the corpus — a change to a validated artifact, so it wants its own cycle.
+- **FR-92 — non-business crypto ordinary income (Schedule 1 line 8v) has NO Tax-Calculator variable,
+  so the most btctax-specific income line is one-witness at best (T11 build, follow-up 2). Owning
+  phase: ownerless residue (oracle-path coverage).** OpenTaxSolver has `S1_8z` (*"other income"*);
+  Tax-Calculator's `Records` has fixed income categories and no generic other-income slot, so a
+  household with hobby staking or mining rewards cannot be put to both engines on that line at all.
+  `project_to_golden` therefore does not carry it and `return_1040::unprojected_ledger_lines` reports
+  it beside the row, with the same treatment for crypto DONATIONS (Schedule A line 12, a non-cash
+  gift: taxcalc's `e20100` and OTS's `A12` exist, but the oracle row models only the cash class and
+  OTS 2024 applies no §170(b) ceiling — the V2b shape). Carrying either on one witness would be
+  calling a figure validated on one oracle, which `CLAUDE.md` forbids. Held by
+  `oracle_projection.rs::the_ledger_lines_the_oracle_row_cannot_carry_are_reported`, seen red on a
+  planted defect.
+- **FR-93 — a filer who never answered the §G-9 death question sees 1040 line 12 diverge from BOTH
+  engines by the §63(f) aged addition, and `check_return.py` reports it as a plain divergence (T11
+  build, follow-up 3). Owning phase: ownerless residue (UX).** btctax FORGOES the age-65 addition
+  when `taxpayer_died_during_year` / `spouse_died_during_year` is unanswered (class (B): silence
+  forgoes, and `Advisory::AgedBoxForfeitedDeathUnanswered` already says so), while both engines grant
+  it from the age alone. That is a real, actionable finding — answer the question and the deduction
+  appears — so it is deliberately NOT excused; it is recorded because the diff line itself does not
+  yet name the cause, and a filer reading `check_return.py` output would have to know the rule. The
+  fix is a recognizer in `check_return.py` (line-12 gap equal to a whole multiple of the year's
+  §63(f) addition on a filer aged 65+ ⇒ print the advisory's own sentence). `build_golden_return`
+  answers both gates, so no corpus cell is exposed.
 - **FR-82 — `tax_tables.rs`'s TY2026 doc comment cites Rev. Proc. 2025-32 §2.14 / §2.10 for figures
   that sit in its Section 4 (T7 build, follow-up 2; pre-existing). Owning phase: ownerless residue
   (doc-consistency).** The new §4.23 cite beside them is accurate.

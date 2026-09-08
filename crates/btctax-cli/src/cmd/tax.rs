@@ -447,6 +447,92 @@ pub fn scrub_return_inputs(
     .transpose()
 }
 
+/// ★★★ **`income project` — the ORACLE ROW for `year`** (SPEC_interview.md R13, task T11).
+///
+/// The two independent engines btctax is validated against are fed a HOUSEHOLD DICT, not a
+/// `ReturnInputs`, so before T11 a real return had no path to either of them: the corpus could be
+/// checked and a filer's own return could not. This projects the stored return (and its ledger) onto
+/// exactly that dict, so `scripts/oracle/check_return.py` can put a real return in front of both
+/// OpenTaxSolver and PSL Tax-Calculator **before it is printed**.
+///
+/// ★★ **It carries no identity, and that is a property of the TYPE rather than a redaction pass.**
+///    `GoldenInputs` has no name, SSN, address, employer or payer field at all — nothing to leak and
+///    nothing to remember to strip. (`income scrub`, by contrast, must replace identity because TOML
+///    of a whole `ReturnInputs` carries it.)
+///
+/// ★★★ **And it prints what it could NOT carry.** `GoldenInputs` is the corpus's household model,
+///     deliberately smaller than the 1040; a filer with medical expenses, a student-loan 1098-E or a
+///     prior-year capital-loss carryforward is projected without them. Reporting those figures beside
+///     the row is what keeps the resulting divergence attributable: without it, an engine answering a
+///     DIFFERENT household's question would read as a btctax defect. See
+///     [`btctax_core::tax::testonly::ORACLE_INVISIBLE`].
+///
+/// Reads through the same seam `income scrub` does, so a version-current DRAFT shadows the committed
+/// row: the return the filer is looking at is the return that gets checked.
+pub fn project_return_inputs(
+    vault: &Path,
+    pp: &Passphrase,
+    year: i32,
+) -> Result<Option<String>, CliError> {
+    let s = Session::open(vault, pp)?;
+    let (loaded, stale) = crate::input_form_store::load_for_read(s.conn(), year)?;
+    if let Some(note) = stale {
+        eprintln!(
+            "note: your {}-schema draft for {} could not be read by this build (expected v{}), so \
+             the last COMMITTED return is what was projected. Nothing was deleted.",
+            note.found, note.year, note.expected
+        );
+    }
+    let ri = match loaded {
+        crate::input_form_store::Loaded::Draft { ri, .. } => Some(ri),
+        crate::input_form_store::Loaded::Committed(ri) => Some(ri),
+        crate::input_form_store::Loaded::Fresh => None,
+    };
+    let Some(ri) = ri else {
+        return Ok(None);
+    };
+    let (state, _cfg) = s.project()?;
+    let row = btctax_core::tax::testonly::project_to_golden(&ri, &state);
+    let not_carried: Vec<serde_json::Value> =
+        btctax_core::tax::testonly::unprojected_nonzero_leaves(&ri)
+            .into_iter()
+            .map(|(leaf, amount, e)| {
+                serde_json::json!({
+                    "leaf": leaf,
+                    "amount": amount.to_string(),
+                    "because": format!("{:?}", e.because),
+                    "note": e.note,
+                })
+            })
+            .collect();
+    // ★★★ AND the LEDGER's own unprojectable lines. The leaf census above walks `ReturnInputs`;
+    //     the ledger is not one of its leaves, so without this the CRYPTO side of a btctax return —
+    //     the reason this tool exists — could be silently truncated on its way to an engine.
+    let not_carried_ledger: Vec<serde_json::Value> =
+        btctax_core::tax::return_1040::unprojected_ledger_lines(&state, year)
+            .into_iter()
+            .map(|(line, amount, note)| {
+                serde_json::json!({
+                    "line": line,
+                    "amount": amount.to_string(),
+                    "note": note,
+                })
+            })
+            .collect();
+    let out = serde_json::json!({
+        "tax_year": year,
+        "row": row,
+        "not_carried": not_carried,
+        "not_carried_from_the_ledger": not_carried_ledger,
+    });
+    serde_json::to_string_pretty(&out)
+        .map(Some)
+        .map_err(|e| CliError::BadConfigValue {
+            key: format!("return_inputs[{year}]"),
+            value: e.to_string(),
+        })
+}
+
 /// `income clear` — remove the stored full-return inputs for `year` (recovery path so a year with
 /// `ReturnInputs` isn't a dead end while derivation is pending — review I3). Returns whether a row existed.
 pub fn clear_return_inputs(

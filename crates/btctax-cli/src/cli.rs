@@ -508,6 +508,31 @@ pub enum IncomeCmd {
         #[arg(long)]
         year: i32,
     },
+    /// Project this year's return onto the row the two independent tax engines take, and print it
+    /// (JSON). Run it before you export: it is how a REAL return reaches an oracle.
+    ///
+    /// btctax's figures are validated against two engines that share no lineage — OpenTaxSolver and
+    /// the Policy Simulation Library's Tax-Calculator — but both are fed a household description,
+    /// not a btctax return, so until now only the built-in corpus could be checked. This prints your
+    /// return as that description: wages, interest, dividends, the Schedule D gains, Schedule C net
+    /// profit, unemployment, the four Schedule A components, the HSA deduction, and your dependents
+    /// with their ages, the credit box each one lands in, blindness and your own age.
+    ///
+    /// It carries NO identity — not because it strips one, but because the description has no name,
+    /// Social Security number, address, employer or payer field to put one in. It is safe to paste.
+    ///
+    /// It also prints `not_carried`: every figure on your return that the engines' description
+    /// cannot express, with the reason. That list is the honest part — a filer with medical
+    /// expenses, student-loan interest or a prior-year capital-loss carryforward is described to the
+    /// engines WITHOUT them, so a disagreement on those lines is the description's, not btctax's.
+    ///
+    /// `scripts/oracle/check_return.py` consumes this and runs both engines on it. Nothing is
+    /// written and nothing leaves your machine.
+    Project {
+        /// The tax year (e.g. 2024).
+        #[arg(long)]
+        year: i32,
+    },
     /// Write a SHAREABLE copy of this year's inputs: every figure preserved, the identity replaced.
     ///
     /// For handing a real return to someone else — a maintainer, a reviewer — so they can reproduce a

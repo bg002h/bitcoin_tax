@@ -93,6 +93,10 @@ except ImportError:  # pragma: no cover
 # `cargo build -p btctax-oracle-harness`; this is its debug-profile path.
 HARNESS_BIN = Path(__file__).resolve().parents[2] / "target" / "debug" / "btctax-oracle-harness"
 
+# The FR-29 adult sentinel age, read out of `testonly.rs` by `ots_direct._rust_const` so neither
+# Python module carries its own copy (T11).
+GOLDEN_ADULT_AGE = ots_direct.GOLDEN_ADULT_AGE
+
 
 # ── The corpus (SPEC §5.1 / plan T10) ─────────────────────────────────────────────────────────────
 # The hand-written 12-household list moved to `corpus.py` — where it survives VERBATIM as the 12
@@ -196,6 +200,54 @@ def _mars(filing_status: str) -> int:
 TAXCALC_EXACT_YEARS = frozenset({2025})
 
 
+def dependent_block(i: dict) -> dict:
+    """★★★ T11 / SPEC_interview.md R13 — the dependents block, as Tax-Calculator's own variables.
+
+    Derived from the household's `dependents` list and the two adult ages, mirroring
+    `GoldenInputs`'s accessors in `crates/btctax-core/src/tax/testonly.rs`. **`check_return.py`
+    cross-checks this against the Rust ones on every run** (`oracle_harness --row-counts`), because
+    Schedule 8812's other-dependent leg is `ODC_c * max(0, XTOT - childnum - num)`
+    (`taxcalc/calcfunctions.py:3362`) — a Python `XTOT` that drifted from the Rust one would move
+    the $500-per-dependent credit the whole line-19 excuse is measured against, silently.
+
+    ★★ `nu18` / `n1820` / `n21` are INERT under baseline law and are carried for completeness only:
+       they reach `UBI` (a reform-only parameter whose rates are $0) and `AGI`'s
+       `pre_c04600 = max(0, XTOT - nu18) * II_em`, whose `II_em` is $0 for 2018-2025. `XTOT`, `n24`
+       and `EIC` are the three that move money.
+
+    ★ A unit member whose age is unknown (a DECLINED date of birth) is in NO age band, which is why
+      `XTOT` is counted from the filing status and the row set rather than summed from the bands.
+    """
+    deps = i.get("dependents", [])
+    # ★★ The absent-key default MATCHES `GoldenInputs`'s serde default (`GOLDEN_ADULT_AGE` = 44, the
+    #    FR-29 adult sentinel `build_golden_return` has always used), so a corpus cell that states no
+    #    age describes the same household to both engines and to btctax. An explicit `null` means the
+    #    filer DECLINED the date of birth and stays `None`.
+    #    ★ Measured over all 107 committed cells: `age_head` 0 versus 44 moves not one taxcalc
+    #      output, so aligning the default changed no baked golden.
+    age_head = i["age_head"] if "age_head" in i else GOLDEN_ADULT_AGE
+    age_spouse = i.get("age_spouse")
+    ages = [d["age"] for d in deps]
+    for a in (age_head, age_spouse):
+        if a is not None:
+            ages.append(a)
+    return {
+        "XTOT": 1 + (1 if i.get("filing_status") == "Married/Joint" else 0) + len(deps),
+        "n24": sum(1 for d in deps if d.get("credit") == "child_tax_credit"),
+        "nu18": sum(1 for a in ages if a < 18),
+        "n1820": sum(1 for a in ages if 18 <= a <= 20),
+        "n21": sum(1 for a in ages if a >= 21),
+        # taxcalc documents `EIC` as "(range: 0 to 3)"; §32(b)'s credit percentage tops out at three.
+        "EIC": min(3, sum(1 for d in deps if d.get("eic_qualifying_child"))),
+        # A declined date of birth has no age; taxcalc's own absent-value is 0 and its aged tests
+        # are `age >= 65`, so 0 forgoes the §63(f) addition exactly as silence must.
+        "age_head": age_head or 0,
+        "age_spouse": age_spouse or 0,
+        "blind_head": 1 if i.get("blind_head") else 0,
+        "blind_spouse": 1 if i.get("blind_spouse") else 0,
+    }
+
+
 def _taxcalc_row(n, i, year: int = 2024):
     """One Tax-Calculator input record from a household's `inputs` dict (the variable mapping the old
     inline builder used — factored out so the D-2 AMT/credit admission probe reuses it verbatim)."""
@@ -230,8 +282,49 @@ def _taxcalc_row(n, i, year: int = 2024):
         # deducted here and REFUSED by btctax (excess contributions need Form 5329). The constraint
         # lives in the cell's own `why`, exactly as it does for `charitable_cash` and §170(b).
         "e03290": i.get("hsa_deduction", 0),
+        # ★★★ T11 — Schedule 1 line 7, unemployment compensation.
+        "e02300": i.get("unemployment", 0),
+        # ★★★ T11 / R13 — the DEPENDENTS BLOCK. Without it `n24` is 0 on every row, taxcalc's
+        #     `c07220 + odc` is $0 even for a household with three qualifying children, and the
+        #     line-19 excuse ("btctax's blank line 19 differs from the oracle's CTC by exactly the
+        #     oracle's CTC") would be `0 - 0` — a comparison that cannot fail.
+        **dependent_block(i),
         "s006": 1.0,
     }
+
+
+def taxcalc_credits(households, year: int = 2024) -> list[dict]:
+    """★★★ T11 — the CREDIT lines `taxcalc_run` deliberately does not bake, per household.
+
+    They are not part of the golden corpus (whose cells are creditless by construction), so adding
+    them to `taxcalc_run`'s dict would change the shape of every committed `expected_taxcalc`. They
+    exist for `check_return.py`, which needs the SIZE of each excuse:
+
+    * `ctc_odc` — 1040 line 19, *"Child tax credit or credit for other dependents from Schedule
+      8812"*: taxcalc's `c07220` (the adjusted CTC) plus `odc`. btctax has no Schedule 8812, so its
+      line 19 is blank and the whole of this is the expected gap.
+    * `eitc` — 1040 line 27; btctax computes no earned income credit.
+    * `actc` — 1040 line 28, the refundable additional CTC (`c11070`).
+    * `nonrefundable_used` — `c07100`, *"Total non-refundable credits used to reduce positive tax
+      liability"*. `c09200` (the 1040 line 24 equivalent) is taken AFTER these, so a household with
+      dependents makes taxcalc's line 24 smaller than btctax's by exactly this much.
+    """
+    rows = [_taxcalc_row(n, i, year) for n, i in enumerate(households)]
+    recs = tc.Records(
+        data=pd.DataFrame(rows), start_year=year, gfactors=None, weights=None, adjust_ratios=None
+    )
+    calc = tc.Calculator(policy=tc.Policy(), records=recs)
+    calc.advance_to_year(year)
+    calc.calc_all()
+    return [
+        {
+            "ctc_odc": float(calc.array("c07220")[n]) + float(calc.array("odc")[n]),
+            "eitc": float(calc.array("eitc")[n]),
+            "actc": float(calc.array("c11070")[n]),
+            "nonrefundable_used": float(calc.array("c07100")[n]),
+        }
+        for n in range(len(rows))
+    ]
 
 
 def taxcalc_run(households, year: int = 2024):

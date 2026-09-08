@@ -222,6 +222,67 @@ fn income_import_then_show_redacts_pii_at_the_vault_level() {
     );
 }
 
+/// ★★★ **T11 / R13 — `income project` at the VAULT level: the oracle row, and no identity.**
+///
+/// The structural half is held in core (`oracle_projection.rs`), which plants distinctive tokens in
+/// every identity field of a `ReturnInputs` and asserts none survives the projection. This is the
+/// other half — the whole command, over a real vault, from an imported TOML that carries a cleartext
+/// SSN — because the guarantee that matters to a filer is about what the COMMAND prints.
+///
+/// ★ It also pins the `not_carried` census, which is the thing that stops a truncated household
+///   reading as a btctax defect: box 2 withholding is on the return and cannot reach either engine,
+///   and the operator has to be told so.
+#[test]
+fn income_project_prints_the_oracle_row_and_no_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    assert_eq!(
+        cmd::tax::project_return_inputs(&vault, &pp(), 2024).unwrap(),
+        None,
+        "a year with no stored return projects nothing"
+    );
+
+    let toml = dir.path().join("inputs.toml");
+    std::fs::write(
+        &toml,
+        "filing_status = \"Single\"\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\n\n\
+         [header.taxpayer]\nfirst_name = \"Pat\"\nlast_name = \"Doe\"\nssn = \"123-45-6789\"\n\n\
+         [[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"82000\"\n\
+         box2_fed_withheld = \"9100\"\n",
+    )
+    .unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false, false).unwrap();
+
+    let out = cmd::tax::project_return_inputs(&vault, &pp(), 2024)
+        .unwrap()
+        .expect("inputs were imported");
+    // The FIGURES travel …
+    assert!(
+        out.contains("82000"),
+        "the wages must reach the row:\n{out}"
+    );
+    assert!(out.contains("\"filing_status\": \"Single\""), "{out}");
+    // … and NOTHING that identifies the filer does. Not redacted — absent by type.
+    for token in ["Pat", "Doe", "123-45-6789", "***-**-6789", "ACME"] {
+        assert!(
+            !out.contains(token),
+            "the oracle row leaked {token:?}:\n{out}"
+        );
+    }
+    // The withholding is on the return and reaches neither engine; the census must say so.
+    assert!(
+        out.contains("box2_fed_withheld") && out.contains("PaymentOrWithholding"),
+        "`not_carried` must name the withholding and its reason:\n{out}"
+    );
+    // And the row itself parses back as a `GoldenInputs`, which is what the harness and both oracle
+    // drivers consume — a row nothing can read would be a screenshot with extra steps.
+    let doc: serde_json::Value = serde_json::from_str(&out).expect("the projection is JSON");
+    let _row: btctax_core::tax::testonly::GoldenInputs =
+        serde_json::from_value(doc["row"].clone()).expect("the row round-trips as GoldenInputs");
+}
+
 /// M-1 blast-radius tripwire (spec §4/§9.6, "pin that enumeration in the KAT"): the workspace-global
 /// `preserve_order` flip is SAFE only because every PRODUCTION `serde_json::Value` construction is
 /// DISPLAYED or PARSED, never serialized into PERSISTED/FINGERPRINTED bytes — those use typed serde

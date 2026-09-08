@@ -175,6 +175,15 @@ pub struct DependentWalk {
     /// A bitset over `DependentGate::ALL` indices. Twenty-one gates, so a `u32` is exact and the walk
     /// allocates nothing.
     demanded: u32,
+    /// ★★★ **Did Step 1 conclude *"Yes. Go to Step 2"*?** — i.e. is this person a §152(c)
+    /// QUALIFYING CHILD, as opposed to a §152(d) qualifying relative reached through Step 4.
+    ///
+    /// It is recorded here rather than recomputed by a caller because the predicate is the
+    /// instruction's own five-limb conjunction (`i1040gi--2025.txt:1485-1529`) and a second copy of
+    /// it would be a second thing to keep true. T11's oracle projection reads it: §32(c)(3)(A)
+    /// defines an EIC qualifying child as a §152(c) qualifying child, so the EIC count is a subset
+    /// of the rows for which this is `true`.
+    qualifying_child: bool,
 }
 
 impl DependentWalk {
@@ -182,6 +191,15 @@ impl DependentWalk {
     #[must_use]
     pub fn demands(&self, gate: DependentGate) -> bool {
         self.demanded & (1u32 << gate_index(gate)) != 0
+    }
+    /// Did Step 1 conclude that this person is a §152(c) QUALIFYING CHILD (*"Yes. Go to Step 2"*)?
+    ///
+    /// `false` for a row Step 1 sent to Step 4, for a row with no answer yet, and for
+    /// [`DependentVerdict::NoRow`] — the fail-closed direction, since every consumer uses it to
+    /// COUNT a benefit.
+    #[must_use]
+    pub fn is_qualifying_child(&self) -> bool {
+        self.qualifying_child
     }
     /// Every gate the walk demanded, in `DependentGate::ALL` order.
     #[must_use]
@@ -211,6 +229,8 @@ struct Walk<'a> {
     ri: &'a ReturnInputs,
     d: &'a Dependent,
     demanded: u32,
+    /// Set once, by [`walk_dependent`], when Step 1 routes the row to Step 2.
+    qualifying_child: bool,
 }
 
 impl<'a> Walk<'a> {
@@ -227,6 +247,7 @@ impl<'a> Walk<'a> {
         DependentWalk {
             verdict,
             demanded: self.demanded,
+            qualifying_child: self.qualifying_child,
         }
     }
     fn yes(&self, gate: DependentGate) -> bool {
@@ -247,9 +268,15 @@ pub fn walk_dependent(ri: &ReturnInputs, row: usize) -> DependentWalk {
         return DependentWalk {
             verdict: DependentVerdict::NoRow,
             demanded: 0,
+            qualifying_child: false,
         };
     };
-    let mut w = Walk { ri, d, demanded: 0 };
+    let mut w = Walk {
+        ri,
+        d,
+        demanded: 0,
+        qualifying_child: false,
+    };
     use DependentGate as G;
 
     // ── STEP 1 — Do You Have a Qualifying Child? (`i1040gi--2025.txt:1485-1529`) ─────────────────
@@ -290,6 +317,7 @@ pub fn walk_dependent(ri: &ReturnInputs, row: usize) -> DependentWalk {
         && w.yes(G::LivedWithYouOverHalfYear);
 
     if is_qualifying_child {
+        w.qualifying_child = true;
         step2(w)
     } else {
         // *"1. Do you have a child who meets the conditions to be your qualifying child? … No. Go to
