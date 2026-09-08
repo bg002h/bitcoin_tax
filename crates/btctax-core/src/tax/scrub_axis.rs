@@ -170,6 +170,29 @@ pub fn maximal_sentinel() -> ReturnInputs {
         .to_string(),
         relationship: format!("SENTINEL_relationship_{tag}"),
         date_of_birth: Some(date!(2015 - 03 - 03)),
+        // ★ T7 / R6 — MAXIMAL means non-default on every gate: a leaf left `None` on both sides
+        //   produces no differing path and drops out of the derived axis entirely (module doc). The
+        //   values are the CTC edge, so the fixture is also a coherent dependent.
+        lived_with_you_over_half_year: Some(true),
+        lived_with_you_in_us: Some(true),
+        full_time_student: Some(true),
+        permanently_and_totally_disabled: Some(true),
+        qc_relationship: Some(true),
+        younger_than_you_or_spouse: Some(true),
+        provided_over_half_own_support: Some(false),
+        filing_joint_return: Some(true),
+        joint_return_only_to_claim_refund: Some(true),
+        qualifying_child_of_another_person: Some(false),
+        citizen_national_resident_or_canada_mexico: Some(true),
+        married: Some(false),
+        tin_issued_by_due_date: Some(true),
+        citizen_national_or_resident_alien: Some(true),
+        ssns_valid_for_employment_issued_by_due_date: Some(true),
+        qr_relationship_or_member_of_household: Some(true),
+        qualifying_child_of_any_taxpayer: Some(false),
+        gross_income_under_limit: Some(true),
+        you_provided_over_half_support: Some(true),
+        divorced_separated_multiple_support_or_kidnapped_rule_applies: Some(false),
     };
     let w2 = |tag: &str, ein: &str| W2 {
         owner: Owner::Taxpayer,
@@ -391,6 +414,8 @@ pub fn maximal_sentinel() -> ReturnInputs {
             form8615_condition3_age_support: Some(true),
             form8615_condition4_parent_alive: Some(ParentAliveAnswer::CannotKnow),
             form8615_parent_identity_unobtainable: Some(true),
+            // ★ T7 / R6 — maximal means non-default here too.
+            filer_tin_issued_by_due_date: Some(true),
         },
         w2s: vec![w2("one", "11-1111111"), w2("two", "22-2222222")],
         int_1099: vec![int_1099("one", "33-3333333"), int_1099("two", "44-4444444")],
@@ -951,16 +976,13 @@ mod matrix {
                 Fixture(|r| r.header.dependents[0].name = String::new()),
                 NoSuchState(NO_READER),
             ),
-            // ★★★ THIS ROW EXISTS BECAUSE THE MATRIX DEMANDED IT, NOT BECAUSE ANYONE REMEMBERED.
-            //     §6 dropped the dependent DOB, which put a NEW field into the derived axis, and the
-            //     loop refused to pass until its class behaviour was decided. That is the whole
-            //     mechanism working on its first real occasion — no reader had to notice.
-            (
-                "header.dependents[].date_of_birth",
-                Fixture(|r| r.header.dependents.clear()),
-                NoSuchState("an Option<Date>: absent IS its empty state, there is no third value"),
-                NoSuchState(NO_READER),
-            ),
+            // ★★★ **THE MATRIX WORKED IN BOTH DIRECTIONS, and this comment is its second occasion.**
+            //     §6 dropped the dependent DOB, which put a NEW field into the derived axis and made
+            //     the loop refuse until its class behaviour was decided — the mechanism catching an
+            //     addition. **T7 then gave the field a reader** (R6's Step 1 age test), so scrub
+            //     KEEPS it, so it LEFT the derived axis — and the same loop refused again, this time
+            //     because a matrix row named a field scrub no longer replaces. Neither direction
+            //     needed a reader to notice; the row is gone because the derivation says so.
             (
                 "header.address_street",
                 NoSuchState(PLAIN_STRING),

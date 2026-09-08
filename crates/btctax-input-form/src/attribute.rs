@@ -27,6 +27,44 @@ fn skip(s: btctax_core::tax::questions::SkippableId) -> Anchor {
     Anchor::Field(crate::spec::skippable_to_field(s))
 }
 
+/// ★★★ **T7 / R6 — `DependentGate` → the Dependents-section `Field` that carries it.** TOTAL: an
+/// exhaustive `match` with no `_` arm, so a new gate is a compile error here until it is placed.
+///
+/// `DateOfBirth` resolves to the pre-existing `DepDob` leaf rather than a new one — the row already
+/// had a date field, and R6 changed its CLASS (required, blocking) rather than adding a second one.
+fn dependent_gate_field(gate: btctax_core::tax::provenance::DependentGate) -> FieldId {
+    use btctax_core::tax::provenance::DependentGate as G;
+    match gate {
+        G::DateOfBirth => FieldId::DepDob,
+        G::QcRelationship => FieldId::DepGateQcRelationship,
+        G::YoungerThanYouOrSpouse => FieldId::DepGateYoungerThanYouOrSpouse,
+        G::FullTimeStudent => FieldId::DepGateFullTimeStudent,
+        G::PermanentlyAndTotallyDisabled => FieldId::DepGatePermanentlyAndTotallyDisabled,
+        G::ProvidedOverHalfOwnSupport => FieldId::DepGateProvidedOverHalfOwnSupport,
+        G::FilingJointReturn => FieldId::DepGateFilingJointReturn,
+        G::JointReturnOnlyToClaimRefund => FieldId::DepGateJointReturnOnlyToClaimRefund,
+        G::LivedWithYouOverHalfYear => FieldId::DepGateLivedWithYouOverHalfYear,
+        G::LivedWithYouInUs => FieldId::DepGateLivedWithYouInUs,
+        G::QualifyingChildOfAnotherPerson => FieldId::DepGateQualifyingChildOfAnotherPerson,
+        G::CitizenNationalResidentOrCanadaMexico => {
+            FieldId::DepGateCitizenNationalResidentOrCanadaMexico
+        }
+        G::Married => FieldId::DepGateMarried,
+        G::TinIssuedByDueDate => FieldId::DepGateTinIssuedByDueDate,
+        G::CitizenNationalOrResidentAlien => FieldId::DepGateCitizenNationalOrResidentAlien,
+        G::SsnsValidForEmploymentIssuedByDueDate => {
+            FieldId::DepGateSsnsValidForEmploymentIssuedByDueDate
+        }
+        G::QrRelationshipOrMemberOfHousehold => FieldId::DepGateQrRelationshipOrMemberOfHousehold,
+        G::QualifyingChildOfAnyTaxpayer => FieldId::DepGateQualifyingChildOfAnyTaxpayer,
+        G::GrossIncomeUnderLimit => FieldId::DepGateGrossIncomeUnderLimit,
+        G::YouProvidedOverHalfSupport => FieldId::DepGateYouProvidedOverHalfSupport,
+        G::DivorcedSeparatedMultipleSupportOrKidnappedRuleApplies => {
+            FieldId::DepGateDivorcedSeparatedMultipleSupportOrKidnappedRuleApplies
+        }
+    }
+}
+
 /// Where a screen-refusal points in the input form (spec §7). An EXHAUSTIVE `match` — no `_` arm — so a new
 /// `RefuseReason` fails to compile until it is placed. Returns the §7 attribution row's anchor list.
 pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
@@ -35,6 +73,18 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         // ── Unanswered declarations → their Declaration field, exact via QuestionId (§7 line 508). The
         //    mortgage one dedups to the Schedule-A leaf `SaMortgageAllUsed` through `question_to_field`. ──
         R::DependentStatusUnanswered => vec![decl(QuestionId::DependentTaxpayer)],
+        // ★★★ **T7 / R6 — the per-row dependent gates.** Both refusals anchor on the GATE'S OWN
+        //     field in the Dependents section: an unanswered one is fixed by answering it, and a
+        //     refusing one by changing the answer that took the flowchart to the STOP (or removing
+        //     the row). The refusal's own text names the rule and the exit, which is where the
+        //     filer learns which of the two applies.
+        //
+        // ★★ The FieldId names the gate; the ROW comes from the refusal's `row`, exactly as the
+        //      broker anchors resolve their provider row. `Anchor` carries no row and §10 freezes it.
+        R::DependentGateUnanswered { gate, .. } | R::DependentGateRefused { gate, .. } => {
+            vec![Anchor::Field(dependent_gate_field(*gate))]
+        }
+        R::FilerTinUnanswered => vec![decl(QuestionId::FilerTinIssuedByDueDate)],
         R::DependentSpouseStatusUnanswered => vec![decl(QuestionId::DependentSpouse)],
         R::MfsSpouseItemizeUnknown => vec![decl(QuestionId::MfsSpouseItemizes)],
         R::HsaActivityUnanswered => vec![decl(QuestionId::HsaActivity)],

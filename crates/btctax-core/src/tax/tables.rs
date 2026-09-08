@@ -497,6 +497,19 @@ pub struct FullReturnParams {
     pub salt: SaltLimitation,
     /// §1(g)(4) kiddie-tax unearned-income threshold (Form 8615 refuse trigger, spec C1).
     pub kiddie_unearned_threshold: Usd,
+    /// ★★★ **§152(d)(1)(B) — the qualifying-relative GROSS INCOME limit** (T7 / R6, Step 4).
+    ///
+    /// The flowchart states the test with the year's figure in it: *"Who had gross income of less
+    /// than **$5,200** in 2025"* (`design/forms/extract/i1040gi--2025.txt:1690`). It is the §151(d)
+    /// exemption amount republished annually — **TY2024 $5,050** (Rev. Proc. 2023-34 §3.24), **TY2025
+    /// $5,200** (Rev. Proc. 2024-40 §2.24), **TY2026 $5,300** (Rev. Proc. 2025-32 §4.23) — so it is a
+    /// per-year parameter and not a constant.
+    ///
+    /// ★★ **The gate's prompt QUOTES it**, which is why the gate is *waiting for the year package*
+    /// rather than blocking on a year with no [`FullReturnParams`] (R6/M7, R12's `waiting` row): a
+    /// prompt that cannot state the figure asks the filer to derive it, and a derived answer to a
+    /// §6065 declaration is exactly what this interview exists to prevent.
+    pub qualifying_relative_gross_income_limit: Usd,
     /// §402(g)(1) elective-deferral limit (excess-deferral refuse trigger, spec F3).
     pub elective_deferral_limit: Usd,
     /// §904(j) no-Form-1116 foreign-tax-credit ceiling (general; MFJ = double at the use site).

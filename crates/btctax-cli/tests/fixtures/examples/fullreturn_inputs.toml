@@ -97,14 +97,29 @@ address_street = "100 Main St"
 address_zip = "62704"
 can_be_claimed_as_dependent_spouse = false
 can_be_claimed_as_dependent_taxpayer = false
+filer_tin_issued_by_due_date = true
 presidential_fund_spouse = false
 presidential_fund_taxpayer = false
 
 [[header.dependents]]
+citizen_national_or_resident_alien = true
+citizen_national_resident_or_canada_mexico = true
 date_of_birth = [2012, 106]
+filing_joint_return = false
+full_time_student = false
+lived_with_you_in_us = true
+lived_with_you_over_half_year = true
+married = false
 name = "Sam Doe"
+permanently_and_totally_disabled = false
+provided_over_half_own_support = false
+qc_relationship = true
+qualifying_child_of_another_person = false
 relationship = "Son"
 ssn = "111-22-3333"
+ssns_valid_for_employment_issued_by_due_date = true
+tin_issued_by_due_date = true
+younger_than_you_or_spouse = true
 
 [header.spouse]
 first_name = "Jane"

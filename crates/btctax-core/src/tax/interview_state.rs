@@ -28,9 +28,13 @@
 //! is computed on demand from the registries and the return; nothing about it is stored.
 
 use crate::conventions::Usd;
+use crate::tax::dependent_gates::{
+    gate_is_answered, walk_dependent, DependentVerdict, DEPENDENT_GATES,
+};
 use crate::tax::document_census::{row_of_question, DocumentRow};
 use crate::tax::provenance::{
-    answer_status, AnswerKey, AnswerStatus, DependentGate, WORDING_CHANGED_REASON,
+    answer_status, dependent_ssn_hash, AnswerKey, AnswerStatus, DependentGate,
+    WORDING_CHANGED_REASON,
 };
 use crate::tax::questions::{QuestionId, SkippableId, FORM_QUESTIONS, SKIPPABLE_QUESTIONS};
 use crate::tax::return_inputs::ReturnInputs;
@@ -140,6 +144,16 @@ impl InterviewState {
 /// §152(d) gross-income figure for the year (R6 / M7). When T7 lands, its entry goes here and the
 /// planted test keeps meaning the same thing.
 pub const PARAMS_GATED_PROMPTS: &[(QuestionId, &str)] = &[];
+
+/// What a params-quoting prompt is WAITING ON, named so the filer knows what they are waiting for.
+///
+/// ★★★ **T7 landed `gross_income_under_limit` as a `DependentGate`, not a `QuestionId`**, so it
+/// could not go in [`PARAMS_GATED_PROMPTS`] — that table is keyed by the return-level registry. It
+/// needs no table at all: a gate declares its own params dependence by carrying a
+/// `prompt_from_params` renderer, so *waiting* is DERIVED from the registry entry rather than looked
+/// up in a second list keyed by hand. [`PARAMS_GATED_PROMPTS`] stays for the return-level case, with
+/// its planted-occupant test unchanged.
+pub const YEAR_PACKAGE: &str = "the tax year's parameter package (FullReturnParams)";
 
 /// ★★★ **THE PANEL.** Every blocking, forgoing, refusing and waiting item on this return, derived
 /// from the registries (R12).
@@ -263,17 +277,88 @@ fn interview_state_with(
         }
     }
 
-    // ── 3. The dependent gates × rows. ────────────────────────────────────────────────────────────
+    // ── 3. The dependent gates × rows (T7 / R6). ─────────────────────────────────────────────────
     //
-    // ★★ **T7 owns the `DEPENDENT_GATES` registry**, which does not exist at HEAD: the per-gate
-    //    prompts, liveness and refusals are its deliverable, and `provenance::current_prompt`
-    //    already returns `None` for an `AnswerKey::DependentGate` for the same reason. The walk is
-    //    written here as one loop over the rows so T7 adds a registry, not a traversal — and the
-    //    assertion below is the honest statement of what is NOT yet covered.
+    // ★★ **Liveness is the WALK's**, so it is computed ONCE per row and both the per-gate liveness
+    //    and the flowchart's own STOP are read off the same value — two calls would be two chances
+    //    to disagree.
     debug_assert!(
-        DependentGate::ALL.len() == 21,
-        "the gate identities exist (T1); their REGISTRY — prompts, liveness, refusals — is T7"
+        DependentGate::ALL.len() == DEPENDENT_GATES.len(),
+        "DEPENDENT_GATES is total over the gate identities"
     );
+    for (row, d) in ri.header.dependents.iter().enumerate() {
+        let walk = walk_dependent(ri, row);
+        for g in DEPENDENT_GATES {
+            if !walk.demands(g.gate) {
+                st.not_live += 1;
+                continue;
+            }
+            let item = AnswerKey::DependentGate {
+                ssn_hash: dependent_ssn_hash(&d.ssn),
+                gate: g.gate,
+            };
+            // ★★★ **R12's `waiting` row, and its first real occupant.** A prompt that must QUOTE a
+            //     year-package figure cannot be STATED until the package arrives, so it is listed as
+            //     *waiting*, never as blocking: asking a question whose words are not yet knowable
+            //     is how a filer is made to answer something else. It becomes blocking the moment
+            //     params exist — which is what the two entry points to this walk are for.
+            if g.needs_params() && params.is_none() {
+                st.waiting.push(Waiting {
+                    item,
+                    prompt: g.prompt_text(ri, None),
+                    waiting_on: YEAR_PACKAGE,
+                });
+                continue;
+            }
+            let prompt = g.prompt_text(ri, params);
+            if !gate_is_answered(d, g.gate) {
+                st.blocking.push(Blocking {
+                    item,
+                    prompt,
+                    reason: "this question has not been answered",
+                    accounts_for: g.unanswered_detail,
+                });
+                continue;
+            }
+            // R10.3 — an answer given under earlier words does not stand under later ones. For the
+            // params-quoting gate the comparand is the RENDERED prompt, which only exists here.
+            let stale = if g.needs_params() {
+                ri.answer_log
+                    .get(&item)
+                    .is_some_and(|r| r.prompt_hash != crate::tax::provenance::prompt_hash(&prompt))
+            } else {
+                answer_status(ri, &item) == AnswerStatus::WordingChanged
+            };
+            if stale {
+                st.blocking.push(Blocking {
+                    item,
+                    prompt,
+                    reason: WORDING_CHANGED_REASON,
+                    accounts_for: g.unanswered_detail,
+                });
+                continue;
+            }
+            st.answered += 1;
+        }
+        // ★★ An ANSWERED gate whose answer STOPS the flowchart — shown while authoring rather than
+        //    met at commit (J-32), and derived from the walk's own refusal, never re-decided here.
+        if let DependentVerdict::Refused(r) = walk.verdict {
+            st.refusing.push(Refusing {
+                item: AnswerKey::DependentGate {
+                    ssn_hash: dependent_ssn_hash(&d.ssn),
+                    gate: r.gate,
+                },
+                prompt: crate::tax::dependent_gates::entry(r.gate).prompt_text(ri, params),
+                reason: RefuseReason::DependentGateRefused { row, gate: r.gate },
+                exit: format!(
+                    "dependent row {}: {} The rule the Form 1040 instructions send you to is {}.",
+                    row + 1,
+                    r.exit,
+                    r.rule
+                ),
+            });
+        }
+    }
 
     // ── 4. The declared-document / rows invariant (R3), the one panel item that is not a registry
     //       entry: it is a fact about the RETURN, not about a question. ────────────────────────────

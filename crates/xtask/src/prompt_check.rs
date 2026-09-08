@@ -28,6 +28,7 @@
 //! under any amount of case folding.
 
 use crate::cite_check::{normalise, repo_root};
+use btctax_core::tax::provenance::DependentGate;
 use btctax_core::tax::questions::{SkippableId, SKIPPABLE_QUESTIONS};
 use std::fmt::Write as _;
 
@@ -154,6 +155,225 @@ fn count(haystack: &str, needle: &str) -> usize {
     n
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// T7 / R6 — THE DEPENDENT GATES. Same rule, one registry over.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// ★★★ **Row (5)(a)'s help carries the *Exception to time lived with you* VERBATIM, and the span is
+/// ENUMERATED FROM THE EXTRACT'S OWN LINES rather than pasted here.**
+///
+/// R6 makes the exception part of the condition, not a branch out of the flowchart: a child born in
+/// November whose home was the filer's for more than half the time they were alive answers the bare
+/// question *No*, reaches Step 4, passes every qualifying-relative test, and prints the SMALLER
+/// credit. So the exception has to be in front of the filer, in the instruction's own words.
+///
+/// ★★ **The comparand is the FILE, at the cited lines.** A pasted constant here would be a second
+///      copy of the manual, and this whole module exists because a document does not need to agree
+///      with itself — it needs to agree with the form. The line numbers are the ones the gate's own
+///      `cite` names, so moving one without the other reds.
+const EXCEPTION_SPAN: (&str, usize, usize) = ("design/forms/extract/i1040gi--2025.txt", 1905, 1913);
+
+/// One dependent-gate clause: the gate, which of its two filer-facing strings carries it, and the
+/// clause. Every one is sourced from `i1040gi--2025.txt`, the flowchart's own booklet.
+struct GateClause {
+    gate: DependentGate,
+    face: Face,
+    text: &'static str,
+}
+
+/// The clause table. One clause per flowchart CONDITION whose wording decides an edge — the words a
+/// filer checks against their own facts.
+const GATE_CLAUSES: &[GateClause] = &[
+    GateClause {
+        gate: DependentGate::QcRelationship,
+        face: Face::Prompt,
+        text: "Son, daughter, stepchild, foster child, brother, sister, stepbrother, stepsister, \
+               half brother, half sister, or a descendant of any of them",
+    },
+    GateClause {
+        gate: DependentGate::YoungerThanYouOrSpouse,
+        face: Face::Help,
+        text: "younger than you (or your spouse if filing jointly)",
+    },
+    GateClause {
+        gate: DependentGate::FullTimeStudent,
+        face: Face::Help,
+        text: "It doesn\u{2019}t include an on-the-job training course, correspondence school, or \
+               school offering courses only through the Internet",
+    },
+    GateClause {
+        gate: DependentGate::PermanentlyAndTotallyDisabled,
+        face: Face::Prompt,
+        text: "can\u{2019}t engage in any substantial gainful activity because of a physical or \
+               mental condition",
+    },
+    GateClause {
+        gate: DependentGate::ProvidedOverHalfOwnSupport,
+        face: Face::Help,
+        text: "Who didn\u{2019}t provide over half of their own support",
+    },
+    GateClause {
+        gate: DependentGate::JointReturnOnlyToClaimRefund,
+        face: Face::Help,
+        text: "only to claim a refund of withheld income tax or estimated tax paid",
+    },
+    GateClause {
+        gate: DependentGate::QualifyingChildOfAnotherPerson,
+        face: Face::Help,
+        text: "If the child meets the conditions to be a qualifying child of any other person \
+               (other than your spouse if filing jointly)",
+    },
+    GateClause {
+        gate: DependentGate::CitizenNationalResidentOrCanadaMexico,
+        face: Face::Prompt,
+        text:
+            "a U.S. citizen, U.S. national, U.S. resident alien, or a resident of Canada or Mexico",
+    },
+    GateClause {
+        gate: DependentGate::TinIssuedByDueDate,
+        face: Face::Prompt,
+        text:
+            "an SSN, ITIN, or adoption taxpayer identification number (ATIN) issued on or before \
+               the due date of your return (including extensions)",
+    },
+    GateClause {
+        gate: DependentGate::CitizenNationalOrResidentAlien,
+        face: Face::Prompt,
+        text: "a U.S. citizen, U.S. national, or U.S. resident alien",
+    },
+    GateClause {
+        gate: DependentGate::SsnsValidForEmploymentIssuedByDueDate,
+        face: Face::Prompt,
+        text: "have SSNs valid for employment and issued before the due date of your",
+    },
+    GateClause {
+        gate: DependentGate::QrRelationshipOrMemberOfHousehold,
+        face: Face::Prompt,
+        text:
+            "Any other person (other than your spouse) who lived with you all year as a member of \
+               your household if your relationship didn\u{2019}t violate local law",
+    },
+    GateClause {
+        gate: DependentGate::QualifyingChildOfAnyTaxpayer,
+        face: Face::Help,
+        text: "Who wasn\u{2019}t a qualifying child (see Step 1) of any taxpayer",
+    },
+    GateClause {
+        gate: DependentGate::GrossIncomeUnderLimit,
+        face: Face::Help,
+        text: "If the person was permanently and totally disabled, see Exception to gross income \
+               test, later",
+    },
+    GateClause {
+        gate: DependentGate::YouProvidedOverHalfSupport,
+        face: Face::Help,
+        text: "For whom you provided over half of the person\u{2019}s support",
+    },
+    GateClause {
+        gate: DependentGate::DivorcedSeparatedMultipleSupportOrKidnappedRuleApplies,
+        face: Face::Help,
+        text:
+            "But see Children of divorced or separated parents, Multiple support agreements, and \
+               Kidnapped child, later",
+    },
+];
+
+/// Which of a gate's two filer-facing strings a clause is checked against.
+fn gate_face_text(gate: DependentGate, face: Face) -> &'static str {
+    let q = btctax_core::tax::dependent_gates::entry(gate);
+    match face {
+        Face::Prompt => q.prompt,
+        Face::Help => q.help,
+    }
+}
+
+/// The cited span of the extract, normalised — read from the FILE, never pasted.
+fn cited_span(
+    root: &std::path::Path,
+    file: &str,
+    first: usize,
+    last: usize,
+) -> Result<String, String> {
+    let raw =
+        std::fs::read_to_string(root.join(file)).map_err(|e| format!("cannot read {file}: {e}"))?;
+    let lines: Vec<&str> = raw.lines().collect();
+    if lines.len() < last {
+        return Err(format!("{file} has {} lines, want :{last}", lines.len()));
+    }
+    Ok(normalise(&lines[first - 1..last].join(" ")))
+}
+
+/// The T7 half of the check: `Ok(n)` assertions passed, `Err` names every failure.
+fn check_gates(root: &std::path::Path) -> Result<usize, String> {
+    let mut failures: Vec<String> = Vec::new();
+    let mut passed = 0usize;
+    let extract = "design/forms/extract/i1040gi--2025.txt";
+    let raw = std::fs::read_to_string(root.join(extract))
+        .map_err(|e| format!("cannot read {extract}: {e}"))?;
+    let hay = normalise(&raw);
+    for (i, c) in GATE_CLAUSES.iter().enumerate() {
+        let n = i + 1;
+        let clause = normalise(c.text);
+        // (a) — the clause really is the manual's.
+        if hay.contains(&clause) {
+            passed += 1;
+        } else {
+            failures.push(format!(
+                "gate clause {n} ({:?}) is NOT in {extract}: {:?}",
+                c.gate, c.text
+            ));
+        }
+        // (b) — and it is what the filer is shown.
+        if normalise(gate_face_text(c.gate, c.face)).contains(&clause) {
+            passed += 1;
+        } else {
+            failures.push(format!(
+                "gate clause {n} ({:?} {:?}) is NOT in the string the filer reads: {:?}",
+                c.gate, c.face, c.text
+            ));
+        }
+    }
+    // Row (5)(a)'s exception, verbatim, at its own cited lines.
+    let (file, first, last) = EXCEPTION_SPAN;
+    let span = cited_span(root, file, first, last)?;
+    if exception_is_quoted(
+        &span,
+        gate_face_text(DependentGate::LivedWithYouOverHalfYear, Face::Help),
+    ) {
+        passed += 1;
+    } else {
+        failures.push(format!(
+            "row (5)(a)'s help does NOT quote {file}:{first}-{last} verbatim \u{2014} the Exception \
+             to time lived with you is PART OF THE CONDITION (R6), and a child born in November \
+             whose help omits it answers the bare question \"no\" and prints the smaller credit"
+        ));
+    }
+    // …and the gate's own `cite` names those lines, so the two cannot drift apart.
+    let cite =
+        btctax_core::tax::dependent_gates::entry(DependentGate::LivedWithYouOverHalfYear).cite;
+    if cite.contains(&format!(":{first}-{last}")) {
+        passed += 1;
+    } else {
+        failures.push(format!(
+            "row (5)(a)'s `cite` must name :{first}-{last}, the span this check reads: got {cite:?}"
+        ));
+    }
+    if failures.is_empty() {
+        Ok(passed)
+    } else {
+        let mut msg = String::new();
+        for f in &failures {
+            let _ = writeln!(msg, "  {f}");
+        }
+        Err(msg)
+    }
+}
+
+/// THE RULE, as a pure function of its two inputs, so a planted defect can reach it (B1).
+fn exception_is_quoted(cited_span: &str, help: &str) -> bool {
+    normalise(help).contains(cited_span)
+}
+
 /// Run the check over the live registry. `Ok(count)` is the number of clause assertions that passed
 /// (both halves each); `Err` names every failure.
 pub fn check() -> Result<usize, String> {
@@ -208,7 +428,7 @@ pub fn check() -> Result<usize, String> {
     }
 
     if failures.is_empty() {
-        Ok(passed)
+        Ok(passed + check_gates(&root)?)
     } else {
         let mut msg = String::new();
         for f in &failures {
@@ -227,6 +447,102 @@ pub fn run() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ★★★ **T7 / R6 — THE B1 PAIRING FOR ROW (5)(a): the verbatim check is observed RED on a
+    /// planted defect and GREEN on the shipped help.**
+    ///
+    /// The rule is `exception_is_quoted(cited_span, help)`, a pure function of its two inputs, so the
+    /// mutation reaches it without touching the repo. Three defects are planted, and each is one a
+    /// well-meaning editor would actually commit:
+    ///
+    /// 1. **a paraphrase** — *"count as time the person lived with you"* softened to *"may count"*;
+    /// 2. **a TRUNCATION** — the born-or-died sentence dropped, which is the whole reason the
+    ///    exception is in the help at all (a November baby answers the bare question *no*);
+    /// 3. **the empty help**, the degenerate case a `contains` check must not pass.
+    #[test]
+    fn the_row_five_a_help_quotes_the_exception_and_a_mutated_help_reds() {
+        let root = repo_root();
+        let (file, first, last) = EXCEPTION_SPAN;
+        let span = cited_span(&root, file, first, last).expect("the extract is committed");
+        assert!(
+            span.contains("exception to time lived with you")
+                && span.contains("born or died in 2025"),
+            "the CITED SPAN itself must be the exception \u{2014} if this fails the line numbers \
+             moved, and every assertion below would be checking the wrong paragraph: {span:?}"
+        );
+        let help = gate_face_text(DependentGate::LivedWithYouOverHalfYear, Face::Help);
+
+        // GREEN on the shipped help.
+        assert!(
+            exception_is_quoted(&span, help),
+            "the unmutated help must PASS \u{2014} a checker that reds on everything is \
+             indistinguishable from one that works"
+        );
+
+        // RED on a paraphrase.
+        let paraphrased = help.replace(
+            "count as time the person lived with you",
+            "may count as time the person lived with you",
+        );
+        assert_ne!(paraphrased, help, "the mutation must change the help");
+        assert!(
+            !exception_is_quoted(&span, &paraphrased),
+            "PLANTED DEFECT NOT CAUGHT: a one-word paraphrase of the exception passed"
+        );
+
+        // RED on a TRUNCATION \u{2014} the born-or-died sentence is the one that decides a November baby.
+        let cut = help
+            .find("If the person meets all other requirements")
+            .expect("the born-or-died sentence is in the help");
+        let truncated = &help[..cut];
+        assert!(
+            !exception_is_quoted(&span, truncated),
+            "PLANTED DEFECT NOT CAUGHT: the born-or-died sentence was dropped and the check still \
+             passed \u{2014} which is exactly the misroute R6 exists to prevent"
+        );
+
+        // RED on the degenerate case.
+        assert!(
+            !exception_is_quoted(&span, ""),
+            "PLANTED DEFECT NOT CAUGHT: an EMPTY help passed a `contains` check"
+        );
+    }
+
+    /// ★★★ **The gate clause table is observed RED too**, on the same shape of defect the Form 8615
+    /// table is: a real sentence replaced by a plausible paraphrase of it.
+    #[test]
+    fn a_paraphrased_gate_prompt_is_rejected() {
+        let real = gate_face_text(DependentGate::TinIssuedByDueDate, Face::Prompt);
+        let clause = normalise(
+            "an SSN, ITIN, or adoption taxpayer identification number (ATIN) issued on or before \
+             the due date of your return (including extensions)",
+        );
+        assert!(
+            normalise(real).contains(&clause),
+            "GREEN on the real prompt"
+        );
+        // "by the due date" is not "on or before the due date" \u{2014} and the difference is a day.
+        let paraphrased = real.replace("on or before the due date", "by the due date");
+        assert_ne!(paraphrased, real, "the mutation must change the prompt");
+        assert!(
+            !normalise(&paraphrased).contains(&clause),
+            "PLANTED DEFECT NOT CAUGHT: the paraphrase passed the gate clause table"
+        );
+    }
+
+    /// ★★ **The `cite` and the span this check reads are the SAME lines.** Without this, moving
+    /// the cite (or the span) would leave the check silently reading a different paragraph from the
+    /// one the gate claims to quote \u{2014} the FOLLOWUPS \u{a7}G-10 shape, one registry over.
+    #[test]
+    fn the_row_five_a_cite_names_the_span_this_check_reads() {
+        let (_, first, last) = EXCEPTION_SPAN;
+        let cite =
+            btctax_core::tax::dependent_gates::entry(DependentGate::LivedWithYouOverHalfYear).cite;
+        assert!(
+            cite.contains(&format!(":{first}-{last}")),
+            "the gate cites {cite:?} but this check reads :{first}-{last}"
+        );
+    }
 
     /// The check passes against the live registry.
     #[test]

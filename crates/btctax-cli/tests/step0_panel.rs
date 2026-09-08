@@ -887,6 +887,10 @@ fn answer_everything_no(ri: &ReturnInputs) -> Vec<u8> {
             .filter(|a| match a {
                 Ask::Declaration(q) => !asked.contains(&format!("d{:?}", q.id)),
                 Ask::Skippable(sk) => !asked.contains(&format!("s{:?}", sk.id)),
+                // ★★★ T7 / R6 — the per-row §152 gates join the sweep.
+                Ask::DependentGate { gate, row } => {
+                    !asked.contains(&format!("g{:?}{row}", gate.gate))
+                }
             })
             .collect();
         if round.is_empty() {
@@ -902,6 +906,32 @@ fn answer_everything_no(ri: &ReturnInputs) -> Vec<u8> {
                 Ask::Skippable(sk) => {
                     asked.insert(format!("s{:?}", sk.id));
                     script.push('\n');
+                }
+                // ★★★ T7 / R6 — answered at the registry's declared claim-path polarity, because a
+                //     blanket "no" on a §152 gate is not neutral: it routes the row down another
+                //     branch of the flowchart, and some of those branches REFUSE.
+                Ask::DependentGate { gate, row } => {
+                    use btctax_core::tax::dependent_gates::GateKind;
+                    asked.insert(format!("g{:?}{row}", gate.gate));
+                    match gate.kind {
+                        GateKind::Date => {
+                            let dob = time::Date::from_calendar_date(
+                                ri.tax_year - 10,
+                                time::Month::June,
+                                1,
+                            )
+                            .unwrap();
+                            script.push_str(&format!("{dob}\n"));
+                            ri.header.dependents[row].date_of_birth = Some(dob);
+                        }
+                        GateKind::YesNo => {
+                            let v = gate
+                                .claim_path
+                                .expect("a YesNo gate declares its claim path");
+                            script.push_str(if v { "y\n" } else { "n\n" });
+                            (gate.set)(&mut ri.header.dependents[row], v);
+                        }
+                    }
                 }
             }
         }

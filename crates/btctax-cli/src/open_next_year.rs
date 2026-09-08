@@ -36,8 +36,8 @@
 use crate::{input_form_store, return_inputs, CliError, Session};
 use btctax_core::tax::document_census::DocumentRow;
 use btctax_core::tax::return_inputs::{
-    CarryProvenance, Form1099B, Form1099Div, Form1099G, Form1099Int, HouseholdHeader, Person,
-    ReturnInputs, W2,
+    CarryProvenance, Dependent, Form1099B, Form1099Div, Form1099G, Form1099Int, HouseholdHeader,
+    Person, ReturnInputs, W2,
 };
 
 /// The earliest tax year this build has any table for, and the latest year it will open INTO — the
@@ -368,7 +368,7 @@ fn leaves_the_seed_writes(seeded: &ReturnInputs) -> Vec<String> {
 /// | taxpayer / spouse name + SSN | who the return is FOR. Not testimony about the tax year. |
 /// | the two dates of birth | the `Durable` facts (`questions.rs`) — *shown*, and confirmed by the same keystroke a fresh answer takes. **No `AnswerRecord` comes with them.** |
 /// | the mailing address | where the return is sent; the same class as a payer's name. |
-/// | each dependent's name, SSN, relationship, date of birth | R10.4's *"each dependent"*. Every §152 gate on the row stays `None`. |
+/// | each dependent's name, SSN, relationship, date of birth | R10.4's *"each dependent"*. The PERSON crosses; the CLAIM does not — every one of T7's twenty §152 gates stays `None`, so the row is BLOCKING until the filer answers this year's flowchart for them (FR-70). |
 /// | each W-2 employer + EIN, each 1099 payer + TIN, per kind | R10.4's *"each payer by TIN"* — pre-named rows with **every box default**. |
 /// | each venue | the Form 1099-DA provider keys, each with **both cohort slots unanswered** (answered-ness lives in the slot, so an empty `CohortAnswers` claims nothing and `screen_broker_reporting` reads nothing from it). |
 ///
@@ -411,18 +411,62 @@ pub fn seed(prior: &ReturnInputs, to: i32) -> ReturnInputs {
             address_city: prior.header.address_city.clone(),
             address_state: prior.header.address_state.clone(),
             address_zip: prior.header.address_zip.clone(),
-            // ★★★ **I-2 — DEPENDENTS ARE NOT SEEDED.** A `Dependent` row IS the claim: it prints
-            //     the person, their SSN and their relationship in the 1040 Dependents grid — sworn
-            //     testimony — and there is nothing on this year's return that can answer for it. No
-            //     census row, no `FormQuestion`, no `RefuseReason`, and (machine-checked in the
-            //     review) no `interview_state` item. The child who aged out, moved out, or is
-            //     claimed by the other parent would ride across the year silently.
+            // ★★★ **FR-70 (T7) — DEPENDENTS ARE SEEDED AGAIN, as IDENTITIES with every gate blank.**
             //
-            //     R10.4 says each identity is SHOWN as its own prompt, and a shown identity that is
-            //     not seeded is exactly that: `identities_of` names every prior dependent from year
-            //     N's row, and the filer adds back the ones still theirs. **FR-70 (T7)** is where
-            //     the row returns — once `DEPENDENT_GATES` exist, there is something to answer.
-            dependents: Vec::new(),
+            //     I-2 removed them for one reason and it has now been removed: *"there is nothing on
+            //     this year's return that can answer for it — no `FormQuestion`, no `RefuseReason`,
+            //     no `interview_state` item"*, so a seeded row rode across the year silently. T7
+            //     built all three. A seeded row is now BLOCKING through every §152 gate the walk
+            //     demands of it, and the child who aged out, moved out, or is claimed by the other
+            //     parent is refused until the filer says so or deletes the row.
+            //
+            //     **What crosses is the PERSON; what does not is the CLAIM.** Name, SSN,
+            //     relationship and date of birth are facts about who this is — the same class as a
+            //     payer's name and TIN, and keyed by the same `ssn` the diligence log hashes. Every
+            //     one of the twenty gates asserts something about THIS tax year ("did this person
+            //     live with you for more than half of 2027?"), every one is `Durability::PerYear`,
+            //     and every one is left `None`.
+            //
+            //     ★ The `answer_log` does not cross either (nothing in this seed copies it), so a
+            //       prior year's gate answer cannot satisfy this year's provenance.
+            dependents: prior
+                .header
+                .dependents
+                .iter()
+                .map(|d| Dependent {
+                    name: d.name.clone(),
+                    ssn: d.ssn.clone(),
+                    relationship: d.relationship.clone(),
+                    // ★★ A birth date is the one `Durability::Durable` gate in `DEPENDENT_GATES`:
+                    //    it cannot change, and it is keyed to the SAME person by the SAME SSN. It
+                    //    crosses as an identity field, and `income answer` still puts it to the
+                    //    filer as a live class-(A) question with the value shown.
+                    date_of_birth: d.date_of_birth,
+                    // ★★★ Every gate blank, spelled out with no `..Default::default()` tail: a gate
+                    //     added later must be decided HERE, identity or declaration, and a missing
+                    //     field is a compile error rather than a silent carry.
+                    lived_with_you_over_half_year: None,
+                    lived_with_you_in_us: None,
+                    full_time_student: None,
+                    permanently_and_totally_disabled: None,
+                    qc_relationship: None,
+                    younger_than_you_or_spouse: None,
+                    provided_over_half_own_support: None,
+                    filing_joint_return: None,
+                    joint_return_only_to_claim_refund: None,
+                    qualifying_child_of_another_person: None,
+                    citizen_national_resident_or_canada_mexico: None,
+                    married: None,
+                    tin_issued_by_due_date: None,
+                    citizen_national_or_resident_alien: None,
+                    ssns_valid_for_employment_issued_by_due_date: None,
+                    qr_relationship_or_member_of_household: None,
+                    qualifying_child_of_any_taxpayer: None,
+                    gross_income_under_limit: None,
+                    you_provided_over_half_support: None,
+                    divorced_separated_multiple_support_or_kidnapped_rule_applies: None,
+                })
+                .collect(),
 
             ..Default::default()
         },

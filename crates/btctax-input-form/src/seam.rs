@@ -304,6 +304,53 @@ pub enum FieldId {
     DeclHsaSpouseFamilyCoverage,
     /// ★ Seam review M-1 — R3's door for Form 8889 line 14a: a distribution with no Form 1099-SA.
     DeclHsaDistributionWithout1099sa,
+    /// ★★★ T7 / R6 — Step 5 question 1: did YOU (and your spouse on a joint return) have an SSN or
+    ///     ITIN issued by the due date? Return-level, live iff a dependent row exists.
+    DeclFilerTinIssuedByDueDate,
+    // ── ★★★ T7 / R6 — THE TWENTY PER-ROW DEPENDENT GATES (`DEPENDENT_GATES`). Each delegates to the
+    //    registry entry; `live` is `|_| true` and `get` returns absent when the gate is not live for
+    //    THAT ROW — the I-4 emulation §10's frozen seam requires, since `Field.live` has no row.
+    //    (The row's date of birth is the pre-existing `DepDob`, which every row always demands.)
+    /// Step 1 relationship test (i1040gi--2025.txt:1463-1466).
+    DepGateQcRelationship,
+    /// Step 1 age test — younger than you, or your spouse on a joint return.
+    DepGateYoungerThanYouOrSpouse,
+    /// Row (6) "Full-time student", and Step 1's second age limb.
+    DepGateFullTimeStudent,
+    /// Row (6) "Permanently and totally disabled", and Step 1's third age limb.
+    DepGatePermanentlyAndTotallyDisabled,
+    /// Step 1 — did this person provide over half of their own support?
+    DepGateProvidedOverHalfOwnSupport,
+    /// Step 1 — is this person filing a joint return?
+    DepGateFilingJointReturn,
+    /// Step 1's second limb — is that joint return refund-only?
+    DepGateJointReturnOnlyToClaimRefund,
+    /// Row (5)(a), with the Exception to time lived with you in its help.
+    DepGateLivedWithYouOverHalfYear,
+    /// Row (5)(b) "And in the U.S."
+    DepGateLivedWithYouInUs,
+    /// The Step 1 CAUTION — a qualifying child of more than one person.
+    DepGateQualifyingChildOfAnotherPerson,
+    /// Step 2 q1 / Step 4 q2 — citizenship, Canada or Mexico admitted.
+    DepGateCitizenNationalResidentOrCanadaMexico,
+    /// Step 2 q2 / Step 4 q3 — was this person married?
+    DepGateMarried,
+    /// Step 3 q1 / Step 5 q2 — SSN, ITIN or ATIN by the due date.
+    DepGateTinIssuedByDueDate,
+    /// Step 3 q2 / Step 5 q3 — the NARROWER citizenship test.
+    DepGateCitizenNationalOrResidentAlien,
+    /// Step 3 q4 — the child tax credit's own SSN test.
+    DepGateSsnsValidForEmploymentIssuedByDueDate,
+    /// Step 4's qualifying-relative list, or a member of your household.
+    DepGateQrRelationshipOrMemberOfHousehold,
+    /// Step 4 — was this person a qualifying child of any taxpayer?
+    DepGateQualifyingChildOfAnyTaxpayer,
+    /// Step 4's §152(d)(1)(B) gross income test — its prompt quotes the year's figure.
+    DepGateGrossIncomeUnderLimit,
+    /// Step 4 — did you provide over half of this person's support?
+    DepGateYouProvidedOverHalfSupport,
+    /// Step 4 — does any of the three multi-page support rules apply?
+    DepGateDivorcedSeparatedMultipleSupportOrKidnappedRuleApplies,
     // ── ★★★ R4 / T5 — Form 1099-INT (per row). One Field per COLLECTED box, named for the box. ──
     /// The payer as printed on the form.
     Int1099Payer,

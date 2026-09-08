@@ -133,8 +133,13 @@ fn ty2024_full_return() -> FullReturnParams {
             cap_mfs: dec!(5000),
         },
         kiddie_unearned_threshold: dec!(2600), // §1(g)(4)
-        elective_deferral_limit: dec!(23000),  // §402(g)(1), Notice 2023-75
-        ftc_ceiling: dec!(300),                // §904(j) (MFJ = $600 at the use site)
+        // §152(d)(1)(B) qualifying-relative gross income limit — **Rev. Proc. 2023-34 §3.24**
+        // ("the exemption amount referenced in § 152(d)(1)(B) is $5,050"), and the Step 4
+        // flowchart prints the same figure: "Who had gross income of less than $5,050 in 2024"
+        // (`design/forms/extract/i1040gi--2024.txt:1700`).
+        qualifying_relative_gross_income_limit: dec!(5050),
+        elective_deferral_limit: dec!(23000), // §402(g)(1), Notice 2023-75
+        ftc_ceiling: dec!(300),               // §904(j) (MFJ = $600 at the use site)
         // §199A(e)(2) QBI TI-before-QBI threshold (Rev. Proc. 2023-34 §2.10): $191,950 base / $383,900 MFJ.
         qbi_ti_threshold_unmarried: dec!(191950),
         qbi_ti_threshold_married: dec!(383900),
@@ -240,8 +245,13 @@ pub fn ty2026_full_return() -> FullReturnParams {
             line_10_mfs_halves: true,
         },
         kiddie_unearned_threshold: dec!(2700), // 2 × $1,350, §1(g)(4)(A)(ii), Rev. Proc. 2025-32 §2.02
-        elective_deferral_limit: dec!(24500),  // §402(g)(1), Notice 2025-67
-        ftc_ceiling: dec!(300),                // §904(j) (MFJ = $600 at the use site)
+        // §152(d)(1)(B) — **Rev. Proc. 2025-32 §4.23** (SECTION 4, *2026 Adjusted Items*):
+        // "the exemption amount referred to in § 152(d)(1)(B) is $5,300"
+        // (`legal/text/irs-guidance/RevProc_2025-32.txt:908-910`). Statute and Rev. Proc., not
+        // form — so it settles now, like every other constant in this function.
+        qualifying_relative_gross_income_limit: dec!(5300),
+        elective_deferral_limit: dec!(24500), // §402(g)(1), Notice 2025-67
+        ftc_ceiling: dec!(300),               // §904(j) (MFJ = $600 at the use site)
         // §199A(e)(2) thresholds (Rev. Proc. 2025-32 §2.26); phase-in widths Pub. L. 119-21 §70105(a).
         qbi_ti_threshold_unmarried: dec!(201750),
         qbi_ti_threshold_married: dec!(403500),

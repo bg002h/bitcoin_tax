@@ -1089,6 +1089,9 @@ mod tests {
     #[test]
     fn dependents_carry_through_with_canonical_ssns() {
         let ri = ReturnInputs {
+            // ★ T7 — STATED, not left at §G-15's `0` sentinel: `answer_all_dependent_gates` derives
+            //   the dependent's date of birth from it (see its own assertion).
+            tax_year: 2024,
             // Single (not MFJ): this test is about DEPENDENT carry-through, and an MFJ return with no
             // spouse `Person` now correctly refuses at build (`MfjWithoutSpouse`, r3 M-6).
             filing_status: FilingStatus::Single,
@@ -1117,6 +1120,8 @@ mod tests {
     #[test]
     fn a_bad_ssn_anywhere_in_the_household_fails_the_header() {
         let base = |ssn_t: &str, ssn_s: &str, ssn_d: &str| ReturnInputs {
+            // ★ T7 — STATED, not left at §G-15's `0` sentinel (see `answer_all_dependent_gates`).
+            tax_year: 2024,
             filing_status: FilingStatus::Mfj,
             header: HouseholdHeader {
                 taxpayer: person("John", "Doe", ssn_t),

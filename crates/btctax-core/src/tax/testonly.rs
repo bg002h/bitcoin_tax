@@ -44,9 +44,66 @@ pub fn answer_all_live_declarations(ri: &mut ReturnInputs) {
     //   answering for a human. It is also what makes §5.7's *"TY2024 fixtures gain
     //   `documents.w2 = Some(true)`"* true with zero per-fixture edits.
     reconcile_document_census(ri);
+    // ★★★ T7 / R6 — the DEPENDENT GATES first, because `FilerTinIssuedByDueDate` is live iff a
+    //     dependent row exists and the loop below must see a coherent row when it answers it.
+    answer_all_dependent_gates(ri);
     for q in FORM_QUESTIONS {
         if (q.live)(ri) && (q.get)(ri).is_none() {
             (q.set)(ri, q.neutral); // ★ declared per question — see FormQuestion::neutral
+        }
+    }
+}
+
+/// ★★★ **T7 / R6 — answer every LIVE dependent gate a fixture left blank, at its declared
+/// `claim_path` polarity**, so a fixture that carries a dependent row is not tripped by
+/// `screen_dependent_gates`.
+///
+/// **DERIVED, in two senses.** Which gates to answer comes from
+/// [`walk_dependent`] — the same liveness the screen uses, never a list here — and the ANSWER comes
+/// from the registry's own [`DependentGateQuestion::claim_path`] column, which
+/// `every_gate_at_its_claim_path_answer_reaches_the_ctc_edge` proves lands on the CTC edge. So a new
+/// gate is covered with zero fixture edits, which is the property `answer_all_live_declarations`
+/// exists for.
+///
+/// ★★ **The date of birth is DERIVED FROM THE FIXTURE'S OWN TAX YEAR** (ten years before it), not
+///    typed: R6 makes it required, and `claim_path` leaves `full_time_student` and
+///    `permanently_and_totally_disabled` at `false`, so the age test needs a child under 19. A
+///    fixture that already carries a date keeps it.
+///
+/// ★ Legitimate for a FIXTURE helper and not for a product surface, exactly as
+///   [`reconcile_document_census`] records: it derives a fixture's intent from the fixture's own
+///   data (a dependent row means to claim that person), and it never answers for a human.
+pub fn answer_all_dependent_gates(ri: &mut ReturnInputs) {
+    use crate::tax::dependent_gates::{entry, walk_dependent, DependentVerdict, DEPENDENT_GATES};
+    for row in 0..ri.header.dependents.len() {
+        if ri.header.dependents[row].date_of_birth.is_none() {
+            // ★★★ **FAILS LOUDLY on the `tax_year = 0` sentinel**, which §G-15 defines as *"not
+            //     stated"* and `return_inputs::set` stamps from the STORE KEY. A fixture in that
+            //     state would get a date ten years before year zero, and the age test — computed
+            //     against the stamped year — would then place a 2034-year-old on the
+            //     qualifying-RELATIVE branch. Silent, and it moves the verdict, so it is an
+            //     assertion rather than a guess.
+            assert!(
+                ri.tax_year > 0,
+                "answer_all_dependent_gates derives a dependent's date of birth from the fixture's \
+                 own tax year, and this fixture has not stated one (tax_year = 0). Set `tax_year` \
+                 before calling, or give the row a date of birth."
+            );
+            let dob = time::Date::from_calendar_date(ri.tax_year - 10, time::Month::June, 1)
+                .expect("June 1 exists in every year");
+            ri.header.dependents[row].date_of_birth = Some(dob);
+        }
+        // Answering one gate opens the next block, so sweep to a fixpoint. The bound is the gate
+        // count: each pass answers at least one, or breaks.
+        for _ in 0..=DEPENDENT_GATES.len() {
+            let DependentVerdict::Unanswered(gate) = walk_dependent(ri, row).verdict else {
+                break;
+            };
+            let q = entry(gate);
+            let v = q
+                .claim_path
+                .expect("only the Date gate has no claim_path, and it is answered above");
+            (q.set)(&mut ri.header.dependents[row], v);
         }
     }
 }
@@ -134,6 +191,8 @@ pub fn ty2024_params() -> FullReturnParams {
             cap_mfs: dec!(5000),
         },
         kiddie_unearned_threshold: dec!(2600),
+        // §152(d)(1)(B), Rev. Proc. 2023-34 §3.24; i1040gi--2024.txt:1700 prints it.
+        qualifying_relative_gross_income_limit: dec!(5050),
         elective_deferral_limit: dec!(23000),
         ftc_ceiling: dec!(300),
         qbi_ti_threshold_unmarried: dec!(191950),
@@ -351,7 +410,33 @@ pub fn kitchen_sink_household() -> (ReturnInputs, LedgerState) {
                 ssn: "111-22-3333".into(),
                 relationship: "Son".into(),
                 date_of_birth: Some(date!(2012 - 04 - 15)),
+                // ★ T7 / R6 — the CTC edge: Step 1 Yes, Step 2 claimable, Step 3 all Yes and under
+                //   17, so row (7)'s "Child tax credit" box. Answered here rather than left to
+                //   `answer_all_dependent_gates`, because this fixture is the MAXIMAL one and a
+                //   `None` leaf drops out of every derived axis built on it.
+                lived_with_you_over_half_year: Some(true),
+                lived_with_you_in_us: Some(true),
+                full_time_student: Some(false),
+                permanently_and_totally_disabled: Some(false),
+                qc_relationship: Some(true),
+                younger_than_you_or_spouse: Some(true),
+                provided_over_half_own_support: Some(false),
+                filing_joint_return: Some(false),
+                joint_return_only_to_claim_refund: None,
+                qualifying_child_of_another_person: Some(false),
+                citizen_national_resident_or_canada_mexico: Some(true),
+                married: Some(false),
+                tin_issued_by_due_date: Some(true),
+                citizen_national_or_resident_alien: Some(true),
+                ssns_valid_for_employment_issued_by_due_date: Some(true),
+                qr_relationship_or_member_of_household: None,
+                qualifying_child_of_any_taxpayer: None,
+                gross_income_under_limit: None,
+                you_provided_over_half_support: None,
+                divorced_separated_multiple_support_or_kidnapped_rule_applies: None,
             }],
+            // ★ T7 / R6 — Step 5 question 1, live because this fixture carries a dependent row.
+            filer_tin_issued_by_due_date: Some(true),
             ..Default::default()
         },
         // Σ box 5 = 290,000 > the $250,000 MFJ threshold ⇒ Form 8959 Part I fires.

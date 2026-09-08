@@ -125,6 +125,8 @@ address_state = "IL"
 address_street = "100 Main St"
 address_zip = "62704"
 can_be_claimed_as_dependent_taxpayer = false
+# ★★★ T7 / R6 — Step 5 question 1, live because this return claims dependents.
+filer_tin_issued_by_due_date = true
 presidential_fund_spouse = false
 presidential_fund_taxpayer = false
 
@@ -179,46 +181,183 @@ basis_reported_and_no_adjustments = true
 name = "Child1 Testcase"
 ssn = "101-00-0001"
 relationship = "Daughter"
+date_of_birth = [2010, 2]
+# ★★★ T7 / R6 — the §152 flowchart, answered as this household's filer would. All nine children are
+#     at the CHILD TAX CREDIT edge: Step 1 yes, Step 2 claimable, Step 3 every yes and under 17.
+qc_relationship = true
+younger_than_you_or_spouse = true
+full_time_student = false
+permanently_and_totally_disabled = false
+provided_over_half_own_support = false
+filing_joint_return = false
+lived_with_you_over_half_year = true
+lived_with_you_in_us = true
+qualifying_child_of_another_person = false
+citizen_national_resident_or_canada_mexico = true
+married = false
+tin_issued_by_due_date = true
+citizen_national_or_resident_alien = true
+ssns_valid_for_employment_issued_by_due_date = true
 
 [[header.dependents]]
 name = "Child2 Testcase"
 ssn = "101-00-0002"
 relationship = "Daughter"
+date_of_birth = [2011, 2]
+qc_relationship = true
+younger_than_you_or_spouse = true
+full_time_student = false
+permanently_and_totally_disabled = false
+provided_over_half_own_support = false
+filing_joint_return = false
+lived_with_you_over_half_year = true
+lived_with_you_in_us = true
+qualifying_child_of_another_person = false
+citizen_national_resident_or_canada_mexico = true
+married = false
+tin_issued_by_due_date = true
+citizen_national_or_resident_alien = true
+ssns_valid_for_employment_issued_by_due_date = true
 
 [[header.dependents]]
 name = "Child3 Testcase"
 ssn = "101-00-0003"
 relationship = "Daughter"
+date_of_birth = [2012, 2]
+qc_relationship = true
+younger_than_you_or_spouse = true
+full_time_student = false
+permanently_and_totally_disabled = false
+provided_over_half_own_support = false
+filing_joint_return = false
+lived_with_you_over_half_year = true
+lived_with_you_in_us = true
+qualifying_child_of_another_person = false
+citizen_national_resident_or_canada_mexico = true
+married = false
+tin_issued_by_due_date = true
+citizen_national_or_resident_alien = true
+ssns_valid_for_employment_issued_by_due_date = true
 
 [[header.dependents]]
 name = "Child4 Testcase"
 ssn = "101-00-0004"
 relationship = "Daughter"
+date_of_birth = [2013, 2]
+qc_relationship = true
+younger_than_you_or_spouse = true
+full_time_student = false
+permanently_and_totally_disabled = false
+provided_over_half_own_support = false
+filing_joint_return = false
+lived_with_you_over_half_year = true
+lived_with_you_in_us = true
+qualifying_child_of_another_person = false
+citizen_national_resident_or_canada_mexico = true
+married = false
+tin_issued_by_due_date = true
+citizen_national_or_resident_alien = true
+ssns_valid_for_employment_issued_by_due_date = true
 
 [[header.dependents]]
 name = "Child5 Testcase"
 ssn = "101-00-0005"
 relationship = "Daughter"
+date_of_birth = [2014, 2]
+qc_relationship = true
+younger_than_you_or_spouse = true
+full_time_student = false
+permanently_and_totally_disabled = false
+provided_over_half_own_support = false
+filing_joint_return = false
+lived_with_you_over_half_year = true
+lived_with_you_in_us = true
+qualifying_child_of_another_person = false
+citizen_national_resident_or_canada_mexico = true
+married = false
+tin_issued_by_due_date = true
+citizen_national_or_resident_alien = true
+ssns_valid_for_employment_issued_by_due_date = true
 
 [[header.dependents]]
 name = "Child6 Testcase"
 ssn = "101-00-0006"
 relationship = "Daughter"
+date_of_birth = [2015, 2]
+qc_relationship = true
+younger_than_you_or_spouse = true
+full_time_student = false
+permanently_and_totally_disabled = false
+provided_over_half_own_support = false
+filing_joint_return = false
+lived_with_you_over_half_year = true
+lived_with_you_in_us = true
+qualifying_child_of_another_person = false
+citizen_national_resident_or_canada_mexico = true
+married = false
+tin_issued_by_due_date = true
+citizen_national_or_resident_alien = true
+ssns_valid_for_employment_issued_by_due_date = true
 
 [[header.dependents]]
 name = "Child7 Testcase"
 ssn = "101-00-0007"
 relationship = "Daughter"
+date_of_birth = [2016, 2]
+qc_relationship = true
+younger_than_you_or_spouse = true
+full_time_student = false
+permanently_and_totally_disabled = false
+provided_over_half_own_support = false
+filing_joint_return = false
+lived_with_you_over_half_year = true
+lived_with_you_in_us = true
+qualifying_child_of_another_person = false
+citizen_national_resident_or_canada_mexico = true
+married = false
+tin_issued_by_due_date = true
+citizen_national_or_resident_alien = true
+ssns_valid_for_employment_issued_by_due_date = true
 
 [[header.dependents]]
 name = "Child8 Testcase"
 ssn = "101-00-0008"
 relationship = "Daughter"
+date_of_birth = [2017, 2]
+qc_relationship = true
+younger_than_you_or_spouse = true
+full_time_student = false
+permanently_and_totally_disabled = false
+provided_over_half_own_support = false
+filing_joint_return = false
+lived_with_you_over_half_year = true
+lived_with_you_in_us = true
+qualifying_child_of_another_person = false
+citizen_national_resident_or_canada_mexico = true
+married = false
+tin_issued_by_due_date = true
+citizen_national_or_resident_alien = true
+ssns_valid_for_employment_issued_by_due_date = true
 
 [[header.dependents]]
 name = "Child9 Testcase"
 ssn = "101-00-0009"
 relationship = "Daughter"
+date_of_birth = [2018, 2]
+qc_relationship = true
+younger_than_you_or_spouse = true
+full_time_student = false
+permanently_and_totally_disabled = false
+provided_over_half_own_support = false
+filing_joint_return = false
+lived_with_you_over_half_year = true
+lived_with_you_in_us = true
+qualifying_child_of_another_person = false
+citizen_national_resident_or_canada_mexico = true
+married = false
+tin_issued_by_due_date = true
+citizen_national_or_resident_alien = true
+ssns_valid_for_employment_issued_by_due_date = true
 
 [[int_1099]]
 payer = "Community Savings Bank"

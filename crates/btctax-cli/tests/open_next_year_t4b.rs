@@ -531,6 +531,10 @@ fn sweep_script(
         std::collections::BTreeSet::new();
     let mut skip: std::collections::BTreeSet<btctax_core::tax::questions::SkippableId> =
         std::collections::BTreeSet::new();
+    let mut gates: std::collections::BTreeSet<(
+        btctax_core::tax::provenance::DependentGate,
+        usize,
+    )> = std::collections::BTreeSet::new();
     let mut script = String::new();
     for _ in 0..8 {
         let round: Vec<Ask> = cmd::answer::live_questions(&ri)
@@ -538,6 +542,8 @@ fn sweep_script(
             .filter(|a| match a {
                 Ask::Declaration(q) => !decl.contains(&q.id),
                 Ask::Skippable(sk) => !skip.contains(&sk.id),
+                // ★★★ T7 / R6 — the per-row §152 gates join the sweep too.
+                Ask::DependentGate { gate, row } => !gates.contains(&(gate.gate, *row)),
             })
             .collect();
         if round.is_empty() {
@@ -553,6 +559,32 @@ fn sweep_script(
                 Ask::Skippable(sk) => {
                     skip.insert(sk.id);
                     script.push_str(&skippable(sk.id));
+                }
+                // ★★★ T7 / R6 — a seeded dependent row is BLOCKING through its gates (FR-70), so a
+                //     script that skipped them would end the run mid-interview. Answered at the
+                //     registry's own declared claim-path polarity.
+                Ask::DependentGate { gate, row } => {
+                    use btctax_core::tax::dependent_gates::GateKind;
+                    gates.insert((gate.gate, row));
+                    match gate.kind {
+                        GateKind::Date => {
+                            let dob = time::Date::from_calendar_date(
+                                ri.tax_year - 10,
+                                time::Month::June,
+                                1,
+                            )
+                            .unwrap();
+                            script.push_str(&format!("{dob}\n"));
+                            ri.header.dependents[row].date_of_birth = Some(dob);
+                        }
+                        GateKind::YesNo => {
+                            let v = gate
+                                .claim_path
+                                .expect("a YesNo gate declares its claim path");
+                            script.push_str(if v { "y\n" } else { "n\n" });
+                            (gate.set)(&mut ri.header.dependents[row], v);
+                        }
+                    }
                 }
             }
         }
@@ -989,25 +1021,32 @@ fn answering_no_to_the_census_removes_the_pre_named_rows() {
 // The rest of the identity list: dependents and venues
 // ════════════════════════════════════════════════════════════════════════════════════════════════
 
-/// ★★★ **I-2 / I-3 — a dependent and a venue are PROMPTS, and NOTHING ELSE crosses for them.**
+/// ★★★ **FR-70 (T7) CLOSES I-2, AND I-3 STANDS: the dependent IDENTITY crosses; the venue KEY does not.**
 ///
-/// Both were seeded by the build, and neither had a surface that could answer for it:
+/// I-2 removed the seeded dependent row for ONE reason, recorded in `open_next_year::seed`: *"there
+/// is nothing on this year's return that can answer for it — no census row, no `FormQuestion`, no
+/// `RefuseReason`, and no `interview_state` item"*, so the child who aged out rode across silently.
+/// **T7 built all four.** A seeded row is now BLOCKING through every §152 gate the flowchart demands
+/// of it (asserted below through `interview_state`), and `screen_inputs` refuses until the filer
+/// answers this year's Step 1 for that child or deletes the row.
 ///
-/// - a `Dependent` row **is** the claim — it prints the person, their SSN and their relationship in
-///   the 1040 Dependents grid, sworn testimony — with no census row, no `FormQuestion` and no
-///   `interview_state` item anywhere that could refuse it. The child who aged out rides across
-///   silently. **FR-70 (T7)** is where the row returns, once `DEPENDENT_GATES` can answer for it;
-/// - a venue KEY is answered-ness: `broker_reporting`'s contract is *"absent = unanswered:
-///   answered-ness lives in the key set, never in a sentinel value"*, and three call sites read
-///   presence in the key set as *"the filer stored 1099-DA answers"*.
+/// The venue is NOT the same shape and is unchanged: a venue KEY *is* answered-ness —
+/// `broker_reporting`'s contract is *"absent = unanswered: answered-ness lives in the key set, never
+/// in a sentinel value"*, and three call sites read presence in the key set as *"the filer stored
+/// 1099-DA answers"*. There is no blank state to seed.
+///
+/// ★ This test used to assert `dependents.is_empty()`. That assertion was the RECORD of a missing
+///   surface, not a property of the design, and it is replaced here rather than deleted so the diff
+///   shows exactly what changed and why.
 #[test]
-fn a_dependent_and_a_venue_are_prompted_and_never_seeded() {
+fn a_dependent_identity_is_seeded_blocking_and_a_venue_key_is_not() {
     let (_dir, vault) = vault_with_year_n(|ri| {
         ri.header.dependents = vec![Dependent {
             name: "Sam Filer".into(),
             ssn: "987654321".into(),
             relationship: "daughter".into(),
             date_of_birth: Some(time::macros::date!(2015 - 04 - 01)),
+            ..Default::default()
         }];
         ri.broker_reporting
             .0
@@ -1029,11 +1068,52 @@ fn a_dependent_and_a_venue_are_prompted_and_never_seeded() {
     );
 
     let seed = draft(&vault);
-    assert!(
-        seed.header.dependents.is_empty(),
-        "I-2 — the ROW is not seeded: an unconfirmed dependent is ABSENT, not claimed: {:?}",
-        seed.header.dependents
+    // ── FR-70: the PERSON crosses. ──
+    assert_eq!(seed.header.dependents.len(), 1, "the identity is seeded");
+    let d = &seed.header.dependents[0];
+    assert_eq!(
+        (d.name.as_str(), d.ssn.as_str(), d.relationship.as_str()),
+        ("Sam Filer", "987654321", "daughter"),
+        "name, SSN and relationship are IDENTITY — who this is, not a claim about the year"
     );
+    assert_eq!(
+        d.date_of_birth,
+        Some(time::macros::date!(2015 - 04 - 01)),
+        "a birth date is the one Durable gate: it cannot change, and it is keyed to the same person"
+    );
+    // ── ...and the CLAIM does not: every one of the twenty §152 gates is blank. ──
+    let blank: Vec<_> = btctax_core::tax::dependent_gates::DEPENDENT_GATES
+        .iter()
+        .filter(|g| {
+            g.gate != btctax_core::tax::provenance::DependentGate::DateOfBirth
+                && (g.get)(d).is_some()
+        })
+        .map(|g| g.gate)
+        .collect();
+    assert!(
+        blank.is_empty(),
+        "every §152 gate must cross BLANK — a prior year's answer is not testimony for this one: \
+         {blank:?}"
+    );
+    // ── ...and the row is therefore BLOCKING, which is what I-2 said did not exist. ──
+    let st = btctax_core::tax::interview_state::interview_state(&seed);
+    let gate_items = st
+        .blocking
+        .iter()
+        .filter(|b| {
+            matches!(
+                b.item,
+                btctax_core::tax::provenance::AnswerKey::DependentGate { .. }
+            )
+        })
+        .count();
+    assert!(
+        gate_items > 0,
+        "FR-70 — the seeded row must be BLOCKING through its gates, or it rides across silently \
+         exactly as I-2 described: {:?}",
+        st.blocking
+    );
+    // ── The venue: unchanged. ──
     assert!(
         seed.broker_reporting.0.is_empty(),
         "I-3 — no venue key, so nothing reads answered-ness the filer never gave: {:?}",

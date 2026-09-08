@@ -9,6 +9,9 @@ pub mod capital_loss_carryover;
 pub mod charitable;
 pub mod classifier;
 pub mod compute;
+/// ★★★ T7 / R6 — the `Who Qualifies as Your Dependent` flowchart, transcribed as a per-row gate
+/// registry and walked one dependent at a time (`i1040gi--2025.txt:1447-1812`).
+pub mod dependent_gates;
 pub mod dependents_statement;
 pub mod document_census;
 /// Form 8275 (Disclosure Statement) content — Part I (auto, promoted 8949 disposal legs) + Part II

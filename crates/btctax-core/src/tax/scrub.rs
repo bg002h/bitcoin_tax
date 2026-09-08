@@ -445,30 +445,72 @@ fn scrub_dependent(d: &Dependent, n: usize) -> Dependent {
         name,
         ssn,
         relationship,
-        // ★ Bound and discarded rather than omitted: the `..`-free destructure is the guard, so this
-        //   must stay named even though §6 drops the value. Removing it would silently re-open the
-        //   hole for the NEXT field added to `Dependent`.
-        date_of_birth: _,
+        // ★★★ **KEPT, and this reverses the §6 decision — because T7 gave it a READER.**
+        //
+        //     §6 dropped it with the reason "nothing reads a dependent's DOB — btctax does not
+        //     compute the CTC", which was true when it was written and is not true now: R6's Step 1
+        //     AGE TEST is computed from this date (`dependent_gates::age_test`), Step 3's under-17
+        //     question reads it, and `DependentGateUnanswered { gate: DateOfBirth }` REFUSES without
+        //     it. §3.2's rule is that every replaced field must preserve every property a SCREEN
+        //     reads from it, so dropping it now would make the scrubbed copy refuse where the
+        //     filer's own return passes — the exact class this module exists to prevent, and the
+        //     same reasoning `scrub_person` already applies to the taxpayer's own date of birth.
+        date_of_birth,
+        // ★★ **KEPT — every one of the twenty §152 gates is READ** by `screen_dependent_gates`
+        //     and by `walk_dependent`, and each decides whether the row is claimable at all. They
+        //     are answers about a person's circumstances, not identifiers: none of them narrows who
+        //     the person is, and replacing one would move the verdict.
+        lived_with_you_over_half_year,
+        lived_with_you_in_us,
+        full_time_student,
+        permanently_and_totally_disabled,
+        qc_relationship,
+        younger_than_you_or_spouse,
+        provided_over_half_own_support,
+        filing_joint_return,
+        joint_return_only_to_claim_refund,
+        qualifying_child_of_another_person,
+        citizen_national_resident_or_canada_mexico,
+        married,
+        tin_issued_by_due_date,
+        citizen_national_or_resident_alien,
+        ssns_valid_for_employment_issued_by_due_date,
+        qr_relationship_or_member_of_household,
+        qualifying_child_of_any_taxpayer,
+        gross_income_under_limit,
+        you_provided_over_half_support,
+        divorced_separated_multiple_support_or_kidnapped_rule_applies,
     } = d;
     Dependent {
         name: replace_preserving_emptiness(name, format!("Dependent{n}")),
-        // ★ A dependent's SSN is read by `Ssn::canonical` too (`packet.rs:425`), so its validity class
-        //   is as load-bearing as the taxpayer's: an eight-digit typo refuses on the original, and an
-        //   unconditional stand-in would let the scrubbed copy EXPORT where the filer could not.
+        // ★ A dependent's SSN is read by `Ssn::canonical` too (`packet.rs:425`), so its validity
+        // class is as load-bearing as the taxpayer's: an eight-digit typo refuses on the original,
+        // and an unconditional stand-in would let the scrubbed copy EXPORT where the filer could not.
         ssn: synthetic_ssn_like(ssn, synthetic_ssn(100 + n)),
         // ★ KEPT: `relationship` decides child-vs-other-dependent, and it IS read.
         relationship: relationship.clone(),
-        // ★★★ DROPPED (§6) — and the comment this replaces was FALSE. It said "the DOB decides
-        //     qualifying-child age. BOTH are read", which is not true of a DEPENDENT's DOB: btctax
-        //     does not compute the CTC, and every non-test reader of `date_of_birth` is the
-        //     taxpayer's or the spouse's (`questions.rs:804,820`; `packet.rs:306,314`).
-        //     `DependentRow` carries `name`/`ssn`/`relationship` only (`packet.rs:418-428`).
-        //
-        //     So retaining it is RETENTION, not computation — a child's date of birth kept in a file
-        //     stamped shareable for no reason anything reads. Dropping it cannot move a figure,
-        //     which is exactly why it must be dropped rather than quantized: quantizing would be
-        //     inventing a value to stand in for one nothing consumes.
-        date_of_birth: None,
+        date_of_birth: *date_of_birth,
+        lived_with_you_over_half_year: *lived_with_you_over_half_year,
+        lived_with_you_in_us: *lived_with_you_in_us,
+        full_time_student: *full_time_student,
+        permanently_and_totally_disabled: *permanently_and_totally_disabled,
+        qc_relationship: *qc_relationship,
+        younger_than_you_or_spouse: *younger_than_you_or_spouse,
+        provided_over_half_own_support: *provided_over_half_own_support,
+        filing_joint_return: *filing_joint_return,
+        joint_return_only_to_claim_refund: *joint_return_only_to_claim_refund,
+        qualifying_child_of_another_person: *qualifying_child_of_another_person,
+        citizen_national_resident_or_canada_mexico: *citizen_national_resident_or_canada_mexico,
+        married: *married,
+        tin_issued_by_due_date: *tin_issued_by_due_date,
+        citizen_national_or_resident_alien: *citizen_national_or_resident_alien,
+        ssns_valid_for_employment_issued_by_due_date: *ssns_valid_for_employment_issued_by_due_date,
+        qr_relationship_or_member_of_household: *qr_relationship_or_member_of_household,
+        qualifying_child_of_any_taxpayer: *qualifying_child_of_any_taxpayer,
+        gross_income_under_limit: *gross_income_under_limit,
+        you_provided_over_half_support: *you_provided_over_half_support,
+        divorced_separated_multiple_support_or_kidnapped_rule_applies:
+            *divorced_separated_multiple_support_or_kidnapped_rule_applies,
     }
 }
 
@@ -493,6 +535,7 @@ fn scrub_header(h: &HouseholdHeader) -> HouseholdHeader {
         form8615_condition3_age_support,
         form8615_condition4_parent_alive,
         form8615_parent_identity_unobtainable,
+        filer_tin_issued_by_due_date,
     } = h;
     HouseholdHeader {
         taxpayer: scrub_person(taxpayer, "Taxpayer", 1),
@@ -544,6 +587,9 @@ fn scrub_header(h: &HouseholdHeader) -> HouseholdHeader {
         form8615_condition3_age_support: *form8615_condition3_age_support,
         form8615_condition4_parent_alive: *form8615_condition4_parent_alive,
         form8615_parent_identity_unobtainable: *form8615_parent_identity_unobtainable,
+        // ★ KEPT with its neighbours: T7's Step 5 question 1 is a fail-loud declaration that decides
+        //   whether the credit for other dependents is available at all.
+        filer_tin_issued_by_due_date: *filer_tin_issued_by_due_date,
     }
 }
 
@@ -1010,12 +1056,14 @@ mod tests {
                 ssn: ssn0.into(),
                 relationship: "Son".into(),
                 date_of_birth: None,
+                ..Default::default()
             },
             Dependent {
                 name: "Kid Two".into(),
                 ssn: ssn1.into(),
                 relationship: "Daughter".into(),
                 date_of_birth: None,
+                ..Default::default()
             },
         ];
         let key = |ssn: &str, gate| AnswerKey::DependentGate {
@@ -1477,12 +1525,20 @@ mod tests {
                 o.relationship, n.relationship,
                 "relationship is computational"
             );
-            // ★ §6: DROPPED, not preserved. Nothing reads a dependent's DOB — btctax does not
-            //   compute the CTC — so keeping it is retention with no computational warrant.
+            // ★★★ **T7 / R6 REVERSED §6's DROP, because it gave the field a READER.** Step 1's
+            //     age test is computed from this date, Step 3's under-17 question reads it, and
+            //     `DependentGateUnanswered { gate: DateOfBirth }` refuses without it. §3.2's rule is
+            //     that a replaced field must preserve every property a SCREEN reads from it, so
+            //     dropping it now would make the scrubbed copy refuse where the filer's own return
+            //     passes — the exact class this module exists to prevent.
             assert_eq!(
-                n.date_of_birth, None,
-                "a dependent's DOB is DROPPED: nothing reads it, so retaining a child's date of \
-                 birth in a file stamped shareable buys nothing"
+                o.date_of_birth, n.date_of_birth,
+                "a dependent's DOB is KEPT: Step 1's age test is computed from it (T7/R6), so \
+                 dropping it would move the scrubbed copy's verdict"
+            );
+            assert!(
+                o.date_of_birth.is_some(),
+                "the fixture must carry a dependent DOB, or the assertion above is vacuous"
             );
         }
         // ★★ …and the two fields a security review found riding through the FIRST version of this

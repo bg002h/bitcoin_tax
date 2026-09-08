@@ -580,6 +580,7 @@ fn every_shipped_full_return_params_equal_the_ones_the_corpus_validates() {
             dependent_std_earned_addon: s_dependent_addon,
             salt: s_salt,
             kiddie_unearned_threshold: s_kiddie,
+            qualifying_relative_gross_income_limit: s_qr_gross_income,
             elective_deferral_limit: s_deferral,
             ftc_ceiling: s_ftc,
             qbi_ti_threshold_unmarried: s_qbi_thr_unmarried,
@@ -600,6 +601,7 @@ fn every_shipped_full_return_params_equal_the_ones_the_corpus_validates() {
             dependent_std_earned_addon: v_dependent_addon,
             salt: v_salt,
             kiddie_unearned_threshold: v_kiddie,
+            qualifying_relative_gross_income_limit: v_qr_gross_income,
             elective_deferral_limit: v_deferral,
             ftc_ceiling: v_ftc,
             qbi_ti_threshold_unmarried: v_qbi_thr_unmarried,
@@ -706,6 +708,15 @@ fn every_shipped_full_return_params_equal_the_ones_the_corpus_validates() {
         //     ★ It is the ONE figure here that does not come from the autumn inflation Rev. Proc. —
         //     §223(g) requires publication by June 1 of the PRECEDING year, so TY2024's authority is
         //     Rev. Proc. 2023-23 §2.01(1), transcribed independently on each side.
+        // ★★★ T7 / R6 — §152(d)(1)(B). It is QUOTED IN A PROMPT the filer answers, so a wrong figure
+        //     is not a wrong number on a worksheet: it is a question that asks about the wrong
+        //     threshold, and the answer given to it is the filer's own testimony.
+        assert_eq!(
+            s_qr_gross_income, v_qr_gross_income,
+            "TY{year}: the §152(d)(1)(B) qualifying-relative gross income limit differs — it is \
+             quoted verbatim in the Step 4 gate's prompt, so the two sides disagree about what the \
+             filer was asked"
+        );
         assert_eq!(
             s_hsa, v_hsa,
             "TY{year}: the §223(b) HSA contribution limitation differs — it sets Form 8889 line 3, \

@@ -3927,6 +3927,7 @@ mod tests {
                 cap_mfs: dec!(5000),
             },
             kiddie_unearned_threshold: dec!(2600),
+            qualifying_relative_gross_income_limit: dec!(5050),
             elective_deferral_limit: dec!(23000),
             ftc_ceiling: dec!(300),
             qbi_ti_threshold_unmarried: dec!(191950),

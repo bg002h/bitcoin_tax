@@ -10,11 +10,15 @@
 //! no-echo. `answer` is an ordinary echoing prompt — routing a secret through it would print a crown jewel
 //! into terminal scrollback.
 use crate::{return_inputs, CliError, Session};
-use btctax_core::tax::provenance::{record_answer, AnswerKey, AnswerState};
+use btctax_core::tax::dependent_gates::{DependentGateQuestion, GateKind, DEPENDENT_GATES};
+use btctax_core::tax::provenance::{
+    dependent_ssn_hash, record_answer, AnswerKey, AnswerState, DependentGate,
+};
 use btctax_core::tax::questions::{
     FormQuestion, QuestionId, SkippableKind, SkippableQuestion, FORM_QUESTIONS, SKIPPABLE_QUESTIONS,
 };
 use btctax_core::tax::return_inputs::ReturnInputs;
+use btctax_core::tax::tables::FullReturnParams;
 use btctax_store::Passphrase;
 use std::io::Write;
 use std::path::Path;
@@ -25,6 +29,16 @@ use std::path::Path;
 pub enum Ask {
     Declaration(&'static FormQuestion),
     Skippable(&'static SkippableQuestion),
+    /// ★★★ **T7 / R6 — one gate of *Who Qualifies as Your Dependent*, on one dependent ROW.**
+    ///
+    /// A third variant rather than a per-row `FormQuestion`, because the answer's identity is the
+    /// row's salted SSN hash and the prompt's liveness depends on the row — neither of which the
+    /// return-level registry can express.
+    DependentGate {
+        gate: &'static DependentGateQuestion,
+        /// The row's index in `header.dependents`, resolved at enumeration time.
+        row: usize,
+    },
 }
 
 impl Ask {
@@ -32,11 +46,19 @@ impl Ask {
     pub fn declaration_id(&self) -> Option<QuestionId> {
         match self {
             Ask::Declaration(q) => Some(q.id),
-            Ask::Skippable(_) => None,
+            Ask::Skippable(_) | Ask::DependentGate { .. } => None,
+        }
+    }
+    /// The gate identity and row if this is a dependent gate — for tests that assert WHICH gates are live.
+    pub fn dependent_gate(&self) -> Option<(DependentGate, usize)> {
+        match self {
+            Ask::DependentGate { gate, row } => Some((gate.gate, *row)),
+            Ask::Declaration(_) | Ask::Skippable(_) => None,
         }
     }
     /// Whether a bare Enter with nothing on file is a legitimate outcome. True for skippables (DOBs), false
-    /// for declarations — silence on a declaration is exactly what D-8 forbids.
+    /// for declarations — silence on a declaration is exactly what D-8 forbids, and a dependent gate is a
+    /// declaration (class A) on a row.
     pub fn is_skippable(&self) -> bool {
         matches!(self, Ask::Skippable(_))
     }
@@ -51,6 +73,17 @@ impl Ask {
 /// declarations would leave the return refused and unstorable; asking everything at once prevents that
 /// deadlock. The spouse DOB prompt is gated on `header.spouse.is_some()` (r3 I-7).
 pub fn live_questions(ri: &ReturnInputs) -> Vec<Ask> {
+    live_questions_with(ri, None)
+}
+
+/// [`live_questions`] on a year whose PACKAGE is in hand.
+///
+/// ★★★ **The only difference is R6's params-quoting gate.** `gross_income_under_limit`'s prompt must
+/// QUOTE the year's §152(d)(1)(B) figure, so on a params-less year it is *waiting for the year
+/// package* (R12) and must not be put to the filer at all — a prompt that cannot state the figure
+/// asks them to derive it. Two entry points rather than an `Option` at every call site, exactly as
+/// `interview_state` / `interview_state_with_params` are.
+pub fn live_questions_with(ri: &ReturnInputs, params: Option<&FullReturnParams>) -> Vec<Ask> {
     // ★★★ **DOCUMENT-FIRST** (T3 seam review, M5). A real interview asks the shoebox first: what
     //     did you receive? The registry ARRAY cannot say so — `decl_tristate!`/`census_tristate!`
     //     couple to a literal index, so the eighteen census rows had to be APPENDED at 17..=34 —
@@ -98,6 +131,25 @@ pub fn live_questions(ri: &ReturnInputs) -> Vec<Ask> {
     // ★ P9 §2.2 class-(B) skippables — DERIVED from the core [`SKIPPABLE_QUESTIONS`] registry (the DOBs, the
     // blindness pair, and the §164(b)(5) sales-tax election), each gated by its own `live` predicate so the
     // prompt scope tracks the WRITE scope (a `set` on an absent spouse / Schedule A is silently discarded).
+    // ★★★ **T7 / R6 — THE DEPENDENT GATES, one row at a time, before the skippables.**
+    //
+    //     Grouped by ROW rather than by gate, because that is the unit the filer holds in their
+    //     head: one child, one chain of the instruction's own questions. Within a row the order is
+    //     `DEPENDENT_GATES`' own, which is the flowchart's.
+    //
+    // ★ Liveness is the WALK's (`DependentGateQuestion::live`), so a Step 4 gate appears for a row
+    //   exactly when Step 1 sent that row to Step 4 — and the sweep below re-asks `live_questions`
+    //   after every answer, which is how a block opens.
+    for row in 0..ri.header.dependents.len() {
+        asks.extend(
+            DEPENDENT_GATES
+                .iter()
+                .filter(|g| g.live(ri, row))
+                // R12's `waiting`: not asked until the year's package can state the figure.
+                .filter(|g| !g.needs_params() || params.is_some())
+                .map(move |g| Ask::DependentGate { gate: g, row }),
+        );
+    }
     asks.extend(
         SKIPPABLE_QUESTIONS
             .iter()
@@ -105,6 +157,34 @@ pub fn live_questions(ri: &ReturnInputs) -> Vec<Ask> {
             .map(Ask::Skippable),
     );
     asks
+}
+
+/// ★★★ **THE SWEEP BOUND** — a guard against a liveness CYCLE (A opens B opens A), which no
+/// registry entry has. It is module-level so the tests can assert against the REAL number rather
+/// than a second copy of it: T7's dependent chain opens one flowchart STEP per sweep, and a
+/// liveness that opened one GATE per sweep would exceed this and fail loudly rather than silently
+/// ending a filer's session mid-interview.
+pub const MAX_SWEEPS: usize = 8;
+
+/// ★★★ **THE KEY ONE ASK IS RECORDED UNDER.** A free function rather than a closure over `ri`,
+/// because the loop that uses it also MUTATES `ri` — and because a dependent gate's key is read off
+/// the return (the row's salted SSN hash), not off the `Ask`.
+fn key_of(ri: &ReturnInputs, a: &Ask) -> AnswerKey {
+    match a {
+        Ask::Declaration(q) => AnswerKey::Question(q.id),
+        Ask::Skippable(sk) => AnswerKey::Skippable(sk.id),
+        // ★★★ R10.3 / T1 — the row's salted SSN hash, never its index: delete row 0 and an
+        //     index-keyed record would move one child's diligence onto another.
+        Ask::DependentGate { gate, row } => AnswerKey::DependentGate {
+            ssn_hash: dependent_ssn_hash(
+                ri.header
+                    .dependents
+                    .get(*row)
+                    .map_or("", |d| d.ssn.as_str()),
+            ),
+            gate: gate.gate,
+        },
+    }
 }
 
 /// Parse one yes/no reply. `""` (a bare Enter) means "keep `default`", and is only an ANSWER when there
@@ -255,6 +335,21 @@ pub fn write_panel(
     Ok(())
 }
 
+/// The R12 panel for `ri`, with the year's package where there is one.
+///
+/// ★ Two entry points in core (`interview_state` / `interview_state_with_params`) exist precisely so
+///   the *waiting* / *blocking* split is decided by whether the caller HOLDS the package — and this
+///   is the one production caller that knows.
+fn panel_state(
+    ri: &ReturnInputs,
+    params: Option<&FullReturnParams>,
+) -> btctax_core::tax::interview_state::InterviewState {
+    match params {
+        Some(p) => btctax_core::tax::interview_state::interview_state_with_params(ri, p),
+        None => btctax_core::tax::interview_state::interview_state(ri),
+    }
+}
+
 /// ★★★ **T4 / `SPEC_interview.md` R11 — WHERE `income answer` WRITES.**
 ///
 /// Two stores, and which one is the answer target is a fact about the year, not a flag:
@@ -329,6 +424,19 @@ pub fn answer_return_inputs(
         AnswerTarget::Draft(ri) => (ri, true, crate::input_form_store::DraftCoherence::Absent),
     };
 
+    // ★★★ **T7 / R6 — THE YEAR'S PACKAGE, for the WORDS of one gate and nothing else.**
+    //
+    //     `gross_income_under_limit`'s prompt must QUOTE the year's §152(d)(1)(B) figure. On a year
+    //     with no package it is *waiting* (R12) and is not asked at all; with one, the figure is in
+    //     the sentence the filer answers and in the hash `record_answer` stores. Nothing else on
+    //     this path reads the package.
+    let params: Option<FullReturnParams> = {
+        use btctax_core::tax::tables::FullReturnTables;
+        btctax_adapters::BundledFullReturnTables::load()
+            .full_return_for(year)
+            .cloned()
+    };
+
     // ★ r3 NIT-2 — the questions say "in this tax year" but the registry prompts are `&'static str` and
     // cannot interpolate the year; a one-line banner anchors them so the filer need not hold it in their head.
     writeln!(out, "Answering full-return questions for tax year {year}:")?;
@@ -394,11 +502,9 @@ pub fn answer_return_inputs(
     }
 
     // ★★★ R12 / §4.2 — THE PANEL, BEFORE the first question.
-    write_panel(
-        out,
-        &btctax_core::tax::interview_state::interview_state(&ri),
-        "before",
-    )?;
+    // ★ T7 — with the year's package where there is one, so a params-quoting gate is listed as
+    //   BLOCKING (its words can be stated) rather than as *waiting* on a year that has arrived.
+    write_panel(out, &panel_state(&ri, params.as_ref()), "before")?;
 
     // ★★★ **R3 / T5 — ASKING IS A SWEEP, NOT A SNAPSHOT.**
     //
@@ -414,16 +520,12 @@ pub fn answer_return_inputs(
     //   a pass finds nothing new. The bound is a guard against a liveness CYCLE (A opens B opens A),
     //   which no registry entry has today — it fails loudly rather than looping forever.
     let mut asked: std::collections::BTreeSet<AnswerKey> = std::collections::BTreeSet::new();
-    let key_of = |a: &Ask| match a {
-        Ask::Declaration(q) => AnswerKey::Question(q.id),
-        Ask::Skippable(sk) => AnswerKey::Skippable(sk.id),
-    };
-    const MAX_SWEEPS: usize = 8;
+
     let mut sweeps = 0usize;
     loop {
-        let round: Vec<Ask> = live_questions(&ri)
+        let round: Vec<Ask> = live_questions_with(&ri, params.as_ref())
             .into_iter()
-            .filter(|a| !asked.contains(&key_of(a)))
+            .filter(|a| !asked.contains(&key_of(&ri, a)))
             .collect();
         if round.is_empty() {
             break;
@@ -452,11 +554,15 @@ pub fn answer_return_inputs(
             let still_live = match &ask {
                 Ask::Declaration(q) => (q.live)(&ri),
                 Ask::Skippable(s) => (s.live)(&ri),
+                // ★ A dependent gate's liveness is the WALK's, and an answer given earlier in this
+                //   same round can move a row onto another branch — so it is re-checked here like
+                //   every other ask, and a row that has been REMOVED simply reads as not live.
+                Ask::DependentGate { gate, row } => gate.live(&ri, *row),
             };
             if !still_live {
                 continue;
             }
-            asked.insert(key_of(&ask));
+            asked.insert(key_of(&ri, &ask));
             match ask {
                 // A MANDATORY declaration — silence with nothing on file is refused, never accepted (D-8).
                 Ask::Declaration(q) => {
@@ -620,6 +726,96 @@ pub fn answer_return_inputs(
                         }
                     }
                 },
+                // ★★★ **T7 / R6 — ONE DEPENDENT GATE ON ONE ROW.** A class-(A) declaration, so
+                //     silence with nothing on file is refused exactly as it is for a return-level
+                //     one; the only differences are the row banner and the identity key.
+                Ask::DependentGate { gate, row } => {
+                    let who = ri
+                        .header
+                        .dependents
+                        .get(row)
+                        .map_or_else(String::new, |d| d.name.trim().to_string());
+                    let banner = if who.is_empty() {
+                        format!("dependent row {}", row + 1)
+                    } else {
+                        who
+                    };
+                    // ★★★ R10.4 — the words PUT TO THE FILER. For `gross_income_under_limit` those
+                    //     words QUOTE the year's §152(d)(1)(B) figure, so the hash changes for free
+                    //     when the figure moves and R10.3 re-asks it — which is exactly right: a
+                    //     different limit is a different question.
+                    let prompt = format!("[{banner}] {}", gate.prompt_text(&ri, params.as_ref()));
+                    match gate.kind {
+                        GateKind::Date => {
+                            let cur = ri.header.dependents[row].date_of_birth;
+                            loop {
+                                let shown =
+                                    cur.map_or_else(|| "none".to_string(), |d| d.to_string());
+                                write!(out, "{prompt} [YYYY-MM-DD; currently {shown}]: ")?;
+                                out.flush()?;
+                                let mut line = String::new();
+                                if input.read_line(&mut line)? == 0 {
+                                    return Err(CliError::Usage(
+                                        "input ended before every question was answered — nothing was stored"
+                                            .into(),
+                                    ));
+                                }
+                                match parse_date(&line) {
+                                    // ★ A bare Enter KEEPS what is on file — and with nothing on
+                                    //   file it is silence on a class-(A) declaration, which D-8
+                                    //   forbids, so it re-asks.
+                                    Ok(None) => match cur {
+                                        Some(_) => break,
+                                        None => writeln!(
+                                            out,
+                                            "  a dependent row needs a date of birth: Step 1's age \
+                                             test is computed from it and has no \"unknown\" edge"
+                                        )?,
+                                    },
+                                    Ok(Some(d)) => {
+                                        ri.header.dependents[row].date_of_birth = Some(d);
+                                        break;
+                                    }
+                                    Err(e) => writeln!(out, "  not a date (YYYY-MM-DD): {e}")?,
+                                }
+                            }
+                        }
+                        GateKind::YesNo => {
+                            let cur = (gate.get)(&ri.header.dependents[row]);
+                            loop {
+                                let shown = match cur {
+                                    Some(true) => "y/n, currently y",
+                                    Some(false) => "y/n, currently n",
+                                    None => "y/n",
+                                };
+                                write!(out, "{prompt} [{shown}]: ")?;
+                                out.flush()?;
+                                let mut line = String::new();
+                                if input.read_line(&mut line)? == 0 {
+                                    return Err(CliError::Usage(
+                                        "input ended before every question was answered — nothing was stored"
+                                            .into(),
+                                    ));
+                                }
+                                match parse_yes_no(&line, cur) {
+                                    Some(v) => {
+                                        (gate.set)(&mut ri.header.dependents[row], v);
+                                        break;
+                                    }
+                                    None => writeln!(out, "  please answer y or n")?,
+                                }
+                            }
+                        }
+                    }
+                    // ★★★ R10.3 — the ONE writer, keyed by the row's IDENTITY. A class-(A) gate has
+                    //     no lawful decline, so it is always `Given`: neither loop above can exit
+                    //     without a value.
+                    let key = AnswerKey::DependentGate {
+                        ssn_hash: dependent_ssn_hash(&ri.header.dependents[row].ssn),
+                        gate: gate.gate,
+                    };
+                    record_answer(&mut ri, key, &prompt, now, AnswerState::Given);
+                }
             }
             // ★★★ R10.3 — one record per prompt PUT TO THE FILER. Placed after the `Ask` match so the
             //     three SKIPPABLE shapes (date / yes-no / choice) share one recording site instead of
@@ -642,11 +838,7 @@ pub fn answer_return_inputs(
 
     // ★★★ R12 / §4.2 — THE PANEL, AFTER the last question. Printed BEFORE the write, so a filer
     //     whose session ends in a refusing answer sees it while they are still at the keyboard.
-    write_panel(
-        out,
-        &btctax_core::tax::interview_state::interview_state(&ri),
-        "after",
-    )?;
+    write_panel(out, &panel_state(&ri, params.as_ref()), "after")?;
 
     if into_draft {
         // ★★★ R11 — the draft, never `return_inputs::set`. The draft is invisible to `resolve.rs`
@@ -957,10 +1149,15 @@ mod tests {
         //     says the command can. It re-derives the live set until it stops growing, exactly as
         //     the command does.
         let mut asked: std::collections::BTreeSet<QuestionId> = std::collections::BTreeSet::new();
+        // ★★★ T7 — the per-row gates join the sweep, keyed as the command keys them: by IDENTITY,
+        //     never by row index.
+        let mut asked_gates: std::collections::BTreeSet<AnswerKey> =
+            std::collections::BTreeSet::new();
         for _ in 0..8 {
             let round: Vec<Ask> = live_questions(&ri)
                 .into_iter()
                 .filter(|a| a.declaration_id().is_none_or(|id| !asked.contains(&id)))
+                .filter(|a| !asked_gates.contains(&key_of(&ri, a)))
                 .collect();
             if round.is_empty() {
                 break;
@@ -968,6 +1165,9 @@ mod tests {
             for ask in round {
                 if let Some(id) = ask.declaration_id() {
                     asked.insert(id);
+                }
+                if matches!(ask, Ask::DependentGate { .. }) {
+                    asked_gates.insert(key_of(&ri, &ask));
                 }
                 match ask {
                     // ★★ Answer "no" — EXCEPT on a document-census row, which is answered from what
@@ -984,6 +1184,27 @@ mod tests {
                         (q.set)(&mut ri, truth);
                     }
                     Ask::Skippable(_) => {} // skippable by design
+                    // ★★★ T7 / R6 — THE NO-BRICK PROPERTY REACHES THE PER-ROW GATES. Answered at
+                    //     the registry's own declared claim-path polarity, which is the only
+                    //     polarity a fixture may use — the alternative is a hand-list here, which
+                    //     is exactly what `FormQuestion::neutral` exists to prevent one form over.
+                    Ask::DependentGate { gate, row } => match gate.kind {
+                        GateKind::Date => {
+                            ri.header.dependents[row].date_of_birth = Some(
+                                time::Date::from_calendar_date(
+                                    ri.tax_year - 10,
+                                    time::Month::June,
+                                    1,
+                                )
+                                .unwrap(),
+                            );
+                        }
+                        GateKind::YesNo => (gate.set)(
+                            &mut ri.header.dependents[row],
+                            gate.claim_path
+                                .expect("a YesNo gate declares its claim path"),
+                        ),
+                    },
                 }
             }
         }
@@ -991,6 +1212,184 @@ mod tests {
             screen_inputs(&ri, table, params).is_none(),
             "answering every LIVE declaration must clear the screen — if it does not, `answer` cannot \
              rescue a bricked year and the whole command is a dead end"
+        );
+    }
+
+    /// ★★★ **T7 / R6 — `income answer` ASKS every live dependent gate, keyed by IDENTITY, and the
+    /// SWEEP SETTLES.**
+    ///
+    /// Three things at once, because they are one property: a gate that is never asked cannot be
+    /// answered (the no-brick rule, one row deeper); a gate keyed by ROW INDEX would move one
+    /// child's diligence onto another; and the flowchart opens a whole STEP at a time, so the sweep
+    /// must reach the end of the chain inside `MAX_SWEEPS` — which is the reason liveness is
+    /// block-shaped rather than one gate at a time.
+    #[test]
+    fn income_answer_asks_the_dependent_gates_and_the_sweep_settles() {
+        use btctax_core::tax::dependent_gates::{walk_dependent, DependentVerdict, GateKind};
+        use btctax_core::tax::provenance::dependent_ssn_hash;
+        let mut ri = single();
+        ri.tax_year = 2024;
+        ri.header.dependents = vec![
+            btctax_core::tax::return_inputs::Dependent {
+                name: "First Kid".into(),
+                ssn: "000-00-1111".into(),
+                relationship: "Daughter".into(),
+                ..Default::default()
+            },
+            btctax_core::tax::return_inputs::Dependent {
+                name: "Second Kid".into(),
+                ssn: "000-00-2222".into(),
+                relationship: "Son".into(),
+                ..Default::default()
+            },
+        ];
+        let params = {
+            use btctax_core::tax::tables::FullReturnTables;
+            btctax_adapters::BundledFullReturnTables::load()
+                .full_return_for(2024)
+                .cloned()
+                .expect("TY2024 params are bundled")
+        };
+
+        // The sweep, exactly as `answer_return_inputs` runs it.
+        let mut asked: std::collections::BTreeSet<AnswerKey> = std::collections::BTreeSet::new();
+        let mut sweeps = 0usize;
+        loop {
+            let round: Vec<Ask> = live_questions_with(&ri, Some(&params))
+                .into_iter()
+                .filter(|a| !asked.contains(&key_of(&ri, a)))
+                .collect();
+            if round.is_empty() {
+                break;
+            }
+            sweeps += 1;
+            assert!(
+                sweeps <= MAX_SWEEPS,
+                "the dependent chain must SETTLE inside the command's own guard — it did not, \
+                 which means liveness opens one gate at a time instead of one STEP at a time"
+            );
+            for ask in round {
+                let key = key_of(&ri, &ask);
+                if !match &ask {
+                    Ask::Declaration(q) => (q.live)(&ri),
+                    Ask::Skippable(s) => (s.live)(&ri),
+                    Ask::DependentGate { gate, row } => gate.live(&ri, *row),
+                } {
+                    continue;
+                }
+                asked.insert(key);
+                match ask {
+                    Ask::Declaration(q) => (q.set)(&mut ri, q.neutral),
+                    Ask::Skippable(_) => {}
+                    Ask::DependentGate { gate, row } => match gate.kind {
+                        GateKind::Date => {
+                            ri.header.dependents[row].date_of_birth =
+                                Some(time::macros::date!(2014 - 06 - 01))
+                        }
+                        GateKind::YesNo => (gate.set)(
+                            &mut ri.header.dependents[row],
+                            gate.claim_path
+                                .expect("a YesNo gate declares its claim path"),
+                        ),
+                    },
+                }
+            }
+        }
+
+        // ── 1. Both rows completed the flowchart. ──
+        for row in 0..2 {
+            assert_eq!(
+                walk_dependent(&ri, row).verdict,
+                DependentVerdict::ChildTaxCredit,
+                "row {row} was asked its whole chain"
+            );
+        }
+        // ── 2. Every gate the walk demanded was ASKED, and keyed by the row's own identity. ──
+        for row in 0..2 {
+            let hash = dependent_ssn_hash(&ri.header.dependents[row].ssn);
+            for g in walk_dependent(&ri, row).demanded_gates() {
+                let key = AnswerKey::DependentGate {
+                    ssn_hash: hash.clone(),
+                    gate: g,
+                };
+                assert!(
+                    asked.contains(&key),
+                    "row {row}'s {g:?} is live and was never asked — a gate nobody asks is a gate \
+                     nobody can answer"
+                );
+            }
+        }
+        // ── 3. The two rows' keys are DISJOINT: no gate answer is shared between children. ──
+        let h0 = dependent_ssn_hash("000-00-1111");
+        let h1 = dependent_ssn_hash("000-00-2222");
+        assert_ne!(h0, h1);
+        let count = |h: &str| {
+            asked
+                .iter()
+                .filter(|k| matches!(k, AnswerKey::DependentGate { ssn_hash, .. } if ssn_hash == h))
+                .count()
+        };
+        assert!(
+            count(&h0) > 0 && count(&h0) == count(&h1),
+            "one key set per child"
+        );
+        // ── 4. The whole return then screens clean — the no-brick property, with gates. ──
+        use btctax_core::tax::return_refuse::screen_inputs;
+        let table = {
+            use btctax_core::TaxTables;
+            btctax_adapters::BundledTaxTables::load()
+                .table_for(2024)
+                .cloned()
+                .expect("TY2024 table is bundled")
+        };
+        assert!(
+            screen_inputs(&ri, &table, &params).is_none(),
+            "answering every live gate must clear the screen: {:?}",
+            screen_inputs(&ri, &table, &params).map(|r| r.reason)
+        );
+    }
+
+    /// ★★★ **THE PARAMS-QUOTING GATE IS NOT PUT TO THE FILER ON A PARAMS-LESS YEAR.** R12 lists it
+    /// as *waiting*; asking it would mean asking a question whose words are not yet knowable.
+    #[test]
+    fn the_gross_income_gate_is_not_asked_without_the_years_package() {
+        use btctax_core::tax::provenance::DependentGate;
+        let mut ri = single();
+        ri.tax_year = 2026;
+        ri.header.dependents = vec![btctax_core::tax::return_inputs::Dependent {
+            name: "Grandparent".into(),
+            ssn: "000-00-3333".into(),
+            relationship: "Mother".into(),
+            date_of_birth: Some(time::macros::date!(1950 - 03 - 04)),
+            qc_relationship: Some(false),
+            younger_than_you_or_spouse: Some(false),
+            full_time_student: Some(false),
+            permanently_and_totally_disabled: Some(false),
+            provided_over_half_own_support: Some(false),
+            filing_joint_return: Some(false),
+            lived_with_you_over_half_year: Some(true),
+            lived_with_you_in_us: Some(true),
+            ..Default::default()
+        }];
+        let gate_of = |a: &Ask| a.dependent_gate().map(|(g, _)| g);
+        let without: Vec<_> = live_questions(&ri).iter().filter_map(gate_of).collect();
+        assert!(
+            !without.contains(&DependentGate::GrossIncomeUnderLimit),
+            "on a params-less year the gate is WAITING, not asked: {without:?}"
+        );
+        assert!(
+            without.contains(&DependentGate::QrRelationshipOrMemberOfHousehold),
+            "…while the rest of Step 4 IS asked, so the exclusion is the figure and nothing else"
+        );
+        let mut p = btctax_core::tax::testonly::ty2024_params();
+        p.qualifying_relative_gross_income_limit = rust_decimal_macros::dec!(5300);
+        let with: Vec<_> = live_questions_with(&ri, Some(&p))
+            .iter()
+            .filter_map(gate_of)
+            .collect();
+        assert!(
+            with.contains(&DependentGate::GrossIncomeUnderLimit),
+            "with the package it IS asked: {with:?}"
         );
     }
 
@@ -1053,6 +1452,15 @@ mod tests {
                     btctax_core::tax::document_census::DocumentRow::Sa1099,
                     Some(false),
                 );
+            }
+            // ★★★ T7 / R6 — Step 5 question 1 is live iff the return carries a DEPENDENT ROW.
+            QuestionId::FilerTinIssuedByDueDate => {
+                r.header.dependents = vec![btctax_core::tax::return_inputs::Dependent {
+                    name: "Kid Example".into(),
+                    ssn: "000-00-1111".into(),
+                    relationship: "Daughter".into(),
+                    ..Default::default()
+                }];
             }
             // ★★★ R3 / T5 — THE DOCUMENT-LESS INCOME DOOR. Each of the three paired questions is
             //     live EXACTLY when its census row says `No` — the pairing R3 states — so the

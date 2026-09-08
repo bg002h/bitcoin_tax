@@ -252,6 +252,82 @@ fn sentinel(f: &Field) -> FieldValue {
     }
 }
 
+/// The [`DependentGate`] a `DepGate*` field carries — the inverse of `attribute::dependent_gate_field`,
+/// and `None` for every other field.
+fn gate_of_field(id: FieldId) -> Option<btctax_core::tax::provenance::DependentGate> {
+    use btctax_core::tax::provenance::DependentGate as G;
+    Some(match id {
+        FieldId::DepGateQcRelationship => G::QcRelationship,
+        FieldId::DepGateYoungerThanYouOrSpouse => G::YoungerThanYouOrSpouse,
+        FieldId::DepGateFullTimeStudent => G::FullTimeStudent,
+        FieldId::DepGatePermanentlyAndTotallyDisabled => G::PermanentlyAndTotallyDisabled,
+        FieldId::DepGateProvidedOverHalfOwnSupport => G::ProvidedOverHalfOwnSupport,
+        FieldId::DepGateFilingJointReturn => G::FilingJointReturn,
+        FieldId::DepGateJointReturnOnlyToClaimRefund => G::JointReturnOnlyToClaimRefund,
+        FieldId::DepGateLivedWithYouOverHalfYear => G::LivedWithYouOverHalfYear,
+        FieldId::DepGateLivedWithYouInUs => G::LivedWithYouInUs,
+        FieldId::DepGateQualifyingChildOfAnotherPerson => G::QualifyingChildOfAnotherPerson,
+        FieldId::DepGateCitizenNationalResidentOrCanadaMexico => {
+            G::CitizenNationalResidentOrCanadaMexico
+        }
+        FieldId::DepGateMarried => G::Married,
+        FieldId::DepGateTinIssuedByDueDate => G::TinIssuedByDueDate,
+        FieldId::DepGateCitizenNationalOrResidentAlien => G::CitizenNationalOrResidentAlien,
+        FieldId::DepGateSsnsValidForEmploymentIssuedByDueDate => {
+            G::SsnsValidForEmploymentIssuedByDueDate
+        }
+        FieldId::DepGateQrRelationshipOrMemberOfHousehold => G::QrRelationshipOrMemberOfHousehold,
+        FieldId::DepGateQualifyingChildOfAnyTaxpayer => G::QualifyingChildOfAnyTaxpayer,
+        FieldId::DepGateGrossIncomeUnderLimit => G::GrossIncomeUnderLimit,
+        FieldId::DepGateYouProvidedOverHalfSupport => G::YouProvidedOverHalfSupport,
+        FieldId::DepGateDivorcedSeparatedMultipleSupportOrKidnappedRuleApplies => {
+            G::DivorcedSeparatedMultipleSupportOrKidnappedRuleApplies
+        }
+        _ => return None,
+    })
+}
+
+/// ★★★ **Make `gate` LIVE on row 0, and leave it UNANSWERED so its sentinel differs.**
+///
+/// Three steps, and the middle one is the point: clear the row, set the ONE precondition the
+/// flowchart puts in front of this gate, then let the fixture helper walk the rest — so the path is
+/// derived from `walk_dependent`, not typed here. Finally the gate itself is un-answered through the
+/// registry's own `clear`.
+///
+/// ★★ Scaffolding, exactly like `fixture_for`'s other arms: a wrong precondition leaves the gate
+///      not live, `set` returns `NoSuchRow`, and the KAT fails loudly. It cannot yield a false PASS.
+fn prime_dependent_gate(ri: &mut ReturnInputs, gate: btctax_core::tax::provenance::DependentGate) {
+    use btctax_core::tax::dependent_gates::{entry, DEPENDENT_GATES};
+    use btctax_core::tax::provenance::DependentGate as G;
+    // ★★ The two RETURN-LEVEL answers the flowchart consults on its way through: Step 2 question 4
+    //    / Step 4 question 5 ("could you be claimed?") and Step 5 question 1 (the filer's own TIN).
+    //    Without them the walk stops at `WaitingOnQuestion` and never reaches Step 3 or Step 5, so
+    //    no gate past Step 2 would be live — which is a scenario bug, not a gate bug.
+    ri.header.can_be_claimed_as_dependent_taxpayer = Some(false);
+    ri.header.filer_tin_issued_by_due_date = Some(true);
+    let d = &mut ri.header.dependents[0];
+    for q in DEPENDENT_GATES {
+        (q.clear)(d);
+    }
+    match gate {
+        // Step 4's own gates are reached only when Step 1 says "not a qualifying child".
+        G::QrRelationshipOrMemberOfHousehold
+        | G::QualifyingChildOfAnyTaxpayer
+        | G::GrossIncomeUnderLimit
+        | G::YouProvidedOverHalfSupport
+        | G::DivorcedSeparatedMultipleSupportOrKidnappedRuleApplies => {
+            d.qc_relationship = Some(false);
+        }
+        // The instruction opens the refund-only limb only on a joint return.
+        G::JointReturnOnlyToClaimRefund => d.filing_joint_return = Some(true),
+        // Row (5)(b) "And in the U.S." prints under a checked row (5)(a).
+        G::LivedWithYouInUs => d.lived_with_you_over_half_year = Some(true),
+        _ => {}
+    }
+    btctax_core::tax::testonly::answer_all_dependent_gates(ri);
+    (entry(gate).clear)(&mut ri.header.dependents[0]);
+}
+
 /// A per-`FieldId` fixture VARIANT for a field whose liveness gate the maximal fixture cannot satisfy at
 /// the same time as covering the gate itself.
 ///
@@ -263,6 +339,16 @@ fn sentinel(f: &Field) -> FieldValue {
 /// leaf uncovered, so it can never yield a false PASS.
 fn fixture_for(field: &Field, base: &ReturnInputs) -> ReturnInputs {
     let mut ri = base.clone();
+    // ★★★ **T7 / R6 — THE DEPENDENT GATES, primed by the WALK rather than one by one.**
+    //
+    //     A gate is live for a row iff the flowchart REACHES it, so no single fixture can cover all
+    //     twenty: Step 3's gates need Step 1 to have said *"qualifying child"* and Step 4's need it
+    //     to have said *"no"*. Structural, exactly like the §G-9 dates of death — and handled the
+    //     same way, per field.
+    if let Some(gate) = gate_of_field(field.id) {
+        prime_dependent_gate(&mut ri, gate);
+        return ri;
+    }
     match field.id {
         FieldId::DodTaxpayer => ri.header.taxpayer_died_during_year = Some(true),
         // ★ MFJ too: `DodSpouse` is MFJ-gated (the only status whose spouse §63(f) box is counted),
@@ -686,7 +772,7 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     // change happened to keep the sets balanced.
     let field_count: usize = form_spec().iter().map(|s| s.fields.len()).sum();
     assert_eq!(
-        field_count, 218,
+        field_count, 239,
         "expected 216 Fields — 117 before T5, plus its FIFTY-EIGHT: the four document-less income \
          declarations (R3), W-2 boxes 13 and 14b, and the six document sections (1099-INT 14, \
          1099-DIV 14, 1099-B 8, 1099-G 7, 1098-E 4, and R5's five filer's-records leaves) — plus \
@@ -698,11 +784,13 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
          1099-SA section's 8 and the Form 5498-SA section's 9, Form 8889's own 7 money leaves, and \
          its 7 declarations. \u{2605} The T16 SEAM REVIEW added TWO more: I-3's spouse-plan \
          declaration (Form 8889 line 1 / line 3 rule 1) and M-1's document-less distribution door \
-         (line 14a)."
+         (line 14a). ★★★ T7 / R6 added TWENTY-ONE: the twenty per-row §152 gates of Who \
+         Qualifies as Your Dependent, plus Step 5 question 1 — the one gate that is about the \
+         FILER rather than about a row."
     );
     assert_eq!(
         covered.len(),
-        217,
+        238,
         "expected 215 distinctly-covered in-scope leaves — every one of the 216 Fields but \
          `DocForm1098`, whose row is still shadowed by the `schedule_a.mortgage_interest_1098` \
          scalar (T9) and so is never live. It was 115 of 117 before T5, then 174 of 175, then 182 \
@@ -795,6 +883,84 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
         "header.dependents[0].relationship",
     ),
     (FieldId::DepDob, "header.dependents[0].date_of_birth"),
+    // ── ★★★ T7 / R6 — the twenty per-row §152 gates. ──
+    (
+        FieldId::DepGateQcRelationship,
+        "header.dependents[0].qc_relationship",
+    ),
+    (
+        FieldId::DepGateYoungerThanYouOrSpouse,
+        "header.dependents[0].younger_than_you_or_spouse",
+    ),
+    (
+        FieldId::DepGateFullTimeStudent,
+        "header.dependents[0].full_time_student",
+    ),
+    (
+        FieldId::DepGatePermanentlyAndTotallyDisabled,
+        "header.dependents[0].permanently_and_totally_disabled",
+    ),
+    (
+        FieldId::DepGateProvidedOverHalfOwnSupport,
+        "header.dependents[0].provided_over_half_own_support",
+    ),
+    (
+        FieldId::DepGateFilingJointReturn,
+        "header.dependents[0].filing_joint_return",
+    ),
+    (
+        FieldId::DepGateJointReturnOnlyToClaimRefund,
+        "header.dependents[0].joint_return_only_to_claim_refund",
+    ),
+    (
+        FieldId::DepGateLivedWithYouOverHalfYear,
+        "header.dependents[0].lived_with_you_over_half_year",
+    ),
+    (
+        FieldId::DepGateLivedWithYouInUs,
+        "header.dependents[0].lived_with_you_in_us",
+    ),
+    (
+        FieldId::DepGateQualifyingChildOfAnotherPerson,
+        "header.dependents[0].qualifying_child_of_another_person",
+    ),
+    (
+        FieldId::DepGateCitizenNationalResidentOrCanadaMexico,
+        "header.dependents[0].citizen_national_resident_or_canada_mexico",
+    ),
+    (FieldId::DepGateMarried, "header.dependents[0].married"),
+    (
+        FieldId::DepGateTinIssuedByDueDate,
+        "header.dependents[0].tin_issued_by_due_date",
+    ),
+    (
+        FieldId::DepGateCitizenNationalOrResidentAlien,
+        "header.dependents[0].citizen_national_or_resident_alien",
+    ),
+    (
+        FieldId::DepGateSsnsValidForEmploymentIssuedByDueDate,
+        "header.dependents[0].ssns_valid_for_employment_issued_by_due_date",
+    ),
+    (
+        FieldId::DepGateQrRelationshipOrMemberOfHousehold,
+        "header.dependents[0].qr_relationship_or_member_of_household",
+    ),
+    (
+        FieldId::DepGateQualifyingChildOfAnyTaxpayer,
+        "header.dependents[0].qualifying_child_of_any_taxpayer",
+    ),
+    (
+        FieldId::DepGateGrossIncomeUnderLimit,
+        "header.dependents[0].gross_income_under_limit",
+    ),
+    (
+        FieldId::DepGateYouProvidedOverHalfSupport,
+        "header.dependents[0].you_provided_over_half_support",
+    ),
+    (
+        FieldId::DepGateDivorcedSeparatedMultipleSupportOrKidnappedRuleApplies,
+        "header.dependents[0].divorced_separated_multiple_support_or_kidnapped_rule_applies",
+    ),
     (FieldId::W2Owner, "w2s[0].owner"),
     (FieldId::W2Employer, "w2s[0].employer"),
     (FieldId::W2Ein, "w2s[0].ein"),
@@ -1258,6 +1424,11 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
     (
         FieldId::DeclHsaDistributionWithout1099sa,
         "hsa_distribution_without_1099sa",
+    ),
+    // ── ★★★ T7 / R6 — Step 5 question 1, the one dependent gate about the FILER. ──
+    (
+        FieldId::DeclFilerTinIssuedByDueDate,
+        "header.filer_tin_issued_by_due_date",
     ),
     // ── ★★★ R5 / T5 — the filer's-records rows for Schedule B lines 1 and 5. ──
     (

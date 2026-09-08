@@ -70,6 +70,10 @@ pub struct Census {
     /// not visible here — the classifier has no ledger; the screen (`screen_absolute`) counts them
     /// against the year's rows and refuses.
     pub broker_answers: Vec<(String, crate::forms::Cohort, crate::forms::BrokerReported)>,
+    /// ★★★ T7 / R6 — every per-row dependent gate this walk classified, one entry per gate per row.
+    /// `the_classifiers_gate_rows_line_up_with_the_registry` checks it against `DEPENDENT_GATES` in
+    /// both directions.
+    pub dependent_gates: Vec<crate::tax::provenance::DependentGate>,
 }
 
 impl Census {
@@ -80,6 +84,17 @@ impl Census {
     /// An exempted default — lawful, with its §2 class and the statutory reason it is lawful.
     fn exempt<T>(&mut self, _leaf: &T, class: Class, statutory_reason: &'static str) {
         self.exemptions.push((class, statutory_reason));
+    }
+    /// ★★★ **T7 / R6 — a class-(A) DECLARATION on a dependent ROW.** Its liveness and refusal live
+    /// in [`crate::tax::dependent_gates::DEPENDENT_GATES`], and its answer-log key is the row's
+    /// `ssn_hash`, not its index. Separate from [`Self::declaration`] because the key space is
+    /// different, not because the class is.
+    fn dependent_gate(
+        &mut self,
+        _leaf: &Option<bool>,
+        gate: crate::tax::provenance::DependentGate,
+    ) {
+        self.dependent_gates.push(gate);
     }
 }
 
@@ -399,10 +414,17 @@ fn classify_header(c: &mut Census, h: &HouseholdHeader) {
         form8615_condition3_age_support,
         form8615_condition4_parent_alive,
         form8615_parent_identity_unobtainable,
+        filer_tin_issued_by_due_date,
     } = h;
     c.declaration(
         can_be_claimed_as_dependent_taxpayer,
         QuestionId::DependentTaxpayer,
+    );
+    // ★ T7 / R6 — Step 5 question 1: a class-(A) declaration like its two neighbours, live iff the
+    //   return carries a dependent row.
+    c.declaration(
+        filer_tin_issued_by_due_date,
+        QuestionId::FilerTinIssuedByDueDate,
     );
     c.declaration(
         can_be_claimed_as_dependent_spouse,
@@ -512,14 +534,99 @@ fn classify_person(c: &mut Census, p: &Person) {
     );
 }
 
-fn classify_dependent(_c: &mut Census, d: &Dependent) {
-    // No classifiable leaves — but destructured with no `..` so a future bool here is a compile error.
+/// ★★★ **T7 / R6 — the twenty per-row DECLARATIONS of `Who Qualifies as Your Dependent`.**
+///
+/// Every one is class (A): the filer asserts it, `DEPENDENT_GATES` owns its liveness and its
+/// refusal, and `screen_inputs` refuses a live `None`. They are recorded through
+/// [`Census::dependent_gate`] rather than [`Census::declaration`] because their key is a
+/// [`DependentGate`] on a ROW, not a return-level [`QuestionId`] — and
+/// `the_classifiers_gate_rows_line_up_with_the_registry` pins the two lists against each other in
+/// both directions, so a gate classified here but absent from the registry (or the reverse) reds.
+fn classify_dependent(c: &mut Census, d: &Dependent) {
+    use crate::tax::provenance::DependentGate as G;
+    // No `..` and no `_` on an `Option<bool>` — a new gate is a compile error here until classified.
     let Dependent {
         name: _,
         ssn: _,
         relationship: _,
+        // An `Option<Date>` — a scalar, not a leaf the classifier's `_` rule covers. Its
+        // answered-ness is carried by `DependentGate::DateOfBirth` in the same registry, which is
+        // why it is REQUIRED (R6) rather than a class-(B) forgo like the taxpayer's.
         date_of_birth: _,
+        lived_with_you_over_half_year,
+        lived_with_you_in_us,
+        full_time_student,
+        permanently_and_totally_disabled,
+        qc_relationship,
+        younger_than_you_or_spouse,
+        provided_over_half_own_support,
+        filing_joint_return,
+        joint_return_only_to_claim_refund,
+        qualifying_child_of_another_person,
+        citizen_national_resident_or_canada_mexico,
+        married,
+        tin_issued_by_due_date,
+        citizen_national_or_resident_alien,
+        ssns_valid_for_employment_issued_by_due_date,
+        qr_relationship_or_member_of_household,
+        qualifying_child_of_any_taxpayer,
+        gross_income_under_limit,
+        you_provided_over_half_support,
+        divorced_separated_multiple_support_or_kidnapped_rule_applies,
     } = d;
+    c.dependent_gate(lived_with_you_over_half_year, G::LivedWithYouOverHalfYear);
+    c.dependent_gate(lived_with_you_in_us, G::LivedWithYouInUs);
+    c.dependent_gate(full_time_student, G::FullTimeStudent);
+    c.dependent_gate(
+        permanently_and_totally_disabled,
+        G::PermanentlyAndTotallyDisabled,
+    );
+    c.dependent_gate(qc_relationship, G::QcRelationship);
+    c.dependent_gate(younger_than_you_or_spouse, G::YoungerThanYouOrSpouse);
+    c.dependent_gate(
+        provided_over_half_own_support,
+        G::ProvidedOverHalfOwnSupport,
+    );
+    c.dependent_gate(filing_joint_return, G::FilingJointReturn);
+    c.dependent_gate(
+        joint_return_only_to_claim_refund,
+        G::JointReturnOnlyToClaimRefund,
+    );
+    c.dependent_gate(
+        qualifying_child_of_another_person,
+        G::QualifyingChildOfAnotherPerson,
+    );
+    c.dependent_gate(
+        citizen_national_resident_or_canada_mexico,
+        G::CitizenNationalResidentOrCanadaMexico,
+    );
+    c.dependent_gate(married, G::Married);
+    c.dependent_gate(tin_issued_by_due_date, G::TinIssuedByDueDate);
+    c.dependent_gate(
+        citizen_national_or_resident_alien,
+        G::CitizenNationalOrResidentAlien,
+    );
+    c.dependent_gate(
+        ssns_valid_for_employment_issued_by_due_date,
+        G::SsnsValidForEmploymentIssuedByDueDate,
+    );
+    c.dependent_gate(
+        qr_relationship_or_member_of_household,
+        G::QrRelationshipOrMemberOfHousehold,
+    );
+    c.dependent_gate(
+        qualifying_child_of_any_taxpayer,
+        G::QualifyingChildOfAnyTaxpayer,
+    );
+    c.dependent_gate(gross_income_under_limit, G::GrossIncomeUnderLimit);
+    c.dependent_gate(
+        you_provided_over_half_support,
+        G::YouProvidedOverHalfSupport,
+    );
+    c.dependent_gate(
+        divorced_separated_multiple_support_or_kidnapped_rule_applies,
+        G::DivorcedSeparatedMultipleSupportOrKidnappedRuleApplies,
+    );
 }
 
 fn classify_w2(c: &mut Census, w: &W2) {
@@ -1301,6 +1408,56 @@ mod tests {
             census.declarations.len(),
             QuestionId::ALL.len(),
             "the classifier declares EXACTLY the registry questions — no more, no less"
+        );
+    }
+
+    /// ★★★ **T7 / R6 — the classifier's DEPENDENT GATES line up EXACTLY with `DEPENDENT_GATES`,
+    /// both directions.** A gate classified here but absent from the registry has no prompt, no
+    /// liveness and no refusal; one in the registry but not classified is a leaf whose answered-ness
+    /// nobody decided. Neither is a compile error — the `Dependent` destructure catches only a NEW
+    /// field, not a `c.dependent_gate(x, WrongGate)` — so it is caught here.
+    ///
+    /// ★ `DateOfBirth` is deliberately NOT in the classifier's list: it is an `Option<Date>`, a
+    ///   scalar the classifier's `_` rule permits, and its answered-ness is carried by its
+    ///   `DEPENDENT_GATES` entry. The exclusion is asserted rather than assumed.
+    #[test]
+    fn the_classifiers_gate_rows_line_up_with_the_registry() {
+        use crate::tax::dependent_gates::{GateKind, DEPENDENT_GATES};
+        use crate::tax::provenance::DependentGate;
+        let mut ri = ReturnInputs::default();
+        ri.header.dependents = vec![crate::tax::return_inputs::Dependent::default()];
+        let census = classify(&ri);
+
+        let classified: std::collections::BTreeSet<DependentGate> =
+            census.dependent_gates.iter().copied().collect();
+        let registered: std::collections::BTreeSet<DependentGate> = DEPENDENT_GATES
+            .iter()
+            .filter(|q| q.kind == GateKind::YesNo)
+            .map(|q| q.gate)
+            .collect();
+        assert_eq!(
+            classified, registered,
+            "every `Option<bool>` gate in the registry is classified, and nothing else is"
+        );
+        assert_eq!(
+            census.dependent_gates.len(),
+            registered.len(),
+            "…exactly once per row, no duplicates"
+        );
+        assert!(
+            !classified.contains(&DependentGate::DateOfBirth),
+            "the date of birth is an Option<Date> scalar; its answered-ness is the registry's"
+        );
+
+        // ★ ONE ENTRY PER ROW: two dependents ⇒ twice the rows. A classifier that visited only the
+        //   first would be blind to exactly the second child's leaves.
+        ri.header
+            .dependents
+            .push(crate::tax::return_inputs::Dependent::default());
+        assert_eq!(
+            classify(&ri).dependent_gates.len(),
+            registered.len() * 2,
+            "the census is per ROW, not per struct type"
         );
     }
 

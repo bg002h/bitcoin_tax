@@ -349,6 +349,11 @@ const DECL_FIELDS: &[Field] = &[
         ri.hsa_distribution_without_1099sa = None;
         Ok(())
     }),
+    // ★★★ Index 52 — T7 / R6's Step 5 question 1. Appended at the END for the array-index reason above.
+    decl_tristate!(52, FieldId::DeclFilerTinIssuedByDueDate, |ri| {
+        ri.header.filer_tin_issued_by_due_date = None;
+        Ok(())
+    }),
     FOREIGN_COUNTRY_NAMES,
 ];
 
@@ -676,6 +681,8 @@ pub fn field_to_question(id: FieldId) -> Option<QuestionId> {
         FieldId::DeclHsaTestingPeriodFailure => QuestionId::HsaTestingPeriodFailure,
         FieldId::DeclHsaSpouseFamilyCoverage => QuestionId::HsaSpouseFamilyCoverage,
         FieldId::DeclHsaDistributionWithout1099sa => QuestionId::HsaDistributionWithout1099sa,
+        // ★ T7 / R6 — Step 5 question 1.
+        FieldId::DeclFilerTinIssuedByDueDate => QuestionId::FilerTinIssuedByDueDate,
         _ => return None,
     })
 }
@@ -758,6 +765,9 @@ pub fn question_to_field(id: QuestionId) -> FieldId {
         QuestionId::HsaTestingPeriodFailure => FieldId::DeclHsaTestingPeriodFailure,
         QuestionId::HsaSpouseFamilyCoverage => FieldId::DeclHsaSpouseFamilyCoverage,
         QuestionId::HsaDistributionWithout1099sa => FieldId::DeclHsaDistributionWithout1099sa,
+        // ★ T7 / R6 — Step 5 question 1. Not deduped anywhere: the Dependents section carries the
+        //   PER-ROW gates, and this one is about the filer, not about a row.
+        QuestionId::FilerTinIssuedByDueDate => FieldId::DeclFilerTinIssuedByDueDate,
     }
 }
 

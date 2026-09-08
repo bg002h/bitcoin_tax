@@ -170,8 +170,8 @@ mod tests {
             );
         }
         assert_eq!(
-            decl_count, 30,
-            "28 declarations are Decl* fields (the other two dedup to Schedule A). ★ R10.4 / T4b \
+            decl_count, 31,
+            "29 declarations are Decl* fields (the other two dedup to Schedule A). ★ R10.4 / T4b \
              added the sixteenth (the carried filing status's confirmation); ★ R3 / T5 added the \
              four of the DOCUMENT-LESS INCOME DOOR — wages with no W-2, interest or dividends with \
              no 1099, a state refund with no 1099-G, and the §111(a) prior-year-itemized gate; \
@@ -181,7 +181,9 @@ mod tests {
              the line-4 Archer MSA gate and Part III's testing period. \u{2605}\u{2605}\u{2605} The T16 SEAM \
              REVIEW added the twenty-ninth and thirtieth: I-3's SPOUSE-plan declaration (the \
              instructions' line 1 and line 3 rule 1 both read \"you or your spouse\") and M-1's \
-             document-less HSA distribution door (line 14a)."
+             document-less HSA distribution door (line 14a). \u{2605}\u{2605}\u{2605} T7 / R6 added the \
+             thirty-first: Step 5 question 1 of Who Qualifies as Your Dependent, the one dependent \
+             gate that is about the FILER rather than about a row."
         );
         assert_eq!(
             deduped,
@@ -192,11 +194,11 @@ mod tests {
             "exactly the two Schedule-A-owned mortgage declarations dedup"
         );
 
-        // 21 delegating Decl* fields + the foreign_country_names Text field.
+        // The delegating Decl* fields + the foreign_country_names Text field.
         assert_eq!(
             decls.fields.len(),
-            31,
-            "30 declarations + foreign_country_names"
+            32,
+            "31 declarations + foreign_country_names"
         );
         assert!(decls
             .fields
@@ -319,6 +321,10 @@ mod tests {
                 //     reason the census rows are — the test drives one field at a time through the
                 //     registry, and `DeclHsaActivity` is itself driven by the loop above.
                 ri.sch1.hsa_activity = Some(true);
+                // ★★★ T7 / R6 — the liveness primer for Step 5 question 1: it is live iff the
+                //     return carries a DEPENDENT ROW. Safe to prime here for the same reason the
+                //     census rows are — the test drives one field at a time through the registry.
+                ri.header.dependents = vec![btctax_core::tax::return_inputs::Dependent::default()];
                 ri
             };
             assert!(

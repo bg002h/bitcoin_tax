@@ -15,6 +15,7 @@ use crate::seam::{
 };
 use btctax_core::conventions::Usd;
 use btctax_core::forms::{BrokerReported, Cohort};
+use btctax_core::tax::dependent_gates::DEPENDENT_GATES;
 use btctax_core::tax::questions::{FORM_QUESTIONS, SKIPPABLE_QUESTIONS};
 use btctax_core::tax::return_inputs::{
     Box12Entry, CharitableClass, CharitableGift, Dependent, ItemizeElection, Person,
@@ -484,6 +485,61 @@ pub(crate) const ADDRESS: Section = Section {
     fields: ADDRESS_FIELDS,
 };
 
+// ★★★ **T7 / R6 — a per-row DEPENDENT GATE → a `TriState` `Field` over `DEPENDENT_GATES[$idx]`.**
+//
+// The I-4 emulation, one row deeper than `decl_tristate!`: the frozen seam's `Field.live` takes no
+// row (SPEC_interview.md §10), so `live` is `|_| true` and the ROW's own liveness is expressed by
+// `get` returning `None` — which the renderer already treats as hidden — and by `set` refusing
+// `NoSuchRow`. Widening the seam to `fn(&ReturnInputs, &RowAddr) → bool` was decided AGAINST in R6:
+// 98 mechanical closure edits, a broken freeze, and no behaviour the emulation does not give.
+//
+// ★★ The closures are NON-CAPTURING (a `const` registry path plus a literal index), which is what
+//      lets them coerce to the bare `fn` pointers `Field` requires.
+macro_rules! dep_gate_tristate {
+    ($idx:literal, $fid:expr) => {
+        Field {
+            id: $fid,
+            label: DEPENDENT_GATES[$idx].prompt,
+            help: DEPENDENT_GATES[$idx].help,
+            kind: FieldKind::TriState,
+            live: |_| true,
+            get: |ri, a| {
+                if !DEPENDENT_GATES[$idx].live(ri, a.0[0]) {
+                    return None;
+                }
+                Some(FieldValue::TriState((DEPENDENT_GATES[$idx].get)(
+                    ri.header.dependents.get(a.0[0])?,
+                )))
+            },
+            set: |ri, a, v| {
+                if !DEPENDENT_GATES[$idx].live(ri, a.0[0]) {
+                    return Err(SetError::NoSuchRow);
+                }
+                let FieldValue::TriState(Some(b)) = v else {
+                    return Err(SetError::WrongKind);
+                };
+                (DEPENDENT_GATES[$idx].set)(
+                    ri.header
+                        .dependents
+                        .get_mut(a.0[0])
+                        .ok_or(SetError::NoSuchRow)?,
+                    b,
+                );
+                Ok(())
+            },
+            clear: Some(|ri, a| {
+                (DEPENDENT_GATES[$idx].clear)(
+                    ri.header
+                        .dependents
+                        .get_mut(a.0[0])
+                        .ok_or(SetError::NoSuchRow)?,
+                );
+                Ok(())
+            }),
+        }
+    };
+}
+
 // ── 5. Dependents (Repeating) — `header.dependents: Vec<Dependent>`, indexed by `addr.0[0]` ─────────────────
 
 const DEPENDENT_FIELDS: &[Field] = &[
@@ -604,6 +660,30 @@ const DEPENDENT_FIELDS: &[Field] = &[
             Ok(())
         },
     },
+    // ── ★★★ T7 / R6 — the twenty §152 gates, in `DEPENDENT_GATES` order. ──
+    dep_gate_tristate!(1, FieldId::DepGateQcRelationship),
+    dep_gate_tristate!(2, FieldId::DepGateYoungerThanYouOrSpouse),
+    dep_gate_tristate!(3, FieldId::DepGateFullTimeStudent),
+    dep_gate_tristate!(4, FieldId::DepGatePermanentlyAndTotallyDisabled),
+    dep_gate_tristate!(5, FieldId::DepGateProvidedOverHalfOwnSupport),
+    dep_gate_tristate!(6, FieldId::DepGateFilingJointReturn),
+    dep_gate_tristate!(7, FieldId::DepGateJointReturnOnlyToClaimRefund),
+    dep_gate_tristate!(8, FieldId::DepGateLivedWithYouOverHalfYear),
+    dep_gate_tristate!(9, FieldId::DepGateLivedWithYouInUs),
+    dep_gate_tristate!(10, FieldId::DepGateQualifyingChildOfAnotherPerson),
+    dep_gate_tristate!(11, FieldId::DepGateCitizenNationalResidentOrCanadaMexico),
+    dep_gate_tristate!(12, FieldId::DepGateMarried),
+    dep_gate_tristate!(13, FieldId::DepGateTinIssuedByDueDate),
+    dep_gate_tristate!(14, FieldId::DepGateCitizenNationalOrResidentAlien),
+    dep_gate_tristate!(15, FieldId::DepGateSsnsValidForEmploymentIssuedByDueDate),
+    dep_gate_tristate!(16, FieldId::DepGateQrRelationshipOrMemberOfHousehold),
+    dep_gate_tristate!(17, FieldId::DepGateQualifyingChildOfAnyTaxpayer),
+    dep_gate_tristate!(18, FieldId::DepGateGrossIncomeUnderLimit),
+    dep_gate_tristate!(19, FieldId::DepGateYouProvidedOverHalfSupport),
+    dep_gate_tristate!(
+        20,
+        FieldId::DepGateDivorcedSeparatedMultipleSupportOrKidnappedRuleApplies
+    ),
 ];
 
 pub(crate) const DEPENDENTS: Section = Section {

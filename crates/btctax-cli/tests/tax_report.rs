@@ -94,6 +94,10 @@ fn answer_script(
     let mut asked_decl: std::collections::BTreeSet<QuestionId> = std::collections::BTreeSet::new();
     let mut asked_skip: std::collections::BTreeSet<btctax_core::tax::questions::SkippableId> =
         std::collections::BTreeSet::new();
+    let mut asked_gate: std::collections::BTreeSet<(
+        btctax_core::tax::provenance::DependentGate,
+        usize,
+    )> = std::collections::BTreeSet::new();
     let mut script = String::new();
     for _ in 0..8 {
         let round: Vec<Ask> = live_questions(&ri)
@@ -101,6 +105,12 @@ fn answer_script(
             .filter(|a| match a {
                 Ask::Declaration(q) => !asked_decl.contains(&q.id),
                 Ask::Skippable(sk) => !asked_skip.contains(&sk.id),
+                // ★★★ T7 / R6 — the per-row gates join the sweep, keyed by (gate, row) as the
+                //     command keys them by (gate, identity). None of the fixtures this script
+                //     drives carries a dependent row, so the arm is here to keep the script honest
+                //     rather than to be exercised — and if one gains a row, it answers the gate at
+                //     its declared claim-path polarity rather than silently skipping it.
+                Ask::DependentGate { gate, row } => !asked_gate.contains(&(gate.gate, *row)),
             })
             .collect();
         if round.is_empty() {
@@ -117,6 +127,29 @@ fn answer_script(
                 Ask::Skippable(sk) => {
                     asked_skip.insert(sk.id);
                     script.push('\n');
+                }
+                Ask::DependentGate { gate, row } => {
+                    use btctax_core::tax::dependent_gates::GateKind;
+                    asked_gate.insert((gate.gate, row));
+                    match gate.kind {
+                        GateKind::Date => {
+                            let dob = time::Date::from_calendar_date(
+                                ri.tax_year - 10,
+                                time::Month::June,
+                                1,
+                            )
+                            .unwrap();
+                            script.push_str(&format!("{dob}\n"));
+                            ri.header.dependents[row].date_of_birth = Some(dob);
+                        }
+                        GateKind::YesNo => {
+                            let v = gate
+                                .claim_path
+                                .expect("a YesNo gate declares its claim path");
+                            script.push_str(if v { "y\n" } else { "n\n" });
+                            (gate.set)(&mut ri.header.dependents[row], v);
+                        }
+                    }
                 }
             }
         }
@@ -2928,6 +2961,10 @@ fn full_return_report_surfaces_conservative_omission_advisories() {
     {
         let mut s = Session::open(&vault, &pp()).unwrap();
         let mut ri = ReturnInputs {
+            // ★ T7 — STATED, not left at §G-15's `0` sentinel: `answer_all_dependent_gates` derives
+            //   the DEPENDENT's date of birth from it (the TAXPAYER's stays absent, which is what
+            //   this fixture is about).
+            tax_year: 2024,
             filing_status: FilingStatus::Single,
             // ★ NOT `adult_filer_header()`: this fixture is ABOUT the missing date of birth (it
             //   asserts "DATE OF BIRTH NOT ON FILE" below), so it cannot have one — and without one

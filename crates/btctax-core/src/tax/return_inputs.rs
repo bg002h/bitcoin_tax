@@ -557,13 +557,144 @@ pub struct Person {
     pub occupation: String,
 }
 
-/// A dependent (captured in v1; CTC/ODC is a conservative omission — §3.4).
+/// A dependent — the four identity fields printed in the 1040 Dependents grid, the row (5)/(6)
+/// checkbox facts, and the sixteen §152 gates of the *Who Qualifies as Your Dependent* flowchart
+/// (`design/forms/extract/i1040gi--2025.txt:1447-1812`).
+///
+/// ★★★ **T7 / SPEC_interview.md R6 — the gates are TRANSCRIBED, one field per flowchart condition,
+/// in the instruction's own words, each carrying its own line cite.** They are not a compression of
+/// §152: the flowchart is what a filer follows, and every condition it states is a field here. The
+/// registry that owns their prompts, liveness and refusals is
+/// [`crate::tax::dependent_gates::DEPENDENT_GATES`]; the walk that turns them into a verdict is
+/// [`crate::tax::dependent_gates::walk_dependent`].
+///
+/// ★★ **Every gate is a class-(A) DECLARATION** (R14): `None` on a LIVE gate is *never asked*, and it
+/// REFUSES ([`crate::tax::return_refuse::RefuseReason::DependentGateUnanswered`]) rather than
+/// defaulting. A `Some(false)` is testimony; a `None` is silence. The two are not the same, and the
+/// 1040's Dependents section is *"the dependents you claim"* (`i1040gi--2025.txt:1472-1474`) — a
+/// printed row asserts that §152 is satisfied, so it may not be printed on a chain nobody completed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Dependent {
     pub name: String,
     pub ssn: String,
     pub relationship: String,
+    /// ★★★ **REQUIRED on a dependent row (R6).** Step 1's age test (`i1040gi--2025.txt:1487-1499`)
+    /// is evaluated from this date and the row's `tax_year`, and Step 1 ends *"Yes. Go to Step 2. No.
+    /// Go to Step 4."* (`:1525-1529`) with **no *unknown* edge** — so `None` is
+    /// `DependentGateUnanswered { row, gate: DateOfBirth }` and blocks, rather than forgoing a credit.
+    ///
+    /// ★ It is a FACT (the birth certificate and the SSN application both carry it), not a decision,
+    ///   which is why it is class (A) here while the TAXPAYER's date of birth is a lawfully
+    ///   declinable class-(B) skippable ([`crate::tax::questions::SkippableId::DobTaxpayer`]).
     pub date_of_birth: Option<Date>,
+    // ── Rows (5) and (6) of the TY2025+ Dependents grid (`f1040--2025.txt:45-50`) ────────────────
+    /// **Row (5)(a)** — *"Check if lived with you more than half of 2025"* (`f1040--2025.txt:45-46`).
+    /// The Step 1 condition is *"Who lived with you for more than half of 2025. If the child didn't
+    /// live with you for the required time, see **Exception to time lived with you**, later."*
+    /// (`i1040gi--2025.txt:1512-1516`) — and the exception is part of the condition, quoted verbatim
+    /// in the gate's `help` (`:1905-1913`), not a branch out of the flowchart.
+    #[serde(default)]
+    pub lived_with_you_over_half_year: Option<bool>,
+    /// **Row (5)(b)** — *"And in the U.S."* (`f1040--2025.txt:47`). Printed; `Some(false)` prints
+    /// the box unchecked, which is a different statement from a row nobody answered.
+    #[serde(default)]
+    pub lived_with_you_in_us: Option<bool>,
+    /// **Row (6)** — *"Full-time student"* (`f1040--2025.txt:48-49`). Also the second limb of Step
+    /// 1's age test: *"Under age 24 at the end of 2025, a full-time student (defined later), and
+    /// younger than you (or your spouse if filing jointly)"* (`i1040gi--2025.txt:1491-1494`).
+    #[serde(default)]
+    pub full_time_student: Option<bool>,
+    /// **Row (6)** — *"Permanently and totally disabled"* (`f1040--2025.txt:48-50`). Also the third
+    /// limb of Step 1's age test: *"Any age and permanently and totally disabled (defined later)"*
+    /// (`i1040gi--2025.txt:1496-1498`).
+    #[serde(default)]
+    pub permanently_and_totally_disabled: Option<bool>,
+    // ── Step 1 — Do You Have a Qualifying Child? (`i1040gi--2025.txt:1485-1529`) ─────────────────
+    /// *"A qualifying child is your... Son, daughter, stepchild, foster child, brother, sister,
+    /// stepbrother, stepsister, half brother, half sister, or a descendant of any of them"*
+    /// (`i1040gi--2025.txt:1463-1466`). **No ⇒ Step 4.**
+    #[serde(default)]
+    pub qc_relationship: Option<bool>,
+    /// *"younger than you (or your spouse if filing jointly)"* (`i1040gi--2025.txt:1488-1489,
+    /// :1491-1492`) — Step 1's age test, **asked as its own per-row gate and never computed from the
+    /// taxpayer's date of birth**, which is a lawfully declinable class-(B) skippable. No Step 1
+    /// predicate may depend on a declinable value (R6/I4).
+    #[serde(default)]
+    pub younger_than_you_or_spouse: Option<bool>,
+    /// *"Who didn't provide over half of their own support for 2025 (see Pub. 501)"*
+    /// (`i1040gi--2025.txt:1502`). **Yes ⇒ Step 4** (the condition is the negation).
+    #[serde(default)]
+    pub provided_over_half_own_support: Option<bool>,
+    /// *"Who isn't filing a joint return for 2025 or is filing a joint return for 2025 only to claim
+    /// a refund of withheld income tax or estimated tax paid"* (`i1040gi--2025.txt:1506-1508`) —
+    /// the first limb.
+    #[serde(default)]
+    pub filing_joint_return: Option<bool>,
+    /// The second limb of `i1040gi--2025.txt:1506-1508`, live only when
+    /// [`Self::filing_joint_return`] is `Some(true)`: **joint and not refund-only ⇒ Step 4.**
+    #[serde(default)]
+    pub joint_return_only_to_claim_refund: Option<bool>,
+    /// The Step 1 **CAUTION**: *"If the child meets the conditions to be a qualifying child of any
+    /// other person (other than your spouse if filing jointly) for 2025, see Qualifying child of more
+    /// than one person, later."* (`i1040gi--2025.txt:1519-1521`.) **Yes ⇒ REFUSE**, naming
+    /// *Qualifying child of more than one person* (`:1967`).
+    #[serde(default)]
+    pub qualifying_child_of_another_person: Option<bool>,
+    // ── Step 2 — Is Your Qualifying Child Your Dependent? (`:1535-1590`), reused at Step 4 ───────
+    /// Step 2 question 1 / Step 4 question 2: *"Was the child a U.S. citizen, U.S. national, U.S.
+    /// resident alien, or a resident of Canada or Mexico?"* (`i1040gi--2025.txt:1540-1543`).
+    /// **No ⇒ STOP — *"You can't claim this child as a dependent."***
+    #[serde(default)]
+    pub citizen_national_resident_or_canada_mexico: Option<bool>,
+    /// Step 2 question 2 / Step 4 question 3: *"Was the child married?"* (`i1040gi--2025.txt:1548`).
+    /// **Yes ⇒ *See Married person, later.*** — a REFUSE naming that rule (`:1945`).
+    #[serde(default)]
+    pub married: Option<bool>,
+    // ── Step 3 — the credit column (`:1592-1656`), reused at Step 5 ──────────────────────────────
+    /// Step 3 question 1 / Step 5 question 2: *"Did the child have an SSN, ITIN, or adoption taxpayer
+    /// identification number (ATIN) issued on or before the due date of your return (including
+    /// extensions)?"* (`i1040gi--2025.txt:1639-1643`.) **No ⇒ no credit box** — a forgo, not a refusal.
+    #[serde(default)]
+    pub tin_issued_by_due_date: Option<bool>,
+    /// Step 3 question 2 / Step 5 question 3 — **narrower than Step 2's**: *"Was the child a U.S.
+    /// citizen, U.S. national, or U.S. resident alien?"* (`i1040gi--2025.txt:1594-1597`; no Canada or
+    /// Mexico.) **No ⇒ no credit box.**
+    #[serde(default)]
+    pub citizen_national_or_resident_alien: Option<bool>,
+    /// Step 3 question 4: *"Did you, or your spouse if filing a joint return, and this child have
+    /// SSNs valid for employment and issued before the due date of your 2025 return (including
+    /// extensions)?"* (`i1040gi--2025.txt:1619-1622`.) **Yes ⇒ the child tax credit box; No ⇒ Step 5**
+    /// (the credit for other dependents).
+    #[serde(default)]
+    pub ssns_valid_for_employment_issued_by_due_date: Option<bool>,
+    // ── Step 4 — Is Your Qualifying Relative Your Dependent? (`:1658-1735`) ──────────────────────
+    /// *"A qualifying relative is your..."* — the Step 4 relationship list, or *"Any other person
+    /// (other than your spouse) who lived with you all year as a member of your household if your
+    /// relationship didn't violate local law"* (`i1040gi--2025.txt:1662-1679`).
+    /// **No ⇒ REFUSE — not a dependent.**
+    #[serde(default)]
+    pub qr_relationship_or_member_of_household: Option<bool>,
+    /// *"Who wasn't a qualifying child (see Step 1) of any taxpayer for 2025."*
+    /// (`i1040gi--2025.txt:1683-1686`.) **Yes ⇒ REFUSE** — not a qualifying relative.
+    #[serde(default)]
+    pub qualifying_child_of_any_taxpayer: Option<bool>,
+    /// *"Who had gross income of less than $5,200 in 2025."* (`i1040gi--2025.txt:1690-1691`; the
+    /// figure is §152(d)(1)(B)'s exemption amount, republished every year — see
+    /// [`crate::tax::tables::FullReturnParams::qualifying_relative_gross_income_limit`].) The prompt
+    /// **quotes the year's figure**, so the gate cannot be stated until the year's package exists.
+    /// **No ⇒ REFUSE**, naming *Exception to gross income test* (`:1897`) for a disabled person.
+    #[serde(default)]
+    pub gross_income_under_limit: Option<bool>,
+    /// *"For whom you provided over half of the person's support in 2025."*
+    /// (`i1040gi--2025.txt:1695-1696`.) **No ⇒ REFUSE.**
+    #[serde(default)]
+    pub you_provided_over_half_support: Option<bool>,
+    /// *"But see Children of divorced or separated parents, Multiple support agreements, and
+    /// Kidnapped child, later."* (`i1040gi--2025.txt:1695-1697`.) Each of the three leaves the
+    /// flowchart for a multi-page rule, so **Yes ⇒ REFUSE**, naming all three (`:1823`, `:1949`,
+    /// `:1940`).
+    #[serde(default)]
+    pub divorced_separated_multiple_support_or_kidnapped_rule_applies: Option<bool>,
 }
 
 /// 1040 header / PII (vault-only). Fold into the per-year `ReturnInputs` blob (the 1040 is per-year).
@@ -644,6 +775,18 @@ pub struct HouseholdHeader {
     pub spouse_died_during_year: Option<bool>,
     #[serde(default)]
     pub ip_pin: Option<String>,
+    /// ★★★ **T7 / R6 — Step 5, question 1**, the one dependent gate that is about the FILER rather
+    /// than about a row: *"Did you, and your spouse if filing a joint return, have either an SSN or
+    /// ITIN issued on or before the due date of your 2025 return (including extensions)? (Answer
+    /// "Yes" if you are applying for an ITIN on or before the return due date (including
+    /// extensions).)"* (`design/forms/extract/i1040gi--2025.txt:1743-1747`.)
+    ///
+    /// **No ⇒ *"You can't claim the credit for other dependents."*** (`:1752-1754`) — a forgo, not a
+    /// refusal. A class-(A) declaration ([`crate::tax::questions::QuestionId::FilerTinIssuedByDueDate`]),
+    /// **live iff this return carries at least one dependent row**: Step 5 is reached only through a
+    /// dependent, and a return with none never asks it.
+    #[serde(default)]
+    pub filer_tin_issued_by_due_date: Option<bool>,
     /// **Form 8615, condition 3** (`design/forms/extract/i1040gi--2025.txt:3932-3940`), verbatim:
     /// "3. You were either:
     ///     a. Under age 18 at the end of 2025,

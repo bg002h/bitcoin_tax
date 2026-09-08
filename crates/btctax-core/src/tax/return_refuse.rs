@@ -297,6 +297,33 @@ pub enum RefuseReason {
         /// Which of Form 8889's questions is blank.
         question: crate::tax::questions::QuestionId,
     },
+    /// ★★★ **T7 / R6 — a LIVE dependent gate on one row has no answer.**
+    ///
+    /// The key carries the ROW INDEX, not the row's SSN hash: it points the filer at a position on
+    /// screen and it is never stored. (The stored diligence key is the identity —
+    /// [`crate::tax::provenance::AnswerKey::DependentGate`] — precisely because the index moves when
+    /// a row is deleted.)
+    DependentGateUnanswered {
+        /// The row's index in `header.dependents`, 0-based.
+        row: usize,
+        /// Which gate of `Who Qualifies as Your Dependent` is blank.
+        gate: crate::tax::provenance::DependentGate,
+    },
+    /// ★★★ **T7 / R6 — a dependent gate's ANSWER takes the flowchart to a STOP.**
+    ///
+    /// Every REFUSE edge in R6's table names the rule the instruction sends the filer to, and the
+    /// detail carries it: *Qualifying child of more than one person* (`:1967`), *Married person*
+    /// (`:1945`), *Children of divorced or separated parents* / *Multiple support agreements* /
+    /// *Kidnapped child* (`:1823`, `:1949`, `:1940`), *Exception to gross income test* (`:1897`).
+    /// A refusal with no exit is a brick with better prose.
+    DependentGateRefused {
+        row: usize,
+        gate: crate::tax::provenance::DependentGate,
+    },
+    /// ★★★ **T7 / R6 — Step 5 question 1 is unanswered on a return that claims a dependent.**
+    /// (`i1040gi--2025.txt:1743-1747`.) A class-(A) declaration like every other, raised by the
+    /// [`crate::tax::questions::FORM_QUESTIONS`] loop.
+    FilerTinUnanswered,
     /// **Form 8889 line 3 needs the *Line 3 Limitation Chart and Worksheet*, which btctax does not
     /// carry.** Fires when the filer was NOT an eligible individual with the same coverage on the
     /// first day of every month, or was enrolled in Medicare for any month.
@@ -1531,6 +1558,81 @@ pub fn screen_broker_reporting(
     None
 }
 
+/// ★★★ **T7 / R6 — THE DEPENDENT GATES, in one place: rows x gates, then the flowchart's STOP.**
+///
+/// Called from the UNANSWERED tier of [`screen_inputs_tiered`]. Returns the FIRST refusal in
+/// (row, `DependentGate::ALL`) order, so the message is deterministic.
+///
+/// ★★ **Liveness is the WALK.** `DEPENDENT_GATES` carries no per-entry liveness predicate; a gate
+///      is live for a row iff [`walk_dependent`] demanded it. So the walk is computed once per row
+///      here and both halves are read off the same value.
+///
+/// ★★ **`params` is only for the WORDS.** One gate quotes the year's §152(d)(1)(B) figure, and
+///      R10.3's re-ask rule hashes what was SHOWN — so the wording check for that gate can only run
+///      where the package is in hand. Where it is not, the check is skipped rather than run against
+///      words nobody saw, exactly as [`crate::tax::provenance::current_prompt`] records.
+fn screen_dependent_gates(ri: &ReturnInputs, params: Option<&FullReturnParams>) -> Option<Refusal> {
+    use crate::tax::dependent_gates::{
+        gate_is_answered, walk_dependent, DependentVerdict, DEPENDENT_GATES,
+    };
+    use crate::tax::provenance::{answer_status, dependent_ssn_hash, AnswerKey, AnswerStatus};
+    for (row, d) in ri.header.dependents.iter().enumerate() {
+        let walk = walk_dependent(ri, row);
+        let who = if d.name.trim().is_empty() {
+            format!("row {}", row + 1)
+        } else {
+            format!("row {} ({})", row + 1, d.name.trim())
+        };
+        for g in DEPENDENT_GATES {
+            if !walk.demands(g.gate) {
+                continue;
+            }
+            if !gate_is_answered(d, g.gate) {
+                return refuse(
+                    RefuseReason::DependentGateUnanswered { row, gate: g.gate },
+                    format!("dependent {who}: {}", g.unanswered_detail),
+                );
+            }
+            // ★★★ R10.3, keyed by the row's IDENTITY (its salted SSN hash), never by its index:
+            //       delete row 0 and an index-keyed record would move onto another child.
+            let key = AnswerKey::DependentGate {
+                ssn_hash: dependent_ssn_hash(&d.ssn),
+                gate: g.gate,
+            };
+            let stale = if g.needs_params() {
+                params.is_some_and(|p| {
+                    ri.answer_log.get(&key).is_some_and(|r| {
+                        r.prompt_hash
+                            != crate::tax::provenance::prompt_hash(&g.prompt_text(ri, Some(p)))
+                    })
+                })
+            } else {
+                answer_status(ri, &key) == AnswerStatus::WordingChanged
+            };
+            if stale {
+                return refuse(
+                    RefuseReason::DependentGateUnanswered { row, gate: g.gate },
+                    WORDING_CHANGED_DETAIL,
+                );
+            }
+        }
+        // The flowchart's own STOPs. Every one names the rule the instruction sends the filer to.
+        if let DependentVerdict::Refused(r) = walk.verdict {
+            return refuse(
+                RefuseReason::DependentGateRefused {
+                    row,
+                    gate: r.gate,
+                },
+                format!(
+                    "dependent {who}: {} The rule the Form 1040 instructions send you to is {}.                      Remove the row, or change the answer that took the flowchart there                      (`btctax income answer`).",
+                    r.exit, r.rule
+                ),
+            );
+        }
+    }
+    None
+}
+
 /// ★★★ **R3 — THE DOCUMENT CENSUS's three VALUE rules**, in one place.
 ///
 /// The fourth rule — a live row that is `None` — is not here: it is the
@@ -1856,6 +1958,20 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
             {
                 return refuse(q.unanswered.clone(), WORDING_CHANGED_DETAIL);
             }
+        }
+
+        // ★★★ **T7 / R6 — THE DEPENDENT GATES, rows x gates.**
+        //
+        // Placed immediately after the return-level registry loop and inside the same UNANSWERED
+        // tier, for the identical reason: `income import` is the only path that creates a dependent
+        // row, and `income answer` the only one that fills its gates, so demanding them at import
+        // would make answering unreachable.
+        //
+        // ★★ Liveness is the WALK's (`DEPENDENT_GATES` has no per-entry predicate), so the walk
+        //      is computed ONCE per row and both the liveness and the flowchart's own STOP are read
+        //      off it. Two calls would be two chances to disagree.
+        if let Some(r) = screen_dependent_gates(ri, tier.package.map(|(_, p)| p)) {
+            return Some(r);
         }
     }
 
@@ -2823,6 +2939,7 @@ mod tests {
                 cap_mfs: dec!(5000),
             },
             kiddie_unearned_threshold: dec!(2600),
+            qualifying_relative_gross_income_limit: dec!(5050),
             elective_deferral_limit: dec!(23000),
             ftc_ceiling: dec!(300),
             qbi_ti_threshold_unmarried: dec!(191950),
@@ -2863,6 +2980,10 @@ mod tests {
     }
     pub(super) fn ri() -> ReturnInputs {
         let mut ri = ReturnInputs {
+            // ★ T7 — the tax year is STATED, not left at §G-15's `0` sentinel: a fixture that grows
+            //   a dependent row needs it for the Step 1 age test, and `answer_all_dependent_gates`
+            //   asserts rather than deriving a date of birth from year zero.
+            tax_year: 2024,
             filing_status: FilingStatus::Single,
             ..Default::default()
         };
@@ -4097,6 +4218,20 @@ mod tests {
                     Some(false),
                 );
             }
+            // ★★★ T7 / R6 — Step 5 question 1 is live iff the return carries a DEPENDENT ROW, so
+            //     its scenario grows one. The row's own gates are answered at their claim-path
+            //     polarity (derived from the registry, never a list here), because an unanswered
+            //     gate would refuse first and mask the target — the same masking `ItemizedPriorYear`
+            //     avoids by answering its census row above.
+            QuestionId::FilerTinIssuedByDueDate => {
+                r.header.dependents = vec![crate::tax::return_inputs::Dependent {
+                    name: "Kid Example".into(),
+                    ssn: "000-00-1111".into(),
+                    relationship: "Daughter".into(),
+                    ..Default::default()
+                }];
+                crate::tax::testonly::answer_all_dependent_gates(&mut r);
+            }
             QuestionId::AmtDepreciationSameAsRegular => {
                 // A nonzero FLAT expense total is the whole liveness condition — btctax cannot see
                 // whether Part II line 13 inside it is $0 or $200,000. See `amt_depreciation_question_live`.
@@ -4458,6 +4593,10 @@ mod tests {
                     ssn: ssn.into(),
                     ..Default::default()
                 });
+            // ★ T7 / R6 — a dependent ROW now brings its own gates and Step 5's filer-TIN question
+            //   with it, and every one refuses while blank. This test is about the SSN's validity
+            //   class, so the row is made coherent first and the SSN is the only thing left wrong.
+            crate::tax::testonly::answer_all_live_declarations(&mut r);
             assert_eq!(reason(&r), None, "{label}: dependent — report computes");
             assert!(
                 matches!(

@@ -2356,6 +2356,9 @@ fn more_than_four_dependents_checks_the_box_and_prints_the_first_four() {
     use btctax_core::tax::return_inputs::{Dependent, Person, ReturnInputs};
 
     let mut ri = ReturnInputs {
+        // ★ T7 — STATED, not left at §G-15's `0` sentinel: this fixture carries dependent
+        //   rows and `answer_all_dependent_gates` derives their date of birth from it.
+        tax_year: 2024,
         filing_status: FilingStatus::Single,
         ..Default::default()
     };
@@ -2435,6 +2438,9 @@ fn the_checkbox_and_the_statement_are_the_same_decision() {
     let map = btctax_forms::Form1040Map::ty2024();
     for n in 0..=12usize {
         let mut ri = ReturnInputs {
+            // ★ T7 — STATED, not left at §G-15's `0` sentinel: this fixture carries dependent
+            //   rows and `answer_all_dependent_gates` derives their date of birth from it.
+            tax_year: 2024,
             filing_status: FilingStatus::Single,
             ..Default::default()
         };
@@ -2492,6 +2498,9 @@ fn a_map_that_declares_a_different_dependent_capacity_fails_closed() {
     use btctax_core::tax::return_inputs::{Dependent, Person, ReturnInputs};
 
     let mut ri = ReturnInputs {
+        // ★ T7 — STATED, not left at §G-15's `0` sentinel: this fixture carries dependent
+        //   rows and `answer_all_dependent_gates` derives their date of birth from it.
+        tax_year: 2024,
         filing_status: FilingStatus::Single,
         ..Default::default()
     };

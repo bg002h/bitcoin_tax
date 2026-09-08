@@ -730,10 +730,16 @@ fn answer_status_against(ri: &ReturnInputs, key: &AnswerKey, current_prompt: &st
 
 /// The words currently asked for `key`, from the registry that owns it.
 ///
-/// ★ `None` for a [`AnswerKey::DependentGate`]: the per-gate prompts live in the `DEPENDENT_GATES`
-/// registry, which is task T7. Until it exists a dependent record has no current prompt to compare
-/// against, so nothing outside [`record_answer`] can decide a dependent record is stale — and
-/// `record_answer` never has to, because it hashes the prompt the caller actually showed.
+/// ★★★ **T7 — a dependent gate now HAS a registry** ([`crate::tax::dependent_gates::DEPENDENT_GATES`]),
+/// so its words resolve here like every other key's, and R10.3's re-ask rule reaches the gates.
+///
+/// ★★ **One gate still resolves to `None`, and it is a fact rather than an omission.**
+/// [`DependentGate::GrossIncomeUnderLimit`]'s prompt QUOTES the year's §152(d)(1)(B) figure, which
+/// lives in `FullReturnParams` — and this function has no package. Returning the FIGURELESS
+/// fallback would hash words nobody was ever shown and report `WordingChanged` on a correctly
+/// answered gate: exactly the D-1 defect the seam review closed one layer up. So the wording check
+/// is SKIPPED for it rather than guessed, and the surfaces that hold the package
+/// (`screen_inputs`, `interview_state_with_params`) are where its words are rendered.
 pub fn current_prompt(key: &AnswerKey, ri: &ReturnInputs) -> Option<Cow<'static, str>> {
     match key {
         // ★★ R10.4 — `prompt_text`, not `prompt`: a question whose subject is a value ON the return
@@ -748,7 +754,12 @@ pub fn current_prompt(key: &AnswerKey, ri: &ReturnInputs) -> Option<Cow<'static,
             .iter()
             .find(|s| s.id == *id)
             .map(|s| Cow::Borrowed(s.prompt)),
-        AnswerKey::DependentGate { .. } => None,
+        // ★ The prompt is per-GATE, not per-row: no dependent gate quotes a value off its own row,
+        //   so the ssn_hash selects the record and the gate selects the words.
+        AnswerKey::DependentGate { gate, .. } => {
+            let q = crate::tax::dependent_gates::entry(*gate);
+            (!q.needs_params()).then(|| q.prompt_text(ri, None))
+        }
     }
 }
 

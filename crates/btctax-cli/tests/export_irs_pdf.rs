@@ -187,6 +187,8 @@ fn a_dependents_statement_is_marked_draft_only_on_a_pseudo_ledger() {
     {
         let mut s = Session::open(&clean, &pp()).unwrap();
         let mut ri = ReturnInputs {
+            // ★ T7 — STATED, not left at §G-15's `0` sentinel (see `answer_all_dependent_gates`).
+            tax_year: 2024,
             filing_status: FilingStatus::Single,
             header: btctax_core::tax::testonly::not_a_dependent(),
             ..Default::default()
@@ -245,6 +247,8 @@ fn a_dependents_statement_is_marked_draft_only_on_a_pseudo_ledger() {
     {
         let mut s = Session::open(&pseudo, &pp()).unwrap();
         let mut ri = ReturnInputs {
+            // ★ T7 — STATED, not left at §G-15's `0` sentinel (see `answer_all_dependent_gates`).
+            tax_year: 2024,
             filing_status: FilingStatus::Single,
             header: btctax_core::tax::testonly::not_a_dependent(),
             ..Default::default()
@@ -732,6 +736,8 @@ fn export_dispatches_a_full_return_year_to_the_full_packet() {
     {
         let mut s = Session::open(&vault, &pp()).unwrap();
         let mut ri = ReturnInputs {
+            // ★ T7 — STATED, not left at §G-15's `0` sentinel (see `answer_all_dependent_gates`).
+            tax_year: 2024,
             filing_status: FilingStatus::Single,
             header: btctax_core::tax::testonly::not_a_dependent(),
             ..Default::default()
@@ -859,6 +865,8 @@ fn export_full_return_out_collision_names_path() {
     {
         let mut s = Session::open(&vault, &pp()).unwrap();
         let mut ri = ReturnInputs {
+            // ★ T7 — STATED, not left at §G-15's `0` sentinel (see `answer_all_dependent_gates`).
+            tax_year: 2024,
             filing_status: FilingStatus::Single,
             header: btctax_core::tax::testonly::not_a_dependent(),
             ..Default::default()
@@ -931,6 +939,8 @@ fn forms_slice_ignored_on_full_return_year_is_flagged_and_packet_unchanged() {
     {
         let mut s = Session::open(&vault, &pp()).unwrap();
         let mut ri = ReturnInputs {
+            // ★ T7 — STATED, not left at §G-15's `0` sentinel (see `answer_all_dependent_gates`).
+            tax_year: 2024,
             filing_status: FilingStatus::Single,
             header: btctax_core::tax::testonly::not_a_dependent(),
             ..Default::default()
@@ -1028,6 +1038,8 @@ fn forms_slice_on_full_return_year_warns_on_stderr_and_packet_is_identical() {
     {
         let mut s = Session::open(&vault, &pp()).unwrap();
         let mut ri = ReturnInputs {
+            // ★ T7 — STATED, not left at §G-15's `0` sentinel (see `answer_all_dependent_gates`).
+            tax_year: 2024,
             filing_status: FilingStatus::Single,
             header: btctax_core::tax::testonly::not_a_dependent(),
             ..Default::default()
@@ -1243,6 +1255,8 @@ fn the_two_pipelines_cannot_overwrite_each_others_files() {
     {
         let mut s = Session::open(&vault, &pp()).unwrap();
         let mut ri = ReturnInputs {
+            // ★ T7 — STATED, not left at §G-15's `0` sentinel (see `answer_all_dependent_gates`).
+            tax_year: 2024,
             filing_status: FilingStatus::Single,
             header: btctax_core::tax::testonly::not_a_dependent(),
             ..Default::default()
@@ -1418,6 +1432,8 @@ fn full_return_vault(
     {
         let mut s = Session::open(&vault, &pp()).unwrap();
         let mut ri = ReturnInputs {
+            // ★ T7 — STATED, not left at §G-15's `0` sentinel (see `answer_all_dependent_gates`).
+            tax_year: 2024,
             filing_status: FilingStatus::Single,
             header: btctax_core::tax::testonly::not_a_dependent(),
             ..Default::default()
@@ -2735,6 +2751,8 @@ fn a_pseudo_voucher_is_gated_and_watermarked_like_the_packet() {
     {
         let mut s = Session::open(&pseudo, &pp()).unwrap();
         let mut ri = ReturnInputs {
+            // ★ T7 — STATED, not left at §G-15's `0` sentinel (see `answer_all_dependent_gates`).
+            tax_year: 2024,
             filing_status: FilingStatus::Single,
             header: btctax_core::tax::testonly::not_a_dependent(),
             ..Default::default()

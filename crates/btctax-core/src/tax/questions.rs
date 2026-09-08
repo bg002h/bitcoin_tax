@@ -351,6 +351,11 @@ pub enum QuestionId {
     /// **R3's document-less door for Form 8889 line 14a** — a distribution taken with no Form
     /// 1099-SA behind it. Live exactly on a `Sa1099` census `No` beside an affirmed HSA trigger.
     HsaDistributionWithout1099sa,
+    /// ★★★ **T7 / R6 — Step 5, question 1** of *Who Qualifies as Your Dependent*: the one dependent
+    /// gate that is about the FILER rather than about a row, so it is a return-level declaration
+    /// rather than a `DependentGate`. Live iff this return carries at least one dependent row.
+    /// APPENDED AT THE END for the `decl_tristate!` array-index reason recorded above.
+    FilerTinIssuedByDueDate,
 }
 
 impl QuestionId {
@@ -409,6 +414,8 @@ impl QuestionId {
         // ★★★ Seam review I-3 and M-1 — indices 50 and 51.
         QuestionId::HsaSpouseFamilyCoverage,
         QuestionId::HsaDistributionWithout1099sa,
+        // ★★★ T7 / R6 — index 52.
+        QuestionId::FilerTinIssuedByDueDate,
     ];
 }
 
@@ -2079,6 +2086,30 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         //   `Yes` REFUSES — btctax has no surface for a distribution that arrives with no form.
         neutral: false,
     },
+    // ── ★★★ T7 / R6 — STEP 5, QUESTION 1 of *Who Qualifies as Your Dependent*. ────
+    FormQuestion {
+        id: QuestionId::FilerTinIssuedByDueDate,
+        prompt: "Did you, and your spouse if filing a joint return, have either an SSN or ITIN issued \
+                 on or before the due date of your return (including extensions)? (Answer \"Yes\" if \
+                 you are applying for an ITIN on or before the return due date (including \
+                 extensions).)",
+        unanswered: RefuseReason::FilerTinUnanswered,
+        unanswered_detail:
+            "this return claims one or more dependents, so Step 5 of Who Qualifies as Your Dependent \
+             (i1040gi--2025.txt:1743-1747) asks whether YOU \u{2014} and your spouse on a joint return \
+             \u{2014} had an SSN or ITIN issued on or before the due date of the return, including \
+             extensions. A \"No\" forgoes the credit for other dependents; it does not stop you \
+             claiming the dependent. Run `btctax income answer`",
+        // ★ Live iff the return carries a dependent row: Step 5 is reached only through a dependent,
+        //   and a return with none is never asked it (R6's own liveness rule for this question).
+        live: |ri| !ri.header.dependents.is_empty(),
+        get: |ri| ri.header.filer_tin_issued_by_due_date,
+        set: |ri, v| ri.header.filer_tin_issued_by_due_date = Some(v),
+        durability: Durability::PerYear,
+        // ★ Neutral at TRUE: an SSN or ITIN issued by the due date is the ordinary case, it needs no
+        //   adjustment and forgoes nothing. A "No" is what costs the filer the credit.
+        neutral: true,
+    },
 ];
 
 /// ★★★ **T16 — the ONE liveness predicate for every Form 8889 question.**
@@ -3044,6 +3075,7 @@ mod tests {
                 // ★ Seam review I-3 (the spouse's plan) and M-1 (the document-less distribution).
                 QuestionId::HsaSpouseFamilyCoverage => 50,
                 QuestionId::HsaDistributionWithout1099sa => 51,
+                QuestionId::FilerTinIssuedByDueDate => 52,
             };
             assert_eq!(idx, i, "QuestionId::ALL is out of order / missing {id:?}");
             assert_eq!(
@@ -3054,13 +3086,13 @@ mod tests {
         }
         assert_eq!(
             QuestionId::ALL.len(),
-            52,
+            53,
             "17 declarations + the 20 R3 document-census rows + R10.4's filing-status confirmation \
              + T5's four document-less-income-door questions + R9/T6's Digital Assets question \
              + T16's seven Form 8889 questions + the T16 seam review's two (the SPOUSE's HDHP \
-             plan, and R3's document-less distribution door)"
+             plan, and R3's document-less distribution door) + T7/R6's filer-TIN question"
         );
-        assert_eq!(FORM_QUESTIONS.len(), 52, "one entry per declaration");
+        assert_eq!(FORM_QUESTIONS.len(), 53, "one entry per declaration");
     }
 
     /// ★★★ §G-6/ISO — THE OUT-OF-SCOPE QUESTION MUST NAME THE ISO EXERCISE, WHICH IS NOT INCOME.

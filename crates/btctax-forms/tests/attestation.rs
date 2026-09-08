@@ -702,6 +702,11 @@ fn the_all_zero_return_files_one_form_whose_every_money_line_is_zero_or_blank() 
 /// ★ Real SSNs, because the packet refuses a malformed one at `ReturnHeader::build` — a dependent's
 ///   just as surely as the taxpayer's (`return_refuse.rs`'s SSN sweep pins all three).
 fn with_dependents(mut ri: ReturnInputs, deps: usize) -> ReturnInputs {
+    // ★★★ T7 / R6 — a dependent row now brings the §152 flowchart with it: every gate the walk
+    //     demands must be answered, and Step 5 question 1 (`filer_tin_issued_by_due_date`) becomes
+    //     live the moment the first row exists. This helper hangs children on a GOLDEN household,
+    //     so it answers them the way that household's filer would — through the registry-derived
+    //     helper, never a hand-list here.
     for i in 0..deps {
         ri.header
             .dependents
@@ -710,7 +715,16 @@ fn with_dependents(mut ri: ReturnInputs, deps: usize) -> ReturnInputs {
                 ssn: format!("40000000{i}"),
                 relationship: "Daughter".into(),
                 date_of_birth: None,
+                ..Default::default()
             });
+    }
+    if deps > 0 {
+        // ★ The golden households are TY2024 vectors that leave `tax_year` at §G-15's "not stated"
+        //   sentinel, so the year is stated here — the helper derives each child's date of birth
+        //   from it and asserts rather than computing one against year zero.
+        ri.tax_year = 2024;
+        btctax_core::tax::testonly::answer_all_dependent_gates(&mut ri);
+        ri.header.filer_tin_issued_by_due_date = Some(true);
     }
     ri
 }
