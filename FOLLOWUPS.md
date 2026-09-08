@@ -6343,6 +6343,19 @@ build, each with an owning phase.
   task: interview T16 residue, before the simulated real return if the owner's eligibility was
   part-year.** Every path to it refuses naming it (part-year eligibility, Medicare, the last-month
   rule); transcribing the worksheet (`i8889`) lets a part-year or Medicare filer file.
+- **FR-81 — two dependent rows with empty SSNs share one `answer_log` key space (T7 build
+  `282a8a32`, follow-up 1; pre-existing from T1's `dependent_ssn_hash`). Owning task: interview T8
+  (the row's identity is printed there), reconciled before the T7 seam review closes if the review
+  finds it reachable before the packet boundary.** `dependent_ssn_hash("")` is a valid hash, so a
+  gate answer for one blank-SSN row can be read as the other's; the SSN gate sits at the packet
+  boundary, not at authoring.
+- **FR-82 — `tax_tables.rs`'s TY2026 doc comment cites Rev. Proc. 2025-32 §2.14 / §2.10 for figures
+  that sit in its Section 4 (T7 build, follow-up 2; pre-existing). Owning phase: ownerless residue
+  (doc-consistency).** The new §4.23 cite beside them is accurate.
+- **FR-83 — the form seam shows `gross_income_under_limit`'s figureless fallback prompt on a
+  params-less year while the R12 panel says *waiting* (T7 build, follow-up 3). Owning task:
+  interview T12 (the render pass).** `Field.live` has no package; the fallback names the missing
+  package, so it is honest, but it is a second wording of the same gate.
   Owner-driven; the assistant prepares the walk (a checklist of moments from `SPEC_interview.md` §6)
   and records the findings verbatim.
 - **FR-47 — `AmtParams` / `FullReturnParams` TY2026 is a NOW item, not a post-finals one.**
