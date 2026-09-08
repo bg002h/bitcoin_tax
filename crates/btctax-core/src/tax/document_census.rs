@@ -62,6 +62,10 @@ pub enum DocumentRow {
     Form1098,
     /// Form 1098-E — student loan interest.
     Form1098e,
+    /// Form 1099-SA — distributions from an HSA, Archer MSA or MA MSA (T16).
+    Sa1099,
+    /// Form 5498-SA — HSA / Archer MSA / MA MSA contribution and FMV information (T16).
+    Sa5498,
     /// Form 1099-R — IRA / pension / annuity distributions (§2.2).
     R1099,
     /// Form SSA-1099 / RRB-1099 — Social Security and railroad retirement (§2.2).
@@ -97,6 +101,8 @@ impl DocumentRow {
         DocumentRow::G1099,
         DocumentRow::Form1098,
         DocumentRow::Form1098e,
+        DocumentRow::Sa1099,
+        DocumentRow::Sa5498,
         DocumentRow::R1099,
         DocumentRow::Ssa1099,
         DocumentRow::NecMiscK1099,
@@ -126,6 +132,8 @@ impl DocumentRow {
             DocumentRow::G1099 => "Form 1099-G",
             DocumentRow::Form1098 => "Form 1098",
             DocumentRow::Form1098e => "Form 1098-E",
+            DocumentRow::Sa1099 => "Form 1099-SA",
+            DocumentRow::Sa5498 => "Form 5498-SA",
             DocumentRow::R1099 => "Form 1099-R",
             DocumentRow::Ssa1099 => "Form SSA-1099 or RRB-1099",
             DocumentRow::NecMiscK1099 => "Form 1099-NEC, 1099-MISC or 1099-K",
@@ -163,6 +171,9 @@ impl DocumentRow {
             //   owed. `form_1098` is still not live (its amount is a scalar until T9), so no answer
             //   of its can reach a refusal either.
             DocumentRow::Form1098 | DocumentRow::Form1098e => return None,
+            // ★ T16 — both HSA information returns have their own section, so neither is an
+            //   excluded family and neither is owed an exit.
+            DocumentRow::Sa1099 | DocumentRow::Sa5498 => return None,
             // ── §2.2, verbatim. ─────────────────────────────────────────────────────────────────
             DocumentRow::R1099 => {
                 "btctax cannot take a Form 1099-R for this year: Form 1040 lines 4a–5b and the \
@@ -220,6 +231,8 @@ impl DocumentRow {
             DocumentRow::G1099 => Q::DocG1099,
             DocumentRow::Form1098 => Q::DocForm1098,
             DocumentRow::Form1098e => Q::DocForm1098e,
+            DocumentRow::Sa1099 => Q::DocSa1099,
+            DocumentRow::Sa5498 => Q::DocSa5498,
             DocumentRow::R1099 => Q::DocR1099,
             DocumentRow::Ssa1099 => Q::DocSsa1099,
             DocumentRow::NecMiscK1099 => Q::DocNecMiscK1099,
@@ -289,6 +302,17 @@ impl DocumentRow {
                  `[[form_1098e]]` table through `btctax income import` — Schedule 1 line 21 reads \
                  the SUM of the rows' box 1 (§221)"
             }
+            DocumentRow::Sa1099 => {
+                "enter it in the Form 1099-SA section of the tax-inputs form, or as an `[[sa_1099]]` \
+                 table through `btctax income import` — Form 8889 line 14a reads the SUM of the \
+                 rows' box 1, and Part II decides how much of it is taxable"
+            }
+            DocumentRow::Sa5498 => {
+                "enter it in the Form 5498-SA section of the tax-inputs form, or as an `[[sa_5498]]` \
+                 table through `btctax income import` — no line of Form 8889 sums it, so it is \
+                 transcribed so you can CHECK the contributions you entered on line 2 against what \
+                 your trustee reported"
+            }
             _ => return None,
         })
     }
@@ -326,6 +350,15 @@ impl DocumentRow {
             DocumentRow::Form1098e => {
                 "Did you receive one or more Form 1098-E (your student loan servicer should send you \
                  one — Schedule 1 line 21 instructions)?"
+            }
+            DocumentRow::Sa1099 => {
+                "Did you receive one or more Form 1099-SA (the trustee of a health savings account \
+                 must send you one for any distribution — Form 8889 line 14a instructions)?"
+            }
+            DocumentRow::Sa5498 => {
+                "Did you receive one or more Form 5498-SA (the trustee of a health savings account \
+                 sends one reporting the year's contributions and the account's fair market value \
+                 — see the instructions for Forms 1099-SA and 5498-SA)?"
             }
             DocumentRow::R1099 => {
                 "Did you receive one or more Form 1099-R (the payer of an IRA, pension or annuity \
@@ -408,6 +441,12 @@ pub struct DocumentCensus {
     /// the `sch1.student_loan_interest_paid` scalar with `form_1098e` rows; see [`row_is_live`].
     #[serde(default)]
     pub form_1098e: Option<bool>,
+    /// Form 1099-SA — HSA distributions, Form 8889 Part II (T16).
+    #[serde(default)]
+    pub sa_1099: Option<bool>,
+    /// Form 5498-SA — HSA contribution and FMV information (T16).
+    #[serde(default)]
+    pub sa_5498: Option<bool>,
     /// Form 1099-R — §2.2, refuses on `Some(true)`.
     #[serde(default)]
     pub r_1099: Option<bool>,
@@ -457,6 +496,8 @@ impl DocumentCensus {
             DocumentRow::G1099 => self.g_1099,
             DocumentRow::Form1098 => self.form_1098,
             DocumentRow::Form1098e => self.form_1098e,
+            DocumentRow::Sa1099 => self.sa_1099,
+            DocumentRow::Sa5498 => self.sa_5498,
             DocumentRow::R1099 => self.r_1099,
             DocumentRow::Ssa1099 => self.ssa_1099,
             DocumentRow::NecMiscK1099 => self.nec_misc_k_1099,
@@ -481,6 +522,8 @@ impl DocumentCensus {
             DocumentRow::G1099 => self.g_1099 = v,
             DocumentRow::Form1098 => self.form_1098 = v,
             DocumentRow::Form1098e => self.form_1098e = v,
+            DocumentRow::Sa1099 => self.sa_1099 = v,
+            DocumentRow::Sa5498 => self.sa_5498 = v,
             DocumentRow::R1099 => self.r_1099 = v,
             DocumentRow::Ssa1099 => self.ssa_1099 = v,
             DocumentRow::NecMiscK1099 => self.nec_misc_k_1099 = v,
@@ -523,6 +566,9 @@ pub fn declared_rows(
         // ★ T5 — the 1098-E gained a `Vec` when `Form1098E` replaced the
         //   `sch1.student_loan_interest_paid` scalar.
         DocumentRow::Form1098e => Some(ri.form_1098e.len()),
+        // ★ T16 — both HSA information returns gained a `Vec` with the Form 8889 build.
+        DocumentRow::Sa1099 => Some(ri.sa_1099.len()),
+        DocumentRow::Sa5498 => Some(ri.sa_5498.len()),
         DocumentRow::Form1098
         | DocumentRow::R1099
         | DocumentRow::Ssa1099
@@ -579,6 +625,22 @@ pub const fn requires_transcription(row: DocumentRow) -> bool {
         //     into, `itemized_prior_year` decides §111(a) on it, and a declared 1099-G with no row
         //     is once again exactly "nothing ever populated it".
         DocumentRow::G1099 => true,
+        // ★★★ 1099-SA — YES. Form 8889 line 14a reads the SUM of the rows' box 1 and NOTHING ELSE
+        //     carries an HSA distribution onto the return: there is no scalar behind it, and the
+        //     payer *"isn't required to compute the taxable amount of any distribution"*
+        //     (`f1099sa--2019.txt:61`), so the figure exists nowhere else. A declared 1099-SA with
+        //     no row is exactly "nothing ever populated it" — and what it hides is a DISTRIBUTION,
+        //     which is gross income plus a 20% additional tax under §223(f). The understatement
+        //     direction, so the demand is right.
+        DocumentRow::Sa1099 => true,
+        // ★★★ 5498-SA — **NO, and the reason is the mirror of the 1099-B's.** No line of Form 8889
+        //     sums any box of it: line 2 asks for the contributions the FILER made, and box 2 is
+        //     the trustee's employer-and-employee total by calendar year. So zero rows cannot
+        //     understate anything, and a filer who holds the form but has already entered their own
+        //     contributions on line 2 has a correct return with no row. The DECLARATION is still
+        //     required — it is what makes "I hold one" recorded rather than blank — and the
+        //     contradiction rule still runs, so a `Some(false)` beside a transcribed row refuses.
+        DocumentRow::Sa5498 => false,
         // The §2.2 families refuse on `Yes` before this is ever read, and the one scalar-shadowed
         // row left (`form_1098`, until T9) is not live — none of them has rows to demand.
         DocumentRow::Form1098
@@ -690,6 +752,26 @@ pub fn row_is_pre_named(
         //   seeds W-2 employers, 1099 payers and venues — R10.4). So no `form_1098e` row can be
         //   pre-named, and a `No` beside a transcribed row correctly refuses instead of deleting it.
         //   If the opener ever carries a servicer identity, this arm is where it lands.
+        // ★★★ T16 — the HSA TRUSTEE **is** seeded (`open_next_year` carries every prior
+        //     `sa_1099` / `sa_5498` identity, because a trustee that sent a Form 1099-SA last year
+        //     will send one again whenever money leaves the account). So these rows CAN be
+        //     pre-named, and the comparison is the same identity-only seed every other payer gets:
+        //     anything the filer has typed — a box, a date, an account-type checkbox — makes the
+        //     row unequal and it is KEPT, with the contradiction refusal still standing.
+        DocumentRow::Sa1099 => ri.sa_1099.get(i).is_some_and(|r| {
+            *r == crate::tax::return_inputs::Form1099Sa {
+                payer: r.payer.clone(),
+                payer_tin: r.payer_tin.clone(),
+                ..Default::default()
+            }
+        }),
+        DocumentRow::Sa5498 => ri.sa_5498.get(i).is_some_and(|r| {
+            *r == crate::tax::return_inputs::Form5498Sa {
+                trustee: r.trustee.clone(),
+                trustee_tin: r.trustee_tin.clone(),
+                ..Default::default()
+            }
+        }),
         DocumentRow::Form1098e
         // No section exists, so there is no row to be pre-named — and it is a `match`, so a kind
         // that GAINS a section reds here.
@@ -735,6 +817,11 @@ pub fn drop_pre_named_rows(
         DocumentRow::Div1099 => retain_by(&mut ri.div_1099, &keep),
         DocumentRow::G1099 => retain_by(&mut ri.g_1099, &keep),
         DocumentRow::B1099 => retain_by(&mut ri.b_1099, &keep),
+        // ★ T16 — both HSA rows have a `Vec` to retain over. `row_is_pre_named` is `false` for
+        //   them today, so this removes nothing; it is here because the two predicates must agree,
+        //   and a kind whose rows CAN be pre-named must also be able to shed them.
+        DocumentRow::Sa1099 => retain_by(&mut ri.sa_1099, &keep),
+        DocumentRow::Sa5498 => retain_by(&mut ri.sa_5498, &keep),
         DocumentRow::Form1098
         | DocumentRow::Form1098e
         | DocumentRow::R1099
@@ -887,6 +974,17 @@ mod tests {
                     );
                     continue;
                 }
+                // ★ T16 — both HSA information returns HAVE a section, and the opener DOES seed
+                //   their trustee (an HSA trustee sends a Form 1099-SA every year money leaves the
+                //   account), so a pre-named row is real here and a `No` must drop it.
+                DocumentRow::Sa1099 => ri.sa_1099.push(crate::tax::return_inputs::Form1099Sa {
+                    payer: "P".into(),
+                    ..Default::default()
+                }),
+                DocumentRow::Sa5498 => ri.sa_5498.push(crate::tax::return_inputs::Form5498Sa {
+                    trustee: "P".into(),
+                    ..Default::default()
+                }),
                 other => panic!("{other:?} gained a section — give it a pre-named seed here"),
             }
             let q = FORM_QUESTIONS
@@ -981,6 +1079,17 @@ mod tests {
                     );
                     continue;
                 }
+                // ★ T16 — both HSA information returns HAVE a section, and the opener DOES seed
+                //   their trustee (an HSA trustee sends a Form 1099-SA every year money leaves the
+                //   account), so a pre-named row is real here and a `No` must drop it.
+                DocumentRow::Sa1099 => ri.sa_1099.push(crate::tax::return_inputs::Form1099Sa {
+                    payer: "P".into(),
+                    ..Default::default()
+                }),
+                DocumentRow::Sa5498 => ri.sa_5498.push(crate::tax::return_inputs::Form5498Sa {
+                    trustee: "P".into(),
+                    ..Default::default()
+                }),
                 other => panic!("{other:?} gained a section — give it a pre-named seed here"),
             }
             assert_eq!(declared_rows(&ri, *row), Some(1));
@@ -997,15 +1106,19 @@ mod tests {
     /// make a new variant a compile error; this pins that `ALL` lists it too).
     #[test]
     fn every_row_is_listed_and_round_trips() {
-        assert_eq!(DocumentRow::ALL.len(), 18, "§5.1 declares eighteen rows");
+        assert_eq!(
+            DocumentRow::ALL.len(),
+            20,
+            "§5.1's eighteen rows plus T16's two HSA information returns"
+        );
         let mut c = DocumentCensus::default();
         for row in DocumentRow::ALL {
             assert_eq!(c.get(*row), None, "{row:?} starts unanswered");
             c.set(*row, Some(true));
             assert_eq!(c.get(*row), Some(true), "{row:?} reads back what was set");
         }
-        // Every leaf is now `Some(true)` — i.e. `set` wrote eighteen DISTINCT leaves, not one
-        // eighteen times.
+        // Every leaf is now `Some(true)` — i.e. `set` wrote twenty DISTINCT leaves, not one
+        // twenty times.
         for row in DocumentRow::ALL {
             assert_eq!(c.get(*row), Some(true), "{row:?} was not overwritten");
         }

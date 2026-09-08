@@ -1,0 +1,24 @@
+https://www.irs.gov/pub/irs-prior/f1099sa--2025.pdf
+
+# f1099sa--2025.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  cc2324629a9bd416180c1e10b66ce44d914937a6c4a11cc4bb8e17c22da44bd1
+# bytes   79460
+#
+# Fetch:    curl -sL -o f1099sa--2025.pdf https://www.irs.gov/pub/irs-prior/f1099sa--2025.pdf
+# Verify:   sha256sum f1099sa--2025.pdf   # must equal the sha256 above
+#
+# ★ A DIFFERENT hash does not mean a corrupt download — it means the IRS REVISED this
+# document. That is a change to the authority: review it, never silently absorb it.
+#
+# The committed text layer is design/forms/extract/f1099sa--2025.txt — that is what the
+# conformance tests read, so they run with no PDF and no network.
+#
+# Archived 2026-09-07 for the interview build (design/SPEC_interview.md r2 §7 T16, owner
+# ruling FR-76): Form 8889 is the one form on the owner's filed TY2024 return that btctax
+# refused, and T16 transcribes it line by line with these documents as the authority.
+# REVISION, READ OFF THE DOCUMENT'S OWN TEXT:
+#   "(Rev. April 2025)" (extract:6); footer "Form 1099-SA (Rev. 4-2025)" (extract:26).
+# PERIODIC (continuous-use). In force from TY2025 onward.
+# ★ Byte-identical to the CURRENT moving URL https://www.irs.gov/pub/irs-pdf/f1099sa.pdf
+# (both sha256 cc2324629a9bd416180c1e10b66ce44d914937a6c4a11cc4bb8e17c22da44bd1, measured
+# 2026-09-07), so no later revision has displaced it.

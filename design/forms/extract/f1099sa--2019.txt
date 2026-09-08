@@ -1,0 +1,122 @@
+                     9494                      VOID               CORRECTED
+TRUSTEE'S/PAYER’S name, street address, city or town, state or province,                             OMB No. 1545-1517
+country, ZIP or foreign postal code, and telephone number                                                                             Distributions
+                                                                                                     Form   1099-SA                  From an HSA,
+                                                                                                                                   Archer MSA, or
+                                                                                                     (Rev. November 2019)
+                                                                                                                               Medicare Advantage
+                                                                                                       For calendar year
+                                                                                                                                              MSA
+                                                                                                            20
+PAYER’S TIN                            RECIPIENT’S TIN                        1 Gross distribution    2 Earnings on excess cont.                 Copy A
+                                                                              $                       $                                           For
+                                                                                                                                     Internal Revenue
+RECIPIENT’S name                                                              3 Distribution code     4 FMV on date of death
+                                                                                                                                       Service Center
+                                                                                                                                    File with Form 1096.
+                                                                                                      $                                   For Privacy Act
+ Street address (including apt. no.)                                          5 HSA                                                       and Paperwork
+                                                                                                                                           Reduction Act
+                                                                                  Archer                                                  Notice, see the
+                                                                                  MSA
+City or town, state or province, country, and ZIP or foreign postal code                                                                 current General
+                                                                                  MA                                                     Instructions for
+                                                                                  MSA
+                                                                                                                                                  Certain
+Account number (see instructions)                                                                                                            Information
+                                                                                                                                                Returns.
+Form 1099-SA (Rev. 11-2019)                Cat. No. 38471D             www.irs.gov/Form1099SA          Department of the Treasury - Internal Revenue Service
+Do Not Cut or Separate Forms on This Page — Do Not Cut or Separate Forms on This Page
+                                                                  CORRECTED (if checked)
+TRUSTEE’S/PAYER’S name, street address, city or town, state or province,                                OMB No. 1545-1517
+country, ZIP or foreign postal code, and telephone number                                                                                Distributions
+                                                                                                        Form   1099-SA                  From an HSA,
+                                                                                                                                      Archer MSA, or
+                                                                                                        (Rev. November 2019)
+                                                                                                                                  Medicare Advantage
+                                                                                                          For calendar year
+                                                                                                                                                 MSA
+                                                                                                               20
+PAYER’S TIN                            RECIPIENT’S TIN                     1 Gross distribution          2 Earnings on excess cont.                 Copy B
+                                                                           $                             $                                              For
+RECIPIENT’S name                                                           3 Distribution code           4 FMV on date of death                   Recipient
+
+                                                                                                         $
+Street address (including apt. no.)                                        5 HSA
+                                                                               Archer
+                                                                               MSA                                                        This information
+City or town, state or province, country, and ZIP or foreign postal code                                                                is being furnished
+                                                                               MA
+                                                                               MSA                                                              to the IRS.
+Account number (see instructions)
+
+
+Form 1099-SA (Rev. 11-2019)                   (keep for your records)          www.irs.gov/Form1099SA     Department of the Treasury - Internal Revenue Service
+Instructions for Recipient                                                                   Nonspouse beneficiary. If you inherited the HSA, Archer MSA, or MA MSA
+                                                                                             from someone who wasn’t your spouse, you must report as income on your tax
+Distributions from a health savings account (HSA), Archer medical savings                    return the FMV of the account as of the date of death. Report the FMV on your
+account (MSA), or Medicare Advantage (MA) MSA are reported to you on                         tax return for the year the account owner died even if you received the
+Form 1099-SA. File Form 8853 or Form 8889 with your Form 1040 or 1040-SR                     distribution from the account in a later year. See the Instructions for Form 8853
+to report a distribution from these accounts even if the distribution isn’t taxable.         or the Instructions for Form 8889. Any earnings on the account after the date of
+The payer isn’t required to compute the taxable amount of any distribution.                  death (box 1 minus box 4 of Form 1099-SA) are taxable. Include the earnings on
+   An HSA or Archer MSA distribution isn’t taxable if you used it to pay qualified medical   the “Other income” line of your tax return.
+expenses of the account holder or eligible family member or you rolled it over. An HSA       Account number. May show an account or other unique number the payer
+may be rolled over to another HSA; an Archer MSA may be rolled over to another Archer        assigned to distinguish your account.
+MSA or an HSA. An MA MSA isn’t taxable if you used it to pay qualified medical               Box 1. Shows the amount received this year. The amount may have been a
+expenses of the account holder only. If you didn’t use the distribution from an HSA,         direct payment to the medical service provider or distributed to you.
+Archer MSA, or MA MSA to pay for qualified medical expenses, or in the case of an HSA        Box 2. Shows the earnings on any excess contributions you withdrew from an HSA
+or Archer MSA, you didn’t roll it over, you must include the distribution in your income     or Archer MSA by the due date of your income tax return. If you withdrew the
+(see Form 8853 or Form 8889). Also, you may owe a penalty.                                   excess, plus any earnings, by the due date of your income tax return, you must
+   You may repay a mistaken distribution from an HSA no later than April 15                  include the earnings in your income in the year you received the distribution even if
+following the first year you knew or should have known the distribution was a                you used it to pay qualified medical expenses. This amount is included in box 1.
+mistake, providing the trustee allows the repayment.                                         Include the earnings on the “Other income” line of your tax return. An excise tax of
+   For more information, see the Instructions for Form 8853 and the Instructions             6% for each tax year is imposed on you for excess individual and employer
+for Form 8889. Also see Pub. 969.                                                            contributions that remain in the account. See Form 5329, Additional Taxes on
+Recipient’s taxpayer identification number (TIN). For your protection, this form             Qualified Plans (Including IRAs) and Other Tax-Favored Accounts.
+may show only the last four digits of your TIN (SSN, ITIN, ATIN, or EIN). However,           Box 3. These codes identify the distribution you received: 1—Normal
+the issuer has reported your complete identification number to the IRS.                      distribution; 2—Excess contributions; 3—Disability; 4—Death distribution other
+Spouse beneficiary. If you inherited an Archer MSA or MA MSA because of the death of         than code 6; 5—Prohibited transaction; 6—Death distribution after year of death
+your spouse, special rules apply. See the Instructions for Form 8853. If you inherited an    to a nonspouse beneficiary.
+HSA because of the death of your spouse, see the Instructions for Form 8889.                 Box 4. If the account holder died, shows the FMV of the account on the date of death.
+Estate beneficiary. If the HSA, Archer MSA, or MA MSA account holder dies                    Box 5. Shows the type of account that is reported on this Form 1099-SA.
+and the estate is the beneficiary, the fair market value (FMV) of the account on             Future developments. For the latest information about developments related to
+the date of death is includible in the account holder’s gross income. Report the             Form 1099-SA and its instructions, such as legislation enacted after they were
+amount on the account holder’s final income tax return.                                      published, go to www.irs.gov/Form1099SA.
+                                               VOID               CORRECTED
+TRUSTEE’S/PAYER’S name, street address, city or town, state or province,                            OMB No. 1545-1517
+country, ZIP or foreign postal code, and telephone number                                                                            Distributions
+                                                                                                    Form   1099-SA                  From an HSA,
+                                                                                                                                  Archer MSA, or
+                                                                                                    (Rev. November 2019)
+                                                                                                                              Medicare Advantage
+                                                                                                      For calendar year
+                                                                                                                                             MSA
+                                                                                                           20
+PAYER’S TIN                            RECIPIENT’S TIN                       1 Gross distribution    2 Earnings on excess cont.                 Copy C
+                                                                             $                       $                                            For
+RECIPIENT’S name                                                             3 Distribution code     4 FMV on date of death             Trustee/Payer
+                                                                                                                                         For Privacy Act
+                                                                                                     $                                   and Paperwork
+Street address (including apt. no.)                                          5 HSA                                                        Reduction Act
+                                                                                 Archer                                                  Notice, see the
+                                                                                 MSA                                                    current General
+City or town, state or province, country, and ZIP or foreign postal code                                                                Instructions for
+                                                                                 MA
+                                                                                 MSA                                                             Certain
+Account number (see instructions)                                                                                                           Information
+                                                                                                                                               Returns.
+
+Form 1099-SA (Rev. 11-2019)                                       www.irs.gov/Form1099SA              Department of the Treasury - Internal Revenue Service
+Instructions for Trustee/Payer
+To complete Form 1099-SA, use:                                      To file electronically, you must have software that generates
+• The current General Instructions for Certain Information       a file according to the specifications in Pub. 1220.
+Returns, and                                                     Need help? If you have questions about reporting on Form
+• The current Instructions for Forms 1099-SA and 5498-SA.        1099-SA, call the information reporting customer service site
+                                                                 toll free at 866-455-7438 or 304-263-8700 (not toll free).
+   To get or to order these instructions, go to                  Persons with a hearing or speech disability with access to
+www.irs.gov/Form1099SA.                                          TTY/TDD equipment can call 304-579-4827 (not toll free).
+Filing and furnishing. For filing and furnishing instructions,
+including due dates, and to request filing or furnishing
+extensions, see the current General Instructions for Certain
+Information Returns.
+

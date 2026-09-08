@@ -314,6 +314,34 @@ pub enum QuestionId {
     /// Form 1040 whether or not you received a Form 1099-DA"* (`i1040gi--2025.txt:1399-1401`).
     /// APPENDED AT THE END for the `decl_tristate!` array-index reason recorded above.
     DigitalAssetActivity,
+    // ── ★★★ T16 / FR-76 — Form 8889 (Health Savings Accounts). APPENDED AT THE END for the
+    //    `decl_tristate!` array-index reason recorded above. Two census rows for the HSA
+    //    information returns, then the seven questions Form 8889 asks that nothing else on the
+    //    return can answer. All seven are live iff `sch1.hsa_activity == Some(true)` — a filer with
+    //    no HSA trigger is asked none of them, and a filer with one is refused until every one is
+    //    answered.
+    /// R3 / T16 — the Form 1099-SA census row.
+    DocSa1099,
+    /// R3 / T16 — the Form 5498-SA census row.
+    DocSa5498,
+    /// Form 8889 **line 1** — self-only or FAMILY high-deductible health plan coverage.
+    HsaFamilyCoverage,
+    /// Form 8889 **line 3**'s own condition — eligible on the first day of every month, with the
+    /// same coverage. `No` is the form's *"All others"*, which the instructions send to the Line 3
+    /// Limitation Chart and Worksheet.
+    HsaEligibleEveryMonth,
+    /// Form 8889 **line 3 item (6) / line 7** — age 55 or older at the end of the tax year.
+    HsaAge55OrOlder,
+    /// Form 8889 Part I / the Line 3 Limitation Chart's first question — enrolled in Medicare for
+    /// any month.
+    HsaMedicareEnrollment,
+    /// Form 8889's Part I / II / III heading condition — both spouses have separate HSAs, which the
+    /// form answers with *"Complete a separate Form 8889 for each spouse."*
+    HsaBothSpousesHaveHsas,
+    /// Form 8889 **line 4** — Archer MSA contributions, which come from **Form 8853**.
+    HsaArcherMsaActivity,
+    /// Form 8889 **Part III** — failure to remain an eligible individual during a testing period.
+    HsaTestingPeriodFailure,
 }
 
 impl QuestionId {
@@ -359,6 +387,16 @@ impl QuestionId {
         QuestionId::StateRefundWithout1099g,
         QuestionId::ItemizedPriorYear,
         QuestionId::DigitalAssetActivity,
+        // ★★★ T16 / FR-76 — indices 41..=49, appended at the END (see the enum's own note).
+        QuestionId::DocSa1099,
+        QuestionId::DocSa5498,
+        QuestionId::HsaFamilyCoverage,
+        QuestionId::HsaEligibleEveryMonth,
+        QuestionId::HsaAge55OrOlder,
+        QuestionId::HsaMedicareEnrollment,
+        QuestionId::HsaBothSpousesHaveHsas,
+        QuestionId::HsaArcherMsaActivity,
+        QuestionId::HsaTestingPeriodFailure,
     ];
 }
 
@@ -1780,7 +1818,211 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         //   `screen_compute_dependent` and not in this registry: liveness is an input predicate.
         neutral: false,
     },
+    // ── ★★★ T16 / FR-76 — the two HSA information-return census rows. ────────────────────────────
+    FormQuestion {
+        id: QuestionId::DocSa1099,
+        prompt: crate::tax::document_census::DocumentRow::Sa1099.prompt(),
+        unanswered: RefuseReason::DocumentCensusUnanswered {
+            kind: crate::tax::document_census::DocumentRow::Sa1099,
+        },
+        unanswered_detail: DOC_CENSUS_UNANSWERED_DETAIL,
+        live: |ri| {
+            crate::tax::document_census::row_is_live(
+                ri,
+                crate::tax::document_census::DocumentRow::Sa1099,
+            )
+        },
+        get: |ri| ri.documents.sa_1099,
+        set: |ri, v| {
+            crate::tax::document_census::answer_row(
+                ri,
+                crate::tax::document_census::DocumentRow::Sa1099,
+                v,
+            );
+        },
+        durability: Durability::PerYear,
+        neutral: false,
+    },
+    FormQuestion {
+        id: QuestionId::DocSa5498,
+        prompt: crate::tax::document_census::DocumentRow::Sa5498.prompt(),
+        unanswered: RefuseReason::DocumentCensusUnanswered {
+            kind: crate::tax::document_census::DocumentRow::Sa5498,
+        },
+        unanswered_detail: DOC_CENSUS_UNANSWERED_DETAIL,
+        live: |ri| {
+            crate::tax::document_census::row_is_live(
+                ri,
+                crate::tax::document_census::DocumentRow::Sa5498,
+            )
+        },
+        get: |ri| ri.documents.sa_5498,
+        set: |ri, v| {
+            crate::tax::document_census::answer_row(
+                ri,
+                crate::tax::document_census::DocumentRow::Sa5498,
+                v,
+            );
+        },
+        durability: Durability::PerYear,
+        neutral: false,
+    },
+    // ── ★★★ T16 / FR-76 — FORM 8889's OWN SEVEN QUESTIONS. Every one is live iff the §223 trigger
+    //    declaration is affirmed, and every one is a question the FORM asks that nothing else on
+    //    the return can answer. ──────────────────────────────────────────────────────────────────
+    FormQuestion {
+        id: QuestionId::HsaFamilyCoverage,
+        prompt: "Form 8889 line 1: was your high-deductible health plan (HDHP) coverage FAMILY coverage? \
+                 (Yes = the form's \"Family\" box; No = its \"Self-only\" box. If you were covered by \
+                 both at different times, check the plan that was in effect for the longer period; \
+                 if you were covered by both at the same time, you are treated as having family \
+                 coverage.)",
+        unanswered: RefuseReason::Form8889Unanswered {
+            question: QuestionId::HsaFamilyCoverage,
+        },
+        unanswered_detail: "Form 8889 line 1 asks you to check your HDHP coverage, and line 3's contribution limit is \
+             a different figure for each box — btctax will not choose one for you. Run `btctax income \
+             answer`",
+        live: hsa_question_live,
+        get: |ri| ri.hsa.family_coverage,
+        set: |ri, v| ri.hsa.family_coverage = Some(v),
+        // ★ §G-15 — PER-YEAR: every one of these asserts about ONE tax year's coverage, age,
+        //   enrolment or accounts, so none is durable.
+        durability: Durability::PerYear,
+        neutral: false,
+    },
+    FormQuestion {
+        id: QuestionId::HsaEligibleEveryMonth,
+        prompt: "Form 8889 line 3: on the first day of EVERY month this year, were you (or were you \
+                 considered) an eligible individual with the SAME coverage? (The last-month rule \
+                 counts as \"considered\": if you were an eligible individual on the first day of the \
+                 last month of your tax year, you are treated as eligible for the whole year.)",
+        unanswered: RefuseReason::Form8889Unanswered {
+            question: QuestionId::HsaEligibleEveryMonth,
+        },
+        unanswered_detail: "Form 8889 line 3 gives one flat limit to a filer eligible with the same coverage every \
+             month and sends everyone else to the Line 3 Limitation Chart and Worksheet, which btctax \
+             does not carry. Entering the flat limit for a part-year filer would overstate the \
+             deduction. Run `btctax income answer`",
+        live: hsa_question_live,
+        get: |ri| ri.hsa.eligible_every_month_same_coverage,
+        set: |ri, v| ri.hsa.eligible_every_month_same_coverage = Some(v),
+        // ★ §G-15 — PER-YEAR: every one of these asserts about ONE tax year's coverage, age,
+        //   enrolment or accounts, so none is durable.
+        durability: Durability::PerYear,
+        neutral: true,
+    },
+    FormQuestion {
+        id: QuestionId::HsaAge55OrOlder,
+        prompt: "Form 8889 lines 3 and 7: were you age 55 or older at the END of this tax year? (\u{a7}223(b)(3) \
+                 lets you contribute an additional $1,000; the form puts it on line 3 if you are \
+                 unmarried, or married with self-only coverage all year, and on line 7 if you are \
+                 married with family coverage.)",
+        unanswered: RefuseReason::Form8889Unanswered {
+            question: QuestionId::HsaAge55OrOlder,
+        },
+        unanswered_detail: "Form 8889's contribution limit is $1,000 higher for a filer who reached 55 by the end of \
+             the year (\u{a7}223(b)(3)(B)), and the form asks it on two different lines depending on your \
+             marital status and coverage. Run `btctax income answer`",
+        live: hsa_question_live,
+        get: |ri| ri.hsa.age_55_or_older_at_year_end,
+        set: |ri, v| ri.hsa.age_55_or_older_at_year_end = Some(v),
+        // ★ §G-15 — PER-YEAR: every one of these asserts about ONE tax year's coverage, age,
+        //   enrolment or accounts, so none is durable.
+        durability: Durability::PerYear,
+        neutral: false,
+    },
+    FormQuestion {
+        id: QuestionId::HsaMedicareEnrollment,
+        prompt: "Form 8889 line 3: were you enrolled in MEDICARE for any month this year? (The Line 3 \
+                 Limitation Chart's first question, and Part I's rule: \"You cannot deduct any \
+                 contributions for any month in which you were enrolled in Medicare.\")",
+        unanswered: RefuseReason::Form8889Unanswered {
+            question: QuestionId::HsaMedicareEnrollment,
+        },
+        unanswered_detail: "Medicare enrolment for even one month means the flat line-3 limit is not your limit — the \
+             Line 3 Limitation Chart and Worksheet computes the reduced one, and btctax does not carry \
+             it. Run `btctax income answer`",
+        live: hsa_question_live,
+        get: |ri| ri.hsa.enrolled_in_medicare_any_month,
+        set: |ri, v| ri.hsa.enrolled_in_medicare_any_month = Some(v),
+        // ★ §G-15 — PER-YEAR: every one of these asserts about ONE tax year's coverage, age,
+        //   enrolment or accounts, so none is durable.
+        durability: Durability::PerYear,
+        neutral: false,
+    },
+    FormQuestion {
+        id: QuestionId::HsaBothSpousesHaveHsas,
+        prompt: "Form 8889 Parts I, II and III: do BOTH you and your spouse each have a separate HSA? (The \
+                 form's own answer is \"Complete a separate Form 8889 for each spouse\".)",
+        unanswered: RefuseReason::Form8889Unanswered {
+            question: QuestionId::HsaBothSpousesHaveHsas,
+        },
+        unanswered_detail: "Form 8889 says to complete a separate form for each spouse who has an HSA, and btctax \
+             produces one. Run `btctax income answer`",
+        live: hsa_question_live,
+        get: |ri| ri.hsa.both_spouses_have_hsas,
+        set: |ri, v| ri.hsa.both_spouses_have_hsas = Some(v),
+        // ★ §G-15 — PER-YEAR: every one of these asserts about ONE tax year's coverage, age,
+        //   enrolment or accounts, so none is durable.
+        durability: Durability::PerYear,
+        neutral: false,
+    },
+    FormQuestion {
+        id: QuestionId::HsaArcherMsaActivity,
+        prompt: "Form 8889 line 4: did you or your employer contribute to an ARCHER MSA this year, or did \
+                 you have a Medicare Advantage MSA? (Line 4 takes the amount from Form 8853, lines 1 \
+                 and 2, and the form's first instruction is \"Complete Form 8853 \u{2026} if required\".)",
+        unanswered: RefuseReason::Form8889Unanswered {
+            question: QuestionId::HsaArcherMsaActivity,
+        },
+        unanswered_detail: "Form 8889 line 4 subtracts your Archer MSA contributions from your HSA limit, and it takes \
+             them from Form 8853 — which btctax does not build. A blank line 4 on a return that has \
+             Archer MSA contributions overstates the HSA limit. Run `btctax income answer`",
+        live: hsa_question_live,
+        get: |ri| ri.hsa.archer_msa_activity,
+        set: |ri, v| ri.hsa.archer_msa_activity = Some(v),
+        // ★ §G-15 — PER-YEAR: every one of these asserts about ONE tax year's coverage, age,
+        //   enrolment or accounts, so none is durable.
+        durability: Durability::PerYear,
+        neutral: false,
+    },
+    FormQuestion {
+        id: QuestionId::HsaTestingPeriodFailure,
+        prompt: "Form 8889 Part III: did you STOP being an eligible individual during a testing period \
+                 this year \u{2014} after using the last-month rule, or after an IRA-to-HSA qualified funding \
+                 distribution, in an earlier year? (Part III: \"Income and Additional Tax for Failure \
+                 To Maintain HDHP Coverage\".)",
+        unanswered: RefuseReason::Form8889Unanswered {
+            question: QuestionId::HsaTestingPeriodFailure,
+        },
+        unanswered_detail: "Failing the testing period puts the earlier year's excess contribution back into income on \
+             Schedule 1 line 8f and adds a 10% tax on Schedule 2 line 17d. Computing it needs the \
+             PRIOR year's Line 3 Limitation Chart and Worksheet, which btctax carries for no year, so \
+             the answer decides whether this return can be filed at all. Run `btctax income answer`",
+        live: hsa_question_live,
+        get: |ri| ri.hsa.testing_period_failure,
+        set: |ri, v| ri.hsa.testing_period_failure = Some(v),
+        // ★ §G-15 — PER-YEAR: every one of these asserts about ONE tax year's coverage, age,
+        //   enrolment or accounts, so none is durable.
+        durability: Durability::PerYear,
+        neutral: false,
+    },
 ];
+
+/// ★★★ **T16 — the ONE liveness predicate for every Form 8889 question.**
+///
+/// The §223 trigger declaration is what opens the form: `Some(true)` means a contribution, a
+/// distribution, an inheritance or a testing-period inclusion happened, and Form 8889 is then
+/// mandatory. `Some(false)` and `None` both leave the seven silent — `None` because `HsaActivity`
+/// itself is the live question refusing first, which is the tiering `screen_inputs` already has.
+///
+/// ★ NOT scoped to "there is a Form 1099-SA row": a contribution with no distribution files a Form
+/// 8889 with an empty Part II, so scoping the questions to a document would be the circular liveness
+/// §2.9 records — asking only where btctax already knew the answer.
+fn hsa_question_live(ri: &ReturnInputs) -> bool {
+    ri.sch1.hsa_activity == Some(true)
+}
 
 /// The identity of each SKIPPABLE prompt (§2, class B) — the questions where silence is LAWFUL: a bare
 /// Enter leaves the value `None`, forgoing a benefit whose burden to CLAIM is the filer's (New Colonial
@@ -2699,6 +2941,16 @@ mod tests {
                 QuestionId::ItemizedPriorYear => 39,
                 // ★ R9 / T6 — Form 1040 page 1's Digital Assets question, index 40.
                 QuestionId::DigitalAssetActivity => 40,
+                // ★ T16 / FR-76 — the two HSA census rows and Form 8889's seven questions.
+                QuestionId::DocSa1099 => 41,
+                QuestionId::DocSa5498 => 42,
+                QuestionId::HsaFamilyCoverage => 43,
+                QuestionId::HsaEligibleEveryMonth => 44,
+                QuestionId::HsaAge55OrOlder => 45,
+                QuestionId::HsaMedicareEnrollment => 46,
+                QuestionId::HsaBothSpousesHaveHsas => 47,
+                QuestionId::HsaArcherMsaActivity => 48,
+                QuestionId::HsaTestingPeriodFailure => 49,
             };
             assert_eq!(idx, i, "QuestionId::ALL is out of order / missing {id:?}");
             assert_eq!(
@@ -2709,11 +2961,12 @@ mod tests {
         }
         assert_eq!(
             QuestionId::ALL.len(),
-            41,
-            "17 declarations + the 18 R3 document-census rows + R10.4's filing-status confirmation \
-             + T5's four document-less-income-door questions + R9/T6's Digital Assets question"
+            50,
+            "17 declarations + the 20 R3 document-census rows + R10.4's filing-status confirmation \
+             + T5's four document-less-income-door questions + R9/T6's Digital Assets question \
+             + T16's seven Form 8889 questions"
         );
-        assert_eq!(FORM_QUESTIONS.len(), 41, "one entry per declaration");
+        assert_eq!(FORM_QUESTIONS.len(), 50, "one entry per declaration");
     }
 
     /// ★★★ §G-6/ISO — THE OUT-OF-SCOPE QUESTION MUST NAME THE ISO EXERCISE, WHICH IS NOT INCOME.

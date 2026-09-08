@@ -17,7 +17,7 @@ use crate::tax::return_inputs::{
     HouseholdHeader, Owner, Payments, Person, ReturnInputs, ScheduleAInputs, ScheduleCInputs, W2,
 };
 use crate::tax::tables::{
-    AmtParams, FullReturnParams, LtcgBreakpoints, OrdinaryBracket, OrdinarySchedule,
+    AmtParams, FullReturnParams, HsaParams, LtcgBreakpoints, OrdinaryBracket, OrdinarySchedule,
     SaltLimitation, TaxTable,
 };
 use crate::tax::types::FilingStatus;
@@ -158,6 +158,14 @@ pub fn ty2024_params() -> FullReturnParams {
             rate_28: dec!(0.28),
             rate_28_subtrahend: dec!(4652),
             rate_28_subtrahend_mfs: dec!(2326),
+        },
+        // §223(b)(2) HSA contribution limitation (Rev. Proc. 2023-23 §2.01(1)) — $4,150 self-only,
+        // $8,300 family. §223(b)(3)(B)'s additional contribution at 55+ is a flat statutory
+        // $1,000, NOT indexed.
+        hsa: HsaParams {
+            self_only_limit: dec!(4150),
+            family_limit: dec!(8300),
+            additional_contribution_55: dec!(1000),
         },
     }
 }
@@ -760,6 +768,20 @@ pub struct GoldenInputs {
     /// own `why`.
     #[serde(default)]
     pub charitable_cash: f64,
+    /// ★★★ **Schedule 1 line 13 — the §223 HSA DEDUCTION** (T16 / FR-76).
+    ///
+    /// The figure the filer CONTRIBUTED to their own HSA, which Form 8889 line 13 deducts after its
+    /// §223(b) limit. Both engines take it directly: OTS's `S1_13` (*"Health savings account
+    /// deduction. Attach Form 8889"*) and Tax-Calculator's `e03290` (*"Health savings account
+    /// deduction from Form 8889"*).
+    ///
+    /// ★★ **Keep it at or under the year's §223(b)(2) limit.** Neither oracle applies the limit —
+    /// each takes the deduction as given — so a household over it would have btctax REFUSE (excess
+    /// contributions need Form 5329) while both engines happily deducted the excess. That is the
+    /// V2b shape recorded on `charitable_cash` above: a corpus cell that crosses a ceiling one
+    /// engine does not model loses that engine. The constraint lives in the corpus cell's own `why`.
+    #[serde(default)]
+    pub hsa_deduction: f64,
 }
 
 pub fn golden_usd(v: f64) -> Usd {
@@ -921,6 +943,30 @@ pub fn build_golden_return(i: &GoldenInputs) -> (ReturnInputs, LedgerState) {
             is_cooperative_patron: Some(false),
             ..Default::default()
         });
+    }
+    // ★★★ T16 — the §223 HSA deduction. The oracle gives a DEDUCTION; btctax gives Form 8889 the
+    //     CONTRIBUTION and lets line 13 produce the deduction — which is the point of driving the
+    //     form rather than the figure. They agree exactly while the contribution is within the
+    //     year's §223(b) limit, which the corpus cell's own `why` is required to keep it under.
+    //
+    // ★ The seven Form 8889 declarations are answered the way an ordinary single-coverage HSA
+    //   holder answers them: self-only coverage, eligible every month with the same coverage, under
+    //   55, no Medicare, one HSA, no Archer MSA, no testing-period failure. Every one of those is a
+    //   real answer to a question the form asks — none is a default, and each is what makes line 3
+    //   the flat limit rather than the worksheet's.
+    if i.hsa_deduction > 0.0 {
+        ri.sch1.hsa_activity = Some(true);
+        ri.hsa = crate::tax::return_inputs::HsaInputs {
+            family_coverage: Some(false),
+            eligible_every_month_same_coverage: Some(true),
+            age_55_or_older_at_year_end: Some(false),
+            enrolled_in_medicare_any_month: Some(false),
+            both_spouses_have_hsas: Some(false),
+            archer_msa_activity: Some(false),
+            testing_period_failure: Some(false),
+            line2_contributions_you_made: golden_usd(i.hsa_deduction),
+            ..Default::default()
+        };
     }
     // Schedule B Part III must be answered when Schedule B files.
     ri.foreign_accounts = Some(false);

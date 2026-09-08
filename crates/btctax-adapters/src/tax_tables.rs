@@ -48,7 +48,7 @@
 //! Callers requesting a year with no bundled table receive `None` from [`TaxTables::table_for`],
 //! which the compute layer converts to `TaxOutcome::NotComputable(TaxTableMissing)` (B.4/I6).
 use btctax_core::tax::tables::{
-    AmtParams, FullReturnParams, FullReturnTables, LtcgBreakpoints, OrdinaryBracket,
+    AmtParams, FullReturnParams, FullReturnTables, HsaParams, LtcgBreakpoints, OrdinaryBracket,
     OrdinarySchedule, SaltLimitation, TaxTable, TaxTables,
 };
 use btctax_core::{FilingStatus, Usd};
@@ -163,6 +163,14 @@ fn ty2024_full_return() -> FullReturnParams {
             rate_28_subtrahend: dec!(4652),
             rate_28_subtrahend_mfs: dec!(2326),
         },
+        // §223(b)(2) HSA contribution limitation (Rev. Proc. 2023-23 §2.01(1)) — $4,150 self-only,
+        // $8,300 family. §223(b)(3)(B)'s additional contribution at 55+ is a flat statutory
+        // $1,000, NOT indexed.
+        hsa: HsaParams {
+            self_only_limit: dec!(4150),
+            family_limit: dec!(8300),
+            additional_contribution_55: dec!(1000),
+        },
     }
 }
 
@@ -259,6 +267,13 @@ pub fn ty2026_full_return() -> FullReturnParams {
             rate_28: dec!(0.28),
             rate_28_subtrahend: dec!(4890),
             rate_28_subtrahend_mfs: dec!(2445),
+        },
+        // §223(b)(2) (Rev. Proc. 2025-19 §2.01(1)). The 55+ amount is §223(b)(3)(B)'s flat
+        // statutory $1,000 — it is not indexed and has not moved since 2009.
+        hsa: HsaParams {
+            self_only_limit: dec!(4400),
+            family_limit: dec!(8750),
+            additional_contribution_55: dec!(1000),
         },
     }
 }

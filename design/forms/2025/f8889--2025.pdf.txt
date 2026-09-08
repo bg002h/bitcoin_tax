@@ -1,0 +1,25 @@
+https://www.irs.gov/pub/irs-prior/f8889--2025.pdf
+
+# f8889--2025.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  15ed4587f75bec57b0b343dfd001b4016f09698af970afee633ca1a364d5f49f
+# bytes   74277
+#
+# Fetch:    curl -sL -o f8889--2025.pdf https://www.irs.gov/pub/irs-prior/f8889--2025.pdf
+# Verify:   sha256sum f8889--2025.pdf   # must equal the sha256 above
+#
+# ★ A DIFFERENT hash does not mean a corrupt download — it means the IRS REVISED this
+# document. That is a change to the authority: review it, never silently absorb it.
+#
+# The committed text layer is design/forms/extract/f8889--2025.txt — that is what the
+# conformance tests read, so they run with no PDF and no network.
+#
+# Archived 2026-09-07 for the interview build (design/SPEC_interview.md r2 §7 T16, owner
+# ruling FR-76): Form 8889 is the one form on the owner's filed TY2024 return that btctax
+# refused, and T16 transcribes it line by line with these documents as the authority.
+# REVISION, READ OFF THE DOCUMENT'S OWN TEXT (never assumed from the filename):
+#   footer "Form 8889 (2025) Created 3/28/25" (extract:61); face year "2025" (extract:4).
+# ANNUAL. The IRS-final form, not a draft — it carries no draft cover sheet and no
+# "DRAFT" watermark text (0 hits for "draft" in the extract).
+# ★ The LINE SET is identical to the 2024 edition; only the year, the §223(b)(2) limits
+# printed on line 3 ($4,150/$8,300 → $4,300/$8,550) and the footer differ.
+# Attachment Sequence No. 52 (extract:8).

@@ -120,6 +120,8 @@ fn zero_inputs(filing_status: &str) -> GoldenInputs {
         real_estate_tax: 0.0,
         mortgage_interest: 0.0,
         charitable_cash: 0.0,
+        // ★ T16 — no HSA on these households, said rather than inherited.
+        hsa_deduction: 0.0,
     }
 }
 

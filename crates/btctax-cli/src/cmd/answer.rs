@@ -736,8 +736,8 @@ mod tests {
         assert_eq!(
             declaration_ids(&single()),
             vec![
-                // ★★★ R3 / §5.1 — THE DOCUMENT CENSUS, ASKED FIRST (T3 seam review, M5). SEVENTEEN
-                // of the eighteen rows are live for every filer: a document type must be ANSWERED,
+                // ★★★ R3 / §5.1 — THE DOCUMENT CENSUS, ASKED FIRST (T3 seam review, M5). NINETEEN
+                // of the twenty rows are live for every filer: a document type must be ANSWERED,
                 // and "a filer cannot answer no to a category they were never shown". The only
                 // missing one is `DocForm1098`, whose amount is collected today by a scalar — it
                 // opens with T9, and until then a `No` on the row would contradict a figure the
@@ -767,6 +767,11 @@ mod tests {
                 QuestionId::DocC1099,
                 QuestionId::DocA1095,
                 QuestionId::DocT1098,
+                // ★ T16 — the two HSA information returns. Appended at the END of `QuestionId::ALL`
+                //   (indices 41 and 42), so they sort after the eighteen §5.1 rows in the census
+                //   partition `live_questions` builds.
+                QuestionId::DocSa1099,
+                QuestionId::DocSa5498,
                 // ── …then the gate declarations, in registry order, unchanged. ──────────────────
                 QuestionId::DependentTaxpayer,
                 QuestionId::ForeignAccounts,
@@ -1021,6 +1026,17 @@ mod tests {
                     expenses: dec!(5000),
                     ..Default::default()
                 });
+            }
+            // ★★★ T16 — Form 8889's seven questions share ONE liveness predicate: the §223 trigger
+            //     declaration is affirmed. One scenario, exactly as the carryforward trio above.
+            QuestionId::HsaFamilyCoverage
+            | QuestionId::HsaEligibleEveryMonth
+            | QuestionId::HsaAge55OrOlder
+            | QuestionId::HsaMedicareEnrollment
+            | QuestionId::HsaBothSpousesHaveHsas
+            | QuestionId::HsaArcherMsaActivity
+            | QuestionId::HsaTestingPeriodFailure => {
+                r.sch1.hsa_activity = Some(true);
             }
             // ★★★ R3 / T5 — THE DOCUMENT-LESS INCOME DOOR. Each of the three paired questions is
             //     live EXACTLY when its census row says `No` — the pairing R3 states — so the

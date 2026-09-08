@@ -172,7 +172,35 @@ const CEIL_IDIOMS: &[(&str, &str)] = &[
 ///     the form's own `-0-` when none is filed) — `f1040sse:4a`'s shape. 4c is *"enter the **larger**
 ///     of line 4a or line 4b"*, and there is no larger-of production (`Bounded` is *"the smaller
 ///     of"*) — `f1040:12`'s shape, filed for the same reason.
-const MAX_EXCEPTIONS: usize = 24;
+///
+/// **RAISED 24 → 26 on 2026-09-07 (T16 / FR-76), for Schedule 2's TWO HSA lines: `f1040s2:17c` and
+/// `:17d`.** Measured, not estimated: `line-coverage` reported *"26 exceptions, ratchet is 24"* on the
+/// table carrying T16's new rows, so the delta is exactly these two and nothing else.
+///
+/// ★★ They are `f1040s2:2`'s shape, filed for its reason and no new one. Both are CONDITIONAL entries
+/// — *"Additional tax on HSA distributions. **Attach Form 8889**"* and *"Additional tax on an HSA
+/// because you didn't remain an eligible individual. **Attach Form 8889**"* — so both are
+/// `Option<Usd>`, blank on every return that files no Form 8889, and the emitter skips the cells
+/// rather than writing a sworn `0` about a tax the filer never figured on a form the IRS never
+/// receives (§G-11 — *an entry is testimony*). A `Carry` would assert the line always holds a figure.
+///
+/// ★ Note what did NOT need an exception: **every one of Form 8889's own 21 numbered lines** fits a
+/// production, because the form states each one — *"Subtract line 4 from line 3. If zero or less,
+/// enter -0-"* is `Clamped`, *"Add lines 6 and 7"* is `Combine`, *"enter the smaller of line 2 or line
+/// 12"* is `Bounded`, *"Multiply line 20 by 10% (0.10)"* is `Scaled`. That is the transcription rule
+/// paying off: a form written for a person to follow has a production for every line.
+/// **RAISED 26 → 31 on 2026-09-07 (T16), for the FIVE lines of the *Employer Contribution
+/// Worksheet*.** Measured: the run reported *"31 exceptions, ratchet is 26"*, so the delta is
+/// exactly these five.
+///
+/// ★★ They are a different shape from every exception above, and the difference is the point: the
+/// worksheet is in the INSTRUCTIONS, not on a filed form. i8889 prints it as *Keep for Your Records*
+/// to reconcile a **calendar-year** Form W-2 box 12 code W against the **tax year** Form 8889 line 9
+/// asks for. So its lines name `(none)` and quote nothing (rule 2c), and no production can describe
+/// a line that is never printed anywhere. They are covered all the same, because a worksheet whose
+/// arithmetic nothing checks is the blank-with-no-provenance this whole census exists to prevent —
+/// and its OUTPUT is line 9, which is fully checked.
+const MAX_EXCEPTIONS: usize = 31;
 // ★ RAISED 11 → 12 for Form 8995-A **line 38** (§G-28/B1a). The DPAD line is a CONDITIONAL entry with
 //   no "-0-" clause — "DPAD under section 199A(g) allocated from an agricultural or horticultural
 //   cooperative. Don't enter more than line 33 minus line 37" presumes an allocation from a Schedule D
@@ -181,7 +209,11 @@ const MAX_EXCEPTIONS: usize = 24;
 //   an Exception is for.
 
 /// See the block comment at its use site in [`check`].
-const MAX_UNLOCATABLE: usize = 12;
+///
+/// ★ **RAISED 12 → 17 on 2026-09-07 (T16)** for the same five Employer Contribution Worksheet rows
+/// [`MAX_EXCEPTIONS`] names: a `(none)` row is by construction unlocatable in a form's text, because
+/// it denies being a line of one. Measured — the run named exactly those five and no other new row.
+const MAX_UNLOCATABLE: usize = 17;
 // ★ RAISED 8 → 12 on 2026-09-05 (B3/T2) for Schedule 1-A line 22's four money COLUMNS —
 //   `f1040s1a:22a(ii)`, `22a(iii)`, `22b(ii)`, `22b(iii)`. Measured, not estimated: the run named
 //   exactly those four and no other new row. Line 22 is a heading whose entry rows print a bare `a`
@@ -560,6 +592,8 @@ fn booklet_for(form: &str) -> Option<&'static str> {
         "f8960" => "i8960",
         "f8995" => "i8995",
         "f8995a" => "i8995a",
+        // ★ T16 — Form 8889's booklet follows the identically-numbered convention too.
+        "f8889" => "i8889",
         _ => return None,
     })
 }

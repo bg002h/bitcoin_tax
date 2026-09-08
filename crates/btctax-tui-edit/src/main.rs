@@ -10717,13 +10717,14 @@ mod tests {
         }
         assert_eq!(
             app.tax_inputs_form.as_ref().unwrap().section_idx,
-            17,
+            20,
             "section cursor clamps at the last live section (18 on Single: Spouse hidden, \
              box12/charitable nested). ★ +1 for the §G-22 Carryforwards section — the two QBI loss \
              carryforwards were import-only, and omitting them UNDERSTATES tax. ★ +1 again for R3's \
              DocumentCensus section — eighteen tri-states, one per document TYPE. ★ +6 for T5's \
              information-return sections: Forms 1099-INT, 1099-DIV, the filer's-records rows, \
-             1099-B, 1099-G and 1098-E. ★ THE SCHEDULE-B FILER'S-RECORDS SECTION IS COUNTED even \
+             1099-B, 1099-G and 1098-E. ★ +3 for T16's: the Form 1099-SA and Form 5498-SA rows, and \
+             Form 8889's own money leaves. ★ THE SCHEDULE-B FILER'S-RECORDS SECTION IS COUNTED even \
              though it is live only behind R3's door — the left pane lists every section and its \
              fields report `live` individually, exactly as `Spouse` does on an MFJ return."
         );

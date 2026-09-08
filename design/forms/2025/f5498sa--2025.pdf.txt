@@ -1,0 +1,22 @@
+https://www.irs.gov/pub/irs-prior/f5498sa--2025.pdf
+
+# f5498sa--2025.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  3506c7849bd7faa89e445ccc800cd34e8fdbd4b970bdb16e7b2fd0c927c38aef
+# bytes   79992
+#
+# Fetch:    curl -sL -o f5498sa--2025.pdf https://www.irs.gov/pub/irs-prior/f5498sa--2025.pdf
+# Verify:   sha256sum f5498sa--2025.pdf   # must equal the sha256 above
+#
+# ★ A DIFFERENT hash does not mean a corrupt download — it means the IRS REVISED this
+# document. That is a change to the authority: review it, never silently absorb it.
+#
+# The committed text layer is design/forms/extract/f5498sa--2025.txt — that is what the
+# conformance tests read, so they run with no PDF and no network.
+#
+# Archived 2026-09-07 for the interview build (design/SPEC_interview.md r2 §7 T16, owner
+# ruling FR-76): Form 8889 is the one form on the owner's filed TY2024 return that btctax
+# refused, and T16 transcribes it line by line with these documents as the authority.
+# REVISION, READ OFF THE DOCUMENT'S OWN TEXT:
+#   face year "2025" (extract:7); box 2 "Total contributions made in 2025" (extract:9).
+#   ANNUAL — no "Rev." appears anywhere in the document.
+# Its instructions are the COMBINED booklet i1099sa.

@@ -286,6 +286,138 @@ pub struct Form1098E {
     pub box1_interest: Usd,
 }
 
+/// **Form 1099-SA box 5 / Form 5498-SA box 6 — WHICH ACCOUNT the document reports.**
+///
+/// ★ The two forms print the same three-way checkbox, and it is the one box on either that decides
+/// **which form the filer must file**: an HSA goes on Form 8889, an Archer MSA or a Medicare
+/// Advantage MSA goes on **Form 8853** — *"Before you begin: Complete Form 8853, Archer MSAs and
+/// Long-Term Care Insurance Contracts, if required"* (`f8889--2024.txt:13`). btctax builds no Form
+/// 8853, so the two MSA answers refuse
+/// ([`super::return_refuse::RefuseReason::ArcherOrMaMsaNeedsForm8853`]).
+///
+/// ★★ `Option`, and the `None` is the whole point: a document whose account type was never
+/// transcribed is not an HSA by default. Defaulting to `Hsa` would route an Archer MSA's
+/// distribution onto Form 8889 line 14a — the wrong form, silently.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SaAccountType {
+    /// *"HSA"* — the box Form 8889 reads.
+    Hsa,
+    /// *"Archer MSA"* — Form 8853 Section A.
+    ArcherMsa,
+    /// *"MA MSA"* — Form 8853 Section C.
+    MaMsa,
+}
+
+/// **Form 1099-SA — *Distributions From an HSA, Archer MSA, or Medicare Advantage MSA*** (R4 / §5.2,
+/// new at T16).
+///
+/// The archived editions are **Rev. November 2019** (in force for TY2019–TY2024) and **Rev. April
+/// 2025**; both print the identical five boxes, so one struct serves both. Form 8889 line 14a reads
+/// the SUM of box 1 across the rows — *"These amounts should be shown on Form 1099-SA, box 1"*
+/// (`i8889--2024.txt:907-908`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct Form1099Sa {
+    /// *"TRUSTEE'S/PAYER'S name"* as printed on the form.
+    pub payer: String,
+    /// **R10.2 — document identity.** See [`Form1099Int::payer_tin`].
+    #[serde(default)]
+    pub payer_tin: String,
+    /// **R10.2 — when this row was transcribed.** See [`Form1099Int::transcribed_on`].
+    #[serde(default)]
+    pub transcribed_on: Option<Date>,
+    /// **Box 1 — *Gross distribution*.** → Form 8889 line 14a.
+    #[serde(default)]
+    pub box1_gross_distribution: Usd,
+    /// **Box 2 — *Earnings on excess cont.*** ★★★ A refuse-guard. The 1099-SA's own *Instructions for
+    /// Recipient* say of box 2: *"Include the earnings on the “Other income” line of your tax
+    /// return"* (`f1099sa--2019.txt:70-72`) — Schedule 1 line 8z, which btctax fills from nothing. An
+    /// income box with no reader UNDERSTATES, so any amount refuses
+    /// ([`super::return_refuse::RefuseReason::OtherIncomeLine8zNotModeled`]).
+    #[serde(default)]
+    pub box2_earnings_on_excess: Usd,
+    /// **Box 3 — *Distribution code*.** A one-character code, never an amount. Code `4` is death,
+    /// code `3` disability, code `5` a prohibited transaction, code `6` a mistaken distribution — the
+    /// exceptions Form 8889 line 17a turns on are read from the filer's own answer, not from this
+    /// code, because the form asks the FILER (*"If any of the distributions included on line 16 meet
+    /// any of the Exceptions to the Additional 20% Tax (see instructions), check here"*).
+    #[serde(default)]
+    pub box3_distribution_code: String,
+    /// **Box 4 — *FMV on date of death*.** ★★★ A refuse-guard. An inherited account's fair market
+    /// value is income to a non-spouse beneficiary — *"you must report as income on your tax return
+    /// the FMV of the account as of the date of death"* (`f1099sa--2019.txt:57-59`) — on Schedule 1
+    /// line 8z, which btctax fills from nothing. Any amount refuses.
+    #[serde(default)]
+    pub box4_fmv_on_date_of_death: Usd,
+    /// **Box 5 — the *HSA / Archer MSA / MA MSA* checkbox.** See [`SaAccountType`]: anything but
+    /// `Hsa` refuses, naming Form 8853.
+    #[serde(default)]
+    pub box5_account_type: Option<SaAccountType>,
+}
+
+/// **Form 5498-SA — *HSA, Archer MSA, or Medicare Advantage MSA Information*** (R4 / §5.2, new at
+/// T16).
+///
+/// ★★ **It is the trustee's statement, and Form 8889 reads NONE of its boxes as a line.** The
+/// contributions Form 8889 line 2 asks for are *"HSA contributions you made for 2024 … Do not
+/// include employer contributions, contributions through a cafeteria plan, or rollovers"*, while the
+/// 5498-SA's box 2 is *"Total contributions made in 2024"* — employer and employee together, and by
+/// calendar year rather than tax year. Adding box 2 to line 2 would double-count the employer's
+/// share (which line 9 already carries from the W-2) and would silently include rollovers.
+///
+/// So the row exists to be **transcribed and compared**, not summed: it is the document that lets a
+/// filer check the figures they entered, and its census presence is what makes *"I hold a 5498-SA"*
+/// a recorded answer instead of a blank. Every box's decision is in
+/// `crates/xtask/src/box_census.rs`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct Form5498Sa {
+    /// *"TRUSTEE'S name"* as printed on the form.
+    pub trustee: String,
+    /// **R10.2 — document identity.** See [`Form1099Int::payer_tin`].
+    #[serde(default)]
+    pub trustee_tin: String,
+    /// **R10.2 — when this row was transcribed.** See [`Form1099Int::transcribed_on`].
+    #[serde(default)]
+    pub transcribed_on: Option<Date>,
+    /// **Box 1 — *Employee's or self-employed person's Archer MSA contributions made in \<year\> and
+    /// \<year+1\> for \<year\>*.** ★ A refuse-guard: an Archer MSA is Form 8853's, never Form 8889's.
+    #[serde(default)]
+    pub box1_archer_msa_contributions: Usd,
+    /// **Box 2 — *Total contributions made in \<year\>*.** Employer AND employee, by CALENDAR year.
+    /// See the struct note: it is not Form 8889 line 2 and is deliberately not summed into it.
+    #[serde(default)]
+    pub box2_total_contributions: Usd,
+    /// **Box 3 — *Total HSA or Archer MSA contributions made in \<year+1\> for \<year\>*.** The
+    /// carry-back window Form 8889 line 2's instruction describes (*"amounts contributed for 2024
+    /// made in 2025 by the unextended deadline"*). Transcribed, not summed — see the struct note.
+    #[serde(default)]
+    pub box3_contributions_next_year_for_this_year: Usd,
+    /// **Box 4 — *Rollover contributions*.** ★ Explicitly EXCLUDED from Form 8889 line 2 by its own
+    /// instruction (*"do not include … amounts rolled over from another HSA or Archer MSA"*).
+    #[serde(default)]
+    pub box4_rollover_contributions: Usd,
+    /// **Box 5 — *Fair market value of HSA, Archer MSA, or MA MSA*.** The account's year-end value.
+    /// No line of Form 8889 or the Form 1040 chain reads it.
+    #[serde(default)]
+    pub box5_fair_market_value: Usd,
+    /// **Box 6 — the *HSA / Archer MSA / MA MSA* checkbox.** See [`SaAccountType`].
+    #[serde(default)]
+    pub box6_account_type: Option<SaAccountType>,
+}
+
+/// **Form 8889 line 1 — the HDHP coverage checkbox.**
+///
+/// > *"Check the box to indicate your coverage under a high-deductible health plan (HDHP) during
+/// > 2024. See instructions"* — `Self-only` / `Family` (`f8889--2024.txt:16-17`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HdhpCoverage {
+    /// *"Self-only"*.
+    SelfOnly,
+    /// *"Family"*.
+    Family,
+}
+
 /// Which Schedule B list a [`ScheduleBRecord`] belongs on (R3/R5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -911,6 +1043,136 @@ pub struct Schedule1Inputs {
     pub hsa_activity: Option<bool>,
 }
 
+/// ★★★ **THE FORM 8889 INPUT SURFACE (T16)** — every question Form 8889 asks that no other part of
+/// the return can answer.
+///
+/// **Read the form, not this struct.** Each field names the line that asks it, carries that line's
+/// own printed words, and is COLLECTED for exactly one reason: the form asks and nothing else on the
+/// return knows. What the return already knows is *not* here — the employer's contributions come
+/// from Form W-2 box 12 code W (line 9's own instruction: *"These contributions should be shown on
+/// Form W-2, box 12, code W"*), the distributions come from the Form 1099-SA rows (line 14a: *"These
+/// amounts should be shown on Form 1099-SA, box 1"*), and marital status comes from the filing
+/// status. Re-asking any of those would invite two answers to one question.
+///
+/// ★★ **Every `Option<bool>` here is a class-(A) DECLARATION with a registry question**, live only
+/// when [`Schedule1Inputs::hsa_activity`] is `Some(true)`: a filer with no HSA activity is asked
+/// none of this, and a filer with HSA activity is refused until every one is answered. That is the
+/// answered-ness invariant at the form's own door — a `false` nobody typed would claim a
+/// contribution limit the filer never earned.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct HsaInputs {
+    /// **L1** — *"Check the box to indicate your coverage under a high-deductible health plan (HDHP)
+    /// during 2024. See instructions"*, whose two boxes are `Self-only` and `Family`
+    /// (`f8889--2024.txt:16-17`).
+    ///
+    /// ★★ An `Option<bool>` rather than an `Option<`[`HdhpCoverage`]`>` so it is a class-(A)
+    /// registry DECLARATION the answered-ness invariant covers by construction: `None` refuses
+    /// ([`super::return_refuse::RefuseReason::HsaCoverageUnanswered`]), never defaults. The form's
+    /// two boxes are mutually exclusive, so one bool says which — and if anything ever DID default,
+    /// `false` is self-only, the LOWER limit, which is the direction that cannot overstate a
+    /// deduction. [`HdhpCoverage`] is the transcription struct's type; this is the answer it reads.
+    #[serde(default)]
+    pub family_coverage: Option<bool>,
+    /// **L3's own condition** — *"If you were under age 55 at the end of 2024 and, on the first day
+    /// of every month during 2024, you were, or were considered, an eligible individual with the
+    /// same coverage, enter $4,150 ($8,300 for family coverage). All others, see the instructions
+    /// for the amount to enter."*
+    ///
+    /// ★★★ This field is the *"on the first day of every month … with the same coverage"* half.
+    /// `Some(true)` is the flat limit the form prints. `Some(false)` is **"All others"**, and the
+    /// instructions send those filers to the **Line 3 Limitation Chart and Worksheet**
+    /// (`i8889--2024.txt:558-618`) — a twelve-month chart btctax does not carry — so it REFUSES,
+    /// naming the worksheet. ★ *"were, or were considered"* includes the last-month rule: a filer
+    /// the rule makes eligible for the whole year answers YES (instruction (2), `i8889--2024.txt:497`).
+    #[serde(default)]
+    pub eligible_every_month_same_coverage: Option<bool>,
+    /// **L3 item (6) / L7** — *"If, at the end of 2024, you were age 55 or older…"* (`i8889`). The
+    /// $1,000 additional contribution amount (§223(b)(3)(B)) lands on **line 3** for an unmarried
+    /// filer or one married with self-only coverage all year, and on **line 7** for a filer who is
+    /// married with family coverage — the form's own split, not ours.
+    #[serde(default)]
+    pub age_55_or_older_at_year_end: Option<bool>,
+    /// **L3's Line 3 Limitation Chart's first question** — *"Were you enrolled in Medicare for the
+    /// month?"* (`i8889--2024.txt:561`), and Part I's own rule: *"You cannot deduct any contributions
+    /// for any month in which you were enrolled in Medicare."*
+    ///
+    /// ★ `Some(true)` REFUSES naming the worksheet: Medicare enrollment for any month means the flat
+    /// limit is not the filer's limit, and the chart is what computes the reduced one.
+    #[serde(default)]
+    pub enrolled_in_medicare_any_month: Option<bool>,
+    /// **Part I / II / III's shared heading condition** — *"If you are filing jointly and both you
+    /// and your spouse each have separate HSAs, complete a separate Part I for each spouse"*, and
+    /// *"Complete a separate Form 8889 for each spouse"* (`i8889--2024.txt:456`).
+    ///
+    /// ★★ btctax emits **one** Form 8889, so `Some(true)` REFUSES. It is a separate question from the
+    /// coverage type because it is what line 6's allocation and the two-form packet both turn on.
+    #[serde(default)]
+    pub both_spouses_have_hsas: Option<bool>,
+    /// **L2** — *"HSA contributions you made for 2024 (or those made on your behalf), including those
+    /// made by the unextended due date of your tax return that were for 2024. Do not include
+    /// employer contributions, contributions through a cafeteria plan, or rollovers."*
+    ///
+    /// ★ The filer's own records. Form 5498-SA box 2 is NOT this figure — it is employer and employee
+    /// together, by calendar year — so it is transcribed and never summed here
+    /// ([`Form5498Sa`]).
+    #[serde(default)]
+    pub line2_contributions_you_made: Usd,
+    /// **L4's gate** — *"Enter the amount you and your employer contributed to your Archer MSAs for
+    /// 2024 from Form 8853, lines 1 and 2."*
+    ///
+    /// ★★★ btctax builds no **Form 8853**, which the form itself demands *before you begin*
+    /// (`f8889--2024.txt:13`). So this is a declaration, not an amount: `Some(true)` REFUSES naming
+    /// Form 8853, and `Some(false)` is what makes line 4 blank BY DECISION rather than by omission.
+    #[serde(default)]
+    pub archer_msa_activity: Option<bool>,
+    /// **Employer Contribution Worksheet line 2** — *"Enter employer contributions made in 2024 for
+    /// tax year 2023"* (`i8889--2024.txt:783`). Subtracted from the W-2 box 12 code W total, because
+    /// a W-2 reports by CALENDAR year and line 9 wants the TAX year.
+    #[serde(default)]
+    pub employer_contributions_prior_year: Usd,
+    /// **Employer Contribution Worksheet line 4** — *"Enter employer contributions made in 2025 for
+    /// tax year 2024"* (`i8889--2024.txt:789`). Added, for the same reason.
+    #[serde(default)]
+    pub employer_contributions_next_year: Usd,
+    /// **L10** — *"Qualified HSA funding distributions."* A once-in-a-lifetime direct
+    /// trustee-to-trustee transfer from an IRA (`i8889--2024.txt:758-773`). It is not distributed
+    /// FROM the HSA, so no Form 1099-SA carries it; the filer's own records are the only source.
+    #[serde(default)]
+    pub line10_qualified_funding_distribution: Usd,
+    /// **L14b** — *"Distributions included on line 14a that you rolled over to another HSA. Also
+    /// include any excess contributions (and the earnings on those excess contributions) included on
+    /// line 14a that were withdrawn by the due date of your return."* The Form 1099-SA does not
+    /// distinguish a rollover, so the filer's records are the only source.
+    #[serde(default)]
+    pub line14b_rollovers_and_withdrawn_excess: Usd,
+    /// **L15** — *"Qualified medical expenses paid using HSA distributions."*
+    ///
+    /// ★★★ The single figure that decides whether a distribution is taxable, and **no document
+    /// carries it** — the Form 1099-SA's own instruction says so: *"The payer isn't required to
+    /// compute the taxable amount of any distribution"* (`f1099sa--2019.txt:61`). It is the filer's
+    /// receipts, which is exactly why it is asked rather than inferred.
+    #[serde(default)]
+    pub line15_qualified_medical_expenses: Usd,
+    /// **L17a / L17b** — *"Enter on line 17b only 20% (0.20) of any amount included on line 16 that
+    /// does not meet any of the exceptions"* (`i8889--2024.txt:963-966`).
+    ///
+    /// ★ So the collected quantity is the part of line 16 that DOES meet an exception (the account
+    /// beneficiary died, became disabled, or turned 65), and line 17a's checkbox is the form's own
+    /// sentence about it: *"If any of the distributions included on line 16 meet any of the
+    /// Exceptions … check here."* Any > 0 checks the box; line 17b taxes the remainder.
+    #[serde(default)]
+    pub line16_amount_meeting_an_exception: Usd,
+    /// **Part III's gate** — *"Income and Additional Tax for Failure To Maintain HDHP Coverage."*
+    ///
+    /// ★★★ `Some(true)` REFUSES. Line 18 is *"the excess of the amount contributed over the
+    /// redetermined amount"*, and the instructions compute the redetermined amount with *"the Line 3
+    /// Limitation Chart and Worksheet … **for the year the contribution was made**"*
+    /// (`i8889--2024.txt:1017-1021`) — a PRIOR year's worksheet, which btctax carries for no year at
+    /// all. Refusing names it; guessing would understate both the income and the 10% additional tax.
+    #[serde(default)]
+    pub testing_period_failure: Option<bool>,
+}
+
 /// Estimated/extension/other payments (SPEC §4.8). Withholding (25a/25b/25c) is summed from the W-2/1099
 /// `Vec`s at derivation time, not duplicated here.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -1178,6 +1440,14 @@ pub struct ReturnInputs {
     /// it replaced the scalar `sch1.student_loan_interest_paid` at T5. See [`Form1098E`].
     #[serde(default)]
     pub form_1098e: Vec<Form1098E>,
+    /// ★★★ **R4 / §5.2 — Form 1099-SA rows** (T16). Form 8889 line 14a reads the SUM of their box 1.
+    /// See [`Form1099Sa`].
+    #[serde(default)]
+    pub sa_1099: Vec<Form1099Sa>,
+    /// ★★★ **R4 / §5.2 — Form 5498-SA rows** (T16). Transcribed and censused; no line of Form 8889
+    /// sums them, and [`Form5498Sa`] says why in the form's own words.
+    #[serde(default)]
+    pub sa_5498: Vec<Form5498Sa>,
     #[serde(default)]
     pub schedule_c: Option<ScheduleCInputs>,
     #[serde(default)]
@@ -1189,6 +1459,11 @@ pub struct ReturnInputs {
     pub mfs_spouse_itemizes: Option<bool>,
     #[serde(default)]
     pub sch1: Schedule1Inputs,
+    /// **Form 8889 (T16)** — the HSA questions no other part of the return can answer. Live only
+    /// when `sch1.hsa_activity` is `Some(true)`; a `Default` claims nothing, which is the correct
+    /// surface for the overwhelming majority of filers.
+    #[serde(default)]
+    pub hsa: HsaInputs,
     /// **Schedule 1-A (TY2025+)** — the four new above-the-line deductions (Pub. L. 119-21).
     ///
     /// ★★ Scoped by `tax_year`, not always-live: asking a TY2024 filer about a deduction that did
@@ -1732,6 +2007,8 @@ impl Default for ReturnInputs {
             g_1099: Vec::new(),
             b_1099: Vec::new(),
             form_1098e: Vec::new(),
+            sa_1099: Vec::new(),
+            sa_5498: Vec::new(),
             // ★★★ R3 — all `None`: a fresh return has been asked NOTHING about income that arrived
             //     without its document either. A defaulted `Some(false)` here would be the same
             //     laundering as a defaulted census row, one door further in.
@@ -1749,6 +2026,7 @@ impl Default for ReturnInputs {
             itemize_election: ItemizeElection::Auto,
             mfs_spouse_itemizes: None,
             sch1: Schedule1Inputs::default(),
+            hsa: HsaInputs::default(),
             // TY2025+ only; an empty surface claims nothing, which is the correct default.
             schedule_1a: Schedule1aInputs::default(),
             payments: Payments::default(),

@@ -50,6 +50,13 @@ pub enum DocumentKind {
     /// `sch1.student_loan_interest_paid` scalar, which is why Schedule 1 line 21's figure moved from
     /// `FilerRecords` (the `sch1` prefix) to a document.
     Form1098E,
+    /// ★ T16 — Form 1099-SA, *Distributions From an HSA, Archer MSA, or Medicare Advantage MSA*.
+    /// Form 8889 line 14a reads the SUM of the rows' box 1.
+    Form1099Sa,
+    /// ★ T16 — Form 5498-SA, *HSA, Archer MSA, or Medicare Advantage MSA Information*. No line sums
+    /// it; the row is transcribed so the contributions on Form 8889 line 2 can be checked against
+    /// what the trustee reported. A document all the same, and its boxes' provenance is the row.
+    Form5498Sa,
 }
 
 /// Where one money leaf's figure comes from (R10 part 1).
@@ -88,12 +95,23 @@ pub const LEAF_SOURCE: &[(&str, Source)] = &[
     ("g_1099", Source::Document(DocumentKind::Form1099G)),
     ("b_1099", Source::Document(DocumentKind::Form1099B)),
     ("form_1098e", Source::Document(DocumentKind::Form1098E)),
+    ("sa_1099", Source::Document(DocumentKind::Form1099Sa)),
+    ("sa_5498", Source::Document(DocumentKind::Form5498Sa)),
     // ── The filer's own records ──────────────────────────────────────────────────────────────────
     // Schedule A: medical, SALT, interest, gifts — every one a figure the filer reads off their own
     // books or a statement btctax does not transcribe. (`mortgage_interest_1098` moves to a
     // `Form1098` document row in task T9; the prefix follows it then.)
     ("schedule_a", Source::FilerRecords),
     ("sch1", Source::FilerRecords),
+    // ★★★ T16 — Form 8889's own money leaves. Every one is a figure the FORM asks for and no
+    //     information return reports: line 2's contributions (the 5498-SA's box 2 is a different
+    //     quantity), the Employer Contribution Worksheet's two calendar-versus-tax-year
+    //     adjustments, line 10's IRA-to-HSA transfer (not distributed FROM the HSA, so no 1099-SA
+    //     carries it), line 14b's rollovers (the 1099-SA does not distinguish one), line 15's
+    //     medical expenses (*"The payer isn't required to compute the taxable amount of any
+    //     distribution"*), and the part of line 16 meeting an exception. The filer's own records,
+    //     by the documents' own admission.
+    ("hsa", Source::FilerRecords),
     ("schedule_c", Source::FilerRecords),
     ("schedule_1a", Source::FilerRecords),
     ("payments", Source::FilerRecords),

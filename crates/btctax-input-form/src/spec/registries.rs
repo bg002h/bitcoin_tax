@@ -309,6 +309,36 @@ const DECL_FIELDS: &[Field] = &[
         ri.digital_asset_activity = None;
         Ok(())
     }),
+    // ★★★ Indices 43..=49 — T16's FORM 8889 declarations. Appended at the END for the array-index
+    //     reason above; 41 and 42 are the two HSA census rows and live in `DocumentCensus`.
+    decl_tristate!(43, FieldId::DeclHsaFamilyCoverage, |ri| {
+        ri.hsa.family_coverage = None;
+        Ok(())
+    }),
+    decl_tristate!(44, FieldId::DeclHsaEligibleEveryMonth, |ri| {
+        ri.hsa.eligible_every_month_same_coverage = None;
+        Ok(())
+    }),
+    decl_tristate!(45, FieldId::DeclHsaAge55OrOlder, |ri| {
+        ri.hsa.age_55_or_older_at_year_end = None;
+        Ok(())
+    }),
+    decl_tristate!(46, FieldId::DeclHsaMedicareEnrollment, |ri| {
+        ri.hsa.enrolled_in_medicare_any_month = None;
+        Ok(())
+    }),
+    decl_tristate!(47, FieldId::DeclHsaBothSpousesHaveHsas, |ri| {
+        ri.hsa.both_spouses_have_hsas = None;
+        Ok(())
+    }),
+    decl_tristate!(48, FieldId::DeclHsaArcherMsaActivity, |ri| {
+        ri.hsa.archer_msa_activity = None;
+        Ok(())
+    }),
+    decl_tristate!(49, FieldId::DeclHsaTestingPeriodFailure, |ri| {
+        ri.hsa.testing_period_failure = None;
+        Ok(())
+    }),
     FOREIGN_COUNTRY_NAMES,
 ];
 
@@ -401,6 +431,8 @@ const DOC_CENSUS_FIELDS: &[Field] = &[
     census_tristate!(21, FieldId::DocG1099, DocumentRow::G1099),
     census_tristate!(22, FieldId::DocForm1098, DocumentRow::Form1098),
     census_tristate!(23, FieldId::DocForm1098e, DocumentRow::Form1098e),
+    census_tristate!(41, FieldId::DocSa1099, DocumentRow::Sa1099),
+    census_tristate!(42, FieldId::DocSa5498, DocumentRow::Sa5498),
     census_tristate!(24, FieldId::DocR1099, DocumentRow::R1099),
     census_tristate!(25, FieldId::DocSsa1099, DocumentRow::Ssa1099),
     census_tristate!(26, FieldId::DocNecMiscK1099, DocumentRow::NecMiscK1099),
@@ -604,6 +636,8 @@ pub fn field_to_question(id: FieldId) -> Option<QuestionId> {
         FieldId::DocG1099 => QuestionId::DocG1099,
         FieldId::DocForm1098 => QuestionId::DocForm1098,
         FieldId::DocForm1098e => QuestionId::DocForm1098e,
+        FieldId::DocSa1099 => QuestionId::DocSa1099,
+        FieldId::DocSa5498 => QuestionId::DocSa5498,
         FieldId::DocR1099 => QuestionId::DocR1099,
         FieldId::DocSsa1099 => QuestionId::DocSsa1099,
         FieldId::DocNecMiscK1099 => QuestionId::DocNecMiscK1099,
@@ -622,6 +656,14 @@ pub fn field_to_question(id: FieldId) -> Option<QuestionId> {
         FieldId::DeclStateRefundWithout1099g => QuestionId::StateRefundWithout1099g,
         FieldId::DeclItemizedPriorYear => QuestionId::ItemizedPriorYear,
         FieldId::DeclDigitalAssetActivity => QuestionId::DigitalAssetActivity,
+        // ★ T16 — Form 8889's seven declarations.
+        FieldId::DeclHsaFamilyCoverage => QuestionId::HsaFamilyCoverage,
+        FieldId::DeclHsaEligibleEveryMonth => QuestionId::HsaEligibleEveryMonth,
+        FieldId::DeclHsaAge55OrOlder => QuestionId::HsaAge55OrOlder,
+        FieldId::DeclHsaMedicareEnrollment => QuestionId::HsaMedicareEnrollment,
+        FieldId::DeclHsaBothSpousesHaveHsas => QuestionId::HsaBothSpousesHaveHsas,
+        FieldId::DeclHsaArcherMsaActivity => QuestionId::HsaArcherMsaActivity,
+        FieldId::DeclHsaTestingPeriodFailure => QuestionId::HsaTestingPeriodFailure,
         _ => return None,
     })
 }
@@ -669,6 +711,8 @@ pub fn question_to_field(id: QuestionId) -> FieldId {
         QuestionId::DocG1099 => FieldId::DocG1099,
         QuestionId::DocForm1098 => FieldId::DocForm1098,
         QuestionId::DocForm1098e => FieldId::DocForm1098e,
+        QuestionId::DocSa1099 => FieldId::DocSa1099,
+        QuestionId::DocSa5498 => FieldId::DocSa5498,
         QuestionId::DocR1099 => FieldId::DocR1099,
         QuestionId::DocSsa1099 => FieldId::DocSsa1099,
         QuestionId::DocNecMiscK1099 => FieldId::DocNecMiscK1099,
@@ -691,6 +735,15 @@ pub fn question_to_field(id: QuestionId) -> FieldId {
         //   section carries it, and the crypto/1099-DA block asks about BROKER REPORTING, which is
         //   a different question with a different answer space.
         QuestionId::DigitalAssetActivity => FieldId::DeclDigitalAssetActivity,
+        // ★ T16 — Form 8889's seven declarations. Not deduped anywhere: the money leaves they gate
+        //   live in the `Form8889` section, and none of them is itself an amount.
+        QuestionId::HsaFamilyCoverage => FieldId::DeclHsaFamilyCoverage,
+        QuestionId::HsaEligibleEveryMonth => FieldId::DeclHsaEligibleEveryMonth,
+        QuestionId::HsaAge55OrOlder => FieldId::DeclHsaAge55OrOlder,
+        QuestionId::HsaMedicareEnrollment => FieldId::DeclHsaMedicareEnrollment,
+        QuestionId::HsaBothSpousesHaveHsas => FieldId::DeclHsaBothSpousesHaveHsas,
+        QuestionId::HsaArcherMsaActivity => FieldId::DeclHsaArcherMsaActivity,
+        QuestionId::HsaTestingPeriodFailure => FieldId::DeclHsaTestingPeriodFailure,
     }
 }
 

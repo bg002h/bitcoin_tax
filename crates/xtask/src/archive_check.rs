@@ -83,14 +83,24 @@ fn irs_stem(name: &str) -> bool {
     matches!(rest.first(), Some('w')) && rest.get(1).is_some_and(char::is_ascii_digit)
 }
 
-/// ★★★ **Is this stem one of the W / 1098 / 1099 INFORMATION RETURNS?** — the series the interview
-/// transcribes boxes from, and the join `box_census` derives its censused document set through.
+/// ★★★ **Is this stem one of the W / 1098 / 1099 / 5498 INFORMATION RETURNS?** — the series the
+/// interview transcribes boxes from, and the join `box_census` derives its censused document set
+/// through.
 ///
-/// ★ It is a reading of how the IRS numbers the series, not a list of the seven documents we happen
-/// to hold: strip the `f`/`i` prefix, then the remainder is the wage series (`w` + a digit: `fw2`,
-/// `iw2w3`) or the 1098/1099 series (`f1098e`, `i1099int`). A hand-list would have to be edited to
+/// ★ It is a reading of how the IRS numbers the series, not a list of the documents we happen to
+/// hold: strip the `f`/`i` prefix, then the remainder is the wage series (`w` + a digit: `fw2`,
+/// `iw2w3`), the 1098/1099 series (`f1098e`, `i1099int`), or the **5498 series** (`f5498sa`, and
+/// the 5498 / 5498-ESA / 5498-QA it does not yet hold). A hand-list would have to be edited to
 /// admit the 1099-NEC, 1099-R or 1099-DA, and forgetting to is exactly the silence I2 found — the
 /// review deleted a whole archived form from the census and every test still reported success.
+///
+/// ★★ **T16 widened it to the 5498 series, and the widening is the finding.** Form 5498-SA is an
+/// information return by every part of its own construction — a TRUSTEE files it, a PARTICIPANT
+/// receives a copy, it carries the same *Attention / Copy A / Cat. No.* furniture, and its
+/// instructions are the same booklet as the Form 1099-SA's. Before this, `f5498sa` classified as
+/// **not** an information return, so archiving it would have left it outside
+/// [`crate::box_census::archived_information_returns`] — censused by nothing, with `box-census`
+/// still printing OK. That is I2's silence again, one series over.
 #[must_use]
 pub fn is_information_return_stem(stem: &str) -> bool {
     let rest = match stem.as_bytes().first() {
@@ -99,6 +109,7 @@ pub fn is_information_return_stem(stem: &str) -> bool {
     };
     rest.starts_with("1098")
         || rest.starts_with("1099")
+        || rest.starts_with("5498")
         || (rest.starts_with('w') && rest[1..].starts_with(|c: char| c.is_ascii_digit()))
 }
 

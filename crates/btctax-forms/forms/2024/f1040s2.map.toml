@@ -45,6 +45,9 @@ line3  = "form1[0].Page1[0].f1_13[0]"
 line4  = "form1[0].Page1[0].f1_14[0]"   # "Self-employment tax. Attach Schedule SE"   (SS + regular Medicare ONLY)
 line11 = "form1[0].Page1[0].f1_21[0]"   # "Additional Medicare Tax. Attach Form 8959" (the form's PRINTED line 18)
 line12 = "form1[0].Page1[0].f1_22[0]"   # "Net investment income tax. Attach Form 8960" (the form's PRINTED line 17)
+line17c = "form1[0].Page2[0].f2_04[0]"   # "Additional tax on HSA distributions. Attach Form 8889" (Form 8889 line 17b)   ★ T16, PAGE 2
+line17d = "form1[0].Page2[0].f2_05[0]"   # "Additional tax on an HSA because you didn’t remain an eligible individual." (Form 8889 line 21)   ★ T16, PAGE 2
+line18  = "form1[0].Page2[0].f2_22[0]"   # "Total additional taxes. Add lines 17a through 17z"   ★ T16, PAGE 2
 line21 = "form1[0].Page2[0].f2_25[0]"   # "Add lines 4, 7 through 16, 18, and 19…" → 1040 line 23   ★ PAGE 2
 
 # ── Identity header (P6.2). Dumped + correlated against the printed form; the SSN cell declares
@@ -171,8 +174,6 @@ last_line    = "21"
 "form1[0].Page2[0].Line17a_ReadOrder[0].Line17_ReadOrder[0].f2_01[0]" = { line = "17a type",   rule = "unmodeled", reason = "\"Recapture of other credits. List type, form number, and amount\" — btctax claims no credit that could be recaptured, and writes no write-in taxes.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "Recapture of other credits" }
 "form1[0].Page2[0].Line17a_ReadOrder[0].f2_02[0]"                     = { line = "17a amount", rule = "unmodeled", reason = "Amount for the 17a write-in — same. Recapture of other credits.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "Recapture of other credits" }
 "form1[0].Page2[0].f2_03[0]" = { line = "17b", rule = "unmodeled", reason = "Recapture of federal mortgage subsidy — btctax models no home sale or subsidised mortgage.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "federal mortgage subsidy" }
-"form1[0].Page2[0].f2_04[0]" = { line = "17c", rule = "unmodeled", reason = "Additional tax on HSA distributions (Form 8889) — no HSA modelled.", covered_by = "RefuseReason::HsaActivityUnsupported" }
-"form1[0].Page2[0].f2_05[0]" = { line = "17d", rule = "unmodeled", reason = "Additional tax on an HSA for failing to remain an eligible individual (Form 8889) — same.", covered_by = "RefuseReason::HsaActivityUnsupported" }
 "form1[0].Page2[0].f2_06[0]" = { line = "17e", rule = "unmodeled", reason = "Additional tax on Archer MSA distributions (Form 8853) — no MSA modelled.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "8853" }
 "form1[0].Page2[0].f2_07[0]" = { line = "17f", rule = "unmodeled", reason = "Additional tax on Medicare Advantage MSA distributions (Form 8853) — same.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "8853" }
 "form1[0].Page2[0].f2_08[0]" = { line = "17g", rule = "unmodeled", reason = "Recapture of a charitable deduction for a fractional interest in tangible personal property. ★ btctax DOES model charitable gifts, but only of BTC and cash — a fractional interest in tangible personal property is a different §170(o) regime it neither collects nor deducts, so there is no prior deduction of this kind to recapture.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "fractional interest" }
@@ -191,6 +192,5 @@ last_line    = "21"
 "form1[0].Page2[0].f2_21[0]"                      = { line = "17z amount", rule = "unmodeled", reason = "Amount for the 17z write-in — same. btctax writes no write-in taxes.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "write-in taxes" }
 
 # ── Page 2 totals and the remaining Part II lines ────────────────────────────────────────────────
-"form1[0].Page2[0].f2_22[0]" = { line = "18", rule = "unmodeled", reason = "\"Total additional taxes. Add lines 17a through 17z\" — dead with all of line 17 blank. Line 21 (mapped) sums lines 4, 7 through 16, 18 and 19, so a blank line 18 contributes nothing.", covered_by = "RefuseReason::HsaActivityUnsupported" }
 "form1[0].Page2[0].f2_23[0]" = { line = "19", rule = "unmodeled", reason = "Recapture of net EPE from Form 4255 line 1d column (l) — no Form 4255 modelled.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "4255" }
 "form1[0].Page2[0].Line20_ReadOrder[0].f2_24[0]" = { line = "20", rule = "unmodeled", reason = "Section 965 net tax liability installment from Form 965-A — no §965 transition tax modelled. ★ Note line 20 is informational and is NOT summed into line 21, so it sits in the MID column, not the amount column.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "965-A" }

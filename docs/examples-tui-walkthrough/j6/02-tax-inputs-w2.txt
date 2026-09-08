@@ -12,17 +12,17 @@
  10││  ✓ Forms 1099-B (Schedule D sum││  6 Medicare tax withheld  [$2900]                                                  │
  11││  ✓ Forms 1099-G                ││  7 Social security tips  [$0]                                                      │
  12││  ✓ Forms 1098-E (student loan i││  17 State income tax  [$9000]                                                      │
- 13││  … Schedule A (itemized deducti││  19 Local income tax  [$0]                                                         │
- 14││  … Payments                    ││  8 Allocated tips  [$0]                                                            │
- 15││  … Carryforwards from last year││  10 Dependent care benefits  [$0]                                                  │
- 16││  … §199A limitation (only if yo││  13 Statutory employee  [[ ]]                                                      │
- 17││  ✓ Declarations                ││  14b Treasury Tipped Occupation Code(s)  []                                        │
- 18││  ✓ Documents received          ││  Box 12 entries (0) →                                                              │
- 19││  … Income exclusions (§911/931/││                                                                                    │
- 20││  … Skippables                  ││  [Left/Esc] back to rows                                                           │
- 21││                                ││                                                                                    │
- 22││                                ││                                                                                    │
- 23││                                ││                                                                                    │
+ 13││  ✓ Forms 1099-SA (HSA distribut││  19 Local income tax  [$0]                                                         │
+ 14││  ✓ Forms 5498-SA (HSA contribut││  8 Allocated tips  [$0]                                                            │
+ 15││  … Form 8889 (health savings ac││  10 Dependent care benefits  [$0]                                                  │
+ 16││  … Schedule A (itemized deducti││  13 Statutory employee  [[ ]]                                                      │
+ 17││  … Payments                    ││  14b Treasury Tipped Occupation Code(s)  []                                        │
+ 18││  … Carryforwards from last year││  Box 12 entries (0) →                                                              │
+ 19││  … §199A limitation (only if yo││                                                                                    │
+ 20││  ✓ Declarations                ││  [Left/Esc] back to rows                                                           │
+ 21││  ✓ Documents received          ││                                                                                    │
+ 22││  … Income exclusions (§911/931/││                                                                                    │
+ 23││  … Skippables                  ││                                                                                    │
  24││                                ││                                                                                    │
  25││                                ││                                                                                    │
  26│└────────────────────────────────┘└────────────────────────────────────────────────────────────────────────────────────┘

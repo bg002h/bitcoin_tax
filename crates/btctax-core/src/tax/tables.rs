@@ -258,6 +258,35 @@ pub fn loss_limit(status: FilingStatus) -> Usd {
 /// only**, so a separate table with **fail-closed per-year gating** (`None` ⇒ `NotComputable`) has the
 /// smallest blast radius. This does NOT rely on any frozen-file constraint (`se.rs` only *calls* the
 /// unfrozen `synthetic_table`, so `TaxTable` could technically gain a field).
+/// ★★★ **§223(b) — the HSA annual contribution limitation** (T16 / Form 8889 line 3).
+///
+/// **Where these come from, and why not the usual Rev. Proc.** §223(g) requires the Secretary to
+/// publish the HSA amounts **by June 1 of the PRECEDING calendar year**, so they do not appear in
+/// the autumn inflation revenue procedure that carries the brackets and the standard deduction —
+/// each year gets its own spring Revenue Procedure, a year and a half ahead of the return. TY2024 is
+/// Rev. Proc. 2023-23 §2.01(1), TY2025 Rev. Proc. 2024-25 §2.01(1), TY2026 Rev. Proc. 2025-19
+/// §2.01(1); all three are archived under `legal/primary-sources/irs-guidance/`.
+///
+/// ★★ The two limitations ARE indexed (§223(g)(1)); the **$1,000 additional contribution amount is
+/// not** — §223(b)(3)(B) states it as a flat statutory figure with no indexing clause, which is why
+/// it has read $1,000 unchanged since 2009. A table update that "indexes" it alongside its
+/// neighbours is wrong, exactly as for [`FullReturnParams::qbi_phase_in_range_unmarried`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HsaParams {
+    /// §223(b)(2)(A) — *"the annual limitation on deductions … for an individual with **self-only**
+    /// coverage under a high deductible health plan"*. TY2024 = **$4,150**, which is the figure Form
+    /// 8889 (2024) line 3 prints (`design/forms/extract/f8889--2024.txt:22`).
+    pub self_only_limit: Usd,
+    /// §223(b)(2)(B) — the same for **family** coverage. TY2024 = **$8,300**
+    /// (`design/forms/extract/f8889--2024.txt:22`).
+    pub family_limit: Usd,
+    /// §223(b)(3)(B) — the **additional contribution amount** for an individual who has attained age
+    /// 55 before the close of the taxable year. **$1,000, statutory and NOT indexed.** It reaches
+    /// line 3 for an unmarried filer (or one married with self-only coverage all year) and line 7 for
+    /// a filer married with family coverage — the form's own split.
+    pub additional_contribution_55: Usd,
+}
+
 /// §55(d)/§55(b)(1) AMT amounts for the 2024 "Worksheet To See if You Should Fill in Form 6251"
 /// (SPEC §4.11). All INDEXED (§55(d)(4) inflation adjustment). Grouped by the worksheet's
 /// (differing) filing-status bucketings.
@@ -506,6 +535,8 @@ pub struct FullReturnParams {
     pub student_loan_phaseout_married: (Usd, Usd),
     /// §55(d)/§55(b)(1) AMT amounts for Form 6251 and its screening worksheet (SPEC §4.11).
     pub amt: AmtParams,
+    /// §223(b) HSA contribution limitation — Form 8889 line 3 and line 7 (T16). See [`HsaParams`].
+    pub hsa: HsaParams,
 }
 
 impl FullReturnParams {

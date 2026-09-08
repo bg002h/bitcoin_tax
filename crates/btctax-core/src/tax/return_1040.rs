@@ -318,6 +318,14 @@ pub struct Schedule1Parts {
     pub early_withdrawal_18: Usd,
     /// L21 — the §221 student-loan interest deduction, after its MAGI phase-out.
     pub student_loan_21: Usd,
+    /// ★★★ **L8f — "Income from Form 8889"** (T16). The SUM of Form 8889 line 16 (a taxable HSA
+    /// distribution) and line 20 (a testing-period inclusion), because the form routes BOTH here and
+    /// says so on each line. Zero on every return that files no Form 8889.
+    pub hsa_income_8f: Usd,
+    /// ★★★ **L13 — "Health savings account deduction. Attach Form 8889"** (T16). Form 8889's own
+    /// printed line 13. An ADJUSTMENT, so it lands in Part II beside ½-SE and the student-loan
+    /// interest, and it reduces AGI.
+    pub hsa_deduction_13: Usd,
 }
 
 /// The **Schedule A components**, line by line — the itemized deduction is the SUM of these, and the
@@ -1692,6 +1700,15 @@ pub struct AbsoluteReturn {
     /// The P6 printed chain (`printed::schedule_a_lines`) rounds these at the line and re-adds the
     /// ROUNDED lines, so the filed form cross-foots (SPEC §3.1).
     pub schedule_a: Option<ScheduleAParts>,
+    /// ★★★ **The filled Form 8889** (T16), or `None` when the §223 trigger did not fire and the form
+    /// is not filed. Computed here for the same reason Form 6251 is: `assemble_absolute` holds the
+    /// year's [`FullReturnParams`] (whose `hsa` carries §223(b)'s limits) while `screen_absolute`
+    /// takes `ar` immutably.
+    ///
+    /// ★ It is the ONE derivation. Schedule 1 lines 8f and 13, Schedule 2 lines 17c and 17d, and the
+    /// packet's attached Form 8889 all read THIS struct — a second derivation anywhere is how a
+    /// filed PDF comes to disagree with the tax it reports.
+    pub form_8889: Option<crate::tax::form8889::Form8889>,
     /// The filled **Form 6251** (§4.11). Computed here because `assemble_absolute` holds the
     /// `TaxTable` (for the §1(h) breakpoints Part III reads) while `screen_absolute` takes `ar`
     /// immutably. `screen_absolute` only READS this — see `must_attach()`.
@@ -2110,7 +2127,21 @@ pub fn assemble_absolute(
         status,
         params,
     );
-    let adjustments = early_wd + half_se + student_loan;
+    // ★★★ T16 — FORM 8889, computed ONCE. Schedule 1 lines 8f and 13, Schedule 2 lines 17c and
+    //     17d, and the packet's attached PDF all read this. It files exactly when the §223 trigger
+    //     declaration is affirmed (`Form8889::must_file`), never on a threshold: an all-zero Part II
+    //     and a $0 deduction are legitimately blank parts of a form that still files.
+    let form_8889 = crate::tax::form8889::Form8889::must_file(ri)
+        .then(|| crate::tax::form8889::compute(ri, &params.hsa));
+    let hsa_income_8f = form_8889
+        .as_ref()
+        .map_or(Usd::ZERO, |f| f.schedule_1_line_8f());
+    let hsa_deduction_13 = form_8889
+        .as_ref()
+        .map_or(Usd::ZERO, |f| f.schedule_1_line_13());
+    // ★ Line 8f is Schedule 1 PART I income, so it belongs in `total_income` through line 10 — see
+    //   `schedule_1_income` below, which is what 1040 line 8 prints.
+    let adjustments = early_wd + half_se + student_loan + hsa_deduction_13;
     let agi = total_income - adjustments; // 1040 L11 (with-crypto AGI)
 
     // Schedule C exists whenever the filer declared a trade or business. Gross receipts (line 1) are
@@ -2130,6 +2161,8 @@ pub fn assemble_absolute(
         half_se_15: half_se,
         early_withdrawal_18: early_wd,
         student_loan_21: student_loan,
+        hsa_income_8f,
+        hsa_deduction_13,
     };
 
     // ── Deductions L12–L15 (Schedule A on the WITH-crypto AGI, G7) ───────────────────────────────────
@@ -2472,6 +2505,7 @@ pub fn assemble_absolute(
         //     testified to the dead end AND attested that they cannot supply a name and address.
         form8615_certification: form8615_certification(ri, state, year, params),
         schedule_1a_additional,
+        form_8889,
         amt,
         wages,
         taxable_interest,
@@ -3874,6 +3908,14 @@ mod tests {
                 rate_28: dec!(0.28),
                 rate_28_subtrahend: dec!(4652),
                 rate_28_subtrahend_mfs: dec!(2326),
+            },
+            // §223(b)(2) HSA contribution limitation (Rev. Proc. 2023-23 §2.01(1)) — $4,150 self-only,
+            // $8,300 family. §223(b)(3)(B)'s additional contribution at 55+ is a flat statutory
+            // $1,000, NOT indexed.
+            hsa: crate::tax::tables::HsaParams {
+                self_only_limit: dec!(4150),
+                family_limit: dec!(8300),
+                additional_contribution_55: dec!(1000),
             },
         }
     }

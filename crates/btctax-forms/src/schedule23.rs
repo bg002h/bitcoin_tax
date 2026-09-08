@@ -50,12 +50,20 @@ pub fn fill_schedule_2_with_map(
     //       so an empty Part I totals to nothing, and a printed `0` on either line would swear the
     //       filer figured an AMT on a form that is not in the packet.
     let part_i = lines.line2.is_some();
-    let plan: [Usd; 6] = [
+    // ★★★ T16 — lines 17c, 17d and 18 stand or fall together for the SAME reason Part I's pair does:
+    //     17c and 17d are conditional entries ("Attach Form 8889"), and line 18 is "Add lines 17a
+    //     through 17z", which line 21 sums. With no Form 8889 in the packet a printed `0` on any of
+    //     the three would swear the filer figured an HSA tax on a form the IRS never receives.
+    let hsa = lines.line17c.is_some();
+    let plan: [Usd; 9] = [
         lines.line2.unwrap_or(Usd::ZERO),
         lines.line3,
         lines.line4,
         lines.line11,
         lines.line12,
+        lines.line17c.unwrap_or(Usd::ZERO),
+        lines.line17d.unwrap_or(Usd::ZERO),
+        lines.line18,
         lines.line21,
     ];
 
@@ -64,6 +72,9 @@ pub fn fill_schedule_2_with_map(
     for (i, (cell, value)) in map.lines().iter().zip(plan).enumerate() {
         if i < 2 && !part_i {
             continue; // §G-6 — no Form 6251 attached ⇒ Part I carries NO testimony
+        }
+        if (5..=7).contains(&i) && !hsa {
+            continue; // T16 — no Form 8889 attached ⇒ the HSA block carries NO testimony
         }
         let page = page_of(cell.fields()[0]) as u32;
         let ord = ord_on_page[page as usize];
@@ -164,13 +175,15 @@ pub fn fill_schedule_1_with_map(
     let mut writes: Vec<(String, pdf::FieldValue)> = Vec::new();
     let mut placements: Vec<FlatPlacement> = Vec::new();
 
-    let plan: [(Usd, usize); 10] = [
+    let plan: [(Usd, usize); 12] = [
         (lines.line1, COL_AMOUNT),  // 1  taxable state/local refund
         (lines.line3, COL_AMOUNT),  // 3  business income (Schedule C net)
         (lines.line7, COL_AMOUNT),  // 7  unemployment
-        (lines.line8v, COL_MID),    // 8v digital assets as ordinary income  ← the only MID cell
+        (lines.line8f, COL_MID),    // 8f income from Form 8889          ★ T16 — a lettered 8x cell
+        (lines.line8v, COL_MID),    // 8v digital assets as ordinary income
         (lines.line9, COL_AMOUNT),  // 9  total other income
         (lines.line10, COL_AMOUNT), // 10 -> 1040 L8
+        (lines.line13, COL_AMOUNT), // 13 HSA deduction (Form 8889 L13)  ★ T16          (page 2)
         (lines.line15, COL_AMOUNT), // 15 deductible part of SE tax      (page 2)
         (lines.line18, COL_AMOUNT), // 18 early-withdrawal penalty       (page 2)
         (lines.line21, COL_AMOUNT), // 21 student-loan interest          (page 2)

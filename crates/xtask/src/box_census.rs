@@ -92,6 +92,16 @@
 //!    the enumerator read it as box 20 — caught, loudly, by rule 4 (*"not contiguous: 12..19 missing
 //!    from 1..=20"*). The stub is the document's own furniture, named by the document's own words,
 //!    exactly like `OMB No.`
+//!    ★★ **The lookback is to the face block, not to the previous LINE — and that is measured.**
+//!    The rule first read *"the line before this one says `For calendar year`"*, which is true of the
+//!    Form 1098 and false of the **Rev. November 2019 Form 1099-SA**, where the layout drops another
+//!    column's vertical run (`MSA`) between the caption and its blank
+//!    (`design/forms/extract/f1099sa--2019.txt:8-10`). Rule 4 red the moment that edition was
+//!    archived — *"not contiguous: 6..19 missing from 1..=20"* — which is the guard doing exactly its
+//!    job on a document it had never seen, for the second time. The interposed run is LAYOUT, the
+//!    same distinction the wrapped-caption limit below rests on, so the rule now waits for the stub
+//!    anywhere after its caption and consumes exactly one: a run that is exactly `20`, alone on its
+//!    line, which is the century prefix of `20__` rather than any box a form numbers 20.
 //! 6. **A bare LETTERED run is the vertical `Code` rail, never a box.** Form W-2 prints the word
 //!    *Code* down the side of box 12 and `pdftotext` emits `C`, `o`, `d`, `e` as separate runs. Every
 //!    captionless box these forms print is NUMBERED (W-2 box 9 and 12b–12d), so a run that is only a
@@ -137,6 +147,20 @@ pub const PREAMBLE_1141: &str = "1141, 1167, and 1179";
 /// Publication 1141 …"* / *"See IRS Publication 1223 for more information about printing substitute
 /// Forms W-2c and W-3c."* (`design/forms/extract/fw2--2026.txt:26-28`).
 pub const PREAMBLE_W2_2026: &str = "See IRS Publication 1223";
+
+/// ★★★ **The HSA information returns carry NO *Attention* preamble at all.** The IRS serves
+/// `f1099sa` and `f5498sa` from `irs-prior` with Copy A starting on the first line of the document,
+/// so there is no sentence to end. What opens Copy A on those four editions instead is the red-ink
+/// **control number** the form prints in its own top-left corner beside *VOID* and *CORRECTED* —
+/// `9494` on every Form 1099-SA, `2727` on every Form 5498-SA — and the box grid begins on the next
+/// line, which is exactly the contract [`face_block`] wants of a marker.
+///
+/// ★ `VOID` itself will not do, and the difference is measured rather than assumed: it occurs twice
+/// in `f1099sa--2019` (Copy A and Copy C) and once in the other three, so it cannot bound a block.
+/// Each control number occurs exactly once in its own edition, and [`face_block`] asserts that.
+pub const CONTROL_9494: &str = "9494";
+/// The Form 5498-SA's own control number. See [`CONTROL_9494`].
+pub const CONTROL_2727: &str = "2727";
 
 /// The Copy A footer. The box grid ends on the line before the first one.
 const FACE_END: &str = "Cat. No.";
@@ -318,6 +342,42 @@ pub const DOCUMENTS: &[DocumentAuthority] = &[
         instructions: "i1098et",
         preamble_end: PREAMBLE_1141,
     },
+    // ── T16 — the HSA information returns. ★ ONE booklet (`i1099sa`, "Instructions for Forms
+    //    1099-SA and 5498-SA") covers BOTH forms; there is no `i5498sa`, the way there is no
+    //    `i1098e`. And the two forms keep different cadences: the 1099-SA is continuous-use, the
+    //    5498-SA prints its tax year on the face. ───────────────────────────────────────────────
+    DocumentAuthority {
+        stem: "f1099sa",
+        edition: "2019",
+        revision_year: 2019,
+        cadence: Cadence::Periodic,
+        instructions: "i1099sa",
+        preamble_end: CONTROL_9494,
+    },
+    DocumentAuthority {
+        stem: "f1099sa",
+        edition: "2025",
+        revision_year: 2025,
+        cadence: Cadence::Periodic,
+        instructions: "i1099sa",
+        preamble_end: CONTROL_9494,
+    },
+    DocumentAuthority {
+        stem: "f5498sa",
+        edition: "2024",
+        revision_year: 2024,
+        cadence: Cadence::Annual,
+        instructions: "i1099sa",
+        preamble_end: CONTROL_2727,
+    },
+    DocumentAuthority {
+        stem: "f5498sa",
+        edition: "2025",
+        revision_year: 2025,
+        cadence: Cadence::Annual,
+        instructions: "i1099sa",
+        preamble_end: CONTROL_2727,
+    },
 ];
 
 /// ★★ **The 16 archived BOOKLET editions**, asserted against `MANIFEST.json` `kind: instructions`
@@ -417,6 +477,20 @@ pub const BOOKLETS: &[BookletEdition] = &[
         stem: "i1098et",
         edition: "2026",
         revision_year: 2026,
+        cadence: Cadence::Annual,
+    },
+    // ── T16 — the combined 1099-SA / 5498-SA booklet. ANNUAL even though the Form 1099-SA it
+    //    covers is periodic, which is precisely why `revision_in_force` resolves per STEM. ──────
+    BookletEdition {
+        stem: "i1099sa",
+        edition: "2024",
+        revision_year: 2024,
+        cadence: Cadence::Annual,
+    },
+    BookletEdition {
+        stem: "i1099sa",
+        edition: "2025",
+        revision_year: 2025,
         cadence: Cadence::Annual,
     },
 ];
@@ -549,6 +623,9 @@ pub fn section_of_stem(stem: &str) -> Option<SectionId> {
         "f1099b" => Some(SectionId::B1099s),
         "f1099g" => Some(SectionId::G1099s),
         "f1098e" => Some(SectionId::Form1098Es),
+        // ★ T16 — the two HSA information returns, each with its own repeating section.
+        "f1099sa" => Some(SectionId::Sa1099s),
+        "f5498sa" => Some(SectionId::Sa5498s),
         // ★ Form 1098 has no section until **T9**: its one collected box is still the Schedule A
         //   scalar `mortgage_interest_1098`, so every one of its entries is `CollectedElsewhere` or
         //   `NotRead`.
@@ -849,6 +926,53 @@ pub const BOXES: &[BoxEntry] = &[
             note: "Form1098E.box1_interest → Schedule 1 line 21 (§221), as the SUM over every transcribed row. It replaced the `sch1.student_loan_interest_paid` scalar at T5: a bare Usd with no lender, no TIN and no transcription date made $0 indistinguishable from 'never asked'" } },
     BoxEntry { stem: "f1098e", editions: &["2024", "2025", "2026"], label: "2", caption: "2 Check if box 1 does not include loan origination fees",
         decision: BoxDecision::NotRead("a qualifier on box 1 for loans made before September 1, 2004: it says the lender left origination fees and capitalized interest OUT. Schedule 1 line 21 takes the box-1 amount as printed, and btctax does not compute the omitted fees") },
+    // ── ★★★ T16 — Form 1099-SA, Rev. November 2019 (in force for TY2024) and Rev. April 2025.
+    //    5 boxes on both, with IDENTICAL captions — so ONE entry per box lists both editions, and a
+    //    caption that moved between the revisions would split them visibly. ────────────────────────
+    BoxEntry { stem: "f1099sa", editions: &["2019", "2025"], label: "1", caption: "1 Gross distribution",
+        decision: BoxDecision::Collected { fields: &[FieldId::Sa1099Box1GrossDistribution],
+            note: "Form1099Sa.box1_gross_distribution → FORM 8889 LINE 14a, as the SUM over every transcribed HSA row. i8889 line 14a says so in the form's own words: 'These amounts should be shown on Form 1099-SA, box 1'" } },
+    BoxEntry { stem: "f1099sa", editions: &["2019", "2025"], label: "2", caption: "2 Earnings on excess cont.",
+        decision: BoxDecision::RefuseIfNonzero { field: FieldId::Sa1099Box2EarningsOnExcess,
+            reason: || RefuseReason::OtherIncomeLine8zNotModeled("Form 1099-SA box 2 (earnings on excess contributions)".to_string()),
+            note: "the 1099-SA's own Instructions for Recipient tell the FILER what to do with box 2: 'Include the earnings on the “Other income” line of your tax return' — Schedule 1 line 8z, which btctax fills from nothing. Income with no reader UNDERSTATES, so > 0 refuses" } },
+    BoxEntry { stem: "f1099sa", editions: &["2019", "2025"], label: "3", caption: "3 Distribution code",
+        decision: BoxDecision::Collected { fields: &[FieldId::Sa1099Box3DistributionCode],
+            note: "Form1099Sa.box3_distribution_code — a one-character IRS code, never an amount, so it reaches no line by arithmetic. It is COLLECTED rather than NotRead because it is the trustee's own statement of what the distribution was (4 = death, 3 = disability), and a filer answering Form 8889 line 17a's exception question is reading it off the paper. ★ The line-17a checkbox is derived from the FILER'S answer, not from this code, because the form asks the filer" } },
+    BoxEntry { stem: "f1099sa", editions: &["2019", "2025"], label: "4", caption: "4 FMV on date of death",
+        decision: BoxDecision::RefuseIfNonzero { field: FieldId::Sa1099Box4Fmv,
+            reason: || RefuseReason::OtherIncomeLine8zNotModeled("Form 1099-SA box 4 (FMV on date of death)".to_string()),
+            note: "the form's Instructions for Recipient again: a NONSPOUSE beneficiary 'must report as income on your tax return the FMV of the account as of the date of death'. Schedule 1 line 8z, which btctax fills from nothing — income with no reader, so > 0 refuses" } },
+    BoxEntry { stem: "f1099sa", editions: &["2019", "2025"], label: "5", caption: "5 HSA",
+        decision: BoxDecision::Collected { fields: &[FieldId::Sa1099Box5AccountType],
+            note: "Form1099Sa.box5_account_type — the three-way HSA / Archer MSA / MA MSA checkbox, whose caption the layout wraps to its first printed line ('5 HSA'), the other two ticks printing in their own vertical runs. ★★★ It is the box that decides WHICH FORM the row belongs on: HSA → Form 8889, the other two → Form 8853, which btctax does not build. Unanswered REFUSES (SaAccountTypeNotTranscribed) rather than defaulting to HSA" } },
+    // ── ★★★ T16 — Form 5498-SA, 2024 and 2025 (6 boxes each). ANNUAL, so boxes 2 and 3 print the
+    //    tax year IN THEIR CAPTIONS and split per edition — which is exactly the visible-split
+    //    property the per-edition census exists for. ─────────────────────────────────────────────
+    BoxEntry { stem: "f5498sa", editions: &["2024", "2025"], label: "1", caption: "1 Employee’s or self-",
+        decision: BoxDecision::Collected { fields: &[FieldId::Sa5498Box1ArcherContributions],
+            note: "Form5498Sa.box1_archer_msa_contributions — 'Employee's or self-employed person's Archer MSA contributions made in <year> and <year+1> for <year>', quoted to its first printed line because the layout wraps it. An Archer MSA is FORM 8853's, never Form 8889's, and box 6 is what refuses the row; this field holds the figure so the filer's transcription is complete" } },
+    BoxEntry { stem: "f5498sa", editions: &["2024"], label: "2", caption: "2 Total contributions made in 2024",
+        decision: BoxDecision::Collected { fields: &[FieldId::Sa5498Box2TotalContributions],
+            note: "Form5498Sa.box2_total_contributions — ★★★ NOT Form 8889 line 2, and the difference is why nothing sums it. Line 2 asks for 'HSA contributions you made … Do not include employer contributions, contributions through a cafeteria plan, or rollovers'; box 2 is the trustee's total for the CALENDAR year, employer and employee together. Adding it to line 2 would double-count the employer's share (line 9 already carries it from the W-2) and silently include rollovers. Transcribed so the filer can CHECK line 2 against it" } },
+    BoxEntry { stem: "f5498sa", editions: &["2025"], label: "2", caption: "2 Total contributions made in 2025",
+        decision: BoxDecision::Collected { fields: &[FieldId::Sa5498Box2TotalContributions],
+            note: "the same box as the 2024 grid's, whose caption names its own tax year — an ANNUAL form's captions move every edition, and the split is what makes that visible rather than silent" } },
+    BoxEntry { stem: "f5498sa", editions: &["2024"], label: "3", caption: "3 Total HSA or Archer MSA contributions made in 2025 for 2024",
+        decision: BoxDecision::Collected { fields: &[FieldId::Sa5498Box3NextYearForThisYear],
+            note: "Form5498Sa.box3_contributions_next_year_for_this_year — the carry-back window Form 8889 line 2's own instruction describes ('amounts contributed for 2024 made in 2025 by the unextended deadline'). Transcribed, never summed, for box 2's reason" } },
+    BoxEntry { stem: "f5498sa", editions: &["2025"], label: "3", caption: "3 Total HSA or Archer MSA contributions made in 2026 for 2025",
+        decision: BoxDecision::Collected { fields: &[FieldId::Sa5498Box3NextYearForThisYear],
+            note: "the 2025 grid's own year pair for the same box" } },
+    BoxEntry { stem: "f5498sa", editions: &["2024", "2025"], label: "4", caption: "4 Rollover contributions",
+        decision: BoxDecision::Collected { fields: &[FieldId::Sa5498Box4Rollover],
+            note: "Form5498Sa.box4_rollover_contributions — money moved from another HSA or Archer MSA. Form 8889 line 2's instruction EXCLUDES it by name ('do not include … amounts rolled over from another HSA or Archer MSA'), so it reaches no line; the field holds it so the filer's transcription of the document is complete" } },
+    BoxEntry { stem: "f5498sa", editions: &["2024", "2025"], label: "5", caption: "5 Fair market value of HSA,",
+        decision: BoxDecision::Collected { fields: &[FieldId::Sa5498Box5Fmv],
+            note: "Form5498Sa.box5_fair_market_value — 'Fair market value of HSA, Archer MSA, or MA MSA', quoted to its first printed line (the layout wraps it). The account's year-end value; no line of Form 8889 or the Form 1040 chain reads it, and it is not income, so there is nothing to refuse" } },
+    BoxEntry { stem: "f5498sa", editions: &["2024", "2025"], label: "6", caption: "6 HSA",
+        decision: BoxDecision::Collected { fields: &[FieldId::Sa5498Box6AccountType],
+            note: "Form5498Sa.box6_account_type — the same three-way checkbox the Form 1099-SA prints as box 5, and the same rule: HSA → Form 8889, Archer MSA or MA MSA → Form 8853 (refuses), unanswered → refuses rather than defaulting" } },
 ];
 
 // ── The enumerator ────────────────────────────────────────────────────────────────────────────────
@@ -951,8 +1075,13 @@ fn trim_furniture(caption: &str) -> &str {
 /// label, because that is how the form prints it and quoting half a printed run is not a quotation.
 pub fn printed_boxes(text: &str, preamble_end: &str) -> Result<BTreeMap<String, String>, String> {
     let mut found: BTreeMap<String, String> = BTreeMap::new();
-    let mut previous = "";
+    // Rule 5's state: the face block has printed `For calendar year` and its blank has not been
+    // consumed yet. NOT "the previous line" — see the rule's own note.
+    let mut year_stub_pending = false;
     for line in face_block(text, preamble_end)? {
+        if line.contains(YEAR_STUB) {
+            year_stub_pending = true;
+        }
         let runs: Vec<&str> = line
             .split("  ")
             .map(str::trim)
@@ -965,8 +1094,10 @@ pub fn printed_boxes(text: &str, preamble_end: &str) -> Result<BTreeMap<String, 
                 if !run.bytes().any(|c| c.is_ascii_digit()) {
                     continue;
                 }
-                // Rule 5: the blank year stub under `For calendar year` is the issuer's blank.
-                if previous.contains(YEAR_STUB) && runs.len() == 1 {
+                // Rule 5: the blank year stub under `For calendar year` is the issuer's blank —
+                // the century prefix of `20__`, not box 20.
+                if year_stub_pending && runs.len() == 1 && *run == "20" {
+                    year_stub_pending = false;
                     continue;
                 }
                 // A bare label adopts the next run on its line — unless that run is itself a box.
@@ -993,7 +1124,6 @@ pub fn printed_boxes(text: &str, preamble_end: &str) -> Result<BTreeMap<String, 
                 }
             }
         }
-        previous = line;
     }
     contiguous(&found)?;
     Ok(found)

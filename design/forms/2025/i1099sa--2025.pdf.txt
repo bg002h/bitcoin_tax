@@ -1,0 +1,23 @@
+https://www.irs.gov/pub/irs-prior/i1099sa--2025.pdf
+
+# i1099sa--2025.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  e2c8bba99bc0d157ae140ce27e897cc112b929c3102cef5a269c00ed2ed4d800
+# bytes   154197
+#
+# Fetch:    curl -sL -o i1099sa--2025.pdf https://www.irs.gov/pub/irs-prior/i1099sa--2025.pdf
+# Verify:   sha256sum i1099sa--2025.pdf   # must equal the sha256 above
+#
+# ★ A DIFFERENT hash does not mean a corrupt download — it means the IRS REVISED this
+# document. That is a change to the authority: review it, never silently absorb it.
+#
+# The committed text layer is design/forms/extract/i1099sa--2025.txt — that is what the
+# conformance tests read, so they run with no PDF and no network.
+#
+# Archived 2026-09-07 for the interview build (design/SPEC_interview.md r2 §7 T16, owner
+# ruling FR-76): Form 8889 is the one form on the owner's filed TY2024 return that btctax
+# refused, and T16 transcribes it line by line with these documents as the authority.
+# REVISION, READ OFF THE DOCUMENT'S OWN TEXT:
+#   "Instructions for Forms 1099-SA and 5498-SA (2025)" (extract:242); face year "2025"
+#   (extract:1).  ANNUAL.
+# ★ ONE booklet covers TWO forms (f1099sa and f5498sa).
+# Extracted with PLAIN `pdftotext` (no -layout) — 3-column instruction pages.

@@ -556,6 +556,10 @@ fn schedule_2_fills_part_ii_and_leaves_part_i_blank() {
         line4: dec!(29871),
         line11: dec!(693),
         line12: dec!(1406),
+        // ★ T16 — no Form 8889 in this packet, so the HSA block carries NO testimony.
+        line17c: None,
+        line17d: None,
+        line18: Usd::ZERO,
         line21: dec!(31970), // 29,871 + 693 + 1,406 — sums the PRINTED lines
     };
     let pdf = btctax_forms::fill_schedule_2(&lines, &kitchen_sink_header(), 2024).unwrap();
@@ -589,6 +593,9 @@ fn schedule_2_part_i_prints_lines_2_and_3_when_form_6251_is_attached() {
         line4: dec!(29871),
         line11: dec!(693),
         line12: dec!(1406),
+        line17c: None,
+        line17d: None,
+        line18: Usd::ZERO,
         line21: dec!(31970),
     };
     let pdf = btctax_forms::fill_schedule_2(&lines, &kitchen_sink_header(), 2024).unwrap();
@@ -833,9 +840,11 @@ fn schedule_1_fills_both_parts_across_two_pages() {
         line1: dec!(1200),   // taxable state refund
         line3: dec!(40000),  // crypto Schedule C net
         line7: dec!(3000),   // unemployment
+        line8f: Usd::ZERO,   // ★ T16 — no Form 8889 on this fixture
         line8v: dec!(5000),  // non-business crypto ordinary income
-        line9: dec!(5000),   // total other income (8a-8z) = 8v
+        line9: dec!(5000),   // total other income (8a-8z) = 8f + 8v
         line10: dec!(49200), // 1,200 + 40,000 + 3,000 + 5,000 → 1040 L8
+        line13: Usd::ZERO,   // ★ T16 — no HSA deduction on this fixture
         line15: dec!(2825),  // half of SE tax
         line18: dec!(150),   // early-withdrawal penalty
         line21: dec!(2500),  // student-loan interest
@@ -4160,4 +4169,141 @@ fn the_1040_digital_asset_box_prints_the_filers_answer_including_no() {
         !box_on(&pdf, yes_field) && !box_on(&pdf, no_field),
         "an unanswered question prints NEITHER box — btctax does not answer for the filer"
     );
+}
+
+// ── ★★★ T16 / FR-76 — FORM 8889 ──────────────────────────────────────────────────────────────────
+
+/// A filled Form 8889 with an amount on every line the TY2024 map carries, so the read-back is over
+/// the WHOLE grid rather than the handful of cells one household happens to reach. Every figure is
+/// distinct, so a transposed map cell prints the wrong number rather than the same one twice.
+fn f8889_every_line() -> btctax_core::tax::form8889::Form8889 {
+    use btctax_core::tax::form8889::{EmployerContributionWorksheet, Form8889};
+    use btctax_core::tax::return_inputs::HdhpCoverage;
+    Form8889 {
+        line1_coverage: HdhpCoverage::Family,
+        line2: dec!(2001),
+        line3: dec!(8300),
+        line4: dec!(2004),
+        line5: dec!(2005),
+        line6: dec!(2006),
+        line7: dec!(1000),
+        line8: dec!(2008),
+        line9: dec!(2009),
+        line10: dec!(2010),
+        line11: dec!(2011),
+        line12: dec!(2012),
+        line13: dec!(2013),
+        line14a: dec!(2014),
+        line14b: dec!(2015),
+        line14c: dec!(2016),
+        line15: dec!(2017),
+        line16: dec!(2018),
+        line17a_exception_box: true,
+        line17b: dec!(2019),
+        line18: dec!(2020),
+        line19: dec!(2021),
+        line20: dec!(2022),
+        line21: dec!(2023),
+        employer_worksheet: EmployerContributionWorksheet::default(),
+    }
+}
+
+/// ★★★ **THE TY2024 MAP CELLS, READ BACK FROM THE FILLED PDF** — the brief's read-back kill.
+///
+/// Every one of the 22 money lines and all three checkboxes are read out of the SERIALIZED bytes by
+/// fully-qualified field name, against the figure the chain put there. A transposed pair of map
+/// cells (`line14b` ↔ `line14c`, say) prints two real numbers in each other's boxes: the geometric
+/// verifier catches the COLUMN and the DESCENT, and this catches the identity.
+///
+/// ★ The three checkboxes are asserted by their ON-STATE STRING, not merely "something was written":
+/// line 1's two boxes are `/1` and `/2` on the same field, so a value copied by analogy would write
+/// a box that renders BLANK while reading back as set.
+#[test]
+fn form_8889_fills_every_line_and_the_three_checkboxes() {
+    let lines = f8889_every_line();
+    let pdf = btctax_forms::fill_form_8889(&lines, &kitchen_sink_header(), 2024).unwrap();
+    let g = |fqn: &str| tv(&pdf, fqn);
+    let p = |n: &str| format!("topmostSubform[0].Page1[0].{n}");
+
+    for (cell, want) in [
+        ("f1_3[0]", "2001"),  // L2
+        ("f1_4[0]", "8300"),  // L3
+        ("f1_5[0]", "2004"),  // L4
+        ("f1_6[0]", "2005"),  // L5
+        ("f1_7[0]", "2006"),  // L6
+        ("f1_8[0]", "1000"),  // L7
+        ("f1_9[0]", "2008"),  // L8
+        ("f1_10[0]", "2009"), // L9  ← MID column
+        ("f1_11[0]", "2010"), // L10 ← MID column
+        ("f1_12[0]", "2011"), // L11
+        ("f1_13[0]", "2012"), // L12
+        ("f1_14[0]", "2013"), // L13 → Schedule 1 line 13
+        ("f1_15[0]", "2014"), // L14a
+        ("f1_16[0]", "2015"), // L14b
+        ("f1_17[0]", "2016"), // L14c
+        ("f1_18[0]", "2017"), // L15
+        ("f1_19[0]", "2018"), // L16 → Schedule 1 line 8f
+        ("f1_20[0]", "2019"), // L17b → Schedule 2 line 17c
+        ("f1_21[0]", "2020"), // L18
+        ("f1_22[0]", "2021"), // L19
+        ("f1_23[0]", "2022"), // L20 → Schedule 1 line 8f
+        ("f1_24[0]", "2023"), // L21 → Schedule 2 line 17d
+    ] {
+        assert_eq!(
+            g(&p(cell)).as_deref(),
+            Some(want),
+            "{cell} must carry {want}"
+        );
+    }
+
+    // Line 1: FAMILY coverage ⇒ the `/2` box, and the self-only `/1` box left alone.
+    assert_eq!(
+        box_on_state(&pdf, &p("c1_1[1]")).as_deref(),
+        Some("2"),
+        "line 1's Family box takes on-state /2"
+    );
+    assert!(
+        !box_on(&pdf, &p("c1_1[0]")),
+        "line 1's Self-only box must stay BLANK — the two are mutually exclusive"
+    );
+    // Line 17a: an excepted distribution checks the box.
+    assert_eq!(box_on_state(&pdf, &p("c1_2[0]")).as_deref(), Some("1"));
+
+    // The identity header, like every other attachment.
+    assert!(g(&p("f1_1[0]")).is_some_and(|v| v.contains("Doe")));
+    assert!(g(&p("f1_2[0]")).is_some_and(|v| v.contains("123-45-6789")));
+}
+
+/// ★★★ **SELF-ONLY COVERAGE CHECKS THE OTHER BOX, AND ONLY THE OTHER BOX.** The pair is the one
+/// place on this form where "something was written" and "the right thing was written" diverge — one
+/// field, two on-states — so both arms are asserted rather than one.
+#[test]
+fn form_8889_line_1_checks_exactly_one_coverage_box() {
+    let mut lines = f8889_every_line();
+    lines.line1_coverage = btctax_core::tax::return_inputs::HdhpCoverage::SelfOnly;
+    lines.line17a_exception_box = false;
+    let pdf = btctax_forms::fill_form_8889(&lines, &kitchen_sink_header(), 2024).unwrap();
+    let p = |n: &str| format!("topmostSubform[0].Page1[0].{n}");
+    assert_eq!(box_on_state(&pdf, &p("c1_1[0]")).as_deref(), Some("1"));
+    assert!(!box_on(&pdf, &p("c1_1[1]")));
+    assert!(
+        !box_on(&pdf, &p("c1_2[0]")),
+        "no excepted distribution ⇒ line 17a stays blank"
+    );
+}
+
+/// ★ The TY2025 grid is the SAME grid — asserted rather than assumed, on the same figures.
+#[test]
+fn form_8889_ty2025_fills_the_identical_cells() {
+    let lines = f8889_every_line();
+    let a = btctax_forms::fill_form_8889(&lines, &kitchen_sink_header(), 2024).unwrap();
+    let b = btctax_forms::fill_form_8889(&lines, &kitchen_sink_header(), 2025).unwrap();
+    for cell in ["f1_3[0]", "f1_14[0]", "f1_19[0]", "f1_24[0]"] {
+        let fqn = format!("topmostSubform[0].Page1[0].{cell}");
+        assert_eq!(
+            tv(&a, &fqn),
+            tv(&b, &fqn),
+            "{cell} must land in the same box on both revisions"
+        );
+    }
 }

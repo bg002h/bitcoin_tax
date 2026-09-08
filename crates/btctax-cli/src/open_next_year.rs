@@ -472,6 +472,30 @@ pub fn seed(prior: &ReturnInputs, to: i32) -> ReturnInputs {
                 ..Default::default()
             })
             .collect(),
+        // ★★★ **T16 — the HSA TRUSTEE is a payer identity like any other.** An HSA trustee sends a
+        //     Form 1099-SA every year money leaves the account, so R10.4's sentence — *"Last year
+        //     Fidelity (TIN 12-3456789) issued you a Form 1099-SA. Did they issue one for 2027?"* —
+        //     is exactly as true of them as of a bank. Every BOX is blank, including box 5's
+        //     account-type checkbox: the seed carries an identity, never testimony, and a blank box
+        //     5 REFUSES until the filer transcribes it, which is the fail-closed direction.
+        sa_1099: prior
+            .sa_1099
+            .iter()
+            .map(|r| btctax_core::tax::return_inputs::Form1099Sa {
+                payer: r.payer.clone(),
+                payer_tin: r.payer_tin.clone(),
+                ..Default::default()
+            })
+            .collect(),
+        sa_5498: prior
+            .sa_5498
+            .iter()
+            .map(|r| btctax_core::tax::return_inputs::Form5498Sa {
+                trustee: r.trustee.clone(),
+                trustee_tin: r.trustee_tin.clone(),
+                ..Default::default()
+            })
+            .collect(),
         // ★★★ **I-3 — NO VENUE KEY.** `broker_reporting`'s own contract is *"absent = unanswered:
         //     answered-ness lives in the KEY SET, never in a sentinel value"*, and an inserted key
         //     with an empty `CohortAnswers` is precisely that sentinel. Three call sites read
@@ -570,6 +594,13 @@ fn payer_of(ri: &ReturnInputs, row: DocumentRow, i: usize) -> (String, String) {
         //   COMPILE here rather than yield a nameless prompt (*"Last year  issued you a Form
         //   1099-R…"*) and be silently unseeded. The compensating kill existed, but it lived in
         //   another crate — the compiler is the right instrument for an omission this shape.
+        // ★ T16 — the HSA trustee, named the same way every other payer is.
+        DocumentRow::Sa1099 => ri.sa_1099.get(i).map_or_else(Default::default, |r| {
+            (r.payer.clone(), clause("TIN", &r.payer_tin))
+        }),
+        DocumentRow::Sa5498 => ri.sa_5498.get(i).map_or_else(Default::default, |r| {
+            (r.trustee.clone(), clause("TIN", &r.trustee_tin))
+        }),
         DocumentRow::Form1098
         | DocumentRow::Form1098e
         | DocumentRow::R1099

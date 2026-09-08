@@ -1,0 +1,82 @@
+# Form 8889 (Health Savings Accounts), tax year 2024 — logical line → fully-qualified PDF field name.
+#
+# Extracted with `cargo run -p xtask -- dump-fields crates/btctax-forms/forms/2024/f8889.pdf` and
+# correlated line-by-line against the printed form's TEXT LAYER
+# (`design/forms/extract/f8889--2024.txt`) — never a rendered page. The blank carries exactly
+# **27** AcroForm fields, and the label reader resolves every one of them to a printed line
+# (`cargo run -p xtask -- label-boxes f8889--2024`): f1_1 = name, f1_2 = SSN, c1_1[0]/c1_1[1] =
+# line 1's Self-only / Family boxes, f1_3..f1_24 = the 22 numbered money lines in printed order, and
+# c1_2[0] = line 17a's exceptions box.
+#
+# ★★ THE TY2024 AND TY2025 GRIDS ARE IDENTICAL, and that is MEASURED rather than assumed:
+# `diff <(label-boxes f8889--2024) <(label-boxes f8889--2025)` is empty, and the two extracts differ
+# only in the year, the §223(b) figures printed on line 3, one period after "(see instructions)" on
+# line 13, and the 2025 footer's "Created 3/28/25". So this map is the same shape for both years and
+# the two files differ only in `year`, `template_sha256` and `line_set`.
+#
+# Column x-clusters (hand-pinned; the geometric oracle lives in form8889.rs, never here):
+#   MID    x ≈ [410.4, 481.6] — lines 9 and 10 ONLY, the two the form prints inset so line 11 can
+#                               add them in the amount column
+#   AMOUNT x ≈ [504.0, 576.0] — every other money line
+#
+# NOTHING IS UNMAPPED. Every printed line of Parts I, II and III is filled, so this map's `[census]`
+# is empty — the only Form 8889 fields not in `lines()` are the identity pair (mapped under
+# `[identity]`) and the three checkboxes (mapped as their own cells).
+form = "f8889"
+year = 2024
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-07 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form, `f8889--2024.txt:8`). ──
+irs_stem            = "f8889"
+versioning          = "annual"
+template_sha256     = "a93c1f651b267df7d2935adab13341b1d7e1eade9bcb14acee0b32dd93464e14"
+instructions        = "i8889"
+line_set            = "f8889/2024"
+attachment_sequence = "52"
+
+# ── Part I — HSA Contributions and Deduction ────────────────────────────────────────────────────
+line2   = "topmostSubform[0].Page1[0].f1_3[0]"    # "HSA contributions you made for 2024…"                       AMOUNT
+line3   = "topmostSubform[0].Page1[0].f1_4[0]"    # "If you were under age 55 at the end of 2024…"               AMOUNT
+line4   = "topmostSubform[0].Page1[0].f1_5[0]"    # "Enter the amount you and your employer contributed to your Archer MSAs…"  AMOUNT
+line5   = "topmostSubform[0].Page1[0].f1_6[0]"    # "Subtract line 4 from line 3. If zero or less, enter -0-"      AMOUNT
+line6   = "topmostSubform[0].Page1[0].f1_7[0]"    # "Enter the amount from line 5…"                                AMOUNT
+line7   = "topmostSubform[0].Page1[0].f1_8[0]"    # "…enter your additional contribution amount"                   AMOUNT
+line8   = "topmostSubform[0].Page1[0].f1_9[0]"    # "Add lines 6 and 7"                                            AMOUNT
+line9   = "topmostSubform[0].Page1[0].f1_10[0]"   # "Employer contributions made to your HSAs for 2024"          MID
+line10  = "topmostSubform[0].Page1[0].f1_11[0]"   # "Qualified HSA funding distributions"                          MID
+line11  = "topmostSubform[0].Page1[0].f1_12[0]"   # "Add lines 9 and 10"                                           AMOUNT
+line12  = "topmostSubform[0].Page1[0].f1_13[0]"   # "Subtract line 11 from line 8. If zero or less, enter -0-"     AMOUNT
+line13  = "topmostSubform[0].Page1[0].f1_14[0]"   # "HSA deduction" → Schedule 1 line 13                           AMOUNT
+
+# ── Part II — HSA Distributions ────────────────────────────────────────────────────────────────
+line14a = "topmostSubform[0].Page1[0].f1_15[0]"   # "Total distributions you received in 2024 from all HSAs"     AMOUNT
+line14b = "topmostSubform[0].Page1[0].f1_16[0]"   # "Distributions included on line 14a that you rolled over…"     AMOUNT
+line14c = "topmostSubform[0].Page1[0].f1_17[0]"   # "Subtract line 14b from line 14a"                              AMOUNT
+line15  = "topmostSubform[0].Page1[0].f1_18[0]"   # "Qualified medical expenses paid using HSA distributions"      AMOUNT
+line16  = "topmostSubform[0].Page1[0].f1_19[0]"   # "Taxable HSA distributions…" → Schedule 1 line 8f              AMOUNT
+line17b = "topmostSubform[0].Page1[0].f1_20[0]"   # "Additional 20% tax…" → Schedule 2 line 17c                    AMOUNT
+
+# ── Part III — Income and Additional Tax for Failure To Maintain HDHP Coverage ─────────────────
+line18  = "topmostSubform[0].Page1[0].f1_21[0]"   # "Last-month rule"                                              AMOUNT
+line19  = "topmostSubform[0].Page1[0].f1_22[0]"   # "Qualified HSA funding distribution"                           AMOUNT
+line20  = "topmostSubform[0].Page1[0].f1_23[0]"   # "Total income. Add lines 18 and 19…" → Schedule 1 line 8f      AMOUNT
+line21  = "topmostSubform[0].Page1[0].f1_24[0]"   # "Additional tax. Multiply line 20 by 10% (0.10)…" → Sch 2 17d  AMOUNT
+
+# ── The three CHECKBOXES. Line 1's pair is mutually exclusive (the form prints one box each for
+#    Self-only and Family); line 17a's is checked iff some part of line 16 meets an exception. ──
+check_1_self_only = { field = "topmostSubform[0].Page1[0].c1_1[0]", on = "1" }
+check_1_family    = { field = "topmostSubform[0].Page1[0].c1_1[1]", on = "2" }
+check_17a         = { field = "topmostSubform[0].Page1[0].c1_2[0]", on = "1" }
+
+# ── Identity header (P6.2). The SSN cell declares /MaxLen 11, so it takes the HYPHENATED form —
+#    `push_identity` reads each cell's own capacity rather than assuming. ──
+[identity]
+name = "topmostSubform[0].Page1[0].f1_1[0]"
+ssn  = "topmostSubform[0].Page1[0].f1_2[0]"
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# ★★★ THE FIELD CENSUS (§G-13). EMPTY, and that is a claim rather than an omission: every one of
+# the 27 AcroForm fields is mapped above, so `census_accounts_for_every_field` has nothing left to
+# account for. Form 8889 is a one-page form btctax fills COMPLETELY — there is no line of it that
+# btctax leaves blank by decision, because every situation the form routes elsewhere REFUSES the
+# return instead (`return_refuse::screen_inputs_tiered`, T16's five stops).
+[census]

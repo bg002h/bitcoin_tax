@@ -1812,6 +1812,14 @@ mod tests {
                 rate_28_subtrahend: dec!(4652),
                 rate_28_subtrahend_mfs: dec!(2326),
             },
+            // §223(b)(2) HSA contribution limitation (Rev. Proc. 2023-23 §2.01(1)) — $4,150 self-only,
+            // $8,300 family. §223(b)(3)(B)'s additional contribution at 55+ is a flat statutory
+            // $1,000, NOT indexed.
+            hsa: crate::tax::tables::HsaParams {
+                self_only_limit: dec!(4150),
+                family_limit: dec!(8300),
+                additional_contribution_55: dec!(1000),
+            },
         }
     }
 

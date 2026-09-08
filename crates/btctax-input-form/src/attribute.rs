@@ -141,7 +141,10 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
 
         // ── The `Some(true)` value-refusals → the same Declaration field as their unanswered twin (§7 510). ──
         R::ForeignTrust => vec![decl(QuestionId::ForeignTrust)],
-        R::HsaActivityUnsupported => vec![decl(QuestionId::HsaActivity)],
+        // ★★★ T16 — `HsaActivityUnsupported` is GONE: an affirmed §223 trigger opens Form 8889.
+        //     What anchors here now is the unanswered case of any of Form 8889's own seven
+        //     questions, which carries the `QuestionId` and so maps straight back to its leaf.
+        R::Form8889Unanswered { question } => vec![decl(*question)],
         R::DualStatusAlienUnsupported => vec![decl(QuestionId::DualStatusAlien)],
         R::DependentSpouseUnsupported => vec![decl(QuestionId::DependentSpouse)],
         // Form 6251's two ADVERSE answers: v1 models neither add-back, so each refuses at the same
@@ -322,6 +325,48 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::LiquidationDistributionNotComputed(_) => vec![
             Anchor::Field(FieldId::Div1099Box9CashLiquidation),
             Anchor::Field(FieldId::Div1099Box10NoncashLiquidation),
+        ],
+        // ── ★★★ T16 — Form 8889's five stops. Each anchors on the LEAF the filer must change to
+        //    get past it, which for four of the five is the declaration that raised it. ──
+        R::HsaLine3WorksheetRequired => vec![
+            Anchor::Field(FieldId::DeclHsaEligibleEveryMonth),
+            Anchor::Field(FieldId::DeclHsaMedicareEnrollment),
+        ],
+        R::HsaSeparateForm8889Required => {
+            vec![Anchor::Field(FieldId::DeclHsaBothSpousesHaveHsas)]
+        }
+        // ★ Three leaves raise it: the line-4 declaration and the two documents' own account-type
+        //   checkboxes. The payload names WHICH in the message; the anchors offer every remedy.
+        R::ArcherOrMaMsaNeedsForm8853(_) => vec![
+            Anchor::Field(FieldId::DeclHsaArcherMsaActivity),
+            Anchor::Field(FieldId::Sa1099Box5AccountType),
+            Anchor::Field(FieldId::Sa5498Box6AccountType),
+        ],
+        R::SaAccountTypeNotTranscribed(_) => vec![
+            Anchor::Field(FieldId::Sa1099Box5AccountType),
+            Anchor::Field(FieldId::Sa5498Box6AccountType),
+        ],
+        R::HsaTestingPeriodFailureNotComputed => {
+            vec![Anchor::Field(FieldId::DeclHsaTestingPeriodFailure)]
+        }
+        // ★★ The two EXCESS rules anchor on the amounts, not on a declaration: the filer's remedy
+        //    is to correct the contribution figure (or to withdraw the excess and re-enter it), and
+        //    no yes/no answer can clear either.
+        R::HsaExcessContributionsNeedForm5329 => vec![
+            Anchor::Field(FieldId::HsaLine2Contributions),
+            Anchor::Field(FieldId::DeclHsaFamilyCoverage),
+        ],
+        R::HsaExcessEmployerContributions => vec![
+            Anchor::Field(FieldId::HsaEmployerPriorYear),
+            Anchor::Field(FieldId::HsaEmployerNextYear),
+            Anchor::Field(FieldId::Box12Amount),
+        ],
+        // ★ The W-2 says the employer contributed and the declaration says nothing happened. Both
+        //   leaves are the remedy: answer the §223 question Yes, or correct the box 12 entry.
+        R::HsaEmployerContributionWithoutActivity => vec![
+            Anchor::Field(FieldId::DeclHsaActivity),
+            Anchor::Field(FieldId::Box12Code),
+            Anchor::Field(FieldId::Box12Amount),
         ],
         R::IraDeductionClaimed => vec![Anchor::NotInForm {
             note: "the Schedule 1 IRA deduction is not a v1 form field — entered via TOML import",
@@ -559,9 +604,22 @@ mod tests {
             attribute(&RefuseReason::ForeignTrust),
             vec![Field(FieldId::DeclForeignTrust)]
         );
+        // ★★★ T16 — the HSA entry here USED to be `HsaActivityUnsupported`. It is gone: an
+        //     affirmed §223 trigger opens Form 8889 rather than refusing it. Its replacement is the
+        //     unanswered case of one of Form 8889's own seven questions, which carries the
+        //     `QuestionId` and so anchors on a DIFFERENT leaf per question — pinned here on two, so
+        //     a payload the map ignored would red.
         assert_eq!(
-            attribute(&RefuseReason::HsaActivityUnsupported),
-            vec![Field(FieldId::DeclHsaActivity)]
+            attribute(&RefuseReason::Form8889Unanswered {
+                question: QuestionId::HsaFamilyCoverage
+            }),
+            vec![Field(FieldId::DeclHsaFamilyCoverage)]
+        );
+        assert_eq!(
+            attribute(&RefuseReason::Form8889Unanswered {
+                question: QuestionId::HsaTestingPeriodFailure
+            }),
+            vec![Field(FieldId::DeclHsaTestingPeriodFailure)]
         );
         assert_eq!(
             attribute(&RefuseReason::DualStatusAlienUnsupported),

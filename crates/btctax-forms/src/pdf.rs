@@ -27,6 +27,12 @@ pub fn schedule_se_pdf(year: i32) -> Result<&'static [u8], FormsError> {
         .ok_or(FormsError::UnsupportedYear(year))
 }
 
+/// The bundled Form 8889 PDF bytes for a supported tax year (T16 — TY2024 and TY2025).
+pub fn f8889_pdf(year: i32) -> Result<&'static [u8], FormsError> {
+    crate::bundled::template(crate::bundled::Stem::F8889, year)
+        .ok_or(FormsError::UnsupportedYear(year))
+}
+
 /// The bundled Form 8959 PDF bytes for a supported tax year. Full-return v1 is TY2024-only.
 pub fn f8959_pdf(year: i32) -> Result<&'static [u8], FormsError> {
     crate::bundled::template(crate::bundled::Stem::F8959, year)

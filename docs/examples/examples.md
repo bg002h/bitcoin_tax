@@ -97,7 +97,7 @@ Tax profile for 2025 saved.
 ```
 ```console
 $ btctax --vault v.pgp report --tax-year 2025
-TY2025 — preparing (17 forms; TaxTable yes; full-return params no; 1099-DA proceeds)
+TY2025 — preparing (18 forms; TaxTable yes; full-return params no; 1099-DA proceeds)
 Federal tax attributable to crypto — tax year 2025
   net short-term: -350.00   net long-term: 0.00
   crypto ordinary income (level): 0.00
@@ -294,7 +294,7 @@ Recorded decision decision|2
 ```
 ```console
 $ btctax --vault v.pgp report --tax-year 2025
-TY2025 — preparing (17 forms; TaxTable yes; full-return params no; 1099-DA proceeds)
+TY2025 — preparing (18 forms; TaxTable yes; full-return params no; 1099-DA proceeds)
 Federal tax attributable to crypto — tax year 2025
   net short-term: 0.00   net long-term: 0.00
   crypto ordinary income (level): 7450.67
@@ -553,6 +553,8 @@ $ btctax --vault v.pgp income show --year 2024
     "g_1099": true,
     "form_1098": null,
     "form_1098e": false,
+    "sa_1099": false,
+    "sa_5498": false,
     "r_1099": false,
     "ssa_1099": false,
     "nec_misc_k_1099": false,
@@ -660,6 +662,8 @@ $ btctax --vault v.pgp income show --year 2024
   ],
   "b_1099": [],
   "form_1098e": [],
+  "sa_1099": [],
+  "sa_5498": [],
   "schedule_c": {
     "owner": "taxpayer",
     "business_description": "Bitcoin mining",
@@ -700,6 +704,22 @@ $ btctax --vault v.pgp income show --year 2024
     "state_refund_taxable": "0",
     "ira_deduction_claimed": "0",
     "hsa_activity": false
+  },
+  "hsa": {
+    "family_coverage": null,
+    "eligible_every_month_same_coverage": null,
+    "age_55_or_older_at_year_end": null,
+    "enrolled_in_medicare_any_month": null,
+    "both_spouses_have_hsas": null,
+    "line2_contributions_you_made": "0",
+    "archer_msa_activity": null,
+    "employer_contributions_prior_year": "0",
+    "employer_contributions_next_year": "0",
+    "line10_qualified_funding_distribution": "0",
+    "line14b_rollovers_and_withdrawn_excess": "0",
+    "line15_qualified_medical_expenses": "0",
+    "line16_amount_meeting_an_exception": "0",
+    "testing_period_failure": null
   },
   "schedule_1a": {
     "tips": null,
@@ -960,7 +980,7 @@ Tax profile for 2024 saved.
 ```
 ```console
 $ btctax --vault v.pgp report --tax-year 2024
-TY2024 — filable (19 forms; TaxTable yes; full-return params yes; 1099-DA none)
+TY2024 — filable (20 forms; TaxTable yes; full-return params yes; 1099-DA none)
 Federal tax attributable to crypto — tax year 2024
   net short-term: 0.00   net long-term: 0.00
   crypto ordinary income (level): 3300.00
@@ -1134,7 +1154,7 @@ Imported full-return inputs for tax year 2024.
 ```
 ```console
 $ btctax --vault v.pgp report --tax-year 2024
-TY2024 — filable (19 forms; TaxTable yes; full-return params yes; 1099-DA none)
+TY2024 — filable (20 forms; TaxTable yes; full-return params yes; 1099-DA none)
 Federal tax attributable to crypto — tax year 2024
   net short-term: 0.00   net long-term: 200000.00
   crypto ordinary income (level): 0.00

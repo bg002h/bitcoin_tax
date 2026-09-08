@@ -746,6 +746,25 @@ pub struct FormAuthority {
 /// `the_forms_const_row_agrees_with_its_map_row` holds these five rows to those declarations, so a
 /// page range cannot drift here without reddening.
 pub const FORMS: &[FormAuthority] = &[
+    // ★★★ T16 / FR-76 — Form 8889 reached STEP 2 the day it was transcribed, which is the point of
+    //     the ladder: the transcription in `btctax_core::tax::form8889` is checked line by line
+    //     against these fixtures by `xtask line-coverage`, so the form is not merely archived but
+    //     CHECKABLE. `instr_pages` is `None` because the whole i8889 booklet is the authority (its
+    //     Line-N blocks are what `line-coverage`'s `FilerRecords` rows quote from).
+    FormAuthority {
+        form: "f8889",
+        year: 2024,
+        instructions: "i8889",
+        instr_pages: None,
+        extract_stem: "f8889_2024",
+    },
+    FormAuthority {
+        form: "f8889",
+        year: 2025,
+        instructions: "i8889",
+        instr_pages: None,
+        extract_stem: "f8889_2025",
+    },
     FormAuthority {
         form: "f1040s1a",
         year: 2025,
@@ -1212,9 +1231,10 @@ mod tests {
             planted += 1;
         }
         assert_eq!(
-            planted, 5,
+            planted, 7,
             "guard the guard: every archived FORMS row must have been planted — a loop that ran \
-             zero times would pass every assertion inside it"
+             zero times would pass every assertion inside it. 5 → 7 on 2026-09-07 (T16): the two \
+             Form 8889 rows reached step 2 the day the form was transcribed"
         );
     }
 
@@ -1469,10 +1489,11 @@ mod map_row_tests {
         );
         assert_eq!(
             from_rows.len(),
-            36,
-            "36 rows on disk today (37 → 41 on 2026-09-06 for the four Form 4868 / Form 1040-V \
+            38,
+            "38 rows on disk today (37 → 41 on 2026-09-06 for the four Form 4868 / Form 1040-V \
              rows, spec 4868/1040-V T1, then 41 → 36 the same day when S9 dropped the five TY2017 \
-             rows); a new year adds files, not a list"
+             rows, then 36 → 38 on 2026-09-07 for T16's two Form 8889 rows); a new year adds files, \
+             not a list"
         );
     }
 

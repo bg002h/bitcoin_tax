@@ -39,6 +39,10 @@ pub fn form_spec() -> &'static [Section] {
         sections::B_1099S,
         sections::G_1099S,
         sections::FORM_1098ES,
+        // ★ R4 / T16 — the HSA information returns, then Form 8889's own money leaves.
+        sections::SA_1099S,
+        sections::SA_5498S,
+        sections::FORM_8889,
         sections::SCHEDULE_A,
         sections::SCHEDULE_A_CHARITABLE,
         sections::PAYMENTS,
@@ -166,12 +170,15 @@ mod tests {
             );
         }
         assert_eq!(
-            decl_count, 21,
-            "21 declarations are Decl* fields (the other two dedup to Schedule A). ★ R10.4 / T4b \
+            decl_count, 28,
+            "28 declarations are Decl* fields (the other two dedup to Schedule A). ★ R10.4 / T4b \
              added the sixteenth (the carried filing status's confirmation); ★ R3 / T5 added the \
              four of the DOCUMENT-LESS INCOME DOOR — wages with no W-2, interest or dividends with \
              no 1099, a state refund with no 1099-G, and the §111(a) prior-year-itemized gate; \
-             ★ R9 / T6 added the twenty-first, Form 1040 page 1's DIGITAL ASSETS question."
+             ★ R9 / T6 added the twenty-first, Form 1040 page 1's DIGITAL ASSETS question; \
+             ★ T16 / FR-76 added SEVEN — Form 8889's coverage box, its line-3 eligibility \
+             condition, the age-55 amount, Medicare enrolment, the both-spouses heading condition, \
+             the line-4 Archer MSA gate and Part III's testing period."
         );
         assert_eq!(
             deduped,
@@ -185,8 +192,8 @@ mod tests {
         // 21 delegating Decl* fields + the foreign_country_names Text field.
         assert_eq!(
             decls.fields.len(),
-            22,
-            "21 declarations + foreign_country_names"
+            29,
+            "28 declarations + foreign_country_names"
         );
         assert!(decls
             .fields
@@ -304,6 +311,11 @@ mod tests {
                     box2_state_refund: rust_decimal_macros::dec!(1),
                     ..Default::default()
                 }];
+                // ★★★ T16 — the liveness primer for Form 8889's seven declarations, which share
+                //     one predicate: the §223 trigger is affirmed. Safe to prime here for the same
+                //     reason the census rows are — the test drives one field at a time through the
+                //     registry, and `DeclHsaActivity` is itself driven by the loop above.
+                ri.sch1.hsa_activity = Some(true);
                 ri
             };
             assert!(

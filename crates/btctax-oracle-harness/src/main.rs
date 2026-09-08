@@ -844,6 +844,12 @@ fn map_for(name: &str) -> Option<&'static str> {
         "schedule_se" => {
             btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::ScheduleSe, 2024).unwrap()
         }
+        // ★ T16 — Form 8889. The harness reads its cells back like any other member; no compared
+        //   line lives on it (neither oracle prints a Form 8889), but the read-back is what makes
+        //   the packet's own cells visible to the sweep's transcription check.
+        "f8889" => {
+            btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8889, 2024).unwrap()
+        }
         "f8959" => {
             btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8959, 2024).unwrap()
         }

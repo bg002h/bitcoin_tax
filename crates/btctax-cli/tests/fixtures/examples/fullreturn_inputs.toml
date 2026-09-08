@@ -27,6 +27,8 @@ form_2555_line50 = "0"
 form_4563_line15 = "0"
 itemize_election = "auto"
 other_out_of_scope_income = false
+sa_1099 = []
+sa_5498 = []
 schedule_b_filer_records = []
 tax_year = 2024
 
@@ -68,6 +70,8 @@ nec_misc_k_1099 = false
 oid_1099 = false
 r_1099 = false
 s_1099 = false
+sa_1099 = false
+sa_5498 = false
 schedule_e_rental = false
 ssa_1099 = false
 t_1098 = false
@@ -113,6 +117,15 @@ first_name = "John"
 last_name = "Doe"
 occupation = "Engineer"
 ssn = "123-45-6789"
+
+[hsa]
+employer_contributions_next_year = "0"
+employer_contributions_prior_year = "0"
+line10_qualified_funding_distribution = "0"
+line14b_rollovers_and_withdrawn_excess = "0"
+line15_qualified_medical_expenses = "0"
+line16_amount_meeting_an_exception = "0"
+line2_contributions_you_made = "0"
 
 [[int_1099]]
 box10_market_discount = "0"

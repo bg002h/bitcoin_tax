@@ -392,7 +392,24 @@ pub struct Schedule2Lines {
     pub line11: Usd,
     /// L12 — net investment income tax: **Form 8960's printed line 17**. Zero when no NIIT is owed.
     pub line12: Usd,
-    /// L21 — total other taxes = add 4, 7 through 16, 18 and 19 ⇒ `4 + 11 + 12` here → 1040 **L23**.
+    /// ★★★ **L17c — "Additional tax on HSA distributions. Attach Form 8889"** (T16): Form 8889's own
+    /// printed line 17b, the 20% tax under §223(f)(4) on a distribution not used for qualified
+    /// medical expenses.
+    ///
+    /// ★ `Option`, for the reason [`Self::line2`] is: 17c is a CONDITIONAL entry — *"Attach Form
+    /// 8889"* — so a printed `0` on a return carrying no Form 8889 would swear the filer figured
+    /// this tax on a form the IRS never receives. Blank is the only honest mark.
+    pub line17c: Option<Usd>,
+    /// ★★★ **L17d — "Additional tax on an HSA because you didn't remain an eligible individual.
+    /// Attach Form 8889"** (T16): Form 8889's own printed line 21, the §223(b)(8)(B)(i)(II) /
+    /// §223(f)(7) 10% tax. `Option` for the same reason as 17c.
+    pub line17d: Option<Usd>,
+    /// **L18 — "Total additional taxes. Add lines 17a through 17z."** btctax fills only 17c and 17d,
+    /// so this IS their sum. It is our arithmetic rather than the filer's testimony, which is why a
+    /// blank 17c/17d sums as zero here where a printed `0` on the line itself would not be honest.
+    pub line18: Usd,
+    /// L21 — total other taxes = add 4, 7 through 16, 18 and 19 ⇒ `4 + 11 + 12 + 18` here → 1040
+    /// **L23**.
     pub line21: Usd,
 }
 
@@ -408,6 +425,9 @@ pub fn schedule_2_lines(
     f8960: Option<&Form8960Lines>,
     // §G-6 — the attached Form 6251, when one is filed. `Some` exactly when `must_attach()` holds.
     f6251: Option<&crate::tax::form6251::Form6251>,
+    // ★ T16 — the attached Form 8889, when one is filed. `Some` exactly when `Form8889::must_file`
+    //   held at assembly, which is the §223 trigger declaration and nothing else.
+    f8889: Option<&crate::tax::form8889::Form8889>,
 ) -> Option<Schedule2Lines> {
     // ★ L4 IS Schedule SE's PRINTED line 12 — the form says so ("Enter here and on Schedule 2, line 4").
     // A re-rounding of the exact SE tax would put this schedule a dollar away from the Schedule SE
@@ -424,7 +444,15 @@ pub fn schedule_2_lines(
     //   the filer's testimony, so `unwrap_or(ZERO)` here is right where a printed `0` on line 2 is not.
     // "Add lines 1z and 2" — btctax fills nothing on the 1z additions block, so line 3 IS line 2.
     let line3 = line2.unwrap_or(Usd::ZERO);
-    let line21 = line4 + line11 + line12; // ★ sums the PRINTED lines
+    // ★★★ T16 — Form 8889's OWN printed lines, rounded there rather than re-derived here. Each line
+    //     routes itself: *"Also, include this amount in the total on Schedule 2 (Form 1040), Part
+    //     II, line 17c"* (line 17b) and *"…line 17d"* (line 21). Re-rounding would put this
+    //     schedule a dollar away from the Form 8889 stapled behind it.
+    let line17c = f8889.map(|f| round_dollar(f.schedule_2_line_17c()));
+    let line17d = f8889.map(|f| round_dollar(f.schedule_2_line_17d()));
+    // "Add lines 17a through 17z" — btctax fills only 17c and 17d.
+    let line18 = line17c.unwrap_or(Usd::ZERO) + line17d.unwrap_or(Usd::ZERO);
+    let line21 = line4 + line11 + line12 + line18; // ★ sums the PRINTED lines
 
     // ★★★ THE FILING GATE CARRIES **BOTH PARTS**, because Schedule 2 files on either.
     //
@@ -447,6 +475,9 @@ pub fn schedule_2_lines(
         line4,
         line11,
         line12,
+        line17c,
+        line17d,
+        line18,
         line21,
     })
 }
@@ -470,9 +501,13 @@ pub struct Schedule1Lines {
     pub line3: Usd,
     /// L7 — unemployment compensation.
     pub line7: Usd,
+    /// ★★★ **L8f — "Income from Form 8889"** (T16). Form 8889 line 16 (a taxable HSA distribution)
+    /// plus line 20 (a testing-period inclusion) — the form routes both here, on each line's own
+    /// text. Blank on every return that files no Form 8889.
+    pub line8f: Usd,
     /// L8v — digital assets received as ordinary income (non-business).
     pub line8v: Usd,
-    /// L9 — total other income = add **printed** 8a through 8z ⇒ `= line8v` here.
+    /// L9 — total other income = add **printed** 8a through 8z ⇒ `= line8f + line8v` here.
     pub line9: Usd,
     /// L10 — combine **printed** 1 through 7 and 9 → 1040 **L8**.
     pub line10: Usd,
@@ -480,9 +515,12 @@ pub struct Schedule1Lines {
     pub line15: Usd,
     /// L18 — penalty on early withdrawal of savings.
     pub line18: Usd,
+    /// ★★★ **L13 — "Health savings account deduction. Attach Form 8889"** (T16). Form 8889's own
+    /// printed line 13.
+    pub line13: Usd,
     /// L21 — the §221 student-loan interest deduction (post-phase-out).
     pub line21: Usd,
-    /// L26 — add **printed** 11 through 23 and 25 ⇒ `15 + 18 + 21` here → 1040 **L10**.
+    /// L26 — add **printed** 11 through 23 and 25 ⇒ `13 + 15 + 18 + 21` here → 1040 **L10**.
     pub line26: Usd,
 }
 
@@ -495,15 +533,17 @@ pub fn schedule_1_lines(ar: &AbsoluteReturn) -> Option<Schedule1Lines> {
     let line1 = round_dollar(p.state_refund_1);
     let line3 = round_dollar(p.schedule_c_net_3);
     let line7 = round_dollar(p.unemployment_7);
+    let line8f = round_dollar(p.hsa_income_8f);
     let line8v = round_dollar(p.crypto_ordinary_8v);
-    let line9 = line8v; // 8a-8u and 8w-8z are blank
+    let line9 = line8f + line8v; // 8a-8e, 8g-8u and 8w-8z are blank
     let line10 = line1 + line3 + line7 + line9; // ★ sums the PRINTED lines
 
     // Part II — adjustments to income.
     let line15 = round_dollar(p.half_se_15);
     let line18 = round_dollar(p.early_withdrawal_18);
+    let line13 = round_dollar(p.hsa_deduction_13);
     let line21 = round_dollar(p.student_loan_21);
-    let line26 = line15 + line18 + line21; // ★ sums the PRINTED lines
+    let line26 = line13 + line15 + line18 + line21; // ★ sums the PRINTED lines
 
     if line10 <= Usd::ZERO && line26 <= Usd::ZERO {
         return None;
@@ -512,9 +552,11 @@ pub fn schedule_1_lines(ar: &AbsoluteReturn) -> Option<Schedule1Lines> {
         line1,
         line3,
         line7,
+        line8f,
         line8v,
         line9,
         line10,
+        line13,
         line15,
         line18,
         line21,
@@ -1801,6 +1843,7 @@ mod tests {
             uses_8995a: false,
             f8995a_parts_i_to_iii: None,
             amt: Default::default(),
+            form_8889: None,
             wages: z,
             taxable_interest: z,
             ordinary_dividends: z,
@@ -1820,6 +1863,8 @@ mod tests {
                 half_se_15: z,
                 early_withdrawal_18: z,
                 student_loan_21: z,
+                hsa_income_8f: z,
+                hsa_deduction_13: z,
             },
             schedule_c: None,
             schedule_d: crate::tax::return_1040::ScheduleDParts {
@@ -2095,8 +2140,8 @@ mod tests {
         );
 
         let f8959 = form_8959_lines(FilingStatus::Single, Usd::ZERO, Usd::ZERO, Some(&se));
-        let s2 =
-            schedule_2_lines(Some(&sse), &f8959, None, None).expect("SE tax ⇒ Schedule 2 files");
+        let s2 = schedule_2_lines(Some(&sse), &f8959, None, None, None)
+            .expect("SE tax ⇒ Schedule 2 files");
         assert_eq!(
             s2.line4, sse.line12,
             "★ Schedule 2 L4 IS Schedule SE's printed L12"
@@ -2562,7 +2607,7 @@ mod tests {
         let sch_c = schedule_c_lines(&ar).unwrap();
         let sse = schedule_se_lines(&ar, &sch_c).unwrap();
         let f8959 = form_8959_lines(FilingStatus::Single, Usd::ZERO, Usd::ZERO, Some(&se));
-        let s2 = schedule_2_lines(Some(&sse), &f8959, None, None).unwrap();
+        let s2 = schedule_2_lines(Some(&sse), &f8959, None, None, None).unwrap();
 
         // ★ L4 IS Schedule SE's printed L12 = printed L10 + printed L11 = round(21,836.40) +
         // round(8,034.45) = 21,836 + 8,034 = 29,870 — and NOT round_dollar(29,870.85) = 29,871.
@@ -2610,7 +2655,7 @@ mod tests {
         let exact_total = dec!(274.50) + dec!(499.50); // what the engine carries, in cents
         assert_eq!(round_dollar(exact_total), dec!(774)); // …which rounds to something ELSE
 
-        let s2 = schedule_2_lines(None, &f8959, None, None).unwrap();
+        let s2 = schedule_2_lines(None, &f8959, None, None, None).unwrap();
         assert_eq!(
             s2.line11,
             dec!(775),
@@ -2624,7 +2669,7 @@ mod tests {
     fn schedule_2_absent_when_no_other_taxes() {
         let f8959 = form_8959_lines(FilingStatus::Single, dec!(50000), Usd::ZERO, None);
         assert_eq!(f8959.line18, Usd::ZERO);
-        assert!(schedule_2_lines(None, &f8959, None, None).is_none());
+        assert!(schedule_2_lines(None, &f8959, None, None, None).is_none());
     }
 
     /// Schedule 3 carries the FTC and the excess-SS credit, and cross-foots to 1040 L20 / L31.
@@ -3135,7 +3180,7 @@ mod tests {
             "…the exact one differs"
         );
 
-        let s2 = schedule_2_lines(None, &f8959, None, None).unwrap();
+        let s2 = schedule_2_lines(None, &f8959, None, None, None).unwrap();
         assert_eq!(
             s2.line11,
             dec!(775),

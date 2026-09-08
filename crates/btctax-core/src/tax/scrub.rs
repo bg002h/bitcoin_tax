@@ -599,6 +599,10 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
         // ★ R4 / T5 — the 1098-E rows carry a LENDER NAME and a lender TIN, exactly the identity
         //   class the 1099 payers carry. Scrubbed below, through the same `EinMap`.
         form_1098e: _,
+        // ★ R4 / T16 — the two HSA information returns carry a TRUSTEE name and TIN, the same
+        //   identity class as a 1099 payer. Scrubbed below, through the same `EinMap`.
+        sa_1099: _,
+        sa_5498: _,
         // ★★★ R5 / T5 — THE MOST IDENTIFYING ROWS ON THE RETURN. A `schedule_b_filer_records` row
         //     is the seller-financed-mortgage case Schedule B asks for BY NAME: the buyer's own
         //     **SSN** and street address (`i1040sb--2025.txt:24, 77`) — a third party's identity,
@@ -622,6 +626,10 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
         itemize_election: _,
         mfs_spouse_itemizes: _,
         sch1: _, // money only
+        // ★ T16 — Form 8889's answers: coverage, eligibility, age, Medicare, an Archer declaration
+        //   and four money figures. Facts about the FILER'S OWN year, none of them identifying —
+        //   there is no trustee, no account number and no name anywhere on this struct.
+        hsa: _,
         payments: _,
         capital_loss_carryforward_in: _,
         capital_loss_carryforward_in_provenance: _,
@@ -856,6 +864,38 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
         } = f;
         f.lender = replace_preserving_emptiness(&f.lender, format!("Servicer{}", i + 1));
         f.lender_tin = map_payer_tin(&mut eins, &f.lender_tin);
+    }
+    // ★ R4 / T16 — Form 1099-SA: a TRUSTEE/PAYER name and TIN, the 1099-payer identity class.
+    for (i, f) in out.sa_1099.iter_mut().enumerate() {
+        let crate::tax::return_inputs::Form1099Sa {
+            payer: _,
+            payer_tin: _, // mapped below, through the SAME `EinMap` as every other payer TIN
+            transcribed_on: _, // R10.2 — KEPT (see the 1099-INT loop)
+            box1_gross_distribution: _,
+            box2_earnings_on_excess: _,
+            // ★ A one-character IRS code, never free text a filer writes — no identity.
+            box3_distribution_code: _,
+            box4_fmv_on_date_of_death: _,
+            box5_account_type: _,
+        } = f;
+        f.payer = replace_preserving_emptiness(&f.payer, format!("Trustee{}", i + 1));
+        f.payer_tin = map_payer_tin(&mut eins, &f.payer_tin);
+    }
+    // ★ R4 / T16 — Form 5498-SA: the same trustee identity class.
+    for (i, f) in out.sa_5498.iter_mut().enumerate() {
+        let crate::tax::return_inputs::Form5498Sa {
+            trustee: _,
+            trustee_tin: _,    // mapped below, through the SAME `EinMap`
+            transcribed_on: _, // R10.2 — KEPT (see the 1099-INT loop)
+            box1_archer_msa_contributions: _,
+            box2_total_contributions: _,
+            box3_contributions_next_year_for_this_year: _,
+            box4_rollover_contributions: _,
+            box5_fair_market_value: _,
+            box6_account_type: _,
+        } = f;
+        f.trustee = replace_preserving_emptiness(&f.trustee, format!("Trustee{}", i + 1));
+        f.trustee_tin = map_payer_tin(&mut eins, &f.trustee_tin);
     }
     // ★★★ R5 / T5 — the filer's-records rows. `payer_ssn` is a **third party's** SSN (the buyer on a
     //     seller-financed mortgage), so it goes through `synthetic_ssn_like` exactly like a

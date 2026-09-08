@@ -40,11 +40,13 @@ attachment_sequence = "01"
 line1  = "form1[0].Page1[0].f1_04[0]"   # "Taxable refunds, credits, or offsets of state and local income taxes"  AMOUNT
 line3  = "form1[0].Page1[0].f1_07[0]"   # "Business income or (loss). Attach Schedule C"                          AMOUNT
 line7  = "form1[0].Page1[0].f1_11[0]"   # "Unemployment compensation"                                            AMOUNT
+line8f = "form1[0].Page1[0].f1_17[0]"   # "Income from Form 8889"                                                AMOUNT  ★ T16
 line8v = "form1[0].Page1[0].f1_33[0]"   # "Digital assets received as ordinary income not reported elsewhere"    MID   ★ btctax
 line9  = "form1[0].Page1[0].f1_37[0]"   # "Total other income. Add lines 8a through 8z"                          AMOUNT
 line10 = "form1[0].Page1[0].f1_38[0]"   # "Combine lines 1 through 7 and 9…" → 1040 line 8                       AMOUNT
 
 # ── Part II — Adjustments to Income (page 2) ────────────────────────────────────────────────────
+line13 = "form1[0].Page2[0].f2_03[0]"   # "Health savings account deduction. Attach Form 8889"                   AMOUNT  ★ T16
 line15 = "form1[0].Page2[0].f2_05[0]"   # "Deductible part of self-employment tax. Attach Schedule SE"           AMOUNT
 line18 = "form1[0].Page2[0].f2_08[0]"   # "Penalty on early withdrawal of savings"                               AMOUNT
 line21 = "form1[0].Page2[0].f2_13[0]"   # "Student loan interest deduction"                                      AMOUNT
@@ -127,7 +129,6 @@ last_line    = "26"
 "form1[0].Page1[0].f1_14[0]" = { line = "8c", rule = "unmodeled", reason = "Cancellation of debt — btctax collects no Form 1099-C. Income, so the understatement direction; there is no input that could reach it.", covered_by = "RefuseReason::DocumentTypeUnsupported" }
 "form1[0].Page1[0].f1_15[0]" = { line = "8d", rule = "unmodeled", reason = "Foreign earned income exclusion from Form 2555 ★ PAREN — btctax models a domestic filer and emits no Form 2555 (see also line 24j).", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "2555" }
 "form1[0].Page1[0].f1_16[0]" = { line = "8e", rule = "unmodeled", reason = "Income from Form 8853 (Archer MSA / long-term care) — no MSA modelled.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "8853" }
-"form1[0].Page1[0].f1_17[0]" = { line = "8f", rule = "unmodeled", reason = "Income from Form 8889 (HSA) — no HSA modelled (matching Schedule 2 lines 17c/17d).", covered_by = "RefuseReason::HsaActivityUnsupported" }
 "form1[0].Page1[0].f1_18[0]" = { line = "8g", rule = "unmodeled", reason = "Alaska Permanent Fund dividends — not modelled.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "Alaska Permanent Fund" }
 "form1[0].Page1[0].f1_19[0]" = { line = "8h", rule = "unmodeled", reason = "Jury duty pay — not modelled (its offsetting adjustment is line 24a).", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "Jury duty pay" }
 "form1[0].Page1[0].f1_20[0]" = { line = "8i", rule = "unmodeled", reason = "Prizes and awards — not modelled.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "Prizes and awards" }
@@ -151,7 +152,6 @@ last_line    = "26"
 # ★ Everything below is a DEDUCTION: each blank forgoes a benefit and can only overstate the tax.
 "form1[0].Page2[0].f2_01[0]" = { line = "11", rule = "unmodeled", reason = "Educator expenses — not modelled.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
 "form1[0].Page2[0].f2_02[0]" = { line = "12", rule = "unmodeled", reason = "Certain business expenses of reservists, performing artists and fee-basis government officials (Form 2106) — not modelled.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
-"form1[0].Page2[0].f2_03[0]" = { line = "13", rule = "unmodeled", reason = "Health savings account deduction (Form 8889) — no HSA modelled.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
 "form1[0].Page2[0].f2_04[0]" = { line = "14", rule = "unmodeled", reason = "Moving expenses for members of the Armed Forces (Form 3903) — not modelled.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
 "form1[0].Page2[0].f2_06[0]" = { line = "16", rule = "unmodeled", reason = "Self-employed SEP, SIMPLE and qualified plans. ★ Adjacent to modelled behaviour — btctax computes Schedule C and Schedule SE — but it collects no retirement-plan contributions. A forgone deduction; it can only overstate the tax.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
 "form1[0].Page2[0].f2_07[0]" = { line = "17", rule = "unmodeled", reason = "Self-employed health insurance deduction — same adjacency, same direction: Schedule C exists, health-insurance premiums are not collected.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }

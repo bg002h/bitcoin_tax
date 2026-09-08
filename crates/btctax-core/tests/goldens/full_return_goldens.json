@@ -5,7 +5,7 @@
     "oracle_2": "PSL Tax-Calculator (CC0) \u2014 a SECOND independent implementation of a completely different lineage. Two oracles are worth far more than one: a single oracle can only tell you that you DISAGREE, never which of you is wrong.",
     "oracle_2_version": "6.8.2",
     "tax_year": 2024,
-    "generated": "2026-09-06",
+    "generated": "2026-09-07",
     "generator": "scripts/oracle/gen_goldens.py",
     "corpus": "SPEC \u00a75.1 variable-strength constrained COVERING ARRAY (scripts/oracle/corpus.py): the 12 hand-written anchors (verbatim) + 2 bake-time-steered pinned liveness cells + the hand-written LOW_END cells (shapes the axis tables cannot reach) + the hand-written NON_INTERACTION cells (households that make a claimed non-interaction observable \u2014 a guarantee 'X does not move Y' is invisible to a corpus in which X and Y never co-occur) + a generated array \u2014 full cartesian on the named triples {SE,LTCG,qual-div} and {itemized,SALT-over-cap,high-income} (t=3 by construction), pairwise (t=2) elsewhere, under the D-1/D-2/D-3 constraints. Every candidate is ADMITTED refusal-free and AMT/credit-free through the \u00a79 oracle_harness binary before it is baked, so a scenario btctax would refuse never enters this file.",
     "regeneration": "\u2605 ENGINE-VERSION-GATED (SPEC \u00a711). These figures are computed by the EXTERNAL engines pinned in oracle_1_version / oracle_2_version. Re-run the generator \u2014 and re-review \u2014 whenever EITHER version changes: a bump can shift a figure by a cent and move a $50 Tax-Table bin edge or a half-dollar rounding boundary, and the two \u00a75.1 pinned liveness cells sit deliberately on exactly such edges. Recipe: `export OTS_DIR=\u2026; .venv/bin/python scripts/oracle/gen_goldens.py > crates/btctax-core/tests/goldens/full_return_goldens.json` (requires the T7 harness binary built: `cargo build -p btctax-oracle-harness`).",
@@ -1042,6 +1042,65 @@
         "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 100000.0
+      }
+    },
+    {
+      "name": "single_w2_with_an_hsa_deduction",
+      "why": "\u2605 T16 / FR-76 \u2014 the \u00a7223 HSA DEDUCTION, which reaches Schedule 1 line 13 and so AGI. A single filer with $95,000 of wages who contributed $4,150 to a self-only HSA. Both engines take the deduction directly (OTS `S1_13`, Tax-Calculator `e03290`), and btctax reaches the SAME figure the long way \u2014 through Form 8889's own line 3 limit and line 13's \"smaller of line 2 or line 12\" \u2014 which is what makes the cell discriminating rather than a pass-through: a wrong \u00a7223(b) limit, a wrong line-12 subtraction or a dropped line-13 carry all move AGI here and nowhere else in the corpus. \u2605\u2605 $4,150 is EXACTLY the TY2024 self-only limitation (Rev. Proc. 2023-23 \u00a72.01(1)), and it is deliberately AT the ceiling rather than under it: one dollar more and btctax refuses (excess contributions need Form 5329) while both oracles would happily deduct it, because neither models \u00a7223(b) \u2014 the same ceiling hazard `charitable_cash` records for \u00a7170(b). \u2605 Self-only, under 55, eligible every month, no Medicare, no Archer MSA and no distribution: the answers `build_golden_return` gives Form 8889, each a real answer to a question the form asks. With no distribution there is no Part II, so Schedule 1 line 8f and Schedule 2 lines 17c/17d stay blank and the cell tests the DEDUCTION leg alone.",
+      "inputs": {
+        "filing_status": "Single",
+        "w2_income": 95000,
+        "hsa_deduction": 4150
+      },
+      "expected_ots": {
+        "adjusted_gross_income": 90850.0,
+        "taxable_income": 76250.0,
+        "qbi_deduction": 0.0,
+        "income_tax_before_credits": 11834.0,
+        "se_tax": 0.0,
+        "niit": 0.0,
+        "additional_medicare_tax": 0.0,
+        "total_tax": 11834.0,
+        "deduction_taken": 14600.0,
+        "sch_d_to_l7": 0.0,
+        "salt_capped": null,
+        "qbi_cap_l12": null,
+        "qual_div_l3a": 0,
+        "net_ltcg_qd_exclusive": 0.0,
+        "se_l10_oasdi": null,
+        "se_l11_medicare": null,
+        "f8959_l7": 0.0,
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 76250.0,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 90850.0,
+          "line5": 85700.0,
+          "line6": 5150.0,
+          "line7": 1339.0,
+          "line9": 1339.0,
+          "line10": 11834.0,
+          "line11": 0.0
+        }
+      },
+      "expected_taxcalc": {
+        "adjusted_gross_income": 90850.0,
+        "taxable_income": 76250.0,
+        "qbi_deduction": 0.0,
+        "income_tax_before_credits": 11828.0,
+        "se_tax": 0.0,
+        "niit": 0.0,
+        "additional_medicare_tax": 0.0,
+        "deduction_taken": 14600.0,
+        "salt_capped": 0.0,
+        "sch_d_to_l7": 0.0,
+        "total_tax": 11828.0,
+        "amt": 0.0,
+        "qual_div_l3a": 0.0,
+        "net_ltcg_qd_exclusive": 0.0
       }
     },
     {

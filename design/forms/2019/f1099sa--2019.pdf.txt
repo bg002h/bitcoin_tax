@@ -1,0 +1,32 @@
+https://www.irs.gov/pub/irs-prior/f1099sa--2019.pdf
+
+# f1099sa--2019.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  1cc3c9fe24162f008bac57160fcfec13fbd7c28dfb3906f787c558f1c6289064
+# bytes   90823
+#
+# Fetch:    curl -sL -o f1099sa--2019.pdf https://www.irs.gov/pub/irs-prior/f1099sa--2019.pdf
+# Verify:   sha256sum f1099sa--2019.pdf   # must equal the sha256 above
+#
+# ★ A DIFFERENT hash does not mean a corrupt download — it means the IRS REVISED this
+# document. That is a change to the authority: review it, never silently absorb it.
+#
+# The committed text layer is design/forms/extract/f1099sa--2019.txt — that is what the
+# conformance tests read, so they run with no PDF and no network.
+#
+# Archived 2026-09-07 for the interview build (design/SPEC_interview.md r2 §7 T16, owner
+# ruling FR-76): Form 8889 is the one form on the owner's filed TY2024 return that btctax
+# refused, and T16 transcribes it line by line with these documents as the authority.
+# REVISION, READ OFF THE DOCUMENT'S OWN TEXT:
+#   "(Rev. November 2019)" (extract:6); footer "Form 1099-SA (Rev. 11-2019)" (extract:28).
+# PERIODIC (continuous-use): the face carries a blank "For calendar year 20__" stub the
+# issuer completes, not a printed tax year.
+#
+# ★★★ THIS IS THE EDITION IN FORCE FOR TY2024, AND THAT IS MEASURED, NOT ASSUMED.
+# irs-prior/f1099sa--2024.pdf is 404, as are --2020 through --2023 (all five probed
+# 2026-09-07); irs-prior serves --2015 … --2019 and then --2025. By the IRS's own rule —
+# "the year of the revision date is the first year for which issuers are to use the form to
+# report amounts" (design/forms/extract/f1098e--2026.txt:2-5) — Rev. November 2019 governs
+# from TY2019 until Rev. April 2025 displaces it, so it is the Form 1099-SA a TY2024 filer
+# holds (furnished by 2025-01-31, before the April 2025 revision existed).
+# ★ No Wayback capture was needed: the IRS still serves these exact bytes from its own
+# prior-products path, which is the FIRST source in design/forms/README.md's cadence table.

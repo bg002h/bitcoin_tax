@@ -182,6 +182,9 @@ fn row_depth(id: SectionId) -> usize {
         | SectionId::B1099s
         | SectionId::G1099s
         | SectionId::Form1098Es
+        // ★ R4 / T16 — the two HSA information returns, same shape.
+        | SectionId::Sa1099s
+        | SectionId::Sa5498s
         | SectionId::ScheduleBFilerRecords => 1,
         SectionId::W2Box12 => 2,
         SectionId::ReturnOptions
@@ -196,6 +199,9 @@ fn row_depth(id: SectionId) -> usize {
         // ★ R3 — the census is a SINGLETON: one tri-state per document TYPE, not per document. The
         //   per-document rows live in the document sections (`W2s`, and T5's 1099 sections).
         | SectionId::DocumentCensus
+        // ★ T16 — Form 8889's money leaves are a SINGLETON: one HSA surface per return. (Two
+        //   spouses with separate HSAs need two Forms 8889, which REFUSES.)
+        | SectionId::Form8889
         | SectionId::IncomeExclusions
         | SectionId::Skippables => 0,
     }

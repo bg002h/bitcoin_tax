@@ -1,0 +1,22 @@
+https://www.irs.gov/pub/irs-prior/i8889--2025.pdf
+
+# i8889--2025.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  da6f2f588b06f3f44cc7177883ce6496dc1bb247d84bc068a79277822410cb0f
+# bytes   216817
+#
+# Fetch:    curl -sL -o i8889--2025.pdf https://www.irs.gov/pub/irs-prior/i8889--2025.pdf
+# Verify:   sha256sum i8889--2025.pdf   # must equal the sha256 above
+#
+# ★ A DIFFERENT hash does not mean a corrupt download — it means the IRS REVISED this
+# document. That is a change to the authority: review it, never silently absorb it.
+#
+# The committed text layer is design/forms/extract/i8889--2025.txt — that is what the
+# conformance tests read, so they run with no PDF and no network.
+#
+# Archived 2026-09-07 for the interview build (design/SPEC_interview.md r2 §7 T16, owner
+# ruling FR-76): Form 8889 is the one form on the owner's filed TY2024 return that btctax
+# refused, and T16 transcribes it line by line with these documents as the authority.
+# REVISION, READ OFF THE DOCUMENT'S OWN TEXT:
+#   "Instructions for Form 8889 (2025) Catalog Number 37971Y" (extract:123); face year
+#   "2025" (extract:1).  ANNUAL.
+# Extracted with PLAIN `pdftotext` (no -layout) — 3-column instruction pages.

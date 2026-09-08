@@ -127,6 +127,13 @@ fn maximal_fixture() -> ReturnInputs {
         ..Default::default()
     }];
     ri.form_1098e = vec![btctax_core::tax::return_inputs::Form1098E::default()];
+    // ★★★ R4 / T16 — one row of each HSA information return, same reason as the four 1099 `Vec`s.
+    ri.sa_1099 = vec![btctax_core::tax::return_inputs::Form1099Sa::default()];
+    ri.sa_5498 = vec![btctax_core::tax::return_inputs::Form5498Sa::default()];
+    // ★★★ T16 — the LIVENESS PRIMER for Form 8889: its seven declarations and its seven money
+    //     leaves are live iff the §223 trigger is affirmed, so an unprimed fixture would cover none
+    //     of the fourteen and give false drift-protection for the whole form.
+    ri.sch1.hsa_activity = Some(true);
     // ★★★ R5 — one filer's-records row. Its five leaves are covered only while the R3 door is open,
     //     which `fixture_for` primes per field (the door's own declaration cannot be covered on a
     //     fixture that already holds its answer).
@@ -233,6 +240,11 @@ fn sentinel(f: &Field) -> FieldValue {
                 FieldId::BrokerCovered | FieldId::BrokerNoncovered => "BasisMatches",
                 // ★ R5 — the fixture row's kind is the `Default`, `Interest`.
                 FieldId::SbRecordKind => "Dividend",
+                // ★ T16 — both HSA account-type checkboxes are `None` in the fixture (the
+                //   `Default`, and the state that REFUSES), so every real choice differs. `MaMsa`
+                //   is chosen over `Hsa` for the same reason `CannotKnow` is chosen above: it is
+                //   the answer no default could ever be.
+                FieldId::Sa1099Box5AccountType | FieldId::Sa5498Box6AccountType => "MaMsa",
                 other => panic!("no Enum sentinel for {other:?} — add a distinct real choice"),
             };
             FieldValue::Choice(choice.to_string())
@@ -277,6 +289,13 @@ fn fixture_for(field: &Field, base: &ReturnInputs) -> ReturnInputs {
         // ★ The FBAR sub-question is live only under a Schedule B 7a "Yes"; a set on a non-live
         //   question correctly refuses with `NoSuchRow`, so the fixture must make it live.
         FieldId::FbarFilingRequired => ri.foreign_accounts = Some(true),
+        // ★★★ T16 — the §223 trigger declaration is the GATE for Form 8889's fourteen leaves, so the
+        //     maximal fixture primes it `Some(true)`. That makes covering the gate ITSELF
+        //     impossible on that fixture: the `TriState(Some(true))` sentinel equals what is
+        //     already there, and the mutate-and-diff observes nothing. Structural, exactly like the
+        //     §G-9 dates of death and the document-less income door above — one fixture cannot both
+        //     satisfy a gate and cover it.
+        FieldId::DeclHsaActivity => ri.sch1.hsa_activity = None,
         // ★★★ FR-29 — the SPEC §6.3 dead-end fact is live ONLY once condition 4 is answered CANNOT
         //     KNOW. That is the owner ruling's first constraint discharged in the liveness predicate,
         //     so it is structural exactly like the §G-9 dates of death above: one fixture cannot both
@@ -344,6 +363,9 @@ fn addr_for(id: SectionId) -> RowAddr {
         | SectionId::B1099s
         | SectionId::G1099s
         | SectionId::Form1098Es
+        // ★ R4 / T16 — the two HSA information returns.
+        | SectionId::Sa1099s
+        | SectionId::Sa5498s
         | SectionId::ScheduleBFilerRecords => RowAddr(vec![0]),
         _ => RowAddr::default(),
     }
@@ -654,23 +676,25 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     // change happened to keep the sets balanced.
     let field_count: usize = form_spec().iter().map(|s| s.fields.len()).sum();
     assert_eq!(
-        field_count, 183,
-        "expected 183 Fields — 117 before T5, plus its FIFTY-EIGHT: the four document-less income \
+        field_count, 216,
+        "expected 216 Fields — 117 before T5, plus its FIFTY-EIGHT: the four document-less income \
          declarations (R3), W-2 boxes 13 and 14b, and the six document sections (1099-INT 14, \
          1099-DIV 14, 1099-B 8, 1099-G 7, 1098-E 4, and R5's five filer's-records leaves) — plus \
          the SEVEN the seam review's M-1 added, one per income box that had no reader and now \
          refuses (1099-G 5/6/7/9, 1099-B 13, 1099-DIV 9/10). A refuse-guard needs a Field on the \
          document's own row or the guard is a brick the filer cannot reach, which is the FR-65 \
          defect T5 itself was fixing. ★ R9 / T6 added the 183rd, Form 1040 page 1's DIGITAL ASSETS \
-         question."
+         question. ★★★ T16 / FR-76 added THIRTY-THREE for Form 8889: two census rows, the Form \
+         1099-SA section's 8 and the Form 5498-SA section's 9, Form 8889's own 7 money leaves, and \
+         its 7 declarations."
     );
     assert_eq!(
         covered.len(),
-        182,
-        "expected 182 distinctly-covered in-scope leaves — every one of the 183 Fields but \
+        215,
+        "expected 215 distinctly-covered in-scope leaves — every one of the 216 Fields but \
          `DocForm1098`, whose row is still shadowed by the `schedule_a.mortgage_interest_1098` \
-         scalar (T9) and so is never live. It was 115 of 117 before T5, then 174 of 175; the seven \
-         M-1 refuse-guards are all covered."
+         scalar (T9) and so is never live. It was 115 of 117 before T5, then 174 of 175, then 182 \
+         of 183; T16's thirty-three are all covered."
     );
 
     // ── 5. ★ I-6: PIN the observed FieldId → leaf-path map against a literal (kills TRANSPOSITION). ──
@@ -1113,6 +1137,107 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
         "form_1098e[0].box1_interest",
     ),
     (FieldId::DocForm1098e, "documents.form_1098e"),
+    // ── ★★★ R4 / T16 — the two HSA information returns, their census rows, and Form 8889's own
+    //    money leaves and declarations. ──
+    (FieldId::Sa1099Payer, "sa_1099[0].payer"),
+    (FieldId::Sa1099PayerTin, "sa_1099[0].payer_tin"),
+    (FieldId::Sa1099TranscribedOn, "sa_1099[0].transcribed_on"),
+    (
+        FieldId::Sa1099Box1GrossDistribution,
+        "sa_1099[0].box1_gross_distribution",
+    ),
+    (
+        FieldId::Sa1099Box2EarningsOnExcess,
+        "sa_1099[0].box2_earnings_on_excess",
+    ),
+    (
+        FieldId::Sa1099Box3DistributionCode,
+        "sa_1099[0].box3_distribution_code",
+    ),
+    (
+        FieldId::Sa1099Box4Fmv,
+        "sa_1099[0].box4_fmv_on_date_of_death",
+    ),
+    (
+        FieldId::Sa1099Box5AccountType,
+        "sa_1099[0].box5_account_type",
+    ),
+    (FieldId::DocSa1099, "documents.sa_1099"),
+    (FieldId::Sa5498Trustee, "sa_5498[0].trustee"),
+    (FieldId::Sa5498TrusteeTin, "sa_5498[0].trustee_tin"),
+    (FieldId::Sa5498TranscribedOn, "sa_5498[0].transcribed_on"),
+    (
+        FieldId::Sa5498Box1ArcherContributions,
+        "sa_5498[0].box1_archer_msa_contributions",
+    ),
+    (
+        FieldId::Sa5498Box2TotalContributions,
+        "sa_5498[0].box2_total_contributions",
+    ),
+    (
+        FieldId::Sa5498Box3NextYearForThisYear,
+        "sa_5498[0].box3_contributions_next_year_for_this_year",
+    ),
+    (
+        FieldId::Sa5498Box4Rollover,
+        "sa_5498[0].box4_rollover_contributions",
+    ),
+    (FieldId::Sa5498Box5Fmv, "sa_5498[0].box5_fair_market_value"),
+    (
+        FieldId::Sa5498Box6AccountType,
+        "sa_5498[0].box6_account_type",
+    ),
+    (FieldId::DocSa5498, "documents.sa_5498"),
+    (
+        FieldId::HsaLine2Contributions,
+        "hsa.line2_contributions_you_made",
+    ),
+    (
+        FieldId::HsaEmployerPriorYear,
+        "hsa.employer_contributions_prior_year",
+    ),
+    (
+        FieldId::HsaEmployerNextYear,
+        "hsa.employer_contributions_next_year",
+    ),
+    (
+        FieldId::HsaLine10FundingDistribution,
+        "hsa.line10_qualified_funding_distribution",
+    ),
+    (
+        FieldId::HsaLine14bRollovers,
+        "hsa.line14b_rollovers_and_withdrawn_excess",
+    ),
+    (
+        FieldId::HsaLine15MedicalExpenses,
+        "hsa.line15_qualified_medical_expenses",
+    ),
+    (
+        FieldId::HsaLine16Excepted,
+        "hsa.line16_amount_meeting_an_exception",
+    ),
+    (FieldId::DeclHsaFamilyCoverage, "hsa.family_coverage"),
+    (
+        FieldId::DeclHsaEligibleEveryMonth,
+        "hsa.eligible_every_month_same_coverage",
+    ),
+    (
+        FieldId::DeclHsaAge55OrOlder,
+        "hsa.age_55_or_older_at_year_end",
+    ),
+    (
+        FieldId::DeclHsaMedicareEnrollment,
+        "hsa.enrolled_in_medicare_any_month",
+    ),
+    (
+        FieldId::DeclHsaBothSpousesHaveHsas,
+        "hsa.both_spouses_have_hsas",
+    ),
+    (FieldId::DeclHsaArcherMsaActivity, "hsa.archer_msa_activity"),
+    (
+        FieldId::DeclHsaTestingPeriodFailure,
+        "hsa.testing_period_failure",
+    ),
     // ── ★★★ R5 / T5 — the filer's-records rows for Schedule B lines 1 and 5. ──
     (
         FieldId::SbRecordPayerName,

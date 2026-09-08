@@ -87,6 +87,9 @@ pub fn attachment_sequence(stem: &str, year: i32) -> Option<&'static str> {
         "f6251" => Some("32"),
         "f8995" => Some("55"),
         "f8995a" => Some("55A"),
+        // ★ T16 — Form 8889, "Attachment Sequence No. 52", read off the printed form
+        //   (`design/forms/extract/f8889--2024.txt:8` and `--2025.txt:8`, identical).
+        "f8889" => Some("52"),
         "f8959" => Some("71"),
         "f8960" => Some("72"),
         "f8275" => Some("92"),
@@ -132,6 +135,7 @@ pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<FiledPacket, Fo
                 f6251,
                 f8283,
                 f8275,
+                f8889,
             },
     } = pr;
 
@@ -256,6 +260,15 @@ pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<FiledPacket, Fo
                 header,
                 &crate::map::Form8995AMap::for_year(year)?,
             )?,
+        );
+    }
+    // ★★★ T16 — Form 8889. `Some` exactly when the §223 trigger declaration is affirmed, decided in
+    //     CORE (`Form8889::must_file`), never here: the filler only obeys it.
+    if let Some(l) = f8889 {
+        push(
+            "f8889",
+            attachment_sequence("f8889", year),
+            crate::fill_form_8889(l, header, year)?,
         );
     }
     // Form 8959's filing decision is a CORE fact (`must_file`), not the filler's — the chain is built

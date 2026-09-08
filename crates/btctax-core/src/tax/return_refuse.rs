@@ -24,9 +24,19 @@ use crate::tax::tables::{FullReturnParams, TaxTable, EMPLOYEE_OASDI_RATE};
 use crate::tax::types::{Carryforward, FilingStatus};
 use rust_decimal_macros::dec;
 
-/// The W-2 box-12 codes that are inert for a Common W-2 household return (elective deferrals + purely
-/// informational). Any OTHER code refuses (SPEC §4.10 / audit I1 — an allowlist, not a blocklist).
-const INERT_BOX12_CODES: &[&str] = &["D", "E", "F", "G", "H", "S", "AA", "BB", "EE", "DD"];
+/// The W-2 box-12 codes a Common W-2 household return can carry — the inert ones (elective deferrals
+/// and purely informational) plus, since **T16**, the one code a form actually READS. Any OTHER code
+/// refuses (SPEC §4.10 / audit I1 — an allowlist, not a blocklist).
+///
+/// ★★★ **`W` moved in with Form 8889, and its arrival is the finding.** Code W is *"Employer
+/// contributions to your Health Savings Account"*, and Form 8889 line 9's own instruction is *"These
+/// contributions should be shown on Form W-2, box 12, code W"* — so before T16 the code refused
+/// `UnsupportedBox12Code`, which was the correct answer while no form read it and is the wrong one
+/// now. ★ It is NOT inert: [`crate::tax::form8889::employer_contributions_from_w2s`] sums it, the
+/// Employer Contribution Worksheet adjusts it for the calendar/tax-year gap, and line 12 subtracts
+/// the result from the filer's own limit. A code W beside a return that files no Form 8889 is a
+/// CONTRADICTION and refuses on its own rule below.
+const INERT_BOX12_CODES: &[&str] = &["D", "E", "F", "G", "H", "S", "AA", "BB", "EE", "DD", "W"];
 
 /// The §402(g) elective-deferral codes whose cross-employer sum is capped (SPEC F3).
 const ELECTIVE_DEFERRAL_CODES: &[&str] = &["D", "E", "F", "G", "S"];
@@ -270,10 +280,68 @@ pub enum RefuseReason {
     /// aggregate box 4 exceeds the §3101(a) cap. Refuses rather than guessing — the credit is a real
     /// figure on a signed return and the wrong guess UNDERSTATES tax.
     ExcessSsEmployerUnknown,
-    /// Schedule 1 line 13 HSA ACTIVITY (§223 trigger) affirmed → Form 8889 mandatory, out of scope for v1.
-    /// (Renamed from `HsaPresent`: the field it reads was renamed `hsa_present → hsa_activity` in P9 §2.4 —
-    /// the question is now whether a trigger fired, not mere holding.)
-    HsaActivityUnsupported,
+    // ─────────────────────────────────────────────────────────────────────────────────────────────
+    // ★★★ T16 / FR-76 — FORM 8889 (HEALTH SAVINGS ACCOUNTS).
+    //
+    // `HsaActivityUnsupported` USED TO LIVE HERE, and its deletion is the task: `hsa_activity ==
+    // Some(true)` no longer refuses — it OPENS Form 8889. What is left behind are the places the
+    // FORM ITSELF sends the filer somewhere btctax does not go, each naming where.
+    // ─────────────────────────────────────────────────────────────────────────────────────────────
+    /// **One of Form 8889's own seven questions is UNANSWERED** on a return whose `hsa_activity` is
+    /// `Some(true)`.
+    ///
+    /// ★ One variant carrying the [`QuestionId`] rather than seven variants, exactly as
+    /// [`Self::DocumentCensusUnanswered`] carries its `DocumentRow`: the seven differ only in which
+    /// leaf is blank, and `attribute` maps the id straight back to its Declaration field.
+    Form8889Unanswered {
+        /// Which of Form 8889's questions is blank.
+        question: crate::tax::questions::QuestionId,
+    },
+    /// **Form 8889 line 3 needs the *Line 3 Limitation Chart and Worksheet*, which btctax does not
+    /// carry.** Fires when the filer was NOT an eligible individual with the same coverage on the
+    /// first day of every month, or was enrolled in Medicare for any month.
+    ///
+    /// ★★★ Line 3's own text is *"If you were under age 55 at the end of 2024 and, on the first day
+    /// of every month during 2024, you were, or were considered, an eligible individual with the
+    /// same coverage, enter $4,150 ($8,300 for family coverage). **All others, see the instructions
+    /// for the amount to enter**"* — and the instructions' answer for "all others" is a twelve-month
+    /// chart (`i8889--2024.txt:558-618`). Entering the flat limit anyway would OVERSTATE the
+    /// contribution limit, hence the deduction on line 13, hence understate tax.
+    HsaLine3WorksheetRequired,
+    /// **Both spouses have separate HSAs**, and the form's answer is *"Complete a separate Form 8889
+    /// for each spouse"* (`i8889--2024.txt:456`). btctax emits one.
+    HsaSeparateForm8889Required,
+    /// **An Archer MSA or a Medicare Advantage MSA**, which is **Form 8853**'s — the Form 8889 says
+    /// so before its first line: *"Before you begin: Complete Form 8853, Archer MSAs and Long-Term
+    /// Care Insurance Contracts, if required"* (`f8889--2024.txt:13`). btctax builds no Form 8853.
+    /// Carries what named it (an `sa_1099` box 5, an `sa_5498` box 6, or the line-4 declaration).
+    ArcherOrMaMsaNeedsForm8853(String),
+    /// **Form 8889 line 2 exceeds line 13 — EXCESS CONTRIBUTIONS**, which the instructions send to
+    /// **Form 5329**: *"you or someone on your behalf (or your employer) contributed more to your
+    /// HSA than is allowable and you may have to pay an additional tax on the excess contributions
+    /// … See Form 5329 … to figure the additional tax"* (`i8889--2024.txt:827-833`). btctax builds
+    /// no Form 5329, and the omitted 6% excise tax is an UNDERSTATEMENT.
+    HsaExcessContributionsNeedForm5329,
+    /// **Employer contributions exceed the line-8 limitation** (reduced by any line-10 funding
+    /// distribution) — *"Excess employer contributions … If the excess was not included in income on
+    /// Form W-2, you must report it as “Other income” on your tax return"* (`i8889--2024.txt:846`).
+    /// Schedule 1 line 8z, which btctax fills from nothing: income with no reader UNDERSTATES.
+    HsaExcessEmployerContributions,
+    /// **Part III — the testing period failed.** Line 18 is *"the excess of the amount contributed
+    /// over the redetermined amount"*, and the redetermined amount comes from *"the Line 3
+    /// Limitation Chart and Worksheet … for the year the contribution was made"*
+    /// (`i8889--2024.txt:1017-1021`) — a PRIOR year's worksheet btctax carries for no year. Omitting
+    /// it understates both the Schedule 1 line 8f income and the Schedule 2 line 17d 10% tax.
+    HsaTestingPeriodFailureNotComputed,
+    /// **A Form W-2 reports an employer HSA contribution (box 12 code W) on a return that says no
+    /// HSA activity happened.** The W-2 and the §223 declaration contradict each other about the
+    /// same fact, and the declaration is what decides whether Form 8889 files at all.
+    HsaEmployerContributionWithoutActivity,
+    /// **A Form 1099-SA box 5 / Form 5498-SA box 6 checkbox was never transcribed.** The box says
+    /// which of three accounts the document reports, and it is the box that decides whether the
+    /// figures belong on Form 8889 or on Form 8853. `None` is *not transcribed*, never *"it is an
+    /// HSA"* — defaulting would route an Archer MSA's distribution onto the wrong form silently.
+    SaAccountTypeNotTranscribed(String),
     /// P9 §2.5 (r5 I-3) — `dual_status_alien == Some(true)`. A dual-status return is out of scope for v1, and
     /// §63(c)(6)(B) zeroes a nonresident alien's standard deduction: proceeding would take the full standard
     /// deduction the statute denies (a silent understatement). VALUE-refusal, disjoint from the `None`
@@ -701,6 +769,10 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         g_1099,
         b_1099,
         form_1098e,
+        // ★ R4 / T16 — the HSA information returns carry money (a distribution, an FMV, an
+        //   earnings-on-excess figure); `screen_form_8889` screens all of it.
+        sa_1099,
+        sa_5498,
         // ★ R5 / T5 — the filer's-records rows DO carry money (`amount`), screened below.
         schedule_b_filer_records,
         // ★ R3 — three tri-states about income arriving without its document, plus the
@@ -717,6 +789,10 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         itemize_election: _,
         mfs_spouse_itemizes: _,
         sch1,
+        // ★ T16 — Form 8889's four money leaves (contributions, the two employer-worksheet
+        //   adjustments, the funding distribution, the medical expenses and the excepted slice);
+        //   all are screened for negatives below.
+        hsa,
         // ★ Sch 1-A carries three money leaves (tips, overtime, per-vehicle interest); all three
         //   are screened below. The eligibility bools are declarations, not money.
         schedule_1a,
@@ -991,6 +1067,99 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         } = e;
         if neg(*box1_interest) {
             return Some("1098-E box 1 student loan interest received by lender");
+        }
+    }
+    // ★ R4 / T16 — Form 1099-SA's three money boxes.
+    for r in sa_1099 {
+        let crate::tax::return_inputs::Form1099Sa {
+            payer: _,
+            payer_tin: _,
+            transcribed_on: _,
+            box1_gross_distribution,
+            box2_earnings_on_excess,
+            // A one-character IRS code, not a money leaf.
+            box3_distribution_code: _,
+            box4_fmv_on_date_of_death,
+            // The three-way account checkbox; `screen_form_8889` screens it.
+            box5_account_type: _,
+        } = r;
+        if neg(*box1_gross_distribution) {
+            return Some("1099-SA box 1 gross distribution");
+        }
+        if neg(*box2_earnings_on_excess) {
+            return Some("1099-SA box 2 earnings on excess contributions");
+        }
+        if neg(*box4_fmv_on_date_of_death) {
+            return Some("1099-SA box 4 FMV on date of death");
+        }
+    }
+    // ★ R4 / T16 — Form 5498-SA's five money boxes.
+    for r in sa_5498 {
+        let crate::tax::return_inputs::Form5498Sa {
+            trustee: _,
+            trustee_tin: _,
+            transcribed_on: _,
+            box1_archer_msa_contributions,
+            box2_total_contributions,
+            box3_contributions_next_year_for_this_year,
+            box4_rollover_contributions,
+            box5_fair_market_value,
+            box6_account_type: _,
+        } = r;
+        for (label, amount) in [
+            (
+                "5498-SA box 1 Archer MSA contributions",
+                box1_archer_msa_contributions,
+            ),
+            (
+                "5498-SA box 2 total contributions",
+                box2_total_contributions,
+            ),
+            (
+                "5498-SA box 3 contributions made next year for this year",
+                box3_contributions_next_year_for_this_year,
+            ),
+            (
+                "5498-SA box 4 rollover contributions",
+                box4_rollover_contributions,
+            ),
+            ("5498-SA box 5 fair market value", box5_fair_market_value),
+        ] {
+            if neg(*amount) {
+                return Some(label);
+            }
+        }
+    }
+    // ★ T16 — Form 8889's six money leaves.
+    {
+        let crate::tax::return_inputs::HsaInputs {
+            family_coverage: _,
+            eligible_every_month_same_coverage: _,
+            age_55_or_older_at_year_end: _,
+            enrolled_in_medicare_any_month: _,
+            both_spouses_have_hsas: _,
+            archer_msa_activity: _,
+            testing_period_failure: _,
+            line2_contributions_you_made,
+            employer_contributions_prior_year,
+            employer_contributions_next_year,
+            line10_qualified_funding_distribution,
+            line14b_rollovers_and_withdrawn_excess,
+            line15_qualified_medical_expenses,
+            line16_amount_meeting_an_exception,
+        } = hsa;
+        for (label, amount) in [
+            ("Form 8889 line 2 HSA contributions you made", line2_contributions_you_made),
+            ("the Employer Contribution Worksheet line 2 (contributions made this year for last year)", employer_contributions_prior_year),
+            ("the Employer Contribution Worksheet line 4 (contributions made next year for this year)", employer_contributions_next_year),
+            ("Form 8889 line 10 qualified HSA funding distribution", line10_qualified_funding_distribution),
+            ("Form 8889 line 14b rollovers and withdrawn excess contributions", line14b_rollovers_and_withdrawn_excess),
+            ("Form 8889 line 15 qualified medical expenses", line15_qualified_medical_expenses),
+            ("the part of Form 8889 line 16 meeting an exception to the additional 20% tax", line16_amount_meeting_an_exception),
+        ] {
+            if neg(*amount) {
+                return Some(label);
+            }
         }
     }
     // R5 — the filer's-records rows for Schedule B lines 1 / 5.
@@ -2196,6 +2365,26 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
                     format!("W-2 box 12 code {code} is not supported in v1"),
                 );
             }
+            // ★★★ T16 — a code-W amount is an EMPLOYER HSA CONTRIBUTION, which is trigger (a) of
+            //     the §223 declaration in the filer's own words ("anyone … put money into one for
+            //     you"). A `Some(false)` beside it is the W-2 and the declaration saying opposite
+            //     things about the same fact, and the one nobody typed would win: line 9 would go
+            //     unread, the contribution would sit outside every limit test, and §223(a) requires
+            //     the Form 8889 whenever a contribution is made.
+            if code == "W" && entry.amount > Usd::ZERO && ri.sch1.hsa_activity != Some(true) {
+                return refuse(
+                    RefuseReason::HsaEmployerContributionWithoutActivity,
+                    format!(
+                        "a Form W-2 reports ${} in box 12 code W — \"Employer contributions to \
+                         your Health Savings Account\" — but this return says no health \
+                         savings account activity happened. Those two cannot both be true: an \
+                         employer contribution IS the activity, and Form 8889 line 9 is where it \
+                         goes. Answer the HSA question Yes and complete Form 8889, or correct the \
+                         box 12 entry",
+                        entry.amount
+                    ),
+                );
+            }
             if ELECTIVE_DEFERRAL_CODES.contains(&code.as_str()) {
                 match w2.owner {
                     Owner::Taxpayer => deferral_tp += entry.amount,
@@ -2370,15 +2559,170 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
         }
     }
 
-    // Schedule 1 minimal surface: an affirmed HSA activity and any claimed IRA deduction refuse in v1.
-    // (`None` — never asked — is caught by the registry's unanswered screen, P9 step 4; here we handle only
-    // the affirmed `Some(true)`. `Some(false)`, a dormant holder, proceeds — un-bricking r2 C-1.)
+    // ─────────────────────────────────────────────────────────────────────────────────────────────
+    // ★★★ T16 / FR-76 — FORM 8889. `hsa_activity == Some(true)` used to refuse
+    //     `HsaActivityUnsupported` here; it now OPENS the form. What refuses instead is exactly the
+    //     set of situations in which **Form 8889 itself tells the filer to go somewhere btctax does
+    //     not go** — and each refusal names that place, because "a refusal with no exit is just a
+    //     brick with better prose".
+    //
+    // ★ The order is the form's own reading order: the account-type checkbox (which decides whether
+    //   this is Form 8889's business at all), then Part I's Archer gate and its heading condition,
+    //   then line 3's worksheet, then Part III. Line 13's excess needs the year's §223(b) figures,
+    //   so it lives under the `tier.package` gate further down.
+    //
+    // ★★ Every one is the UNDERSTATEMENT direction if guessed — a limit taken flat where the
+    //    worksheet would have reduced it, a distribution filed on the wrong form, a testing-period
+    //    inclusion nobody adds to income — so none can be an advisory (§3.4).
+    // ─────────────────────────────────────────────────────────────────────────────────────────────
+    //
+    // The account-type checkbox is screened on EVERY transcribed row, whatever the declaration
+    // says: a filer who answered the §223 trigger NO and still transcribed an Archer MSA document
+    // is exactly the contradiction this catches.
+    for (what, ty) in ri
+        .sa_1099
+        .iter()
+        .map(|r| ("Form 1099-SA box 5", r.box5_account_type))
+        .chain(
+            ri.sa_5498
+                .iter()
+                .map(|r| ("Form 5498-SA box 6", r.box6_account_type)),
+        )
+    {
+        let Some(ty) = ty else {
+            return refuse(
+                RefuseReason::SaAccountTypeNotTranscribed(what.to_string()),
+                format!(
+                    "{what} — the checkbox that says whether this document reports an HSA, an \
+                     Archer MSA or a Medicare Advantage MSA — has not been transcribed. It is the \
+                     box that decides WHICH FORM the figures belong on: an HSA goes on Form 8889, \
+                     the other two on Form 8853. btctax will not assume HSA, because assuming it \
+                     would file an Archer MSA's distribution on the wrong form without saying so. \
+                     Enter the box as your document prints it"
+                ),
+            );
+        };
+        if ty != crate::tax::return_inputs::SaAccountType::Hsa {
+            let which = match ty {
+                crate::tax::return_inputs::SaAccountType::ArcherMsa => "an Archer MSA",
+                crate::tax::return_inputs::SaAccountType::MaMsa => "a Medicare Advantage MSA",
+                crate::tax::return_inputs::SaAccountType::Hsa => unreachable!("filtered above"),
+            };
+            return refuse(
+                RefuseReason::ArcherOrMaMsaNeedsForm8853(what.to_string()),
+                format!(
+                    "{what} says this document reports {which}, not a health savings account. \
+                     Form 8889's own first instruction is \"Before you begin: Complete Form 8853, \
+                     Archer MSAs and Long-Term Care Insurance Contracts, if required\" — and btctax \
+                     does not build Form 8853. File with a preparer, who will report it there"
+                ),
+            );
+        }
+    }
+    // Everything below is Part I / II / III, which exist only when the §223 trigger fired. `None`
+    // is the registry's (`HsaActivityUnanswered`), not ours.
     if ri.sch1.hsa_activity == Some(true) {
-        return refuse(
-            RefuseReason::HsaActivityUnsupported,
-            "a Form 8889 trigger (HSA contribution, distribution, testing-period inclusion, or inheritance) \
-             was affirmed — Form 8889 is out of scope for v1",
-        );
+        if ri.hsa.archer_msa_activity == Some(true) {
+            return refuse(
+                RefuseReason::ArcherOrMaMsaNeedsForm8853("Form 8889 line 4".to_string()),
+                "you said you or your employer contributed to an Archer MSA. Form 8889 line 4 takes \
+                 that amount from FORM 8853, lines 1 and 2, and subtracts it from your HSA \
+                 contribution limit — and btctax does not build Form 8853, so line 4 would print \
+                 blank and your line-3 limit would be too high. File with a preparer, who will \
+                 complete Form 8853 first",
+            );
+        }
+        if ri.hsa.both_spouses_have_hsas == Some(true) {
+            return refuse(
+                RefuseReason::HsaSeparateForm8889Required,
+                "you and your spouse each have a separate HSA. Form 8889 says \"Complete a separate \
+                 Form 8889 for each spouse\" and \"Combine the amounts on line 13 of both Forms 8889 \
+                 and enter this amount on Schedule 1 (Form 1040), line 13\" — and it changes line 6, \
+                 which allocates a shared family limit between you. btctax produces ONE Form 8889, \
+                 so it refuses rather than file half of the pair. File with a preparer",
+            );
+        }
+        if ri.hsa.eligible_every_month_same_coverage == Some(false) {
+            return refuse(
+                RefuseReason::HsaLine3WorksheetRequired,
+                "you were not (and were not considered) an eligible individual with the same \
+                 coverage on the first day of every month this year. Form 8889 line 3 gives its \
+                 flat limit only to a filer who was, and sends everyone else to the LINE 3 \
+                 LIMITATION CHART AND WORKSHEET in the Instructions for Form 8889 — a twelve-month \
+                 chart btctax does not carry. Entering the flat limit anyway would overstate your \
+                 contribution limit, and so your deduction. File with a preparer, or complete the \
+                 worksheet and file on paper",
+            );
+        }
+        if ri.hsa.enrolled_in_medicare_any_month == Some(true) {
+            return refuse(
+                RefuseReason::HsaLine3WorksheetRequired,
+                "you were enrolled in Medicare for at least one month this year. Form 8889's Part I \
+                 rule is \"You cannot deduct any contributions for any month in which you were \
+                 enrolled in Medicare\", and the LINE 3 LIMITATION CHART AND WORKSHEET is what \
+                 computes the reduced limit — a twelve-month chart btctax does not carry. File with \
+                 a preparer, or complete the worksheet and file on paper",
+            );
+        }
+        if ri.hsa.testing_period_failure == Some(true) {
+            return refuse(
+                RefuseReason::HsaTestingPeriodFailureNotComputed,
+                "you stopped being an eligible individual during a testing period. Form 8889 Part \
+                 III puts the earlier year's excess contribution back into income on Schedule 1 \
+                 line 8f and adds a 10% additional tax on Schedule 2 line 17d — and line 18 is \
+                 figured with the LINE 3 LIMITATION CHART AND WORKSHEET FOR THE YEAR THE \
+                 CONTRIBUTION WAS MADE, a prior year's worksheet btctax carries for no year. \
+                 Omitting it would understate both the income and the tax, so it refuses. File with \
+                 a preparer",
+            );
+        }
+    }
+    // ★★★ T16 — Form 8889 line 13's EXCESS CONTRIBUTIONS, and the excess EMPLOYER contributions
+    //     beside it. Both compare against the year's §223(b) limit, so both wait for the package —
+    //     and both read the figures off the TRANSCRIPTION rather than re-deriving them, so the
+    //     refusal talks about the numbers the form would print.
+    if let Some((_, p)) = tier.package {
+        if ri.sch1.hsa_activity == Some(true) {
+            let f = crate::tax::form8889::compute(ri, &p.hsa);
+            if f.line2 > f.line13 {
+                return refuse(
+                    RefuseReason::HsaExcessContributionsNeedForm5329,
+                    format!(
+                        "Form 8889 line 2 (${}, the contributions you made) is more than line 13 \
+                         (${}, the deduction the limit allows), so you have EXCESS CONTRIBUTIONS. \
+                         The instructions say \"you may have to pay an additional tax on the excess \
+                         contributions … See Form 5329, Additional Taxes on Qualified Plans \
+                         (Including IRAs) and Other Tax-Favored Accounts, to figure the additional \
+                         tax\" — and btctax does not build Form 5329, so the §4973 6% excise tax \
+                         would simply not appear. You can still fix this yourself: withdrawing the \
+                         excess, and any earnings on it, by the due date of your return (including \
+                         extensions) means it is treated as never contributed. Otherwise file with \
+                         a preparer",
+                        f.line2, f.line13
+                    ),
+                );
+            }
+            // i8889 "Excess Employer Contributions": "the excess, if any, of your employer's
+            // contributions over your limitation on line 8. If you made a qualified HSA funding
+            // distribution (line 10) during the tax year, reduce your limitation (line 8) by that
+            // distribution before you determine whether you have excess employer contributions."
+            let employer_room = (f.line8 - f.line10).max(Usd::ZERO);
+            if f.line9 > employer_room {
+                return refuse(
+                    RefuseReason::HsaExcessEmployerContributions,
+                    format!(
+                        "your employer contributed ${} to your HSA (Form W-2 box 12 code W, through \
+                         the Employer Contribution Worksheet), which is more than the ${} of room \
+                         Form 8889 line 8 leaves after line 10's funding distribution. The \
+                         instructions call that an EXCESS EMPLOYER CONTRIBUTION: \"If the excess was \
+                         not included in income on Form W-2, you must report it as 'Other income' \
+                         on your tax return\" — Schedule 1 line 8z, which btctax fills from nothing, \
+                         so the income would simply vanish. File with a preparer",
+                        f.line9, employer_room
+                    ),
+                );
+            }
+        }
     }
     if ri.sch1.ira_deduction_claimed > Usd::ZERO {
         return refuse(
@@ -2460,6 +2804,14 @@ mod tests {
                 rate_28: dec!(0.28),
                 rate_28_subtrahend: dec!(4652),
                 rate_28_subtrahend_mfs: dec!(2326),
+            },
+            // §223(b)(2) HSA contribution limitation (Rev. Proc. 2023-23 §2.01(1)) — $4,150 self-only,
+            // $8,300 family. §223(b)(3)(B)'s additional contribution at 55+ is a flat statutory
+            // $1,000, NOT indexed.
+            hsa: crate::tax::tables::HsaParams {
+                self_only_limit: dec!(4150),
+                family_limit: dec!(8300),
+                additional_contribution_55: dec!(1000),
             },
         }
     }
@@ -3354,8 +3706,11 @@ mod tests {
                 // ★ T5 — the 1098-E gained a `Vec` when `Form1098E` replaced the
                 //   `sch1.student_loan_interest_paid` scalar.
                 DocumentRow::Form1098e,
+                // ★ T16 — the two HSA information returns gained `Vec`s with Form 8889.
+                DocumentRow::Sa1099,
+                DocumentRow::Sa5498,
             ],
-            "the six `Vec`-bearing kinds, and only those, have a row count"
+            "the eight `Vec`-bearing kinds, and only those, have a row count"
         );
         let demanding: Vec<DocumentRow> = DocumentRow::ALL
             .iter()
@@ -3376,6 +3731,15 @@ mod tests {
                 // ★ And the 1098-E, whose rows replaced `sch1.student_loan_interest_paid`: nothing
                 //   else carries student-loan interest onto the return any more.
                 DocumentRow::Form1098e,
+                // ★★★ And the 1099-SA (T16): Form 8889 line 14a reads the SUM of the rows' box 1,
+                //     nothing else carries an HSA distribution onto the return, and the payer
+                //     *"isn't required to compute the taxable amount of any distribution"* — so a
+                //     declared 1099-SA with no row hides gross income and a 20% additional tax.
+                //     ★ The 5498-SA is NOT here, and its excuse is the 1099-B's shape rather than
+                //     the 1099-G's: no line SUMS any of its boxes (line 2 asks for the filer's own
+                //     contributions; box 2 is the trustee's employer-and-employee calendar-year
+                //     total), so zero rows cannot understate anything.
+                DocumentRow::Sa1099,
             ],
             "★ 1099-B is the only supported row still OUT, and its excuse is the FORM'S OWN printed \
              blank (Schedule D line 1a/8a is a summary option, and the ledger is the crypto filer's \
@@ -3658,6 +4022,18 @@ mod tests {
                 }];
                 r.documents
                     .set(crate::tax::document_census::DocumentRow::G1099, Some(true));
+            }
+            // ★★★ T16 — Form 8889's seven questions share ONE liveness predicate: the §223 trigger
+            //     declaration is affirmed. So they share one scenario, exactly as the three
+            //     carryforward-conditioned declarations above do.
+            QuestionId::HsaFamilyCoverage
+            | QuestionId::HsaEligibleEveryMonth
+            | QuestionId::HsaAge55OrOlder
+            | QuestionId::HsaMedicareEnrollment
+            | QuestionId::HsaBothSpousesHaveHsas
+            | QuestionId::HsaArcherMsaActivity
+            | QuestionId::HsaTestingPeriodFailure => {
+                r.sch1.hsa_activity = Some(true);
             }
             QuestionId::AmtDepreciationSameAsRegular => {
                 // A nonzero FLAT expense total is the whole liveness condition — btctax cannot see
@@ -4602,11 +4978,25 @@ mod tests {
         assert_eq!(reason(&r), None);
     }
 
+    /// ★★★ **T16 — an affirmed §223 trigger NO LONGER REFUSES.** It used to be
+    /// `HsaActivityUnsupported`; it now opens Form 8889, and what the return then demands is the
+    /// seven answers Form 8889 asks. This test pins BOTH halves, because "it stopped refusing" and
+    /// "it started asking" are different claims and only the pair is the change.
     #[test]
     fn hsa_and_ira_refuse() {
         let mut a = ri();
         a.sch1.hsa_activity = Some(true);
-        assert_eq!(reason(&a), Some(RefuseReason::HsaActivityUnsupported));
+        // `ri()` answers every live declaration at its neutral, and the seven Form 8889 questions
+        // are live only once `hsa_activity` is affirmed — so flipping it here leaves them ALL
+        // unanswered, and the first of them is what refuses.
+        assert!(
+            matches!(reason(&a), Some(RefuseReason::Form8889Unanswered { .. })),
+            "an affirmed HSA trigger must now ASK Form 8889's questions, not refuse the form: {:?}",
+            reason(&a)
+        );
+        // Answer all seven the way a simple HSA filer would, and the return proceeds.
+        crate::tax::testonly::answer_all_live_declarations(&mut a);
+        assert_eq!(reason(&a), None, "a plain HSA return must not refuse");
         let mut b = ri();
         b.sch1.ira_deduction_claimed = dec!(6000);
         assert_eq!(reason(&b), Some(RefuseReason::IraDeductionClaimed));
@@ -6281,8 +6671,49 @@ mod param_free_tier {
                 ..Default::default()
             });
         });
-        add("HsaActivityUnsupported", &|r| {
-            r.sch1.hsa_activity = Some(true)
+        // ★★★ T16 — the five Form 8889 stops, each fired by the situation the FORM sends
+        //     elsewhere. `HsaActivityUnsupported` used to be the single entry here.
+        add("HsaEmployerContributionWithoutActivity", &|r| {
+            r.documents.set(DocumentRow::W2, Some(true));
+            // `ri()` answers `hsa_activity` at its neutral (`false`), which is exactly the
+            // contradiction: the W-2 says the employer contributed and the declaration says nothing
+            // happened.
+            r.w2s.push(w2(|w| {
+                w.box12 = vec![Box12Entry {
+                    code: "W".into(),
+                    amount: dec!(1500),
+                }]
+            }));
+        });
+        add("SaAccountTypeNotTranscribed", &|r| {
+            r.documents.set(DocumentRow::Sa1099, Some(true));
+            r.sa_1099.push(crate::tax::return_inputs::Form1099Sa {
+                payer: "Trustee".into(),
+                box1_gross_distribution: dec!(500),
+                // box 5 left `None` — the defect this rule exists to catch.
+                ..Default::default()
+            });
+        });
+        add("ArcherOrMaMsaNeedsForm8853", &|r| {
+            r.documents.set(DocumentRow::Sa1099, Some(true));
+            r.sa_1099.push(crate::tax::return_inputs::Form1099Sa {
+                payer: "Trustee".into(),
+                box1_gross_distribution: dec!(500),
+                box5_account_type: Some(crate::tax::return_inputs::SaAccountType::ArcherMsa),
+                ..Default::default()
+            });
+        });
+        add("HsaSeparateForm8889Required", &|r| {
+            r.sch1.hsa_activity = Some(true);
+            r.hsa.both_spouses_have_hsas = Some(true);
+        });
+        add("HsaLine3WorksheetRequired", &|r| {
+            r.sch1.hsa_activity = Some(true);
+            r.hsa.eligible_every_month_same_coverage = Some(false);
+        });
+        add("HsaTestingPeriodFailureNotComputed", &|r| {
+            r.sch1.hsa_activity = Some(true);
+            r.hsa.testing_period_failure = Some(true);
         });
         add("IraDeductionClaimed", &|r| {
             r.sch1.ira_deduction_claimed = dec!(3000)
@@ -6394,6 +6825,27 @@ mod param_free_tier {
                 box6_foreign_tax: dec!(5000),
                 ..Default::default()
             });
+        });
+        // ★★★ T16 — the two Form 8889 rules that compare against the year's §223(b) limit. Both
+        //     are package-gated for exactly that reason, and both are exercised at a figure the
+        //     TY2024 limit makes excessive: self-only coverage caps line 3 at $4,150.
+        add("HsaExcessContributionsNeedForm5329", &|r| {
+            r.sch1.hsa_activity = Some(true);
+            // $9,000 of the filer's own contributions against a $4,150 self-only limit.
+            r.hsa.line2_contributions_you_made = dec!(9000);
+        });
+        add("HsaExcessEmployerContributions", &|r| {
+            r.sch1.hsa_activity = Some(true);
+            r.documents.set(DocumentRow::W2, Some(true));
+            // Box 12 code W of $9,000 against the same $4,150 line-8 limitation. ★ Line 2 stays $0
+            // so `HsaExcessContributionsNeedForm5329` (which fires first) cannot mask this one:
+            // with no contribution of the filer's own, line 2 = line 13 = 0.
+            r.w2s.push(w2(|w| {
+                w.box12 = vec![Box12Entry {
+                    code: "W".into(),
+                    amount: dec!(9000),
+                }]
+            }));
         });
         out
     }

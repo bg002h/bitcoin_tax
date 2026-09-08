@@ -530,6 +530,13 @@ pub struct PrintedForms {
     /// an incomplete Part II gates the export (`cmd::admin::promote_export_gate`) rather than filing a
     /// silently-blank one.
     pub f8275: Option<Printed8275>,
+    /// ★★★ **Form 8889 (T16)** — `Some` exactly when the §223 trigger declaration is affirmed
+    /// ([`crate::tax::form8889::Form8889::must_file`]), which is the filer's own answer and never a
+    /// threshold over the figures. An all-zero Part II and a $0 line 13 are legitimately blank parts
+    /// of a form the IRS still requires; a figure-derived gate would drop the form for a filer whose
+    /// contributions exactly equalled their employer's, leaving Schedule 1 line 13 with no
+    /// attachment behind it.
+    pub f8889: Option<crate::tax::form8889::Form8889>,
 }
 
 #[allow(clippy::too_many_arguments)] // the Form 1099-DA regime is the eighth (spec 1099-DA R1); a params struct is a later tidy
@@ -665,7 +672,13 @@ pub fn assemble_printed_forms(
     // §G-6 — the attached Form 6251, decided by its OWN Who-Must-File test. Bound before Schedule 2
     // because Schedule 2 line 2 is Form 6251's printed line 11 and must not re-derive it.
     let f6251 = ar.amt.must_attach().then(|| ar.amt.clone());
-    let sch_2 = schedule_2_lines(sch_se.as_ref(), &f8959, f8960.as_ref(), f6251.as_ref());
+    let sch_2 = schedule_2_lines(
+        sch_se.as_ref(),
+        &f8959,
+        f8960.as_ref(),
+        f6251.as_ref(),
+        ar.form_8889.as_ref(),
+    );
     let sch_3 = schedule_3_lines(ar);
 
     // Form 8283 files only when the return ITEMIZES and its printed noncash gifts clear the $500
@@ -737,6 +750,9 @@ pub fn assemble_printed_forms(
         f6251,
         f8283,
         f8275,
+        // ★ T16 — the ONE derivation, computed in `assemble_absolute` beside Form 6251 and read
+        //   here; Schedule 1 lines 8f/13 and Schedule 2 lines 17c/17d read the same struct.
+        f8889: ar.form_8889.clone(),
     }
 }
 

@@ -1618,15 +1618,262 @@ fn zero_scheduleselines() -> crate::tax::printed::ScheduleSeLines {
     }
 }
 
+/// ★★★ **Form 8889** (f8889) — every one of its 21 numbered lines, plus the Employer Contribution
+/// Worksheet the instructions carry as *Keep for Your Records* (T16 / FR-76).
+///
+/// Destructured with no `..`, so a new money field cannot compile until it is covered here.
+///
+/// ★★ **Every line fits a production.** No exception was needed anywhere on this form, and that is
+/// the transcription rule paying off rather than luck: Form 8889 is written for a person to follow,
+/// so each line says what to do — *"Subtract line 4 from line 3. If zero or less, enter -0-"*
+/// (`Clamped`), *"Add lines 6 and 7"* (`Combine`), *"Multiply line 20 by 10% (0.10)"* (`Scaled`).
+/// The one line whose sentence is not arithmetic, line 13, quotes its own INSTRUCTIONS booklet
+/// through `FilerRecords`… no: it is `Bounded`, because i8889 states it as *"enter the smaller of
+/// line 2 or line 12"*. Nothing here is derived.
+///
+/// ★ The Employer Contribution Worksheet's five lines carry `(none)` as their line, because they are
+/// not lines of Form 8889 — they are the instructions' own worksheet, and a row that names no line
+/// must quote none either (rule 2c).
+pub fn cover_form8889(p: &crate::tax::form8889::Form8889) -> Coverage {
+    let crate::tax::form8889::Form8889 {
+        // L1 is a CHECKBOX (Self-only / Family), not money — no figure to cover.
+        line1_coverage: _,
+        line2,
+        line3,
+        line4,
+        line5,
+        line6,
+        line7,
+        line8,
+        line9,
+        line10,
+        line11,
+        line12,
+        line13,
+        line14a,
+        line14b,
+        line14c,
+        line15,
+        line16,
+        // L17a is a CHECKBOX, not money.
+        line17a_exception_box: _,
+        line17b,
+        line18,
+        line19,
+        line20,
+        line21,
+        employer_worksheet,
+    } = p;
+    let f = "f8889";
+    let mut c = Coverage::quoting("2024");
+    // ── Part I ───────────────────────────────────────────────────────────────────────────────────
+    c.line(*line2, f, "2", "line2",
+        Production::filer_records("Include on line 2 only those amounts you, or others on your behalf, contributed to your HSA for 2024."),
+        "HSA contributions you made for 2024 (or those made on your behalf), including those made by the");
+    c.line(*line3, f, "3", "line3", Production::Constant,
+        "If you were under age 55 at the end of 2024 and, on the first day of every month during 2024, you");
+    c.line(*line4, f, "4", "line4", Production::Carry,
+        "Enter the amount you and your employer contributed to your Archer MSAs for 2024 from Form 8853,");
+    c.line(
+        *line5,
+        f,
+        "5",
+        "line5",
+        Production::Clamped(Polarity::FloorAtZero),
+        "Subtract line 4 from line 3. If zero or less, enter -0-",
+    );
+    c.line(*line6, f, "6", "line6", Production::Carry,
+        "Enter the amount from line 5. But if you and your spouse each have separate HSAs and had family");
+    c.line(*line7, f, "7", "line7", Production::Constant,
+        "If you were age 55 or older at the end of 2024, married, and you or your spouse had family coverage");
+    c.line(
+        *line8,
+        f,
+        "8",
+        "line8",
+        Production::Combine,
+        "Add lines 6 and 7",
+    );
+    c.line(
+        *line9,
+        f,
+        "9",
+        "line9",
+        Production::doc_box("fw2", "12a"),
+        "Employer contributions made to your HSAs for 2024",
+    );
+    c.line(*line10, f, "10", "line10",
+        Production::filer_records("A distribution from your traditional IRA or Roth IRA to your HSA in a direct trustee-to-trustee transfer is called an HSA funding distribution."),
+        "Qualified HSA funding distributions");
+    c.line(
+        *line11,
+        f,
+        "11",
+        "line11",
+        Production::Combine,
+        "Add lines 9 and 10",
+    );
+    c.line(
+        *line12,
+        f,
+        "12",
+        "line12",
+        Production::Clamped(Polarity::FloorAtZero),
+        "Subtract line 11 from line 8. If zero or less, enter -0-",
+    );
+    c.line(
+        *line13,
+        f,
+        "13",
+        "line13",
+        Production::Bounded,
+        "HSA deduction (see instructions)",
+    );
+    // ── Part II ──────────────────────────────────────────────────────────────────────────────────
+    c.line(
+        *line14a,
+        f,
+        "14a",
+        "line14a",
+        Production::doc_box("f1099sa", "1"),
+        "Total distributions you received in 2024 from all HSAs (see instructions)",
+    );
+    c.line(*line14b, f, "14b", "line14b",
+        Production::filer_records("Include on line 14b any distributions you received in 2024 that qualified as a rollover contribution to another HSA."),
+        "Distributions included on line 14a that you rolled over to another HSA. Also include any excess");
+    c.line(
+        *line14c,
+        f,
+        "14c",
+        "line14c",
+        Production::Combine,
+        "Subtract line 14b from line 14a",
+    );
+    c.line(*line15, f, "15", "line15",
+        Production::filer_records("In general, include on line 15 distributions from all HSAs in 2024 that were used for the qualified medical expenses"),
+        "Qualified medical expenses paid using HSA distributions (see instructions)");
+    c.line(*line16, f, "16", "line16", Production::Clamped(Polarity::FloorAtZero),
+        "Taxable HSA distributions. Subtract line 15 from line 14c. If zero or less, enter -0-. Also, include this");
+    c.line(*line17b, f, "17b", "line17b", Production::Scaled,
+        "Additional 20% tax (see instructions). Enter 20% (0.20) of the distributions included on line 16 that");
+    // ── Part III ─────────────────────────────────────────────────────────────────────────────────
+    c.line(
+        *line18,
+        f,
+        "18",
+        "line18",
+        Production::filer_records(
+            "Enter on line 18 the excess of the amount contributed over the redetermined amount.",
+        ),
+        "Last-month rule",
+    );
+    c.line(
+        *line19,
+        f,
+        "19",
+        "line19",
+        Production::filer_records(
+            "Enter the total of any qualified HSA funding distribution (see line 10).",
+        ),
+        "Qualified HSA funding distribution",
+    );
+    c.line(*line20, f, "20", "line20", Production::Combine,
+        "Total income. Add lines 18 and 19. Include this amount on Schedule 1 (Form 1040), Part I, line 8f");
+    c.line(*line21, f, "21", "line21", Production::Scaled,
+        "Additional tax. Multiply line 20 by 10% (0.10). Include this amount in the total on Schedule 2 (Form");
+    c.0.extend(dated(cover_employer_contribution_worksheet(
+        employer_worksheet,
+    )));
+    c
+}
+
+/// ★★ **The Employer Contribution Worksheet** (`i8889`'s own *Keep for Your Records* worksheet).
+///
+/// Its five lines are NOT lines of Form 8889, so every row names `(none)` and quotes nothing — rule
+/// (2c). They are covered all the same, because a worksheet line that nothing checks is exactly the
+/// blank-with-no-provenance the census exists to prevent, and because line 9 is its OUTPUT.
+pub fn cover_employer_contribution_worksheet(
+    w: &crate::tax::form8889::EmployerContributionWorksheet,
+) -> Coverage {
+    let crate::tax::form8889::EmployerContributionWorksheet {
+        line1_w2_box12_code_w,
+        line2_made_this_year_for_prior_year,
+        line3,
+        line4_made_next_year_for_this_year,
+        line5,
+    } = w;
+    let f = "f8889";
+    let mut c = Coverage::quoting("2024");
+    for (v, field) in [
+        (*line1_w2_box12_code_w, "worksheet_line1_w2_box12_code_w"),
+        (
+            *line2_made_this_year_for_prior_year,
+            "worksheet_line2_made_this_year_for_prior_year",
+        ),
+        (*line3, "worksheet_line3"),
+        (
+            *line4_made_next_year_for_this_year,
+            "worksheet_line4_made_next_year_for_this_year",
+        ),
+        (*line5, "worksheet_line5"),
+    ] {
+        c.exception(
+            v,
+            f,
+            "(none)",
+            field,
+            "",
+            "a line of the INSTRUCTIONS' Employer Contribution Worksheet, not of Form 8889 — the \
+             booklet's own \"Keep for Your Records\" table that reconciles a CALENDAR-year Form W-2 \
+             box 12 code W against the TAX year Form 8889 line 9 wants. It prints on no filed form, \
+             so it names no line and quotes none (rule 2c); its output IS line 9, which is covered.",
+        );
+    }
+    c
+}
+
+fn zero_form8889() -> crate::tax::form8889::Form8889 {
+    use crate::tax::form8889::{EmployerContributionWorksheet, Form8889};
+    Form8889 {
+        line1_coverage: crate::tax::return_inputs::HdhpCoverage::SelfOnly,
+        line2: Usd::ZERO,
+        line3: Usd::ZERO,
+        line4: Usd::ZERO,
+        line5: Usd::ZERO,
+        line6: Usd::ZERO,
+        line7: Usd::ZERO,
+        line8: Usd::ZERO,
+        line9: Usd::ZERO,
+        line10: Usd::ZERO,
+        line11: Usd::ZERO,
+        line12: Usd::ZERO,
+        line13: Usd::ZERO,
+        line14a: Usd::ZERO,
+        line14b: Usd::ZERO,
+        line14c: Usd::ZERO,
+        line15: Usd::ZERO,
+        line16: Usd::ZERO,
+        line17a_exception_box: false,
+        line17b: Usd::ZERO,
+        line18: Usd::ZERO,
+        line19: Usd::ZERO,
+        line20: Usd::ZERO,
+        line21: Usd::ZERO,
+        employer_worksheet: EmployerContributionWorksheet::default(),
+    }
+}
+
 /// **Schedule1Lines** (f1040s1) — destructured with no `..`; a new money field cannot compile.
 pub fn cover_schedule1lines(l: &crate::tax::printed::Schedule1Lines) -> Coverage {
     let crate::tax::printed::Schedule1Lines {
         line1,
         line3,
         line7,
+        line8f,
         line8v,
         line9,
         line10,
+        line13,
         line15,
         line18,
         line21,
@@ -1658,6 +1905,17 @@ pub fn cover_schedule1lines(l: &crate::tax::printed::Schedule1Lines) -> Coverage
         Production::doc_box("f1099g", "1"),
         "Unemployment compensation",
     );
+    // ★★★ T16 — Form 8889 line 16 (a taxable HSA distribution) and line 20 (a testing-period
+    //     inclusion) both route themselves here, so this is a Carry of the attached form's own
+    //     lines rather than a figure anyone supplies.
+    c.line(
+        *line8f,
+        f,
+        "8f",
+        "line8f",
+        Production::Carry,
+        "Income from Form 8889",
+    );
     c.line(
         *line8v,
         f,
@@ -1681,6 +1939,16 @@ pub fn cover_schedule1lines(l: &crate::tax::printed::Schedule1Lines) -> Coverage
         "line10",
         Production::Combine,
         "Combine lines 1 through 7 and 9. This is your additional income.",
+    );
+    // ★★★ T16 — Form 8889's own printed line 13, carried. i8889 line 13: *"Generally, enter the
+    //     smaller of line 2 or line 12 on line 13 and on Schedule 1 (Form 1040), Part II, line 13."*
+    c.line(
+        *line13,
+        f,
+        "13",
+        "line13",
+        Production::Carry,
+        "Health savings account deduction. Attach Form 8889",
     );
     c.line(
         *line15,
@@ -1717,9 +1985,11 @@ fn zero_schedule1lines() -> crate::tax::printed::Schedule1Lines {
         line1: Usd::ZERO,
         line3: Usd::ZERO,
         line7: Usd::ZERO,
+        line8f: Usd::ZERO,
         line8v: Usd::ZERO,
         line9: Usd::ZERO,
         line10: Usd::ZERO,
+        line13: Usd::ZERO,
         line15: Usd::ZERO,
         line18: Usd::ZERO,
         line21: Usd::ZERO,
@@ -1735,6 +2005,9 @@ pub fn cover_schedule2lines(l: &crate::tax::printed::Schedule2Lines) -> Coverage
         line4,
         line11,
         line12,
+        line17c,
+        line17d,
+        line18,
         line21,
     } = l;
     let f = "f1040s2";
@@ -1783,6 +2056,37 @@ pub fn cover_schedule2lines(l: &crate::tax::printed::Schedule2Lines) -> Coverage
         Production::Carry,
         "Net investment income tax. Attach Form 8960",
     );
+    // ★★★ T16 — the two HSA additional taxes. Both are CONDITIONAL entries ("Attach Form 8889"),
+    //     so both are `Option` and blank without the form, exactly as line 2 is without Form 6251.
+    c.exception(
+        line17c.unwrap_or(Usd::ZERO),
+        f,
+        "17c",
+        "line17c",
+        "Additional tax on HSA distributions. Attach Form 8889",
+        "BLANK unless Form 8889 is attached (T16). `Option<Usd>`; the emitter skips the cell entirely \
+         when no Form 8889 files, so a return with no HSA carries no testimony about a 20% tax under \
+         §223(f)(4).",
+    );
+    c.exception(
+        line17d.unwrap_or(Usd::ZERO),
+        f,
+        "17d",
+        "line17d",
+        "Additional tax on an HSA because you didn\u{2019}t remain an eligible individual.",
+        "BLANK unless Form 8889 is attached (T16), as 17c. ★ The caption is quoted to its FIRST \
+         PRINTED LINE: the form wraps it, and \"Attach Form 8889\" prints on the next line \
+         (`f1040s2--2024.txt:87-88`) — quoting across the wrap would quote text the page never \
+         prints contiguously.",
+    );
+    c.line(
+        *line18,
+        f,
+        "18",
+        "line18",
+        Production::Combine,
+        "Total additional taxes. Add lines 17a through 17z",
+    );
     c.line(*line21, f, "21", "line21", Production::Combine,
         "Add lines 4, 7 through 16, 18, and 19. These are your total other taxes. Enter here and on Form 1040 or 1040-SR, line 23, or Form 1040-NR, line 23b");
     c
@@ -1795,6 +2099,9 @@ fn zero_schedule2lines() -> crate::tax::printed::Schedule2Lines {
         line4: Usd::ZERO,
         line11: Usd::ZERO,
         line12: Usd::ZERO,
+        line17c: None,
+        line17d: None,
+        line18: Usd::ZERO,
         line21: Usd::ZERO,
     }
 }
@@ -3679,6 +3986,8 @@ pub fn all() -> Coverage {
     rows.extend(dated(cover_schedulealines(&zero_schedulealines())));
     rows.extend(dated(cover_scheduleclines(&zero_scheduleclines())));
     rows.extend(dated(cover_scheduleselines(&zero_scheduleselines())));
+    // ★★★ T16 — Form 8889 and the instructions' Employer Contribution Worksheet.
+    rows.extend(dated(cover_form8889(&zero_form8889())));
     rows.extend(dated(cover_schedule1lines(&zero_schedule1lines())));
     rows.extend(dated(cover_schedule2lines(&zero_schedule2lines())));
     rows.extend(dated(cover_schedule3lines(&zero_schedule3lines())));

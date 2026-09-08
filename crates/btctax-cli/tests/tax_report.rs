@@ -877,7 +877,7 @@ fn report_tax_year_derives_and_computes_from_ty2024_return_inputs() {
     let toml = _dir.path().join("inputs.toml");
     std::fs::write(
         &toml,
-        "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\nfiling_form_4952 = false\n# R3 / T5 — the document-less income door, answered: no undocumented wages, interest,\n# dividends or state refund.\nw2_wages_without_w2 = false\ninterest_or_dividends_without_1099 = false\nstate_refund_without_1099g = false\n# R9 / T6 — Form 1040 page 1's Digital Assets question. This vault's only disposal is in 2025,\n# so 2024 saw no receipt and no disposition.\ndigital_asset_activity = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"90000\"\nbox2_fed_withheld = \"12000\"\nbox5_medicare_wages = \"90000\"\n\n\n# R3 — the document census: this household holds a W-2 and nothing else.\n[documents]\nw2 = true\nint_1099 = false\ndiv_1099 = false\nb_1099 = false\ng_1099 = false\nr_1099 = false\nssa_1099 = false\nnec_misc_k_1099 = false\nk1 = false\nschedule_e_rental = false\ns_1099 = false\noid_1099 = false\nw2g = false\nc_1099 = false\na_1095 = false\nt_1098 = false\nform_1098e = false\n",
+        "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\nfiling_form_4952 = false\n# R3 / T5 — the document-less income door, answered: no undocumented wages, interest,\n# dividends or state refund.\nw2_wages_without_w2 = false\ninterest_or_dividends_without_1099 = false\nstate_refund_without_1099g = false\n# R9 / T6 — Form 1040 page 1's Digital Assets question. This vault's only disposal is in 2025,\n# so 2024 saw no receipt and no disposition.\ndigital_asset_activity = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"90000\"\nbox2_fed_withheld = \"12000\"\nbox5_medicare_wages = \"90000\"\n\n\n# R3 — the document census: this household holds a W-2 and nothing else.\n[documents]\nw2 = true\nint_1099 = false\ndiv_1099 = false\nb_1099 = false\ng_1099 = false\nr_1099 = false\nssa_1099 = false\nnec_misc_k_1099 = false\nk1 = false\nschedule_e_rental = false\ns_1099 = false\noid_1099 = false\nw2g = false\nc_1099 = false\na_1095 = false\nt_1098 = false\nform_1098e = false\n# T16 — the two HSA information returns.\nsa_1099 = false\nsa_5498 = false\n",
     )
     .unwrap();
     // The CSV disposal is in 2025, but v1 full-return tables are TY2024-only; import for 2024 to exercise
@@ -928,7 +928,7 @@ fn report_tax_year_refuses_business_income_without_schedule_c() {
 
     // Full-return inputs for 2024 with NO Schedule C.
     let toml = _dir.path().join("inputs.toml");
-    std::fs::write(&toml, "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\nfiling_form_4952 = false\n# R3 / T5 — the document-less income door, answered: no undocumented wages, interest,\n# dividends or state refund.\nw2_wages_without_w2 = false\ninterest_or_dividends_without_1099 = false\nstate_refund_without_1099g = false\n# R9 / T6 — this household RECEIVED digital assets as mining income in 2024, so the Form 1040\n# page-1 question is answered YES; a NO here would be contradicted by the ledger.\ndigital_asset_activity = true\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n\n# R3 — the document census: this crypto-only household received no information return.\n[documents]\nw2 = false\nint_1099 = false\ndiv_1099 = false\nb_1099 = false\ng_1099 = false\nr_1099 = false\nssa_1099 = false\nnec_misc_k_1099 = false\nk1 = false\nschedule_e_rental = false\ns_1099 = false\noid_1099 = false\nw2g = false\nc_1099 = false\na_1095 = false\nt_1098 = false\nform_1098e = false\n").unwrap();
+    std::fs::write(&toml, "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\nfiling_form_4952 = false\n# R3 / T5 — the document-less income door, answered: no undocumented wages, interest,\n# dividends or state refund.\nw2_wages_without_w2 = false\ninterest_or_dividends_without_1099 = false\nstate_refund_without_1099g = false\n# R9 / T6 — this household RECEIVED digital assets as mining income in 2024, so the Form 1040\n# page-1 question is answered YES; a NO here would be contradicted by the ledger.\ndigital_asset_activity = true\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n\n# R3 — the document census: this crypto-only household received no information return.\n[documents]\nw2 = false\nint_1099 = false\ndiv_1099 = false\nb_1099 = false\ng_1099 = false\nr_1099 = false\nssa_1099 = false\nnec_misc_k_1099 = false\nk1 = false\nschedule_e_rental = false\ns_1099 = false\noid_1099 = false\nw2g = false\nc_1099 = false\na_1095 = false\nt_1098 = false\nform_1098e = false\n# T16 — the two HSA information returns.\nsa_1099 = false\nsa_5498 = false\n").unwrap();
     cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false, false).unwrap();
 
     let err = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap_err();
@@ -3387,12 +3387,14 @@ fn a_re_import_keeps_every_answer_record_already_on_the_row() {
     //   passes for the wrong reason, which is the whole failure class this file exists to catch.
     assert_eq!(
         before.len(),
-        35,
-        "the interview wrote {} records, not the 35 this kill was measured against — if the \
+        37,
+        "the interview wrote {} records, not the 37 this kill was measured against — if the \
          registry grew, update the number; if it SHRANK, the keystroke script is under-answering \
          and the survival assertion below has stopped meaning anything. ★ It was 30 before T5, \
-         which added the 1098-E census row and R3's three document-less income questions, and 34 \
-         before T6, which added R9's Digital Assets question",
+         which added the 1098-E census row and R3's three document-less income questions, 34 \
+         before T6, which added R9's Digital Assets question, and 35 before T16, which added the \
+         two HSA information-return census rows (Form 8889's own seven questions are NOT here: \
+         they are live only when the §223 trigger is affirmed, and this fixture answers it No)",
         before.len()
     );
 

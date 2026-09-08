@@ -163,6 +163,11 @@ t_1098 = false
 # ★ T5 — the 1098-E row opened when `Form1098E` replaced the `sch1.student_loan_interest_paid`
 #   scalar. This household holds no student loan, so the answer is a truthful "none".
 form_1098e = false
+# ★ T16 — the two HSA information returns opened with Form 8889. This household has no health
+#   savings account, so both answers are a truthful "none" — and `sch1.hsa_activity = false` below
+#   says the same thing about the §223 triggers, which is why no Form 8889 files.
+sa_1099 = false
+sa_5498 = false
 
 [header]
 address_street = "88 Larkspur Way"

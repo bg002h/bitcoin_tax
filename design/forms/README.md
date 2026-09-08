@@ -39,6 +39,7 @@ verified by round-trip (fetch `f8995--2025.pdf`, hash it, compare to the note: m
 when `periodic/` was retired into the year directories).
 
     design/forms/MANIFEST.json     every document: source URL, sha256, size  (the provenance record)
+    design/forms/2019/*.pdf.txt    the Form 1099-SA revision in force for TY2019–TY2024 (Rev. 11-2019)
     design/forms/2022/*.pdf.txt    the Form 1098 revision in force for TY2022–TY2024 (see below)
     design/forms/2024/*.pdf.txt    TY2024 notes — what btctax ships today
     design/forms/2025/*.pdf.txt    TY2025 notes — the B3 target
@@ -69,7 +70,7 @@ tax year and nothing later.
 
 Archived ≠ extracted ≠ conformance-tested. These PDFs are step 1 of three:
 
-1. **archived** — done: **115** documents recorded, all in `design/forms/` (measured
+1. **archived** — done: **125** documents recorded, all in `design/forms/` (measured
    `ls design/forms/*/*.pdf.txt | wc -l`, 2026-09-07), each as a URL note plus its extracted text.
    ★ The older `design/amt-form6251/` holds **no** notes — it was retired as an archive on
    2026-07-30.

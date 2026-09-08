@@ -1774,6 +1774,185 @@ impl ScheduleDMap {
     }
 }
 
+/// ★★★ **The Form 8889 (Health Savings Accounts) field map for one tax year** (T16 / FR-76).
+///
+/// ★★ **EVERY line is mapped**, which is why the `census` is empty and why there is no `direction`
+/// table: btctax fills Parts I, II and III completely, and every situation the form routes to paper
+/// btctax does not carry REFUSES the return instead of printing a blank. The only fields outside
+/// [`Self::lines`] are the identity pair and the three checkboxes, each mapped as its own cell.
+///
+/// ★ The TY2024 and TY2025 grids are identical — measured, not assumed: the label reader's output
+/// for `f8889--2024` and `f8889--2025` is byte-identical, so one struct serves both revisions.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Form8889Map {
+    /// `"f8889"`.
+    pub form: String,
+    /// Tax year.
+    pub year: i32,
+    // ── design r2 §4 — the ROW. The same keys as [`MapRow`]; required ones REFUSE when missing. ──
+    /// IRS basename. See [`MapRow::irs_stem`].
+    pub irs_stem: String,
+    /// Annual or periodic. See [`MapRow::versioning`].
+    pub versioning: Versioning,
+    /// sha256 of the bundled PDF. See [`MapRow::template_sha256`].
+    pub template_sha256: String,
+    /// OPTIONAL — the manifest-join excuse. See [`MapRow::authority`].
+    #[serde(default)]
+    pub authority: Option<String>,
+    /// OPTIONAL — a second extract root. See [`MapRow::extract_override`].
+    #[serde(default)]
+    pub extract_override: Option<String>,
+    /// Instructions stem — `"i8889"`, the identically-numbered convention.
+    pub instructions: String,
+    /// OPTIONAL — page range in an `i1040gi` booklet. Absent: Form 8889 has its own booklet.
+    #[serde(default)]
+    pub instr_pages: Option<[u32; 2]>,
+    /// The line-set revision. See [`MapRow::line_set`].
+    pub line_set: String,
+    /// `"52"` — read off the printed form (`design/forms/extract/f8889--2024.txt:8`).
+    #[serde(default)]
+    pub attachment_sequence: Option<String>,
+    /// The §G-13 field census. **EMPTY for this form** — see the struct note.
+    #[serde(default)]
+    pub census: std::collections::BTreeMap<String, CensusDecision>,
+    /// R2.2's `[direction]` table. Empty: a map with no `unmodeled` census entry needs none.
+    #[serde(default)]
+    pub direction: Vec<DirectionBlock>,
+    /// R2.2's derived flip. Empty for the same reason.
+    #[serde(default)]
+    pub subtracts: Vec<SubtractSentence>,
+    /// **L1's *Self-only* box.** The form prints two mutually-exclusive boxes; exactly one is checked.
+    pub check_1_self_only: CheckChoice,
+    /// **L1's *Family* box.**
+    pub check_1_family: CheckChoice,
+    /// **L17a** — *"If any of the distributions included on line 16 meet any of the Exceptions to the
+    /// Additional 20% Tax (see instructions), check here."*
+    pub check_17a: CheckChoice,
+    /// The name + SSN header cells (P6.2). REQUIRED.
+    pub identity: IdentityCells,
+    /// L2 — HSA contributions the filer made, AMOUNT column.
+    pub line2: MoneyCell,
+    /// L3 — the §223(b) contribution limit, AMOUNT column.
+    pub line3: MoneyCell,
+    /// L4 — Archer MSA contributions from Form 8853, AMOUNT column. Always blank BY DECISION: any
+    /// Archer MSA activity refuses.
+    pub line4: MoneyCell,
+    /// L5 — line 3 − line 4, floored at 0, AMOUNT column.
+    pub line5: MoneyCell,
+    /// L6 — the amount from line 5, AMOUNT column.
+    pub line6: MoneyCell,
+    /// L7 — the §223(b)(3)(B) additional contribution amount for a married 55+ filer with family
+    /// coverage, AMOUNT column.
+    pub line7: MoneyCell,
+    /// L8 — add 6 and 7, AMOUNT column.
+    pub line8: MoneyCell,
+    /// L9 — employer contributions (Form W-2 box 12 code W), **MID column**.
+    pub line9: MoneyCell,
+    /// L10 — qualified HSA funding distributions, **MID column**.
+    pub line10: MoneyCell,
+    /// L11 — add 9 and 10, AMOUNT column.
+    pub line11: MoneyCell,
+    /// L12 — line 8 − line 11, floored at 0, AMOUNT column.
+    pub line12: MoneyCell,
+    /// L13 — the HSA deduction → Schedule 1 line 13, AMOUNT column.
+    pub line13: MoneyCell,
+    /// L14a — total distributions (Σ Form 1099-SA box 1), AMOUNT column.
+    pub line14a: MoneyCell,
+    /// L14b — rollovers and withdrawn excess, AMOUNT column.
+    pub line14b: MoneyCell,
+    /// L14c — line 14a − line 14b, AMOUNT column.
+    pub line14c: MoneyCell,
+    /// L15 — qualified medical expenses, AMOUNT column.
+    pub line15: MoneyCell,
+    /// L16 — taxable distributions → Schedule 1 line 8f, AMOUNT column.
+    pub line16: MoneyCell,
+    /// L17b — the 20% additional tax → Schedule 2 line 17c, AMOUNT column.
+    pub line17b: MoneyCell,
+    /// L18 — the last-month rule inclusion, AMOUNT column.
+    pub line18: MoneyCell,
+    /// L19 — a qualified HSA funding distribution included in income, AMOUNT column.
+    pub line19: MoneyCell,
+    /// L20 — add 18 and 19 → Schedule 1 line 8f, AMOUNT column.
+    pub line20: MoneyCell,
+    /// L21 — 10% of line 20 → Schedule 2 line 17d, AMOUNT column.
+    pub line21: MoneyCell,
+}
+
+impl Form8889Map {
+    /// Parse the committed TOML.
+    pub fn parse(toml_src: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(toml_src)
+    }
+
+    /// The TY2024 map.
+    pub fn ty2024() -> Self {
+        Self::for_year(2024).expect("the bundled TY2024 map is wired and parses")
+    }
+
+    /// The map for a tax year — design r2 §10 step 3: the file comes from the glob
+    /// (`bundled::map_text`), the revision from its ROW, and the ONE exhaustive
+    /// `line_set → schema` match decides whether THIS struct parses it.
+    pub fn for_year(year: i32) -> Result<Self, FormsError> {
+        let text = crate::bundled::map_text(crate::bundled::Stem::F8889, year)
+            .ok_or(FormsError::UnsupportedYear(year))?;
+        let row = MapRow::read(text).map_err(|e| {
+            FormsError::Structure(format!("F8889 TY{year}: the map's row does not parse: {e}"))
+        })?;
+        let ls = crate::line_set::LineSet::parse(&row.line_set).ok_or_else(|| {
+            FormsError::Structure(format!(
+                "F8889 TY{year}: line_set {:?} is not a revision this build knows",
+                row.line_set
+            ))
+        })?;
+        match crate::line_set::schema(ls) {
+            crate::line_set::Schema::Form8889Map => Self::parse(text).map_err(|e| {
+                FormsError::Structure(format!(
+                    "F8889 TY{year}: the bundled map does not parse: {e}"
+                ))
+            }),
+            crate::line_set::Schema::Unwired => Err(FormsError::UnwiredLineSet {
+                stem: "F8889",
+                year,
+                line_set: ls.as_str(),
+            }),
+            other => Err(FormsError::Structure(format!(
+                "F8889 TY{year}: line_set {} parses into {other:?}, not Form8889Map",
+                ls.as_str()
+            ))),
+        }
+    }
+
+    /// The 22 filled money cells, in **printed reading order** (strictly descending y on page 1) —
+    /// the order `fill_form_8889` walks and the ordinal the geometric verifier checks the descent of.
+    pub fn lines(&self) -> [&MoneyCell; 22] {
+        [
+            &self.line2,
+            &self.line3,
+            &self.line4,
+            &self.line5,
+            &self.line6,
+            &self.line7,
+            &self.line8,
+            &self.line9,
+            &self.line10,
+            &self.line11,
+            &self.line12,
+            &self.line13,
+            &self.line14a,
+            &self.line14b,
+            &self.line14c,
+            &self.line15,
+            &self.line16,
+            &self.line17b,
+            &self.line18,
+            &self.line19,
+            &self.line20,
+            &self.line21,
+        ]
+    }
+}
+
 /// The Form 8959 (Additional Medicare Tax) field map for one tax year.
 ///
 /// Only the lines we FILL are mapped. Lines 2/3 (Form 4137 / Form 8919) and all of Part III plus
@@ -2830,6 +3009,15 @@ pub struct Schedule2Map {
     pub line11: MoneyCell,
     /// L12 — net investment income tax (Form 8960's printed L17), AMOUNT column, page 1.
     pub line12: MoneyCell,
+    /// ★★★ **L17c — "Additional tax on HSA distributions. Attach Form 8889"** (T16), **page 2**. A
+    /// CONDITIONAL entry: skipped entirely when no Form 8889 is attached, exactly like line 2.
+    pub line17c: MoneyCell,
+    /// ★★★ **L17d — "Additional tax on an HSA because you didn't remain an eligible individual.
+    /// Attach Form 8889"** (T16), page 2, conditional as 17c is.
+    pub line17d: MoneyCell,
+    /// ★★★ **L18 — "Total additional taxes. Add lines 17a through 17z"** (T16), page 2. Our own
+    /// arithmetic over the two cells above, so it prints exactly when they do.
+    pub line18: MoneyCell,
     /// L21 — total other taxes → 1040 L23, AMOUNT column, **page 2**.
     pub line21: MoneyCell,
 }
@@ -2881,13 +3069,16 @@ impl Schedule2Map {
     /// The 6 filled cells in printed reading order. **Descent is grouped by PAGE** — line 21 sits on
     /// page 2, whose y-coordinates are not comparable with page 1's.
     /// ★ §G-6 — line 2 (the AMT) leads, so its descent ordinal is 0 on page 1.
-    pub fn lines(&self) -> [&MoneyCell; 6] {
+    pub fn lines(&self) -> [&MoneyCell; 9] {
         [
             &self.line2,
             &self.line3,
             &self.line4,
             &self.line11,
             &self.line12,
+            &self.line17c,
+            &self.line17d,
+            &self.line18,
             &self.line21,
         ]
     }
@@ -3249,12 +3440,18 @@ pub struct Schedule1Map {
     pub line3: MoneyCell,
     /// L7 — unemployment compensation, AMOUNT column, page 1.
     pub line7: MoneyCell,
+    /// ★★★ **L8f — "Income from Form 8889"** (T16), AMOUNT column, page 1. It was `unmodeled` in the
+    /// census until Form 8889 landed; the entry retired with the excuse.
+    pub line8f: MoneyCell,
     /// L8v — digital assets received as ordinary income, **MID column**, page 1.
     pub line8v: MoneyCell,
     /// L9 — total other income, AMOUNT column, page 1.
     pub line9: MoneyCell,
     /// L10 — combine 1–7 and 9 → 1040 L8, AMOUNT column, page 1.
     pub line10: MoneyCell,
+    /// ★★★ **L13 — "Health savings account deduction. Attach Form 8889"** (T16), AMOUNT column,
+    /// **page 2** (Part II). Its census entry retired with Form 8889.
+    pub line13: MoneyCell,
     /// L15 — deductible part of SE tax, AMOUNT column, **page 2**.
     pub line15: MoneyCell,
     /// L18 — early-withdrawal penalty, AMOUNT column, page 2.
@@ -3310,14 +3507,16 @@ impl Schedule1Map {
         }
     }
     /// The 10 filled cells in printed reading order. **Descent is grouped by PAGE.**
-    pub fn lines(&self) -> [&MoneyCell; 10] {
+    pub fn lines(&self) -> [&MoneyCell; 12] {
         [
             &self.line1,
             &self.line3,
             &self.line7,
+            &self.line8f,
             &self.line8v,
             &self.line9,
             &self.line10,
+            &self.line13,
             &self.line15,
             &self.line18,
             &self.line21,

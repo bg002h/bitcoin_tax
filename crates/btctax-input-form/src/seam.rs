@@ -44,6 +44,17 @@ pub enum SectionId {
     G1099s,
     /// Form 1098-E rows — `ri.form_1098e` (Schedule 1 line 21).
     Form1098Es,
+    /// ★ T16 — Form 1099-SA rows — `ri.sa_1099` (Form 8889 line 14a).
+    Sa1099s,
+    /// ★ T16 — Form 5498-SA rows — `ri.sa_5498` (transcribed and censused; no line sums it).
+    Sa5498s,
+    /// ★★★ T16 — **Form 8889's own money leaves**, the figures no document carries: line 2's
+    /// contributions, the Employer Contribution Worksheet's two calendar-year adjustments, line
+    /// 10's funding distribution, line 14b's rollovers, line 15's medical expenses and the part of
+    /// line 16 that meets an exception. Its own section rather than more `Declarations` leaves,
+    /// because these are AMOUNTS off the filer's own records, and the section is live only when the
+    /// §223 trigger declaration is affirmed.
+    Form8889,
     /// ★★★ R5 / T5 — interest and dividends from the FILER'S OWN RECORDS, with no information
     /// return behind them: `ri.schedule_b_filer_records`. Its own section rather than more 1099
     /// rows, because the provenance is different by construction (`Source::FilerRecords`) and the
@@ -231,6 +242,10 @@ pub enum FieldId {
     DocForm1098,
     /// Census: did the filer receive one or more Form 1098-E?
     DocForm1098e,
+    /// Census: did the filer receive one or more Form 1099-SA?
+    DocSa1099,
+    /// Census: did the filer receive one or more Form 5498-SA?
+    DocSa5498,
     /// Census: did the filer receive one or more Form 1099-R?
     DocR1099,
     /// Census: did the filer receive one or more Form SSA-1099 / RRB-1099?
@@ -268,6 +283,21 @@ pub enum FieldId {
     /// ★★★ R9 / T6 — Form 1040 page 1's DIGITAL ASSETS question, above line 1a. Always live: the
     ///   form prints it on every return and the box that prints is this ANSWER.
     DeclDigitalAssetActivity,
+    // ── ★★★ T16 — Form 8889's seven DECLARATIONS. Live iff `sch1.hsa_activity == Some(true)`. ───
+    /// L1 — is the HDHP coverage FAMILY coverage? (`false` = the form's *Self-only* box.)
+    DeclHsaFamilyCoverage,
+    /// L3's condition — eligible on the first day of every month, with the same coverage.
+    DeclHsaEligibleEveryMonth,
+    /// L3 item (6) / L7 — age 55 or older at the end of the year.
+    DeclHsaAge55OrOlder,
+    /// L3 / Part I's Medicare rule — enrolled in Medicare for any month.
+    DeclHsaMedicareEnrollment,
+    /// The Part I / II / III heading condition — both spouses have separate HSAs.
+    DeclHsaBothSpousesHaveHsas,
+    /// L4 — Archer MSA contributions, which come from Form 8853.
+    DeclHsaArcherMsaActivity,
+    /// Part III — failure to remain an eligible individual during a testing period.
+    DeclHsaTestingPeriodFailure,
     // ── ★★★ R4 / T5 — Form 1099-INT (per row). One Field per COLLECTED box, named for the box. ──
     /// The payer as printed on the form.
     Int1099Payer,
@@ -370,6 +400,52 @@ pub enum FieldId {
     Form1098eTranscribedOn,
     /// Box 1 — *Student loan interest received by lender* → Schedule 1 line 21 (§221).
     Form1098eBox1Interest,
+    // ── ★★★ R4 / T16 — Form 1099-SA (per row). ──────────────────────────────────────────────────
+    Sa1099Payer,
+    Sa1099PayerTin,
+    Sa1099TranscribedOn,
+    /// Box 1 — *Gross distribution* → Form 8889 line 14a.
+    Sa1099Box1GrossDistribution,
+    /// Box 2 — *Earnings on excess cont.* — a refuse-guard (Schedule 1 line 8z).
+    Sa1099Box2EarningsOnExcess,
+    /// Box 3 — *Distribution code*.
+    Sa1099Box3DistributionCode,
+    /// Box 4 — *FMV on date of death* — a refuse-guard (Schedule 1 line 8z).
+    Sa1099Box4Fmv,
+    /// Box 5 — the *HSA / Archer MSA / MA MSA* checkbox. Unanswered REFUSES; the two MSA answers
+    /// refuse naming Form 8853.
+    Sa1099Box5AccountType,
+    // ── ★★★ R4 / T16 — Form 5498-SA (per row). ──────────────────────────────────────────────────
+    Sa5498Trustee,
+    Sa5498TrusteeTin,
+    Sa5498TranscribedOn,
+    /// Box 1 — *Employee's or self-employed person's Archer MSA contributions*.
+    Sa5498Box1ArcherContributions,
+    /// Box 2 — *Total contributions made in \<year\>*.
+    Sa5498Box2TotalContributions,
+    /// Box 3 — *Total HSA or Archer MSA contributions made in \<year+1\> for \<year\>*.
+    Sa5498Box3NextYearForThisYear,
+    /// Box 4 — *Rollover contributions*.
+    Sa5498Box4Rollover,
+    /// Box 5 — *Fair market value of HSA, Archer MSA, or MA MSA*.
+    Sa5498Box5Fmv,
+    /// Box 6 — the *HSA / Archer MSA / MA MSA* checkbox.
+    Sa5498Box6AccountType,
+    // ── ★★★ T16 — Form 8889's own money leaves. ─────────────────────────────────────────────────
+    /// L2 — *"HSA contributions you made for \<year\>"*.
+    HsaLine2Contributions,
+    /// Employer Contribution Worksheet line 2 — contributions made this year for last year.
+    HsaEmployerPriorYear,
+    /// Employer Contribution Worksheet line 4 — contributions made next year for this year.
+    HsaEmployerNextYear,
+    /// L10 — *"Qualified HSA funding distributions"*.
+    HsaLine10FundingDistribution,
+    /// L14b — rollovers, and excess contributions withdrawn by the due date.
+    HsaLine14bRollovers,
+    /// L15 — *"Qualified medical expenses paid using HSA distributions"*.
+    HsaLine15MedicalExpenses,
+    /// L17a/L17b — the part of line 16 that meets an exception to the additional 20% tax.
+    HsaLine16Excepted,
     // ── ★★★ R5 / T5 — the filer's-records rows for Schedule B lines 1 / 5. ──────────────────────
     SbRecordPayerName,
     /// The buyer's SSN on a seller-financed mortgage (`i1040sb--2025.txt:24`).

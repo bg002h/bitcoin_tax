@@ -54,6 +54,8 @@ pub enum LineSet {
     /// `"f8949/2024"`.
     F8949_2024,
     /// `"f8959/2024"`.
+    /// Form 8889, TY2024 (T16).
+    F8889_2024,
     F8959_2024,
     /// `"f8960/2024"`.
     F8960_2024,
@@ -90,6 +92,9 @@ pub enum LineSet {
     /// `"f8949/2025"`.
     F8949_2025,
     /// `"f8959/2025"` — wired at step 5 (2026-09-05): map ⊆ PDF fields, the label join and `[census]` all green; parses into the 2024 struct (a constants-only revision of the same line set).
+    /// Form 8889, TY2025 (T16). The SAME line set as 2024 — measured: the two grids' label
+    /// readings are identical and the extracts differ only in the year and the §223(b) figures.
+    F8889_2025,
     F8959_2025,
     /// `"f8960/2025"` — wired at step 5 (2026-09-05): map ⊆ PDF fields, the label join and `[census]` all green; parses into the 2024 struct (a constants-only revision of the same line set).
     F8960_2025,
@@ -118,6 +123,7 @@ impl LineSet {
             "f8275/2024" => Some(LineSet::F8275_2024),
             "f8283/2024" => Some(LineSet::F8283_2024),
             "f8949/2024" => Some(LineSet::F8949_2024),
+            "f8889/2024" => Some(LineSet::F8889_2024),
             "f8959/2024" => Some(LineSet::F8959_2024),
             "f8960/2024" => Some(LineSet::F8960_2024),
             "f8995/2024" => Some(LineSet::F8995_2024),
@@ -136,6 +142,7 @@ impl LineSet {
             "f6251/2025" => Some(LineSet::F6251_2025),
             "f8283/2025" => Some(LineSet::F8283_2025),
             "f8949/2025" => Some(LineSet::F8949_2025),
+            "f8889/2025" => Some(LineSet::F8889_2025),
             "f8959/2025" => Some(LineSet::F8959_2025),
             "f8960/2025" => Some(LineSet::F8960_2025),
             "f8995/2025" => Some(LineSet::F8995_2025),
@@ -161,6 +168,7 @@ impl LineSet {
             LineSet::F8275_2024 => "f8275/2024",
             LineSet::F8283_2024 => "f8283/2024",
             LineSet::F8949_2024 => "f8949/2024",
+            LineSet::F8889_2024 => "f8889/2024",
             LineSet::F8959_2024 => "f8959/2024",
             LineSet::F8960_2024 => "f8960/2024",
             LineSet::F8995_2024 => "f8995/2024",
@@ -179,6 +187,7 @@ impl LineSet {
             LineSet::F6251_2025 => "f6251/2025",
             LineSet::F8283_2025 => "f8283/2025",
             LineSet::F8949_2025 => "f8949/2025",
+            LineSet::F8889_2025 => "f8889/2025",
             LineSet::F8959_2025 => "f8959/2025",
             LineSet::F8960_2025 => "f8960/2025",
             LineSet::F8995_2025 => "f8995/2025",
@@ -202,6 +211,7 @@ impl LineSet {
         LineSet::F8275_2024,
         LineSet::F8283_2024,
         LineSet::F8949_2024,
+        LineSet::F8889_2024,
         LineSet::F8959_2024,
         LineSet::F8960_2024,
         LineSet::F8995_2024,
@@ -220,6 +230,7 @@ impl LineSet {
         LineSet::F6251_2025,
         LineSet::F8283_2025,
         LineSet::F8949_2025,
+        LineSet::F8889_2025,
         LineSet::F8959_2025,
         LineSet::F8960_2025,
         LineSet::F8995_2025,
@@ -245,6 +256,8 @@ pub enum Schema {
     Form8283Map,
     /// Parses into [`crate::map::Form8949Map`].
     Form8949Map,
+    /// Parses into [`crate::map::Form8889Map`].
+    Form8889Map,
     /// Parses into [`crate::map::Form8959Map`].
     Form8959Map,
     /// Parses into [`crate::map::Form8960Map`].
@@ -291,6 +304,7 @@ pub fn schema(ls: LineSet) -> Schema {
         LineSet::F8275_2024 => Schema::Form8275Map,
         LineSet::F8283_2024 => Schema::Form8283Map,
         LineSet::F8949_2024 => Schema::Form8949Map,
+        LineSet::F8889_2024 => Schema::Form8889Map,
         LineSet::F8959_2024 => Schema::Form8959Map,
         LineSet::F8960_2024 => Schema::Form8960Map,
         LineSet::F8995_2024 => Schema::Form8995Map,
@@ -309,6 +323,7 @@ pub fn schema(ls: LineSet) -> Schema {
         LineSet::F6251_2025 => Schema::Unwired,
         LineSet::F8283_2025 => Schema::Form8283Map,
         LineSet::F8949_2025 => Schema::Form8949Map,
+        LineSet::F8889_2025 => Schema::Form8889Map,
         LineSet::F8959_2025 => Schema::Form8959Map,
         LineSet::F8960_2025 => Schema::Form8960Map,
         LineSet::F8995_2025 => Schema::Form8995Map,
@@ -332,7 +347,8 @@ mod tests {
         assert_eq!(LineSet::parse("f1040/2017"), None);
         // 37 → 41 on 2026-09-06 (the four Form 4868 / Form 1040-V revisions, spec 4868/1040-V R1),
         // then 41 → 36 the same day: S9 dropped the five TY2017 revisions with their form package.
-        assert_eq!(LineSet::ALL.len(), 36);
+        // 36 → 38 on 2026-09-07 (T16 / FR-76): the TY2024 and TY2025 Form 8889 revisions.
+        assert_eq!(LineSet::ALL.len(), 38);
     }
 
     /// The Unwired set is EXACTLY the two that step 5 could not wire — a shrink-only pin: wiring

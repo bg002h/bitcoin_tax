@@ -1,0 +1,25 @@
+https://www.irs.gov/pub/irs-prior/i1099sa--2024.pdf
+
+# i1099sa--2024.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  a8779d33b4a5cf6925b8659b256526ded2e46855e272a806f125b090a6e4f6c3
+# bytes   160995
+#
+# Fetch:    curl -sL -o i1099sa--2024.pdf https://www.irs.gov/pub/irs-prior/i1099sa--2024.pdf
+# Verify:   sha256sum i1099sa--2024.pdf   # must equal the sha256 above
+#
+# ★ A DIFFERENT hash does not mean a corrupt download — it means the IRS REVISED this
+# document. That is a change to the authority: review it, never silently absorb it.
+#
+# The committed text layer is design/forms/extract/i1099sa--2024.txt — that is what the
+# conformance tests read, so they run with no PDF and no network.
+#
+# Archived 2026-09-07 for the interview build (design/SPEC_interview.md r2 §7 T16, owner
+# ruling FR-76): Form 8889 is the one form on the owner's filed TY2024 return that btctax
+# refused, and T16 transcribes it line by line with these documents as the authority.
+# REVISION, READ OFF THE DOCUMENT'S OWN TEXT:
+#   "Instructions for Forms 1099-SA and 5498-SA (2024)" (extract:249); face year "2024"
+#   (extract:1).  ANNUAL — the booklet is annual even though the Form 1099-SA it covers is
+#   periodic, which is exactly why revision_in_force resolves per STEM.
+# ★ ONE booklet covers TWO forms: it is the instructions for f1099sa AND f5498sa. There is
+# no i5498sa document, the way there is no i1098e (the 1098-E's booklet is i1098et).
+# Extracted with PLAIN `pdftotext` (no -layout) — 3-column instruction pages.

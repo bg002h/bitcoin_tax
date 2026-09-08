@@ -102,6 +102,8 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         g_1099,
         b_1099,
         form_1098e,
+        sa_1099,
+        sa_5498,
         schedule_b_filer_records,
         w2_wages_without_w2,
         interest_or_dividends_without_1099,
@@ -113,6 +115,7 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         itemize_election,
         mfs_spouse_itemizes,
         sch1,
+        hsa,
         schedule_1a,
         payments,
         broker_reporting,
@@ -286,6 +289,12 @@ pub fn classify(ri: &ReturnInputs) -> Census {
     for e in form_1098e {
         classify_1098e(&mut c, e);
     }
+    for r in sa_1099 {
+        classify_1099sa(&mut c, r);
+    }
+    for r in sa_5498 {
+        classify_5498sa(&mut c, r);
+    }
     for r in schedule_b_filer_records {
         classify_schedule_b_record(&mut c, r);
     }
@@ -320,6 +329,7 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         classify_schedule_a(&mut c, a);
     }
     classify_schedule1(&mut c, sch1);
+    classify_hsa(&mut c, hsa);
     classify_payments(&mut c, payments);
     // ★★★ R10.3 — THE ANSWER LOG. Not an answer, and never a default that could answer FOR the filer:
     // a record exists only because a writer observed an act. Class (C): no figure on the return reads
@@ -936,6 +946,89 @@ fn classify_charitable_gift(c: &mut Census, g: &CharitableGift) {
     );
 }
 
+/// ★★★ **T16 — Form 8889's seven answers, every one a class-(A) DECLARATION.**
+///
+/// Their liveness is `sch1.hsa_activity == Some(true)`, so a filer with no HSA trigger is asked
+/// none of them and a filer with one is refused until every one is answered. There is no lawful
+/// default here: each answer moves the §223(b) contribution limit, the taxable distribution, or the
+/// additional tax, and every direction a default could take understates one of them.
+fn classify_hsa(c: &mut Census, h: &crate::tax::return_inputs::HsaInputs) {
+    let crate::tax::return_inputs::HsaInputs {
+        family_coverage,
+        eligible_every_month_same_coverage,
+        age_55_or_older_at_year_end,
+        enrolled_in_medicare_any_month,
+        both_spouses_have_hsas,
+        line2_contributions_you_made: _,
+        archer_msa_activity,
+        employer_contributions_prior_year: _,
+        employer_contributions_next_year: _,
+        line10_qualified_funding_distribution: _,
+        line14b_rollovers_and_withdrawn_excess: _,
+        line15_qualified_medical_expenses: _,
+        line16_amount_meeting_an_exception: _,
+        testing_period_failure,
+    } = h;
+    c.declaration(family_coverage, QuestionId::HsaFamilyCoverage);
+    c.declaration(
+        eligible_every_month_same_coverage,
+        QuestionId::HsaEligibleEveryMonth,
+    );
+    c.declaration(age_55_or_older_at_year_end, QuestionId::HsaAge55OrOlder);
+    c.declaration(
+        enrolled_in_medicare_any_month,
+        QuestionId::HsaMedicareEnrollment,
+    );
+    c.declaration(both_spouses_have_hsas, QuestionId::HsaBothSpousesHaveHsas);
+    c.declaration(archer_msa_activity, QuestionId::HsaArcherMsaActivity);
+    c.declaration(testing_period_failure, QuestionId::HsaTestingPeriodFailure);
+}
+
+/// ★ T16 — a Form 1099-SA row. Its one non-money leaf is box 5's account-type checkbox, which is
+/// TRANSCRIBED DATA (which box the trustee ticked), not a defaulted answer for the filer — and its
+/// `None` refuses rather than defaulting to `Hsa`.
+fn classify_1099sa(c: &mut Census, r: &crate::tax::return_inputs::Form1099Sa) {
+    let crate::tax::return_inputs::Form1099Sa {
+        payer: _,
+        payer_tin: _,
+        transcribed_on: _,
+        box1_gross_distribution: _,
+        box2_earnings_on_excess: _,
+        box3_distribution_code: _,
+        box4_fmv_on_date_of_death: _,
+        box5_account_type,
+    } = r;
+    c.exempt(
+        box5_account_type,
+        Class::DataDerived,
+        "Form 1099-SA box 5 — which of HSA / Archer MSA / MA MSA the TRUSTEE ticked, transcribed off \
+         the paper. `None` is \"not transcribed\" and REFUSES (SaAccountTypeNotTranscribed); it never \
+         defaults to HSA, because that would route an Archer MSA's distribution onto Form 8889 \
+         instead of Form 8853",
+    );
+}
+
+/// ★ T16 — a Form 5498-SA row. Box 6 is the same transcribed checkbox as the 1099-SA's box 5.
+fn classify_5498sa(c: &mut Census, r: &crate::tax::return_inputs::Form5498Sa) {
+    let crate::tax::return_inputs::Form5498Sa {
+        trustee: _,
+        trustee_tin: _,
+        transcribed_on: _,
+        box1_archer_msa_contributions: _,
+        box2_total_contributions: _,
+        box3_contributions_next_year_for_this_year: _,
+        box4_rollover_contributions: _,
+        box5_fair_market_value: _,
+        box6_account_type,
+    } = r;
+    c.exempt(
+        box6_account_type,
+        Class::DataDerived,
+        "Form 5498-SA box 6 — the same three-way account checkbox as the Form 1099-SA's box 5, \
+         transcribed off the paper; `None` REFUSES rather than defaulting to HSA",
+    );
+}
+
 fn classify_schedule1(c: &mut Census, s: &Schedule1Inputs) {
     let Schedule1Inputs {
         state_refund_taxable: _,
@@ -1034,6 +1127,8 @@ fn classify_document_census(c: &mut Census, d: &crate::tax::document_census::Doc
         g_1099,
         form_1098,
         form_1098e,
+        sa_1099,
+        sa_5498,
         r_1099,
         ssa_1099,
         nec_misc_k_1099,
@@ -1053,6 +1148,8 @@ fn classify_document_census(c: &mut Census, d: &crate::tax::document_census::Doc
     c.declaration(g_1099, QuestionId::DocG1099);
     c.declaration(form_1098, QuestionId::DocForm1098);
     c.declaration(form_1098e, QuestionId::DocForm1098e);
+    c.declaration(sa_1099, QuestionId::DocSa1099);
+    c.declaration(sa_5498, QuestionId::DocSa5498);
     c.declaration(r_1099, QuestionId::DocR1099);
     c.declaration(ssa_1099, QuestionId::DocSsa1099);
     c.declaration(nec_misc_k_1099, QuestionId::DocNecMiscK1099);

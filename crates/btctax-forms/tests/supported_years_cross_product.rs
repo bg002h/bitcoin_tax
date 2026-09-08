@@ -55,9 +55,9 @@
 //! 2026-09-06. Both are visible in the diff; neither is a quiet edit to a list.
 
 use btctax_forms::testonly::{
-    Form1040Map, Form1040VMap, Form4868Map, Form6251Map, Form8275Map, Form8283Map, Form8949Map,
-    Form8959Map, Form8960Map, Form8995AMap, Form8995Map, Schedule1Map, Schedule2Map, Schedule3Map,
-    ScheduleAMap, ScheduleBMap, ScheduleCMap, ScheduleDMap, ScheduleSeMap,
+    Form1040Map, Form1040VMap, Form4868Map, Form6251Map, Form8275Map, Form8283Map, Form8889Map,
+    Form8949Map, Form8959Map, Form8960Map, Form8995AMap, Form8995Map, Schedule1Map, Schedule2Map,
+    Schedule3Map, ScheduleAMap, ScheduleBMap, ScheduleCMap, ScheduleDMap, ScheduleSeMap,
 };
 use btctax_forms::{FormsError, SUPPORTED_YEARS};
 use sha2::{Digest, Sha256};
@@ -141,7 +141,7 @@ const BUNDLED_BUT_NOT_SUPPORTED: &[i32] = &[2026]; // TY2026: a `preparing` reco
 /// adding one — a cell with no recorded gap vanishing from the matrix would otherwise be silent.
 // 2026-09-06: 2024 17 → 19 and 2025 15 → 17 — the Form 4868 and Form 1040-V rows (spec 4868/1040-V
 // T1). The `(2017, 5)` row was removed the same day: S9 dropped the TY2017 package (owner ruling).
-const BUNDLED_FORMS_PER_YEAR: &[(i32, usize)] = &[(2024, 19), (2025, 17)];
+const BUNDLED_FORMS_PER_YEAR: &[(i32, usize)] = &[(2024, 20), (2025, 18)];
 
 /// Bundled stems for which this build ships **no map type at all**, so nothing can parse the
 /// committed `*.map.toml`. Recorded rather than skipped (`CLAUDE.md`: *skipping is not passing*).
@@ -230,6 +230,7 @@ fn map_resolves(stem: &str, year: i32) -> Option<bool> {
         "f8275" => Form8275Map::for_year(year).is_ok(),
         "f8283" => Form8283Map::for_year(year).is_ok(),
         "f8949" => Form8949Map::for_year(year).is_ok(),
+        "f8889" => Form8889Map::for_year(year).is_ok(),
         "f8959" => Form8959Map::for_year(year).is_ok(),
         "f8960" => Form8960Map::for_year(year).is_ok(),
         "f8995" => Form8995Map::for_year(year).is_ok(),

@@ -1420,6 +1420,9 @@ mod tests {
                 // ★ T5 — the 1098-E became countable when `Form1098E` replaced the
                 //   `sch1.student_loan_interest_paid` scalar.
                 DocumentRow::Form1098e => r.form_1098e.push(Default::default()),
+                // ★ T16 — the two HSA information returns became countable with Form 8889.
+                DocumentRow::Sa1099 => r.sa_1099.push(Default::default()),
+                DocumentRow::Sa5498 => r.sa_5498.push(Default::default()),
                 other => panic!("a new countable census row ({other:?}) needs a case here"),
             }
             assert!(

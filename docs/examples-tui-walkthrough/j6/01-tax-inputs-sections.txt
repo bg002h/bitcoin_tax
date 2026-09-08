@@ -12,17 +12,17 @@
  10││  ✓ Forms 1099-B (Schedule D sum││                                                                                    │
  11││  ✓ Forms 1099-G                ││                                                                                    │
  12││  ✓ Forms 1098-E (student loan i││                                                                                    │
- 13││  … Schedule A (itemized deducti││                                                                                    │
- 14││  … Payments                    ││                                                                                    │
- 15││  … Carryforwards from last year││                                                                                    │
- 16││  … §199A limitation (only if yo││                                                                                    │
- 17││  ✓ Declarations                ││                                                                                    │
- 18││  ✓ Documents received          ││                                                                                    │
- 19││  … Income exclusions (§911/931/││                                                                                    │
- 20││  … Skippables                  ││                                                                                    │
- 21││                                ││                                                                                    │
- 22││                                ││                                                                                    │
- 23││                                ││                                                                                    │
+ 13││  ✓ Forms 1099-SA (HSA distribut││                                                                                    │
+ 14││  ✓ Forms 5498-SA (HSA contribut││                                                                                    │
+ 15││  … Form 8889 (health savings ac││                                                                                    │
+ 16││  … Schedule A (itemized deducti││                                                                                    │
+ 17││  … Payments                    ││                                                                                    │
+ 18││  … Carryforwards from last year││                                                                                    │
+ 19││  … §199A limitation (only if yo││                                                                                    │
+ 20││  ✓ Declarations                ││                                                                                    │
+ 21││  ✓ Documents received          ││                                                                                    │
+ 22││  … Income exclusions (§911/931/││                                                                                    │
+ 23││  … Skippables                  ││                                                                                    │
  24││                                ││                                                                                    │
  25││                                ││                                                                                    │
  26│└────────────────────────────────┘└────────────────────────────────────────────────────────────────────────────────────┘

@@ -305,6 +305,25 @@ pub fn maximal_sentinel() -> ReturnInputs {
         transcribed_on: Some(date!(2025 - 02 - 07)),
         box1_interest: dec!(61),
     };
+    // ★ R4 / T16 — the two HSA information returns, each carrying a TRUSTEE name and TIN.
+    let sa_1099 = |tag: &str, tin: &str| crate::tax::return_inputs::Form1099Sa {
+        payer: format!("SENTINEL_trustee_{tag}"),
+        payer_tin: tin.to_string(), // R10.2 — see `int_1099`
+        transcribed_on: Some(date!(2025 - 02 - 07)),
+        box1_gross_distribution: dec!(1200),
+        box3_distribution_code: "1".to_string(),
+        box5_account_type: Some(crate::tax::return_inputs::SaAccountType::Hsa),
+        ..Default::default()
+    };
+    let sa_5498 = |tag: &str, tin: &str| crate::tax::return_inputs::Form5498Sa {
+        trustee: format!("SENTINEL_trustee5498_{tag}"),
+        trustee_tin: tin.to_string(),
+        transcribed_on: Some(date!(2025 - 02 - 07)),
+        box2_total_contributions: dec!(3000),
+        box5_fair_market_value: dec!(9000),
+        box6_account_type: Some(crate::tax::return_inputs::SaAccountType::Hsa),
+        ..Default::default()
+    };
     // ★★★ R5 / T5 — the filer's-records rows: a payer name, a THIRD PARTY'S SSN and their street
     //     address. A real, canonicalizable SSN rather than a token, for the same reason the TINs are
     //     real: scrub preserves the VALIDITY CLASS, so a token that could never canonicalize would
@@ -379,6 +398,8 @@ pub fn maximal_sentinel() -> ReturnInputs {
         g_1099: vec![g_1099("one", "77-7777777"), g_1099("two", "88-8888888")],
         b_1099: vec![b_1099("one", "99-9999999"), b_1099("two", "10-1010101")],
         form_1098e: vec![f1098e("one", "11-1111111"), f1098e("two", "99-9999999")],
+        sa_1099: vec![sa_1099("one", "11-1111111"), sa_1099("two", "22-2222222")],
+        sa_5498: vec![sa_5498("one", "33-3333333"), sa_5498("two", "44-4444444")],
         schedule_b_filer_records: vec![
             sb_record("one", "000-44-4444"),
             sb_record("two", "000-55-5555"),
@@ -439,6 +460,9 @@ pub fn maximal_sentinel() -> ReturnInputs {
         //   fixture a return that could file.
         digital_asset_activity: Some(false),
         mfs_spouse_itemizes: Some(false),
+        // ★ T16 — Form 8889's answers carry no identity, so the axis fixture only needs them
+        //   present; `Default` is an empty surface, which is what a scrub must leave untouched.
+        hsa: crate::tax::return_inputs::HsaInputs::default(),
         sch1: Schedule1Inputs {
             state_refund_taxable: dec!(1),
             // ★ Zero: a claimed IRA deduction refuses (no compute consumer), masking every cell.
@@ -1080,6 +1104,47 @@ mod matrix {
                 Fixture(|r| {
                     for f in &mut r.form_1098e {
                         f.lender_tin = String::new();
+                    }
+                }),
+                NoSuchState(NO_READER),
+            ),
+            // ── ★ R4 / T16 — the HSA trustee, on both information returns. ──
+            (
+                "sa_1099[].payer",
+                Fixture(|r| r.sa_1099.clear()),
+                Fixture(|r| {
+                    for f in &mut r.sa_1099 {
+                        f.payer = String::new();
+                    }
+                }),
+                NoSuchState(NO_READER),
+            ),
+            (
+                "sa_1099[].payer_tin",
+                Fixture(|r| r.sa_1099.clear()),
+                Fixture(|r| {
+                    for f in &mut r.sa_1099 {
+                        f.payer_tin = String::new();
+                    }
+                }),
+                NoSuchState(NO_READER),
+            ),
+            (
+                "sa_5498[].trustee",
+                Fixture(|r| r.sa_5498.clear()),
+                Fixture(|r| {
+                    for f in &mut r.sa_5498 {
+                        f.trustee = String::new();
+                    }
+                }),
+                NoSuchState(NO_READER),
+            ),
+            (
+                "sa_5498[].trustee_tin",
+                Fixture(|r| r.sa_5498.clear()),
+                Fixture(|r| {
+                    for f in &mut r.sa_5498 {
+                        f.trustee_tin = String::new();
                     }
                 }),
                 NoSuchState(NO_READER),

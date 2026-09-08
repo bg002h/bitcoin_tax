@@ -29,6 +29,7 @@ mod form4868;
 mod form6251;
 mod form8275;
 mod form8283;
+mod form8889;
 mod form8959;
 mod form8960;
 mod form8995;
@@ -63,9 +64,9 @@ pub use form1040v::fill_form_1040v;
 pub use form4868::{fill_form_4868, form_4868_lines, Form4868Choices, Form4868Lines};
 pub use form8275::PartIiCapacity;
 pub use map::{
-    AnnualTag, Form1040Map, Form8275Map, Form8283Map, Form8949Map, Form8959Map, Form8960Map,
-    Form8995Map, MapRow, Schedule1Map, Schedule2Map, Schedule3Map, ScheduleAMap, ScheduleBMap,
-    ScheduleCMap, ScheduleDMap, ScheduleSeMap, Versioning,
+    AnnualTag, Form1040Map, Form8275Map, Form8283Map, Form8889Map, Form8949Map, Form8959Map,
+    Form8960Map, Form8995Map, MapRow, Schedule1Map, Schedule2Map, Schedule3Map, ScheduleAMap,
+    ScheduleBMap, ScheduleCMap, ScheduleDMap, ScheduleSeMap, Versioning,
 };
 pub use schedule_se::SE_FLOOR;
 pub use wrap::PartIiOverflow;
@@ -237,6 +238,20 @@ pub fn fill_form_8959(
     }
     let map = Form8959Map::for_year(year)?;
     form8959::fill_form_8959_with_map(lines, header, &map)
+}
+
+/// Fill **Form 8889** (Health Savings Accounts, §223) for `year` from the core-derived line chain
+/// (`btctax_core::tax::form8889::compute`, held on `AbsoluteReturn::form_8889`).
+///
+/// ★ The caller decides whether the form files — `AbsoluteReturn::form_8889` is `Some` exactly when
+/// `Form8889::must_file` held, which reads the filer's own §223 trigger declaration. There is no
+/// figure-derived skip: an all-zero Form 8889 is a form the IRS still requires (T16).
+pub fn fill_form_8889(
+    lines: &btctax_core::tax::form8889::Form8889,
+    header: &btctax_core::tax::packet::ReturnHeader,
+    year: i32,
+) -> Result<Vec<u8>, FormsError> {
+    form8889::fill_form_8889(lines, header, year)
 }
 
 /// Fill **Form 8960** (Net Investment Income Tax, §1411) for `year` from the core-derived line chain
@@ -510,6 +525,7 @@ pub mod testonly {
     pub use crate::form8275::fill_form_8275_with_map as fill_8275_with_map;
     pub use crate::form8283::fill_form_8283 as fill_8283_with_map;
     pub use crate::form8283::fill_form_8283_full as fill_8283_full_with_map;
+    pub use crate::form8889::fill_form_8889_with_map;
     pub use crate::form8959::fill_form_8959_with_map;
     pub use crate::form8960::fill_form_8960_with_map;
     pub use crate::form8995::fill_form_8995_with_map;
@@ -521,9 +537,9 @@ pub mod testonly {
     // read-back tests need the map itself, not just its parsed struct.
     pub use crate::map::{
         AmountCols, AmountColsNoAdjustment, Form1040Map, Form1040VMap, Form4868Map, Form6251Map,
-        Form8275Map, Form8275Row, Form8283Map, Form8949Map, Form8959Map, Form8960Map, Form8995AMap,
-        Form8995Map, MoneyCell, MoneyPair, PartMap, Schedule1Map, Schedule2Map, Schedule3Map,
-        ScheduleAMap, ScheduleBMap, ScheduleCMap, ScheduleDMap, ScheduleSeMap,
+        Form8275Map, Form8275Row, Form8283Map, Form8889Map, Form8949Map, Form8959Map, Form8960Map,
+        Form8995AMap, Form8995Map, MoneyCell, MoneyPair, PartMap, Schedule1Map, Schedule2Map,
+        Schedule3Map, ScheduleAMap, ScheduleBMap, ScheduleCMap, ScheduleDMap, ScheduleSeMap,
     };
     pub use crate::pdf::{
         button_on_states, checkbox_on, collect_fields, f6251_pdf, f8995a_pdf, index, load,

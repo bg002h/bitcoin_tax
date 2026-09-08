@@ -589,6 +589,7 @@ fn every_shipped_full_return_params_equal_the_ones_the_corpus_validates() {
             student_loan_phaseout_unmarried: s_sl_unmarried,
             student_loan_phaseout_married: s_sl_married,
             amt: s_amt,
+            hsa: s_hsa,
         } = s;
         let FullReturnParams {
             year: validated_year,
@@ -608,6 +609,7 @@ fn every_shipped_full_return_params_equal_the_ones_the_corpus_validates() {
             student_loan_phaseout_unmarried: v_sl_unmarried,
             student_loan_phaseout_married: v_sl_married,
             amt: v_amt,
+            hsa: v_hsa,
         } = &v;
 
         assert_eq!(
@@ -697,6 +699,18 @@ fn every_shipped_full_return_params_equal_the_ones_the_corpus_validates() {
             s_amt, v_amt,
             "TY{year}: the AMT parameters differ — exemption, phase-out and the 28% breakpoint all \
              move Form 6251"
+        );
+        // ★★★ T16 — the §223(b) HSA limitation. It moves Form 8889 line 3, therefore line 13's
+        //     deduction on Schedule 1 line 13, AND the excess-contribution refusal: a limit that is
+        //     too high both over-deducts and stops refusing on contributions that need Form 5329.
+        //     ★ It is the ONE figure here that does not come from the autumn inflation Rev. Proc. —
+        //     §223(g) requires publication by June 1 of the PRECEDING year, so TY2024's authority is
+        //     Rev. Proc. 2023-23 §2.01(1), transcribed independently on each side.
+        assert_eq!(
+            s_hsa, v_hsa,
+            "TY{year}: the §223(b) HSA contribution limitation differs — it sets Form 8889 line 3, \
+             the Schedule 1 line 13 deduction, and the threshold above which excess contributions \
+             refuse for Form 5329"
         );
         compared.push(year);
     }

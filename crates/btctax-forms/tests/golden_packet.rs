@@ -981,6 +981,21 @@ fn derive_form_set(i: &GoldenInputs) -> BTreeSet<&'static str> {
     if se || f8959 || f8960 {
         set.insert("f1040s2");
     }
+    // ★★★ T16 — Form 8889, and the Schedule 1 that CARRIES it.
+    //
+    // §223's own filing rule, stated from the law rather than from the filler: a Form 8889 is
+    // required whenever a §223 trigger fired — a contribution by anyone, a distribution, an
+    // inheritance, or a testing-period inclusion. `GoldenInputs` models one of those four (the
+    // filer's own contribution), so from inputs alone the trigger is `hsa_deduction > 0`.
+    //
+    // ★ Schedule 1 comes with it and NOT the other way round: line 13 is *"Health savings account
+    // deduction. Attach Form 8889"*, so an HSA deduction on a household with no Schedule C is
+    // exactly the case where Schedule 1 files for one adjustment alone. A derivation that forgot
+    // this would call the Schedule 1 spurious while the packet was right.
+    if i.hsa_deduction > 0.0 {
+        set.insert("f8889");
+        set.insert("f1040s1");
+    }
     set
 }
 
@@ -1305,6 +1320,11 @@ fn assert_every_form_carries_the_filers_identity(households: &[GoldenHousehold])
         (
             "f8949",
             btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8949, 2024).unwrap(),
+        ),
+        // ★ T16 — Form 8889 carries the filer's name and SSN like every other attachment.
+        (
+            "f8889",
+            btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8889, 2024).unwrap(),
         ),
     ]);
 

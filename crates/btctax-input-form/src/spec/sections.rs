@@ -2229,6 +2229,202 @@ pub(crate) const FORM_1098ES: Section = Section {
     fields: FORM_1098E_FIELDS,
 };
 
+// ── ★★★ R4 / T16 — Form 1099-SA and Form 5498-SA, the HSA information returns ───────────────────
+
+/// The shared help for the three-way account checkbox both HSA information returns print.
+///
+/// ★★★ **Unanswered is not "HSA".** It is the box that decides WHICH FORM the figures belong on, so
+/// leaving it blank refuses rather than defaulting — and the two MSA answers refuse naming Form
+/// 8853, which the Form 8889 demands *"Before you begin"*.
+const SA_ACCOUNT_TYPE_HELP: &str =
+    "Which account does this document report? Tick it exactly as your form does. \u{201c}HSA\u{201d} is \
+     the only one btctax can file: an Archer MSA or a Medicare Advantage MSA goes on FORM 8853, \
+     which btctax does not build, so either answer refuses and names it. Leaving this blank refuses \
+     too \u{2014} btctax will not assume HSA and file an MSA distribution on the wrong form.";
+
+/// The Enum choices, which are the `SaAccountType` variant names.
+const SA_ACCOUNT_TYPE_CHOICES: &[&str] = &["Hsa", "ArcherMsa", "MaMsa"];
+
+fn sa_account_type_from(c: &str) -> Option<btctax_core::tax::return_inputs::SaAccountType> {
+    use btctax_core::tax::return_inputs::SaAccountType as A;
+    match c {
+        "Hsa" => Some(A::Hsa),
+        "ArcherMsa" => Some(A::ArcherMsa),
+        "MaMsa" => Some(A::MaMsa),
+        _ => None,
+    }
+}
+
+const SA_1099_FIELDS: &[Field] = &[
+    doc_text!(FieldId::Sa1099Payer, sa_1099, "TRUSTEE'S/PAYER'S name", "The HSA trustee or custodian as printed on the Form 1099-SA.", payer),
+    doc_text!(FieldId::Sa1099PayerTin, sa_1099, "PAYER'S TIN", PAYER_TIN_HELP, payer_tin),
+    doc_transcribed_on!(FieldId::Sa1099TranscribedOn, sa_1099),
+    doc_money!(FieldId::Sa1099Box1GrossDistribution, sa_1099, "1 Gross distribution",
+        "Box 1 \u{201c}Gross distribution\u{201d} \u{2014} Form 8889 line 14a, which adds box 1 across every Form 1099-SA on this return. It is the amount that came OUT of the account; how much of it is taxable is decided by line 15, the qualified medical expenses you paid with it.", box1_gross_distribution),
+    doc_money!(FieldId::Sa1099Box2EarningsOnExcess, sa_1099, "2 Earnings on excess cont.",
+        "Box 2 \u{201c}Earnings on excess cont.\u{201d} \u{2014} the earnings on excess contributions you withdrew. The form's own instruction to you is \u{201c}Include the earnings on the \u{2018}Other income\u{2019} line of your tax return\u{201d}, which is Schedule 1 line 8z \u{2014} a line btctax fills from nothing, so any amount here refuses rather than vanish.", box2_earnings_on_excess),
+    doc_text!(FieldId::Sa1099Box3DistributionCode, sa_1099, "3 Distribution code",
+        "Box 3 \u{201c}Distribution code\u{201d} \u{2014} the one-character code your trustee printed (1 normal, 2 excess contribution removed, 3 disability, 4 death, 5 prohibited transaction, 6 mistaken distribution). Transcribed for your records; Form 8889 line 17a asks YOU whether an exception applies, not the code.", box3_distribution_code),
+    doc_money!(FieldId::Sa1099Box4Fmv, sa_1099, "4 FMV on date of death",
+        "Box 4 \u{201c}FMV on date of death\u{201d} \u{2014} the account's fair market value when the owner died. If you inherited this account and were not the owner's spouse, that value is income to you on Schedule 1 line 8z, which btctax fills from nothing, so any amount here refuses.", box4_fmv_on_date_of_death),
+    Field {
+        id: FieldId::Sa1099Box5AccountType,
+        clear: Some(|ri, a| {
+            ri.sa_1099
+                .get_mut(a.0[0])
+                .ok_or(SetError::NoSuchRow)?
+                .box5_account_type = None;
+            Ok(())
+        }),
+        label: "5 HSA / Archer MSA / MA MSA",
+        help: SA_ACCOUNT_TYPE_HELP,
+        kind: FieldKind::Enum(SA_ACCOUNT_TYPE_CHOICES),
+        live: |_| true,
+        get: |ri, a| {
+            ri.sa_1099
+                .get(a.0[0])
+                .map(|r| match r.box5_account_type {
+                    Some(v) => FieldValue::Choice(format!("{v:?}")),
+                    None => FieldValue::Choice(String::new()),
+                })
+        },
+        set: |ri, a, v| {
+            let FieldValue::Choice(c) = v else {
+                return Err(SetError::WrongKind);
+            };
+            let ty = sa_account_type_from(&c).ok_or(SetError::WrongKind)?;
+            ri.sa_1099
+                .get_mut(a.0[0])
+                .ok_or(SetError::NoSuchRow)?
+                .box5_account_type = Some(ty);
+            Ok(())
+        },
+    },
+];
+
+pub(crate) const SA_1099S: Section = Section {
+    id: SectionId::Sa1099s,
+    title: "Forms 1099-SA (HSA distributions)",
+    kind: doc_section_kind!(sa_1099, btctax_core::tax::return_inputs::Form1099Sa),
+    fields: SA_1099_FIELDS,
+};
+
+const SA_5498_FIELDS: &[Field] = &[
+    doc_text!(FieldId::Sa5498Trustee, sa_5498, "TRUSTEE'S name", "The HSA trustee or custodian as printed on the Form 5498-SA.", trustee),
+    doc_text!(FieldId::Sa5498TrusteeTin, sa_5498, "TRUSTEE'S TIN", PAYER_TIN_HELP, trustee_tin),
+    doc_transcribed_on!(FieldId::Sa5498TranscribedOn, sa_5498),
+    doc_money!(FieldId::Sa5498Box1ArcherContributions, sa_5498, "1 Employee\u{2019}s or self-employed person\u{2019}s Archer MSA contributions",
+        "Box 1 \u{2014} the form prints it wrapped, \u{201c}1 Employee\u{2019}s or self-\u{201d} / \u{201c}employed person\u{2019}s Archer MSA contributions made in <year> and <year+1> for <year>\u{201d}. An Archer MSA belongs on FORM 8853, not Form 8889, so a Form 5498-SA reporting one refuses \u{2014} its box 6 is what says which account this is.", box1_archer_msa_contributions),
+    doc_money!(FieldId::Sa5498Box2TotalContributions, sa_5498, "2 Total contributions made in the tax year",
+        "Box 2 \u{2014} the form names its own year in the caption, so it reads \u{201c}Total contributions made in 2024\u{201d} on the 2024 edition and \u{201c}Total contributions made in 2025\u{201d} on the 2025 one. It is what your trustee received during the CALENDAR year, from you AND your employer together \u{2014} NOT Form 8889 line 2, which asks only for the contributions YOU made FOR the tax year. btctax transcribes it so you can check line 2 against it, and never adds it to anything.", box2_total_contributions),
+    doc_money!(FieldId::Sa5498Box3NextYearForThisYear, sa_5498, "3 Contributions made after the year end, for the tax year",
+        "Box 3 \u{2014} again the form names its own years: \u{201c}Total HSA or Archer MSA contributions made in 2025 for 2024\u{201d} on the 2024 edition, \u{201c}Total HSA or Archer MSA contributions made in 2026 for 2025\u{201d} on the 2025 one. Contributions your trustee received after the year ended but designated FOR it, up to the April filing deadline. Form 8889 line 2 includes such contributions if YOU made them; this box is what lets you check that.", box3_contributions_next_year_for_this_year),
+    doc_money!(FieldId::Sa5498Box4Rollover, sa_5498, "4 Rollover contributions",
+        "Box 4 \u{201c}Rollover contributions\u{201d} \u{2014} money moved from another HSA or Archer MSA. Form 8889 line 2's instruction says explicitly not to include rollovers, so this figure reaches no line.", box4_rollover_contributions),
+    doc_money!(FieldId::Sa5498Box5Fmv, sa_5498, "5 Fair market value of HSA, Archer MSA, or MA MSA",
+        "Box 5 \u{201c}Fair market value of HSA, Archer MSA, or MA MSA\u{201d} \u{2014} what the account was worth at the end of the year. No line of Form 8889 or the Form 1040 chain reads it; it is transcribed so your record of the account is complete.", box5_fair_market_value),
+    Field {
+        id: FieldId::Sa5498Box6AccountType,
+        clear: Some(|ri, a| {
+            ri.sa_5498
+                .get_mut(a.0[0])
+                .ok_or(SetError::NoSuchRow)?
+                .box6_account_type = None;
+            Ok(())
+        }),
+        label: "6 HSA / Archer MSA / MA MSA",
+        help: SA_ACCOUNT_TYPE_HELP,
+        kind: FieldKind::Enum(SA_ACCOUNT_TYPE_CHOICES),
+        live: |_| true,
+        get: |ri, a| {
+            ri.sa_5498
+                .get(a.0[0])
+                .map(|r| match r.box6_account_type {
+                    Some(v) => FieldValue::Choice(format!("{v:?}")),
+                    None => FieldValue::Choice(String::new()),
+                })
+        },
+        set: |ri, a, v| {
+            let FieldValue::Choice(c) = v else {
+                return Err(SetError::WrongKind);
+            };
+            let ty = sa_account_type_from(&c).ok_or(SetError::WrongKind)?;
+            ri.sa_5498
+                .get_mut(a.0[0])
+                .ok_or(SetError::NoSuchRow)?
+                .box6_account_type = Some(ty);
+            Ok(())
+        },
+    },
+];
+
+pub(crate) const SA_5498S: Section = Section {
+    id: SectionId::Sa5498s,
+    title: "Forms 5498-SA (HSA contribution information)",
+    kind: doc_section_kind!(sa_5498, btctax_core::tax::return_inputs::Form5498Sa),
+    fields: SA_5498_FIELDS,
+};
+
+// ── ★★★ T16 — Form 8889's own money leaves ──────────────────────────────────────────────────────
+//
+// LIVE only when the §223 trigger declaration is affirmed, so a filer with no HSA activity is never
+// shown a figure they have no reason to enter.
+
+/// The one liveness predicate for the Form 8889 money section — the same condition the seven
+/// declarations use, read from the same leaf.
+fn form_8889_live(ri: &btctax_core::tax::return_inputs::ReturnInputs) -> bool {
+    ri.sch1.hsa_activity == Some(true)
+}
+
+/// A singleton money leaf over `ri.hsa.$field`, live iff Form 8889 files.
+macro_rules! hsa_money {
+    ($id:expr, $label:literal, $help:expr, $field:ident) => {
+        Field {
+            id: $id,
+            clear: None,
+            label: $label,
+            help: $help,
+            kind: FieldKind::Money,
+            live: form_8889_live,
+            get: |ri, _| form_8889_live(ri).then(|| FieldValue::Money(ri.hsa.$field)),
+            set: |ri, _, v| {
+                if !form_8889_live(ri) {
+                    return Err(SetError::NoSuchRow);
+                }
+                let FieldValue::Money(m) = v else {
+                    return Err(SetError::WrongKind);
+                };
+                ri.hsa.$field = m;
+                Ok(())
+            },
+        }
+    };
+}
+
+const FORM_8889_FIELDS: &[Field] = &[
+    hsa_money!(FieldId::HsaLine2Contributions, "2 HSA contributions you made for this year",
+        "Line 2 \u{2014} \u{201c}HSA contributions you made for <year> (or those made on your behalf), including those made by the unextended due date of your tax return that were for <year>. Do NOT include employer contributions, contributions through a cafeteria plan, or rollovers.\u{201d} Your employer's share comes from Form W-2 box 12 code W and is never re-asked; a cafeteria-plan payroll deduction counts as your EMPLOYER'S contribution, not yours.", line2_contributions_you_made),
+    hsa_money!(FieldId::HsaEmployerPriorYear, "Employer Contribution Worksheet line 2 \u{2014} contributions made THIS year for LAST year",
+        "The Employer Contribution Worksheet in the Instructions for Form 8889: \u{201c}Enter employer contributions made in <year> for tax year <year-1>.\u{201d} A Form W-2 reports by CALENDAR year and line 9 wants the TAX year, so this is subtracted from your box 12 code W total. Leave it at 0 unless your W-2's code W includes last year's contribution.", employer_contributions_prior_year),
+    hsa_money!(FieldId::HsaEmployerNextYear, "Employer Contribution Worksheet line 4 \u{2014} contributions made NEXT year for this year",
+        "The Employer Contribution Worksheet: \u{201c}Enter employer contributions made in <year+1> for tax year <year>.\u{201d} Added to your box 12 code W total for the same calendar-versus-tax-year reason. Leave it at 0 unless your employer contributed after the year ended and designated it for this year.", employer_contributions_next_year),
+    hsa_money!(FieldId::HsaLine10FundingDistribution, "10 Qualified HSA funding distributions",
+        "Line 10 \u{2014} \u{201c}Qualified HSA funding distributions.\u{201d} A once-in-a-lifetime direct trustee-to-trustee transfer from your traditional or Roth IRA into your HSA. It is not distributed FROM the HSA, so no Form 1099-SA reports it \u{2014} your own records are the source. It is not deductible and it REDUCES what you may contribute.", line10_qualified_funding_distribution),
+    hsa_money!(FieldId::HsaLine14bRollovers, "14b Rollovers and excess contributions withdrawn by the due date",
+        "Line 14b \u{2014} \u{201c}Distributions included on line 14a that you rolled over to another HSA. Also include any excess contributions (and the earnings on those excess contributions) included on line 14a that were withdrawn by the due date of your return.\u{201d} The Form 1099-SA does not distinguish a rollover, so this comes from your records.", line14b_rollovers_and_withdrawn_excess),
+    hsa_money!(FieldId::HsaLine15MedicalExpenses, "15 Qualified medical expenses paid using HSA distributions",
+        "Line 15 \u{2014} \u{201c}Qualified medical expenses paid using HSA distributions.\u{201d} THE figure that decides how much of your distribution is taxable, and no document carries it: the Form 1099-SA's own instruction says \u{201c}The payer isn't required to compute the taxable amount of any distribution.\u{201d} Only expenses not reimbursed by insurance, incurred after the HSA was established, for you, your spouse and your dependents. You cannot also deduct these on Schedule A.", line15_qualified_medical_expenses),
+    hsa_money!(FieldId::HsaLine16Excepted, "17a/17b The part of line 16 that meets an exception to the additional 20% tax",
+        "Line 17b \u{2014} \u{201c}Enter on line 17b only 20% (0.20) of any amount included on line 16 that does not meet any of the exceptions.\u{201d} So enter here the part of your TAXABLE distribution that DOES meet one: distributions made after the account beneficiary dies, becomes disabled, or turns age 65. Any amount here also checks the line 17a box, which is the form's own sentence about it. Leave it at 0 if none applies.", line16_amount_meeting_an_exception),
+];
+
+pub(crate) const FORM_8889: Section = Section {
+    id: SectionId::Form8889,
+    title: "Form 8889 (health savings account)",
+    kind: SectionKind::Singleton,
+    fields: FORM_8889_FIELDS,
+};
+
 // ── ★★★ R5 — the filer's-records rows for Schedule B lines 1 and 5 ──────────────────────────────
 //
 // LIVE only when the filer has said such income exists, so nobody is shown a section for income

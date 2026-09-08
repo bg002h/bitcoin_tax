@@ -48,6 +48,8 @@ pub enum Stem {
     F8275,
     /// Form 8283 — Noncash Charitable Contributions (periodic).
     F8283,
+    /// Form 8889 — Health Savings Accounts (T16 / FR-76).
+    F8889,
     /// Form 8949 — Sales and Other Dispositions of Capital Assets.
     F8949,
     /// Form 8959 — Additional Medicare Tax.
@@ -81,6 +83,7 @@ impl Stem {
         Stem::F6251,
         Stem::F8275,
         Stem::F8283,
+        Stem::F8889,
         Stem::F8949,
         Stem::F8959,
         Stem::F8960,
@@ -106,6 +109,7 @@ impl Stem {
             Stem::F6251 => "f6251",
             Stem::F8275 => "f8275",
             Stem::F8283 => "f8283",
+            Stem::F8889 => "f8889",
             Stem::F8949 => "f8949",
             Stem::F8959 => "f8959",
             Stem::F8960 => "f8960",

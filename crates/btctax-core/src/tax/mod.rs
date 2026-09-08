@@ -15,6 +15,7 @@ pub mod document_census;
 /// (the filer's stored narrative) + the BG-D10 penalty-risk copy. See module doc.
 pub mod form6251;
 pub mod form8275;
+pub mod form8889;
 pub mod frozen_guard;
 pub mod interview_state;
 pub mod line_coverage;

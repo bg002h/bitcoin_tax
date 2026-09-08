@@ -108,6 +108,8 @@ oid_1099 = false
 w2g = false
 c_1099 = false
 a_1095 = false
+sa_1099 = false
+sa_5498 = false
 t_1098 = false
 # ★ T5 — the 1098-E row opened when `Form1098E` replaced the `sch1.student_loan_interest_paid`
 #   scalar. This household holds no student loan, so the answer is a truthful "none".

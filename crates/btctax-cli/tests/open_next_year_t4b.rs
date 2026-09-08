@@ -1353,3 +1353,93 @@ fn an_out_of_range_from_year_refuses_instead_of_overflowing() {
         );
     }
 }
+
+/// ★★★ **T16 / FR-76 — THE HSA TRUSTEE IS A PAYER IDENTITY, SEEDED WITH EVERY BOX BLANK.**
+///
+/// R10.4's sentence is as true of a Form 1099-SA as of a Form 1099-INT: an HSA trustee that reported
+/// a distribution last year will report one again whenever money leaves the account, so *"Last year
+/// Vanguard (TIN 55-5555555) issued you a Form 1099-SA. Did they issue one for 2025?"* is a real
+/// prompt with a real answer. What must NOT carry is any box — and on this document the box that
+/// matters most is **box 5**, the HSA / Archer MSA / MA MSA checkbox, because a carried `Hsa` would
+/// be testimony about paper the filer has not yet seen.
+///
+/// ★ Both halves are asserted, because only the pair is the guarantee: the identity IS carried
+/// (name and TIN), and everything else is `Default` — compared against the row's own identity-only
+/// seed rather than against a hand-list of boxes, which is `row_is_pre_named`'s own rule.
+#[test]
+fn an_hsa_trustee_is_seeded_as_an_identity_with_every_box_blank() {
+    use btctax_core::tax::return_inputs::{Form1099Sa, Form5498Sa, SaAccountType};
+    let (_dir, vault) = vault_with_year_n(|ri| {
+        ri.sch1.hsa_activity = Some(true);
+        ri.documents.set(DocumentRow::Sa1099, Some(true));
+        ri.sa_1099 = vec![Form1099Sa {
+            payer: "Vanguard HSA".into(),
+            payer_tin: "55-5555555".into(),
+            box1_gross_distribution: dec!(1800),
+            box2_earnings_on_excess: dec!(0),
+            box3_distribution_code: "1".into(),
+            box5_account_type: Some(SaAccountType::Hsa),
+            ..Default::default()
+        }];
+        ri.documents.set(DocumentRow::Sa5498, Some(true));
+        ri.sa_5498 = vec![Form5498Sa {
+            trustee: "Vanguard HSA".into(),
+            trustee_tin: "55-5555555".into(),
+            box2_total_contributions: dec!(4150),
+            box5_fair_market_value: dec!(22000),
+            box6_account_type: Some(SaAccountType::Hsa),
+            ..Default::default()
+        }];
+    });
+    let opened = open(&vault, false);
+    for doc in ["Form 1099-SA", "Form 5498-SA"] {
+        let id = opened
+            .identities
+            .iter()
+            .find(|i| i.prompt.contains(doc))
+            .unwrap_or_else(|| panic!("no identity prompt for {doc}: {:#?}", opened.identities));
+        assert!(
+            id.prompt.contains("Vanguard HSA") && id.prompt.contains("55-5555555"),
+            "the prompt names the trustee and its TIN: {}",
+            id.prompt
+        );
+        assert_eq!(id.answer, None, "{doc}: nothing answers for the filer");
+    }
+
+    let seed = draft(&vault);
+    assert_eq!(seed.sa_1099.len(), 1, "the trustee identity is carried");
+    assert_eq!(seed.sa_5498.len(), 1);
+    assert_eq!(
+        seed.sa_1099[0],
+        Form1099Sa {
+            payer: "Vanguard HSA".into(),
+            payer_tin: "55-5555555".into(),
+            ..Default::default()
+        },
+        "★ every BOX is blank — including box 5, whose carried value would be testimony about paper \
+         the filer has not seen. Compared against the identity-only seed, not a box list."
+    );
+    assert_eq!(
+        seed.sa_5498[0],
+        Form5498Sa {
+            trustee: "Vanguard HSA".into(),
+            trustee_tin: "55-5555555".into(),
+            ..Default::default()
+        }
+    );
+    assert_eq!(
+        (seed.documents.sa_1099, seed.documents.sa_5498),
+        (None, None),
+        "both census rows are re-asked from blank"
+    );
+    assert_eq!(
+        seed.sch1.hsa_activity, None,
+        "and so is the §223 trigger declaration — a PerYear gate, re-asked blank"
+    );
+    assert_eq!(
+        seed.hsa,
+        btctax_core::tax::return_inputs::HsaInputs::default(),
+        "★ Form 8889's own seven answers and six figures carry NOTHING: last year's coverage, age, \
+         Medicare enrolment and contributions are facts about last year"
+    );
+}
