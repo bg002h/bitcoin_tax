@@ -6383,6 +6383,23 @@ build, each with an owning phase.
   the constant ($2,000 is right for TY2024, the only bundled year).
   ★ Note: two entries in this file carry the number FR-85 — this one (the CTC ceiling) and the
   `answer_all_live_declarations` half-answering entry below, which is closed.
+- **FR-86 — six of T8's "other standing kills" have never been watched RED (T8 re-verification,
+  2026-09-07). Owning task: interview T12 (the render pass), with the other B1 sweeps.**
+  `only_the_two_credit_arms_check_a_box`, `single_and_mfj_ask_no_hoh_or_qss_question`,
+  `a_hoh_test_answered_no_refuses_with_the_exit`, `the_qss_window_is_derived_from_the_tax_year`,
+  `the_ty2025_grid_checks_the_more_than_four_box_with_its_statement` and
+  `every_slot_caption_is_the_forms_own_words` were listed by the T8 build report as a NAMED SET with
+  no per-kill plant, so neither the build round, the seam review nor the re-verification planted them
+  — all six are "ran, currently green" rather than seen discriminating. That is the exact shape B1
+  exists to refuse (`design/HARNESS.md`), and the verifier flagged its own gap rather than reporting
+  completeness, which is why this entry exists. Not blocking: their siblings in the same clusters WERE
+  planted and red (the HoH `MarriedLivedApart` / `NraSpouseNoElection` arms, the QSS `None`/`No` arms,
+  FR-67's `Yes`, the row-(7) credit arms), and `every_slot_caption_is_the_forms_own_words` was watched
+  PASSING beside the new order assertion's RED on the same plant — which is its correct behaviour, not
+  evidence it discriminates. Burn down by planting each one once.
+  ★ Note: two entries in this file also carry the number FR-84 — this one's neighbours above (the
+  TY2025 grid name cells) and the T12 render-pass entry below. Same collision as FR-85; renumber both
+  pairs when the ownerless residue is next swept.
 - **FR-82 — `tax_tables.rs`'s TY2026 doc comment cites Rev. Proc. 2025-32 §2.14 / §2.10 for figures
   that sit in its Section 4 (T7 build, follow-up 2; pre-existing). Owning phase: ownerless residue
   (doc-consistency).** The new §4.23 cite beside them is accurate.
