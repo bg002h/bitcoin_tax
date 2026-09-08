@@ -805,19 +805,34 @@ impl Advisory {
 /// The worksheet's line 8 is *"Multiply line 4 by $2,000"*, and this proof needs an UPPER BOUND on it
 /// to conclude the credit is provably zero. `ctc_odc_line19` has no [`FullReturnParams`] in scope and
 /// giving it one would thread the package through `PrintedInputs` for a figure nothing else on the
-/// printed chain reads — so the constant stays here and is PINNED instead:
-/// [`ctc_per_child_tests::the_named_ceiling_is_the_years_own_figure`] asserts it equals
-/// `FullReturnParams::child_tax_credit_per_child` for every year whose package is bundled.
+/// printed chain reads — so the constant stays here and is PINNED instead.
+///
+/// ★★★ **The pin that holds it against the BUNDLE is in `btctax-adapters`, and it has to be
+/// (T8 seam review I-2).** `BundledFullReturnTables` lives in that crate; core cannot see it, and the
+/// pin that used to be named here read a core-local fixture literal hardcoded to `year: 2024`, so no
+/// package landing anywhere could red it — the `1..=38` trap in its usual costume, inside the very
+/// test whose own doc named that trap. The real pin is `btctax-adapters`'
+/// `shipped_tables_are_the_validated_tables::every_bundled_years_ctc_per_child_is_the_named_ceiling`,
+/// which derives the year set from the bundle's own `Debug` rendering (never a hand-written list) and
+/// asserts each year's `child_tax_credit_per_child` equals this constant. What stays in core is
+/// [`ctc_per_child_tests::the_named_ceiling_is_the_figure_the_proof_multiplies_by`] — a positive
+/// control on this predicate, not a pin against a package, and its name now says so.
 ///
 /// ★★★ **It is year-blind, and the pin is what makes that loud rather than latent.** Pub. L. 119-21
 /// §70104(a)(2) raises the figure to $2,200 for *"taxable years beginning after December 31, 2024"*
 /// (§70104(f)) — **TY2025, not TY2026** — so the moment TY2025's or TY2026's package is bundled the
-/// pin REDS. That is the correct outcome: with $2,200 the ceiling here is too LOW, and the proof
-/// would conclude "provably zero" for a household that still has credit left. Taxpayer-adverse, and
-/// invisible on the page — line 19 would print a sworn `0`.
+/// adapters pin REDS. That is the correct outcome: with $2,200 the ceiling here is too LOW, and the
+/// proof would conclude "provably zero" for a household that still has credit left. Taxpayer-adverse,
+/// and invisible on the page — line 19 would print a sworn `0`.
+///
+/// ★★ **The fix THEN is to thread the package into `ctc_odc_line19`, never to edit this number.**
+/// $2,000 is the correct §24(h)(2) figure for TY2024, and TY2024 is the only bundled year — raising
+/// the constant would just move the wrongness onto the year btctax can actually file. What the red
+/// asks for is the filing year's `FullReturnParams` in scope here, at which point this literal
+/// becomes TY2024's entry in that package.
 ///
 /// ★ It cannot bite today: `full_return_for` returns `Some` for **TY2024 alone**, and this predicate
-///   is only reached on a return the absolute chain computed. The pin is what keeps that true.
+///   is only reached on a return the absolute chain computed. The adapters pin is what keeps that true.
 pub(crate) const CTC_PER_CHILD_SS24H2: Usd = rust_decimal_macros::dec!(2000);
 
 fn ctc_provably_zero(ri: &ReturnInputs, dependents: usize, agi: Usd) -> bool {
@@ -903,28 +918,49 @@ pub fn ctc_odc_line19(ri: &ReturnInputs, agi: Usd) -> Option<Usd> {
     (dependents > 0 && ctc_provably_zero(ri, dependents, agi)).then_some(Usd::ZERO)
 }
 
-/// ★★★ **B1 — the §24 per-child ceiling is watched against the YEAR'S PACKAGE.**
+/// ★★★ **B1 — the §24 per-child ceiling.**
+///
+/// The half that can be held HERE is the positive control (the proof really does multiply by the
+/// constant). The half that must be held in `btctax-adapters` is the pin against the bundle, because
+/// `BundledFullReturnTables` is not visible from this crate — T8 seam review I-2, and the reason this
+/// module's one test was renamed.
 #[cfg(test)]
 mod ctc_per_child_tests {
     use super::*;
 
-    /// Every bundled year whose `FullReturnParams` exist must agree with [`CTC_PER_CHILD_SS24H2`].
+    /// ★★★ **The POSITIVE CONTROL: this constant is genuinely the figure the proof multiplies by.**
+    /// It is not — and no longer claims to be — a pin against the bundled packages.
     ///
-    /// ★★★ **This test is EXPECTED to red when TY2026's package lands**, and that is its whole
-    /// purpose: OBBBA §70104 raises §24(h)(2) to $2,200, at which point this proof's line-8 ceiling
-    /// is too LOW and `ctc_provably_zero` would conclude the credit is gone for a household that
-    /// still has some — printing a sworn `0` on 1040 line 19. The fix then is to thread the package
-    /// into `ctc_odc_line19`, not to edit the number here.
+    /// ★★★ **T8 seam review I-2: what this test used to say it did, it could not do.** Its doc read
+    /// *"DERIVED over the bundled years … so a new package cannot arrive unnoticed — the `1..=38`
+    /// trap in its usual costume is a hand-written year list"*, while its only source of params was
+    /// `testonly::ty2024_params()`, a **core-local fixture literal** hardcoded to `year: 2024`.
+    /// `BundledFullReturnTables` has zero occurrences anywhere in `btctax-core` — it lives in
+    /// `btctax-adapters` — so no package landing anywhere could red this. Bundling TY2026 (figure
+    /// $2,200) was measured green here while `ctc_odc_line19` returned `Some(0)` for a household at
+    /// MFJ / 2 children / AGI $482,000 that still had credit. It WAS the trap it named.
     ///
-    /// ★ It is DERIVED over the bundled years rather than pinned to 2024, so a new package cannot
-    ///   arrive unnoticed — the `1..=38` trap in its usual costume is a hand-written year list.
+    /// The bundled-year pin now lives where it can see the bundle: `btctax-adapters`'
+    /// `shipped_tables_are_the_validated_tables::every_bundled_years_ctc_per_child_is_the_named_ceiling`.
+    /// What is left here is the half core can actually hold — that `ctc_provably_zero` reads this
+    /// constant, so the pin downstream is pinning a figure the proof still uses — plus the comparison
+    /// against the params the corpus validates against, named for what it is.
     #[test]
-    fn the_named_ceiling_is_the_years_own_figure() {
+    fn the_named_ceiling_is_the_figure_the_proof_multiplies_by() {
+        // The VALIDATED params — the ones the corpus computes against — not a bundled package.
+        // `ty2024_params()` is a fixture literal; the bundle is compared to it, year by year, by
+        // `every_shipped_full_return_params_equal_the_ones_the_corpus_validates` in btctax-adapters.
         let p = crate::tax::testonly::ty2024_params();
         assert_eq!(
             p.child_tax_credit_per_child, CTC_PER_CHILD_SS24H2,
-            "TY{}: Schedule 8812 line 8's per-child figure and the year package disagree",
+            "TY{}: Schedule 8812 line 8's per-child figure and the VALIDATED params disagree",
             p.year
+        );
+        // …and the accessor the downstream pin reads is this same constant, so that pin cannot be
+        // pinning something else.
+        assert_eq!(
+            crate::tax::testonly::ctc_per_child_ss24h2(),
+            CTC_PER_CHILD_SS24H2
         );
         // The positive control: the constant is genuinely the one the proof multiplies by, so this
         // is not satisfied by a proof that stopped reading it.

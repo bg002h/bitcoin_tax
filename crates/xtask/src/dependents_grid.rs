@@ -556,4 +556,100 @@ mod tests {
             );
         }
     }
+
+    /// ★★★ **AND IN THE FORM'S OWN ORDER — T8 seam review N-1.**
+    ///
+    /// The check above is `hay.contains(&needle)`: presence, anywhere, in a whole document. It says
+    /// nothing about which of a two-box row's captions is position 0 — and *position* is precisely
+    /// the half of [`SLOT_CAPTIONS`] the geometric derivation cannot supply, because both boxes of
+    /// row (6) sit in the same band and are told apart only by x. So a caption **swap** — the same
+    /// defect class as `a_transposed_pair_reds`, reached by editing the table instead of the geometry
+    /// — would print *"permanently and totally disabled"* for a filer who said *"full-time student"*
+    /// with every instrument green.
+    ///
+    /// ★ The module header says the order cannot be read from the form's text layer because
+    ///   `pdftotext -layout` interleaves the four columns. That is true of the *whole phrases*; the
+    ///   interleaving **preserves order**, and the first token of each caption survives it:
+    ///   `f1040--2025.txt:48` reads `(6) Check if  Full-time  Permanently  Full-time  Permanently…`
+    ///   and `:51` reads `(7) Credits  Child tax  Credit for  Child tax  Credit for…`. That is
+    ///   enough, and it is the form's own witness rather than a second table.
+    ///
+    /// ★ WHOLE-TOKEN comparison, not `contains`: *"(7) Credits"* contains the substring *"credit"*,
+    ///   so a substring search would find position 1's caption **before** position 0's and report a
+    ///   pass on a genuinely swapped table. Measured while writing this.
+    ///
+    /// ★ The two-position rows are derived from `SLOT_CAPTIONS` itself, never listed here: a future
+    ///   row with two boxes is covered the moment its slots are added.
+    #[test]
+    fn the_two_box_rows_are_captioned_in_the_forms_own_order() {
+        let path = form_geometry::repo_root().join(F1040);
+        let text =
+            std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {F1040}: {e}"));
+
+        // (row label, band) → the captions at position 0, 1, … in SLOT_CAPTIONS' own order.
+        /// One slot's caption and the position the table gives it within its (row, band).
+        type Captioned = (Slot, &'static str, usize);
+        let mut rows: BTreeMap<(&str, usize), Vec<Captioned>> = BTreeMap::new();
+        for (slot, label, band, position, caption, _) in SLOT_CAPTIONS {
+            rows.entry((label, *band))
+                .or_default()
+                .push((*slot, caption, *position));
+        }
+        let mut checked = 0usize;
+        for ((label, _band), mut slots) in rows {
+            if slots.len() < 2 {
+                continue; // a one-box row has no order to get wrong
+            }
+            slots.sort_by_key(|(_, _, position)| *position);
+            // The form's own line for this row: the ONE line carrying the parenthesised label.
+            let lines: Vec<&str> = text
+                .lines()
+                .filter(|l| l.contains(&format!("({label})")))
+                .collect();
+            assert_eq!(
+                lines.len(),
+                1,
+                "row ({label}) must be carried by exactly one line of {F1040} for this to be a \
+                 reading of the form rather than of a guess; found {}",
+                lines.len()
+            );
+            let toks: Vec<String> = normalise(lines[0])
+                .split_whitespace()
+                .map(str::to_string)
+                .collect();
+            let mut last: Option<(Slot, usize)> = None;
+            for (slot, caption, position) in slots {
+                // The caption's FIRST token — the part the column interleaving leaves contiguous.
+                let head = normalise(caption)
+                    .split_whitespace()
+                    .next()
+                    .expect("a caption is not empty")
+                    .to_string();
+                let at = toks.iter().position(|t| *t == head).unwrap_or_else(|| {
+                    panic!(
+                        "row ({label}) position {position}: {slot:?}'s caption {caption:?} \
+                         starts with {head:?}, which is not a token of the form's own row line: \
+                         {:?}",
+                        lines[0].trim()
+                    )
+                });
+                if let Some((prev_slot, prev_at)) = last {
+                    assert!(
+                        prev_at < at,
+                        "row ({label}) prints {prev_slot:?} before {slot:?}, but SLOT_CAPTIONS \
+                         orders them the other way — a swapped caption checks the wrong box for a \
+                         filer while every FQN in the map stays correct. The form's line: {:?}",
+                        lines[0].trim()
+                    );
+                    checked += 1;
+                }
+                last = Some((slot, at));
+            }
+        }
+        assert!(
+            checked >= 2,
+            "rows (6) and (7) each have two boxes, so at least two orderings must have been \
+             compared; compared {checked}. A zero here is this check passing vacuously."
+        );
+    }
 }

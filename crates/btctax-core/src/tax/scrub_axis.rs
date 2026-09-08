@@ -446,7 +446,7 @@ pub fn maximal_sentinel() -> ReturnInputs {
             hoh_marital_basis: Some(HohMaritalBasis::NotMarried),
             hoh_qualifying_person: Some(true),
             hoh_paid_over_half_cost_of_keeping_up_home: Some(true),
-            hoh_qualifying_child_name: "SENTINEL_hoh_child".into(),
+            qualifying_child_name: "SENTINEL_qualifying_child".into(),
             nra_spouse_resident_election: Some(false),
             qss_spouse_died_in_window_and_not_remarried: Some(true),
             qss_child_you_can_claim: Some(true),
@@ -1102,9 +1102,9 @@ mod matrix {
             //     EMPTINESS — which is what the R7 liveness reads. Same three columns as the address
             //     lines, and for the same reasons.
             (
-                "header.hoh_qualifying_child_name",
+                "header.qualifying_child_name",
                 NoSuchState(PLAIN_STRING),
-                Fixture(|r| r.header.hoh_qualifying_child_name = String::new()),
+                Fixture(|r| r.header.qualifying_child_name = String::new()),
                 NoSuchState(NO_READER),
             ),
             (

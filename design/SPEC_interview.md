@@ -1076,7 +1076,13 @@ ODC.
 NraSpouseNoElection }>` (R7/I7 — an enum of the instruction's four states, **not** one compound
 `Option<bool>`; the last two refuse naming their rule), `hoh_qualifying_person`,
 `hoh_paid_over_half_cost_of_keeping_up_home` (R7, `Option<bool>`, live on `Hoh`);
-`hoh_qualifying_child_name: String` (live on `Hoh`); the five QSS gates
+`qualifying_child_name: String` (live on `Hoh` **or `Qss`** — ★ corrected 2026-09-07 by the T8 seam
+review's I-3: the form's own sentence is one entry space for three statuses, *"If you checked the MFS
+box, enter the name of your spouse. If you checked the **HOH or QSS** box, enter the child's name if
+the qualifying person is a child but not your dependent"* (`f1040--2024.txt:28-29`), and QSS condition
+2 (`i1040gi--2025.txt:1298-1306`) is exactly the household it serves. T8 built it as
+`hoh_qualifying_child_name`, live on `HoH` alone, with **no reader on any year**; the `hoh_` prefix was
+part of the mistake and is gone); the five QSS gates
 `qss_spouse_died_in_window_and_not_remarried`, `qss_child_you_can_claim`,
 `qss_child_lived_in_your_home_all_year`, `qss_paid_over_half_cost_of_keeping_up_home`,
 `qss_could_have_filed_jointly_in_year_of_death` (`Option<bool>`, live iff `filing_status == Qss`, R7/I7);

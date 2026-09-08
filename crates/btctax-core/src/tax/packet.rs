@@ -258,6 +258,14 @@ pub struct DependentRow {
 /// page, taken once, in one place. The distinction that matters upstream is kept upstream: a live
 /// gate left `None` refuses through `screen_dependent_gates` before any packet is built, and a gate
 /// the walk never demanded (row (5)(b) under a *No* on (5)(a)) is lawfully blank.
+///
+/// ★★ **That last sentence is held by construction, not by convention (T8 seam review I-1).**
+/// [`ReturnHeader::build`] projects every one of these bools as
+/// `walk.demands(gate) && leaf == Some(true)`, so a leaf left over from an answer the filer has since
+/// retracted cannot reach the page: the walk stops demanding the gate, and the box goes blank. Before
+/// that fix the projection read the raw leaf and printed (5)(b) checked under an unchecked (5)(a) —
+/// a mark the filer could neither see (the form seam's `get` returns `None` for an undemanded gate)
+/// nor clear (`clear` returns `SetError::NoSuchRow`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct DependentGridRow {
     /// Row **(5)(a)** — *"Check if lived with you more than half of 2025 … (a) Yes"*.
@@ -374,6 +382,103 @@ impl AgedBlindBoxes {
     }
 }
 
+/// ★★★ **The 1040 header's SHARED ENTRY SPACE — whose name goes in the one cell, decided ONCE.**
+///
+/// TY2024's form prints one sentence and one widget for three filing statuses: *"If you checked the
+/// MFS box, enter the name of your spouse. If you checked the HOH or QSS box, enter the child's name
+/// if the qualifying person is a child but not your dependent"* (`f1040--2024.txt:28-29`, mapped as
+/// `mfs_spouse_name = "…f1_18[0]"`). Two answers, one cell — so which status claims it has to be one
+/// decision that the interview seam and the emitter both read, or they drift. That is exactly how T8
+/// seam review **I-3** happened: the seam collected the child's name on `HoH`, and the emitter's only
+/// write to the cell was reachable on `Mfs` alone.
+///
+/// ★ **This `impl` block is in `packet.rs` and not beside the enum on purpose.** `tax/types.rs` is
+///   content-pinned by [`crate::tax::frozen_guard`] (SPEC_full_return §2, additive-only): adding a
+///   method there would trip `frozen_engine_files_are_unchanged` and require the documented exception
+///   process — a separately reviewed pin bump — for a predicate that belongs to the printed header
+///   anyway. An inherent impl in another module of the same crate is the same API at every call site.
+impl FilingStatus {
+    /// The CHILD's-name half of the shared entry space — **HoH and QSS**, the two statuses the form's
+    /// own sentence names for it.
+    #[must_use]
+    pub fn wants_qualifying_child_name(self) -> bool {
+        matches!(self, FilingStatus::HoH | FilingStatus::Qss)
+    }
+
+    /// The SPOUSE's-name half of the same cell — *"If you checked the MFS box, enter the name of your
+    /// spouse"* (`f1040--2024.txt:28`).
+    #[must_use]
+    pub fn wants_spouse_name_in_the_shared_entry_space(self) -> bool {
+        matches!(self, FilingStatus::Mfs)
+    }
+
+    /// Every filing status, for a check that must be TOTAL over the enum rather than over a hand-list.
+    ///
+    /// ★ It is itself a written list, so it is held the way `DependentGate::ALL` is
+    ///   (`provenance.rs`'s `every_dependent_gate_is_in_all`): the exhaustive, `_`-free `match` in
+    ///   [`shared_entry_space_tests::every_filing_status_is_in_all`] makes a new variant a COMPILE
+    ///   error, and the index equality is what catches one that was named but left out of `ALL`.
+    pub const ALL: [FilingStatus; 5] = [
+        FilingStatus::Single,
+        FilingStatus::Mfj,
+        FilingStatus::Mfs,
+        FilingStatus::HoH,
+        FilingStatus::Qss,
+    ];
+}
+
+#[cfg(test)]
+mod shared_entry_space_tests {
+    use super::FilingStatus;
+
+    /// ★★ Every filing status is listed in `ALL` — the exhaustive `match` makes a new variant a
+    /// compile error here, and the index equality catches one added to the enum and forgotten in
+    /// `ALL`. Same shape as `provenance.rs`'s `every_dependent_gate_is_in_all`, for the same reason:
+    /// the test below loops `ALL`, so a status missing from it would simply never be checked.
+    #[test]
+    fn every_filing_status_is_in_all() {
+        for (i, st) in FilingStatus::ALL.into_iter().enumerate() {
+            let idx = match st {
+                FilingStatus::Single => 0,
+                FilingStatus::Mfj => 1,
+                FilingStatus::Mfs => 2,
+                FilingStatus::HoH => 3,
+                FilingStatus::Qss => 4,
+            };
+            assert_eq!(idx, i, "FilingStatus::ALL is out of order / missing {st:?}");
+        }
+        assert_eq!(FilingStatus::ALL.len(), 5, "§1(a)-(d) and §2(a)/(b)");
+    }
+
+    /// ★★★ **ONE cell, at most ONE claimant — asserted, not assumed (T8 seam review I-3).** The
+    /// emitter writes the spouse's name into `mfs_spouse_name` on MFS and the qualifying child's name
+    /// into the SAME cell on HoH/QSS. If any status could answer both, one filer's testimony would
+    /// overwrite another's on the printed page. Total over [`FilingStatus::ALL`], so a sixth status
+    /// cannot join without being given an answer here.
+    #[test]
+    fn the_shared_entry_space_has_exactly_one_claimant_per_status() {
+        for st in FilingStatus::ALL {
+            assert!(
+                !(st.wants_qualifying_child_name()
+                    && st.wants_spouse_name_in_the_shared_entry_space()),
+                "{st:?} claims the shared 1040 entry space twice"
+            );
+        }
+        // …and the form's own sentence names three statuses, so exactly three claim it.
+        let claimants: Vec<FilingStatus> = FilingStatus::ALL
+            .into_iter()
+            .filter(|s| {
+                s.wants_qualifying_child_name() || s.wants_spouse_name_in_the_shared_entry_space()
+            })
+            .collect();
+        assert_eq!(
+            claimants,
+            vec![FilingStatus::Mfs, FilingStatus::HoH, FilingStatus::Qss],
+            "\"If you checked the MFS box … If you checked the HOH or QSS box\" — three statuses"
+        );
+    }
+}
+
 /// Who the return is for — derived ONCE, so a filler can only transcribe.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReturnHeader {
@@ -412,6 +517,18 @@ pub struct ReturnHeader {
     /// captured by `ReturnInputs` at all — a capture gap, recorded in LIMITATIONS rather than fabricated.
     pub ip_pin: Option<IpPin>,
     pub dependents: Vec<DependentRow>,
+    /// ★★★ **The 1040 header's shared entry space, HoH/QSS half** — *"If you checked the HOH or QSS
+    /// box, enter the child's name if the qualifying person is a child but not your dependent"*
+    /// (`f1040--2024.txt:28-29`, the cell mapped as `mfs_spouse_name`). Empty when the filer left it
+    /// blank, which is LAWFUL — *"If you don't enter the name, it will take us longer to process your
+    /// return"* (`i1040gi--2025.txt:1206-1210`) — and empty on every other status, where the same
+    /// cell belongs to MFS's spouse name.
+    ///
+    /// ★ T8 seam review **I-3**: this leaf was collected, classified, scrubbed, covered and helped by
+    ///   T8, and had **no reader on any year** — the emitter's only write to that cell sat inside
+    ///   `if let Some(sp) = &header.spouse` under `status == Mfs`, which a HoH or QSS return can
+    ///   never reach. Carrying it here is what gives it one.
+    pub qualifying_child_name: String,
     /// Schedule C's header is "Name of **proprietor**", not the return's name line: a spouse-owned
     /// business files under the SPOUSE's name and SSN even on a joint return. `None` when there is no
     /// Schedule C. (v1 has at most one Schedule C — ≥ 2 SE earners already refuse, §4.4a.)
@@ -459,28 +576,49 @@ impl ReturnHeader {
             Some(Owner::Spouse) => Some(spouse.clone().unwrap_or_else(|| taxpayer.clone())),
         };
 
-        // ★★★ **T8 / R6 — rows (5), (6) and (7), computed HERE and nowhere else.** The credit column
-        //     comes from the same `walk_dependent` the screens ran, through
-        //     `dependent_gates::credit_column`, so the printed box and the refusal that let the row
+        // ★★★ **T8 / R6 — rows (5), (6) and (7), computed HERE and nowhere else, from ONE walk.**
+        //     The credit column and the row-(5)/(6) checkboxes are both read off the same
+        //     `walk_dependent` the screens ran, so the printed boxes and the refusal that let the row
         //     through can never be two different readings of the flowchart.
+        //
+        // ★★★ **T8 seam review I-1 — a box is printed only if the walk DEMANDED its gate.** Reading
+        //     the raw leaf alone printed row (5)(b) *checked* under an unchecked (5)(a): a filer who
+        //     answered (5)(a) `Yes` + (5)(b) `Yes` and then flipped (5)(a) to `No` left a stale
+        //     `Some(true)` behind, which nothing clears (`sections.rs`'s `clear` returns
+        //     `NoSuchRow` for a gate the walk does not demand) and nothing screens — a sub-condition
+        //     asserted on the filed page under a condition the return does not assert.
+        //     `DependentWalk::demands` is this module's stated definition of liveness, so it is the
+        //     thing to ask. **All four** row-(5)/(6) gates are gated on it even though only
+        //     `LivedWithYouInUs` is conditional in today's Step 1 block (the other three are demanded
+        //     unconditionally, `dependent_gates.rs`'s Step 1 loop): the guarantee is
+        //     *not-demanded ⇒ blank*, and a gate that becomes conditional later must not silently
+        //     re-open the hole.
         let dependents = ri
             .header
             .dependents
             .iter()
             .enumerate()
             .map(|(row, d)| {
+                use crate::tax::provenance::DependentGate as G;
+                let walk = crate::tax::dependent_gates::walk_dependent(ri, row);
+                let checked =
+                    |gate: G, leaf: Option<bool>| walk.demands(gate) && leaf == Some(true);
                 Ok(DependentRow {
                     name: d.name.clone(),
                     ssn: Ssn::canonical(&d.ssn)?,
                     relationship: d.relationship.clone(),
                     grid: DependentGridRow {
-                        lived_with_you_over_half_year: d.lived_with_you_over_half_year
-                            == Some(true),
-                        lived_with_you_in_us: d.lived_with_you_in_us == Some(true),
-                        full_time_student: d.full_time_student == Some(true),
-                        permanently_and_totally_disabled: d.permanently_and_totally_disabled
-                            == Some(true),
-                        credit: crate::tax::dependent_gates::credit_column(ri, row),
+                        lived_with_you_over_half_year: checked(
+                            G::LivedWithYouOverHalfYear,
+                            d.lived_with_you_over_half_year,
+                        ),
+                        lived_with_you_in_us: checked(G::LivedWithYouInUs, d.lived_with_you_in_us),
+                        full_time_student: checked(G::FullTimeStudent, d.full_time_student),
+                        permanently_and_totally_disabled: checked(
+                            G::PermanentlyAndTotallyDisabled,
+                            d.permanently_and_totally_disabled,
+                        ),
+                        credit: walk.verdict.credit_column(),
                     },
                 })
             })
@@ -513,6 +651,9 @@ impl ReturnHeader {
                 .map(IpPin::canonical)
                 .transpose()?,
             dependents,
+            // Carried for every status; the EMITTER decides which statuses print it (HoH and QSS —
+            // `FilingStatus::wants_qualifying_child_name`), because the cell is shared with MFS.
+            qualifying_child_name: ri.header.qualifying_child_name.clone(),
             proprietor,
         })
     }

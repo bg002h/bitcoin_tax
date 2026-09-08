@@ -565,7 +565,7 @@ $ btctax --vault v.pgp income show --year 2024
     "hoh_marital_basis": null,
     "hoh_qualifying_person": null,
     "hoh_paid_over_half_cost_of_keeping_up_home": null,
-    "hoh_qualifying_child_name": "",
+    "qualifying_child_name": "",
     "nra_spouse_resident_election": false,
     "qss_spouse_died_in_window_and_not_remarried": null,
     "qss_child_you_can_claim": null,

@@ -2173,8 +2173,8 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         //   states the wrong year is a question the filer cannot check against their own facts.
         //   Every span `xtask prompt-check` holds against the extract is one the year does not
         //   cross.
-        prompt: "Head of household \u{2014} does Test 1 or Test 2 apply to you? TEST 1: you paid over \
-                 half the cost of keeping up a home that was the main home, for the WHOLE tax year, \
+        prompt: "Head of household \u{2014} does Test 1 or Test 2 apply to you? TEST 1: \"You paid over \
+                 half the cost of keeping up a home that was the main home\", for the WHOLE tax year, \
                  of \"your parent whom you can claim as a dependent, except under a multiple support \
                  agreement\". \"Your parent didn't have to live with you.\" TEST 2: you paid over half \
                  the cost of keeping up a home in which you lived and in which one of the following \
@@ -2207,10 +2207,17 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
     },
     FormQuestion {
         id: QuestionId::HohPaidOverHalfCostOfKeepingUpHome,
-        prompt: "Head of household \u{2014} did you pay over half the cost of keeping up a home for the \
-                 tax year? (Both Test 1 and Test 2 begin with it: \"You paid over half the cost of \
-                 keeping up a home\". See Cost of keeping up a home in the Form 1040 instructions, \
-                 and Pub. 501, for what counts.)",
+        // ★★★ **The OPERATIVE clause is the instruction's own sentence, quoted — T8 seam review M-2.**
+        //     `xtask prompt-check` holds the QUOTED spans of a prompt against the extract; it does
+        //     not hold a lead-in that merely paraphrases them. This prompt used to ask *"did you pay
+        //     over half the cost of keeping up a home"* beside a quote of the real test, so an edit
+        //     to the lead-in alone — *"over half"* to *"most"*, which is a different test entirely
+        //     (with three contributors, 40% can be the most) — changed the question the filer answers
+        //     with every instrument green. Measured. Now the sentence the filer reads IS the checked
+        //     span, so there is no second, unchecked statement of the test to drift.
+        prompt: "Head of household \u{2014} for this tax year, is this true: \"You paid over half the \
+                 cost of keeping up a home\"? (Both Test 1 and Test 2 begin with it. See Cost of \
+                 keeping up a home in the Form 1040 instructions, and Pub. 501, for what counts.)",
         unanswered: RefuseReason::HohTestUnanswered {
             question: QuestionId::HohPaidOverHalfCostOfKeepingUpHome,
         },

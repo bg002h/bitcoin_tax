@@ -436,7 +436,7 @@ fn fixture_for(field: &Field, base: &ReturnInputs) -> ReturnInputs {
         FieldId::DeclHohQualifyingPerson
         | FieldId::DeclHohPaidOverHalfCostOfKeepingUpHome
         | FieldId::HohMaritalBasis
-        | FieldId::HohQualifyingChildName => {
+        | FieldId::QualifyingChildName => {
             ri.filing_status = btctax_core::tax::types::FilingStatus::HoH;
         }
         FieldId::DeclQssSpouseDiedInWindow
@@ -1461,10 +1461,7 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
         "header.hoh_paid_over_half_cost_of_keeping_up_home",
     ),
     (FieldId::HohMaritalBasis, "header.hoh_marital_basis"),
-    (
-        FieldId::HohQualifyingChildName,
-        "header.hoh_qualifying_child_name",
-    ),
+    (FieldId::QualifyingChildName, "header.qualifying_child_name"),
     (
         FieldId::DeclNraSpouseResidentElection,
         "header.nra_spouse_resident_election",

@@ -585,7 +585,7 @@ fn scrub_header(h: &HouseholdHeader) -> HouseholdHeader {
         hoh_marital_basis,
         hoh_qualifying_person,
         hoh_paid_over_half_cost_of_keeping_up_home,
-        hoh_qualifying_child_name,
+        qualifying_child_name,
         nra_spouse_resident_election,
         qss_spouse_died_in_window_and_not_remarried,
         qss_child_you_can_claim,
@@ -672,8 +672,8 @@ fn scrub_header(h: &HouseholdHeader) -> HouseholdHeader {
         //     is replaced with a stand-in and its EMPTINESS is preserved, exactly as the address
         //     lines are: whether the entry space is blank is what the R7 liveness reads, so the
         //     scrubbed copy must ask and refuse identically while naming nobody.
-        hoh_qualifying_child_name: replace_preserving_emptiness(
-            hoh_qualifying_child_name,
+        qualifying_child_name: replace_preserving_emptiness(
+            qualifying_child_name,
             SCRUB_QUALIFYING_CHILD.into(),
         ),
         nra_spouse_resident_election: *nra_spouse_resident_election,

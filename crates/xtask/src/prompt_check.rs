@@ -336,6 +336,17 @@ struct QuestionClause {
 /// year is quoted is QSS condition 1, where the window IS the question — and there it is RENDERED
 /// from `tax_year`, so this table checks the rendered sentence against the instruction's own.
 const QUESTION_CLAUSES: &[QuestionClause] = &[
+    // ★★★ **TEST 1's OPERATIVE CONDITION — added by the T8 seam-review fold (M-2's sweep).** T8
+    //     quoted the two NAMES in Test 1 and Test 2's whole condition, but left Test 1's own
+    //     condition — the half that says what the filer must have PAID — as an unchecked paraphrase
+    //     beside them. The span stops one word short of the instruction's year (*"the main home for
+    //     all of 2025 of your parent"*), which is why it ends at *"the main home"*: the prompts type
+    //     no year, and this table is what keeps that honest.
+    QuestionClause {
+        id: btctax_core::tax::questions::QuestionId::HohQualifyingPerson,
+        text: "You paid over half the cost of keeping up a home that was the main home",
+        rendered: None,
+    },
     QuestionClause {
         id: btctax_core::tax::questions::QuestionId::HohQualifyingPerson,
         text: "your parent whom you can claim as a dependent, except under a multiple support \

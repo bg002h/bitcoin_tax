@@ -1030,3 +1030,63 @@ fn the_qbi_phase_in_top_invariant_catches_the_published_amount_paste() {
         "every status of a year with no published figure must be named: {unchecked:?}"
     );
 }
+
+// ══ §5. THE §24(h)(2) PER-CHILD CEILING — HELD AGAINST EVERY YEAR THE BUNDLE REGISTERS ═══════════
+
+/// ★★★ **T8 seam review I-2 — the pin that could not red, moved to the crate that can see the
+/// bundle.**
+///
+/// `btctax_core::tax::advisories::CTC_PER_CHILD_SS24H2` is the $2,000 upper bound
+/// `ctc_provably_zero` multiplies Schedule 8812 line 8 by in order to conclude *"the credit is
+/// provably zero"* — and, when it concludes that, **1040 line 19 prints a sworn `0`** (26 USC §6065).
+/// OBBBA Pub. L. 119-21 §70104(a)(2) raises §24(h)(2) to **$2,200** for *"taxable years beginning
+/// after December 31, 2024"* (§70104(f)), i.e. **TY2025 onward**. At the stale $2,000 ceiling the
+/// proof concludes the credit is gone for households that still have it: measured, MFJ / 2 children /
+/// AGI $482,000 flips from *"still has credit"* to *"provably zero"* on the constant alone.
+///
+/// ★★★ **Why it lives HERE and not beside the constant.** The pin that claimed this ran in
+/// `btctax-core` and read `testonly::ty2024_params()` — a core-local fixture literal hardcoded to
+/// `year: 2024`. `BundledFullReturnTables` lives in *this* crate and has zero occurrences in
+/// `btctax-core`, so that test was structurally incapable of seeing a package land: bundling TY2026
+/// (whose figure is already `dec!(2200)`) left it **green**. Its own doc called a hand-written year
+/// list *"the `1..=38` trap in its usual costume"*; it was that trap.
+///
+/// ★ The year set is derived by [`shipped_param_years`] from the bundle's own `Debug` rendering,
+///   cross-checked against its public lookup — never a list typed here. So
+///   `by_year.insert(2025, ty2025_full_return())` in `tax_tables.rs` reds this the moment it lands.
+///
+/// ★★ **The fix when that red arrives is to thread the year's `FullReturnParams` into
+///    `ctc_odc_line19`, NOT to raise the constant.** $2,000 is right for TY2024, and TY2024 is the
+///    year btctax can actually file; raising it would move the wrongness onto the filed year.
+#[test]
+fn every_bundled_years_ctc_per_child_is_the_named_ceiling() {
+    let bundle = BundledFullReturnTables::load();
+    let years = shipped_param_years(&bundle);
+    assert!(
+        !years.is_empty(),
+        "the shipped params year set derived to EMPTY, so this loop would pass vacuously — see \
+         derive_shipped_years"
+    );
+    let named = btctax_core::tax::testonly::ctc_per_child_ss24h2();
+    let mut wrong: Vec<String> = Vec::new();
+    for year in &years {
+        let p = bundle
+            .full_return_for(*year)
+            .expect("derived from the bundle's own year set");
+        if p.child_tax_credit_per_child != named {
+            wrong.push(format!(
+                "TY{year}: the bundled package says §24(h)(2) is {} per child, \
+                 advisories::CTC_PER_CHILD_SS24H2 says {named}",
+                p.child_tax_credit_per_child
+            ));
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{wrong:?}\n\nThe Schedule 8812 line-8 ceiling `advisories::ctc_provably_zero` multiplies by \
+         is not this year's figure. At a ceiling that is too LOW the proof concludes the credit is \
+         gone for a household that still has one, and 1040 line 19 prints a sworn `0` — \
+         taxpayer-adverse and invisible on the page. Fix it by threading the year's FullReturnParams \
+         into `ctc_odc_line19`, NOT by editing the constant: $2,000 is correct for TY2024."
+    );
+}

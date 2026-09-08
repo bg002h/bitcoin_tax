@@ -1688,15 +1688,56 @@ mod tests {
         assert!(g.lived_with_you_over_half_year, "row (5)(a)");
         assert!(g.lived_with_you_in_us, "row (5)(b)");
 
-        // A row (5)(b) the walk never demanded stays BLANK rather than defaulting to checked: the
-        // filer answered (5)(a) `No`, so the nested box was never asked.
+        // ★★★ **THE STALE (5)(b) ROW — T8 seam review I-1, and the case the old assertion SKIPPED.**
+        //
+        // The old version set `lived_with_you_in_us = None` by hand and asserted the box was blank,
+        // which tests `None ⇒ false` and never *not-demanded ⇒ blank* — a shadow of the guarantee.
+        // The real hazard is a leaf that is `Some(true)` and STALE: the filer answered (5)(a) *Yes*
+        // and (5)(b) *Yes*, then flipped (5)(a) to *No*. Nothing clears the nested leaf (the form
+        // seam's `clear` returns `SetError::NoSuchRow` for a gate the walk no longer demands, and its
+        // `get` returns `None`, so the filer can neither see it nor erase it), and nothing screens it.
+        // Before the fix the page printed *"(b) And in the U.S."* checked with *"(a) Yes"* blank —
+        // a sub-condition asserted under a condition the return does not assert.
         let mut ri = at_the_ctc_edge(2025);
         named_taxpayer(&mut ri);
+        assert_eq!(
+            ri.header.dependents[0].lived_with_you_in_us,
+            Some(true),
+            "the fixture really did answer (5)(b) Yes before the flip"
+        );
         ri.header.dependents[0].lived_with_you_over_half_year = Some(false);
-        ri.header.dependents[0].lived_with_you_in_us = None;
+        // …and the filer answers whatever Step 4 now demands, so this is a FILABLE return rather than
+        // one that refuses for an unrelated blank.
+        crate::tax::testonly::answer_all_live_declarations(&mut ri);
+        // The hazard is live: the leaf SURVIVES the flip, and the walk no longer demands its gate.
+        assert_eq!(
+            ri.header.dependents[0].lived_with_you_in_us,
+            Some(true),
+            "nothing clears the nested leaf — that is exactly why the projection must ask the walk"
+        );
+        let walk = walk_dependent(&ri, 0);
+        assert!(
+            !walk.demands(DependentGate::LivedWithYouInUs),
+            "(5)(a) No ⇒ the walk never asks (5)(b)"
+        );
+        assert!(
+            walk.verdict.is_claimable(),
+            "and the row still prints: a claimable dependent under Step 4"
+        );
+        assert!(
+            crate::tax::return_refuse::screen_param_free(&ri).is_none(),
+            "no screen catches it — the printed page is the only place it shows"
+        );
         let header = crate::tax::packet::ReturnHeader::build(&ri, 2025).expect("header");
-        assert!(!header.dependents[0].grid.lived_with_you_over_half_year);
-        assert!(!header.dependents[0].grid.lived_with_you_in_us);
+        assert!(
+            !header.dependents[0].grid.lived_with_you_over_half_year,
+            "row (5)(a) answered No prints blank"
+        );
+        assert!(
+            !header.dependents[0].grid.lived_with_you_in_us,
+            "row (5)(b) is blank under an unchecked (5)(a): the walk never demanded it, so the \
+             stale Some(true) leaf must not reach the page"
+        );
     }
 
     /// ★ Every verdict arm maps to a credit column, and only the two claimable-with-a-credit arms

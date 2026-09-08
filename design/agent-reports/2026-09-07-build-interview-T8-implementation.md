@@ -55,6 +55,16 @@ harness-check    harness-check: OK — 2 hook(s) wired
   distinction stays upstream: a live gate left `None` refuses through `screen_dependent_gates` before
   any packet is built, and a gate the walk never demanded (row (5)(b) under a *No* on (5)(a)) is
   lawfully blank.
+
+  > **★ CORRECTION 2026-09-07 (seam review I-1, folded).** That last clause was **FALSE as built**.
+  > `ReturnHeader::build` projected the grid from the RAW LEAVES (`d.lived_with_you_in_us ==
+  > Some(true)`) with no reference to the walk, so a filer who answered (5)(a) *Yes* + (5)(b) *Yes*
+  > and then flipped (5)(a) to *No* left a stale `Some(true)` that nothing cleared, nothing screened,
+  > and `push_dependents_grid` wrote unconditionally — *"(b) And in the U.S."* printed checked under a
+  > blank *"(a) Yes"*, invisible in the form seam (`get` → `None`) and unclearable (`clear` →
+  > `SetError::NoSuchRow`). The fold builds every row-(5)/(6) bool as
+  > `walk.demands(gate) && leaf == Some(true)`, so the sentence is now true by construction; see
+  > `2026-09-07-build-interview-T8-fold.md` §I-1.
 - Built in `ReturnHeader::build`, from `dependent_gates::credit_column(ri, row)` and the row's own
   gates. The stale doc comment (*"the CTC/ODC credit boxes are deliberately NOT modeled here"*) is
   replaced with why they are modelled now and why line 19 staying blank is not a contradiction.
@@ -173,6 +183,17 @@ T8 — asserted, not assumed (see the kills).
 | `QssCouldHaveFiledJointlyInYearOfDeath` | `:1280-1283` | `Qss` | same |
 | `hoh_qualifying_child_name` (`FieldKind::Text`) | `:1206-1210` | `HoH` | none — a blank is lawful (*"it will take us longer to process your return"*) |
 
+> **★ CORRECTION 2026-09-07 (seam review I-3, folded).** That leaf had **no reader on any year** — it
+> was collected, classified, scrubbed, covered and helped, and nothing wrote it onto a form; the only
+> write to the cell it belongs in was nested inside `if let Some(sp) = &header.spouse` under
+> `status == Mfs`, which a HoH or QSS return can never reach. It was also live on `HoH` alone, while
+> the form's own sentence is one entry space for three statuses (*"If you checked the HOH or QSS
+> box…"*, `f1040--2024.txt:28-29`) and the field's help quoted *"the entry space below qualifying
+> surviving spouse"*. The fold renames it `qualifying_child_name` (the `hoh_` prefix was part of the
+> mistake), makes it live on **HoH | Qss**, carries it onto `ReturnHeader`, and writes it into the
+> shared cell on both statuses — read back off the filled TY2024 PDF by a KAT. Deviation 3 below is
+> unchanged in substance and now applies to QSS as well.
+
 **No prompt types a YEAR or a FIGURE** except QSS condition 1, where the two-year window IS the
 question and is rendered from `tax_year` (`RENDERED_PROMPTS`). The HoH tests and QSS conditions 2/3
 were de-yeared and de-figured during the build for exactly this reason — condition 2's instruction
@@ -245,7 +266,19 @@ neither and is not indexed. Every comment now says TY2024, and the pin below is 
 
 `advisories.rs`'s `ctc_provably_zero` multiplied by a bare `2000`. That literal is now the named
 `CTC_PER_CHILD_SS24H2` and is **pinned against the year's package** by
-`ctc_per_child_tests::the_named_ceiling_is_the_years_own_figure`. It cannot bite today
+`ctc_per_child_tests::the_named_ceiling_is_the_years_own_figure`.
+
+> **★ CORRECTION 2026-09-07 (seam review I-2, folded).** The pin named in this paragraph **could not
+> red on the defect the paragraph describes**, and the sentence below — *"the moment TY2025's or
+> TY2026's package is bundled the test REDS"* — was false. That test lived in `btctax-core` and read
+> `testonly::ty2024_params()`, a core-local fixture literal hardcoded to `year: 2024`;
+> `BundledFullReturnTables` lives in `btctax-adapters` and has zero occurrences in `btctax-core`, so
+> no package landing anywhere could reach it. Bundling TY2026 was measured **green**. The pin now
+> lives in `btctax-adapters`
+> (`shipped_tables_are_the_validated_tables::every_bundled_years_ctc_per_child_is_the_named_ceiling`),
+> derives its year set from the bundle itself, and was watched red on two plants; core keeps only the
+> renamed positive control `the_named_ceiling_is_the_figure_the_proof_multiplies_by`. See
+> `2026-09-07-build-interview-T8-fold.md` §I-2. It cannot bite today
 (`full_return_for` returns `Some` for TY2024 alone, and this predicate is only reached on a return the
 absolute chain computed) — and the pin is what keeps that true: the moment TY2025's or TY2026's
 package is bundled the test REDS, which is correct, because at $2,200 the ceiling here is too LOW and
@@ -264,7 +297,7 @@ line 19, taxpayer-adverse and invisible on the page. The fix then is to thread t
 | `a_transposed_pair_reds`, `a_missing_cell_reds` (xtask) | in-test geometry mutation | standing negative tests |
 | the register | map 25 cells, leave the register at 196 | `2025/f1040: recorded 196 unaccounted field(s), measured 171. The register is SHRINK-ONLY…` |
 | `the_ty2025_dependents_grid_prints_the_answers` (forms) | `credit_for_other_dependents` written on `g.credit != ChildTaxCredit` | `dependent 3, credit_for_other_dependents / left: Some("2")` |
-| `the_ty2024_1040_is_byte_identical…` (forms) | TY2024 emitter checks `row.ctc` from the computation | `row 0 ctc / left: Some("1")` |
+| `the_ty2024_1040_is_byte_identical…` (forms) — **renamed 2026-09-07 to `the_ty2024_1040_ignores_the_computed_grid_and_fills_deterministically`** (seam review M-1: its hash compares two fills in ONE build, which is determinism, not a pin against pre-T8 bytes) | TY2024 emitter checks `row.ctc` from the computation | `row 0 ctc / left: Some("1")` |
 | `hoh_refuses_until_the_instructions_own_tests_are_answered` (core) | class-(A) skippable loop stops refusing | panicked at `return_refuse.rs:4725` |
 | `the_untranscribed_marital_bases_refuse_naming_their_rule` (core) | `MarriedLivedApart` arm made unreachable | panicked at `return_refuse.rs:4797` |
 | `qss_asks_all_five_of_the_instructions_conditions` (core) | a QSS `No` stops refusing | panicked at `return_refuse.rs:4888` |

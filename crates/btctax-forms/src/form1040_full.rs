@@ -482,11 +482,28 @@ fn push_header_block(
             &cells.spouse_ssn,
             &render_ssn(&sp.ssn, max_len_of(&cells.spouse_ssn))?,
         );
-        // "If you checked the MFS box, enter the name of your spouse" — MFS only. (On HoH/QSS that same
-        // cell wants the qualifying CHILD's name, which v1 does not capture, so it stays blank.)
-        if status == FilingStatus::Mfs {
+        // "If you checked the MFS box, enter the name of your spouse" — the MFS half of the shared
+        // entry space. The HoH/QSS half is written below, outside this `if let`, because those
+        // returns carry no spouse `Person` at all.
+        if status.wants_spouse_name_in_the_shared_entry_space() {
             text(w, p, &cells.mfs_spouse_name, &sp.full_name());
         }
+    }
+    // ★★★ **The SAME cell, the other half of the form's own sentence** — *"If you checked the HOH or
+    //     QSS box, enter the child's name if the qualifying person is a child but not your
+    //     dependent"* (`f1040--2024.txt:28-29`). T8 collected this name and nothing on any year read
+    //     it: the only write to `mfs_spouse_name` was nested inside `if let Some(sp) = &header.spouse`
+    //     AND guarded by MFS, so a HoH or QSS return — which carries no spouse `Person` — could never
+    //     reach it, while the field's own help quoted *"the entry space below qualifying surviving
+    //     spouse"* (T8 seam review I-3).
+    //
+    // ★ The two halves are DISJOINT by filing status, so the cell is never contested — asserted, not
+    //   assumed, by `FilingStatus`'s own `the_shared_entry_space_has_exactly_one_claimant_per_status`.
+    // ★ An empty name writes NOTHING. A blank here is lawful testimony (*"If you don't enter the
+    //   name, it will take us longer to process your return"*), and writing `""` would be a
+    //   fabricated empty answer rather than the filer's silence.
+    if status.wants_qualifying_child_name() && !header.qualifying_child_name.is_empty() {
+        text(w, p, &cells.mfs_spouse_name, &header.qualifying_child_name);
     }
 
     // The signature block (page 2): occupations, and the IP PIN — whose absence gets a paper return

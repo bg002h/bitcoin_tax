@@ -308,8 +308,19 @@ const TAXPAYER_FIELDS: &[Field] = &[
     //     below qualifying surviving spouse. If you don't enter the name, it will take us longer to
     //     process your return."* (`i1040gi--2025.txt:1206-1210`.)
     //
-    // ★★★ LIVE iff Head of household, and NOT additionally gated on "no dependent row is the
-    //     qualifying person" — because btctax cannot evaluate that conjunct. The form's condition is
+    // ★★★ LIVE on Head of household **AND on Qualifying surviving spouse** — the form's own sentence
+    //     is ONE entry space for three statuses: *"If you checked the MFS box, enter the name of your
+    //     spouse. If you checked the **HOH or QSS** box, enter the child's name if the qualifying
+    //     person is a child but not your dependent"* (`f1040--2024.txt:28-29`). T8 shipped it live on
+    //     `HoH` alone while quoting *"the entry space below qualifying surviving spouse"* in its own
+    //     help — the field's help naming the status the field refused to serve (T8 seam review I-3).
+    //     QSS condition 2 is exactly this household: a child *"whom you can claim as a dependent or
+    //     could claim as a dependent except that"* their gross income reached the §152(d)(1)(B)
+    //     limit, they filed a joint return, or the filer is themselves claimable
+    //     (`i1040gi--2025.txt:1298-1306`).
+    //
+    // ★★★ NOT additionally gated on "no dependent row is the qualifying person" — because btctax
+    //     cannot evaluate that conjunct. The form's condition is
     //     *"if the child isn't claimed as your dependent"*, and WHICH person qualifies the filer for
     //     head of household is the filer's own judgment: a return may carry a dependent parent under
     //     Test 1 and still be qualified by a non-dependent child under Test 2. Gating on
@@ -320,26 +331,26 @@ const TAXPAYER_FIELDS: &[Field] = &[
     //   you don't enter the name, it will take us longer to process your return."* Nothing refuses
     //   on it, and the help says when to leave it blank.
     Field {
-        id: FieldId::HohQualifyingChildName,
+        id: FieldId::QualifyingChildName,
         clear: None,
-        label: "Qualifying child's name (HoH entry space)",
+        label: "Qualifying child's name (HoH / QSS entry space)",
         help: "Form 1040 header: \"If the child isn't claimed as your dependent, enter the child's \
                name in the entry space below qualifying surviving spouse. If you don't enter the \
                name, it will take us longer to process your return.\" Leave it blank if the person \
-               who qualifies you for head of household IS one of your dependents \u{2014} they are \
-               already named in the Dependents section.",
+               who qualifies you for head of household \u{2014} or for qualifying surviving spouse \
+               \u{2014} IS one of your dependents: they are already named in the Dependents section.",
         kind: FieldKind::Text,
-        live: |ri| ri.filing_status == btctax_core::tax::types::FilingStatus::HoH,
+        live: |ri| ri.filing_status.wants_qualifying_child_name(),
         get: |ri, _| {
-            (ri.filing_status == btctax_core::tax::types::FilingStatus::HoH)
-                .then(|| FieldValue::Text(ri.header.hoh_qualifying_child_name.clone()))
+            ri.filing_status.wants_qualifying_child_name()
+                .then(|| FieldValue::Text(ri.header.qualifying_child_name.clone()))
         },
         set: |ri, _, v| {
-            if ri.filing_status != btctax_core::tax::types::FilingStatus::HoH {
+            if !ri.filing_status.wants_qualifying_child_name() {
                 return Err(SetError::NoSuchRow);
             }
             let FieldValue::Text(s) = v else { return Err(SetError::WrongKind) };
-            ri.header.hoh_qualifying_child_name = s;
+            ri.header.qualifying_child_name = s;
             Ok(())
         },
     },

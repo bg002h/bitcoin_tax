@@ -826,12 +826,24 @@ pub struct HouseholdHeader {
     /// don't enter the name, it will take us longer to process your return."*
     /// (`i1040gi--2025.txt:1206-1210`.)
     ///
-    /// ★ A `String`, not a declaration: the form asks for a NAME. Live iff HoH and no dependent row
-    ///   is the qualifying person — a filer whose qualifying person IS on the Dependents grid has
-    ///   already named them there, and the form's own condition is *"if the child isn't claimed as
-    ///   your dependent"*.
+    /// ★ A `String`, not a declaration: the form asks for a NAME. Live on HoH **or QSS**, and NOT
+    ///   additionally gated on *"no dependent row is the qualifying person"* — btctax cannot evaluate
+    ///   that conjunct, and hiding the cell from a household that needs it is the silent-omission
+    ///   direction (the reasoning is on the `Field` in `spec/sections.rs`). The blank is lawful, so
+    ///   nothing refuses on it.
+    ///
+    /// ★★★ **Named without the `hoh_` prefix (T8 seam review I-3), because the FORM's sentence is one
+    /// entry space for three filing statuses:** *"If you checked the MFS box, enter the name of your
+    /// spouse. If you checked the **HOH or QSS** box, enter the child's name if the qualifying person
+    /// is a child but not your dependent"* (`f1040--2024.txt:28-29`). T8 shipped it live on `HoH`
+    /// alone while its own help text quoted *"enter the child's name in the entry space below
+    /// **qualifying surviving spouse**"* — the field's help naming the status the field refused to
+    /// serve. QSS condition 2 is exactly the household the space exists for: a child *"whom you can
+    /// claim as a dependent **or could claim as a dependent except that**"* their gross income
+    /// reached the §152(d)(1)(B) limit, they filed a joint return, or the filer is themselves
+    /// claimable (`i1040gi--2025.txt:1298-1306`).
     #[serde(default)]
-    pub hoh_qualifying_child_name: String,
+    pub qualifying_child_name: String,
     /// ★★★ **FR-67 / R7 — the §6013(g)/(h) NONRESIDENT-ALIEN-SPOUSE ELECTION.**
     ///
     /// *"Generally, a married couple can't file a joint return if either spouse is a nonresident alien

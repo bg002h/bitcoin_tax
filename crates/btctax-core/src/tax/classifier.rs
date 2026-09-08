@@ -422,7 +422,7 @@ fn classify_header(c: &mut Census, h: &HouseholdHeader) {
         hoh_marital_basis,
         hoh_qualifying_person,
         hoh_paid_over_half_cost_of_keeping_up_home,
-        hoh_qualifying_child_name: _, // String — a scalar the `_` rule permits
+        qualifying_child_name: _, // String — a scalar the `_` rule permits
         nra_spouse_resident_election,
         qss_spouse_died_in_window_and_not_remarried,
         qss_child_you_can_claim,

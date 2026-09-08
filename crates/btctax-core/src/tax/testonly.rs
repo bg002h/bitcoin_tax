@@ -228,6 +228,23 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use time::macros::date;
 
+/// ★★★ **The §24(h)(2) per-child ceiling `advisories::ctc_provably_zero` multiplies by**, exposed so
+/// a DOWNSTREAM crate can pin it against every year the bundle actually registers.
+///
+/// ★★ This accessor exists because of T8 seam review **I-2**. The pin that claimed to hold this
+/// constant *"for every year whose package is bundled"* lived in core and read
+/// [`ty2024_params`] — a core-local fixture literal hardcoded to 2024. `BundledFullReturnTables`
+/// lives in `btctax-adapters`, so core cannot see a bundled package at all and the pin could not red
+/// on the defect it documented: bundling TY2026 (whose figure is $2,200) left it green while
+/// `ctc_odc_line19` swore a `0` on line 19 for a household that still had credit. The assertion had
+/// to move to the crate that can see the bundle; this is the one thing it needs from core.
+/// The pin is `btctax-adapters`'
+/// `shipped_tables_are_the_validated_tables::every_bundled_years_ctc_per_child_is_the_named_ceiling`.
+#[must_use]
+pub fn ctc_per_child_ss24h2() -> Usd {
+    crate::tax::advisories::CTC_PER_CHILD_SS24H2
+}
+
 /// The TY2024 §63 / §199A / §164(b) parameters (the real Rev. Proc. 2023-34 figures).
 pub fn ty2024_params() -> FullReturnParams {
     let mut std_deduction = BTreeMap::new();

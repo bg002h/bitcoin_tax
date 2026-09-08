@@ -715,6 +715,75 @@ fn the_ty2025_dependents_grid_prints_the_answers() {
     assert_eq!(box_on_state(&pdf, &mtf.field), None);
 }
 
+/// ★★★ **T8 seam review I-1 — A STALE (5)(b) NEVER REACHES THE PRINTED PAGE.**
+///
+/// The filer answers *"lived with you more than half of 2025"* **Yes** and its nested *"(b) And in
+/// the U.S."* **Yes**, then goes back and flips (5)(a) to **No**. Nothing clears the nested leaf: the
+/// form seam's `get` returns `None` for a gate the walk no longer demands, so it is invisible, and
+/// `clear` returns `SetError::NoSuchRow`, so it cannot be erased. Nothing screens it either. The one
+/// place it could ever show is the filed page — which is why this KAT reads the box back off the
+/// bytes rather than off the packet: it drives the production `push_dependents_grid` + `pdf::` path
+/// into the **real TY2025 template**, the same way the grid's other KATs do.
+///
+/// ★ The row is still a claimable dependent (Step 4), so this asserts a page that PRINTS the row:
+///   a fix that simply dropped the dependent would not pass.
+#[test]
+fn a_stale_row_5b_answer_is_not_printed_under_an_unchecked_row_5a() {
+    use btctax_core::tax::return_inputs::{Dependent, HouseholdHeader, ReturnInputs};
+    let mut ri = ReturnInputs {
+        tax_year: 2025,
+        filing_status: FilingStatus::Single,
+        header: HouseholdHeader {
+            dependents: vec![Dependent {
+                name: "Ada Example".into(),
+                ssn: "000-00-1111".into(),
+                relationship: "Daughter".into(),
+                date_of_birth: Some(
+                    time::Date::from_calendar_date(2015, time::Month::June, 1).unwrap(),
+                ),
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    ri.header.taxpayer.first_name = "Pat".into();
+    ri.header.taxpayer.last_name = "Roe".into();
+    ri.header.taxpayer.ssn = "000-00-2222".into();
+    btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+    assert_eq!(
+        ri.header.dependents[0].lived_with_you_in_us,
+        Some(true),
+        "(5)(b) really was answered Yes before the flip"
+    );
+    // The filer flips (5)(a) to No and answers whatever Step 4 then demands.
+    ri.header.dependents[0].lived_with_you_over_half_year = Some(false);
+    btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+    assert_eq!(
+        ri.header.dependents[0].lived_with_you_in_us,
+        Some(true),
+        "and nothing clears it — the stale leaf is still there"
+    );
+    let header = btctax_core::tax::packet::ReturnHeader::build(&ri, 2025).expect("the header");
+
+    let pdf = fill_ty2025_grid_only(&header);
+    for (slot, want) in [("lived_with_you", false), ("lived_with_you_in_us", false)] {
+        let (fqn, on) = grid_cell(0, slot);
+        assert_eq!(
+            box_on_state(&pdf, &fqn),
+            want.then_some(on),
+            "dependent 1, {slot}: (5)(b) may not print under an unchecked (5)(a)"
+        );
+    }
+    // …and the row IS on the page: a claimable dependent under Step 4, printed with its credit box.
+    let (fqn, on) = grid_cell(0, "credit_for_other_dependents");
+    assert_eq!(
+        box_on_state(&pdf, &fqn),
+        Some(on),
+        "the row still prints — this is a filed page with the dependent on it"
+    );
+}
+
 /// ★★★ **The box and the statement are ONE decision, on the TY2025 grid too.** Five dependents ⇒ the
 /// box is checked AND the continuation statement exists; four ⇒ neither.
 #[test]
@@ -762,12 +831,23 @@ fn the_ty2025_grid_checks_the_more_than_four_box_with_its_statement() {
     assert!(dependents_statement(&header, 2025).is_none());
 }
 
-/// ★★★ **TY2024 IS UNTOUCHED BY THE GRID WORK (R6's own guarantee).** The TY2024 map declares no
-/// `[dependents_grid]`, so `fill_form_1040_full_with_map` writes exactly what it wrote before T8 —
-/// asserted here as a HASH over a fixture that carries dependents whose row (7) is now computed.
-/// Without dependents on the fixture the assertion would hold vacuously.
+/// ★★★ **TY2024's PAGE DOES NOT SEE THE COMPUTED GRID (R6's own guarantee), and the fill is
+/// deterministic.** The TY2024 map declares no `[dependents_grid]`, so `fill_form_1040_full_with_map`
+/// never reaches `push_dependents_grid`, and a fixture whose dependents carry a computed row (7) and
+/// checked rows (5)/(6) prints the same TY2024 page it printed before T8 — with the credit boxes
+/// EMPTY, which is what "unchanged" means on the page.
+///
+/// ★★ **RENAMED, because the old name claimed more than the test does (T8 seam review M-1).** It was
+/// `the_ty2024_1040_is_byte_identical_…`, and its hash compares two `fill_form_1040_full` calls **in
+/// the same build** — that is determinism, not a pin against pre-T8 bytes; no committed digest is
+/// compared anywhere. The honest options were to pin a committed digest or to rename, and a *pre-T8*
+/// digest is not obtainable for this fixture in the first place: the fixture is `ty2025_two_dependents`,
+/// which T8 itself introduced, and `DependentRow` had no `grid` field before T8 to put in it. So the
+/// determinism half keeps its (real, smaller) name and the discriminating half is stated as the
+/// guarantee. The substantive assertion is the one below, and it was watched red on the report's own
+/// plant (writing `row.ctc` from the computation gives `left: Some("1")`).
 #[test]
-fn the_ty2024_1040_is_byte_identical_with_dependents_whose_credit_column_is_computed() {
+fn the_ty2024_1040_ignores_the_computed_grid_and_fills_deterministically() {
     let map = Form1040Map::for_year(2024).expect("the TY2024 1040 map");
     assert!(
         map.dependents_grid.is_none(),
@@ -780,11 +860,21 @@ fn the_ty2024_1040_is_byte_identical_with_dependents_whose_credit_column_is_comp
         btctax_core::tax::dependent_gates::CreditColumn::ChildTaxCredit,
         "the fixture really does carry a computed credit column"
     );
+    // ★ …and checked rows (5)/(6) too, so "TY2024 ignores the grid" is asserted against a grid that
+    //   has something in every one of its slots rather than against a default-shaped one.
+    assert!(header.dependents[0].grid.lived_with_you_over_half_year);
+    assert!(header.dependents[0].grid.lived_with_you_in_us);
+    assert!(header.dependents[1].grid.full_time_student);
     let lines = f1040();
     let a = btctax_forms::fill_form_1040_full(&lines, &header, FilingStatus::Single, 2024).unwrap();
     let b = btctax_forms::fill_form_1040_full(&lines, &header, FilingStatus::Single, 2024).unwrap();
-    assert_eq!(hex(&Sha256::digest(&a)), hex(&Sha256::digest(&b)));
-    // …and the TY2024 credit boxes stay EMPTY, which is what "unchanged" means on the page.
+    // Determinism only — two calls in one build. Named for what it is.
+    assert_eq!(
+        hex(&Sha256::digest(&a)),
+        hex(&Sha256::digest(&b)),
+        "two fills of the same header in one build differ"
+    );
+    // ★★ THE DISCRIMINATING HALF: the TY2024 credit boxes stay EMPTY.
     let rows = &map.header.as_ref().unwrap().dependent_rows;
     for (i, row) in rows.iter().enumerate() {
         assert_eq!(box_on_state(&a, &row.ctc.field), None, "row {i} ctc");
@@ -4600,6 +4690,91 @@ fn form_8889_ty2025_fills_the_identical_cells() {
             tv(&a, &fqn),
             tv(&b, &fqn),
             "{cell} must land in the same box on both revisions"
+        );
+    }
+}
+
+// ══ T8 seam review I-3 — THE SHARED ENTRY SPACE BESIDE THE FILING-STATUS BOXES ═══════════════════
+
+/// A TY2024 return in `status`, carrying `child` in the qualifying-child entry space. No spouse
+/// unless the status needs one, which is what makes the HoH/QSS half of the cell unreachable through
+/// the MFS write site.
+fn ty2024_entry_space_header(
+    status: FilingStatus,
+    child: &str,
+) -> btctax_core::tax::packet::ReturnHeader {
+    use btctax_core::tax::return_inputs::{HouseholdHeader, Person, ReturnInputs};
+    let mut ri = ReturnInputs {
+        tax_year: 2024,
+        filing_status: status,
+        header: HouseholdHeader {
+            qualifying_child_name: child.into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    ri.header.taxpayer.first_name = "Pat".into();
+    ri.header.taxpayer.last_name = "Roe".into();
+    ri.header.taxpayer.ssn = "000-00-2222".into();
+    if matches!(status, FilingStatus::Mfj | FilingStatus::Mfs) {
+        ri.header.spouse = Some(Person {
+            first_name: "Sam".into(),
+            last_name: "Roe".into(),
+            ssn: "000-00-3333".into(),
+            ..Default::default()
+        });
+    }
+    btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+    btctax_core::tax::packet::ReturnHeader::build(&ri, 2024)
+        .expect("the fixture's SSNs canonicalize")
+}
+
+/// ★★★ **T8 seam review I-3 — THE QUALIFYING CHILD'S NAME REACHES THE PRINTED PAGE, on HoH AND QSS.**
+///
+/// The form asks one question in one cell for three statuses: *"If you checked the MFS box, enter the
+/// name of your spouse. If you checked the HOH or QSS box, enter the child's name if the qualifying
+/// person is a child but not your dependent"* (`f1040--2024.txt:28-29`), mapped as
+/// `mfs_spouse_name = "…f1_18[0]"`. T8 collected that name — a leaf, a `Field`, a classifier row, a
+/// `scrub` rule with a matrix row, a `coverage` entry — and **nothing on any year read it**: the
+/// single write to the cell sat inside `if let Some(sp) = &header.spouse` under `status == Mfs`, and a
+/// HoH or QSS return carries no spouse `Person`. The field's own help meanwhile quoted *"the entry
+/// space below **qualifying surviving spouse**"* while it was live on `HoH` alone.
+///
+/// TY2024 is the only year `full_return_for` returns `Some` for, i.e. **the filable year**, so this
+/// reads the cell back off the real filled TY2024 1040 rather than off the packet.
+///
+/// ★ Total over `FilingStatus::ALL`: every status is given an expectation here, so a sixth one cannot
+///   join in silence, and the three that must NOT print a child's name are asserted too.
+#[test]
+fn the_shared_entry_space_prints_the_qualifying_childs_name_on_hoh_and_qss() {
+    const F1_18: &str = "topmostSubform[0].Page1[0].f1_18[0]";
+    for status in FilingStatus::ALL {
+        let h = ty2024_entry_space_header(status, "Robin Roe");
+        let pdf = btctax_forms::fill_form_1040_full(&f1040(), &h, status, 2024).unwrap();
+        let want: Option<&str> = match status {
+            // The form's own sentence, both halves.
+            FilingStatus::HoH | FilingStatus::Qss => Some("Robin Roe"),
+            FilingStatus::Mfs => Some("Sam Roe"),
+            // "Check only one box" — neither half of the sentence names these.
+            FilingStatus::Single | FilingStatus::Mfj => None,
+        };
+        assert_eq!(
+            tv(&pdf, F1_18).as_deref(),
+            want,
+            "{status:?}: the shared entry space beside the filing-status boxes"
+        );
+    }
+
+    // ★★ AND A BLANK IS THE FILER'S SILENCE, not a fabricated empty answer: an unfilled name writes
+    //    nothing at all. *"If you don't enter the name, it will take us longer to process your
+    //    return"* (`i1040gi--2025.txt:1206-1210`) — lawful, and the common case.
+    for status in [FilingStatus::HoH, FilingStatus::Qss] {
+        let h = ty2024_entry_space_header(status, "");
+        let pdf = btctax_forms::fill_form_1040_full(&f1040(), &h, status, 2024).unwrap();
+        assert_eq!(
+            tv(&pdf, F1_18),
+            None,
+            "{status:?}: an unentered name is a blank cell, never an empty string"
         );
     }
 }

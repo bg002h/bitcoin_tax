@@ -328,8 +328,11 @@ pub enum FieldId {
     ///     `FieldKind::Enum`, not a tri-state, and class (A) — see `SkippableQuestion::unanswered`.
     HohMaritalBasis,
     /// ★★★ R7 / T8 — the entry space beside the HoH / QSS box: the non-dependent qualifying child's
-    ///     name. Live iff HoH and no dependent row is the qualifying person.
-    HohQualifyingChildName,
+    ///     name. Live on **HoH or QSS** — the form's own sentence names both
+    ///     (`f1040--2024.txt:28-29`), and it is NOT additionally gated on "no dependent row is the
+    ///     qualifying person", which btctax cannot evaluate (see the `Field` in `spec/sections.rs`).
+    ///     ★ The `hoh_` prefix and the HoH-only liveness were T8 seam review I-3; both are gone.
+    QualifyingChildName,
     // ── ★★★ T7 / R6 — THE TWENTY PER-ROW DEPENDENT GATES (`DEPENDENT_GATES`). Each delegates to the
     //    registry entry; `live` is `|_| true` and `get` returns absent when the gate is not live for
     //    THAT ROW — the I-4 emulation §10's frozen seam requires, since `Field.live` has no row.

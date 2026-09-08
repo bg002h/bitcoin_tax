@@ -6360,10 +6360,29 @@ build, each with an owning phase.
 - **FR-85 — the child tax credit is $2,200 from TY2025, not TY2026 (T8 build; OBBBA §70104(f)
   applies the amendment to taxable years beginning after 2024, and Rev. Proc. 2025-32 .03 says it in
   words, .05(1) republishing $2,200 for TY2026). Owning phase: the TY2025 package (S1).**
-  `advisories.rs`'s `ctc_provably_zero` multiplied by a bare `2000`; T8 named the literal and pinned
-  it against the year's package so the test REDS the moment TY2025's package lands — correct,
-  because at $2,200 that ceiling is too low. The controller's own T8 brief carried the wrong year;
-  the builder found it in the statute.
+  `advisories.rs`'s `ctc_provably_zero` multiplied by a bare `2000`; T8 named the literal
+  (`CTC_PER_CHILD_SS24H2`) and pinned it against the year's package so the test REDS the moment
+  TY2025's package lands — correct, because at $2,200 that ceiling is too low. The controller's own
+  T8 brief carried the wrong year; the builder found it in the statute.
+  **★ 2026-09-07 — THE PIN WAS BLIND, and is now derived over the bundle (T8 seam review I-2, folded
+  in the same day).** `the_named_ceiling_is_the_years_own_figure` lived in `btctax-core` and read
+  `testonly::ty2024_params()`, a core-local fixture literal hardcoded to `year: 2024`;
+  `BundledFullReturnTables` lives in `btctax-adapters` and has **zero** occurrences anywhere in
+  `crates/btctax-core/src/`, so no package landing anywhere could red it — the `1..=38` trap in its
+  usual costume, in the very test whose doc named that trap. Machine-confirmed by the controller
+  (`design/agent-reports/2026-09-07-build-interview-T8-review-VERIFICATION.md` §I-2): with TY2026
+  bundled the pin stayed **PASS**, and flipping the constant alone flips
+  `ctc_provably_zero(MFJ, 2 kids, AGI 482,000)` from `true` to `false` — i.e. the stale ceiling swears
+  a `0` on 1040 line 19 for a household that still has credit. The pin now lives in
+  `btctax-adapters`' `shipped_tables_are_the_validated_tables::every_bundled_years_ctc_per_child_is_the_named_ceiling`,
+  derives its year set from the bundle's own `Debug` rendering via `shipped_param_years` (never a
+  hand-written list), and was watched RED on both plants: bundling TY2026, and moving the shipped
+  TY2024 figure to 2200. Core keeps only the positive control,
+  `the_named_ceiling_is_the_figure_the_proof_multiplies_by`. **The item stays OPEN**: the fix when the
+  red arrives is still to thread the year's `FullReturnParams` into `ctc_odc_line19`, never to raise
+  the constant ($2,000 is right for TY2024, the only bundled year).
+  ★ Note: two entries in this file carry the number FR-85 — this one (the CTC ceiling) and the
+  `answer_all_live_declarations` half-answering entry below, which is closed.
 - **FR-82 — `tax_tables.rs`'s TY2026 doc comment cites Rev. Proc. 2025-32 §2.14 / §2.10 for figures
   that sit in its Section 4 (T7 build, follow-up 2; pre-existing). Owning phase: ownerless residue
   (doc-consistency).** The new §4.23 cite beside them is accurate.
@@ -6382,6 +6401,19 @@ build, each with an owning phase.
   mapped cell for a name, so a half-identified dependent — an SSN printed beside a blank name — is
   not expressible. The fix is to COLLECT first and last separately, which is the identity block's
   own work.
+  **★ 2026-09-07 (T8 seam-review fold, I-3) — the same task owns a SECOND TY2025 re-parting.** TY2024
+  prints ONE entry space for three statuses (*"If you checked the MFS box, enter the name of your
+  spouse. If you checked the HOH or QSS box, enter the child's name…"*, `f1040--2024.txt:28-29`,
+  mapped as the single `mfs_spouse_name = "…f1_18[0]"`). **TY2025 SPLIT it into two cells**: the MFS
+  half reads *"Married filing separately (MFS). Enter spouse's SSN above and full name here:"* and
+  the HOH/QSS half is its own sentence in the right-hand column (`f1040--2025.txt:29-32`). Measured
+  off the template with `xtask dump-fields`: `Checkbox_ReadOrder[0].f1_28[0]` at (180.0, 540.0)–
+  (324.0, 552.0) is the MFS spouse-name cell and `f1_29[0]` at (362.0, 534.0)–(576.0, 546.0) is the
+  qualifying-child cell (`c1_8[0] on="4"` — the HOH box — sits at x 349.6, i.e. the same column).
+  So the TY2025 `[header]` map needs **two** keys where TY2024 has one, and
+  `Form1040Map`'s `mfs_spouse_name` alone cannot express it. Nothing is due today: TY2025's map
+  declares no `[header]`, both cells sit on the `UNCENSUSED` register with the rest of the block, and
+  the emitter's HoH/QSS write is guarded by the year's own map.
 - **FR-85 — `answer_all_live_declarations` left every dependent gate blank on a fixture that did
   not pre-answer `can_be_claimed_as_dependent_taxpayer` (found by T8, FIXED in the same build).**
   Recorded because the shape recurs: the flowchart WAITS on two return-level declarations (Step 2
