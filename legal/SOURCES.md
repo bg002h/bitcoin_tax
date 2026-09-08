@@ -5,14 +5,26 @@ with provenance so the legal basis of every calculation is **defensible** even i
 reorganize or change. This is the legal-defense index.
 
 - **Retrieved:** 2026-06-28 (UTC). IRS forms/pubs/guidance batch ~20:48Z; statute/regs/FR batch ~21:03Z.
-- **Files:** 42 documents, ~14 MB, under `primary-sources/` (44 archived 2026-06-28 + 3 added by the
-  open-questions verification pass: §1223, §61, CCA 202302012; **−5 form PDFs retired 2026-09-04**
-  to `design/forms/` under the hybrid rule — see the Forms table below).
+- **Files:** **58** documents under `primary-sources/` (measured
+  `find legal/primary-sources -type f | wc -l`, 2026-09-07 — the count in this line said 42 and had
+  been stale for some time, which is exactly the hand-count `CLAUDE.md` forbids, so the command that
+  produces it is now written beside it). Originally 44 archived 2026-06-28 + 3 added by the
+  open-questions verification pass (§1223, §61, CCA 202302012); **−5 form PDFs retired 2026-09-04**
+  to `design/forms/` under the hybrid rule — see the Forms table below; then the inflation and
+  retirement-limit batches, and **+3 on 2026-09-07** for interview T16 (the §223(b)(2) HSA limit
+  revenue procedures).
+  ★ **`SHA256SUMS` covers 50 of the 58**, and the eight it does not are named here rather than left
+  to be discovered: `RevProc_2016-55`, `RevProc_2023-34`, `RevProc_2024-40`, `RevProc_2025-32` and
+  the four `SSA_COLA_Determinations_*`. Every one is recorded in
+  `design/forms/MANIFEST.json` — which `xtask authority-manifest` verifies on every run and which is
+  the provenance record the hybrid decision unified — so they are hashed, just not twice. Closing the
+  duplication (or deleting this file's half of it) is not T16's; it is recorded so the next reader of
+  `sha256sum -c` does not read 50 as "all of them".
 - **All sources are official government hosts** (irs.gov, govinfo.gov, ecfr.gov) — no secondary mirrors
   were needed; every fetch returned HTTP 200.
 - **Integrity:** full SHA-256 for every file is in [`SHA256SUMS`](./SHA256SUMS). Re-verify anytime:
   ```
-  cd /scratch/code/bitcoin_tax/legal && sha256sum -c SHA256SUMS      # expect: 42 OK
+  cd /scratch/code/bitcoin_tax/legal && sha256sum -c SHA256SUMS      # expect: 50 OK
   ```
   Raw fetch log (status/bytes/hash/content-type/url): [`_provenance/fetch_log.tsv`](./_provenance/fetch_log.tsv).
   Re-runnable fetch scripts: [`_scripts/`](./_scripts/).
@@ -40,6 +52,9 @@ Notices, Revenue Rulings, a Revenue Procedure, and a Chief Counsel memo. URL bas
 | **Notice 2026-20** | `Notice_2026-20.pdf` | `37ff4019430d` | Broker specific-ID transition relief (Finding 7) |
 | **Notice 2023-75** — 2024 retirement-plan limits | `Notice_2023-75.pdf`; text `legal/text/irs-guidance/Notice_2023-75.txt` | `dbe86eb16e2c` | §402(g)(1) elective-deferral limit **$23,000** (TY2024, `FullReturnParams::elective_deferral_limit`). ★ NOT in the inflation Rev. Proc.; set by this annual notice. Added 2026-09-05 (FR-47) so the existing TY2024 citation resolves to a held document. |
 | **Notice 2025-67** — 2026 retirement-plan limits | `Notice_2025-67.pdf`; text `legal/text/irs-guidance/Notice_2025-67.txt` | `1eea8f141b0c` | §402(g)(1) elective-deferral limit **$24,500** (TY2026; "increased from $23,500 to $24,500"). Added 2026-09-05 (FR-47). |
+| **Rev. Proc. 2023-23** — 2024 HSA limits | `RevProc_2023-23.pdf`; text `legal/text/irs-guidance/RevProc_2023-23.txt` | `cdc4574bde94` | §223(b)(2) annual contribution limitation **$4,150** self-only / **$8,300** family (TY2024, `FullReturnParams::hsa`). ★ NOT in the inflation Rev. Proc. that carries the brackets: §223(g) requires the HSA amounts by June 1 of the PRECEDING year, so they get their own spring Rev. Proc. Added 2026-09-07 (interview T16, Form 8889). |
+| **Rev. Proc. 2024-25** — 2025 HSA limits | `RevProc_2024-25.pdf`; text `legal/text/irs-guidance/RevProc_2024-25.txt` | `6093d2e3923f` | §223(b)(2) limitation **$4,300** / **$8,550** (TY2025 — the figures Form 8889 (2025) line 3 prints). Added 2026-09-07 (T16), so the PAUSED TY2025 packet has its authority in hand. |
+| **Rev. Proc. 2025-19** — 2026 HSA limits | `RevProc_2025-19.pdf`; text `legal/text/irs-guidance/RevProc_2025-19.txt` | `ff2ba4bac62e` | §223(b)(2) limitation **$4,400** / **$8,750** (TY2026, `ty2026_full_return()`). Added 2026-09-07 (T16). |
 | **CCA 202124008** | `CCA_202124008.pdf` | `334a22f1de94` | Crypto decline-in-value / wash-sale context (Q1, TLH) |
 | **CCA 202302012** | `CCA_202302012.pdf` | `42b763510df2` | Crypto charitable donation requires qualified appraisal (Q4) |
 

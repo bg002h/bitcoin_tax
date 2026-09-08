@@ -59,6 +59,7 @@ hand-maintained — only the numeric table above is pasted verbatim, and the tes
 | `f4868` | yes — the extension application; NOT a packet member (spec 4868/1040-V R2 makes it `btctax extension`, mailed on its own) | `f4868--2025` | **NO DRAFT** — the IRS posts no TY2026 Form 4868 draft; the revision arrives with the January 2027 package | **NO DRAFT** |
 | `f1040v` | yes — the payment voucher, written BESIDE the packet and enclosed loose (spec 4868/1040-V R4) | `f1040v--2025` | **NO DRAFT** — the IRS posts no TY2026 Form 1040-V draft; the revision arrives with the January 2027 package | **NO DRAFT** |
 | `f8283` | yes — `packet.rs:223` | `f8283--2025` (Rev. 12-2025, periodic) | **NO DRAFT** — the draft URL served a 2025 document; archiver refused | **NO DRAFT** |
+| `f8889` | yes — `packet.rs`, Form 8889 (Health Savings Accounts), attachment sequence 52 (T16 / FR-76) | `f8889--2025` | **NO DRAFT** — the IRS posts no TY2026 Form 8889 draft; the revision arrives with the January 2027 package. ★ Its §223(b)(2) figures ARE already published (Rev. Proc. 2025-19: $4,400 / $8,750), because §223(g) requires them by June 1 of the preceding year — so the CONSTANTS are known a year before the paper is | **NO DRAFT** |
 | `f8275` | yes — `packet.rs:218` | **NO PRIOR SIDE** for the `--2025` tag — `f8275--2024` (Rev. 10-2024, periodic) is aliased by hash for 2025 | **NO DRAFT** — the draft URL served a 2024 document; archiver refused | **NO DRAFT** — periodic; a new revision would be a hash change, not a year |
 
 ★ **2026-09-06 (residue sweep 1, item 6): `f8995a` moved OUT of this table and INTO the numeric one.**
@@ -67,6 +68,11 @@ extract archived"*; the TY2025 revision is now archived as evidence (note, `-lay
 geometry — no map, no filler, no bundled template), so the pair computes and the row is
 `| f8995a | 111 | 3 | 0 | 0 | port |`. That is the only row that moved: the numeric table went 14
 rows → 15 and the excused table 6 → 5.
+
+★ **2026-09-07 (T16 / FR-76): `f8889` ENTERED this table.** Form 8889 is bundled and emitted for
+TY2024 and TY2025 from the day it was transcribed, and the IRS has posted no TY2026 draft of it — so
+it is a row here rather than in the numeric table, with the prior side present and the new side
+absent. The excused table went 5 rows → 6.
 
 Re-run the archiver when the two periodic forms post a 2026 revision; regenerate this list from the
 emitting surface, not from `design/forms/geometry/` pairs.

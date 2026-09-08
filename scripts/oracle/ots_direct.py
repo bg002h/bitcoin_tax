@@ -486,6 +486,10 @@ def evaluate(h: dict) -> dict[str, float | None]:
             "L3b": h.get("ordinary_dividends", 0),
             "S1_3": se_profit,
             "S1_15": half_se,
+            # ★★★ T16 — Schedule 1 line 13, "Health savings account deduction. Attach Form 8889".
+            # OTS carries the line but applies no §223(b) limit, so the same ceiling caveat as
+            # `A11`/§170(b) applies: a corpus cell over the limit loses this oracle.
+            "S1_13": h.get("hsa_deduction", 0),
             "S2_4": se_tax,
             "S2_11": addl_medicare,
         }

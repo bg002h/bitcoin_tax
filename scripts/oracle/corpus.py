@@ -589,6 +589,29 @@ NON_INTERACTION = [
             "standard_or_itemized": "Itemized",
         },
     },
+    {
+        "name": "single_w2_with_an_hsa_deduction",
+        "why": "★ T16 / FR-76 — the §223 HSA DEDUCTION, which reaches Schedule 1 line 13 and so AGI. "
+        "A single filer with $95,000 of wages who contributed $4,150 to a self-only HSA. Both "
+        "engines take the deduction directly (OTS `S1_13`, Tax-Calculator `e03290`), and btctax "
+        "reaches the SAME figure the long way — through Form 8889's own line 3 limit and line 13's "
+        "\"smaller of line 2 or line 12\" — which is what makes the cell discriminating rather than "
+        "a pass-through: a wrong §223(b) limit, a wrong line-12 subtraction or a dropped line-13 "
+        "carry all move AGI here and nowhere else in the corpus. "
+        "★★ $4,150 is EXACTLY the TY2024 self-only limitation (Rev. Proc. 2023-23 §2.01(1)), and it "
+        "is deliberately AT the ceiling rather than under it: one dollar more and btctax refuses "
+        "(excess contributions need Form 5329) while both oracles would happily deduct it, because "
+        "neither models §223(b) — the same ceiling hazard `charitable_cash` records for §170(b). "
+        "★ Self-only, under 55, eligible every month, no Medicare, no Archer MSA and no distribution: "
+        "the answers `build_golden_return` gives Form 8889, each a real answer to a question the form "
+        "asks. With no distribution there is no Part II, so Schedule 1 line 8f and Schedule 2 lines "
+        "17c/17d stay blank and the cell tests the DEDUCTION leg alone.",
+        "inputs": {
+            "filing_status": "Single",
+            "w2_income": 95_000,
+            "hsa_deduction": 4_150,
+        },
+    },
 ]
 
 LOW_END = [

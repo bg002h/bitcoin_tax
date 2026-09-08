@@ -225,6 +225,11 @@ def _taxcalc_row(n, i, year: int = 2024):
         # NON-interaction: §170 is not in Reg. §1.1411-4(f)'s properly-allocable list, so this must
         # move 1040 line 15 and not one line of Form 8960.
         "e19800": i.get("charitable_cash", 0),
+        # ★★★ T16 — Schedule 1 line 13, the §223 HSA deduction. Tax-Calculator takes the DEDUCTION
+        # as given and applies no §223(b) limit of its own, so a corpus cell over the limit would be
+        # deducted here and REFUSED by btctax (excess contributions need Form 5329). The constraint
+        # lives in the cell's own `why`, exactly as it does for `charitable_cash` and §170(b).
+        "e03290": i.get("hsa_deduction", 0),
         "s006": 1.0,
     }
 
