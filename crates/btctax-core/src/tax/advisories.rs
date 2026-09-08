@@ -799,6 +799,27 @@ impl Advisory {
 /// (every dependent a qualifying child — $500 for an "other dependent" can only be smaller), so
 /// `ceiling ≤ line 11` proves it. ★ btctax already collects every line-2 add-back, so line 3 is exact,
 /// not approximated by AGI.
+/// ★★★ **§24(h)(2)'s per-child ceiling, as Schedule 8812 line 8 uses it — NAMED, so it can be held
+/// against the year's package.**
+///
+/// The worksheet's line 8 is *"Multiply line 4 by $2,000"*, and this proof needs an UPPER BOUND on it
+/// to conclude the credit is provably zero. `ctc_odc_line19` has no [`FullReturnParams`] in scope and
+/// giving it one would thread the package through `PrintedInputs` for a figure nothing else on the
+/// printed chain reads — so the constant stays here and is PINNED instead:
+/// [`ctc_per_child_tests::the_named_ceiling_is_the_years_own_figure`] asserts it equals
+/// `FullReturnParams::child_tax_credit_per_child` for every year whose package is bundled.
+///
+/// ★★★ **It is year-blind, and the pin is what makes that loud rather than latent.** Pub. L. 119-21
+/// §70104(a)(2) raises the figure to $2,200 for *"taxable years beginning after December 31, 2024"*
+/// (§70104(f)) — **TY2025, not TY2026** — so the moment TY2025's or TY2026's package is bundled the
+/// pin REDS. That is the correct outcome: with $2,200 the ceiling here is too LOW, and the proof
+/// would conclude "provably zero" for a household that still has credit left. Taxpayer-adverse, and
+/// invisible on the page — line 19 would print a sworn `0`.
+///
+/// ★ It cannot bite today: `full_return_for` returns `Some` for **TY2024 alone**, and this predicate
+///   is only reached on a return the absolute chain computed. The pin is what keeps that true.
+pub(crate) const CTC_PER_CHILD_SS24H2: Usd = rust_decimal_macros::dec!(2000);
+
 fn ctc_provably_zero(ri: &ReturnInputs, dependents: usize, agi: Usd) -> bool {
     // ★★★ L3 IS A LOWER BOUND, and a bound is all this predicate needs.
     //
@@ -840,7 +861,7 @@ fn ctc_provably_zero(ri: &ReturnInputs, dependents: usize, agi: Usd) -> bool {
     }
     let thousands = (over / Usd::from(1000)).ceil();
     let l11 = thousands * Usd::from(1000) * rust_decimal_macros::dec!(0.05); // L11
-    let l8_ceiling = Usd::from(dependents as i64) * Usd::from(2000);
+    let l8_ceiling = Usd::from(dependents as i64) * CTC_PER_CHILD_SS24H2;
     // L12 "Is the amount on line 8 more than the amount on line 11?" — No ⇒ no credit.
     l8_ceiling <= l11
 }
@@ -880,6 +901,61 @@ fn ctc_provably_zero(ri: &ReturnInputs, dependents: usize, agi: Usd) -> bool {
 pub fn ctc_odc_line19(ri: &ReturnInputs, agi: Usd) -> Option<Usd> {
     let dependents = ri.header.dependents.len();
     (dependents > 0 && ctc_provably_zero(ri, dependents, agi)).then_some(Usd::ZERO)
+}
+
+/// ★★★ **B1 — the §24 per-child ceiling is watched against the YEAR'S PACKAGE.**
+#[cfg(test)]
+mod ctc_per_child_tests {
+    use super::*;
+
+    /// Every bundled year whose `FullReturnParams` exist must agree with [`CTC_PER_CHILD_SS24H2`].
+    ///
+    /// ★★★ **This test is EXPECTED to red when TY2026's package lands**, and that is its whole
+    /// purpose: OBBBA §70104 raises §24(h)(2) to $2,200, at which point this proof's line-8 ceiling
+    /// is too LOW and `ctc_provably_zero` would conclude the credit is gone for a household that
+    /// still has some — printing a sworn `0` on 1040 line 19. The fix then is to thread the package
+    /// into `ctc_odc_line19`, not to edit the number here.
+    ///
+    /// ★ It is DERIVED over the bundled years rather than pinned to 2024, so a new package cannot
+    ///   arrive unnoticed — the `1..=38` trap in its usual costume is a hand-written year list.
+    #[test]
+    fn the_named_ceiling_is_the_years_own_figure() {
+        let p = crate::tax::testonly::ty2024_params();
+        assert_eq!(
+            p.child_tax_credit_per_child, CTC_PER_CHILD_SS24H2,
+            "TY{}: Schedule 8812 line 8's per-child figure and the year package disagree",
+            p.year
+        );
+        // The positive control: the constant is genuinely the one the proof multiplies by, so this
+        // is not satisfied by a proof that stopped reading it.
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Mfj,
+            has_income_exclusion: Some(false),
+            ..Default::default()
+        };
+        for i in 0..2u32 {
+            ri.header
+                .dependents
+                .push(crate::tax::return_inputs::Dependent {
+                    name: format!("Kid {i}"),
+                    ssn: format!("000-00-{:04}", 1000 + i),
+                    relationship: "Daughter".into(),
+                    ..Default::default()
+                });
+        }
+        // L11 = 5% of the excess over $400,000, rounded UP to the next $1,000. The credit is
+        // provably zero exactly where L11 >= 2 x the per-child ceiling.
+        let ceiling = Usd::from(2i64) * CTC_PER_CHILD_SS24H2;
+        let agi_at = Usd::from(400_000) + ceiling / rust_decimal_macros::dec!(0.05);
+        assert!(
+            ctc_provably_zero(&ri, 2, agi_at),
+            "at the exact excess the two-child ceiling is reached"
+        );
+        assert!(
+            !ctc_provably_zero(&ri, 2, agi_at - Usd::from(1_000)),
+            "one $1,000 step below it, the credit is NOT provably zero"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -1788,6 +1864,10 @@ mod tests {
             },
             kiddie_unearned_threshold: dec!(2600),
             qualifying_relative_gross_income_limit: dec!(5050),
+            // §24(h)(2) / §24(h)(4) — the TCJA figures. Nothing computes from them (btctax files
+            // no Schedule 8812); the R12 panel sizes the line-19 forgo with them.
+            child_tax_credit_per_child: dec!(2000),
+            credit_for_other_dependents_per_person: dec!(500),
             elective_deferral_limit: dec!(23000),
             ftc_ceiling: dec!(300),
             qbi_ti_threshold_unmarried: dec!(191950),

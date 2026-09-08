@@ -245,6 +245,10 @@ fn sentinel(f: &Field) -> FieldValue {
                 //   is chosen over `Hsa` for the same reason `CannotKnow` is chosen above: it is
                 //   the answer no default could ever be.
                 FieldId::Sa1099Box5AccountType | FieldId::Sa5498Box6AccountType => "MaMsa",
+                // ★ R7 / T8 — the HoH marital basis. The fixture leaves it UNANSWERED (`None`),
+                //   which is not a variant at all, so every token differs; `NotMarried` is the one
+                //   the instruction states first and the only one that does not itself refuse.
+                FieldId::HohMaritalBasis => "NotMarried",
                 other => panic!("no Enum sentinel for {other:?} — add a distinct real choice"),
             };
             FieldValue::Choice(choice.to_string())
@@ -424,6 +428,23 @@ fn fixture_for(field: &Field, base: &ReturnInputs) -> ReturnInputs {
                 btctax_core::tax::document_census::DocumentRow::Sa1099,
                 Some(false),
             );
+        }
+        // ★★★ R7 / T8 — HEAD OF HOUSEHOLD and QUALIFYING SURVIVING SPOUSE. Each test is live iff the
+        //     FILING STATUS asserts it, and the maximal fixture files MFS — so covering these needs
+        //     the status set, exactly as `DodSpouse` needs MFJ above. A status can be only one thing
+        //     at a time, which is why HoH's and QSS's fixtures are separate arms rather than one.
+        FieldId::DeclHohQualifyingPerson
+        | FieldId::DeclHohPaidOverHalfCostOfKeepingUpHome
+        | FieldId::HohMaritalBasis
+        | FieldId::HohQualifyingChildName => {
+            ri.filing_status = btctax_core::tax::types::FilingStatus::HoH;
+        }
+        FieldId::DeclQssSpouseDiedInWindow
+        | FieldId::DeclQssChildYouCanClaim
+        | FieldId::DeclQssChildLivedAllYear
+        | FieldId::DeclQssPaidOverHalfCost
+        | FieldId::DeclQssCouldHaveFiledJointly => {
+            ri.filing_status = btctax_core::tax::types::FilingStatus::Qss;
         }
         // ★ R5 — the filer's-records ROWS need the door both live AND answered YES: the section is
         //   invisible otherwise, and a row nobody could see would be testimony never given.
@@ -772,7 +793,7 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     // change happened to keep the sets balanced.
     let field_count: usize = form_spec().iter().map(|s| s.fields.len()).sum();
     assert_eq!(
-        field_count, 239,
+        field_count, 249,
         "expected 216 Fields — 117 before T5, plus its FIFTY-EIGHT: the four document-less income \
          declarations (R3), W-2 boxes 13 and 14b, and the six document sections (1099-INT 14, \
          1099-DIV 14, 1099-B 8, 1099-G 7, 1098-E 4, and R5's five filer's-records leaves) — plus \
@@ -786,15 +807,15 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
          declaration (Form 8889 line 1 / line 3 rule 1) and M-1's document-less distribution door \
          (line 14a). ★★★ T7 / R6 added TWENTY-ONE: the twenty per-row §152 gates of Who \
          Qualifies as Your Dependent, plus Step 5 question 1 — the one gate that is about the \
-         FILER rather than about a row."
+         FILER rather than about a row. \u{2605}\u{2605}\u{2605} R7 / T8 added TEN: Head of household's two tests, its MARITAL BASIS (a `Choice`, and the registry's first class-(A) skippable), the entry space for a non-dependent qualifying child, FR-67's \u{a7}6013(g)/(h) nonresident-alien-spouse election gate, and Qualifying surviving spouse's five conditions."
     );
     assert_eq!(
         covered.len(),
-        238,
+        248,
         "expected 215 distinctly-covered in-scope leaves — every one of the 216 Fields but \
          `DocForm1098`, whose row is still shadowed by the `schedule_a.mortgage_interest_1098` \
          scalar (T9) and so is never live. It was 115 of 117 before T5, then 174 of 175, then 182 \
-         of 183; T16's thirty-three and the seam review's two are all covered."
+         of 183; T16's thirty-three and the seam review's two are all covered; R7 / T8's ten likewise."
     );
 
     // ── 5. ★ I-6: PIN the observed FieldId → leaf-path map against a literal (kills TRANSPOSITION). ──
@@ -1429,6 +1450,44 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
     (
         FieldId::DeclFilerTinIssuedByDueDate,
         "header.filer_tin_issued_by_due_date",
+    ),
+    // ── ★★★ R7 / T8 — HEAD OF HOUSEHOLD, QUALIFYING SURVIVING SPOUSE, and FR-67's election gate. ──
+    (
+        FieldId::DeclHohQualifyingPerson,
+        "header.hoh_qualifying_person",
+    ),
+    (
+        FieldId::DeclHohPaidOverHalfCostOfKeepingUpHome,
+        "header.hoh_paid_over_half_cost_of_keeping_up_home",
+    ),
+    (FieldId::HohMaritalBasis, "header.hoh_marital_basis"),
+    (
+        FieldId::HohQualifyingChildName,
+        "header.hoh_qualifying_child_name",
+    ),
+    (
+        FieldId::DeclNraSpouseResidentElection,
+        "header.nra_spouse_resident_election",
+    ),
+    (
+        FieldId::DeclQssSpouseDiedInWindow,
+        "header.qss_spouse_died_in_window_and_not_remarried",
+    ),
+    (
+        FieldId::DeclQssChildYouCanClaim,
+        "header.qss_child_you_can_claim",
+    ),
+    (
+        FieldId::DeclQssChildLivedAllYear,
+        "header.qss_child_lived_in_your_home_all_year",
+    ),
+    (
+        FieldId::DeclQssPaidOverHalfCost,
+        "header.qss_paid_over_half_cost_of_keeping_up_home",
+    ),
+    (
+        FieldId::DeclQssCouldHaveFiledJointly,
+        "header.qss_could_have_filed_jointly_in_year_of_death",
     ),
     // ── ★★★ R5 / T5 — the filer's-records rows for Schedule B lines 1 and 5. ──
     (

@@ -98,6 +98,8 @@ address_zip = "62704"
 can_be_claimed_as_dependent_spouse = false
 can_be_claimed_as_dependent_taxpayer = false
 filer_tin_issued_by_due_date = true
+hoh_qualifying_child_name = ""
+nra_spouse_resident_election = false
 presidential_fund_spouse = false
 presidential_fund_taxpayer = false
 

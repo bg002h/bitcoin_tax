@@ -110,7 +110,30 @@ pub const RENDERED_PROMPTS: &[RenderedPrompt] = &[
     //   does (*"At any time during 2025, did you…"*), and it is the year the filer must check their
     //   records against. Rendered, so a return whose `tax_year` changes re-asks it for free (R10.4).
     (QuestionId::DigitalAssetActivity, digital_asset_prompt),
+    // ★★★ R7 / T8 — QSS condition 1 quotes the TWO-YEAR WINDOW, and the window is derived from
+    //     `tax_year` rather than typed: the instruction's own sentence names the years (*"Your spouse
+    //     died in 2023 or 2024 and you didn't remarry before the end of 2025"*), every revision
+    //     shifts them, and a prompt naming the wrong pair is a question the filer cannot check
+    //     against their own facts. Rendered, so a return whose `tax_year` changes re-asks it for
+    //     free (R10.3/R10.4).
+    (
+        QuestionId::QssSpouseDiedInWindowAndNotRemarried,
+        qss_window_prompt,
+    ),
 ];
+
+/// QSS condition 1 with THIS return's two-year window: *"Your spouse died in 2023 or 2024 and you
+/// didn't remarry before the end of 2025."* (`i1040gi--2025.txt:1293-1297`.)
+fn qss_window_prompt(ri: &ReturnInputs) -> String {
+    let y = ri.tax_year;
+    format!(
+        "Qualifying surviving spouse, condition 1: \"Your spouse died in {a} or {b} and you didn't \
+         remarry before the end of {y}.\" (If your spouse died in {y}, you can't file as qualifying \
+         surviving spouse; see the instructions for Married Filing Jointly.)",
+        a = y - 2,
+        b = y - 1,
+    )
+}
 
 /// *"Did you receive a refund, credit or offset of state or local income taxes in 2026? …"*
 fn state_refund_prompt(ri: &ReturnInputs) -> String {
@@ -356,6 +379,29 @@ pub enum QuestionId {
     /// rather than a `DependentGate`. Live iff this return carries at least one dependent row.
     /// APPENDED AT THE END for the `decl_tristate!` array-index reason recorded above.
     FilerTinIssuedByDueDate,
+    // ── ★★★ R7 / T8 — HEAD OF HOUSEHOLD and QUALIFYING SURVIVING SPOUSE, the two filing statuses
+    //    btctax offered with NO TEST AT ALL. Each choice is an assertion about the filer's household
+    //    and each unlocks money — HoH a wider bracket and standard deduction, QSS the JOINT rates —
+    //    so each now asks the instruction's own tests. APPENDED AT THE END for the `decl_tristate!`
+    //    array-index reason recorded above.
+    /// **HoH Test 1 or Test 2** (`i1040gi--2025.txt:1164-1200`). Live iff `filing_status == HoH`.
+    HohQualifyingPerson,
+    /// **HoH — the cost of keeping up a home**, which both tests state (`:1164`, `:1172`). Live iff
+    /// `filing_status == HoH`.
+    HohPaidOverHalfCostOfKeepingUpHome,
+    /// **FR-67 — the §6013(g)/(h) nonresident-alien-spouse election** (`:1059-1072`). Live iff the
+    /// return carries a spouse; a `Yes` REFUSES.
+    NraSpouseResidentElection,
+    /// **QSS condition 1** (`:1293-1297`) — the two-year window, DERIVED from `tax_year`.
+    QssSpouseDiedInWindowAndNotRemarried,
+    /// **QSS condition 2** (`:1298-1306`).
+    QssChildYouCanClaim,
+    /// **QSS condition 3** (`:1273-1277`).
+    QssChildLivedInYourHomeAllYear,
+    /// **QSS condition 4** (`:1278-1279`).
+    QssPaidOverHalfCostOfKeepingUpHome,
+    /// **QSS condition 5** (`:1280-1283`).
+    QssCouldHaveFiledJointlyInYearOfDeath,
 }
 
 impl QuestionId {
@@ -416,6 +462,15 @@ impl QuestionId {
         QuestionId::HsaDistributionWithout1099sa,
         // ★★★ T7 / R6 — index 52.
         QuestionId::FilerTinIssuedByDueDate,
+        // ★★★ R7 / T8 — indices 53..=60.
+        QuestionId::HohQualifyingPerson,
+        QuestionId::HohPaidOverHalfCostOfKeepingUpHome,
+        QuestionId::NraSpouseResidentElection,
+        QuestionId::QssSpouseDiedInWindowAndNotRemarried,
+        QuestionId::QssChildYouCanClaim,
+        QuestionId::QssChildLivedInYourHomeAllYear,
+        QuestionId::QssPaidOverHalfCostOfKeepingUpHome,
+        QuestionId::QssCouldHaveFiledJointlyInYearOfDeath,
     ];
 }
 
@@ -2110,6 +2165,192 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         //   adjustment and forgoes nothing. A "No" is what costs the filer the credit.
         neutral: true,
     },
+    // ── ★★★ R7 / T8 — HEAD OF HOUSEHOLD. Two tests, both live iff the filer checked the box. ────
+    FormQuestion {
+        id: QuestionId::HohQualifyingPerson,
+        // ★ NO TYPED YEAR and NO TYPED FIGURE. The instruction's own sentences name the year
+        //   ("for all of 2025"); this return's year is not necessarily that one, and a prompt that
+        //   states the wrong year is a question the filer cannot check against their own facts.
+        //   Every span `xtask prompt-check` holds against the extract is one the year does not
+        //   cross.
+        prompt: "Head of household \u{2014} does Test 1 or Test 2 apply to you? TEST 1: you paid over \
+                 half the cost of keeping up a home that was the main home, for the WHOLE tax year, \
+                 of \"your parent whom you can claim as a dependent, except under a multiple support \
+                 agreement\". \"Your parent didn't have to live with you.\" TEST 2: you paid over half \
+                 the cost of keeping up a home in which you lived and in which one of the following \
+                 also lived for more than half of the year \u{2014} any person whom you can claim as a dependent \
+                 (but not a child you claim under the rule for Children of divorced or separated \
+                 parents, a person who is your dependent only because they lived with you all year, \
+                 or a person you claimed under a multiple support agreement); your unmarried \
+                 qualifying child who isn't your dependent; your married qualifying child who isn't \
+                 your dependent only because you can be claimed as a dependent on someone else's \
+                 return; or your qualifying child who, even though you are the custodial parent, \
+                 isn't your dependent because of the rule for Children of divorced or separated \
+                 parents.",
+        unanswered: RefuseReason::HohTestUnanswered {
+            question: QuestionId::HohQualifyingPerson,
+        },
+        unanswered_detail:
+            "you are filing as HEAD OF HOUSEHOLD, and the Form 1040 instructions say to \"Check the \
+             'Head of household' box only if you are unmarried (or considered unmarried) and either \
+             Test 1 or Test 2 applies\" (i1040gi--2025.txt:1164-1200). Head of household gives a \
+             wider bracket and a larger standard deduction than Single, so the box is an assertion \
+             that one of those tests is met. Run `btctax income answer`",
+        live: |ri| ri.filing_status == FilingStatus::HoH,
+        get: |ri| ri.header.hoh_qualifying_person,
+        set: |ri, v| ri.header.hoh_qualifying_person = Some(v),
+        durability: Durability::PerYear,
+        // ★ Neutral at TRUE: a filer who checked the HoH box is asserting the test IS met, and a
+        //   `No` is what refuses. There is no "nothing to see here" answer that leaves the status
+        //   standing.
+        neutral: true,
+    },
+    FormQuestion {
+        id: QuestionId::HohPaidOverHalfCostOfKeepingUpHome,
+        prompt: "Head of household \u{2014} did you pay over half the cost of keeping up a home for the \
+                 tax year? (Both Test 1 and Test 2 begin with it: \"You paid over half the cost of \
+                 keeping up a home\". See Cost of keeping up a home in the Form 1040 instructions, \
+                 and Pub. 501, for what counts.)",
+        unanswered: RefuseReason::HohTestUnanswered {
+            question: QuestionId::HohPaidOverHalfCostOfKeepingUpHome,
+        },
+        unanswered_detail:
+            "you are filing as HEAD OF HOUSEHOLD, and both of the instructions' tests begin with \
+             \"You paid over half the cost of keeping up a home\" (i1040gi--2025.txt:1164, :1172). \
+             It is asked on its own because the two tests share it. Run `btctax income answer`",
+        live: |ri| ri.filing_status == FilingStatus::HoH,
+        get: |ri| ri.header.hoh_paid_over_half_cost_of_keeping_up_home,
+        set: |ri, v| ri.header.hoh_paid_over_half_cost_of_keeping_up_home = Some(v),
+        durability: Durability::PerYear,
+        neutral: true,
+    },
+    // ── ★★★ FR-67 — the \u{a7}6013(g)/(h) NONRESIDENT-ALIEN-SPOUSE ELECTION. ─────────────────────────
+    FormQuestion {
+        id: QuestionId::NraSpouseResidentElection,
+        prompt: "Was your spouse a nonresident alien or a dual-status alien at any time during the \
+                 tax year? (\"Generally, a married couple can't file a joint return if either spouse \
+                 is a nonresident alien at any time during the year. However, you and your spouse \
+                 can choose to be treated as U.S. residents for the entire year and file a joint \
+                 return\" \u{2014} the \u{a7}6013(g) and \u{a7}6013(h) elections. Answer YES if that describes \
+                 either of you, whether or not you make the choice.)",
+        unanswered: RefuseReason::NraSpouseElectionUnanswered,
+        unanswered_detail:
+            "this return carries a spouse, and the Form 1040 instructions' Nonresident aliens and \
+             dual-status aliens rule (i1040gi--2025.txt:1059-1072) decides whether a joint return \
+             may be filed at all. btctax asks nothing else about an alien spouse, so a return \
+             computed without this answer would be a joint return on the U.S. spouse's income alone. \
+             Run `btctax income answer`",
+        // ★ Live iff the return carries a spouse. The rule is about a MARRIED COUPLE, and a return
+        //   with no spouse `Person` has nobody it could be about.
+        live: |ri| ri.header.spouse.is_some(),
+        get: |ri| ri.header.nra_spouse_resident_election,
+        set: |ri, v| ri.header.nra_spouse_resident_election = Some(v),
+        durability: Durability::PerYear,
+        // ★ Neutral at FALSE: no alien spouse needs no election and forgoes nothing. A `Yes`
+        //   REFUSES \u{2014} the election puts the alien spouse's WORLDWIDE income on the return and
+        //   btctax collects none of it.
+        neutral: false,
+    },
+    // ── ★★★ R7 / T8 — QUALIFYING SURVIVING SPOUSE. Five conditions, all live iff the box. ───────
+    FormQuestion {
+        id: QuestionId::QssSpouseDiedInWindowAndNotRemarried,
+        // ★ RENDERED: the two-year window is derived from `tax_year` (see `RENDERED_PROMPTS`). This
+        //   static text is the fallback and names no years, so it can never state the wrong ones.
+        prompt: "Qualifying surviving spouse, condition 1: did your spouse die in one of the two \
+                 years before this tax year, and you didn't remarry before the end of this tax year? \
+                 (If your spouse died during this tax year you can't file as qualifying surviving \
+                 spouse; see the instructions for Married Filing Jointly.)",
+        unanswered: RefuseReason::QssTestUnanswered {
+            question: QuestionId::QssSpouseDiedInWindowAndNotRemarried,
+        },
+        unanswered_detail:
+            "you are filing as QUALIFYING SURVIVING SPOUSE, which uses the JOINT return tax rates \
+             and the joint standard deduction. The Form 1040 instructions allow the box only \"if \
+             all of the following apply\" (i1040gi--2025.txt:1288-1316), and this is condition 1. \
+             Run `btctax income answer`",
+        live: |ri| ri.filing_status == FilingStatus::Qss,
+        get: |ri| ri.header.qss_spouse_died_in_window_and_not_remarried,
+        set: |ri, v| ri.header.qss_spouse_died_in_window_and_not_remarried = Some(v),
+        durability: Durability::PerYear,
+        neutral: true,
+    },
+    FormQuestion {
+        id: QuestionId::QssChildYouCanClaim,
+        // ★ The instruction's sentence names a YEAR and a FIGURE (the §152(d)(1)(B) limit). Neither
+        //   is typed here: the year is not necessarily this return's, and the figure lives in
+        //   `FullReturnParams::qualifying_relative_gross_income_limit` — a table of years typed into
+        //   a prompt is a second copy of derived data that nothing checks.
+        prompt: "Qualifying surviving spouse, condition 2: \"You have a child or stepchild (not a \
+                 foster child) whom you can claim as a dependent\" \u{2014} or could claim as a \
+                 dependent except that, for the tax year: (a) the child's gross income reached the \
+                 \u{a7}152(d)(1)(B) limit for the year, (b) \"The child filed a joint return\", or (c) you \
+                 could be claimed as a dependent on someone else's return.",
+        unanswered: RefuseReason::QssTestUnanswered {
+            question: QuestionId::QssChildYouCanClaim,
+        },
+        unanswered_detail:
+            "you are filing as QUALIFYING SURVIVING SPOUSE; this is condition 2 of the five the \
+             Form 1040 instructions require (i1040gi--2025.txt:1298-1306). Note that it is a child \
+             or STEPCHILD, and that a foster child does not count. Run `btctax income answer`",
+        live: |ri| ri.filing_status == FilingStatus::Qss,
+        get: |ri| ri.header.qss_child_you_can_claim,
+        set: |ri, v| ri.header.qss_child_you_can_claim = Some(v),
+        durability: Durability::PerYear,
+        neutral: true,
+    },
+    FormQuestion {
+        id: QuestionId::QssChildLivedInYourHomeAllYear,
+        prompt: "Qualifying surviving spouse, condition 3: \"This child lived in your home for all of\" \
+                 the tax year. \"If the child didn't live with you for the required time, see \
+                 Exception to time lived with you, later.\" (The exception counts temporary absences \
+                 by you or the child for special circumstances \u{2014} school, vacation, business, \
+                 medical care, military service \u{2014} and a child who was born or died during the \
+                 year.)",
+        unanswered: RefuseReason::QssTestUnanswered {
+            question: QuestionId::QssChildLivedInYourHomeAllYear,
+        },
+        unanswered_detail:
+            "you are filing as QUALIFYING SURVIVING SPOUSE; this is condition 3 of the five \
+             (i1040gi--2025.txt:1273-1277). Run `btctax income answer`",
+        live: |ri| ri.filing_status == FilingStatus::Qss,
+        get: |ri| ri.header.qss_child_lived_in_your_home_all_year,
+        set: |ri, v| ri.header.qss_child_lived_in_your_home_all_year = Some(v),
+        durability: Durability::PerYear,
+        neutral: true,
+    },
+    FormQuestion {
+        id: QuestionId::QssPaidOverHalfCostOfKeepingUpHome,
+        prompt: "Qualifying surviving spouse, condition 4: \"You paid over half the cost of keeping \
+                 up your home.\" (See Cost of keeping up a home in the Form 1040 instructions, and \
+                 Pub. 501, for what counts.)",
+        unanswered: RefuseReason::QssTestUnanswered {
+            question: QuestionId::QssPaidOverHalfCostOfKeepingUpHome,
+        },
+        unanswered_detail:
+            "you are filing as QUALIFYING SURVIVING SPOUSE; this is condition 4 of the five \
+             (i1040gi--2025.txt:1278-1279). Run `btctax income answer`",
+        live: |ri| ri.filing_status == FilingStatus::Qss,
+        get: |ri| ri.header.qss_paid_over_half_cost_of_keeping_up_home,
+        set: |ri, v| ri.header.qss_paid_over_half_cost_of_keeping_up_home = Some(v),
+        durability: Durability::PerYear,
+        neutral: true,
+    },
+    FormQuestion {
+        id: QuestionId::QssCouldHaveFiledJointlyInYearOfDeath,
+        prompt: "Qualifying surviving spouse, condition 5: \"You could have filed a joint return with \
+                 your spouse the year your spouse died, even if you didn't actually do so.\"",
+        unanswered: RefuseReason::QssTestUnanswered {
+            question: QuestionId::QssCouldHaveFiledJointlyInYearOfDeath,
+        },
+        unanswered_detail:
+            "you are filing as QUALIFYING SURVIVING SPOUSE; this is condition 5 of the five \
+             (i1040gi--2025.txt:1280-1283). Run `btctax income answer`",
+        live: |ri| ri.filing_status == FilingStatus::Qss,
+        get: |ri| ri.header.qss_could_have_filed_jointly_in_year_of_death,
+        set: |ri, v| ri.header.qss_could_have_filed_jointly_in_year_of_death = Some(v),
+        durability: Durability::PerYear,
+        neutral: true,
+    },
 ];
 
 /// ★★★ **T16 — the ONE liveness predicate for every Form 8889 question.**
@@ -2281,6 +2522,11 @@ pub enum SkippableId {
     /// ★★ **This is the registry's only POLARITY-INVERTING entry**: the prompt asks what the filer
     /// CAN do and the leaf records what they cannot, so `get_bool`/`set_bool` carry a `!`.
     Form8615ParentIdentityUnobtainable,
+    /// ★★★ **R7 / T8 — the HEAD-OF-HOUSEHOLD marital basis**, the instruction's four named states
+    /// (`i1040gi--2025.txt:1143-1163`). In THIS registry because its answer shape is a
+    /// [`SkippableKind::Choice`], and class **(A)** all the same — see
+    /// [`SkippableQuestion::unanswered`], which is what says so.
+    HohMaritalBasis,
 }
 
 impl SkippableId {
@@ -2312,6 +2558,8 @@ impl SkippableId {
         SkippableId::Form8615Condition3AgeSupport,
         SkippableId::Form8615Condition4ParentAlive,
         SkippableId::Form8615ParentIdentityUnobtainable,
+        // ★★★ R7 / T8 — index 19.
+        SkippableId::HohMaritalBasis,
     ];
 }
 
@@ -2362,6 +2610,28 @@ pub struct SkippableQuestion {
     /// Record a named answer (a no-op for every kind but [`SkippableKind::Choice`], and a no-op on a
     /// string outside that kind's option list — the caller parses, this only stores).
     pub set_choice: fn(&mut ReturnInputs, &'static str),
+    /// ★★★ **THE CLASS, DECLARED — because this registry is no longer uniformly class (B).**
+    ///
+    /// `None` is the registry's rule and every entry's answer until R7: silence is LAWFUL, the panel
+    /// lists the entry as *forgoing*, and nothing refuses. `Some(reason)` says silence is **not**
+    /// lawful here — [`crate::tax::return_refuse::screen_inputs`] refuses with that reason and the
+    /// R12 panel lists the entry as **blocking**.
+    ///
+    /// ★★ **Why a class-(A) entry lives in this registry at all.** The split between
+    /// [`FORM_QUESTIONS`] and this one is not class — it is the ANSWER SHAPE. `FormQuestion` reads
+    /// and writes an `Option<bool>`; this one carries the yes/no, date and **named-choice**
+    /// accessors. R7's HoH marital basis is one of the instruction's four named states
+    /// ([`crate::tax::return_inputs::HohMaritalBasis`]), so it needs the `Choice` shape — and its
+    /// silence is not lawful, because a filer who checked the Head-of-household box has already
+    /// asserted they are unmarried or considered unmarried, and *which of the four ways* is the
+    /// testimony behind that box.
+    ///
+    /// ★ DECLARED rather than inferred, for the same reason [`FormQuestion::neutral`] is: a
+    ///   hand-written list of "the class-(A) ones" beside the registry is a second copy of derived
+    ///   data, and both readers (the screen and the panel) would have to keep it in step.
+    pub unanswered: Option<crate::tax::return_refuse::RefuseReason>,
+    /// The FULL refusal detail, for a class-(A) entry. `""` where [`Self::unanswered`] is `None`.
+    pub unanswered_detail: &'static str,
 }
 
 /// ★ THE SKIPPABLE REGISTRY. Thirteen prompts — SEPARATE from [`FORM_QUESTIONS`] (spec §5.3). The
@@ -2383,6 +2653,8 @@ pub struct SkippableQuestion {
 pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     SkippableQuestion {
         id: SkippableId::BlindTaxpayer,
+        unanswered: None,
+        unanswered_detail: "",
         // ★ §G-15 — PER-YEAR: this subject can differ between years, so re-ask blank.
         durability: Durability::PerYear,
         prompt: "Are YOU legally blind? (§63(f) additional deduction)",
@@ -2399,6 +2671,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     },
     SkippableQuestion {
         id: SkippableId::BlindSpouse,
+        unanswered: None,
+        unanswered_detail: "",
         // ★ §G-15 — PER-YEAR: this subject can differ between years, so re-ask blank.
         durability: Durability::PerYear,
         prompt: "Is YOUR SPOUSE legally blind? (§63(f) additional deduction)",
@@ -2419,6 +2693,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     },
     SkippableQuestion {
         id: SkippableId::SalesTaxElection,
+        unanswered: None,
+        unanswered_detail: "",
         // ★ §G-15 — PER-YEAR: this subject can differ between years, so re-ask blank.
         durability: Durability::PerYear,
         prompt: "Deduct general SALES taxes instead of state/local income taxes? (§164(b)(5))",
@@ -2439,6 +2715,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     },
     SkippableQuestion {
         id: SkippableId::DobTaxpayer,
+        unanswered: None,
+        unanswered_detail: "",
         // ★★ §G-15 — DURABLE: a date of birth cannot change. The prior MAY be shown, but it still
         // takes the same explicit keystroke as a fresh ask — a forced retype invites a typo, and
         // for a DOB a typo is the worse failure.
@@ -2457,6 +2735,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     },
     SkippableQuestion {
         id: SkippableId::DobSpouse,
+        unanswered: None,
+        unanswered_detail: "",
         // ★★ §G-15 — DURABLE: a date of birth cannot change. The prior MAY be shown, but it still
         // takes the same explicit keystroke as a fresh ask — a forced retype invites a typo, and
         // for a DOB a typo is the worse failure.
@@ -2479,6 +2759,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     },
     SkippableQuestion {
         id: SkippableId::DodTaxpayer,
+        unanswered: None,
+        unanswered_detail: "",
         // ★ §G-15 — PER-YEAR: this subject can differ between years, so re-ask blank.
         durability: Durability::PerYear,
         prompt: "YOUR date of death",
@@ -2497,6 +2779,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     },
     SkippableQuestion {
         id: SkippableId::DodSpouse,
+        unanswered: None,
+        unanswered_detail: "",
         // ★ §G-15 — PER-YEAR: this subject can differ between years, so re-ask blank.
         durability: Durability::PerYear,
         prompt: "YOUR SPOUSE's date of death",
@@ -2522,6 +2806,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     },
     SkippableQuestion {
         id: SkippableId::FbarFilingRequired,
+        unanswered: None,
+        unanswered_detail: "",
         // ★ §G-15 — PER-YEAR: whether an FBAR is required turns on the year's account balances.
         durability: Durability::PerYear,
         prompt: "Schedule B line 7a (sub-question): you said you had a foreign financial account \u{2014} \
@@ -2556,6 +2842,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     // fact, and `is_aged` applies the convention. Both halves are now class (B).
     SkippableQuestion {
         id: SkippableId::TaxpayerDiedDuringYear,
+        unanswered: None,
+        unanswered_detail: "",
         // ★ §G-15 — PER-YEAR by definition: the question names a tax year.
         durability: Durability::PerYear,
         prompt: "Did YOU (the taxpayer named on this return) die during the tax year? (A final return \
@@ -2582,6 +2870,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     },
     SkippableQuestion {
         id: SkippableId::SpouseDiedDuringYear,
+        unanswered: None,
+        unanswered_detail: "",
         durability: Durability::PerYear,
         prompt: "Did YOUR SPOUSE die during the tax year? (You may still file jointly for the year of \
                  death. 1040 line 12a: a spouse who died before reaching age 65 does not get the \
@@ -2607,6 +2897,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     // §6721/§6722 exposure is real, so the skip fires an advisory naming both sections.
     SkippableQuestion {
         id: SkippableId::ScheduleC1099Required,
+        unanswered: None,
+        unanswered_detail: "",
         durability: Durability::PerYear,
         prompt: "Schedule C line I: did you make any payments this year that would require you to file \
                  Form(s) 1099? (For example, $600 or more to a contractor or service provider for your \
@@ -2630,6 +2922,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     },
     SkippableQuestion {
         id: SkippableId::ScheduleC1099Filed,
+        unanswered: None,
+        unanswered_detail: "",
         durability: Durability::PerYear,
         prompt: "Schedule C line J: did you, or will you, file those required Form(s) 1099?",
         help: "Asked only because you answered line I \"Yes\" — the form itself says \"If 'Yes,'\". \
@@ -2656,6 +2950,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     // ★★★ Form 8283 Section B lines 5a/5b/5c, asked as ONE return-level universal (§G-21).
     SkippableQuestion {
         id: SkippableId::DonationsHadRestrictions,
+        unanswered: None,
+        unanswered_detail: "",
         durability: Durability::PerYear,
         // ★★ THE PROMPT ENUMERATES ALL THREE LIMBS, in the form's own words. A "No" to something
         // vaguer ("any strings?") would be laundered into three specific answers the filer never gave
@@ -2690,6 +2986,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     //   question — placing this before `DonationsHadRestrictions` in draft did exactly that.
     SkippableQuestion {
         id: SkippableId::ScheduleCIsSstb,
+        unanswered: None,
+        unanswered_detail: "",
         durability: Durability::PerYear,
         prompt: "Is your business a SPECIFIED SERVICE trade or business? Answer YES if its principal \
                  asset is the reputation or skill of its owners or employees, or if it is in health, \
@@ -2724,6 +3022,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     //     array-index reason above.
     SkippableQuestion {
         id: SkippableId::ScheduleCIsCooperativePatron,
+        unanswered: None,
+        unanswered_detail: "",
         durability: Durability::PerYear,
         prompt: "Are you a patron of an agricultural or horticultural cooperative? Answer YES if a \
                  cooperative paid you patronage dividends, per-unit retain allocations, or passed \
@@ -2760,6 +3060,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     //    gate can over-ASK, but the question must never over-CLAIM.
     SkippableQuestion {
         id: SkippableId::CharitableCwaObtained,
+        unanswered: None,
+        unanswered_detail: "",
         durability: Durability::PerYear,
         // ★★★ THE WORDING COVERS THE DEFERRED CLAIM TOO (final whole-branch review, finding 2).
         //
@@ -2818,6 +3120,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     //     `Field`), but it is not free either.
     SkippableQuestion {
         id: SkippableId::Form8615Condition3AgeSupport,
+        unanswered: None,
+        unanswered_detail: "",
         // ★ §G-15 — PER-YEAR: age and support both change between years.
         durability: Durability::PerYear,
         // ★ Year-free, because `prompt` is `&'static str`. The four departures from
@@ -2871,6 +3175,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     // ★★★ FR-29 — Form 8615's condition 4. Index 17, and the registry's ONLY `Choice`.
     SkippableQuestion {
         id: SkippableId::Form8615Condition4ParentAlive,
+        unanswered: None,
+        unanswered_detail: "",
         // ★ §G-15 — PER-YEAR: a parent's survival, and what the filer can find out about it, both
         //   change between years.
         durability: Durability::PerYear,
@@ -2916,6 +3222,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     // ★★★ FR-29 — the SPEC §6.3 dead-end FACT. Index 18.
     SkippableQuestion {
         id: SkippableId::Form8615ParentIdentityUnobtainable,
+        unanswered: None,
+        unanswered_detail: "",
         // ★ §G-15 — PER-YEAR, and here it is more than bookkeeping: an attested dead end is testimony
         //   about ONE tax year, and carrying it forward silently would re-file last year's
         //   certification without asking.
@@ -2969,8 +3277,96 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
         set_choice: |_ri, _v| {},
         get_date: |_ri| None,
         set_date: |_ri, _v| {},
-    }
+    },
+    // ★★★ R7 / T8 — THE HEAD-OF-HOUSEHOLD MARITAL BASIS. Index 19, and the registry's SECOND
+    //     `Choice` and its FIRST class-(A) entry — see `SkippableQuestion::unanswered`.
+    SkippableQuestion {
+        id: SkippableId::HohMaritalBasis,
+        unanswered: Some(crate::tax::return_refuse::RefuseReason::HohMaritalBasisUnanswered),
+        unanswered_detail:
+            "you are filing as HEAD OF HOUSEHOLD. The Form 1040 instructions allow that box only if \
+             \"you are unmarried and provide a home for certain other persons\", and they state four \
+             ways to be unmarried or considered unmarried for this purpose \
+             (i1040gi--2025.txt:1143-1163). Head of household gives a wider bracket and a larger \
+             standard deduction than Single or MFS, so which of the four applies is the testimony \
+             behind the box \u{2014} it is not one yes/no, because the four are distinct legal \
+             predicates. Run `btctax income answer`",
+        // ★ §G-15 — PER-YEAR: §7703(a)(1) determines marital status on the LAST DAY of the tax year,
+        //   so this is precisely a fact that changes at the year boundary.
+        durability: Durability::PerYear,
+        // ★ The instruction's bullets name the year ("at the end of 2025"); the quoted spans here
+        //   stop short of it, for the reason recorded on the HoH tests above.
+        prompt: "Head of household \u{2014} you can check that box \"if you are unmarried and provide a \
+                 home for certain other persons\". Which is true of you? Answer NotMarried if you were \
+                 not married at the end of the tax year. Otherwise you are \"considered unmarried for \
+                 this purpose\" only if one of these applies: LegallySeparatedByDecree \u{2014} \"You were \
+                 legally separated according to your state law under a decree of divorce or separate \
+                 maintenance at the end of\" the tax year (but an interlocutory decree means you are \
+                 considered married); MarriedLivedApart \u{2014} \"You are married but lived apart from \
+                 your spouse for the last 6 months of\" the tax year \"and you meet the other rules \
+                 under Married persons who live apart\"; NraSpouseNoElection \u{2014} \"You are married and \
+                 your spouse was a nonresident alien at any time during the year and the election to \
+                 treat the alien spouse as a resident alien is not made\".",
+        help: "This is not a benefit you may skip: it is the assertion the Head-of-household box \
+               makes. btctax models the first two answers. The last two send you to rules it has \
+               not transcribed \u{2014} Married persons who live apart is five further conditions of its \
+               own, and Nonresident aliens and dual-status aliens governs whether a joint return \
+               may be filed at all \u{2014} so answering either of those stops btctax rather than \
+               computing a return on a rule it has not read.",
+        kind: SkippableKind::Choice(HOH_MARITAL_BASIS_CHOICES),
+        live: |ri| ri.filing_status == FilingStatus::HoH,
+        get_bool: |_ri| None,
+        set_bool: |_ri, _v| {},
+        get_choice: |ri| ri.header.hoh_marital_basis.map(hoh_marital_basis_token),
+        set_choice: |ri, v| {
+            // ★ An unlisted string is a NO-OP, never an answer: the caller parses, this only stores.
+            if let Some(b) = hoh_marital_basis_from_token(v) {
+                ri.header.hoh_marital_basis = Some(b);
+            }
+        },
+        get_date: |_ri| None,
+        set_date: |_ri, _v| {},
+    },
 ];
+
+/// The stable tokens [`SkippableId::HohMaritalBasis`] stores and a renderer presents — the
+/// [`crate::tax::return_inputs::HohMaritalBasis`] variant names, which is what serde writes into a
+/// vault. ★ ONE definition, consumed by the registry entry's `kind`, by both accessors and by the
+/// input-form `FieldKind::Enum`.
+pub const HOH_MARITAL_BASIS_CHOICES: &[&str] = &[
+    "NotMarried",
+    "LegallySeparatedByDecree",
+    "MarriedLivedApart",
+    "NraSpouseNoElection",
+];
+
+/// [`crate::tax::return_inputs::HohMaritalBasis`] → its stable token.
+#[must_use]
+pub fn hoh_marital_basis_token(b: crate::tax::return_inputs::HohMaritalBasis) -> &'static str {
+    use crate::tax::return_inputs::HohMaritalBasis as H;
+    match b {
+        H::NotMarried => "NotMarried",
+        H::LegallySeparatedByDecree => "LegallySeparatedByDecree",
+        H::MarriedLivedApart => "MarriedLivedApart",
+        H::NraSpouseNoElection => "NraSpouseNoElection",
+    }
+}
+
+/// A stable token → its variant, or `None` for anything else.
+///
+/// ★ No fallback variant and no `#[serde(other)]`: an unknown string must fail rather than silently
+/// become an answer.
+#[must_use]
+pub fn hoh_marital_basis_from_token(t: &str) -> Option<crate::tax::return_inputs::HohMaritalBasis> {
+    use crate::tax::return_inputs::HohMaritalBasis as H;
+    match t {
+        "NotMarried" => Some(H::NotMarried),
+        "LegallySeparatedByDecree" => Some(H::LegallySeparatedByDecree),
+        "MarriedLivedApart" => Some(H::MarriedLivedApart),
+        "NraSpouseNoElection" => Some(H::NraSpouseNoElection),
+        _ => None,
+    }
+}
 
 /// The stable tokens [`SkippableId::Form8615Condition4ParentAlive`] stores and a renderer presents —
 /// the `ParentAliveAnswer` variant names, which is what serde writes into a vault.
@@ -3076,6 +3472,15 @@ mod tests {
                 QuestionId::HsaSpouseFamilyCoverage => 50,
                 QuestionId::HsaDistributionWithout1099sa => 51,
                 QuestionId::FilerTinIssuedByDueDate => 52,
+                // ★ R7 / T8 — HoH and QSS, the two filing statuses that had no test.
+                QuestionId::HohQualifyingPerson => 53,
+                QuestionId::HohPaidOverHalfCostOfKeepingUpHome => 54,
+                QuestionId::NraSpouseResidentElection => 55,
+                QuestionId::QssSpouseDiedInWindowAndNotRemarried => 56,
+                QuestionId::QssChildYouCanClaim => 57,
+                QuestionId::QssChildLivedInYourHomeAllYear => 58,
+                QuestionId::QssPaidOverHalfCostOfKeepingUpHome => 59,
+                QuestionId::QssCouldHaveFiledJointlyInYearOfDeath => 60,
             };
             assert_eq!(idx, i, "QuestionId::ALL is out of order / missing {id:?}");
             assert_eq!(
@@ -3086,13 +3491,15 @@ mod tests {
         }
         assert_eq!(
             QuestionId::ALL.len(),
-            53,
+            61,
             "17 declarations + the 20 R3 document-census rows + R10.4's filing-status confirmation \
              + T5's four document-less-income-door questions + R9/T6's Digital Assets question \
              + T16's seven Form 8889 questions + the T16 seam review's two (the SPOUSE's HDHP \
-             plan, and R3's document-less distribution door) + T7/R6's filer-TIN question"
+             plan, and R3's document-less distribution door) + T7/R6's filer-TIN question \
+             + R7/T8's eight (two HoH tests, FR-67's \u{a7}6013(g)/(h) election gate, five QSS \
+             conditions)"
         );
-        assert_eq!(FORM_QUESTIONS.len(), 53, "one entry per declaration");
+        assert_eq!(FORM_QUESTIONS.len(), 61, "one entry per declaration");
     }
 
     /// ★★★ §G-6/ISO — THE OUT-OF-SCOPE QUESTION MUST NAME THE ISO EXERCISE, WHICH IS NOT INCOME.
@@ -3217,6 +3624,8 @@ mod tests {
                 SkippableId::Form8615Condition3AgeSupport => 16,
                 SkippableId::Form8615Condition4ParentAlive => 17,
                 SkippableId::Form8615ParentIdentityUnobtainable => 18,
+                // ★ R7 / T8 — index 19, the registry's first class-(A) entry.
+                SkippableId::HohMaritalBasis => 19,
             };
             assert_eq!(idx, i, "SkippableId::ALL is out of order / missing {id:?}");
             assert_eq!(
@@ -3229,15 +3638,37 @@ mod tests {
     }
 
     #[test]
-    fn the_skippable_registry_is_separate_and_has_nineteen_entries_with_correct_liveness() {
+    fn the_skippable_registry_is_separate_and_has_twenty_entries_with_correct_liveness() {
         use crate::tax::types::FilingStatus;
         assert_eq!(
             SKIPPABLE_QUESTIONS.len(),
-            19,
+            20,
             "blind ×2, SALT, DOB ×2, DOD ×2, FBAR, the §G-9 death pair, Schedule C I/J, 8283 5a/5b/5c, \
-             8995-A SSTB + patron, §170(f)(8) CWA, and FR-29's Form 8615 trio (condition 3, condition 4 \
-             and the §6.3 dead-end fact)"
+             8995-A SSTB + patron, §170(f)(8) CWA, FR-29's Form 8615 trio (condition 3, condition 4 \
+             and the §6.3 dead-end fact), and R7/T8's HoH marital basis"
         );
+        // ★★★ R7 / T8 — the registry is class (B) BY RULE, and this is the ONE entry that declares
+        //     otherwise. Asserted as the whole SET so a second class-(A) entry has to be looked at:
+        //     the panel and the screen both branch on `unanswered`, and "class (B) except where
+        //     declared" is only a safe rule while its exceptions are visible.
+        let class_a: Vec<_> = SKIPPABLE_QUESTIONS
+            .iter()
+            .filter(|s| s.unanswered.is_some())
+            .map(|s| s.id)
+            .collect();
+        assert_eq!(
+            class_a,
+            vec![SkippableId::HohMaritalBasis],
+            "exactly one class-(A) entry: a CHOICE whose silence is not lawful"
+        );
+        for s in SKIPPABLE_QUESTIONS {
+            assert_eq!(
+                s.unanswered.is_some(),
+                !s.unanswered_detail.is_empty(),
+                "{:?}: a class-(A) entry carries a refusal detail and a class-(B) one carries none",
+                s.id
+            );
+        }
         // SALT is live iff a schedule_a exists; spouse-blind iff a spouse Person exists.
         let salt = SKIPPABLE_QUESTIONS
             .iter()

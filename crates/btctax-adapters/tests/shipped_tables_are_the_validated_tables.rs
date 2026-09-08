@@ -581,6 +581,8 @@ fn every_shipped_full_return_params_equal_the_ones_the_corpus_validates() {
             salt: s_salt,
             kiddie_unearned_threshold: s_kiddie,
             qualifying_relative_gross_income_limit: s_qr_gross_income,
+            child_tax_credit_per_child: s_ctc_per_child,
+            credit_for_other_dependents_per_person: s_odc_per_person,
             elective_deferral_limit: s_deferral,
             ftc_ceiling: s_ftc,
             qbi_ti_threshold_unmarried: s_qbi_thr_unmarried,
@@ -602,6 +604,8 @@ fn every_shipped_full_return_params_equal_the_ones_the_corpus_validates() {
             salt: v_salt,
             kiddie_unearned_threshold: v_kiddie,
             qualifying_relative_gross_income_limit: v_qr_gross_income,
+            child_tax_credit_per_child: v_ctc_per_child,
+            credit_for_other_dependents_per_person: v_odc_per_person,
             elective_deferral_limit: v_deferral,
             ftc_ceiling: v_ftc,
             qbi_ti_threshold_unmarried: v_qbi_thr_unmarried,
@@ -644,6 +648,13 @@ fn every_shipped_full_return_params_equal_the_ones_the_corpus_validates() {
             s_salt, v_salt,
             "TY{year}: the §164(b) SALT limitation differs — and it is an ENUM, so a differing \
              variant means the two artifacts disagree about which Schedule A question the year asks"
+        );
+        assert_eq!(
+            (s_ctc_per_child, s_odc_per_person),
+            (v_ctc_per_child, v_odc_per_person),
+            "TY{year}: the §24(h)(2)/(h)(4) per-person credit ceilings differ — nothing computes \
+             from them, but the R12 panel SIZES the line-19 forgo with them, so a divergence puts \
+             two different dollar figures in front of the filer for one forgone credit"
         );
         assert_eq!(
             s_kiddie, v_kiddie,

@@ -348,6 +348,20 @@ pub fn write_panel(
             writeln!(out, "    • {} [waiting on {}]", w.prompt, w.waiting_on)?;
         }
     }
+    // ★★★ R6 / T8 — benefits the FORM computes on a schedule btctax does not file. There is nothing
+    //     to answer, which is why they are their own heading rather than a `FORGOING` row: telling a
+    //     filer to "answer" 1040 line 19 would send them looking for a question that does not exist.
+    if !st.not_computed.is_empty() {
+        writeln!(
+            out,
+            "  NOT COMPUTED ({}) — btctax does not file the schedule these are figured on; the \
+             credit boxes on your return are printed, the amount is yours to enter:",
+            st.not_computed.len()
+        )?;
+        for n in &st.not_computed {
+            writeln!(out, "    • {}", n.line())?;
+        }
+    }
     writeln!(
         out,
         "  ({} answered, {} not applicable to this return)",
@@ -1877,6 +1891,28 @@ mod tests {
             // ★★★ R3 / T5 — THE DOCUMENT-LESS INCOME DOOR. Each of the three paired questions is
             //     live EXACTLY when its census row says `No` — the pairing R3 states — so the
             //     scenario answers that row and nothing else.
+            // ★★★ R7 / T8 — HoH's two tests and QSS's five conditions are live iff the FILING STATUS
+            //     asserts them, and a return has exactly one status. FR-67's election gate needs a
+            //     spouse `Person`.
+            QuestionId::HohQualifyingPerson | QuestionId::HohPaidOverHalfCostOfKeepingUpHome => {
+                r.filing_status = FilingStatus::HoH;
+            }
+            QuestionId::NraSpouseResidentElection => {
+                r.filing_status = FilingStatus::Mfj;
+                r.header.spouse = Some(btctax_core::tax::return_inputs::Person {
+                    first_name: "Sam".into(),
+                    last_name: "Roe".into(),
+                    ssn: "000-00-5555".into(),
+                    ..Default::default()
+                });
+            }
+            QuestionId::QssSpouseDiedInWindowAndNotRemarried
+            | QuestionId::QssChildYouCanClaim
+            | QuestionId::QssChildLivedInYourHomeAllYear
+            | QuestionId::QssPaidOverHalfCostOfKeepingUpHome
+            | QuestionId::QssCouldHaveFiledJointlyInYearOfDeath => {
+                r.filing_status = FilingStatus::Qss;
+            }
             QuestionId::WagesWithoutW2Question => {
                 r.documents.set(
                     btctax_core::tax::document_census::DocumentRow::W2,
@@ -2051,6 +2087,149 @@ mod tests {
                 q.id
             );
         }
+    }
+
+    /// ★★★ **R6 / T8 — the panel PRINTS the line-19 forgo, with its size, under its own heading.**
+    ///
+    /// The renderer is the last surface between the computation and the filer, and a `NotComputed`
+    /// row nothing printed would be a figure with no reader. Both halves are asserted: the sentence
+    /// carries the year's own figure with a package, and no figure at all without one.
+    #[test]
+    fn income_answer_prints_the_line_19_forgo_with_its_size() {
+        let mut ri = single();
+        ri.header.dependents = vec![btctax_core::tax::return_inputs::Dependent {
+            name: "Kid Example".into(),
+            ssn: "000-00-1111".into(),
+            relationship: "Daughter".into(),
+            ..Default::default()
+        }];
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        let p = btctax_core::tax::testonly::ty2024_params();
+
+        let mut screen: Vec<u8> = Vec::new();
+        write_panel(&mut screen, &panel_state(&ri, Some(&p)), "before").unwrap();
+        let with_package = String::from_utf8(screen).unwrap();
+        assert!(with_package.contains("NOT COMPUTED"), "{with_package}");
+        assert!(with_package.contains("child tax credit"), "{with_package}");
+        assert!(
+            with_package.contains("1 dependent with a credit box"),
+            "{with_package}"
+        );
+        assert!(
+            with_package.contains("2000"),
+            "the size is the year's own figure: {with_package}"
+        );
+
+        let mut screen: Vec<u8> = Vec::new();
+        write_panel(&mut screen, &panel_state(&ri, None), "before").unwrap();
+        let no_package = String::from_utf8(screen).unwrap();
+        assert!(no_package.contains("NOT COMPUTED"), "{no_package}");
+        assert!(
+            !no_package.contains("2000"),
+            "no package \u{2014} no invented figure: {no_package}"
+        );
+        assert!(
+            no_package.contains("size waiting on"),
+            "…and it names what it waits on: {no_package}"
+        );
+
+        // A return with no dependents never prints the heading at all.
+        let mut plain = single();
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut plain);
+        let mut screen: Vec<u8> = Vec::new();
+        write_panel(&mut screen, &panel_state(&plain, Some(&p)), "before").unwrap();
+        assert!(!String::from_utf8(screen).unwrap().contains("NOT COMPUTED"));
+    }
+
+    /// ★★★ **THE NO-BRICK PROPERTY FOR THE SKIPPABLE REGISTRY, registry-DERIVED** — the sibling of
+    /// `income_answer_asks_every_live_declaration`, and it exists because R7 put the FIRST class-(A)
+    /// entry in that registry: an entry whose blank REFUSES and which `income answer` did not ask
+    /// would be a brick with no exit at all, which is strictly worse than the declaration case.
+    ///
+    /// ★ The scenario is derived per entry from the registry's own `live` predicate, so a new
+    ///   skippable joins this loop with no edit here.
+    #[test]
+    fn income_answer_asks_every_live_skippable_including_the_class_a_one() {
+        use btctax_core::tax::questions::SkippableKind;
+        let mut asked_any_class_a = false;
+        for s in SKIPPABLE_QUESTIONS {
+            let ri = skippable_scenario_for(s.id);
+            if !(s.live)(&ri) {
+                continue;
+            }
+            assert!(
+                live_questions(&ri)
+                    .iter()
+                    .any(|a| matches!(a, Ask::Skippable(e) if e.id == s.id)),
+                "income answer must ask {:?} when it is live",
+                s.id
+            );
+            if s.unanswered.is_some() {
+                asked_any_class_a = true;
+                // A class-(A) skippable BLOCKS while blank, and answering it through its own setter
+                // clears the block — the no-brick property, one registry over.
+                let st = btctax_core::tax::interview_state::interview_state(&ri);
+                assert!(
+                    st.blocking.iter().any(|b| b.item
+                        == btctax_core::tax::provenance::AnswerKey::Skippable(s.id)),
+                    "{:?} declares a refusal, so the panel must list it as BLOCKING",
+                    s.id
+                );
+                let mut answered = ri.clone();
+                match s.kind {
+                    SkippableKind::Choice(options) => (s.set_choice)(&mut answered, options[0]),
+                    SkippableKind::YesNo => (s.set_bool)(&mut answered, true),
+                    SkippableKind::Date => panic!("a class-(A) Date skippable needs a case here"),
+                }
+                let st = btctax_core::tax::interview_state::interview_state(&answered);
+                assert!(
+                    !st.blocking.iter().any(|b| b.item
+                        == btctax_core::tax::provenance::AnswerKey::Skippable(s.id)),
+                    "answering {:?} through its own setter must empty the item",
+                    s.id
+                );
+            }
+        }
+        assert!(
+            asked_any_class_a,
+            "the loop must have exercised the class-(A) arm, or it passes by finding nothing"
+        );
+    }
+
+    /// A return on which `id` is live. Derived per entry from the registry's own predicate: each arm
+    /// primes exactly the condition that entry's `live` reads.
+    fn skippable_scenario_for(id: SkippableId) -> ReturnInputs {
+        use btctax_core::tax::return_inputs::{ParentAliveAnswer, ScheduleAInputs};
+        let mut r = single();
+        match id {
+            SkippableId::BlindSpouse | SkippableId::DobSpouse => r = with_spouse(single()),
+            SkippableId::DodSpouse | SkippableId::SpouseDiedDuringYear => {
+                r = with_spouse(single());
+                r.filing_status = FilingStatus::Mfj;
+                r.header.spouse_died_during_year = Some(true);
+            }
+            SkippableId::DodTaxpayer => r.header.taxpayer_died_during_year = Some(true),
+            SkippableId::SalesTaxElection => r.schedule_a = Some(ScheduleAInputs::default()),
+            SkippableId::FbarFilingRequired => r.foreign_accounts = Some(true),
+            SkippableId::ScheduleC1099Required
+            | SkippableId::ScheduleCIsSstb
+            | SkippableId::ScheduleCIsCooperativePatron => {
+                r.schedule_c = Some(Default::default());
+            }
+            SkippableId::ScheduleC1099Filed => {
+                r.schedule_c = Some(btctax_core::tax::return_inputs::ScheduleCInputs {
+                    payments_requiring_1099: Some(true),
+                    ..Default::default()
+                });
+            }
+            SkippableId::Form8615ParentIdentityUnobtainable => {
+                r.header.form8615_condition4_parent_alive = Some(ParentAliveAnswer::CannotKnow);
+            }
+            // ★★★ R7 / T8 — the class-(A) entry: live iff the filer checked Head of household.
+            SkippableId::HohMaritalBasis => r.filing_status = FilingStatus::HoH,
+            _ => {}
+        }
+        r
     }
 
     /// ★ P9 §2.2 step 7 — the class-(B) SKIPPABLE bool prompts: blindness (taxpayer always; spouse only

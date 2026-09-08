@@ -18,7 +18,8 @@ use crate::seam::{
 };
 use btctax_core::tax::document_census::DocumentRow;
 use btctax_core::tax::questions::{
-    QuestionId, SkippableId, FORM_QUESTIONS, PARENT_ALIVE_CHOICES, SKIPPABLE_QUESTIONS,
+    QuestionId, SkippableId, FORM_QUESTIONS, HOH_MARITAL_BASIS_CHOICES, PARENT_ALIVE_CHOICES,
+    SKIPPABLE_QUESTIONS,
 };
 
 // ── The delegating-Field generators ──────────────────────────────────────────────────────────────────────
@@ -354,6 +355,40 @@ const DECL_FIELDS: &[Field] = &[
         ri.header.filer_tin_issued_by_due_date = None;
         Ok(())
     }),
+    // ★★★ Indices 53..=60 — R7 / T8's HoH and QSS tests, and FR-67's election gate. Appended at the
+    //     END for the array-index reason above.
+    decl_tristate!(53, FieldId::DeclHohQualifyingPerson, |ri| {
+        ri.header.hoh_qualifying_person = None;
+        Ok(())
+    }),
+    decl_tristate!(54, FieldId::DeclHohPaidOverHalfCostOfKeepingUpHome, |ri| {
+        ri.header.hoh_paid_over_half_cost_of_keeping_up_home = None;
+        Ok(())
+    }),
+    decl_tristate!(55, FieldId::DeclNraSpouseResidentElection, |ri| {
+        ri.header.nra_spouse_resident_election = None;
+        Ok(())
+    }),
+    decl_tristate!(56, FieldId::DeclQssSpouseDiedInWindow, |ri| {
+        ri.header.qss_spouse_died_in_window_and_not_remarried = None;
+        Ok(())
+    }),
+    decl_tristate!(57, FieldId::DeclQssChildYouCanClaim, |ri| {
+        ri.header.qss_child_you_can_claim = None;
+        Ok(())
+    }),
+    decl_tristate!(58, FieldId::DeclQssChildLivedAllYear, |ri| {
+        ri.header.qss_child_lived_in_your_home_all_year = None;
+        Ok(())
+    }),
+    decl_tristate!(59, FieldId::DeclQssPaidOverHalfCost, |ri| {
+        ri.header.qss_paid_over_half_cost_of_keeping_up_home = None;
+        Ok(())
+    }),
+    decl_tristate!(60, FieldId::DeclQssCouldHaveFiledJointly, |ri| {
+        ri.header.qss_could_have_filed_jointly_in_year_of_death = None;
+        Ok(())
+    }),
     FOREIGN_COUNTRY_NAMES,
 ];
 
@@ -609,6 +644,18 @@ const SKIPPABLE_FIELDS: &[Field] = &[
         ri.header.form8615_parent_identity_unobtainable = None;
         Ok(())
     }),
+    // ★★★ R7 / T8 — the HoH marital basis, index 19. The registry's SECOND `Choice` and its FIRST
+    //     class-(A) entry: `clear` still un-answers it (a filer may correct a mis-click), and the
+    //     SCREEN is what makes the blank refuse — the form does not enforce class here, it renders.
+    skippable_choice!(
+        19,
+        FieldId::HohMaritalBasis,
+        HOH_MARITAL_BASIS_CHOICES,
+        |ri| {
+            ri.header.hoh_marital_basis = None;
+            Ok(())
+        }
+    ),
 ];
 
 pub(crate) const SKIPPABLES: Section = Section {
@@ -683,6 +730,17 @@ pub fn field_to_question(id: FieldId) -> Option<QuestionId> {
         FieldId::DeclHsaDistributionWithout1099sa => QuestionId::HsaDistributionWithout1099sa,
         // ★ T7 / R6 — Step 5 question 1.
         FieldId::DeclFilerTinIssuedByDueDate => QuestionId::FilerTinIssuedByDueDate,
+        // ★ R7 / T8 — HoH, QSS, and FR-67's election gate.
+        FieldId::DeclHohQualifyingPerson => QuestionId::HohQualifyingPerson,
+        FieldId::DeclHohPaidOverHalfCostOfKeepingUpHome => {
+            QuestionId::HohPaidOverHalfCostOfKeepingUpHome
+        }
+        FieldId::DeclNraSpouseResidentElection => QuestionId::NraSpouseResidentElection,
+        FieldId::DeclQssSpouseDiedInWindow => QuestionId::QssSpouseDiedInWindowAndNotRemarried,
+        FieldId::DeclQssChildYouCanClaim => QuestionId::QssChildYouCanClaim,
+        FieldId::DeclQssChildLivedAllYear => QuestionId::QssChildLivedInYourHomeAllYear,
+        FieldId::DeclQssPaidOverHalfCost => QuestionId::QssPaidOverHalfCostOfKeepingUpHome,
+        FieldId::DeclQssCouldHaveFiledJointly => QuestionId::QssCouldHaveFiledJointlyInYearOfDeath,
         _ => return None,
     })
 }
@@ -768,6 +826,18 @@ pub fn question_to_field(id: QuestionId) -> FieldId {
         // ★ T7 / R6 — Step 5 question 1. Not deduped anywhere: the Dependents section carries the
         //   PER-ROW gates, and this one is about the filer, not about a row.
         QuestionId::FilerTinIssuedByDueDate => FieldId::DeclFilerTinIssuedByDueDate,
+        // ★ R7 / T8 — HoH, QSS, and FR-67's election gate. Not deduped anywhere: no other section
+        //   carries a filing-status test, and none of them is an amount.
+        QuestionId::HohQualifyingPerson => FieldId::DeclHohQualifyingPerson,
+        QuestionId::HohPaidOverHalfCostOfKeepingUpHome => {
+            FieldId::DeclHohPaidOverHalfCostOfKeepingUpHome
+        }
+        QuestionId::NraSpouseResidentElection => FieldId::DeclNraSpouseResidentElection,
+        QuestionId::QssSpouseDiedInWindowAndNotRemarried => FieldId::DeclQssSpouseDiedInWindow,
+        QuestionId::QssChildYouCanClaim => FieldId::DeclQssChildYouCanClaim,
+        QuestionId::QssChildLivedInYourHomeAllYear => FieldId::DeclQssChildLivedAllYear,
+        QuestionId::QssPaidOverHalfCostOfKeepingUpHome => FieldId::DeclQssPaidOverHalfCost,
+        QuestionId::QssCouldHaveFiledJointlyInYearOfDeath => FieldId::DeclQssCouldHaveFiledJointly,
     }
 }
 
@@ -795,6 +865,7 @@ pub fn field_to_skippable(id: FieldId) -> Option<SkippableId> {
         FieldId::Form8615ParentIdentityUnobtainable => {
             SkippableId::Form8615ParentIdentityUnobtainable
         }
+        FieldId::HohMaritalBasis => SkippableId::HohMaritalBasis,
         _ => return None,
     })
 }
@@ -824,5 +895,6 @@ pub fn skippable_to_field(id: SkippableId) -> FieldId {
         SkippableId::Form8615ParentIdentityUnobtainable => {
             FieldId::Form8615ParentIdentityUnobtainable
         }
+        SkippableId::HohMaritalBasis => FieldId::HohMaritalBasis,
     }
 }

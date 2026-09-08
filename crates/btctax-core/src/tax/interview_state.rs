@@ -104,6 +104,58 @@ pub struct Waiting {
     pub waiting_on: &'static str,
 }
 
+/// ★★★ **R6 / T8 — a benefit the FORM computes on a schedule btctax does not file.**
+///
+/// Not a question and not a skippable, so it has no [`PanelItem`]: nothing the filer can answer
+/// changes it. It is listed because a forgone credit the filer never hears about is the same defect
+/// as an unasked question — 1040 line 19 is a carry from Schedule 8812, btctax emits none, and the
+/// line is therefore the filer's own blank (`advisories::ctc_odc_line19`).
+///
+/// ★★ **The row-(7) boxes ARE printed** on the TY2025+ grid (R6): the box says the dependent
+/// QUALIFIES, the line says what the schedule computed. This item is what tells the filer the
+/// difference is money.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotComputed {
+    /// What is not computed, in the filer's own terms.
+    pub what: &'static str,
+    /// How many rows on this return it applies to.
+    pub count: usize,
+    /// The per-row ceiling from the YEAR'S PACKAGE. ★ `None` on a params-less year — R12's rule,
+    /// the same one [`Forgo::size`] follows: a figure invented from no package is worse than a gap
+    /// the filer can see.
+    pub each: Option<Usd>,
+    /// Where the figure would come from — named so a filer on a params-less year knows what they
+    /// are waiting for, rather than seeing an unexplained blank.
+    pub sized_from: &'static str,
+}
+
+impl NotComputed {
+    /// The panel's sentence — assembled here, once, so the CLI and the TUI cannot word it
+    /// differently. `None` for `each` prints the count with no figure.
+    #[must_use]
+    pub fn line(&self) -> String {
+        match self.each {
+            Some(x) => format!(
+                "{} not computed \u{2014} {} with a credit box; up to {x} each",
+                self.what,
+                self.rows()
+            ),
+            None => format!(
+                "{} not computed \u{2014} {} with a credit box (size waiting on {})",
+                self.what,
+                self.rows(),
+                self.sized_from
+            ),
+        }
+    }
+    fn rows(&self) -> String {
+        match self.count {
+            1 => "1 dependent".to_string(),
+            n => format!("{n} dependents"),
+        }
+    }
+}
+
 /// Every open item on the return, in one call (R12).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InterviewState {
@@ -111,6 +163,8 @@ pub struct InterviewState {
     pub forgoing: Vec<Forgo>,
     pub refusing: Vec<Refusing>,
     pub waiting: Vec<Waiting>,
+    /// ★★★ R6 / T8 — benefits the form computes elsewhere. Never blocking; never answerable.
+    pub not_computed: Vec<NotComputed>,
     /// Live and answered under today's words.
     pub answered: usize,
     /// Not live on this return — counted, silent.
@@ -127,7 +181,11 @@ impl InterviewState {
     /// How many items the panel would print.
     #[must_use]
     pub fn open_items(&self) -> usize {
-        self.blocking.len() + self.forgoing.len() + self.refusing.len() + self.waiting.len()
+        self.blocking.len()
+            + self.forgoing.len()
+            + self.refusing.len()
+            + self.waiting.len()
+            + self.not_computed.len()
     }
 }
 
@@ -245,6 +303,31 @@ fn interview_state_with(
         let item = AnswerKey::Skippable(s.id);
         let has_value = skippable_has_value(s, ri);
         let status = answer_status(ri, &item);
+        // ★★★ **R7 / T8 — the CLASS-(A) entries of this registry are BLOCKING, not forgoing.**
+        //
+        // The split between the two registries is the ANSWER SHAPE, not the class: R7's HoH marital
+        // basis is one of the instruction's four named states, so it needs the `Choice` accessors,
+        // and its silence is not lawful. `SkippableQuestion::unanswered` is what declares that, and
+        // this reads the declaration rather than a list — the screen reads the same one, so the
+        // panel and the refusal cannot drift.
+        if let Some(reason) = s.unanswered.as_ref() {
+            let _ = reason;
+            if !has_value || status == AnswerStatus::WordingChanged {
+                st.blocking.push(Blocking {
+                    item,
+                    prompt: std::borrow::Cow::Borrowed(s.prompt),
+                    reason: if has_value {
+                        WORDING_CHANGED_REASON
+                    } else {
+                        "this question has not been answered"
+                    },
+                    accounts_for: s.unanswered_detail,
+                });
+            } else {
+                st.answered += 1;
+            }
+            continue;
+        }
         match status {
             AnswerStatus::WordingChanged => st.forgoing.push(Forgo {
                 item,
@@ -394,6 +477,33 @@ fn interview_state_with(
         }
     }
 
+    // ── 5. ★★★ **R6 / T8 — 1040 LINE 19, a forgo the filer cannot answer away.** ─────────────────
+    //
+    //    The row-(7) credit boxes are computed and PRINTED (R6), and the amount they entitle the
+    //    filer to is computed on Schedule 8812, which btctax does not file — so line 19 stays the
+    //    filer's own blank. `Advisory::CtcOdcOmitted` already says so on the report; this puts the
+    //    same fact in the panel, WITH ITS SIZE, while the return is being authored.
+    //
+    // ★ Counted from the flowchart's own verdict, not from the dependent count: a row with NEITHER
+    //   box forgoes nothing, and printing it in the size would overstate what the filer is losing.
+    let with_a_credit_box = (0..ri.header.dependents.len())
+        .filter(|row| {
+            crate::tax::dependent_gates::credit_column(ri, *row)
+                != crate::tax::dependent_gates::CreditColumn::Neither
+        })
+        .count();
+    if with_a_credit_box > 0 {
+        st.not_computed.push(NotComputed {
+            what: "child tax credit / credit for other dependents",
+            count: with_a_credit_box,
+            // ★★ The CHILD-credit ceiling, which is the LARGER of the two and the one a filer needs
+            //    to hear. Deliberately not a blended figure: "up to $X each" is a ceiling, and the
+            //    ceiling for a household is the child credit.
+            each: params.map(|p| p.child_tax_credit_per_child),
+            sized_from: YEAR_PACKAGE,
+        });
+    }
+
     st
 }
 
@@ -527,6 +637,76 @@ mod tests {
 
     fn params() -> FullReturnParams {
         crate::tax::testonly::ty2024_params()
+    }
+
+    /// ★★★ **R6 / T8 — THE LINE-19 FORGO IS SIZED FROM THE YEAR'S PACKAGE, AND BLANK WITHOUT ONE.**
+    ///
+    /// The row-(7) credit boxes are printed and the amount is computed on Schedule 8812, which btctax
+    /// does not file — so the panel says so, with a size where the package supplies one. Both halves
+    /// are asserted, because a size that is always present would pass on a hardcoded figure and a
+    /// size that is always absent would pass on a panel that never learned to read the package.
+    #[test]
+    fn the_line_19_forgo_is_sized_from_the_package_and_blank_without_one() {
+        let mut ri = answered_single();
+        ri.header.dependents = vec![crate::tax::return_inputs::Dependent {
+            name: "Kid Example".into(),
+            ssn: "000-00-1111".into(),
+            relationship: "Daughter".into(),
+            ..Default::default()
+        }];
+        crate::tax::testonly::answer_all_live_declarations(&mut ri);
+        assert_eq!(
+            crate::tax::dependent_gates::credit_column(&ri, 0),
+            crate::tax::dependent_gates::CreditColumn::ChildTaxCredit,
+            "the fixture's row really does carry a credit box"
+        );
+
+        // ── with the package ──
+        let p = params();
+        let st = interview_state_with_params(&ri, &p);
+        assert_eq!(st.not_computed.len(), 1);
+        let n = &st.not_computed[0];
+        assert_eq!(n.count, 1);
+        assert_eq!(n.each, Some(p.child_tax_credit_per_child));
+        let line = n.line();
+        assert!(line.contains("1 dependent"), "{line}");
+        assert!(
+            line.contains("2000"),
+            "the size is the year's own figure: {line}"
+        );
+
+        // ── without it ──
+        let st = interview_state(&ri);
+        assert_eq!(st.not_computed.len(), 1);
+        assert_eq!(
+            st.not_computed[0].each, None,
+            "no package ⇒ no invented figure"
+        );
+        let line = st.not_computed[0].line();
+        assert!(!line.contains('$'), "no figure at all, not a zero: {line}");
+        assert!(
+            line.contains(YEAR_PACKAGE),
+            "and it names what it waits on: {line}"
+        );
+
+        // ── a dependent with NEITHER box forgoes nothing, so nothing is listed ──
+        let mut none = ri.clone();
+        none.header.dependents[0].tin_issued_by_due_date = Some(false);
+        assert_eq!(
+            crate::tax::dependent_gates::credit_column(&none, 0),
+            crate::tax::dependent_gates::CreditColumn::Neither
+        );
+        assert!(
+            interview_state_with_params(&none, &p)
+                .not_computed
+                .is_empty(),
+            "a row the instruction gives NO credit box forgoes no credit"
+        );
+
+        // ── …and a return with no dependents at all says nothing. ──
+        assert!(interview_state_with_params(&answered_single(), &p)
+            .not_computed
+            .is_empty());
     }
 
     /// ★★★ **R12's headline kill: N unanswered live class-(A) items are listed as N blocking items

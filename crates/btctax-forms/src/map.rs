@@ -840,6 +840,60 @@ pub struct DependentRowCells {
     pub odc: CheckChoice,
 }
 
+/// ★★★ **T8 / R6 — the TY2025+ DEPENDENTS GRID.**
+///
+/// A separate section from [`Form1040HeaderCells`]'s `dependent_rows`, because the TY2025 form
+/// **re-parted the block**: TY2024 prints four dependent ROWS of four columns, TY2025 four dependent
+/// COLUMNS of seven rows, and the later form adds rows (5), (6) and (7), which have no TY2024
+/// counterpart at all. One struct spanning both revisions would need every field optional, which is
+/// how a revision silently stops printing something.
+///
+/// ★★ **A map declares one or the other, never both** — enforced at fill time by
+/// `form1040_full::fill_form_1040_full_with_map`, because two grid declarations would mean two
+/// answers to *"where does dependent 1's SSN print?"* and nothing on the page would show which won.
+///
+/// ★★★ **Every FQN here is DERIVED, not typed**: `cargo run -p xtask -- dependents-grid f1040--2025`
+/// measures them off the form's own geometry, and
+/// `xtask::dependents_grid::tests::the_committed_ty2025_grid_map_is_the_one_measured_off_the_form`
+/// holds the committed file to that measurement. A transposed pair inside one dependent's row (6) is
+/// invisible on the emitted PDF, invisible to both oracles and invisible to the field census — it is
+/// only visible to a check that knows which SLOT each name belongs in.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DependentsGridCells {
+    /// *"If more than four dependents, see instructions and check here"* — the same ONE decision as
+    /// the continuation statement (`ReturnHeader::more_than_four_dependents`).
+    pub more_than_four_dependents: CheckChoice,
+    /// The four printed dependent columns, LEFT TO RIGHT. Held to `DEPENDENTS_GRID_ROWS` at fill
+    /// time, exactly as the TY2024 `dependent_rows` are.
+    pub columns: Vec<DependentColumnCells>,
+}
+
+/// One printed dependent COLUMN of the TY2025+ grid.
+///
+/// ★ Rows (1)–(4) are declared but **not written by this build**: they are the identity block's cells
+///   and the TY2025 identity block is unmapped. They are therefore ABSENT from this struct rather
+///   than present-and-blank — see `forms/2025/f1040.map.toml`'s own note. A mapped cell nothing
+///   writes is the *"blank because nothing populated it"* defect wearing a map entry.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DependentColumnCells {
+    /// Row **(5)(a)** — *"Check if lived with you more than half of 2025 … (a) Yes"*.
+    pub lived_with_you: CheckChoice,
+    /// Row **(5)(b)** — *"(b) And in the U.S."*.
+    pub lived_with_you_in_us: CheckChoice,
+    /// Row **(6)** — *"Full-time student"*.
+    pub full_time_student: CheckChoice,
+    /// Row **(6)** — *"Permanently and totally disabled"*.
+    pub permanently_and_totally_disabled: CheckChoice,
+    /// Row **(7)** — *"Child tax credit"*. ★ This and the next are the two ON-STATES of ONE AcroForm
+    /// field (`c1_28[0]` on `/1`, `c1_28[1]` on `/2`), which is the form's own way of saying a
+    /// dependent takes at most one of them.
+    pub child_tax_credit: CheckChoice,
+    /// Row **(7)** — *"Credit for other dependents"*.
+    pub credit_for_other_dependents: CheckChoice,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Form1040Map {
@@ -890,6 +944,11 @@ pub struct Form1040Map {
     /// header FQNs; the FULL-return filler refuses on `None` rather than emit an unnamed 1040.
     #[serde(default)]
     pub header: Option<Form1040HeaderCells>,
+    /// ★★★ **T8 / R6 — the TY2025+ Dependents grid.** `None` on TY2024, whose block is the four
+    /// `header.dependent_rows`; `None` also on a year whose grid has not been measured yet, in which
+    /// case nothing is written and the cells stay on the field census's `UNCENSUSED` register.
+    #[serde(default)]
+    pub dependents_grid: Option<DependentsGridCells>,
     /// The capital-gain amount cell (line 7a for 2025, line 7 for 2024, **line 13 for 2017**). A
     /// single field on 2024/2025; a dollars+cents [`MoneyPair`] on the 2017 form.
     pub line7a: MoneyCell,

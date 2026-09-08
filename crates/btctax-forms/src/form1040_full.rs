@@ -27,9 +27,10 @@
 
 use crate::cells::{page_of, push_money, push_money_opt, render_ssn};
 use crate::error::FormsError;
-use crate::map::{CheckChoice, Form1040HeaderCells, Form1040Map, MoneyCell};
+use crate::map::{CheckChoice, DependentsGridCells, Form1040HeaderCells, Form1040Map, MoneyCell};
 use crate::pdf;
 use crate::verify::{verify_flat, FlatPlacement};
+use btctax_core::tax::dependent_gates::CreditColumn;
 use btctax_core::tax::dependents_statement::DEPENDENTS_GRID_ROWS;
 use btctax_core::tax::packet::ReturnHeader;
 use btctax_core::tax::printed::Form1040Lines;
@@ -104,6 +105,24 @@ pub fn fill_form_1040_full_with_map(
         status,
         &blank_fields,
     )?;
+
+    // ★★★ **T8 / R6 — the TY2025+ DEPENDENTS GRID.** A year's map declares its dependents block ONE
+    //     way: TY2024's four `header.dependent_rows`, or the TY2025+ `[dependents_grid]`. Two
+    //     declarations would be two answers to *"where does dependent 1 print?"* and nothing on the
+    //     emitted page would show which one won — the same silent-divergence argument the row-count
+    //     guard below already makes, one level up.
+    if let Some(grid) = map.dependents_grid.as_ref() {
+        if !h.dependent_rows.is_empty() {
+            return Err(FormsError::Geometry(format!(
+                "the TY{y} 1040 map declares BOTH `header.dependent_rows` ({} rows) and \
+                 `[dependents_grid]`. The dependents block is printed once; two declarations of it \
+                 are two answers to where a dependent's cells are, and the emitted page shows \
+                 neither. Keep the one the year's form actually prints.",
+                h.dependent_rows.len()
+            )));
+        }
+        push_dependents_grid(&mut writes, &mut placements, grid, header)?;
+    }
 
     // ── Page 1, AMOUNT column, top to bottom. Line 7 carries a LEADING MINUS on a loss year. ────
     let p1: [(&MoneyCell, Usd); 13] = [
@@ -551,7 +570,90 @@ fn push_header_block(
         text(w, p, &row.name, &d.name);
         text(w, p, &row.ssn, &render_ssn(&d.ssn, max_len_of(&row.ssn))?);
         text(w, p, &row.relationship, &d.relationship);
-        // row.ctc / row.odc are deliberately NOT checked — v1 omits the credit (L19 = 0).
+        // ★ row.ctc / row.odc stay UNCHECKED on TY2024, and that is now a statement about the YEAR
+        //   rather than about the credit. R6's row-(7) computation is transcribed from
+        //   `i1040gi--2025` and its cells are the TY2025+ grid's (`[dependents_grid]`); TY2024's map
+        //   declares none, so this emitter's TY2024 output is byte-identical to what it was before
+        //   T8 — held by `full_return_form_fills_are_byte_deterministic` and the committed goldens.
+    }
+    Ok(())
+}
+
+/// ★★★ **T8 / R6 — write the TY2025+ Dependents grid: the *more than four* box and rows (5), (6)
+/// and (7) for each printed dependent.**
+///
+/// ★★ **Rows (1)–(4) are NOT written here, and the map does not declare them.** They are the page-1
+///    identity block's cells and this build maps no TY2025 identity block; see
+///    `forms/2025/f1040.map.toml`'s own note. What that buys is fail-closed: there is no cell for a
+///    name to be written into, so a half-identified dependent — an SSN printed beside a blank name —
+///    is not expressible.
+///
+/// ★★★ **Its one production call site is `fill_form_1040_full_with_map`, and on the only year that
+///     declares a grid today that call site is not reached** — TY2025's map has no `[header]`, and
+///     the full-return filler refuses an unnamed 1040 before anything else. That is a statement
+///     about the TY2025 PORT (no identity block, no money lines), not about this function: the kill
+///     `the_ty2025_dependents_grid_prints_the_answers` in `full_return_forms.rs` drives **this
+///     function**, through the production `pdf::` write path, into the real TY2025 template, and
+///     reads the boxes back off the saved file.
+pub fn push_dependents_grid(
+    w: &mut Vec<(String, pdf::FieldValue)>,
+    p: &mut Vec<FlatPlacement>,
+    cells: &DependentsGridCells,
+    header: &ReturnHeader,
+) -> Result<(), FormsError> {
+    // The same capacity guard the TY2024 block makes, for the same reason: core owns the split at
+    // `DEPENDENTS_GRID_ROWS` and the map declares the printed column count independently.
+    if cells.columns.len() != DEPENDENTS_GRID_ROWS {
+        return Err(FormsError::Geometry(format!(
+            "the 1040 map declares {} dependent column(s) but core splits the household at {} \
+             (`DEPENDENTS_GRID_ROWS`). The page-1 grid and the continuation statement would disagree \
+             about where the split falls, and nothing on the emitted page would show it. Reconcile \
+             the map with core before filing.",
+            cells.columns.len(),
+            DEPENDENTS_GRID_ROWS
+        )));
+    }
+    let check = |w: &mut Vec<(String, pdf::FieldValue)>,
+                 p: &mut Vec<FlatPlacement>,
+                 c: &CheckChoice,
+                 on: bool| {
+        if !on {
+            return; // an unchecked box is simply not written
+        }
+        w.push((c.field.clone(), pdf::FieldValue::Check { on: c.on.clone() }));
+        p.push(FlatPlacement::check(c.field.clone(), page_of(&c.field)));
+    };
+
+    let (on_form, overflow) = header.dependents_split();
+    // The box and the statement are ONE decision — see `more_than_four_dependents`.
+    check(w, p, &cells.more_than_four_dependents, !overflow.is_empty());
+    for (d, col) in on_form.iter().zip(&cells.columns) {
+        let g = d.grid;
+        check(w, p, &col.lived_with_you, g.lived_with_you_over_half_year);
+        check(w, p, &col.lived_with_you_in_us, g.lived_with_you_in_us);
+        check(w, p, &col.full_time_student, g.full_time_student);
+        check(
+            w,
+            p,
+            &col.permanently_and_totally_disabled,
+            g.permanently_and_totally_disabled,
+        );
+        // ★★★ Row (7) is COMPUTED (R6) and the two positions are two on-states of ONE field, so at
+        //     most one of these writes — the form's own way of saying a dependent takes at most one
+        //     credit. `CreditColumn::Neither` writes neither, which is the instruction's own third
+        //     outcome and not an error.
+        check(
+            w,
+            p,
+            &col.child_tax_credit,
+            g.credit == CreditColumn::ChildTaxCredit,
+        );
+        check(
+            w,
+            p,
+            &col.credit_for_other_dependents,
+            g.credit == CreditColumn::CreditForOtherDependents,
+        );
     }
     Ok(())
 }

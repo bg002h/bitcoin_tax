@@ -52,6 +52,62 @@ pub fn answer_all_live_declarations(ri: &mut ReturnInputs) {
             (q.set)(ri, q.neutral); // ★ declared per question — see FormQuestion::neutral
         }
     }
+    // ★★★ **AND AGAIN, because the flowchart WAITS on two return-level declarations.** Step 2
+    //     question 4 (*"Could you be claimed as a dependent…"*) and Step 5 question 1 (the filer's
+    //     own TIN) are `FormQuestion`s, and a row that reaches one of them unanswered stops at
+    //     `DependentVerdict::WaitingOnQuestion` — which is not `Unanswered`, so the sweep above
+    //     BREAKS and every later gate on that row is left blank. The loop has now answered both, so
+    //     one more sweep finishes the rows that were waiting.
+    //
+    // ★ Found by T8: a TY2025 fixture with two dependents that did not pre-answer
+    //   `can_be_claimed_as_dependent_taxpayer` got `CreditColumn::Neither` on both children, with
+    //   this helper reporting nothing. Idempotent on a fixture that was already complete.
+    answer_all_dependent_gates(ri);
+    answer_all_class_a_skippables(ri);
+}
+
+/// ★★★ **R7 / T8 — answer every LIVE class-(A) entry of `SKIPPABLE_QUESTIONS`.**
+///
+/// That registry is class (B) by rule, and the entries that declare otherwise
+/// ([`crate::tax::questions::SkippableQuestion::unanswered`]) BLOCK — so a fixture that leaves one
+/// blank refuses, exactly as it would for a `FormQuestion`. Which entries those are is DERIVED from
+/// the declaration, never listed here.
+///
+/// ★ **The chosen option is the first that leaves the screen clean**, not a name typed here: two of
+///   the HoH marital basis's four states refuse by design, and a fixture helper that picked one of
+///   them would make every HoH fixture in the workspace refuse for a reason the fixture never meant.
+///   The fallback is the first option, for a fixture already refusing for some unrelated reason.
+pub fn answer_all_class_a_skippables(ri: &mut ReturnInputs) {
+    use crate::tax::questions::{SkippableKind, SKIPPABLE_QUESTIONS};
+    for sk in SKIPPABLE_QUESTIONS {
+        if sk.unanswered.is_none() || !(sk.live)(ri) {
+            continue;
+        }
+        match sk.kind {
+            SkippableKind::YesNo => {
+                if (sk.get_bool)(ri).is_none() {
+                    (sk.set_bool)(ri, true);
+                }
+            }
+            SkippableKind::Date => {}
+            SkippableKind::Choice(options) => {
+                if (sk.get_choice)(ri).is_some() {
+                    continue;
+                }
+                let mut chosen = options.first().copied();
+                for o in options {
+                    (sk.set_choice)(ri, o);
+                    if crate::tax::return_refuse::screen_param_free(ri).is_none() {
+                        chosen = None; // this one stands
+                        break;
+                    }
+                }
+                if let Some(first) = chosen {
+                    (sk.set_choice)(ri, first);
+                }
+            }
+        }
+    }
 }
 
 /// ★★★ **T7 / R6 — answer every LIVE dependent gate a fixture left blank, at its declared
@@ -193,6 +249,11 @@ pub fn ty2024_params() -> FullReturnParams {
         kiddie_unearned_threshold: dec!(2600),
         // §152(d)(1)(B), Rev. Proc. 2023-34 §3.24; i1040gi--2024.txt:1700 prints it.
         qualifying_relative_gross_income_limit: dec!(5050),
+        // §24(h)(2) / §24(h)(4) — the TCJA figures, in force through TY2024 (Pub. L. 119-21
+        // §70104(a)(2)+(f) raises the child credit to $2,200 from TY2025). Nothing computes from
+        // them; the R12 panel SIZES the line-19 forgo with them.
+        child_tax_credit_per_child: dec!(2000),
+        credit_for_other_dependents_per_person: dec!(500),
         elective_deferral_limit: dec!(23000),
         ftc_ceiling: dec!(300),
         qbi_ti_threshold_unmarried: dec!(191950),

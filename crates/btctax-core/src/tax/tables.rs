@@ -510,6 +510,23 @@ pub struct FullReturnParams {
     /// prompt that cannot state the figure asks the filer to derive it, and a derived answer to a
     /// §6065 declaration is exactly what this interview exists to prevent.
     pub qualifying_relative_gross_income_limit: Usd,
+    /// ★★★ **§24(h)(2) — the CHILD TAX CREDIT per qualifying child**, and **§24(h)(4)** below for the
+    /// CREDIT FOR OTHER DEPENDENTS per other qualifying person.
+    ///
+    /// btctax computes NEITHER credit: 1040 line 19 is a carry from Schedule 8812, which it does not
+    /// file, so the line is the filer's own blank (`advisories::ctc_odc_line19`). These figures exist
+    /// so the R12 panel can SIZE that forgo — *"child tax credit not computed — n children with a
+    /// credit box; up to $X each"* — from the year's package rather than from a number typed beside
+    /// it. On a params-less year the panel prints the count and no size, which is R12's own rule: a
+    /// figure invented from no package is worse than a gap the filer can see.
+    ///
+    /// ★ Year-scoped, not constant: §24(h)(2)'s $2,000 is the TCJA figure through **TY2024**, and
+    ///   Pub. L. 119-21 (OBBBA) §70104(a)(2) raises it to $2,200 for *"taxable years beginning after
+    ///   December 31, 2024"* (§70104(f)) — so TY2025 is already $2,200 — with §24(i)(2) indexing it
+    ///   for years beginning after 2025.
+    pub child_tax_credit_per_child: Usd,
+    /// §24(h)(4) — *"$500 for each dependent of the taxpayer other than a qualifying child"*.
+    pub credit_for_other_dependents_per_person: Usd,
     /// §402(g)(1) elective-deferral limit (excess-deferral refuse trigger, spec F3).
     pub elective_deferral_limit: Usd,
     /// §904(j) no-Form-1116 foreign-tax-credit ceiling (general; MFJ = double at the use site).

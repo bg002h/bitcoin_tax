@@ -77,7 +77,13 @@ const UNCENSUSED: &[(i32, &str, usize)] = &[
     // form package — the maps they named no longer exist, so the orphan check below would red on
     // them. Removed by deletion of the year, NOT by census work.
     // TY2025 — ten of fifteen maps DO carry a census and account for 100%. These five do not.
-    (2025, "f1040", 196),
+    // 196 → 171 on 2026-09-07: interview T8 mapped the TY2025 DEPENDENTS GRID — the *more than four
+    // dependents* box plus rows (5)(a), (5)(b), (6)×2 and (7)×2 for each of four dependents, 25
+    // cells, every name and on-state MEASURED off the form by `xtask dependents-grid`. Rows (1)–(4)
+    // (16 cells) stay here on purpose: they are the page-1 identity block's, this build writes no
+    // TY2025 identity block, and a mapped cell nothing writes is the "blank because nothing
+    // populated it" defect with a map entry in front of it.
+    (2025, "f1040", 171),
     (2025, "f8283", 63),
     (2025, "f8949", 12), // 16 → 12 on 2026-09-06: spec 1099-DA T3 mapped the four broker-reported checkboxes G/H (c1_1[3..4]) and J/K (c2_1[3..4])
     (2025, "schedule_d", 24),
@@ -85,12 +91,15 @@ const UNCENSUSED: &[(i32, &str, usize)] = &[
 ];
 
 /// The register's own totals, pinned so that a single edited line is visible as a changed number.
-/// 5 entries; 310 fields — all TY2025.
+/// 5 entries; 285 fields — all TY2025.
 ///
 /// 10 → 5 and 713 → 310 on 2026-09-06: S9 dropped the TY2017 form package, taking its five register
 /// entries (403 fields) with it.
+///
+/// 310 → 285 on 2026-09-07: interview T8 mapped 25 TY2025 `f1040` dependents-grid cells. The entry
+/// count is unchanged — the form is not censused, it is 25 cells less unaccounted.
 const UNCENSUSED_ENTRIES: usize = 5;
-const UNCENSUSED_FIELDS: usize = 310;
+const UNCENSUSED_FIELDS: usize = 285;
 
 // ★ Design r2 §10 step 4: the per-year ABSENT list is no longer a hand-list here — it is each year's
 //   `forms/<year>/YEAR.toml` `[forms_absent]` (with the reason beside each), read through

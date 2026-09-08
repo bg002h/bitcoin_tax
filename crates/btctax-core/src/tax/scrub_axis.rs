@@ -441,6 +441,18 @@ pub fn maximal_sentinel() -> ReturnInputs {
             form8615_parent_identity_unobtainable: Some(true),
             // ★ T7 / R6 — maximal means non-default here too.
             filer_tin_issued_by_due_date: Some(true),
+            // ★ R7 / T8 — same rule: every leaf carries a non-default value, and the name carries a
+            //   SENTINEL so the derived axis sees it if scrub ever stops replacing it.
+            hoh_marital_basis: Some(HohMaritalBasis::NotMarried),
+            hoh_qualifying_person: Some(true),
+            hoh_paid_over_half_cost_of_keeping_up_home: Some(true),
+            hoh_qualifying_child_name: "SENTINEL_hoh_child".into(),
+            nra_spouse_resident_election: Some(false),
+            qss_spouse_died_in_window_and_not_remarried: Some(true),
+            qss_child_you_can_claim: Some(true),
+            qss_child_lived_in_your_home_all_year: Some(true),
+            qss_paid_over_half_cost_of_keeping_up_home: Some(true),
+            qss_could_have_filed_jointly_in_year_of_death: Some(true),
         },
         w2s: vec![w2("one", "11-1111111"), w2("two", "22-2222222")],
         int_1099: vec![int_1099("one", "33-3333333"), int_1099("two", "44-4444444")],
@@ -1083,6 +1095,16 @@ mod matrix {
                 "header.address_zip",
                 NoSuchState(PLAIN_STRING),
                 Fixture(|r| r.header.address_zip = String::new()),
+                NoSuchState(NO_READER),
+            ),
+            // ★★★ R7 / T8 — the HoH / QSS entry space's non-dependent qualifying child. A PERSON'S
+            //     NAME on a filed page, so scrub replaces it with a stand-in and preserves only its
+            //     EMPTINESS — which is what the R7 liveness reads. Same three columns as the address
+            //     lines, and for the same reasons.
+            (
+                "header.hoh_qualifying_child_name",
+                NoSuchState(PLAIN_STRING),
+                Fixture(|r| r.header.hoh_qualifying_child_name = String::new()),
                 NoSuchState(NO_READER),
             ),
             (

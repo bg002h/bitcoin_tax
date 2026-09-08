@@ -170,7 +170,7 @@ mod tests {
             );
         }
         assert_eq!(
-            decl_count, 31,
+            decl_count, 39,
             "29 declarations are Decl* fields (the other two dedup to Schedule A). ★ R10.4 / T4b \
              added the sixteenth (the carried filing status's confirmation); ★ R3 / T5 added the \
              four of the DOCUMENT-LESS INCOME DOOR — wages with no W-2, interest or dividends with \
@@ -183,7 +183,7 @@ mod tests {
              instructions' line 1 and line 3 rule 1 both read \"you or your spouse\") and M-1's \
              document-less HSA distribution door (line 14a). \u{2605}\u{2605}\u{2605} T7 / R6 added the \
              thirty-first: Step 5 question 1 of Who Qualifies as Your Dependent, the one dependent \
-             gate that is about the FILER rather than about a row."
+             gate that is about the FILER rather than about a row. \u{2605}\u{2605}\u{2605} R7 / T8 added EIGHT: Head of household's two tests, FR-67's \u{a7}6013(g)/(h) nonresident-alien-spouse election gate, and Qualifying surviving spouse's five conditions."
         );
         assert_eq!(
             deduped,
@@ -197,8 +197,8 @@ mod tests {
         // The delegating Decl* fields + the foreign_country_names Text field.
         assert_eq!(
             decls.fields.len(),
-            32,
-            "31 declarations + foreign_country_names"
+            40,
+            "39 declarations + foreign_country_names"
         );
         assert!(decls
             .fields
@@ -325,6 +325,26 @@ mod tests {
                 //     return carries a DEPENDENT ROW. Safe to prime here for the same reason the
                 //     census rows are — the test drives one field at a time through the registry.
                 ri.header.dependents = vec![btctax_core::tax::return_inputs::Dependent::default()];
+                // ★★★ R7 / T8 — the FILING STATUS *is* the liveness for eight declarations, and a
+                //     return has exactly one status. So this is the one primer that cannot be
+                //     applied to every field at once, and it is applied PER FIELD — structural, in
+                //     the same way the §G-9 dates of death are for `coverage.rs`. FR-67's election
+                //     gate needs no arm: it is live on any return with a spouse `Person`, which the
+                //     MFS seed already has.
+                match f.id {
+                    FieldId::DeclHohQualifyingPerson
+                    | FieldId::DeclHohPaidOverHalfCostOfKeepingUpHome => {
+                        ri.filing_status = FilingStatus::HoH;
+                    }
+                    FieldId::DeclQssSpouseDiedInWindow
+                    | FieldId::DeclQssChildYouCanClaim
+                    | FieldId::DeclQssChildLivedAllYear
+                    | FieldId::DeclQssPaidOverHalfCost
+                    | FieldId::DeclQssCouldHaveFiledJointly => {
+                        ri.filing_status = FilingStatus::Qss;
+                    }
+                    _ => {}
+                }
                 ri
             };
             assert!(
@@ -485,6 +505,12 @@ mod tests {
                     ri.header.form8615_condition3_age_support = Some(true);
                     ri.header.form8615_condition4_parent_alive =
                         Some(ParentAliveAnswer::CannotKnow);
+                }
+                // ★★★ R7 / T8 — the HoH marital basis is live iff the FILING STATUS is Head of
+                //     household, which neither of the passes above can produce (one is MFJ, the
+                //     other Single). Primed last, and only for an entry both left dead.
+                if !(entry.live)(ri) {
+                    ri.filing_status = FilingStatus::HoH;
                 }
             };
             match entry.kind {

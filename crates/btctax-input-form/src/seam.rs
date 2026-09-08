@@ -307,6 +307,29 @@ pub enum FieldId {
     /// ★★★ T7 / R6 — Step 5 question 1: did YOU (and your spouse on a joint return) have an SSN or
     ///     ITIN issued by the due date? Return-level, live iff a dependent row exists.
     DeclFilerTinIssuedByDueDate,
+    // ── ★★★ R7 / T8 — HEAD OF HOUSEHOLD and QUALIFYING SURVIVING SPOUSE. ─────────────────────────
+    /// HoH — Test 1 or Test 2 (i1040gi--2025.txt:1164-1200). Live iff the status is HoH.
+    DeclHohQualifyingPerson,
+    /// HoH — "You paid over half the cost of keeping up a home", which both tests state.
+    DeclHohPaidOverHalfCostOfKeepingUpHome,
+    /// FR-67 — the §6013(g)/(h) nonresident-alien-spouse election. Live iff the return has a spouse.
+    DeclNraSpouseResidentElection,
+    /// QSS condition 1 — the two-year window, derived from the tax year.
+    DeclQssSpouseDiedInWindow,
+    /// QSS condition 2 — a child or stepchild you can claim.
+    DeclQssChildYouCanClaim,
+    /// QSS condition 3 — the child lived in your home all year.
+    DeclQssChildLivedAllYear,
+    /// QSS condition 4 — you paid over half the cost of keeping up your home.
+    DeclQssPaidOverHalfCost,
+    /// QSS condition 5 — you could have filed jointly the year your spouse died.
+    DeclQssCouldHaveFiledJointly,
+    /// ★★★ R7 / T8 — the HoH marital basis: the CHOICE of the instruction's four states. A
+    ///     `FieldKind::Enum`, not a tri-state, and class (A) — see `SkippableQuestion::unanswered`.
+    HohMaritalBasis,
+    /// ★★★ R7 / T8 — the entry space beside the HoH / QSS box: the non-dependent qualifying child's
+    ///     name. Live iff HoH and no dependent row is the qualifying person.
+    HohQualifyingChildName,
     // ── ★★★ T7 / R6 — THE TWENTY PER-ROW DEPENDENT GATES (`DEPENDENT_GATES`). Each delegates to the
     //    registry entry; `live` is `|_| true` and `get` returns absent when the gate is not live for
     //    THAT ROW — the I-4 emulation §10's frozen seam requires, since `Field.live` has no row.

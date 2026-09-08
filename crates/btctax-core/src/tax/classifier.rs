@@ -419,7 +419,58 @@ fn classify_header(c: &mut Census, h: &HouseholdHeader) {
         form8615_condition4_parent_alive,
         form8615_parent_identity_unobtainable,
         filer_tin_issued_by_due_date,
+        hoh_marital_basis,
+        hoh_qualifying_person,
+        hoh_paid_over_half_cost_of_keeping_up_home,
+        hoh_qualifying_child_name: _, // String — a scalar the `_` rule permits
+        nra_spouse_resident_election,
+        qss_spouse_died_in_window_and_not_remarried,
+        qss_child_you_can_claim,
+        qss_child_lived_in_your_home_all_year,
+        qss_paid_over_half_cost_of_keeping_up_home,
+        qss_could_have_filed_jointly_in_year_of_death,
     } = h;
+    // ★★★ R7 / T8 — HEAD OF HOUSEHOLD and QUALIFYING SURVIVING SPOUSE. Every one is a class-(A)
+    //     DECLARATION: checking either box is an assertion about the filer's household that unlocks
+    //     money (a wider bracket and standard deduction; the joint rates), so silence may not stand
+    //     for a *yes*, and none of them is a benefit the filer may lawfully forgo — forgoing would
+    //     mean filing under a status whose tests were never met.
+    //
+    // ★ `hoh_marital_basis` is the ONE non-boolean here, so it is not a `declaration` (which takes
+    //   an `Option<bool>`). It is class (A) all the same, through
+    //   `SkippableQuestion::unanswered` — `SKIPPABLE_QUESTIONS` is where the CHOICE shape lives, and
+    //   that field is what says its silence is not lawful. See `questions.rs`.
+    c.exempt(
+        hoh_marital_basis,
+        Class::SerdeRequired,
+        "R7 — the HoH marital basis is a CHOICE (`HohMaritalBasis`), so it is asked through          `SkippableId::HohMaritalBasis` rather than as an `Option<bool>` declaration. Its silence is          NOT lawful: the registry entry carries `unanswered: Some(RefuseReason::         HohMaritalBasisUnanswered)`, which `screen_inputs` and the R12 panel both read, and no          serde default names a variant",
+    );
+    c.declaration(hoh_qualifying_person, QuestionId::HohQualifyingPerson);
+    c.declaration(
+        hoh_paid_over_half_cost_of_keeping_up_home,
+        QuestionId::HohPaidOverHalfCostOfKeepingUpHome,
+    );
+    c.declaration(
+        nra_spouse_resident_election,
+        QuestionId::NraSpouseResidentElection,
+    );
+    c.declaration(
+        qss_spouse_died_in_window_and_not_remarried,
+        QuestionId::QssSpouseDiedInWindowAndNotRemarried,
+    );
+    c.declaration(qss_child_you_can_claim, QuestionId::QssChildYouCanClaim);
+    c.declaration(
+        qss_child_lived_in_your_home_all_year,
+        QuestionId::QssChildLivedInYourHomeAllYear,
+    );
+    c.declaration(
+        qss_paid_over_half_cost_of_keeping_up_home,
+        QuestionId::QssPaidOverHalfCostOfKeepingUpHome,
+    );
+    c.declaration(
+        qss_could_have_filed_jointly_in_year_of_death,
+        QuestionId::QssCouldHaveFiledJointlyInYearOfDeath,
+    );
     c.declaration(
         can_be_claimed_as_dependent_taxpayer,
         QuestionId::DependentTaxpayer,

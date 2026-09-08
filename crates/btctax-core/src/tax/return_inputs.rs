@@ -787,6 +787,90 @@ pub struct HouseholdHeader {
     /// dependent, and a return with none never asks it.
     #[serde(default)]
     pub filer_tin_issued_by_due_date: Option<bool>,
+    // ── ★★★ R7 / T8 — HEAD OF HOUSEHOLD and QUALIFYING SURVIVING SPOUSE are ASSERTIONS about the
+    //    filer's household, and each unlocks money: HoH a wider bracket and standard deduction, QSS
+    //    the JOINT rates and the joint standard deduction. `FilingStatusArg::Hoh` and `::Qss` were
+    //    offered with no test at all. Choosing one now asks the instruction's own tests.
+    /// ★★★ **R7 — *"You are considered unmarried for this purpose if any of the following applies"***
+    /// (`i1040gi--2025.txt:1147-1163`). An ENUM of the instruction's four states, live iff
+    /// `filing_status == Hoh`.
+    ///
+    /// ★★ **Not one compound `Option<bool>`.** `:1149-1163` states three distinct legal predicates —
+    /// legally separated under a decree; married but living apart *and meeting the other rules under
+    /// **Married persons who live apart***; a nonresident-alien spouse with no election — and a single
+    /// *Yes* spanning them is the compound answer R1 forbids: *"a compound 'no' spanning distinct
+    /// legal predicates fabricates precision the filer never swore to"*.
+    ///
+    /// Class **(A)**: `None` on a HoH return REFUSES
+    /// ([`crate::tax::return_refuse::RefuseReason::HohMaritalBasisUnanswered`]) — the filer has
+    /// checked a box that says they are unmarried or considered unmarried, and which of the four
+    /// ways is the testimony behind it.
+    #[serde(default)]
+    pub hoh_marital_basis: Option<HohMaritalBasis>,
+    /// ★★★ **R7 — HoH Test 1 or Test 2** (`i1040gi--2025.txt:1164-1200`). *"Check the 'Head of
+    /// household' box only if you are unmarried (or considered unmarried) and either Test 1 or Test 2
+    /// applies."*
+    ///
+    /// A class-(A) declaration ([`crate::tax::questions::QuestionId::HohQualifyingPerson`]), live iff
+    /// `filing_status == Hoh`. `Some(false)` refuses `HohTestNotMet` with the exit *"choose another
+    /// filing status"*.
+    #[serde(default)]
+    pub hoh_qualifying_person: Option<bool>,
+    /// ★★★ **R7 — the cost-of-keeping-up-a-home test**, which BOTH HoH tests state
+    /// (`i1040gi--2025.txt:1164`, `:1172`). Asked separately because the two tests share it and
+    /// because it is the one an unmarried filer most often fails.
+    #[serde(default)]
+    pub hoh_paid_over_half_cost_of_keeping_up_home: Option<bool>,
+    /// ★★★ **R7 — the entry space beside the HoH / QSS box.** *"If the child isn't claimed as your
+    /// dependent, enter the child's name in the entry space below qualifying surviving spouse. If you
+    /// don't enter the name, it will take us longer to process your return."*
+    /// (`i1040gi--2025.txt:1206-1210`.)
+    ///
+    /// ★ A `String`, not a declaration: the form asks for a NAME. Live iff HoH and no dependent row
+    ///   is the qualifying person — a filer whose qualifying person IS on the Dependents grid has
+    ///   already named them there, and the form's own condition is *"if the child isn't claimed as
+    ///   your dependent"*.
+    #[serde(default)]
+    pub hoh_qualifying_child_name: String,
+    /// ★★★ **FR-67 / R7 — the §6013(g)/(h) NONRESIDENT-ALIEN-SPOUSE ELECTION.**
+    ///
+    /// *"Generally, a married couple can't file a joint return if either spouse is a nonresident alien
+    /// at any time during the year. However, you and your spouse can choose to be treated as U.S.
+    /// residents for the entire year and file a joint return…"* (`i1040gi--2025.txt:1059-1072`.)
+    ///
+    /// btctax asked nothing about an NRA spouse, so a joint return for such a filer was computed on
+    /// the U.S. spouse's income alone — the election puts the NRA spouse's **worldwide** income on the
+    /// return, and none of it is collected. A class-(A) declaration
+    /// ([`crate::tax::questions::QuestionId::NraSpouseResidentElection`]), live iff the return carries
+    /// a spouse; `Some(true)` REFUSES naming the election and a preparer.
+    #[serde(default)]
+    pub nra_spouse_resident_election: Option<bool>,
+    /// ★★★ **R7 — QSS condition 1** (`i1040gi--2025.txt:1293-1297`): *"Your spouse died in 2023 or
+    /// 2024 and you didn't remarry before the end of 2025."*
+    ///
+    /// ★ The two-year window is DERIVED from [`ReturnInputs::tax_year`] and rendered into the prompt
+    ///   ([`crate::tax::questions::RENDERED_PROMPTS`]), never a literal pair of years: every revision
+    ///   shifts it, and a prompt naming the wrong years is a question the filer cannot check against
+    ///   their own facts. Changing the year therefore re-asks it for free (R10.3/R10.4).
+    #[serde(default)]
+    pub qss_spouse_died_in_window_and_not_remarried: Option<bool>,
+    /// **R7 — QSS condition 2** (`:1298-1306`): *"You have a child or stepchild (not a foster child)
+    /// whom you can claim as a dependent or could claim as a dependent except that, for 2025: a. The
+    /// child had gross income of $5,200 or more, b. The child filed a joint return, or c. You could be
+    /// claimed as a dependent on someone else's return."*
+    #[serde(default)]
+    pub qss_child_you_can_claim: Option<bool>,
+    /// **R7 — QSS condition 3** (`:1273-1277`): *"This child lived in your home for all of 2025."*
+    #[serde(default)]
+    pub qss_child_lived_in_your_home_all_year: Option<bool>,
+    /// **R7 — QSS condition 4** (`:1278-1279`): *"You paid over half the cost of keeping up your
+    /// home."*
+    #[serde(default)]
+    pub qss_paid_over_half_cost_of_keeping_up_home: Option<bool>,
+    /// **R7 — QSS condition 5** (`:1280-1283`): *"You could have filed a joint return with your spouse
+    /// the year your spouse died, even if you didn't actually do so."*
+    #[serde(default)]
+    pub qss_could_have_filed_jointly_in_year_of_death: Option<bool>,
     /// **Form 8615, condition 3** (`design/forms/extract/i1040gi--2025.txt:3932-3940`), verbatim:
     /// "3. You were either:
     ///     a. Under age 18 at the end of 2025,
@@ -874,6 +958,41 @@ pub enum ParentAliveAnswer {
     /// its own it still refuses, because the certification also requires
     /// [`HouseholdHeader::form8615_parent_identity_unobtainable`] `== Some(true)`.
     CannotKnow,
+}
+
+/// ★★★ **R7 — the four ways the Form 1040 instructions let a filer check *Head of household*.**
+///
+/// *"You can check the 'Head of household' box … if you are unmarried and provide a home for certain
+/// other persons. You are considered unmarried for this purpose if any of the following applies."*
+/// (`design/forms/extract/i1040gi--2025.txt:1143-1163`.) The bullet list that follows states three
+/// distinct legal predicates; being plainly unmarried is the fourth, unlisted state — the sentence's
+/// own *"if you are unmarried"*.
+///
+/// ★ `Serialize`/`Deserialize` with the default representation, so a vault stores `"NotMarried"` and
+///   friends. **No serde default names a variant**, and there is no `#[serde(other)]`: an unknown
+///   string must fail the parse rather than silently become an answer, exactly as
+///   [`ParentAliveAnswer`] records.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HohMaritalBasis {
+    /// Unmarried at the end of the year — the sentence's own opening condition, *"if you are
+    /// unmarried"* (`:1146-1148`). No further test.
+    NotMarried,
+    /// *"You were legally separated according to your state law under a decree of divorce or separate
+    /// maintenance at the end of 2025. But if, at the end of 2025, your divorce wasn't final (an
+    /// interlocutory decree), you are considered married."* (`:1151-1156`.)
+    LegallySeparatedByDecree,
+    /// *"You are married but lived apart from your spouse for the last 6 months of 2025 and you meet
+    /// the other rules under **Married persons who live apart**, later."* (`:1157-1159`.)
+    ///
+    /// **REFUSES**, naming that rule (`:1247-1268`): it is five further conditions btctax does not
+    /// collect, and *"lived apart"* alone is one of them.
+    MarriedLivedApart,
+    /// *"You are married and your spouse was a nonresident alien at any time during the year and the
+    /// election to treat the alien spouse as a resident alien is not made. See **Nonresident aliens
+    /// and dual-status aliens**, earlier."* (`:1160-1163`.)
+    ///
+    /// **REFUSES**, naming that rule (`:1059-1072`).
+    NraSpouseNoElection,
 }
 
 /// Schedule C line F accounting method (SPEC §4.4a).

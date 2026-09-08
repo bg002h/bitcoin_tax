@@ -18,6 +18,7 @@ use crate::donation::DonationDetails;
 use crate::event::LedgerEvent;
 use crate::identity::EventId;
 use crate::state::LedgerState;
+use crate::tax::dependent_gates::CreditColumn;
 use crate::tax::other_taxes::{form_8959_lines, form_8960_lines, Form8959Lines, Form8960Lines};
 use crate::tax::printed::{
     form_1040_income_lines, form_1040_lines, form_8949_printed, schedule_1_lines, schedule_2_lines,
@@ -218,14 +219,57 @@ impl FiledPerson {
     }
 }
 
-/// A dependent's row on the 1040. The CTC/ODC credit boxes are deliberately NOT modeled here: v1 omits
-/// the credit entirely (L19 = 0, with the `CtcOdcOmitted` advisory), and a checked credit box beside a
-/// zero credit is a form contradicting itself.
+/// A dependent's row on the 1040.
+///
+/// ★★★ **T8 / R6 — the credit boxes ARE modelled now.** This doc used to say *"The CTC/ODC credit
+/// boxes are deliberately NOT modeled here: v1 omits the credit entirely (L19 = 0, with the
+/// `CtcOdcOmitted` advisory), and a checked credit box beside a zero credit is a form contradicting
+/// itself."* Two things changed and both are the instruction's, not ours:
+///
+/// 1. **Row (7) is a COMPUTED box, not a claimed amount.** The flowchart *Who Qualifies as Your
+///    Dependent* decides it (`i1040gi--2025.txt:1456-1812`), and [`crate::tax::dependent_gates`]
+///    walks that flowchart. Checking it is transcription.
+/// 2. **Line 19 is still a forgo, and that is not a contradiction.** The credit itself is claimed on
+///    Schedule 8812, which btctax does not file; the box says the dependent QUALIFIES, the line says
+///    what the schedule computed. `ctc_odc_line19` and `Advisory::CtcOdcOmitted` are unchanged, so
+///    the filer is still told what they forgo — see `advisories.rs`'s own note.
+///
+/// TY2024's grid has no rows (5)/(6) and its map declares no `[dependents_grid]`, so nothing here
+/// reaches its printed page: [`Self::grid`] is written only through the TY2025+ grid cells.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DependentRow {
     pub name: String,
     pub ssn: Ssn,
     pub relationship: String,
+    /// Rows (5), (6) and (7) of the TY2025+ Dependents grid.
+    pub grid: DependentGridRow,
+}
+
+/// ★★★ **Rows (5), (6) and (7) of the TY2025+ Dependents grid, for ONE dependent.**
+///
+/// The three printed rows the TY2024 form does not have (`f1040--2025.txt:44-54`): *"(5) Check if
+/// lived with you more than half of 2025 — (a) Yes / (b) And in the U.S."*, *"(6) Check if — Full-time
+/// student / Permanently and totally disabled"*, and *"(7) Credits — Child tax credit / Credit for
+/// other dependents"*.
+///
+/// ★★ **`bool`, not `Option<bool>`, and the projection is the point.** The form prints a CHECKBOX:
+/// the only thing it can say is *checked*. `Some(false)` and `None` are different facts about the
+/// interview and the SAME mark on the page — an empty box — so this is the projection to the filed
+/// page, taken once, in one place. The distinction that matters upstream is kept upstream: a live
+/// gate left `None` refuses through `screen_dependent_gates` before any packet is built, and a gate
+/// the walk never demanded (row (5)(b) under a *No* on (5)(a)) is lawfully blank.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DependentGridRow {
+    /// Row **(5)(a)** — *"Check if lived with you more than half of 2025 … (a) Yes"*.
+    pub lived_with_you_over_half_year: bool,
+    /// Row **(5)(b)** — *"(b) And in the U.S."*.
+    pub lived_with_you_in_us: bool,
+    /// Row **(6)** — *"Full-time student"*.
+    pub full_time_student: bool,
+    /// Row **(6)** — *"Permanently and totally disabled"*.
+    pub permanently_and_totally_disabled: bool,
+    /// Row **(7)** — computed by the flowchart, never asked.
+    pub credit: CreditColumn,
 }
 
 /// The four §63(f) aged/blind checkboxes on 1040 page 1.
@@ -415,15 +459,29 @@ impl ReturnHeader {
             Some(Owner::Spouse) => Some(spouse.clone().unwrap_or_else(|| taxpayer.clone())),
         };
 
+        // ★★★ **T8 / R6 — rows (5), (6) and (7), computed HERE and nowhere else.** The credit column
+        //     comes from the same `walk_dependent` the screens ran, through
+        //     `dependent_gates::credit_column`, so the printed box and the refusal that let the row
+        //     through can never be two different readings of the flowchart.
         let dependents = ri
             .header
             .dependents
             .iter()
-            .map(|d| {
+            .enumerate()
+            .map(|(row, d)| {
                 Ok(DependentRow {
                     name: d.name.clone(),
                     ssn: Ssn::canonical(&d.ssn)?,
                     relationship: d.relationship.clone(),
+                    grid: DependentGridRow {
+                        lived_with_you_over_half_year: d.lived_with_you_over_half_year
+                            == Some(true),
+                        lived_with_you_in_us: d.lived_with_you_in_us == Some(true),
+                        full_time_student: d.full_time_student == Some(true),
+                        permanently_and_totally_disabled: d.permanently_and_totally_disabled
+                            == Some(true),
+                        credit: crate::tax::dependent_gates::credit_column(ri, row),
+                    },
                 })
             })
             .collect::<Result<Vec<_>, SsnError>>()?;

@@ -580,6 +580,66 @@ pub fn under_17_at_year_end(d: &Dependent, tax_year: i32) -> bool {
         .is_some_and(|dob| crate::tax::return_1040::considered_age_at_year_end(dob, tax_year) < 17)
 }
 
+/// ★★★ **ROW (7) of the TY2025+ Dependents grid — *"(7) Credits"* (`f1040--2025.txt:52-54`).**
+///
+/// The form prints TWO check positions per dependent, *"Child tax credit"* and *"Credit for other
+/// dependents"*, and they are the two on-states of ONE AcroForm field: a dependent takes at most one
+/// of them. R6: **row (7) is COMPUTED, never asked** — there is no `FieldId` for either box, and this
+/// is the only thing that decides them.
+///
+/// ★ The third state is a real one and is NOT an error: Step 3's two *"No"* edges and Step 5's print
+///   the same sentence — *"You can't take the child tax credit… you can claim this person as a
+///   dependent"* — so the person stays on the grid with **neither** box (`i1040gi--2025.txt:1650-1653`,
+///   `:1752-1754`). A forgo, not a refusal.
+///
+/// ★ Named for the form's own two labels rather than `Ctc`/`Odc`/`None`: `None` as a variant name
+///   shadows `Option::None` under a glob import, and the doctrine is that a transcription is named
+///   for the words the form prints.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CreditColumn {
+    /// *"Child tax credit"*.
+    ChildTaxCredit,
+    /// *"Credit for other dependents"*.
+    CreditForOtherDependents,
+    /// Neither box — the forgo the instruction states in its own words. ★ The `Default`, and it is
+    /// the fail-closed direction: a grid row nobody computed prints no credit box rather than the
+    /// larger one.
+    #[default]
+    Neither,
+}
+
+impl DependentVerdict {
+    /// ★★★ **Row (7), read off the flowchart's own outcome.** Exhaustive and `_`-free on purpose: a
+    /// new verdict arm must be given a credit column by a human, because the difference between
+    /// *"neither box"* and *"the CTC box"* is up to $2,000 a child and both look like a tidy grid.
+    ///
+    /// Every non-claimable arm is [`CreditColumn::Neither`], and none of them can reach a printed
+    /// page: an `Unanswered` or `WaitingOnQuestion` row refuses through
+    /// [`crate::tax::return_refuse::screen_inputs`] and a `Refused` row through
+    /// `screen_dependent_values`, both before any packet is built. Mapping them to *neither* is the
+    /// fail-closed direction if one ever did.
+    #[must_use]
+    pub fn credit_column(&self) -> CreditColumn {
+        match self {
+            DependentVerdict::ChildTaxCredit => CreditColumn::ChildTaxCredit,
+            DependentVerdict::CreditForOtherDependents => CreditColumn::CreditForOtherDependents,
+            DependentVerdict::NoCreditBox
+            | DependentVerdict::NoRow
+            | DependentVerdict::Unanswered(_)
+            | DependentVerdict::WaitingOnQuestion(_)
+            | DependentVerdict::Refused(_)
+            | DependentVerdict::RefusedByQuestion(_) => CreditColumn::Neither,
+        }
+    }
+}
+
+/// ★★★ **Row (7) for one dependent row, from the flowchart.** The ONE entry point the packet uses,
+/// so no second walk can disagree with the one `screen_dependent_gates` ran.
+#[must_use]
+pub fn credit_column(ri: &ReturnInputs, row: usize) -> CreditColumn {
+    walk_dependent(ri, row).verdict.credit_column()
+}
+
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 // 4. The registry
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -1259,6 +1319,15 @@ mod tests {
         walk_dependent(ri, 0).verdict
     }
 
+    /// Give the fixture a taxpayer `ReturnHeader::build` can canonicalize — the packet refuses an
+    /// identity it cannot print, and the row-(7) kills go THROUGH the packet. The SSN is from the
+    /// never-issued space (area 000), like the dependent's.
+    fn named_taxpayer(ri: &mut ReturnInputs) {
+        ri.header.taxpayer.first_name = "Pat".into();
+        ri.header.taxpayer.last_name = "Roe".into();
+        ri.header.taxpayer.ssn = "000-00-2222".into();
+    }
+
     // ── Registry completeness ────────────────────────────────────────────────────────────────────
 
     /// ★★★ **`DEPENDENT_GATES` is TOTAL over `DependentGate::ALL`, both directions.** The enum is
@@ -1519,6 +1588,149 @@ mod tests {
                 ),
                 _ => assert_eq!(&got, want, "{name}"),
             }
+        }
+    }
+
+    /// ★★★ **T8 / R6 — THE TRUTH TABLE'S ROW-(7) COLUMN, ASKED OF THE SURFACE THAT PRINTS IT.**
+    ///
+    /// `the_flowchart_truth_table` asserts the VERDICT. This asserts what the next surface does with
+    /// it: `ReturnHeader::build` is what the emitter reads, and its `DependentRow::grid` is the only
+    /// thing the TY2025+ page-1 grid is filled from. A `credit_column` that answered correctly while
+    /// the packet dropped it on the floor would leave both boxes blank on a filed page — the exact
+    /// invisible-blank defect, and the verdict-only table cannot see it.
+    ///
+    /// ★ The **born-in-year** row is here by name (R6's own kill): a child born 2026-11-01 whose home
+    ///   was the filer's for more than half the time they were alive answers row (5)(a) *Yes* and must
+    ///   land on the **CHILD TAX CREDIT** box, not the smaller *Credit for other dependents*.
+    #[test]
+    fn the_credit_column_reaches_the_row_the_emitter_prints() {
+        use crate::tax::packet::ReturnHeader;
+        type Row = (&'static str, fn(&mut ReturnInputs), CreditColumn);
+        let rows: &[Row] = &[
+            (
+                "the CTC edge itself",
+                |_ri| {},
+                CreditColumn::ChildTaxCredit,
+            ),
+            (
+                "Step 3 q1 no TIN by the due date \u{2192} NEITHER box (a forgo)",
+                |ri| ri.header.dependents[0].tin_issued_by_due_date = Some(false),
+                CreditColumn::Neither,
+            ),
+            (
+                "Step 3 q2 narrower citizenship No \u{2192} NEITHER box",
+                |ri| ri.header.dependents[0].citizen_national_or_resident_alien = Some(false),
+                CreditColumn::Neither,
+            ),
+            (
+                "Step 3 q3 not under 17 \u{2192} Credit for other dependents",
+                |ri| {
+                    ri.header.dependents[0].date_of_birth = Some(date!(2007 - 06 - 01));
+                    ri.header.dependents[0].full_time_student = Some(true);
+                },
+                CreditColumn::CreditForOtherDependents,
+            ),
+            (
+                "Step 3 q4 SSNs not valid for employment \u{2192} Step 5 \u{2192} Credit for other dependents",
+                |ri| {
+                    ri.header.dependents[0].ssns_valid_for_employment_issued_by_due_date =
+                        Some(false)
+                },
+                CreditColumn::CreditForOtherDependents,
+            ),
+            (
+                "Step 5 q1 the FILER has no TIN by the due date \u{2192} NEITHER box",
+                |ri| {
+                    ri.header.dependents[0].ssns_valid_for_employment_issued_by_due_date =
+                        Some(false);
+                    ri.header.filer_tin_issued_by_due_date = Some(false);
+                },
+                CreditColumn::Neither,
+            ),
+            (
+                "born January 1 \u{2192} considered 17 \u{2192} Credit for other dependents",
+                |ri| ri.header.dependents[0].date_of_birth = Some(date!(2009 - 01 - 01)),
+                CreditColumn::CreditForOtherDependents,
+            ),
+            (
+                "\u{2026}and born January 2 \u{2192} considered 16 \u{2192} Child tax credit",
+                |ri| ri.header.dependents[0].date_of_birth = Some(date!(2009 - 01 - 02)),
+                CreditColumn::ChildTaxCredit,
+            ),
+        ];
+        for (name, perturb, want) in rows {
+            let mut ri = at_the_ctc_edge(2025);
+            named_taxpayer(&mut ri);
+            perturb(&mut ri);
+            assert_eq!(credit_column(&ri, 0), *want, "{name}: the computation");
+            let header = ReturnHeader::build(&ri, ri.tax_year).expect("the header builds");
+            assert_eq!(
+                header.dependents[0].grid.credit, *want,
+                "{name}: the row the emitter prints"
+            );
+        }
+
+        // ★★★ **THE BORN-IN-YEAR ROW.** `a_child_born_in_november_reaches_the_child_tax_credit`
+        //     asserts the verdict; this asserts the BOX, because that is the thing worth up to
+        //     $2,000 and it is what the grid prints.
+        let mut ri = at_the_ctc_edge(2026);
+        named_taxpayer(&mut ri);
+        ri.header.dependents[0].date_of_birth = Some(date!(2026 - 11 - 01));
+        assert_eq!(credit_column(&ri, 0), CreditColumn::ChildTaxCredit);
+        let header = crate::tax::packet::ReturnHeader::build(&ri, 2026).expect("header");
+        let g = header.dependents[0].grid;
+        assert_eq!(
+            g.credit,
+            CreditColumn::ChildTaxCredit,
+            "a child born in the tax year takes the CTC box"
+        );
+        // \u2026and rows (5)/(6) reach the same row, from the gates rather than from the flowchart.
+        assert!(g.lived_with_you_over_half_year, "row (5)(a)");
+        assert!(g.lived_with_you_in_us, "row (5)(b)");
+
+        // A row (5)(b) the walk never demanded stays BLANK rather than defaulting to checked: the
+        // filer answered (5)(a) `No`, so the nested box was never asked.
+        let mut ri = at_the_ctc_edge(2025);
+        named_taxpayer(&mut ri);
+        ri.header.dependents[0].lived_with_you_over_half_year = Some(false);
+        ri.header.dependents[0].lived_with_you_in_us = None;
+        let header = crate::tax::packet::ReturnHeader::build(&ri, 2025).expect("header");
+        assert!(!header.dependents[0].grid.lived_with_you_over_half_year);
+        assert!(!header.dependents[0].grid.lived_with_you_in_us);
+    }
+
+    /// ★ Every verdict arm maps to a credit column, and only the two claimable-with-a-credit arms
+    /// map to a box. Derived from the arms themselves, so a NEW verdict arm that forgot its column
+    /// would have to be added here by a human — the `_`-free match in `credit_column` is what makes
+    /// that a compile error rather than a silent `Neither`.
+    #[test]
+    fn only_the_two_credit_arms_check_a_box() {
+        let arms = [
+            (
+                DependentVerdict::ChildTaxCredit,
+                CreditColumn::ChildTaxCredit,
+            ),
+            (
+                DependentVerdict::CreditForOtherDependents,
+                CreditColumn::CreditForOtherDependents,
+            ),
+            (DependentVerdict::NoCreditBox, CreditColumn::Neither),
+            (DependentVerdict::NoRow, CreditColumn::Neither),
+            (
+                DependentVerdict::Unanswered(DependentGate::DateOfBirth),
+                CreditColumn::Neither,
+            ),
+            (
+                DependentVerdict::WaitingOnQuestion(QuestionId::DependentTaxpayer),
+                CreditColumn::Neither,
+            ),
+        ];
+        for (v, want) in arms {
+            assert_eq!(v.credit_column(), want, "{v:?}");
+            assert_eq!(
+                v.is_claimable(),
+                want != CreditColumn::Neither || v == DependentVerdict::NoCreditBox
+            );
         }
     }
 

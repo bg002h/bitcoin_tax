@@ -138,6 +138,18 @@ fn ty2024_full_return() -> FullReturnParams {
         // flowchart prints the same figure: "Who had gross income of less than $5,050 in 2024"
         // (`design/forms/extract/i1040gi--2024.txt:1700`).
         qualifying_relative_gross_income_limit: dec!(5050),
+        // §24(h)(2) / §24(h)(4) — the TCJA figures, $2,000 per qualifying child and $500 for each
+        // other dependent. ★ IN FORCE THROUGH TY2024 ONLY: Pub. L. 119-21 (OBBBA) §70104(a)(2)
+        // strikes "$2,000" and inserts "$2,200", and §70104(f) applies that "to taxable years
+        // beginning after December 31, 2024" — so TY2025 is already $2,200, not TY2026
+        // (`legal/text/statute-irc/PLAW-119publ21_OBBBA.txt:5042-5051, :5110-5111`; Rev. Proc.
+        // 2025-32 .03 says the same in words: "$2,200 for any taxable year beginning in 2025").
+        // NOTHING COMPUTES FROM THEM: btctax files no
+        // Schedule 8812, so 1040 line 19 is the filer's own blank (`advisories::ctc_odc_line19`).
+        // The R12 panel uses them to SIZE that forgo — "n children with a credit box; up to $X
+        // each" — so the size comes from the year's package rather than a number typed beside it.
+        child_tax_credit_per_child: dec!(2000),
+        credit_for_other_dependents_per_person: dec!(500),
         elective_deferral_limit: dec!(23000), // §402(g)(1), Notice 2023-75
         ftc_ceiling: dec!(300),               // §904(j) (MFJ = $600 at the use site)
         // §199A(e)(2) QBI TI-before-QBI threshold (Rev. Proc. 2023-34 §2.10): $191,950 base / $383,900 MFJ.
@@ -250,6 +262,15 @@ pub fn ty2026_full_return() -> FullReturnParams {
         // (`legal/text/irs-guidance/RevProc_2025-32.txt:908-910`). Statute and Rev. Proc., not
         // form — so it settles now, like every other constant in this function.
         qualifying_relative_gross_income_limit: dec!(5300),
+        // §24(h)(2) as amended by Pub. L. 119-21 (OBBBA) §70104(a)(2). Rev. Proc. 2025-32 .05(1):
+        // "For taxable years beginning in 2026, the maximum amount of the credit allowed under
+        // § 24(a) is $2,200" (`legal/text/irs-guidance/RevProc_2025-32.txt:590-594`). §24(i)(2), as
+        // rewritten by §70104(c), indexes the $2,200 for years beginning after 2025 — the 2026
+        // adjustment lands on the same figure, which is why the Rev. Proc. republishes $2,200.
+        // §24(h)(4)'s $500 for each other dependent is amended by neither and is NOT indexed.
+        // Same use as TY2024's: the R12 panel's size for the line-19 forgo, and nothing else.
+        child_tax_credit_per_child: dec!(2200),
+        credit_for_other_dependents_per_person: dec!(500),
         elective_deferral_limit: dec!(24500), // §402(g)(1), Notice 2025-67
         ftc_ceiling: dec!(300),               // §904(j) (MFJ = $600 at the use site)
         // §199A(e)(2) thresholds (Rev. Proc. 2025-32 §2.26); phase-in widths Pub. L. 119-21 §70105(a).

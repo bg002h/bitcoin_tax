@@ -224,6 +224,8 @@ pub(crate) const SCRUB_STREET: &str = "1 Example St";
 pub(crate) const SCRUB_CITY: &str = "Exampleton";
 pub(crate) const SCRUB_STATE: &str = "XX";
 pub(crate) const SCRUB_ZIP: &str = "00000";
+/// The stand-in for the HoH / QSS entry space's non-dependent qualifying child (R7).
+pub(crate) const SCRUB_QUALIFYING_CHILD: &str = "Qualifying Child";
 
 /// A synthetic SSN that the SSA can never have issued (middle group `00`), distinct per `n`.
 fn synthetic_ssn(n: usize) -> String {
@@ -580,6 +582,16 @@ fn scrub_header(h: &HouseholdHeader) -> HouseholdHeader {
         form8615_condition4_parent_alive,
         form8615_parent_identity_unobtainable,
         filer_tin_issued_by_due_date,
+        hoh_marital_basis,
+        hoh_qualifying_person,
+        hoh_paid_over_half_cost_of_keeping_up_home,
+        hoh_qualifying_child_name,
+        nra_spouse_resident_election,
+        qss_spouse_died_in_window_and_not_remarried,
+        qss_child_you_can_claim,
+        qss_child_lived_in_your_home_all_year,
+        qss_paid_over_half_cost_of_keeping_up_home,
+        qss_could_have_filed_jointly_in_year_of_death,
     } = h;
     HouseholdHeader {
         taxpayer: scrub_person(taxpayer, "Taxpayer", 1),
@@ -649,6 +661,28 @@ fn scrub_header(h: &HouseholdHeader) -> HouseholdHeader {
         // ★ KEPT with its neighbours: T7's Step 5 question 1 is a fail-loud declaration that decides
         //   whether the credit for other dependents is available at all.
         filer_tin_issued_by_due_date: *filer_tin_issued_by_due_date,
+        // ★★ R7 / T8 — the HoH and QSS tests are KEPT, on the same ground as every declaration
+        //    above: each is a fail-loud answer that decides whether the return may be filed under
+        //    the status it claims, and none of them is identifying. Dropping one would make a
+        //    scrubbed file COMPUTE where the filer's own refuses — the direction §3.3 forbids.
+        hoh_marital_basis: *hoh_marital_basis,
+        hoh_qualifying_person: *hoh_qualifying_person,
+        hoh_paid_over_half_cost_of_keeping_up_home: *hoh_paid_over_half_cost_of_keeping_up_home,
+        // ★★★ …EXCEPT this one, which is a PERSON'S NAME — a real child, named on a filed page. It
+        //     is replaced with a stand-in and its EMPTINESS is preserved, exactly as the address
+        //     lines are: whether the entry space is blank is what the R7 liveness reads, so the
+        //     scrubbed copy must ask and refuse identically while naming nobody.
+        hoh_qualifying_child_name: replace_preserving_emptiness(
+            hoh_qualifying_child_name,
+            SCRUB_QUALIFYING_CHILD.into(),
+        ),
+        nra_spouse_resident_election: *nra_spouse_resident_election,
+        qss_spouse_died_in_window_and_not_remarried: *qss_spouse_died_in_window_and_not_remarried,
+        qss_child_you_can_claim: *qss_child_you_can_claim,
+        qss_child_lived_in_your_home_all_year: *qss_child_lived_in_your_home_all_year,
+        qss_paid_over_half_cost_of_keeping_up_home: *qss_paid_over_half_cost_of_keeping_up_home,
+        qss_could_have_filed_jointly_in_year_of_death:
+            *qss_could_have_filed_jointly_in_year_of_death,
     }
 }
 

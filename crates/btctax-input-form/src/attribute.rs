@@ -98,6 +98,22 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         //     tri-state, which merely routes the row to Step 4 and is refused there identically.
         R::DependentRefusedByQuestion { question, .. } => vec![decl(*question)],
         R::FilerTinUnanswered => vec![decl(QuestionId::FilerTinIssuedByDueDate)],
+        // ★★★ R7 / T8 — HEAD OF HOUSEHOLD and QUALIFYING SURVIVING SPOUSE. Every one anchors on the
+        //     control that can change it: the test's own tri-state, or the marital-basis choice.
+        //     ★ `HohTestNotMet` / `QssTestNotMet` anchor on the ANSWERED question rather than on the
+        //       filing status, because the filer may equally have mis-answered the test; the
+        //       refusal's own exit sentence is what names the other remedy ("choose another filing
+        //       status"), and the status is not a `Field` the form can anchor on.
+        R::HohMaritalBasisUnanswered | R::HohMaritalBasisNotModeled { .. } => {
+            vec![Anchor::Field(FieldId::HohMaritalBasis)]
+        }
+        R::HohTestUnanswered { question }
+        | R::HohTestNotMet { question }
+        | R::QssTestUnanswered { question }
+        | R::QssTestNotMet { question } => vec![decl(*question)],
+        R::NraSpouseElectionUnanswered | R::NraSpouseElection => {
+            vec![decl(QuestionId::NraSpouseResidentElection)]
+        }
         R::DependentSpouseStatusUnanswered => vec![decl(QuestionId::DependentSpouse)],
         R::MfsSpouseItemizeUnknown => vec![decl(QuestionId::MfsSpouseItemizes)],
         R::HsaActivityUnanswered => vec![decl(QuestionId::HsaActivity)],

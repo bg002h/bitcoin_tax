@@ -23,6 +23,7 @@ mod capital_loss_carryover_check;
 mod census_join;
 mod check_isolation;
 mod cite_check;
+mod dependents_grid;
 mod docs;
 mod dump_fields;
 mod examples;
@@ -201,6 +202,18 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some("dependents-grid") => {
+            // ★★★ T8 / R6: MEASURE the TY2025+ Dependents grid off the form and print the map
+            //     section, so `forms/<year>/f1040.map.toml` is generated rather than typed.
+            let Some(stem) = args.get(1) else {
+                eprintln!("usage: cargo run -p xtask -- dependents-grid <stem>   e.g. f1040--2025");
+                std::process::exit(2);
+            };
+            if let Err(e) = dependents_grid::run(stem) {
+                eprintln!("xtask dependents-grid: {e}");
+                std::process::exit(1);
+            }
+        }
         Some("label-boxes") => {
             let Some(stem) = args.get(1) else {
                 eprintln!("usage: cargo run -p xtask -- label-boxes <stem>");
@@ -294,7 +307,7 @@ fn main() {
         _ => {
             eprintln!(
                 "usage: cargo run -p xtask -- <docs [--pdf] | examples | subcommand-coverage | \
-                 check-isolation | line-coverage | census-join | stop-list | box-census | cite-check | prompt-check | authority-conflicts | harness-check | archive-check | authority-manifest [--regen] | authority-refresh --check | extract-geometry <stem> | label-census <stem> | label-proof <stem> | label-boxes <stem> | \
+                 check-isolation | line-coverage | census-join | stop-list | box-census | cite-check | prompt-check | authority-conflicts | harness-check | archive-check | authority-manifest [--regen] | authority-refresh --check | extract-geometry <stem> | label-census <stem> | label-proof <stem> | label-boxes <stem> | dependents-grid <stem> | \
                  classify-path <path> | \
                  extract-schedule-1a | dump-fields <pdf> | form-delta <old> <new> | \
                  port-status <prior-tag> <new-tag>>"

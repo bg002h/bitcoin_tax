@@ -303,6 +303,46 @@ const TAXPAYER_FIELDS: &[Field] = &[
             Ok(())
         },
     },
+    // ★★★ R7 / T8 — the ENTRY SPACE beside the Head-of-household / Qualifying-surviving-spouse box.
+    //     *"If the child isn't claimed as your dependent, enter the child's name in the entry space
+    //     below qualifying surviving spouse. If you don't enter the name, it will take us longer to
+    //     process your return."* (`i1040gi--2025.txt:1206-1210`.)
+    //
+    // ★★★ LIVE iff Head of household, and NOT additionally gated on "no dependent row is the
+    //     qualifying person" — because btctax cannot evaluate that conjunct. The form's condition is
+    //     *"if the child isn't claimed as your dependent"*, and WHICH person qualifies the filer for
+    //     head of household is the filer's own judgment: a return may carry a dependent parent under
+    //     Test 1 and still be qualified by a non-dependent child under Test 2. Gating on
+    //     `dependents.is_empty()` would hide the cell from exactly that household, and hiding a cell
+    //     the IRS asks for is the silent-omission direction.
+    //
+    // ★ A `String`, not a declaration: the form asks for a NAME, and a blank one is LAWFUL — *"If
+    //   you don't enter the name, it will take us longer to process your return."* Nothing refuses
+    //   on it, and the help says when to leave it blank.
+    Field {
+        id: FieldId::HohQualifyingChildName,
+        clear: None,
+        label: "Qualifying child's name (HoH entry space)",
+        help: "Form 1040 header: \"If the child isn't claimed as your dependent, enter the child's \
+               name in the entry space below qualifying surviving spouse. If you don't enter the \
+               name, it will take us longer to process your return.\" Leave it blank if the person \
+               who qualifies you for head of household IS one of your dependents \u{2014} they are \
+               already named in the Dependents section.",
+        kind: FieldKind::Text,
+        live: |ri| ri.filing_status == btctax_core::tax::types::FilingStatus::HoH,
+        get: |ri, _| {
+            (ri.filing_status == btctax_core::tax::types::FilingStatus::HoH)
+                .then(|| FieldValue::Text(ri.header.hoh_qualifying_child_name.clone()))
+        },
+        set: |ri, _, v| {
+            if ri.filing_status != btctax_core::tax::types::FilingStatus::HoH {
+                return Err(SetError::NoSuchRow);
+            }
+            let FieldValue::Text(s) = v else { return Err(SetError::WrongKind) };
+            ri.header.hoh_qualifying_child_name = s;
+            Ok(())
+        },
+    },
 ];
 
 pub(crate) const TAXPAYER: Section = Section {

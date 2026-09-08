@@ -519,6 +519,12 @@ pub mod testonly {
     pub use crate::fill8949_full::fill_8949_full_with_map;
     pub use crate::form1040::{fill_form_1040_capgains as fill_1040_with_map, Form1040Fill};
     pub use crate::form1040_full::fill_form_1040_full_with_map;
+    // ★★★ T8 / R6 — the TY2025+ Dependents grid writer and the blank-template reader, exported so
+    //     the grid KILL drives THIS function (B1: a kill calls the instrument it protects) through
+    //     the production `pdf::` write path, rather than a second copy of it. TY2025's full return
+    //     is not emittable yet for reasons unrelated to the grid (no `[header]`, no money lines), so
+    //     without this the only exercise of the writer would be a mock.
+    pub use crate::form1040_full::push_dependents_grid;
     pub use crate::form1040v::fill_form_1040v_with_map;
     pub use crate::form4868::fill_form_4868_with_map;
     pub use crate::form6251::fill_form_6251_with_map;
@@ -530,6 +536,7 @@ pub mod testonly {
     pub use crate::form8960::fill_form_8960_with_map;
     pub use crate::form8995::fill_form_8995_with_map;
     pub use crate::form8995a::fill_form_8995a_with_map;
+    pub use crate::pdf::f1040_pdf;
     pub use crate::pdf::{
         apply_writes, drop_xfa_and_set_needappearances, save, strip_nondeterminism, FieldValue,
     };

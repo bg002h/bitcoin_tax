@@ -3928,6 +3928,10 @@ mod tests {
             },
             kiddie_unearned_threshold: dec!(2600),
             qualifying_relative_gross_income_limit: dec!(5050),
+            // §24(h)(2) / §24(h)(4) — the TCJA figures. Nothing computes from them (btctax files
+            // no Schedule 8812); the R12 panel sizes the line-19 forgo with them.
+            child_tax_credit_per_child: dec!(2000),
+            credit_for_other_dependents_per_person: dec!(500),
             elective_deferral_limit: dec!(23000),
             ftc_ceiling: dec!(300),
             qbi_ti_threshold_unmarried: dec!(191950),

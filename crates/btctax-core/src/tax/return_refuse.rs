@@ -362,6 +362,43 @@ pub enum RefuseReason {
     /// (`i1040gi--2025.txt:1743-1747`.) A class-(A) declaration like every other, raised by the
     /// [`crate::tax::questions::FORM_QUESTIONS`] loop.
     FilerTinUnanswered,
+    // ── ★★★ R7 / T8 — HEAD OF HOUSEHOLD and QUALIFYING SURVIVING SPOUSE. ────────────────────────
+    /// **The HoH marital basis is unanswered on a return that checked the Head-of-household box.**
+    /// (`i1040gi--2025.txt:1143-1163`.) A CHOICE rather than a yes/no, so it is asked through
+    /// [`crate::tax::questions::SkippableId::HohMaritalBasis`] — and it is class **(A)** all the
+    /// same, through that entry's own `unanswered` declaration.
+    HohMaritalBasisUnanswered,
+    /// **The filer states a marital basis whose own rule btctax has not transcribed.**
+    /// `MarriedLivedApart` names *Married persons who live apart* (`:1247-1268`, five further
+    /// conditions); `NraSpouseNoElection` names *Nonresident aliens and dual-status aliens*
+    /// (`:1059-1072`). Neither is a defect in the answer — it is a rule the tool does not model.
+    HohMaritalBasisNotModeled {
+        basis: crate::tax::return_inputs::HohMaritalBasis,
+    },
+    /// **One of the two HoH tests is unanswered.** Raised by the
+    /// [`crate::tax::questions::FORM_QUESTIONS`] loop like every other class-(A) declaration.
+    HohTestUnanswered {
+        question: crate::tax::questions::QuestionId,
+    },
+    /// **A HoH test is answered NO**, so the box may not be checked (`:1170-1171`). The exit is to
+    /// choose another filing status — a refusal with a named remedy, not a brick.
+    HohTestNotMet {
+        question: crate::tax::questions::QuestionId,
+    },
+    /// **FR-67 — the §6013(g)/(h) election gate is unanswered on a return that carries a spouse.**
+    NraSpouseElectionUnanswered,
+    /// **FR-67 — a nonresident-alien or dual-status alien spouse.** btctax collects no part of an
+    /// alien spouse's worldwide income, which the election puts on the return in full.
+    NraSpouseElection,
+    /// **One of the five QSS conditions is unanswered** (`:1288-1316`).
+    QssTestUnanswered {
+        question: crate::tax::questions::QuestionId,
+    },
+    /// **A QSS condition is answered NO**, so the box may not be checked: the instructions allow it
+    /// only *"if all of the following apply"*.
+    QssTestNotMet {
+        question: crate::tax::questions::QuestionId,
+    },
     /// **Form 8889 line 3 needs the *Line 3 Limitation Chart and Worksheet*, which btctax does not
     /// carry.** Fires when the filer was NOT an eligible individual with the same coverage on the
     /// first day of every month, or was enrolled in Medicare for any month.
@@ -1685,6 +1722,148 @@ fn dependent_label(ri: &ReturnInputs, row: usize) -> String {
     }
 }
 
+/// ★★★ **R7 / T8 — THE FILING-STATUS ASSERTIONS' *VALUE* RULES, which refuse on BOTH tiers.**
+///
+/// Head of household and Qualifying surviving spouse are ASSERTIONS about the filer's household, and
+/// each unlocks money — HoH a wider bracket and a larger standard deduction, QSS the JOINT rates and
+/// the joint standard deduction. Every rule here fires on a STATED answer rather than on a blank,
+/// which is why it sits outside [`ScreenTier::unanswered_refuses`] exactly as
+/// [`screen_dependent_values`] does: `income import` is the path that states them, and a `No` on a
+/// test the instructions require is not something `income answer` can fix by asking again.
+///
+/// ★ Every refusal names its own exit. A test answered `No` is not a brick: the filer's remedy is to
+///   file under another status, and the message says so.
+fn screen_filing_status_assertions(ri: &ReturnInputs) -> Option<Refusal> {
+    use crate::tax::questions::QuestionId as Q;
+    use crate::tax::return_inputs::HohMaritalBasis as H;
+
+    // ── Head of household ────────────────────────────────────────────────────────────────────────
+    if ri.filing_status == FilingStatus::HoH {
+        // The two marital bases whose own rule btctax has NOT transcribed. Refusing names the rule,
+        // so the filer can read it and decide for themselves — a pointer, not a wall.
+        match ri.header.hoh_marital_basis {
+            Some(basis @ H::MarriedLivedApart) => {
+                return refuse(
+                    RefuseReason::HohMaritalBasisNotModeled { basis },
+                    "you are filing as HEAD OF HOUSEHOLD and answered that you are married but \
+                     lived apart from your spouse for the last 6 months of the year. The Form 1040 \
+                     instructions do not stop there: that basis holds only if \"you meet the other \
+                     rules under MARRIED PERSONS WHO LIVE APART\" (i1040gi--2025.txt:1157-1159), and \
+                     that rule is five conditions of its own (:1247-1268) \u{2014} you lived apart for \
+                     the last 6 months; you file a separate return from your spouse; you paid over \
+                     half the cost of keeping up your home; your home was the main home of your \
+                     child, stepchild or foster child for more than half the year; and you can claim \
+                     that child as your dependent, or could but for the rule for Children of \
+                     divorced or separated parents. btctax collects none of the five, so it will not \
+                     compute a Head-of-household return on a rule it has not read. Read MARRIED \
+                     PERSONS WHO LIVE APART in the Form 1040 instructions: if all five apply, file \
+                     with a preparer; if they do not, choose another filing status",
+                );
+            }
+            Some(basis @ H::NraSpouseNoElection) => {
+                return refuse(
+                    RefuseReason::HohMaritalBasisNotModeled { basis },
+                    "you are filing as HEAD OF HOUSEHOLD and answered that you are married, your \
+                     spouse was a nonresident alien at some time during the year, and the election \
+                     to treat them as a resident alien was not made. The Form 1040 instructions \
+                     send that basis to NONRESIDENT ALIENS AND DUAL-STATUS ALIENS \
+                     (i1040gi--2025.txt:1160-1163, :1059-1072), which governs whether the \u{a7}6013(g) \
+                     or \u{a7}6013(h) election has been made and what it does to the return. btctax \
+                     collects nothing about an alien spouse's status or income, so it will not \
+                     compute this return. File with a preparer",
+                );
+            }
+            _ => {}
+        }
+        for (q, get) in [
+            (Q::HohQualifyingPerson, ri.header.hoh_qualifying_person),
+            (
+                Q::HohPaidOverHalfCostOfKeepingUpHome,
+                ri.header.hoh_paid_over_half_cost_of_keeping_up_home,
+            ),
+        ] {
+            if get == Some(false) {
+                return refuse(
+                    RefuseReason::HohTestNotMet { question: q },
+                    format!(
+                        "you are filing as HEAD OF HOUSEHOLD and answered NO to one of the \
+                         instructions' own conditions: \"{}\" The instructions say to \"Check the \
+                         'Head of household' box only if you are unmarried (or considered \
+                         unmarried) and either Test 1 or Test 2 applies\" \
+                         (i1040gi--2025.txt:1164-1200), and both tests begin with paying over half \
+                         the cost of keeping up a home. CHOOSE ANOTHER FILING STATUS \u{2014} Single, or \
+                         Married filing separately if you are married \u{2014} or correct the answer if \
+                         it is wrong",
+                        crate::tax::questions::FORM_QUESTIONS
+                            .iter()
+                            .find(|e| e.id == q)
+                            .map_or("", |e| e.prompt)
+                    ),
+                );
+            }
+        }
+    }
+
+    // ── FR-67 — the §6013(g)/(h) nonresident-alien-spouse election ───────────────────────────────
+    if ri.header.spouse.is_some() && ri.header.nra_spouse_resident_election == Some(true) {
+        return refuse(
+            RefuseReason::NraSpouseElection,
+            "you answered that your spouse was a NONRESIDENT ALIEN or a DUAL-STATUS ALIEN at some \
+             time during the tax year. \"Generally, a married couple can't file a joint return if \
+             either spouse is a nonresident alien at any time during the year. However, you and \
+             your spouse can choose to be treated as U.S. residents for the entire year and file a \
+             joint return\" (i1040gi--2025.txt:1059-1072) \u{2014} the \u{a7}6013(g) and \u{a7}6013(h) \
+             elections. Making that choice puts the alien spouse's WORLDWIDE income on this return \
+             and requires a signed statement attached to it; not making it means a joint return may \
+             not be filed at all. btctax collects neither the income nor the statement, and it \
+             will not compute a return that turns on an election it cannot see. File with a \
+             preparer, who will make or decline the election and report the worldwide income",
+        );
+    }
+
+    // ── Qualifying surviving spouse ──────────────────────────────────────────────────────────────
+    if ri.filing_status == FilingStatus::Qss {
+        for (q, get) in [
+            (
+                Q::QssSpouseDiedInWindowAndNotRemarried,
+                ri.header.qss_spouse_died_in_window_and_not_remarried,
+            ),
+            (Q::QssChildYouCanClaim, ri.header.qss_child_you_can_claim),
+            (
+                Q::QssChildLivedInYourHomeAllYear,
+                ri.header.qss_child_lived_in_your_home_all_year,
+            ),
+            (
+                Q::QssPaidOverHalfCostOfKeepingUpHome,
+                ri.header.qss_paid_over_half_cost_of_keeping_up_home,
+            ),
+            (
+                Q::QssCouldHaveFiledJointlyInYearOfDeath,
+                ri.header.qss_could_have_filed_jointly_in_year_of_death,
+            ),
+        ] {
+            if get == Some(false) {
+                return refuse(
+                    RefuseReason::QssTestNotMet { question: q },
+                    format!(
+                        "you are filing as QUALIFYING SURVIVING SPOUSE and answered NO to one of \
+                         the five conditions: \"{}\" The Form 1040 instructions allow that box, and \
+                         the JOINT return tax rates that come with it, only \"if ALL of the \
+                         following apply\" (i1040gi--2025.txt:1288-1316). CHOOSE ANOTHER FILING \
+                         STATUS \u{2014} Single, or Head of household if its own tests are met \u{2014} or \
+                         correct the answer if it is wrong",
+                        crate::tax::questions::FORM_QUESTIONS
+                            .iter()
+                            .find(|e| e.id == q)
+                            .map_or("", |e| e.prompt)
+                    ),
+                );
+            }
+        }
+    }
+    None
+}
+
 /// ★★★ **T7 / R6 — THE DEPENDENT ROWS' *VALUE* RULES, which refuse on BOTH tiers.**
 ///
 /// Two rules, and both are **stated** facts rather than blanks — which is why they sit outside
@@ -2062,8 +2241,50 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
     if let Some(r) = screen_dependent_values(ri) {
         return Some(r);
     }
+    // ★★★ **R7 / T8 — the FILING-STATUS assertions' value rules, on BOTH tiers**, for the identical
+    //     reason: a `No` on one of the instructions' own conditions, or a marital basis whose rule
+    //     btctax has not transcribed, is a STATED fact, and `income import` is the path that states
+    //     it. Answering again cannot fix it; changing the status can.
+    if let Some(r) = screen_filing_status_assertions(ri) {
+        return Some(r);
+    }
 
     if tier.unanswered_refuses {
+        // ★★★ **R7 / T8 — the CLASS-(A) entries of `SKIPPABLE_QUESTIONS`.**
+        //
+        // That registry is class (B) by rule and by name, and exactly one entry declares otherwise:
+        // the HoH marital basis is a named CHOICE (so it needs that registry's answer shape) whose
+        // silence is not lawful (so it must refuse). The set is DERIVED from the entries' own
+        // `unanswered` declaration, never from a list here — see `SkippableQuestion::unanswered`.
+        //
+        // ★ Placed BEFORE the `FORM_QUESTIONS` loop so a HoH return is asked *which of the four ways
+        //   you are unmarried* before it is asked the two tests: the marital basis is the box's own
+        //   premise, and two of its four answers stop the return outright.
+        for sk in crate::tax::questions::SKIPPABLE_QUESTIONS {
+            let Some(reason) = sk.unanswered.clone() else {
+                continue;
+            };
+            if !(sk.live)(ri) {
+                continue;
+            }
+            let answered = match sk.kind {
+                crate::tax::questions::SkippableKind::YesNo => (sk.get_bool)(ri).is_some(),
+                crate::tax::questions::SkippableKind::Date => (sk.get_date)(ri).is_some(),
+                crate::tax::questions::SkippableKind::Choice(_) => (sk.get_choice)(ri).is_some(),
+            };
+            if !answered {
+                return refuse(reason, sk.unanswered_detail);
+            }
+            // R10.3 — an answer given under EARLIER words does not stand under later ones, exactly
+            // as the `FORM_QUESTIONS` loop below applies it.
+            let key = crate::tax::provenance::AnswerKey::Skippable(sk.id);
+            if crate::tax::provenance::answer_status(ri, &key)
+                == crate::tax::provenance::AnswerStatus::WordingChanged
+            {
+                return refuse(reason, WORDING_CHANGED_DETAIL);
+            }
+        }
+
         for q in crate::tax::questions::FORM_QUESTIONS {
             if !(q.live)(ri) {
                 continue;
@@ -3079,6 +3300,10 @@ mod tests {
             },
             kiddie_unearned_threshold: dec!(2600),
             qualifying_relative_gross_income_limit: dec!(5050),
+            // §24(h)(2) / §24(h)(4) — the TCJA figures. Nothing computes from them (btctax files
+            // no Schedule 8812); the R12 panel sizes the line-19 forgo with them.
+            child_tax_credit_per_child: dec!(2000),
+            credit_for_other_dependents_per_person: dec!(500),
             elective_deferral_limit: dec!(23000),
             ftc_ceiling: dec!(300),
             qbi_ti_threshold_unmarried: dec!(191950),
@@ -4379,9 +4604,342 @@ mod tests {
                     ..Default::default()
                 });
             }
+            // ★★★ R7 / T8 — HEAD OF HOUSEHOLD's two tests share ONE liveness predicate (the box is
+            //     checked), so they share one scenario, like the HSA seven above.
+            QuestionId::HohQualifyingPerson | QuestionId::HohPaidOverHalfCostOfKeepingUpHome => {
+                r.filing_status = FilingStatus::HoH;
+                // ★ The MARITAL BASIS is answered here, and it is not incidental: it is the class-(A)
+                //   CHOICE and it refuses FIRST on a HoH return, so leaving it blank would mask the
+                //   target — the same masking `ItemizedPriorYear` avoids by answering its census row.
+                r.header.hoh_marital_basis =
+                    Some(crate::tax::return_inputs::HohMaritalBasis::NotMarried);
+            }
+            // ★★★ FR-67 — the §6013(g)/(h) election gate is live iff the return carries a SPOUSE.
+            QuestionId::NraSpouseResidentElection => {
+                r.filing_status = FilingStatus::Mfj;
+                r.header.spouse = Some(crate::tax::return_inputs::Person {
+                    first_name: "Sam".into(),
+                    last_name: "Roe".into(),
+                    ssn: "000-00-5555".into(),
+                    ..Default::default()
+                });
+            }
+            // ★★★ R7 / T8 — the five QSS conditions share ONE liveness predicate.
+            QuestionId::QssSpouseDiedInWindowAndNotRemarried
+            | QuestionId::QssChildYouCanClaim
+            | QuestionId::QssChildLivedInYourHomeAllYear
+            | QuestionId::QssPaidOverHalfCostOfKeepingUpHome
+            | QuestionId::QssCouldHaveFiledJointlyInYearOfDeath => {
+                r.filing_status = FilingStatus::Qss;
+            }
             _ => {}
         }
         r
+    }
+
+    // ══════════════════ ★★★ R7 / T8 — HEAD OF HOUSEHOLD and QUALIFYING SURVIVING SPOUSE ══════════
+    //
+    // Both statuses were offered with NO TEST AT ALL, and each unlocks money. These are the kills.
+
+    /// A HoH return with every OTHER live declaration answered, so each perturbation below is
+    /// attributable to the thing it perturbs.
+    fn answered_hoh() -> ReturnInputs {
+        let mut r = ri();
+        r.filing_status = FilingStatus::HoH;
+        crate::tax::testonly::answer_all_live_declarations(&mut r);
+        r
+    }
+
+    fn answered_qss() -> ReturnInputs {
+        let mut r = ri();
+        r.filing_status = FilingStatus::Qss;
+        crate::tax::testonly::answer_all_live_declarations(&mut r);
+        r
+    }
+
+    /// ★★★ **`Single` and `Mfj` ask NONE of them** — R7's first kill, and the one that keeps the
+    /// eight new declarations from blocking every return in the workspace.
+    #[test]
+    fn single_and_mfj_ask_no_hoh_or_qss_question() {
+        use crate::tax::questions::{SkippableId, FORM_QUESTIONS, SKIPPABLE_QUESTIONS};
+        let r7: Vec<QuestionId> = vec![
+            QuestionId::HohQualifyingPerson,
+            QuestionId::HohPaidOverHalfCostOfKeepingUpHome,
+            QuestionId::QssSpouseDiedInWindowAndNotRemarried,
+            QuestionId::QssChildYouCanClaim,
+            QuestionId::QssChildLivedInYourHomeAllYear,
+            QuestionId::QssPaidOverHalfCostOfKeepingUpHome,
+            QuestionId::QssCouldHaveFiledJointlyInYearOfDeath,
+        ];
+        let basis = SKIPPABLE_QUESTIONS
+            .iter()
+            .find(|s| s.id == SkippableId::HohMaritalBasis)
+            .expect("the marital basis is a registry entry");
+        for status in [FilingStatus::Single, FilingStatus::Mfj, FilingStatus::Mfs] {
+            let mut r = ri();
+            r.filing_status = status;
+            for id in &r7 {
+                let q = FORM_QUESTIONS.iter().find(|q| q.id == *id).unwrap();
+                assert!(
+                    !(q.live)(&r),
+                    "{id:?} must not be live on {status:?} — a filing-status test asked of a filer \
+                     who did not claim that status is a question with no answer"
+                );
+            }
+            assert!(!(basis.live)(&r), "the marital basis on {status:?}");
+        }
+        // …and the positive control: each IS live under its own status, so this is not satisfied by
+        // a registry that stopped asking anything.
+        let hoh = {
+            let mut r = ri();
+            r.filing_status = FilingStatus::HoH;
+            r
+        };
+        assert!((basis.live)(&hoh));
+        for id in [
+            QuestionId::HohQualifyingPerson,
+            QuestionId::HohPaidOverHalfCostOfKeepingUpHome,
+        ] {
+            assert!((FORM_QUESTIONS.iter().find(|q| q.id == id).unwrap().live)(
+                &hoh
+            ));
+        }
+        let qss = {
+            let mut r = ri();
+            r.filing_status = FilingStatus::Qss;
+            r
+        };
+        for id in &r7[2..] {
+            assert!((FORM_QUESTIONS.iter().find(|q| q.id == *id).unwrap().live)(
+                &qss
+            ));
+        }
+    }
+
+    /// ★★★ **HoH with an unanswered marital basis, or an unanswered test, REFUSES.**
+    #[test]
+    fn hoh_refuses_until_the_instructions_own_tests_are_answered() {
+        assert_eq!(reason(&answered_hoh()), None, "the answered baseline files");
+
+        let mut r = answered_hoh();
+        r.header.hoh_marital_basis = None;
+        assert_eq!(reason(&r), Some(RefuseReason::HohMaritalBasisUnanswered));
+
+        for (q, blank) in [
+            (
+                QuestionId::HohQualifyingPerson,
+                (|r: &mut ReturnInputs| r.header.hoh_qualifying_person = None)
+                    as fn(&mut ReturnInputs),
+            ),
+            (
+                QuestionId::HohPaidOverHalfCostOfKeepingUpHome,
+                |r: &mut ReturnInputs| r.header.hoh_paid_over_half_cost_of_keeping_up_home = None,
+            ),
+        ] {
+            let mut r = answered_hoh();
+            blank(&mut r);
+            assert_eq!(
+                reason(&r),
+                Some(RefuseReason::HohTestUnanswered { question: q }),
+                "{q:?} unanswered"
+            );
+        }
+    }
+
+    /// ★★★ **A HoH test answered NO refuses WITH ITS EXIT — *choose another filing status*.**
+    #[test]
+    fn a_hoh_test_answered_no_refuses_with_the_exit() {
+        for (q, set_no) in [
+            (
+                QuestionId::HohQualifyingPerson,
+                (|r: &mut ReturnInputs| r.header.hoh_qualifying_person = Some(false))
+                    as fn(&mut ReturnInputs),
+            ),
+            (
+                QuestionId::HohPaidOverHalfCostOfKeepingUpHome,
+                |r: &mut ReturnInputs| {
+                    r.header.hoh_paid_over_half_cost_of_keeping_up_home = Some(false)
+                },
+            ),
+        ] {
+            let mut r = answered_hoh();
+            set_no(&mut r);
+            let got = screen_inputs_tiered(
+                &r,
+                ScreenTier {
+                    package: None,
+                    unanswered_refuses: true,
+                },
+            )
+            .expect("a NO on a required test refuses");
+            assert_eq!(got.reason, RefuseReason::HohTestNotMet { question: q });
+            assert!(
+                got.detail.contains("CHOOSE ANOTHER FILING STATUS"),
+                "a refusal with no exit is a brick: {}",
+                got.detail
+            );
+        }
+    }
+
+    /// ★★★ **The two marital bases whose own RULE is not transcribed refuse, NAMING that rule.**
+    ///
+    /// Neither is a defect in the filer's answer — each is a rule btctax has not read — so the
+    /// refusal has to hand over the rule's own name, or the filer cannot go and read it.
+    #[test]
+    fn the_untranscribed_marital_bases_refuse_naming_their_rule() {
+        use crate::tax::return_inputs::HohMaritalBasis as H;
+        for (basis, must_name) in [
+            (H::MarriedLivedApart, "MARRIED PERSONS WHO LIVE APART"),
+            (H::NraSpouseNoElection, "NONRESIDENT ALIENS"),
+        ] {
+            let mut r = answered_hoh();
+            r.header.hoh_marital_basis = Some(basis);
+            let got = screen_param_free(&r).expect("this basis refuses on BOTH tiers");
+            assert_eq!(
+                got.reason,
+                RefuseReason::HohMaritalBasisNotModeled { basis }
+            );
+            assert!(
+                got.detail.contains(must_name),
+                "{basis:?} must name {must_name:?}: {}",
+                got.detail
+            );
+        }
+        // …and the two btctax DOES model file cleanly.
+        for basis in [H::NotMarried, H::LegallySeparatedByDecree] {
+            let mut r = answered_hoh();
+            r.header.hoh_marital_basis = Some(basis);
+            assert_eq!(reason(&r), None, "{basis:?} is a basis btctax models");
+        }
+    }
+
+    /// ★★★ **FR-67 — the §6013(g)/(h) nonresident-alien-spouse election gate.** Unanswered on a
+    /// return that carries a spouse refuses; a `Yes` refuses naming the election and a preparer.
+    #[test]
+    fn the_nra_spouse_election_gate_refuses_unanswered_and_on_yes() {
+        let with_spouse = || {
+            let mut r = ri();
+            r.filing_status = FilingStatus::Mfj;
+            r.header.spouse = Some(crate::tax::return_inputs::Person {
+                first_name: "Sam".into(),
+                last_name: "Roe".into(),
+                ssn: "000-00-5555".into(),
+                ..Default::default()
+            });
+            crate::tax::testonly::answer_all_live_declarations(&mut r);
+            r
+        };
+        assert_eq!(reason(&with_spouse()), None, "the answered baseline files");
+
+        let mut r = with_spouse();
+        r.header.nra_spouse_resident_election = None;
+        assert_eq!(reason(&r), Some(RefuseReason::NraSpouseElectionUnanswered));
+
+        let mut r = with_spouse();
+        r.header.nra_spouse_resident_election = Some(true);
+        let got = screen_param_free(&r).expect("a YES refuses on BOTH tiers");
+        assert_eq!(got.reason, RefuseReason::NraSpouseElection);
+        for span in ["6013(g)", "6013(h)", "worldwide income", "preparer"] {
+            assert!(
+                got.detail.contains(span),
+                "the refusal must name {span:?}: {}",
+                got.detail
+            );
+        }
+        // A return with NO spouse is never asked it, so a stale `Some(true)` cannot refuse.
+        let mut single = ri();
+        single.header.nra_spouse_resident_election = Some(true);
+        crate::tax::testonly::answer_all_live_declarations(&mut single);
+        assert_eq!(reason(&single), None);
+    }
+
+    /// ★★★ **QSS: any of the five unanswered refuses `QssTestUnanswered`; any `No` refuses
+    /// `QssTestNotMet` NAMING the test; all five `Some(true)` files.**
+    #[test]
+    fn qss_asks_all_five_of_the_instructions_conditions() {
+        assert_eq!(
+            reason(&answered_qss()),
+            None,
+            "all five answered ⇒ the return files"
+        );
+
+        type Set = fn(&mut ReturnInputs, Option<bool>);
+        let five: &[(QuestionId, Set)] = &[
+            (QuestionId::QssSpouseDiedInWindowAndNotRemarried, |r, v| {
+                r.header.qss_spouse_died_in_window_and_not_remarried = v
+            }),
+            (QuestionId::QssChildYouCanClaim, |r, v| {
+                r.header.qss_child_you_can_claim = v
+            }),
+            (QuestionId::QssChildLivedInYourHomeAllYear, |r, v| {
+                r.header.qss_child_lived_in_your_home_all_year = v
+            }),
+            (QuestionId::QssPaidOverHalfCostOfKeepingUpHome, |r, v| {
+                r.header.qss_paid_over_half_cost_of_keeping_up_home = v
+            }),
+            (QuestionId::QssCouldHaveFiledJointlyInYearOfDeath, |r, v| {
+                r.header.qss_could_have_filed_jointly_in_year_of_death = v
+            }),
+        ];
+        assert_eq!(five.len(), 5, "the instructions state five conditions");
+        for (q, set) in five {
+            let mut r = answered_qss();
+            set(&mut r, None);
+            assert_eq!(
+                reason(&r),
+                Some(RefuseReason::QssTestUnanswered { question: *q }),
+                "{q:?} unanswered"
+            );
+
+            let mut r = answered_qss();
+            set(&mut r, Some(false));
+            let got = screen_param_free(&r).expect("a NO refuses on BOTH tiers");
+            assert_eq!(got.reason, RefuseReason::QssTestNotMet { question: *q });
+            assert!(
+                got.detail.contains("CHOOSE ANOTHER FILING STATUS"),
+                "a refusal with no exit is a brick: {}",
+                got.detail
+            );
+        }
+    }
+
+    /// ★★★ **QSS condition 1's WINDOW is DERIVED from `tax_year`, never a literal pair of years.**
+    ///
+    /// The instruction's own sentence names them (*"Your spouse died in 2023 or 2024 and you didn't
+    /// remarry before the end of 2025"*), and every revision shifts them — so a filer on TY2026 must
+    /// be asked about 2024 and 2025, and R10.3's re-ask rule then follows for free when the year
+    /// changes.
+    #[test]
+    fn the_qss_window_is_derived_from_the_tax_year() {
+        use crate::tax::questions::FORM_QUESTIONS;
+        let q = FORM_QUESTIONS
+            .iter()
+            .find(|q| q.id == QuestionId::QssSpouseDiedInWindowAndNotRemarried)
+            .unwrap();
+        for (year, a, b) in [(2025, "2023", "2024"), (2026, "2024", "2025")] {
+            let mut r = ri();
+            r.tax_year = year;
+            r.filing_status = FilingStatus::Qss;
+            let asked = q.prompt_text(&r).into_owned();
+            assert!(asked.contains(a) && asked.contains(b), "TY{year}: {asked}");
+            assert!(
+                asked.contains(&year.to_string()),
+                "TY{year} names the tax year too: {asked}"
+            );
+            // The window must NOT name the other year's pair.
+            let other = if year == 2025 {
+                "2025 or 2026"
+            } else {
+                "2023 or 2024"
+            };
+            assert!(!asked.contains(other), "TY{year}: {asked}");
+        }
+        // The static fallback names no year at all, so it can never state the wrong pair.
+        assert!(
+            !q.prompt.contains("20"),
+            "the fallback prompt must not type a year: {}",
+            q.prompt
+        );
     }
 
     /// ★ THE PER-QUESTION PROPERTY TEST (§3.5). For each registry entry: build a return where it is LIVE and
@@ -4714,6 +5272,10 @@ mod tests {
                 ..Default::default()
             });
             r.header.spouse_died_during_year = Some(false);
+            // ★ FR-67 / T8: a return that carries a spouse now asks the §6013(g)/(h) election gate,
+            //   and an unanswered class-(A) declaration refuses before any value rule. Answered so
+            //   this assertion stays about the SSN.
+            r.header.nra_spouse_resident_election = Some(false);
             assert_eq!(reason(&r), None, "{label}: spouse — report computes");
             assert!(
                 matches!(
@@ -5054,8 +5616,12 @@ mod tests {
         mfj.header.can_be_claimed_as_dependent_spouse = Some(false); // MFJ makes the spouse box live (P8a I1)
         assert_eq!(reason(&mfj), None);
         // QSS is NOT a joint return — ceiling stays $300, so $301 refuses (review I2).
+        // ★ R7 / T8: choosing QSS now asks the instruction's five conditions, and they refuse FIRST
+        //   (they are the registry loop, which runs before every value rule). Answered here so the
+        //   assertion stays about the CEILING rather than about the newest question in the registry.
         let mut qss = r.clone();
         qss.filing_status = FilingStatus::Qss;
+        crate::tax::testonly::answer_all_live_declarations(&mut qss);
         assert_eq!(reason(&qss), Some(RefuseReason::ForeignTaxOverCeiling));
     }
 
@@ -5141,6 +5707,9 @@ mod tests {
             is_sstb: Some(false), // §G-28/B1b — the SSTB declaration is live whenever there is a business
             ..Default::default()
         });
+        // ★ R7 / T8: choosing HoH now asks the instruction's own tests, and they refuse before any
+        //   value rule. Answered so this assertion stays about the SPOUSE-OWNED Schedule C.
+        crate::tax::testonly::answer_all_live_declarations(&mut hoh);
         assert_eq!(
             reason(&hoh),
             Some(RefuseReason::SpouseOwnerWithoutJointReturn)

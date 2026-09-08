@@ -15,6 +15,7 @@
 //! doctrine forbids. The filer IS told about the forgone credit — by `Advisory::CtcOdcOmitted`, which
 //! is the channel for that. The filed page is not.
 
+use crate::tax::dependent_gates::CreditColumn;
 use crate::tax::packet::{DependentRow, ReturnHeader};
 
 /// The number of dependent rows Form 1040 page 1 physically prints.
@@ -114,6 +115,16 @@ impl DependentsStatement {
             self.on_form + 1,
             self.total,
         ));
+        // ★★★ **T8 — the TY2025 grid was RE-PARTED, and so was the instruction's own sentence.**
+        //
+        //     TY2024: *"include a statement showing the information required in columns (1) through
+        //     (4)"*. TY2025 (`i1040gi--2025.txt:1456-1459`): *"include a statement showing the
+        //     information requested in **the Dependents section**"* — and that section now prints
+        //     seven rows, not four columns. So the statement follows the year's form.
+        if self.year >= 2025 {
+            self.push_2025_rows(&mut out);
+            return out;
+        }
         out.push_str(
             "                                                                     (4) Check the box if qualifies for\n\
              \x20     (1) First name    Last name          (2) Social security   (3) Relationship        Child tax    Credit for other\n\
@@ -131,6 +142,52 @@ impl DependentsStatement {
         }
         out
     }
+
+    /// ★★★ **The TY2025+ statement — the SEVEN rows the page-1 grid prints, per dependent.**
+    ///
+    /// Headings verbatim from `design/forms/extract/f1040--2025.txt:39-54`: *"(1) First name"*,
+    /// *"(2) Last name"*, *"(3) SSN"*, *"(4) Relationship"*, *"(5) Check if lived with you more than
+    /// half of 2025 — (a) Yes / (b) And in the U.S."*, *"(6) Check if — Full-time student /
+    /// Permanently and totally disabled"*, *"(7) Credits — Child tax credit / Credit for other
+    /// dependents"*.
+    ///
+    /// ★★ **Rows (5), (6) and (7) print their real state here, and row (4) on the TY2024 statement
+    ///     prints empty — the difference is not a policy change, it is that TY2024 had nothing to
+    ///     print.** Row (7) is COMPUTED by the flowchart (R6), and rows (5)/(6) are the filer's own
+    ///     answers to gates they were asked. Printing a box the filer's answers check is
+    ///     transcription; printing a sentence ABOUT an empty box was what the earlier review
+    ///     rejected, and no such sentence appears here either.
+    ///
+    /// ★ **Rows (1) and (2) share one column pair.** `DependentRow` carries ONE `name`, which is what
+    ///   the TY2024 form's single widget asked for; the TY2025 form splits it into two cells. The
+    ///   attached page prints the whole name under the pair, so nothing is dropped and nothing is
+    ///   guessed — a name split at a space is an invention about the filer's testimony. Collecting
+    ///   first and last separately is the page-1 identity block's work (FOLLOWUPS FR-84).
+    fn push_2025_rows(&self, out: &mut String) {
+        out.push_str(
+            "                                                       (5) Check if lived with       (6) Check if           (7) Credits\n\
+             \x20    (1) First name / (2) Last name   (3) SSN         (4) Relationship         you more than half        Full-time  Perm. and     Child tax   Credit for other\n\
+             \x20                                                                              (a) Yes  (b) in the U.S.   student    tot. disabled   credit      dependents\n\
+             \x20    -------------------------------------------------------------------------------------------------------------------------------------------------------\n",
+        );
+        let box_of = |on: bool| if on { "[X]" } else { "[ ]" };
+        for (i, d) in self.rows.iter().enumerate() {
+            let g = d.grid;
+            out.push_str(&format!(
+                " {:>2}  {:<30}  {:<15} {:<22}   {:<8} {:<16} {:<10} {:<14} {:<11} {}\n",
+                self.on_form + i + 1,
+                d.name,
+                d.ssn.hyphenated(),
+                d.relationship,
+                box_of(g.lived_with_you_over_half_year),
+                box_of(g.lived_with_you_in_us),
+                box_of(g.full_time_student),
+                box_of(g.permanently_and_totally_disabled),
+                box_of(g.credit == CreditColumn::ChildTaxCredit),
+                box_of(g.credit == CreditColumn::CreditForOtherDependents),
+            ));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -144,6 +201,7 @@ mod tests {
                 name: format!("Child {i}"),
                 ssn: crate::tax::packet::Ssn::canonical(&format!("111-22-{:04}", i)).unwrap(),
                 relationship: "Daughter".into(),
+                grid: crate::tax::packet::DependentGridRow::default(),
             })
             .collect();
         h

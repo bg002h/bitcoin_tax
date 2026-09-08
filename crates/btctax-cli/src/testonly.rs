@@ -180,6 +180,11 @@ presidential_fund_taxpayer = false
 presidential_fund_spouse = false
 taxpayer_died_during_year = false
 spouse_died_during_year = false
+# ★★★ FR-67 / R7 — the §6013(g)/(h) NONRESIDENT-ALIEN-SPOUSE election gate, live on any return that
+#   carries a spouse. Neither of the Okafors is an alien, so the answer is a truthful "no"; a "yes"
+#   would refuse, because the election puts the alien spouse's WORLDWIDE income on the return and
+#   btctax collects none of it.
+nra_spouse_resident_election = false
 
 [header.taxpayer]
 first_name = "Nina"

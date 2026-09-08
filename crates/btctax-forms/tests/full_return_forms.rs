@@ -505,6 +505,293 @@ fn full_return_form_fills_are_byte_deterministic() {
     }
 }
 
+// ────────────────────────── T8 / R6 — the TY2025+ DEPENDENTS GRID ─────────────────────────────
+
+/// A TY2025 household with TWO dependents: one on the **child tax credit** edge, one on the **credit
+/// for other dependents** edge. Every gate is answered through core's own
+/// `answer_all_live_declarations`, which walks the flowchart rather than a list here, so the fixture
+/// cannot drift from the gates.
+///
+/// ★ The ODC row is an 18-year-old full-time student: a qualifying child (Step 1's second limb) who
+///   is **not under 17**, which is Step 3 question 3's *No* — the instruction's own ODC edge.
+/// ★ Both SSNs are from the never-issued space (area 000).
+fn ty2025_two_dependents() -> btctax_core::tax::packet::ReturnHeader {
+    use btctax_core::tax::return_inputs::{Dependent, HouseholdHeader, ReturnInputs};
+    let mut ri = ReturnInputs {
+        tax_year: 2025,
+        filing_status: FilingStatus::Single,
+        header: HouseholdHeader {
+            dependents: vec![
+                Dependent {
+                    name: "Ada Example".into(),
+                    ssn: "000-00-1111".into(),
+                    relationship: "Daughter".into(),
+                    ..Default::default()
+                },
+                Dependent {
+                    name: "Bo Example".into(),
+                    ssn: "000-00-3333".into(),
+                    relationship: "Son".into(),
+                    date_of_birth: Some(
+                        time::Date::from_calendar_date(2007, time::Month::June, 1).unwrap(),
+                    ),
+                    full_time_student: Some(true),
+                    ..Default::default()
+                },
+                // ★★★ The THIRD credit state, and it is not decoration: Step 3 question 1's *No*
+                //     leaves the person a dependent with NEITHER box (`i1040gi--2025.txt:1650-1653`).
+                //     Without a `Neither` row on this fixture, an emitter that wrote *"credit for
+                //     other dependents"* wherever the CTC did not apply would print identically —
+                //     measured: that exact plant passed a two-row fixture.
+                Dependent {
+                    name: "Cy Example".into(),
+                    ssn: "000-00-4444".into(),
+                    relationship: "Daughter".into(),
+                    tin_issued_by_due_date: Some(false),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    ri.header.taxpayer.first_name = "Pat".into();
+    ri.header.taxpayer.last_name = "Roe".into();
+    ri.header.taxpayer.ssn = "000-00-2222".into();
+    btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+    btctax_core::tax::packet::ReturnHeader::build(&ri, 2025)
+        .expect("the fixture's SSNs canonicalize")
+}
+
+/// Write ONLY the dependents grid into the year's blank 1040, through the production writer and the
+/// production `pdf::` path, and return the saved bytes.
+///
+/// ★★★ **Why this and not `fill_form_1040_full`.** TY2025's full return is not emittable yet, and for
+/// reasons that have nothing to do with the grid: the TY2025 map declares no `[header]` (so the
+/// filler refuses an unnamed 1040) and none of the money lines. What T8 built is the grid — the map
+/// cells, the computation behind them, and `push_dependents_grid` — and this drives exactly that,
+/// with no second copy of it. When the TY2025 identity block and money map land, the same function
+/// is already the one `fill_form_1040_full_with_map` calls.
+fn fill_ty2025_grid_only(header: &btctax_core::tax::packet::ReturnHeader) -> Vec<u8> {
+    let map = Form1040Map::for_year(2025).expect("the TY2025 1040 map");
+    let grid = map
+        .dependents_grid
+        .as_ref()
+        .expect("the TY2025 map declares [dependents_grid]");
+    let mut writes = Vec::new();
+    let mut placements = Vec::new();
+    push_dependents_grid(&mut writes, &mut placements, grid, header).expect("the grid writes");
+    let mut doc = load(f1040_pdf(2025).expect("the TY2025 template")).unwrap();
+    let idx = index(&collect_fields(&doc).unwrap());
+    drop_xfa_and_set_needappearances(&mut doc).unwrap();
+    apply_writes(&mut doc, &idx, &writes).unwrap();
+    strip_nondeterminism(&mut doc);
+    save(&mut doc).unwrap()
+}
+
+/// The FQN of one grid cell, read out of the committed map — never typed here, so this KAT cannot
+/// drift from the map the emitter used.
+fn grid_cell(dependent: usize, slot: &str) -> (String, String) {
+    let map = Form1040Map::for_year(2025).expect("the TY2025 1040 map");
+    let c = &map.dependents_grid.as_ref().expect("grid").columns[dependent];
+    let cell = match slot {
+        "lived_with_you" => &c.lived_with_you,
+        "lived_with_you_in_us" => &c.lived_with_you_in_us,
+        "full_time_student" => &c.full_time_student,
+        "permanently_and_totally_disabled" => &c.permanently_and_totally_disabled,
+        "child_tax_credit" => &c.child_tax_credit,
+        "credit_for_other_dependents" => &c.credit_for_other_dependents,
+        other => panic!("no such grid slot: {other}"),
+    };
+    (cell.field.clone(), cell.on.clone())
+}
+
+/// ★★★ **T8 / R6 — THE TY2025 GRID KAT: rows (5), (6) and (7) print the ANSWERS, read back off the
+/// filled PDF.**
+///
+/// Two dependents, one CTC and one ODC. Twelve box positions are asserted — six per dependent — and
+/// each is asserted in BOTH directions, because "checked" and "not checked" are the two things a
+/// checkbox can say and only asserting the first would pass on an emitter that checked everything.
+///
+/// ★ The ON-STATE STRING is asserted, not merely that something was written. Row (7)'s two positions
+///   are two widgets of ONE AcroForm field with on-states `/1` and `/2`; a box written with the wrong
+///   on-state reads back as set and **renders blank**, which is the failure `box_on_state`'s own doc
+///   in this file records.
+#[test]
+fn the_ty2025_dependents_grid_prints_the_answers() {
+    let header = ty2025_two_dependents();
+    // The computation the grid prints, asserted at the seam first so a failure below is attributable
+    // to the EMITTER rather than to the flowchart.
+    use btctax_core::tax::dependent_gates::CreditColumn;
+    assert_eq!(
+        header.dependents[0].grid.credit,
+        CreditColumn::ChildTaxCredit
+    );
+    assert_eq!(
+        header.dependents[1].grid.credit,
+        CreditColumn::CreditForOtherDependents
+    );
+    assert_eq!(header.dependents[2].grid.credit, CreditColumn::Neither);
+    assert!(!header.dependents[0].grid.full_time_student);
+    assert!(header.dependents[1].grid.full_time_student);
+
+    let pdf = fill_ty2025_grid_only(&header);
+
+    // Dependent 1 — the CTC child: rows (5)(a) and (5)(b) checked, row (6) empty, row (7) CTC.
+    for (slot, want) in [
+        ("lived_with_you", true),
+        ("lived_with_you_in_us", true),
+        ("full_time_student", false),
+        ("permanently_and_totally_disabled", false),
+        ("child_tax_credit", true),
+        ("credit_for_other_dependents", false),
+    ] {
+        let (fqn, on) = grid_cell(0, slot);
+        assert_eq!(
+            box_on_state(&pdf, &fqn),
+            want.then_some(on),
+            "dependent 1, {slot}"
+        );
+    }
+    // Dependent 2 — the 18-year-old full-time student: row (6) full-time student checked, row (7) ODC.
+    for (slot, want) in [
+        ("lived_with_you", true),
+        ("lived_with_you_in_us", true),
+        ("full_time_student", true),
+        ("permanently_and_totally_disabled", false),
+        ("child_tax_credit", false),
+        ("credit_for_other_dependents", true),
+    ] {
+        let (fqn, on) = grid_cell(1, slot);
+        assert_eq!(
+            box_on_state(&pdf, &fqn),
+            want.then_some(on),
+            "dependent 2, {slot}"
+        );
+    }
+    // Dependent 3 — Step 3 question 1's *No*: still a dependent, and NEITHER credit box.
+    for (slot, want) in [
+        ("lived_with_you", true),
+        ("lived_with_you_in_us", true),
+        ("full_time_student", false),
+        ("permanently_and_totally_disabled", false),
+        ("child_tax_credit", false),
+        ("credit_for_other_dependents", false),
+    ] {
+        let (fqn, on) = grid_cell(2, slot);
+        assert_eq!(
+            box_on_state(&pdf, &fqn),
+            want.then_some(on),
+            "dependent 3, {slot}"
+        );
+    }
+    // Dependent 4 has no row on this return: every one of its cells stays BLANK. A grid that wrote
+    // into an absent column would print a credit box for nobody.
+    for d in [3usize] {
+        for slot in [
+            "lived_with_you",
+            "lived_with_you_in_us",
+            "full_time_student",
+            "permanently_and_totally_disabled",
+            "child_tax_credit",
+            "credit_for_other_dependents",
+        ] {
+            let (fqn, _) = grid_cell(d, slot);
+            assert_eq!(
+                box_on_state(&pdf, &fqn),
+                None,
+                "dependent {}, {slot}",
+                d + 1
+            );
+        }
+    }
+    // The *more than four dependents* box is NOT checked on a three-dependent return.
+    let map = Form1040Map::for_year(2025).unwrap();
+    let mtf = &map
+        .dependents_grid
+        .as_ref()
+        .unwrap()
+        .more_than_four_dependents;
+    assert_eq!(box_on_state(&pdf, &mtf.field), None);
+}
+
+/// ★★★ **The box and the statement are ONE decision, on the TY2025 grid too.** Five dependents ⇒ the
+/// box is checked AND the continuation statement exists; four ⇒ neither.
+#[test]
+fn the_ty2025_grid_checks_the_more_than_four_box_with_its_statement() {
+    use btctax_core::tax::dependents_statement::dependents_statement;
+    let mut header = ty2025_two_dependents();
+    let extra = header.dependents[0].clone();
+    while header.dependents.len() < 5 {
+        header.dependents.push(extra.clone());
+    }
+    let map = Form1040Map::for_year(2025).unwrap();
+    let mtf = map
+        .dependents_grid
+        .as_ref()
+        .unwrap()
+        .more_than_four_dependents
+        .clone();
+    let pdf = fill_ty2025_grid_only(&header);
+    assert_eq!(
+        box_on_state(&pdf, &mtf.field).as_deref(),
+        Some(mtf.on.as_str())
+    );
+    let st = dependents_statement(&header, 2025).expect("five dependents ⇒ a statement");
+    let rendered = st.render();
+    // The TY2025 statement shows "the information requested in the Dependents section"
+    // (i1040gi--2025.txt:1456-1459) — all seven rows, not TY2024's four columns.
+    for heading in [
+        "(1) First name",
+        "(3) SSN",
+        "(5) Check if lived",
+        "(7) Credits",
+    ] {
+        assert!(
+            rendered.contains(heading),
+            "the statement prints {heading}:\n{rendered}"
+        );
+    }
+    header.dependents.truncate(4);
+    let pdf = fill_ty2025_grid_only(&header);
+    assert_eq!(
+        box_on_state(&pdf, &mtf.field),
+        None,
+        "four dependents fit the grid"
+    );
+    assert!(dependents_statement(&header, 2025).is_none());
+}
+
+/// ★★★ **TY2024 IS UNTOUCHED BY THE GRID WORK (R6's own guarantee).** The TY2024 map declares no
+/// `[dependents_grid]`, so `fill_form_1040_full_with_map` writes exactly what it wrote before T8 —
+/// asserted here as a HASH over a fixture that carries dependents whose row (7) is now computed.
+/// Without dependents on the fixture the assertion would hold vacuously.
+#[test]
+fn the_ty2024_1040_is_byte_identical_with_dependents_whose_credit_column_is_computed() {
+    let map = Form1040Map::for_year(2024).expect("the TY2024 1040 map");
+    assert!(
+        map.dependents_grid.is_none(),
+        "TY2024 declares the four `header.dependent_rows`, never a grid"
+    );
+    let mut header = kitchen_sink_header();
+    header.dependents = ty2025_two_dependents().dependents;
+    assert_eq!(
+        header.dependents[0].grid.credit,
+        btctax_core::tax::dependent_gates::CreditColumn::ChildTaxCredit,
+        "the fixture really does carry a computed credit column"
+    );
+    let lines = f1040();
+    let a = btctax_forms::fill_form_1040_full(&lines, &header, FilingStatus::Single, 2024).unwrap();
+    let b = btctax_forms::fill_form_1040_full(&lines, &header, FilingStatus::Single, 2024).unwrap();
+    assert_eq!(hex(&Sha256::digest(&a)), hex(&Sha256::digest(&b)));
+    // …and the TY2024 credit boxes stay EMPTY, which is what "unchanged" means on the page.
+    let rows = &map.header.as_ref().unwrap().dependent_rows;
+    for (i, row) in rows.iter().enumerate() {
+        assert_eq!(box_on_state(&a, &row.ctc.field), None, "row {i} ctc");
+        assert_eq!(box_on_state(&a, &row.odc.field), None, "row {i} odc");
+    }
+}
+
 /// Full-return v1 is TY2024-only — every other year is refused, not silently filled with the wrong
 /// revision's field names.
 #[test]

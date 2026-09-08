@@ -99,6 +99,41 @@ const CLAUSES: &[Clause] = &[
                known) of the parent",
         extract: "design/forms/extract/i8615--2025.txt",
     },
+    // ── ★★★ R7 / T8 — the HoH MARITAL BASIS, the registry's second `Choice`. ────────────────────
+    Clause {
+        id: SkippableId::HohMaritalBasis,
+        face: Face::Prompt,
+        text: "if you are unmarried and provide a home for certain other persons",
+        extract: "design/forms/extract/i1040gi--2025.txt",
+    },
+    Clause {
+        id: SkippableId::HohMaritalBasis,
+        face: Face::Prompt,
+        text: "considered unmarried for this purpose",
+        extract: "design/forms/extract/i1040gi--2025.txt",
+    },
+    Clause {
+        id: SkippableId::HohMaritalBasis,
+        face: Face::Prompt,
+        text:
+            "You were legally separated according to your state law under a decree of divorce or \
+               separate maintenance at the end of",
+        extract: "design/forms/extract/i1040gi--2025.txt",
+    },
+    Clause {
+        id: SkippableId::HohMaritalBasis,
+        face: Face::Prompt,
+        text: "You are married but lived apart from your spouse for the last 6 months of",
+        extract: "design/forms/extract/i1040gi--2025.txt",
+    },
+    Clause {
+        id: SkippableId::HohMaritalBasis,
+        face: Face::Prompt,
+        text:
+            "You are married and your spouse was a nonresident alien at any time during the year \
+               and the election to treat the alien spouse as a resident alien is not made",
+        extract: "design/forms/extract/i1040gi--2025.txt",
+    },
 ];
 
 /// ★★ **The STRUCTURAL half, and it is what actually pins the three limbs of condition 3.**
@@ -278,6 +313,155 @@ const GATE_CLAUSES: &[GateClause] = &[
     },
 ];
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// R7 / T8 — HEAD OF HOUSEHOLD and QUALIFYING SURVIVING SPOUSE. Same rule, the third registry over.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// One return-level declaration's clause. `rendered` says the comparand is the prompt AS RENDERED for
+/// a return, not the static fallback — QSS condition 1 quotes a two-year window derived from
+/// `tax_year`, and the static text deliberately names no year at all.
+struct QuestionClause {
+    id: btctax_core::tax::questions::QuestionId,
+    text: &'static str,
+    /// `Some(year)` ⇒ compare against `prompt_text` on a return of that year.
+    rendered: Option<i32>,
+}
+
+/// The clause table for R7's ten filer-facing strings.
+///
+/// ★★★ **Every span stops short of a YEAR and of a FIGURE, and that is the point.** The
+/// instructions' own sentences name both (*"the main home for all of 2025"*, *"gross income of
+/// $5,200 or more"*); a prompt that typed either would be a second copy of derived data — the year
+/// is not necessarily this return's, and the figure lives in `FullReturnParams`. The one place a
+/// year is quoted is QSS condition 1, where the window IS the question — and there it is RENDERED
+/// from `tax_year`, so this table checks the rendered sentence against the instruction's own.
+const QUESTION_CLAUSES: &[QuestionClause] = &[
+    QuestionClause {
+        id: btctax_core::tax::questions::QuestionId::HohQualifyingPerson,
+        text: "your parent whom you can claim as a dependent, except under a multiple support \
+               agreement",
+        rendered: None,
+    },
+    QuestionClause {
+        id: btctax_core::tax::questions::QuestionId::HohQualifyingPerson,
+        text: "Your parent didn\u{2019}t have to live with you.",
+        rendered: None,
+    },
+    QuestionClause {
+        id: btctax_core::tax::questions::QuestionId::HohQualifyingPerson,
+        text:
+            "you paid over half the cost of keeping up a home in which you lived and in which one \
+               of the following also lived for more than half of the year",
+        rendered: None,
+    },
+    QuestionClause {
+        id: btctax_core::tax::questions::QuestionId::HohPaidOverHalfCostOfKeepingUpHome,
+        text: "You paid over half the cost of keeping up a home",
+        rendered: None,
+    },
+    QuestionClause {
+        id: btctax_core::tax::questions::QuestionId::NraSpouseResidentElection,
+        text: "you and your spouse can choose to be treated as U.S. residents for the entire year \
+               and file a joint return",
+        rendered: None,
+    },
+    // ★★★ THE RENDERED ONE. TY2025's window is the instruction's own printed sentence, verbatim.
+    QuestionClause {
+        id: btctax_core::tax::questions::QuestionId::QssSpouseDiedInWindowAndNotRemarried,
+        text:
+            "Your spouse died in 2023 or 2024 and you didn\u{2019}t remarry before the end of 2025.",
+        rendered: Some(2025),
+    },
+    QuestionClause {
+        id: btctax_core::tax::questions::QuestionId::QssChildYouCanClaim,
+        text:
+            "You have a child or stepchild (not a foster child) whom you can claim as a dependent",
+        rendered: None,
+    },
+    QuestionClause {
+        id: btctax_core::tax::questions::QuestionId::QssChildYouCanClaim,
+        text: "The child filed a joint return",
+        rendered: None,
+    },
+    QuestionClause {
+        id: btctax_core::tax::questions::QuestionId::QssChildLivedInYourHomeAllYear,
+        text: "This child lived in your home for all of",
+        rendered: None,
+    },
+    QuestionClause {
+        id: btctax_core::tax::questions::QuestionId::QssPaidOverHalfCostOfKeepingUpHome,
+        text: "You paid over half the cost of keeping up your home.",
+        rendered: None,
+    },
+    QuestionClause {
+        id: btctax_core::tax::questions::QuestionId::QssCouldHaveFiledJointlyInYearOfDeath,
+        text:
+            "You could have filed a joint return with your spouse the year your spouse died, even \
+               if you didn\u{2019}t actually do so.",
+        rendered: None,
+    },
+];
+
+/// The HoH MARITAL BASIS lives in `SKIPPABLE_QUESTIONS` (it is a `Choice`), so its clauses go in
+/// [`CLAUSES`]'s shape rather than [`QUESTION_CLAUSES`]'s — see the two entries added there.
+///
+/// The R7 half of the check: `Ok(n)` assertions passed, `Err` names every failure.
+fn check_questions(root: &std::path::Path) -> Result<usize, String> {
+    use btctax_core::tax::questions::FORM_QUESTIONS;
+    let mut failures: Vec<String> = Vec::new();
+    let mut passed = 0usize;
+    let extract = "design/forms/extract/i1040gi--2025.txt";
+    let raw = std::fs::read_to_string(root.join(extract))
+        .map_err(|e| format!("cannot read {extract}: {e}"))?;
+    let hay = normalise(&raw);
+    for (i, c) in QUESTION_CLAUSES.iter().enumerate() {
+        let n = i + 1;
+        let clause = normalise(c.text);
+        // (a) — the clause really is the manual's.
+        if hay.contains(&clause) {
+            passed += 1;
+        } else {
+            failures.push(format!(
+                "question clause {n} ({:?}) is NOT in {extract}: {:?}",
+                c.id, c.text
+            ));
+        }
+        // (b) — and it is what the filer is shown. For a RENDERED prompt the comparand is the
+        //       sentence a return of that year would actually be asked, never the static fallback.
+        let q = FORM_QUESTIONS
+            .iter()
+            .find(|q| q.id == c.id)
+            .ok_or_else(|| format!("{:?} is not in FORM_QUESTIONS", c.id))?;
+        let face = match c.rendered {
+            None => normalise(q.prompt),
+            Some(year) => {
+                let ri = btctax_core::tax::return_inputs::ReturnInputs {
+                    tax_year: year,
+                    ..Default::default()
+                };
+                normalise(&q.prompt_text(&ri))
+            }
+        };
+        if face.contains(&clause) {
+            passed += 1;
+        } else {
+            failures.push(format!(
+                "question clause {n} ({:?}) is NOT in the string the filer reads: {:?}",
+                c.id, c.text
+            ));
+        }
+    }
+    if failures.is_empty() {
+        Ok(passed)
+    } else {
+        let mut msg = String::new();
+        for f in &failures {
+            let _ = writeln!(msg, "  {f}");
+        }
+        Err(msg)
+    }
+}
+
 /// Which of a gate's two filer-facing strings a clause is checked against.
 fn gate_face_text(gate: DependentGate, face: Face) -> &'static str {
     let q = btctax_core::tax::dependent_gates::entry(gate);
@@ -428,7 +612,7 @@ pub fn check() -> Result<usize, String> {
     }
 
     if failures.is_empty() {
-        Ok(passed + check_gates(&root)?)
+        Ok(passed + check_gates(&root)? + check_questions(&root)?)
     } else {
         let mut msg = String::new();
         for f in &failures {
