@@ -297,6 +297,31 @@ pub enum RefuseReason {
         /// Which of Form 8889's questions is blank.
         question: crate::tax::questions::QuestionId,
     },
+    /// ★★★ **T7 / R6, seam review I-2 — A DEPENDENT ROW HAS NO IDENTITY: its `ssn` is blank.**
+    ///
+    /// A class-(A) blank, the same tier as [`Self::DependentGateUnanswered`], and it is checked
+    /// BEFORE any gate on the row. The reason it is a refusal rather than a nicety is the diligence
+    /// log: a row's answers are stored under `dependent_ssn_hash(ssn)`, so a blank `ssn` is not a
+    /// missing field but a **missing key** — every blank row shares one bucket, and R10.3's record
+    /// then says something about "the blank dependent" rather than about a person.
+    /// `provenance.rs` recorded the question against T7 (*"Recorded here so T7 decides it rather
+    /// than meets it"*); this is the decision. R6 already makes a dependent's identity fields
+    /// mandatory, and the packet boundary already refuses the same row `SsnError::Missing` — this
+    /// moves it to where the filer is working, with the row named.
+    DependentIdentityUnanswered {
+        /// The row's index in `header.dependents`, 0-based.
+        row: usize,
+    },
+    /// ★★★ **T7 / R6, seam review I-2 — TWO DEPENDENT ROWS CARRY THE SAME SSN.**
+    ///
+    /// A VALUE rule, not an unanswered one, so it refuses at `income import` too: the two rows are
+    /// one identity in the answer log, and no amount of answering separates them. It is judged on
+    /// the DIGITS, because `dependent_ssn_hash` is (*"'111-22-3333' and '111223333' are one
+    /// person"*).
+    DependentSsnDuplicated {
+        /// The two rows' indices in `header.dependents`, 0-based, in order.
+        rows: (usize, usize),
+    },
     /// ★★★ **T7 / R6 — a LIVE dependent gate on one row has no answer.**
     ///
     /// The key carries the ROW INDEX, not the row's SSN hash: it points the filer at a position on
@@ -319,6 +344,19 @@ pub enum RefuseReason {
     DependentGateRefused {
         row: usize,
         gate: crate::tax::provenance::DependentGate,
+    },
+    /// ★★★ **T7 / R6, seam review M-1 — a dependent row is refused by a RETURN-LEVEL answer.**
+    ///
+    /// Step 2 question 4 / Step 4 question 5, *"Could you be claimed as a dependent on someone
+    /// else's return?"* — answered `Yes`, which refuses every dependent row at once. It is a
+    /// separate variant from [`Self::DependentGateRefused`] so `attribute` can anchor it on the
+    /// QUESTION the filer must change: anchoring it on a gate of the row sent them to a control
+    /// that cannot fix it (flipping the relationship gate only routes the row to Step 4, where the
+    /// same refusal fires again).
+    DependentRefusedByQuestion {
+        row: usize,
+        /// The return-level declaration whose answer stopped the flowchart.
+        question: crate::tax::questions::QuestionId,
     },
     /// ★★★ **T7 / R6 — Step 5 question 1 is unanswered on a return that claims a dependent.**
     /// (`i1040gi--2025.txt:1743-1747`.) A class-(A) declaration like every other, raised by the
@@ -1572,17 +1610,28 @@ pub fn screen_broker_reporting(
 ///      where the package is in hand. Where it is not, the check is skipped rather than run against
 ///      words nobody saw, exactly as [`crate::tax::provenance::current_prompt`] records.
 fn screen_dependent_gates(ri: &ReturnInputs, params: Option<&FullReturnParams>) -> Option<Refusal> {
-    use crate::tax::dependent_gates::{
-        gate_is_answered, walk_dependent, DependentVerdict, DEPENDENT_GATES,
-    };
+    use crate::tax::dependent_gates::{gate_is_answered, walk_dependent, DEPENDENT_GATES};
     use crate::tax::provenance::{answer_status, dependent_ssn_hash, AnswerKey, AnswerStatus};
     for (row, d) in ri.header.dependents.iter().enumerate() {
         let walk = walk_dependent(ri, row);
-        let who = if d.name.trim().is_empty() {
-            format!("row {}", row + 1)
-        } else {
-            format!("row {} ({})", row + 1, d.name.trim())
-        };
+        let who = dependent_label(ri, row);
+        // ★★★ **SEAM REVIEW I-2 — THE IDENTITY, BEFORE ANY GATE.** A row's gate answers are stored
+        //     under `dependent_ssn_hash(ssn)`, so a blank `ssn` is a missing KEY, not a missing
+        //     field: every blank row shares one bucket. Demanding fifteen §152 answers from a row
+        //     that cannot own them is asking the filer to write diligence about nobody, so the
+        //     identity is asked for first and the gates wait.
+        if ssn_digits(&d.ssn).is_empty() {
+            return refuse(
+                RefuseReason::DependentIdentityUnanswered { row },
+                format!(
+                    "dependent {who} has no Social Security number. A dependent row is a CLAIM, and \
+                     Form 1040 prints the SSN beside the name in column (2) — it is also the key \
+                     this return files that person's answers under, so a blank one has no owner. \
+                     Enter it in the tax-inputs form's Dependents section (or in the TOML you \
+                     import), or remove the row."
+                ),
+            );
+        }
         for g in DEPENDENT_GATES {
             if !walk.demands(g.gate) {
                 continue;
@@ -1616,19 +1665,99 @@ fn screen_dependent_gates(ri: &ReturnInputs, params: Option<&FullReturnParams>) 
                 );
             }
         }
-        // The flowchart's own STOPs. Every one names the rule the instruction sends the filer to.
-        if let DependentVerdict::Refused(r) = walk.verdict {
+    }
+    None
+}
+
+/// The digits of an SSN as written — the identity [`crate::tax::provenance::dependent_ssn_hash`]
+/// keys on, which normalises punctuation so *"111-22-3333"* and *"111223333"* are one person. Empty
+/// ⇒ the row states no identity at all.
+fn ssn_digits(ssn: &str) -> String {
+    ssn.chars().filter(char::is_ascii_digit).collect()
+}
+
+/// `row N (Name)`, or `row N` when the row is unnamed — one spelling, so a refusal and its sibling
+/// cannot name the same row two ways.
+fn dependent_label(ri: &ReturnInputs, row: usize) -> String {
+    match ri.header.dependents.get(row) {
+        Some(d) if !d.name.trim().is_empty() => format!("row {} ({})", row + 1, d.name.trim()),
+        _ => format!("row {}", row + 1),
+    }
+}
+
+/// ★★★ **T7 / R6 — THE DEPENDENT ROWS' *VALUE* RULES, which refuse on BOTH tiers.**
+///
+/// Two rules, and both are **stated** facts rather than blanks — which is why they sit outside
+/// [`ScreenTier::unanswered_refuses`] while [`screen_dependent_gates`] sits inside it. `ScreenTier`'s
+/// own doc draws exactly this line for the census: *"The census's own VALUE rules are NOT in that
+/// tier and DO refuse at import."*
+///
+/// 1. **Two rows, one SSN** (seam review I-2). The answer log keys a row's diligence by
+///    `dependent_ssn_hash`, so two rows sharing an SSN are one identity: whatever the second row is
+///    asked overwrites the first row's record under the same key. Nothing the filer can answer
+///    separates them, so refusing at import — where the row is created — is the real exit, not a
+///    wall.
+/// 2. **A gate answer that STOPs the flowchart** (seam review M-4). `income import` being the only
+///    row-creating path is the reason the UNANSWERED tier waits; it is not a reason to store a row
+///    the instruction has already refused. A TOML saying the dependent is married and filing jointly
+///    used to import cleanly and poison the year until `report` — the shape T4's tier split exists to
+///    avoid. The filer's exit is the same at both ends: correct the answer, or drop the row.
+///
+/// ★ Neither detail may prescribe `btctax income answer`: at import the row does not exist yet, so
+///   that command refuses with *"no full-return inputs and no draft"*. Policed behaviourally by
+///   `no_refusal_in_the_import_tier_prescribes_income_answer`.
+fn screen_dependent_values(ri: &ReturnInputs) -> Option<Refusal> {
+    use crate::tax::dependent_gates::{walk_dependent, DependentVerdict};
+    for (row, d) in ri.header.dependents.iter().enumerate() {
+        let digits = ssn_digits(&d.ssn);
+        if digits.is_empty() {
+            continue; // no identity at all — the UNANSWERED tier's rule, not this one.
+        }
+        if let Some(first) = ri.header.dependents[..row]
+            .iter()
+            .position(|o| ssn_digits(&o.ssn) == digits)
+        {
             return refuse(
-                RefuseReason::DependentGateRefused {
-                    row,
-                    gate: r.gate,
-                },
+                RefuseReason::DependentSsnDuplicated { rows: (first, row) },
                 format!(
-                    "dependent {who}: {} The rule the Form 1040 instructions send you to is {}.                      Remove the row, or change the answer that took the flowchart there                      (`btctax income answer`).",
-                    r.exit, r.rule
+                    "two dependent rows carry the same Social Security number: {} and {}. One SSN \
+                     is one person, and this return files each dependent's §152 answers under it — \
+                     two rows sharing it would file one row's answers as the other's. Correct the \
+                     number, or remove the duplicate row.",
+                    dependent_label(ri, first),
+                    dependent_label(ri, row)
                 ),
             );
         }
+    }
+    // The flowchart's own STOPs. Every one names the rule the instruction sends the filer to, and
+    // the two variants differ ONLY in what the refusal is anchored on (seam review M-1).
+    for (row, _) in ri.header.dependents.iter().enumerate() {
+        let (reason, exit, rule) = match walk_dependent(ri, row).verdict {
+            DependentVerdict::Refused(r) => (
+                RefuseReason::DependentGateRefused { row, gate: r.gate },
+                r.exit,
+                r.rule,
+            ),
+            DependentVerdict::RefusedByQuestion(r) => (
+                RefuseReason::DependentRefusedByQuestion {
+                    row,
+                    question: r.question,
+                },
+                r.exit,
+                r.rule,
+            ),
+            _ => continue,
+        };
+        return refuse(
+            reason,
+            format!(
+                "dependent {}: {exit} The rule the Form 1040 instructions send you to is {rule}. \
+                 Remove the row, or change the answer that took the flowchart there — in the \
+                 tax-inputs form's Dependents section, or in the TOML you import.",
+                dependent_label(ri, row),
+            ),
+        );
     }
     None
 }
@@ -1924,6 +2053,16 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
     // ★★★ T4/R11 — THE WHOLE LOOP IS THE UNANSWERED TIER, and `income import` runs without it (see
     //     [`ScreenTier`]: the import is the only row-creating path and `income answer` the only
     //     answering one, so demanding the answers here would make answering unreachable).
+    // ★★★ **T7 / R6, seam review I-2 + M-4 — THE DEPENDENT ROWS' VALUE RULES, on BOTH tiers.**
+    //
+    // Two rows sharing an SSN, and a gate answer that STOPs the flowchart. Both are STATED facts,
+    // and `income import` is the path that states them, so both refuse there — the same line
+    // `ScreenTier` already draws for the census's value rules. The blank-identity and unanswered
+    // halves stay inside the tier below, where `income answer` is the exit.
+    if let Some(r) = screen_dependent_values(ri) {
+        return Some(r);
+    }
+
     if tier.unanswered_refuses {
         for q in crate::tax::questions::FORM_QUESTIONS {
             if !(q.live)(ri) {
@@ -6819,6 +6958,51 @@ mod param_free_tier {
         add("DependentSpouseUnsupported", &|r| {
             r.header.can_be_claimed_as_dependent_spouse = Some(true)
         });
+        // ★★★ T7 / R6, seam review I-2 — two dependent rows, ONE identity. No gate needs answering:
+        //     the rule is about the SSN, and it fires before the gates are demanded.
+        add("DependentSsnDuplicated", &|r| {
+            for name in ["First Kid", "Second Kid"] {
+                r.header
+                    .dependents
+                    .push(crate::tax::return_inputs::Dependent {
+                        name: name.into(),
+                        ssn: "000-00-1111".into(),
+                        relationship: "Daughter".into(),
+                        ..Default::default()
+                    });
+            }
+        });
+        // ★★★ T7 / R6, seam review M-1 — the STOP that comes from a RETURN-LEVEL answer. Its
+        //     refusal is a different variant precisely so it anchors on `DependentTaxpayer`.
+        add("DependentRefusedByQuestion", &|r| {
+            r.header
+                .dependents
+                .push(crate::tax::return_inputs::Dependent {
+                    name: "Claimed Kid".into(),
+                    ssn: "000-00-3333".into(),
+                    relationship: "Daughter".into(),
+                    ..Default::default()
+                });
+            crate::tax::testonly::answer_all_dependent_gates(r);
+            r.header.filer_tin_issued_by_due_date = Some(true);
+            r.header.can_be_claimed_as_dependent_taxpayer = Some(true);
+        });
+        // ★★★ T7 / R6, seam review M-4 — a STATED answer that STOPs the flowchart. Every gate the
+        //     walk demands is answered at its claim path, then ONE is flipped to the STOP, so the
+        //     unanswered tier has nothing to say and this rule is what refuses — on both paths.
+        add("DependentGateRefused", &|r| {
+            r.header
+                .dependents
+                .push(crate::tax::return_inputs::Dependent {
+                    name: "Married Kid".into(),
+                    ssn: "000-00-2222".into(),
+                    relationship: "Daughter".into(),
+                    ..Default::default()
+                });
+            crate::tax::testonly::answer_all_dependent_gates(r);
+            r.header.filer_tin_issued_by_due_date = Some(true);
+            r.header.dependents[0].married = Some(true);
+        });
         add("SpouseOwnerWithoutJointReturn", &|r| {
             r.documents.set(DocumentRow::W2, Some(true));
             r.w2s.push(w2(|w| w.owner = Owner::Spouse));
@@ -7071,9 +7255,19 @@ mod param_free_tier {
         );
         let census_fn =
             body_after("pub fn screen_document_census(ri: &ReturnInputs) -> Option<Refusal> {");
+        // ★★★ T7 / R6 — the dependent rows' VALUE rules are called unconditionally from the body,
+        //     so they belong to the param-free census exactly as the document census's do. Their
+        //     UNANSWERED siblings live in `screen_dependent_gates`, which the body reaches only
+        //     inside `if tier.unanswered_refuses` and which is therefore deliberately not censused
+        //     here (the same treatment the registry loop's `q.unanswered` raises get).
+        let dependent_values =
+            body_after("fn screen_dependent_values(ri: &ReturnInputs) -> Option<Refusal> {");
 
         let named: BTreeSet<String> = reasons_in(body)
             .union(&reasons_in(census_fn))
+            .cloned()
+            .collect::<BTreeSet<String>>()
+            .union(&reasons_in(dependent_values))
             .cloned()
             .collect();
         let package_gated: BTreeSet<String> =

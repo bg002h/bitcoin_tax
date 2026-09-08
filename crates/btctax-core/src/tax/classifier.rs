@@ -70,10 +70,12 @@ pub struct Census {
     /// not visible here — the classifier has no ledger; the screen (`screen_absolute`) counts them
     /// against the year's rows and refuses.
     pub broker_answers: Vec<(String, crate::forms::Cohort, crate::forms::BrokerReported)>,
-    /// ★★★ T7 / R6 — every per-row dependent gate this walk classified, one entry per gate per row.
-    /// `the_classifiers_gate_rows_line_up_with_the_registry` checks it against `DEPENDENT_GATES` in
-    /// both directions.
-    pub dependent_gates: Vec<crate::tax::provenance::DependentGate>,
+    /// ★★★ T7 / R6 — every per-row dependent gate this walk classified, one entry per gate per row,
+    /// **paired with the leaf it was classified FROM** (seam review N-2).
+    /// `the_classifiers_gate_rows_line_up_with_the_registry` checks the gate set against
+    /// `DEPENDENT_GATES` in both directions, and
+    /// `every_classifier_row_pairs_its_gate_with_its_own_leaf` checks the pairing.
+    pub dependent_gates: Vec<(crate::tax::provenance::DependentGate, Option<bool>)>,
 }
 
 impl Census {
@@ -89,12 +91,14 @@ impl Census {
     /// in [`crate::tax::dependent_gates::DEPENDENT_GATES`], and its answer-log key is the row's
     /// `ssn_hash`, not its index. Separate from [`Self::declaration`] because the key space is
     /// different, not because the class is.
-    fn dependent_gate(
-        &mut self,
-        _leaf: &Option<bool>,
-        gate: crate::tax::provenance::DependentGate,
-    ) {
-        self.dependent_gates.push(gate);
+    ///
+    /// ★★ **The LEAF is recorded, not discarded** (seam review N-2). Dropping it made the census a
+    ///    set of gate names, and a set is blind to a MIS-PAIRING: swapping two calls in
+    ///    `classify_dependent` (`c.dependent_gate(married, G::FilingJointReturn)`) left the set
+    ///    identical and red nothing. The value read off the leaf is what ties a row to the field it
+    ///    is about.
+    fn dependent_gate(&mut self, leaf: &Option<bool>, gate: crate::tax::provenance::DependentGate) {
+        self.dependent_gates.push((gate, *leaf));
     }
 }
 
@@ -1420,6 +1424,40 @@ mod tests {
     /// ★ `DateOfBirth` is deliberately NOT in the classifier's list: it is an `Option<Date>`, a
     ///   scalar the classifier's `_` rule permits, and its answered-ness is carried by its
     ///   `DEPENDENT_GATES` entry. The exclusion is asserted rather than assumed.
+    /// ★★★ **SEAM REVIEW N-2 — EVERY CLASSIFIER ROW PAIRS ITS GATE WITH ITS OWN LEAF.**
+    ///
+    /// `Census::dependent_gate` used to ignore the leaf and push only the gate, and the lineup test
+    /// above compares SETS — so mis-pairing two calls in `classify_dependent` (say
+    /// `c.dependent_gate(married, G::FilingJointReturn)`) left the set identical and red nothing.
+    /// Nothing user-visible moves today, because the census only counts; the two registries look
+    /// alike and only the input form's was protected.
+    ///
+    /// The pairing is checked one gate at a time, DERIVED from the registry: set exactly one gate
+    /// through its own `set` accessor and require the census to report that value against that gate
+    /// and `None` against every other.
+    #[test]
+    fn every_classifier_row_pairs_its_gate_with_its_own_leaf() {
+        use crate::tax::dependent_gates::{GateKind, DEPENDENT_GATES};
+        for q in DEPENDENT_GATES.iter().filter(|q| q.kind == GateKind::YesNo) {
+            let mut ri = ReturnInputs::default();
+            ri.header.dependents = vec![crate::tax::return_inputs::Dependent::default()];
+            (q.set)(&mut ri.header.dependents[0], true);
+            let rows = classify(&ri).dependent_gates;
+            let answered: Vec<_> = rows
+                .iter()
+                .filter(|(_, leaf)| leaf.is_some())
+                .copied()
+                .collect();
+            assert_eq!(
+                answered,
+                vec![(q.gate, Some(true))],
+                "the ONE answered leaf must be classified as {:?} and nothing else — a swapped \
+                 pairing reports another gate's name against this field",
+                q.gate
+            );
+        }
+    }
+
     #[test]
     fn the_classifiers_gate_rows_line_up_with_the_registry() {
         use crate::tax::dependent_gates::{GateKind, DEPENDENT_GATES};
@@ -1429,7 +1467,7 @@ mod tests {
         let census = classify(&ri);
 
         let classified: std::collections::BTreeSet<DependentGate> =
-            census.dependent_gates.iter().copied().collect();
+            census.dependent_gates.iter().map(|(g, _)| *g).collect();
         let registered: std::collections::BTreeSet<DependentGate> = DEPENDENT_GATES
             .iter()
             .filter(|q| q.kind == GateKind::YesNo)

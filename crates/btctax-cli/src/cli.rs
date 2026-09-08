@@ -516,9 +516,17 @@ pub enum IncomeCmd {
     /// a plausible-looking one in a file marked safe to share is worse than none.
     ///
     /// Everything the computation reads survives unchanged: every dollar figure, the filing status,
-    /// dates of birth and death, blindness, the dependent count and each relationship, and every
-    /// fail-loud declaration. W-2 EINs are replaced but keep their SAMENESS, because §6413(c)'s
-    /// excess-social-security credit turns on having more than one employer.
+    /// your own (and your spouse's) dates of birth and death, blindness, the dependent count and
+    /// each relationship, and every fail-loud declaration. W-2 EINs are replaced but keep their
+    /// SAMENESS, because §6413(c)'s excess-social-security credit turns on having more than one
+    /// employer, and two dependent rows that share an SSN still share one in the copy, because that
+    /// is a refusal.
+    ///
+    /// A DEPENDENT's date of birth is replaced with one the tax law cannot tell apart: the
+    /// dependency tests read only the age the child is CONSIDERED to be at the end of the year, so
+    /// the stand-in reproduces that for every tax year — the child tax credit, the credit for other
+    /// dependents and every refusal land exactly where they did — without a child's real birthday
+    /// leaving your vault.
     ///
     /// Every computed FIGURE is preserved — a guarantee held by
     /// `scrub_preserves_every_computed_figure`, which compares the whole assembled return, not a
@@ -571,17 +579,21 @@ pub enum IncomeCmd {
     /// unanswered, and the computed carryforwards carried as data.
     ///
     /// WHAT COMES WITH THEM, and nothing else: your filing status, your name and SSN (and your
-    /// spouse's), your mailing address, each employer and payer by name and EIN/TIN with every box
-    /// blank, and last year's computed carryforwards. Every one of those is printed for you to
-    /// confirm, and the filing status gets its own question — marital status is determined on the
-    /// last day of the tax year, so last year's is not testimony for this one.
+    /// spouse's), your mailing address, each dependent's name, SSN and relationship, each employer
+    /// and payer by name and EIN/TIN with every box blank, and last year's computed carryforwards.
+    /// Every one of those is printed for you to confirm, and the filing status gets its own
+    /// question — marital status is determined on the last day of the tax year, so last year's is
+    /// not testimony for this one.
     ///
     /// Nothing else crosses. A prior year's "no" is not testimony for this year, so every question
     /// starts unanswered and every box starts blank. A date of birth is SHOWN beside its prompt (it
-    /// cannot change) and still takes the same keystroke a fresh answer takes — skipping it forgoes
-    /// the age-65 addition rather than confirming the date on your behalf. Dependents and exchanges
-    /// are named as questions but no row is created: an unconfirmed dependent is absent, never
-    /// claimed.
+    /// cannot change) and still takes the same keystroke a fresh answer takes — skipping yours
+    /// forgoes the age-65 addition rather than confirming the date on your behalf, and a
+    /// dependent's is not confirmed until you type it. A dependent crosses as a PERSON with every
+    /// dependency question blank: the row blocks until you answer this year's "Who Qualifies as
+    /// Your Dependent" flowchart for that child or remove the row, so a child who aged out, moved
+    /// out, or is claimed by their other parent is never carried over as claimed. An exchange is
+    /// named as a question but no venue row is created.
     ///
     /// The carryforwards — §1212(b) capital loss, §170(d)(1) charitable, and the two QBI ones — are
     /// read off year N's computed RETURN, not off what you typed into it, and are stamped as

@@ -2985,10 +2985,19 @@ fn full_return_report_surfaces_conservative_omission_advisories() {
             foreign_trust: Some(false),
             ..Default::default()
         };
-        ri.header.dependents = vec![Dependent::default()]; // → CTC/ODC omission
-                                                           // taxpayer.date_of_birth stays None → the §63(f) aged box is forfeited
-                                                           // ★ FR-29: "no, I was not under 24 at the end of the year" — the filer's own answer, which is
-                                                           //   ladder step 2 and proceeds. Condition 4 is then never asked.
+        // ★ Seam review I-2 — a dependent row is a CLAIM and needs an identity: a blank `ssn` now
+        //   refuses `DependentIdentityUnanswered` before any gate, because the row's §152 answers
+        //   are filed under `dependent_ssn_hash(ssn)` and a blank one has no owner. The never-issued
+        //   000-00-nnnn space, as everywhere else in this suite.
+        ri.header.dependents = vec![Dependent {
+            name: "Kid Example".into(),
+            ssn: "000-00-1111".into(),
+            relationship: "Daughter".into(),
+            ..Default::default()
+        }]; // → CTC/ODC omission
+            // taxpayer.date_of_birth stays None → the §63(f) aged box is forfeited
+            // ★ FR-29: "no, I was not under 24 at the end of the year" — the filer's own answer, which is
+            //   ladder step 2 and proceeds. Condition 4 is then never asked.
         ri.header.form8615_condition3_age_support = Some(false);
         btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
         // ★ R9 / T6 — the Digital Assets answer, off this vault's own ledger.

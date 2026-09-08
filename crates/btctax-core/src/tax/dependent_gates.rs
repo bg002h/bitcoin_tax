@@ -103,6 +103,28 @@ pub struct DependentRefusal {
     pub rule: &'static str,
 }
 
+/// ★★★ **THE FLOWCHART STOPPED ON A RETURN-LEVEL ANSWER, not on a gate of the row** (seam review
+/// M-1).
+///
+/// Step 2 question 4 / Step 4 question 5 — *"Could you be claimed as a dependent on someone else's
+/// return?"* — is about the FILER, and its `Yes` refuses every dependent row at once. Attributing
+/// that to a gate on the row sent the filer to the wrong control: the input form anchored
+/// `DependentGateRefused { gate: QcRelationship }` on the relationship tri-state, and a filer who
+/// followed the anchor and flipped it merely routed the row to Step 4, where the identical refusal
+/// fires again with the identical exit. The refusal TEXT was always right; the anchor was not.
+///
+/// It carries the same `exit` and `rule` a [`DependentRefusal`] does, because the instruction's own
+/// sentence and cite are what make a refusal followable — only the thing it points AT differs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DependentQuestionRefusal {
+    /// The return-level declaration whose answer stopped the flowchart.
+    pub question: QuestionId,
+    /// The instruction's own exit sentence.
+    pub exit: &'static str,
+    /// The NAMED rule the instruction sends the filer to, with its line cite.
+    pub rule: &'static str,
+}
+
 /// ★★★ **What the flowchart says about one dependent row.**
 ///
 /// Task **T8** reads this to fill rows (5), (6) and (7) of the TY2025+ Dependents grid; T7 only
@@ -119,6 +141,10 @@ pub enum DependentVerdict {
     WaitingOnQuestion(QuestionId),
     /// The flowchart STOPped: this person is not a dependent on this return.
     Refused(DependentRefusal),
+    /// The flowchart STOPped on a RETURN-LEVEL answer — see [`DependentQuestionRefusal`]. Separate
+    /// from [`Self::Refused`] so the refusal anchors on the question the filer must change, not on a
+    /// gate of the row that cannot fix it (seam review M-1).
+    RefusedByQuestion(DependentQuestionRefusal),
     /// A dependent, and row (7)'s *"Child tax credit"* box.
     ChildTaxCredit,
     /// A dependent, and row (7)'s *"Credit for other dependents"* box.
@@ -316,8 +342,8 @@ fn step2(mut w: Walk<'_>) -> DependentWalk {
     // someone else's 2025 tax return?"* (the existing return-level declaration).
     match could_you_be_claimed(w.ri) {
         ClaimedTaxpayer::FilingJointly | ClaimedTaxpayer::No => step3(w),
-        ClaimedTaxpayer::Yes => w.done(refused(
-            G::QcRelationship,
+        ClaimedTaxpayer::Yes => w.done(refused_by_question(
+            QuestionId::DependentTaxpayer,
             EXIT_CANT_CLAIM_ANY_DEPENDENTS,
             "Step 2 question 4 / Step 4 question 5 (i1040gi--2025.txt:1571-1589) — someone who can \
              be claimed as a dependent can claim no dependents of their own",
@@ -440,8 +466,8 @@ fn step4(mut w: Walk<'_>) -> DependentWalk {
     }
     match could_you_be_claimed(w.ri) {
         ClaimedTaxpayer::FilingJointly | ClaimedTaxpayer::No => step5(w),
-        ClaimedTaxpayer::Yes => w.done(refused(
-            G::QrRelationshipOrMemberOfHousehold,
+        ClaimedTaxpayer::Yes => w.done(refused_by_question(
+            QuestionId::DependentTaxpayer,
             EXIT_CANT_CLAIM_ANY_DEPENDENTS,
             "Step 2 question 4 / Step 4 question 5 (i1040gi--2025.txt:1717-1735) — someone who can \
              be claimed as a dependent can claim no dependents of their own",
@@ -483,6 +509,19 @@ fn step5(mut w: Walk<'_>) -> DependentWalk {
 
 fn refused(gate: DependentGate, exit: &'static str, rule: &'static str) -> DependentVerdict {
     DependentVerdict::Refused(DependentRefusal { gate, exit, rule })
+}
+
+/// The same STOP, anchored on the RETURN-level question that caused it (seam review M-1).
+fn refused_by_question(
+    question: QuestionId,
+    exit: &'static str,
+    rule: &'static str,
+) -> DependentVerdict {
+    DependentVerdict::RefusedByQuestion(DependentQuestionRefusal {
+        question,
+        exit,
+        rule,
+    })
 }
 
 /// *"4. Could you be claimed as a dependent on someone else's 2025 tax return?"* — and the question
@@ -1107,10 +1146,17 @@ pub const DEPENDENT_GATES: &[DependentGateQuestion] = &[
                  year? (Form 1040 instructions, Step 4. The year's figure arrives with its tax \
                  package; until then this question cannot be stated.)",
         prompt_from_params: Some(gross_income_prompt),
+        // ★★★ **SEAM REVIEW M-5 — NO FIGURE HERE.** The limit is §152(d)(1)(B)'s exemption amount,
+        //     republished for every tax year, and it lives in exactly one place:
+        //     `FullReturnParams::qualifying_relative_gross_income_limit`. `prompt_from_params`
+        //     already renders the YEAR'S figure into the sentence the filer answers, so a table of
+        //     years typed here was a second copy that can drift from the params it duplicates — in
+        //     the one module whose header states the rule against a list typed beside derived data.
+        //     `no_dependent_gate_help_types_a_figure_the_params_carry` holds it.
         help: "Step 4's gross income test. \"If the person was permanently and totally disabled, see \
                Exception to gross income test, later.\" The limit is §152(d)(1)(B)'s exemption \
-               amount, republished for every tax year: $5,050 for 2024, $5,200 for 2025, $5,300 for \
-               2026.",
+               amount, republished for every tax year; the question quotes the year's own figure \
+               once the tax package has arrived.",
         cite: "i1040gi--2025.txt:1690-1691",
         kind: GateKind::YesNo,
         get: |d| d.gross_income_under_limit,
@@ -1254,6 +1300,38 @@ mod tests {
         }
     }
 
+    /// ★★★ **SEAM REVIEW M-5 — NO GATE'S `help` TYPES A FIGURE THE PARAMS CARRY.**
+    ///
+    /// Exactly one gate quotes money, its figure is
+    /// `FullReturnParams::qualifying_relative_gross_income_limit`, and `prompt_from_params` renders
+    /// it. A table of years typed into `help` beside it is a second copy of derived data — the shape
+    /// this module's own header forbids — and it can drift from the params silently, because
+    /// nothing reads it. Derived over the whole registry, so a figure typed into any FUTURE gate's
+    /// help reds here too.
+    #[test]
+    fn no_dependent_gate_help_types_a_figure_the_params_carry() {
+        for q in DEPENDENT_GATES {
+            assert!(
+                !q.help.contains('$'),
+                "{:?}'s help types a dollar figure: the year's figure comes from \
+                 `FullReturnParams`, through `prompt_from_params`, and nowhere else — {:?}",
+                q.gate,
+                q.help
+            );
+        }
+        // ★ The positive control: the figure IS still reaching the filer, so this is not satisfied
+        //   by a registry that stopped saying anything.
+        let mut p = crate::tax::testonly::ty2024_params();
+        p.qualifying_relative_gross_income_limit = rust_decimal_macros::dec!(5300);
+        let asked = entry(DependentGate::GrossIncomeUnderLimit)
+            .prompt_text(&one_dependent(2026), Some(&p))
+            .into_owned();
+        assert!(
+            asked.contains("5300"),
+            "the words PUT TO THE FILER still quote the year's figure: {asked}"
+        );
+    }
+
     /// ★★★ **THE `claim_path` COLUMN IS CHECKED, NOT ASSERTED.** A row built from that column alone
     /// must reach the CTC edge — so a wrong polarity reds here rather than quietly steering every
     /// fixture in the workspace down the qualifying-RELATIVE branch.
@@ -1346,14 +1424,18 @@ mod tests {
                 |ri| ri.header.dependents[0].married = Some(true),
                 refused(DependentGate::Married, RULE_MARRIED_PERSON),
             ),
+            // ★ Seam review M-1 — this STOP comes from a RETURN-LEVEL answer, so its verdict names
+            //   the QUESTION. Nothing on the row can change it.
             (
                 "Step 2 q4 could-you-be-claimed Yes ⇒ REFUSE, You can't claim any dependents",
                 |ri| ri.header.can_be_claimed_as_dependent_taxpayer = Some(true),
-                refused(
-                    DependentGate::QcRelationship,
-                    "Step 2 question 4 / Step 4 question 5 (i1040gi--2025.txt:1571-1589) — someone \
-                     who can be claimed as a dependent can claim no dependents of their own",
-                ),
+                DependentVerdict::RefusedByQuestion(DependentQuestionRefusal {
+                    question: QuestionId::DependentTaxpayer,
+                    exit: "",
+                    rule: "Step 2 question 4 / Step 4 question 5 (i1040gi--2025.txt:1571-1589) — \
+                           someone who can be claimed as a dependent can claim no dependents of \
+                           their own",
+                }),
             ),
             (
                 "Step 2 q3 filing a joint return ⇒ claimed, and on to Step 3",
@@ -1387,6 +1469,22 @@ mod tests {
                 },
                 DependentVerdict::CreditForOtherDependents,
             ),
+            // ★★★ **SEAM REVIEW N-1 — THE UNDER-17 JANUARY-1 BOUNDARY, as a PAIR.** Step 3
+            //     question 3 is computed from the row's date of birth on the IRS's own convention
+            //     (*"a child born on January 1, 2008, is considered to be age 18 at the end of
+            //     2025"*, `i1040gi--2025.txt:3945-3951`). The other under-17 row uses a date ten
+            //     years back, nowhere near the edge, so the GATE's use of the convention was only
+            //     transitively covered by `return_1040`'s own KAT. One day apart, opposite verdicts.
+            (
+                "Step 3 q3 born January 1 ⇒ considered 17 at the end of 2025 ⇒ ODC, not the CTC",
+                |ri| ri.header.dependents[0].date_of_birth = Some(date!(2009 - 01 - 01)),
+                DependentVerdict::CreditForOtherDependents,
+            ),
+            (
+                "…and born January 2 ⇒ considered 16 ⇒ the child tax credit",
+                |ri| ri.header.dependents[0].date_of_birth = Some(date!(2009 - 01 - 02)),
+                DependentVerdict::ChildTaxCredit,
+            ),
             // ── Step 5's own question, reached from Step 3 q4's No ──
             (
                 "Step 5 q1 the FILER has no TIN by the due date ⇒ no credit box",
@@ -1408,6 +1506,15 @@ mod tests {
                 (DependentVerdict::Refused(g), DependentVerdict::Refused(w)) => assert_eq!(
                     (g.gate, g.rule),
                     (w.gate, w.rule),
+                    "{name}: the flowchart took a different exit"
+                ),
+                // …and a RETURN-LEVEL stop is compared on the QUESTION and the rule (M-1).
+                (
+                    DependentVerdict::RefusedByQuestion(g),
+                    DependentVerdict::RefusedByQuestion(w),
+                ) => assert_eq!(
+                    (g.question, g.rule),
+                    (w.question, w.rule),
                     "{name}: the flowchart took a different exit"
                 ),
                 _ => assert_eq!(&got, want, "{name}"),
@@ -1493,17 +1600,29 @@ mod tests {
                 DependentGate::DivorcedSeparatedMultipleSupportOrKidnappedRuleApplies,
                 "Children of divorced or separated parents",
             ),
+            // ★★★ **SEAM REVIEW I-5 — STEP 4 QUESTION 2, THE CITIZEN STOP.** R6's table names this
+            //     edge and the instruction states it as its own question (`i1040gi--2025.txt:
+            //     1765-1772), but no row covered it: `the_flowchart_truth_table`'s citizen row
+            //     starts from the CTC edge, so it exercises STEP 2's arm. Deleting Step 4's whole
+            //     `if w.no(CitizenNationalResidentOrCanadaMexico)` block claimed a non-citizen,
+            //     non-resident qualifying relative as a dependent — a wrong result on the form's
+            //     own terms — with 1315 tests still green.
+            //
+            // ★ The rule fragment asserted is *"adopted person only"*, which is Step 4's own
+            //   wording; Step 2's says *"adopted child only"*. So this row also pins WHICH arm ran.
+            (
+                "Step 4 q2 citizenship No ⇒ REFUSE — You can't claim this person as a dependent",
+                |ri| {
+                    ri.header.dependents[0].citizen_national_resident_or_canada_mexico = Some(false)
+                },
+                DependentGate::CitizenNationalResidentOrCanadaMexico,
+                "covers an adopted person only",
+            ),
             (
                 "Step 4 q3 married Yes ⇒ REFUSE naming Married person",
                 |ri| ri.header.dependents[0].married = Some(true),
                 DependentGate::Married,
                 "Married person",
-            ),
-            (
-                "Step 4 q5 could-you-be-claimed Yes ⇒ REFUSE, You can't claim any dependents",
-                |ri| ri.header.can_be_claimed_as_dependent_taxpayer = Some(true),
-                DependentGate::QrRelationshipOrMemberOfHousehold,
-                "can claim no dependents of their own",
             ),
         ];
         for (name, perturb, gate, rule_fragment) in rows {
@@ -1523,6 +1642,59 @@ mod tests {
                 }
                 other => panic!("{name}: expected a refusal, got {other:?}"),
             }
+        }
+        // ★★★ **SEAM REVIEW M-1 — STEP 4 QUESTION 5 anchors on the QUESTION, not on a gate.** It
+        //     is the only Step 4 STOP that no answer ON THE ROW can lift, and it used to be
+        //     reported as `Refused { gate: QrRelationshipOrMemberOfHousehold }` — which sent the
+        //     filer to a control that merely re-routes the row into the same refusal.
+        {
+            let mut ri = relative();
+            ri.header.can_be_claimed_as_dependent_taxpayer = Some(true);
+            match verdict(&ri) {
+                DependentVerdict::RefusedByQuestion(r) => {
+                    assert_eq!(r.question, QuestionId::DependentTaxpayer);
+                    assert_eq!(r.exit, "You can't claim any dependents.");
+                    assert!(
+                        r.rule.contains("can claim no dependents of their own"),
+                        "the refusal must NAME its rule — got {:?}",
+                        r.rule
+                    );
+                }
+                other => panic!("Step 4 q5 Yes must refuse on the QUESTION, got {other:?}"),
+            }
+        }
+        // ★★★ **SEAM REVIEW I-5 — STEP 4 QUESTION 4, on the relative path.** *"Are you filing a
+        //     joint return for 2025?"* is computed from the filing status, and its `Yes` CLAIMS the
+        //     person and moves on to Step 5 — it never consults the could-you-be-claimed
+        //     declaration. The declaration is blanked here so the Mfj arm is the ONLY thing that
+        //     can produce a verdict: without it the walk waits on `DependentTaxpayer`.
+        {
+            let mut ri = relative();
+            ri.header.can_be_claimed_as_dependent_taxpayer = None;
+            assert_eq!(
+                verdict(&ri),
+                DependentVerdict::WaitingOnQuestion(QuestionId::DependentTaxpayer),
+                "the premise: with the declaration blank and no joint return, the chain WAITS"
+            );
+            ri.filing_status = FilingStatus::Mfj;
+            assert_eq!(
+                verdict(&ri),
+                DependentVerdict::CreditForOtherDependents,
+                "Step 4 q4 Yes ⇒ claimed, on to Step 5 — the declaration is never reached"
+            );
+        }
+        // ★★★ **SEAM REVIEW I-5 — STEP 5 QUESTION 1 answered *No*, on the RELATIVE path.** The
+        //     FILER's own TIN. Only the Step-3-derived path had a row for it, and the two paths
+        //     reach Step 5 through different arms.
+        {
+            let mut ri = relative();
+            ri.header.filer_tin_issued_by_due_date = Some(false);
+            assert_eq!(
+                verdict(&ri),
+                DependentVerdict::NoCreditBox,
+                "Step 5 q1 No ⇒ \"You can't claim the credit for other dependents\" — a forgo, and \
+                 the person is still a dependent"
+            );
         }
         // Step 5's own two reused gates, on the RELATIVE path.
         for (name, perturb) in [
@@ -1719,6 +1891,34 @@ mod tests {
                 detail.contains("btctax income answer") || detail.contains("Remove the row"),
                 "and it must carry an EXIT — got {detail:?}"
             );
+            // ★★★ **SEAM REVIEW M-2 — NO RUN OF SPACES.** The detail was one long string literal
+            //     whose wrapped lines had no `\` continuation, so the filer read two 22-space runs
+            //     mid-sentence. `cargo fmt` does not touch string literals, so nothing else catches
+            //     it; this does, for every refuse edge at once.
+            assert!(
+                !detail.contains("  "),
+                "a missing `\\` continuation collapses into a run of spaces: {detail:?}"
+            );
+        }
+        // ★ The same check on the two IDENTITY refusals and on the unanswered detail, so the whole
+        //   dependent surface is covered rather than only the STOPs.
+        for perturb in [
+            (|ri: &mut ReturnInputs| ri.header.dependents[0].ssn = String::new())
+                as fn(&mut ReturnInputs),
+            |ri: &mut ReturnInputs| {
+                let twin = ri.header.dependents[0].clone();
+                ri.header.dependents.push(twin);
+            },
+            |ri: &mut ReturnInputs| ri.header.dependents[0].lived_with_you_over_half_year = None,
+        ] {
+            let mut ri = at_the_ctc_edge(2024);
+            perturb(&mut ri);
+            let detail = screened_detail(&ri);
+            assert!(!detail.is_empty(), "the premise: this perturbation refuses");
+            assert!(
+                !detail.contains("  "),
+                "a missing `\\` continuation collapses into a run of spaces: {detail:?}"
+            );
         }
     }
 
@@ -1908,6 +2108,123 @@ mod tests {
                 |k| matches!(k, AnswerKey::DependentGate { ssn_hash, .. } if *ssn_hash == gone)
             ),
             "and row 0's own records are gone, not orphaned onto the survivor"
+        );
+    }
+
+    // ── The IDENTITY rules (seam review I-2) ─────────────────────────────────────────────────────
+
+    /// ★★★ **A DEPENDENT ROW WITH A BLANK SSN REFUSES BEFORE ANY GATE, AND NAMES THE ROW.**
+    ///
+    /// `provenance.rs` recorded the question against this task — *"a row with a BLANK `ssn` has no
+    /// identity, so every blank row shares one bucket … Recorded here so T7 decides it rather than
+    /// meets it"* — and this is the decision. The gates on such a row cannot be answered truthfully
+    /// at all: their records would be keyed by `dependent_ssn_hash("")`, which names nobody.
+    #[test]
+    fn a_dependent_row_with_no_ssn_refuses_before_any_gate_and_names_the_row() {
+        let mut ri = at_the_ctc_edge(2024);
+        ri.header.dependents[0].ssn = String::new();
+        assert_eq!(
+            screened(&ri),
+            Some(RefuseReason::DependentIdentityUnanswered { row: 0 }),
+            "the identity is demanded BEFORE the flowchart, not after it"
+        );
+        let detail = screened_detail(&ri);
+        assert!(
+            detail.contains("row 1 (Kid Example)"),
+            "the refusal names the row the filer must fix: {detail}"
+        );
+        // ★ And it really is FIRST: blanking a gate as well must not change which rule speaks.
+        ri.header.dependents[0].lived_with_you_over_half_year = None;
+        assert_eq!(
+            screened(&ri),
+            Some(RefuseReason::DependentIdentityUnanswered { row: 0 }),
+            "an identity-less row is not asked its §152 questions"
+        );
+    }
+
+    /// ★★★ **TWO ROWS, ONE SSN — REFUSED, AND AT `income import` TOO.**
+    ///
+    /// A VALUE rule, not an unanswered one: nothing the filer can ANSWER separates two rows that
+    /// share the key their answers are filed under. `income import` is the path that creates them,
+    /// so that is where the exit is — the same line `ScreenTier` already draws for the census's own
+    /// value rules.
+    #[test]
+    fn two_dependent_rows_with_the_same_ssn_refuse_at_commit_and_at_import() {
+        use crate::tax::return_refuse::screen_param_free;
+        let mut ri = at_the_ctc_edge(2024);
+        let twin = ri.header.dependents[0].clone();
+        ri.header.dependents.push(Dependent {
+            name: "Twin Example".into(),
+            // The SAME person's digits, punctuated differently — `dependent_ssn_hash` normalises
+            // punctuation, so this is ONE identity and the screen must judge it the same way.
+            ssn: twin.ssn.chars().filter(char::is_ascii_digit).collect(),
+            ..twin
+        });
+        assert_eq!(
+            screened(&ri),
+            Some(RefuseReason::DependentSsnDuplicated { rows: (0, 1) }),
+            "one SSN is one person: two rows under it would file one row's answers as the other's"
+        );
+        assert_eq!(
+            screen_param_free(&ri).map(|r| r.reason),
+            Some(RefuseReason::DependentSsnDuplicated { rows: (0, 1) }),
+            "`income import` is the path that CREATES the rows — refusing there is the real exit"
+        );
+        let detail = screened_detail(&ri);
+        for who in ["row 1 (Kid Example)", "row 2 (Twin Example)"] {
+            assert!(
+                detail.contains(who),
+                "the refusal names both rows: {detail}"
+            );
+        }
+    }
+
+    /// ★★★ **`retire_dependent_identity` CANNOT CROSS-DELETE, because the state in which it would
+    ///     is itself refused.**
+    ///
+    /// The mechanism is real and unchanged: `remove` on a row deletes every `answer_log` key under
+    /// that row's `ssn_hash`, so two rows sharing a hash would have one row's removal take the
+    /// other's diligence with it. What closes it is the rule above — no stored return may hold two
+    /// rows with one key — so this asserts BOTH halves: the cross-deletion happens on the degenerate
+    /// state, and the degenerate state cannot be stored.
+    #[test]
+    fn retiring_one_identity_cannot_take_anothers_records_because_a_shared_key_is_refused() {
+        use crate::tax::provenance::{
+            dependent_ssn_hash, record_answer, retire_dependent_identity, AnswerKey, AnswerState,
+        };
+        use crate::tax::return_refuse::screen_param_free;
+        let mut ri = at_the_ctc_edge(2024);
+        let twin = ri.header.dependents[0].clone();
+        ri.header.dependents.push(Dependent {
+            name: "Twin Example".into(),
+            ..twin.clone()
+        });
+        // One record per row, written under each row's own key — which is the SAME key.
+        for gate in [DependentGate::QcRelationship, DependentGate::Married] {
+            let words = entry(gate).prompt_text(&ri, None).into_owned();
+            record_answer(
+                &mut ri,
+                AnswerKey::DependentGate {
+                    ssn_hash: dependent_ssn_hash(&twin.ssn),
+                    gate,
+                },
+                &words,
+                date!(2026 - 02 - 03),
+                AnswerState::Given,
+            );
+        }
+        // THE MECHANISM: retiring row 1 takes row 0's records too — two records for one `remove`.
+        let mut degenerate = ri.clone();
+        assert_eq!(
+            retire_dependent_identity(&mut degenerate, &twin.ssn),
+            2,
+            "the premise: one identity, so one removal clears BOTH rows' diligence"
+        );
+        // THE CLOSURE: that return can never be stored, on either tier.
+        assert_eq!(
+            screen_param_free(&ri).map(|r| r.reason),
+            Some(RefuseReason::DependentSsnDuplicated { rows: (0, 1) }),
+            "…and no committed or imported return may hold two rows under one key"
         );
     }
 

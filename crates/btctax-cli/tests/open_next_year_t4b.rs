@@ -592,6 +592,27 @@ fn sweep_script(
     script
 }
 
+/// Drive `income answer` over the year-`TO` draft with an arbitrary keystroke script, returning the
+/// command's own result AND what the filer saw. The screen is captured either way, because a
+/// refusing run is exactly what one of the tests below is about.
+fn answer_the_draft_with(
+    vault: &std::path::Path,
+    script: &str,
+) -> (Result<(), btctax_cli::CliError>, String) {
+    let mut keys = script.as_bytes();
+    let mut screen = Vec::new();
+    let r = cmd::answer::answer_return_inputs(
+        vault,
+        &pp(),
+        TO,
+        time::macros::date!(2026 - 02 - 03),
+        &mut keys,
+        &mut screen,
+        false,
+    );
+    (r, String::from_utf8(screen).unwrap())
+}
+
 ///   broke `tax_report`'s script when the interview grew.
 fn answer_the_draft(
     vault: &std::path::Path,
@@ -1076,18 +1097,21 @@ fn a_dependent_identity_is_seeded_blocking_and_a_venue_key_is_not() {
         ("Sam Filer", "987654321", "daughter"),
         "name, SSN and relationship are IDENTITY — who this is, not a claim about the year"
     );
+    // ★★★ **SEAM REVIEW I-3 — the one `Durable` gate is SHOWN, NEVER PRE-FILLED.** It used to
+    //     cross, and that broke `Durability::Durable`'s own definition in both halves: `income
+    //     answer`'s date gate takes a bare Enter as *keep what is on file* and then records
+    //     `AnswerState::Given`, so the filer ended up with a record dated THIS year for a value
+    //     they never typed. The value is load-bearing — Step 1's age test decides CTC versus ODC —
+    //     so the seed leaves it blank and the prompt carries year N's date as a hint.
     assert_eq!(
-        d.date_of_birth,
-        Some(time::macros::date!(2015 - 04 - 01)),
-        "a birth date is the one Durable gate: it cannot change, and it is keyed to the same person"
+        d.date_of_birth, None,
+        "the Durable date of birth does not cross: it is displayed beside this year's prompt and \
+         confirmed by the same keystroke a fresh answer takes"
     );
     // ── ...and the CLAIM does not: every one of the twenty §152 gates is blank. ──
     let blank: Vec<_> = btctax_core::tax::dependent_gates::DEPENDENT_GATES
         .iter()
-        .filter(|g| {
-            g.gate != btctax_core::tax::provenance::DependentGate::DateOfBirth
-                && (g.get)(d).is_some()
-        })
+        .filter(|g| (g.get)(d).is_some() || (g.get_date)(d).is_some())
         .map(|g| g.gate)
         .collect();
     assert!(
@@ -1118,6 +1142,96 @@ fn a_dependent_identity_is_seeded_blocking_and_a_venue_key_is_not() {
         seed.broker_reporting.0.is_empty(),
         "I-3 — no venue key, so nothing reads answered-ness the filer never gave: {:?}",
         seed.broker_reporting.0
+    );
+}
+
+/// ★★★ **SEAM REVIEW I-3's KILL — A BARE ENTER DOES NOT CONFIRM A DEPENDENT'S DATE OF BIRTH.**
+///
+/// `DateOfBirth` is `Durability::Durable`: *"the prior MAY be displayed, but it still requires the
+/// same explicit keystroke as a fresh ask: **never Enter-to-accept, never pre-filled**"*. Before this
+/// fold the opener seeded the value, so `income answer`'s date gate found something on file, took a
+/// bare Enter as *keep it*, and wrote `AnswerRecord { state: Given }` dated THIS year for a date the
+/// filer never typed. The value decides Step 1's age test, i.e. the child tax credit versus the
+/// credit for other dependents.
+///
+/// Both halves are asserted: year N's date is SHOWN (so the filer is not sent to look it up), and
+/// skipping it confirms NOTHING — no value, no record, and the gate still blocking.
+#[test]
+fn a_bare_enter_does_not_confirm_a_seeded_dependents_date_of_birth() {
+    use btctax_core::tax::provenance::{dependent_ssn_hash, AnswerKey, DependentGate};
+    let (_dir, vault) = vault_with_year_n(|ri| {
+        a_year_with_money_in_it(ri);
+        ri.header.dependents = vec![Dependent {
+            name: "Sam Filer".into(),
+            ssn: "987654321".into(),
+            relationship: "daughter".into(),
+            date_of_birth: Some(time::macros::date!(2015 - 04 - 01)),
+            ..Default::default()
+        }];
+    });
+    open(&vault, false);
+    let seeded = draft(&vault);
+    assert_eq!(
+        seeded.header.dependents[0].date_of_birth, None,
+        "the premise: the seed does not pre-fill it"
+    );
+
+    // The script a diligent filer would run — with the dependent's date REPLACED by a bare Enter.
+    let full = sweep_script(&seeded, |_| String::from("\n"));
+    let typed = format!("{}\n", time::macros::date!(2015 - 06 - 01));
+    let dob_line = format!("{}\n", seeded.tax_year - 10);
+    let dob_line = full
+        .lines()
+        .find(|l| l.starts_with(&dob_line[..4]))
+        .map(|l| format!("{l}\n"))
+        .expect("the sweep script types a date for the dependent's DOB gate");
+    let skipped = full.replacen(&dob_line, "\n", 1);
+    assert_ne!(skipped, full, "the premise: one keystroke was replaced");
+
+    let (result, screen) = answer_the_draft_with(&vault, &skipped);
+    assert!(
+        screen.contains("TY2024's return gave 2015-04-01 — type it to confirm"),
+        "year N's date is SHOWN beside the gate's own prompt: {screen}"
+    );
+    assert!(
+        result.is_err(),
+        "a class-(A) date has no lawful decline — the gate re-asks rather than accepting silence"
+    );
+
+    // NOTHING was confirmed: no value, no record, and the gate is still blocking.
+    let after = draft(&vault);
+    assert_eq!(
+        after.header.dependents[0].date_of_birth, None,
+        "a bare Enter must not leave a date the filer never typed"
+    );
+    let key = AnswerKey::DependentGate {
+        ssn_hash: dependent_ssn_hash("987654321"),
+        gate: DependentGate::DateOfBirth,
+    };
+    assert!(
+        !after.answer_log.contains_key(&key),
+        "…and no `Given` record dated this year for a value nobody entered: {:?}",
+        after.answer_log.get(&key)
+    );
+    let st = btctax_core::tax::interview_state::interview_state(&after);
+    assert!(
+        st.blocking.iter().any(|b| b.item == key),
+        "the gate is still BLOCKING, which is what `Durable` means: {:?}",
+        st.blocking
+    );
+
+    // The other half: TYPING it is a fresh answer, and then it stands.
+    let (ok, _) = answer_the_draft_with(&vault, &full.replacen(&dob_line, &typed, 1));
+    ok.expect("a typed date is answerable");
+    let confirmed = draft(&vault);
+    assert_eq!(
+        confirmed.header.dependents[0].date_of_birth,
+        Some(time::macros::date!(2015 - 06 - 01)),
+        "typing it is how a Durable fact is confirmed — including a CORRECTION of year N's date"
+    );
+    assert!(
+        confirmed.answer_log.contains_key(&key),
+        "and THAT writes the record"
     );
 }
 

@@ -47,6 +47,27 @@ use std::collections::BTreeSet;
 /// cell going *missing* is as much a divergence as one whose contents change; the differ has to
 /// agree. `serde_json` renders `None` as `Value::Null` at a present key, which is the other half of
 /// why it is the right serializer here.
+/// ★★★ **A `time::Date` IS ONE VALUE, NOT A COLLECTION OF TWO** (seam review M-3).
+///
+/// `time`'s compact serde form is the tuple `(year, ordinal)`, so both walkers in this module would
+/// otherwise read those two numbers as INSTANCES of a repeated field. That is wrong in both
+/// directions once scrub replaces a date:
+///
+/// - [`diff_paths`] would name the axis member `header.dependents[].date_of_birth[]` — an
+///   index-shaped path in the field-shaped vocabulary §5.1's divergence table is keyed in;
+/// - `no_fixture_value_collides_with_a_stand_in` would demand that EVERY part of the value differ,
+///   which a stand-in that PRESERVES the birth year can never satisfy — and preserving it is
+///   precisely what §3.2 requires, because `considered_age_at_year_end` reads it.
+///
+/// So a date is compared whole, like any other scalar. The shape is PINNED by
+/// `a_date_is_one_value_and_a_row_vector_is_not`, so a change to `time`'s wire form reds rather
+/// than silently splitting the field again. `ReturnInputs` holds no `Vec` of numbers anywhere, so
+/// nothing else can match this shape.
+fn is_scalar_date(v: &serde_json::Value) -> bool {
+    matches!(v, serde_json::Value::Array(a)
+        if a.len() == 2 && a.iter().all(serde_json::Value::is_number))
+}
+
 fn diff_paths(
     a: &serde_json::Value,
     b: &serde_json::Value,
@@ -55,6 +76,10 @@ fn diff_paths(
 ) {
     use serde_json::Value;
     if a == b {
+        return;
+    }
+    if is_scalar_date(a) || is_scalar_date(b) {
+        out.insert(path.to_string());
         return;
     }
     match (a, b) {
@@ -766,6 +791,33 @@ mod tests {
         );
     }
 
+    /// ★★★ **THE SHAPE `is_scalar_date` KEYS ON, PINNED.** Both walkers treat a `time::Date` as one
+    /// value rather than as two instances of a repeated field, and that rests on `time`'s compact
+    /// serde form being a two-number tuple. If that form ever changes, the field silently splits
+    /// again — an index-shaped axis member and a collision check that demands the birth YEAR change.
+    /// So the shape is asserted, and so is the other direction: a real vector of instances must NOT
+    /// be mistaken for one value.
+    #[test]
+    fn a_date_is_one_value_and_a_row_vector_is_not() {
+        let d = serde_json::to_value(time::macros::date!(2015 - 04 - 15)).unwrap();
+        assert!(
+            is_scalar_date(&d),
+            "`time::Date`'s wire form changed — it is now {d:?}, so `is_scalar_date` no longer \
+             recognises it and the axis will split the field into its parts again"
+        );
+        for not_a_date in [
+            serde_json::json!([1, 2, 3]),
+            serde_json::json!(["a", "b"]),
+            serde_json::json!([{"payer": "A"}, {"payer": "B"}]),
+            serde_json::json!("2015-04-15"),
+        ] {
+            assert!(
+                !is_scalar_date(&not_a_date),
+                "a collection of instances must stay a collection: {not_a_date:?}"
+            );
+        }
+    }
+
     /// The *secondary* precondition (§3.4 models it for one field with
     /// `assert_ne!(original.address_city, SCRUB_CITY)`): a fixture value that happens to equal its own
     /// stand-in shows no diff and hides its field from the axis. Here it is general — no stand-in
@@ -801,6 +853,18 @@ mod tests {
             hits: &mut usize,
         ) {
             use serde_json::Value;
+            // ★ A date is ONE value — see `is_scalar_date`. Descending would demand that the birth
+            //   YEAR differ, and §3.2 requires it to survive.
+            if is_scalar_date(a) || is_scalar_date(b) {
+                if replaced.contains(path) {
+                    *hits += 1;
+                    assert_ne!(
+                        a, b,
+                        "`{path}`: this date is UNCHANGED although scrub replaces it"
+                    );
+                }
+                return;
+            }
             match (a, b) {
                 (Value::Object(x), Value::Object(y)) => {
                     for (k, av) in x {
@@ -887,6 +951,8 @@ mod matrix {
         "no predicate reads a validity class off this field — not the type, the absence of a reader";
     const PLAIN_STRING: &str =
         "a plain String in a present struct: absent is the same value as empty";
+    const TYPED_DATE: &str =
+        "a typed `Date`: it is present or absent, and there is no third value that is 'empty'";
 
     /// `[path, absent, empty, malformed]`. `valid` is the maximal sentinel itself and needs no row.
     #[allow(clippy::type_complexity)]
@@ -974,6 +1040,18 @@ mod matrix {
                 "header.dependents[].name",
                 Fixture(|r| r.header.dependents.clear()),
                 Fixture(|r| r.header.dependents[0].name = String::new()),
+                NoSuchState(NO_READER),
+            ),
+            // ★★★ **SEAM REVIEW M-3 — the dependent's date of birth, now REPLACED.** Its read
+            //     properties are exactly `considered_age_at_year_end`'s inputs (the birth year and
+            //     the January-1 flag), which `synthetic_dependent_dob` reproduces; the *absent*
+            //     cell is the one that matters here, because a blank date is what
+            //     `DependentGateUnanswered { gate: DateOfBirth }` refuses on, and both copies must
+            //     refuse identically.
+            (
+                "header.dependents[].date_of_birth",
+                Fixture(|r| r.header.dependents[0].date_of_birth = None),
+                NoSuchState(TYPED_DATE),
                 NoSuchState(NO_READER),
             ),
             // ★★★ **THE MATRIX WORKED IN BOTH DIRECTIONS, and this comment is its second occasion.**

@@ -342,19 +342,45 @@ fn interview_state_with(
         }
         // ★★ An ANSWERED gate whose answer STOPS the flowchart — shown while authoring rather than
         //    met at commit (J-32), and derived from the walk's own refusal, never re-decided here.
-        if let DependentVerdict::Refused(r) = walk.verdict {
-            st.refusing.push(Refusing {
-                item: AnswerKey::DependentGate {
+        //
+        // ★★ Two shapes, and the difference is what the item POINTS AT (seam review M-1): a gate
+        //    the filer can change on this row, or the RETURN-level question that refused every row
+        //    at once. The panel item is the thing to go and fix.
+        let stopped = match walk.verdict {
+            DependentVerdict::Refused(r) => Some((
+                AnswerKey::DependentGate {
                     ssn_hash: dependent_ssn_hash(&d.ssn),
                     gate: r.gate,
                 },
-                prompt: crate::tax::dependent_gates::entry(r.gate).prompt_text(ri, params),
-                reason: RefuseReason::DependentGateRefused { row, gate: r.gate },
+                crate::tax::dependent_gates::entry(r.gate).prompt_text(ri, params),
+                RefuseReason::DependentGateRefused { row, gate: r.gate },
+                r.exit,
+                r.rule,
+            )),
+            DependentVerdict::RefusedByQuestion(r) => Some((
+                AnswerKey::Question(r.question),
+                crate::tax::questions::FORM_QUESTIONS
+                    .iter()
+                    .find(|q| q.id == r.question)
+                    .map_or(std::borrow::Cow::Borrowed(""), |q| q.prompt_text(ri)),
+                RefuseReason::DependentRefusedByQuestion {
+                    row,
+                    question: r.question,
+                },
+                r.exit,
+                r.rule,
+            )),
+            _ => None,
+        };
+        if let Some((item, prompt, reason, exit, rule)) = stopped {
+            st.refusing.push(Refusing {
+                item,
+                prompt,
+                reason,
                 exit: format!(
-                    "dependent row {}: {} The rule the Form 1040 instructions send you to is {}.",
+                    "dependent row {}: {exit} The rule the Form 1040 instructions send you to is \
+                     {rule}.",
                     row + 1,
-                    r.exit,
-                    r.rule
                 ),
             });
         }

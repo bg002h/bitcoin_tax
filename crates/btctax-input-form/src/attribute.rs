@@ -84,6 +84,19 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::DependentGateUnanswered { gate, .. } | R::DependentGateRefused { gate, .. } => {
             vec![Anchor::Field(dependent_gate_field(*gate))]
         }
+        // ★★★ **SEAM REVIEW I-2 — the two IDENTITY refusals anchor on the SSN field**, not on a
+        //     gate: neither is fixed by answering a §152 question. A blank one is typed in; a
+        //     duplicated one is corrected (or the row is removed, which the refusal's own text
+        //     offers). The row comes from the refusal's payload, exactly as the gate refusals'
+        //     does — `Anchor` carries no row and §10 freezes it.
+        R::DependentIdentityUnanswered { .. } | R::DependentSsnDuplicated { .. } => {
+            vec![Anchor::Field(FieldId::DepSsn)]
+        }
+        // ★★★ **SEAM REVIEW M-1 — a RETURN-LEVEL answer refused the row, so the anchor is the
+        //     QUESTION, not a gate.** Step 2 q4 / Step 4 q5 is about the filer, and flipping a gate
+        //     on the row cannot change it — the previous anchor sent the filer to the relationship
+        //     tri-state, which merely routes the row to Step 4 and is refused there identically.
+        R::DependentRefusedByQuestion { question, .. } => vec![decl(*question)],
         R::FilerTinUnanswered => vec![decl(QuestionId::FilerTinIssuedByDueDate)],
         R::DependentSpouseStatusUnanswered => vec![decl(QuestionId::DependentSpouse)],
         R::MfsSpouseItemizeUnknown => vec![decl(QuestionId::MfsSpouseItemizes)],
@@ -866,6 +879,46 @@ mod tests {
             ),
             "the Schedule 1 IRA deduction has no form field and its anchor must say so"
         );
+    }
+
+    /// ★★★ **SEAM REVIEW M-1 — A RETURN-LEVEL STOP ANCHORS ON ITS QUESTION, NOT ON A ROW GATE.**
+    ///
+    /// *"Could you be claimed as a dependent on someone else's return?"* answered `Yes` refuses
+    /// every dependent row. It used to arrive as `DependentGateRefused { gate: QcRelationship }`,
+    /// so the form focused the relationship tri-state — a control that cannot lift the refusal:
+    /// flipping it routes the row to Step 4, which refuses again with the same exit. The anchors
+    /// must therefore DIFFER, and this asserts both sides so a future collapse back into one
+    /// variant reds.
+    #[test]
+    fn the_return_level_dependent_stop_anchors_on_its_question_not_on_a_row_gate() {
+        use btctax_core::tax::provenance::DependentGate;
+        assert_eq!(
+            attribute(&RefuseReason::DependentRefusedByQuestion {
+                row: 0,
+                question: QuestionId::DependentTaxpayer,
+            }),
+            vec![decl(QuestionId::DependentTaxpayer)],
+            "the filer changes the QUESTION, so that is where the form takes them"
+        );
+        assert_eq!(
+            attribute(&RefuseReason::DependentGateRefused {
+                row: 0,
+                gate: DependentGate::Married,
+            }),
+            vec![Anchor::Field(FieldId::DepGateMarried)],
+            "a gate STOP still anchors on the gate — the filer can change that one"
+        );
+        // ★ And the identity refusals anchor on the SSN (seam review I-2), which is neither.
+        for r in [
+            RefuseReason::DependentIdentityUnanswered { row: 0 },
+            RefuseReason::DependentSsnDuplicated { rows: (0, 1) },
+        ] {
+            assert_eq!(
+                attribute(&r),
+                vec![Anchor::Field(FieldId::DepSsn)],
+                "{r:?} is fixed by typing the number, not by answering a §152 question"
+            );
+        }
     }
 
     /// ★ The invariant behind the whole map: no refusal attributes to nowhere. Every arm returns a non-empty

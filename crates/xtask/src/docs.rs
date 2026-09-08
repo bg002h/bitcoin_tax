@@ -385,6 +385,48 @@ mod tests {
         }
     }
 
+    /// ★★★ **SEAM REVIEW I-4 — THE SHIPPED SENTENCE ABOUT SEEDED DEPENDENTS.**
+    ///
+    /// FR-70 reversed it: `income open-next-year` DOES create a dependent row now, carrying the
+    /// prior year's name, SSN and relationship, and the row BLOCKS until this year's flowchart is
+    /// answered. The `--help` and the man page kept saying *"Dependents and exchanges are named as
+    /// questions but no row is created: an unconfirmed dependent is absent, never claimed"* — the
+    /// exact safety property a filer reasons about, stated backwards. A filer who believed it would
+    /// not go looking for a row to delete.
+    ///
+    /// Both halves are pinned, because dropping the false sentence without adding the true one
+    /// would leave the filer with no statement at all: the retracted claim must be ABSENT and the
+    /// new behaviour must be NAMED. This reads the committed page, which
+    /// `gen_docs_is_deterministic` holds equal to the generated `--help`, so one assertion covers
+    /// both surfaces.
+    #[test]
+    fn the_open_next_year_page_states_what_fr70_actually_does_with_dependents() {
+        let page = std::fs::read_to_string(man_dir().join("btctax-income-open-next-year.1"))
+            .expect("the committed page exists");
+        assert!(
+            !page.contains("no row is created"),
+            "the retracted claim is still shipped: a dependent row IS created"
+        );
+        for phrase in [
+            "each dependent", // the closed WHAT-COMES-WITH-THEM list names them
+            "crosses as a PERSON with every dependency question blank",
+            "the row blocks until you answer this year",
+            "Who Qualifies as Your Dependent",
+            "or remove the row",
+        ] {
+            assert!(
+                page.contains(phrase),
+                "the page must state FR-70's behaviour — missing {phrase:?}"
+            );
+        }
+        // ★ The venue half of the old sentence is unchanged and must survive the rewrite: no venue
+        //   row is seeded, and that IS still true (a venue key is answered-ness).
+        assert!(
+            page.contains("no venue row is created"),
+            "the exchange half of the claim is still true and must still be said"
+        );
+    }
+
     /// Structural guard over EVERY committed page (generated + the hand-authored TUI pages):
     /// each has NAME + SYNOPSIS; the root btctax.1 has DESCRIPTION + FILES + EXAMPLES; and the
     /// hand-authored TUI pages document their tab set + keys (tui-edit lists `?`, `V`, `O`).

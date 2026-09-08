@@ -440,21 +440,65 @@ fn scrub_person(p: &Person, who: &str, n: usize) -> Person {
     }
 }
 
+/// ★★★ **A DEPENDENT'S DATE OF BIRTH — REPLACED, PRESERVING EVERY PROPERTY A SCREEN READS**
+/// (seam review M-3).
+///
+/// §3.2's rule is *"every field `scrub_pii` replaces must preserve every property any screen,
+/// `ReturnHeader::build`, or form filler reads from it"*, and this module's established pattern for
+/// a field that is BOTH load-bearing and identifying is `synthetic_ssn_like`: **replace, preserving
+/// the read property.** Keeping a child's exact birth date in a file the tool stamps shareable was
+/// defensible under §3.2 and stricter than it needed to be.
+///
+/// **Exactly two properties are read**, and both come through one function. `dependent_gates`'s
+/// `age_test` and `under_17_at_year_end` are the only readers of this field anywhere (nothing
+/// prints it: `ReturnHeader::build` takes name, SSN and relationship, and the dependents statement
+/// takes the built header), and both call
+/// [`crate::tax::return_1040::considered_age_at_year_end`], which is
+/// `year - dob.year() + (dob is January 1)`. So the birth YEAR and the January-1 flag are the whole
+/// of what any screen can see, and the stand-in reproduces both exactly — for every tax year at
+/// once, not just the one in the file.
+///
+/// ★★ **A JANUARY-1 BIRTH IS SHIFTED A YEAR BACK RATHER THAN KEPT.** The naive stand-in — keep
+///    January 1, keep the year — reproduces the property by reproducing the DATE, so for a child
+///    born on January 1 the "shareable" copy carried their exact birthday. The convention is
+///    `year - dob.year() + (dob is January 1)`, so January 1 of year *Y* and any ordinary day of
+///    year *Y − 1* are **the same age at the end of every tax year** — an equivalence, not an
+///    approximation. Taking the second spelling means no child's real date rides out, whatever day
+///    they were born on.
+///
+/// ★ July 1: a fixed day that is not January 1 and exists in every year (no leap-day branch — the
+///   same reasoning `considered_age_at_year_end` records for itself).
+///
+/// ★ The `unwrap_or` is unreachable for any date `time` can hold except the very first supported
+///   year, and it fails toward the invariant that matters: preserving the age a screen reads.
+fn synthetic_dependent_dob(real: time::Date) -> time::Date {
+    let year = if real.month() == time::Month::January && real.day() == 1 {
+        real.year() - 1
+    } else {
+        real.year()
+    };
+    time::Date::from_calendar_date(year, time::Month::July, 1).unwrap_or(real)
+}
+
 fn scrub_dependent(d: &Dependent, n: usize) -> Dependent {
     let Dependent {
         name,
         ssn,
         relationship,
-        // ★★★ **KEPT, and this reverses the §6 decision — because T7 gave it a READER.**
+        // ★★★ **REPLACED, preserving what the screens read — the third position this field has
+        //     held, and each move was forced by a mechanism rather than chosen.**
         //
-        //     §6 dropped it with the reason "nothing reads a dependent's DOB — btctax does not
-        //     compute the CTC", which was true when it was written and is not true now: R6's Step 1
-        //     AGE TEST is computed from this date (`dependent_gates::age_test`), Step 3's under-17
-        //     question reads it, and `DependentGateUnanswered { gate: DateOfBirth }` REFUSES without
-        //     it. §3.2's rule is that every replaced field must preserve every property a SCREEN
-        //     reads from it, so dropping it now would make the scrubbed copy refuse where the
-        //     filer's own return passes — the exact class this module exists to prevent, and the
-        //     same reasoning `scrub_person` already applies to the taxpayer's own date of birth.
+        //     §6 DROPPED it, on the reason "nothing reads a dependent's DOB — btctax does not
+        //     compute the CTC". T7 made that false: R6's Step 1 AGE TEST is computed from this date
+        //     (`dependent_gates::age_test`), Step 3's under-17 question reads it, and
+        //     `DependentGateUnanswered { gate: DateOfBirth }` refuses without it — so §3.2 flipped
+        //     the decision and it was KEPT verbatim.
+        //
+        //     Seam review M-3 takes the third step: §3.2 demands the READ PROPERTIES survive, not
+        //     the digits, and this module's own pattern for a field that is both load-bearing and
+        //     identifying is `synthetic_ssn_like` — replace, preserve the class. A child's exact
+        //     birth date in a file the tool stamps shareable was more than §3.2 asks for. See
+        //     [`synthetic_dependent_dob`] for what "the read properties" are, exactly.
         date_of_birth,
         // ★★ **KEPT — every one of the twenty §152 gates is READ** by `screen_dependent_gates`
         //     and by `walk_dependent`, and each decides whether the row is claimable at all. They
@@ -489,7 +533,7 @@ fn scrub_dependent(d: &Dependent, n: usize) -> Dependent {
         ssn: synthetic_ssn_like(ssn, synthetic_ssn(100 + n)),
         // ★ KEPT: `relationship` decides child-vs-other-dependent, and it IS read.
         relationship: relationship.clone(),
-        date_of_birth: *date_of_birth,
+        date_of_birth: date_of_birth.map(synthetic_dependent_dob),
         lived_with_you_over_half_year: *lived_with_you_over_half_year,
         lived_with_you_in_us: *lived_with_you_in_us,
         full_time_student: *full_time_student,
@@ -546,10 +590,25 @@ fn scrub_header(h: &HouseholdHeader) -> HouseholdHeader {
         //   state plus a filing status plus an income is a long way toward identifying a household.
         address_state: replace_preserving_emptiness(address_state, SCRUB_STATE.into()),
         address_zip: replace_preserving_emptiness(address_zip, SCRUB_ZIP.into()),
+        // ★★★ **THE STAND-IN INDEX IS THE FIRST ROW WITH THIS SSN, NOT THE ROW'S OWN INDEX**
+        //     (seam review I-2 + §3.2). Since T7 a SCREEN reads whether two dependent rows carry the
+        //     same SSN (`RefuseReason::DependentSsnDuplicated`, a value rule that refuses at import
+        //     too), so DUPLICATION is now one of the properties §3.2 requires the stand-in to
+        //     preserve. Minting a distinct synthetic SSN per row would hand a filer whose real
+        //     return refuses a "shareable" copy that FILES — the exact class this module exists to
+        //     prevent, and the same reasoning `synthetic_ssn_like` already applies to validity.
         dependents: dependents
             .iter()
             .enumerate()
-            .map(|(i, d)| scrub_dependent(d, i + 1))
+            .map(|(i, d)| {
+                let digits =
+                    |s: &str| -> String { s.chars().filter(char::is_ascii_digit).collect() };
+                let first = dependents
+                    .iter()
+                    .position(|o| digits(&o.ssn) == digits(&d.ssn))
+                    .unwrap_or(i);
+                scrub_dependent(d, first + 1)
+            })
             .collect(),
         // ★★ All KEPT: every one of these is a fail-loud declaration that moves the return.
         can_be_claimed_as_dependent_taxpayer: *can_be_claimed_as_dependent_taxpayer,
@@ -1439,6 +1498,72 @@ mod tests {
         }
     }
 
+    /// ★★★ **SEAM REVIEW M-3's KILL — THE SCRUBBED COPY REACHES THE SAME VERDICT FOR EVERY
+    ///     DEPENDENT, ON EVERY YEAR.**
+    ///
+    /// The birth date is now REPLACED, and §3.2's demand is that every property a screen reads
+    /// survives. Three screens read it, and all three go through `considered_age_at_year_end`:
+    /// Step 1's age test, Step 3's under-17 question, and the blank-date refusal. The end-to-end
+    /// statement of that is the flowchart's own verdict — CTC versus ODC is exactly what a moved
+    /// date would flip, and it is invisible in a refusal comparison because neither outcome refuses.
+    ///
+    /// Driven over the JANUARY-1 BOUNDARY on purpose: the convention is `+1` for a January-1 birth,
+    /// so a stand-in that ignored it would move the age by a year for precisely those children.
+    #[test]
+    fn a_scrubbed_dependent_reaches_the_same_verdict_including_across_the_january_boundary() {
+        use crate::tax::dependent_gates::walk_dependent;
+        use crate::tax::return_inputs::Dependent;
+        use time::macros::date;
+        for (label, dob) in [
+            ("an ordinary birthday", date!(2009 - 04 - 15)),
+            (
+                "born January 1 — considered a year older",
+                date!(2009 - 01 - 01),
+            ),
+            (
+                "born January 2 — the day the convention stops",
+                date!(2009 - 01 - 02),
+            ),
+            ("born December 31", date!(2008 - 12 - 31)),
+        ] {
+            let mut ri = kitchen_sink_household().0;
+            ri.tax_year = 2025;
+            ri.header.dependents = vec![Dependent {
+                name: "Kid Example".into(),
+                ssn: "000-00-1111".into(),
+                relationship: "Daughter".into(),
+                date_of_birth: Some(dob),
+                ..Default::default()
+            }];
+            crate::tax::testonly::answer_all_dependent_gates(&mut ri);
+            ri.header.filer_tin_issued_by_due_date = Some(true);
+            let scrubbed = scrub_pii(&ri);
+            assert_ne!(
+                scrubbed.header.dependents[0].date_of_birth,
+                Some(dob),
+                "{label}: the child's real birth date must not ride into the shareable copy"
+            );
+            for year in [2024, 2025, 2026] {
+                let mut a = ri.clone();
+                let mut b = scrubbed.clone();
+                a.tax_year = year;
+                b.tax_year = year;
+                assert_eq!(
+                    walk_dependent(&a, 0).verdict,
+                    walk_dependent(&b, 0).verdict,
+                    "{label}: the flowchart must reach the same verdict on TY{year} — a stand-in \
+                     that moved the age flips the child tax credit to the credit for other \
+                     dependents, and no refusal comparison can see it"
+                );
+                assert_eq!(
+                    walk_dependent(&a, 0).demanded_gates(),
+                    walk_dependent(&b, 0).demanded_gates(),
+                    "{label}: …and demands the same gates on TY{year}"
+                );
+            }
+        }
+    }
+
     /// ★★ The identity is actually gone — a scrubber that quietly kept a field would still pass the
     /// invariant above, because names move no figure. Both halves are needed.
     #[test]
@@ -1525,21 +1650,31 @@ mod tests {
                 o.relationship, n.relationship,
                 "relationship is computational"
             );
-            // ★★★ **T7 / R6 REVERSED §6's DROP, because it gave the field a READER.** Step 1's
-            //     age test is computed from this date, Step 3's under-17 question reads it, and
-            //     `DependentGateUnanswered { gate: DateOfBirth }` refuses without it. §3.2's rule is
-            //     that a replaced field must preserve every property a SCREEN reads from it, so
-            //     dropping it now would make the scrubbed copy refuse where the filer's own return
-            //     passes — the exact class this module exists to prevent.
-            assert_eq!(
-                o.date_of_birth, n.date_of_birth,
-                "a dependent's DOB is KEPT: Step 1's age test is computed from it (T7/R6), so \
-                 dropping it would move the scrubbed copy's verdict"
-            );
+            // ★★★ **SEAM REVIEW M-3 — A DEPENDENT'S DATE OF BIRTH IS REPLACED, AND EVERY PROPERTY
+            //     A SCREEN READS FROM IT SURVIVES.** §6 dropped it (nothing read it); T7 gave it
+            //     three readers so §3.2 forced it to be KEPT verbatim; M-3 takes the third step —
+            //     §3.2 demands the READ PROPERTIES survive, not the digits, and this module's own
+            //     pattern for a load-bearing identifier is `synthetic_ssn_like`: replace, preserve
+            //     the class. Asserted as an EQUIVALENCE over every year, not on one comparison:
+            //     `considered_age_at_year_end` is the whole of what any screen can see.
             assert!(
                 o.date_of_birth.is_some(),
-                "the fixture must carry a dependent DOB, or the assertion above is vacuous"
+                "the fixture must carry a dependent DOB, or these assertions are vacuous"
             );
+            assert_ne!(
+                o.date_of_birth, n.date_of_birth,
+                "a child's exact birth date must not ride into a file the tool stamps shareable"
+            );
+            let (od, nd) = (o.date_of_birth.unwrap(), n.date_of_birth.unwrap());
+            for year in [1990, 2023, 2024, 2025, 2026, 2099] {
+                assert_eq!(
+                    crate::tax::return_1040::considered_age_at_year_end(od, year),
+                    crate::tax::return_1040::considered_age_at_year_end(nd, year),
+                    "the stand-in must read the same age at the end of {year}: Step 1's age test \
+                     and Step 3's under-17 question are computed from it, so a stand-in that moved \
+                     it would move the scrubbed copy's VERDICT (CTC versus ODC)"
+                );
+            }
         }
         // ★★ …and the two fields a security review found riding through the FIRST version of this
         //    module: free text where a filer writes a business name, and the countries they bank in.

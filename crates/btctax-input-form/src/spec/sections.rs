@@ -527,7 +527,16 @@ macro_rules! dep_gate_tristate {
                 );
                 Ok(())
             },
+            // ★★★ **SEAM REVIEW N-3 — `clear` CHECKS LIVENESS EXACTLY AS `set` DOES.** The two used
+            //     to disagree: `set` refused `NoSuchRow` on a gate the walk does not demand for this
+            //     row, while `clear` wrote `None` unconditionally. Clearing a non-live gate is a
+            //     no-op in effect today, so the asymmetry was harmless — and it is precisely the
+            //     shape that invites the reverse mistake, a WRITE path that forgets the check. One
+            //     rule, both directions.
             clear: Some(|ri, a| {
+                if !DEPENDENT_GATES[$idx].live(ri, a.0[0]) {
+                    return Err(SetError::NoSuchRow);
+                }
                 (DEPENDENT_GATES[$idx].clear)(
                     ri.header
                         .dependents
@@ -1375,6 +1384,82 @@ mod tests {
     use btctax_core::tax::return_inputs::ItemizeElection;
     use btctax_core::tax::types::FilingStatus;
     use rust_decimal_macros::dec;
+
+    /// ★★★ **SEAM REVIEW N-3 — `clear` REFUSES A NON-LIVE GATE EXACTLY AS `set` DOES.**
+    ///
+    /// The two used to disagree: `set` returned `NoSuchRow` when the walk does not demand the gate
+    /// for that row, while `clear` wrote `None` unconditionally. Clearing a non-live gate is a no-op
+    /// in effect, so nothing was wrong today — and an un-commented asymmetry between a read path
+    /// and a write path is exactly what invites the reverse mistake later. Both directions are
+    /// asserted, and so is the POSITIVE control, so this cannot be satisfied by a `clear` that
+    /// simply always refuses.
+    #[test]
+    fn a_dependent_gate_clear_refuses_a_row_the_gate_is_not_live_for() {
+        use btctax_core::tax::provenance::DependentGate;
+        let mut ri = fresh_single();
+        ri.tax_year = 2025;
+        ri.header.dependents = vec![btctax_core::tax::return_inputs::Dependent {
+            name: "Kid Example".into(),
+            ssn: "000-00-1111".into(),
+            relationship: "Daughter".into(),
+            date_of_birth: Some(time::macros::date!(2015 - 06 - 01)),
+            ..Default::default()
+        }];
+        ri.header.can_be_claimed_as_dependent_taxpayer = Some(false);
+        ri.header.filer_tin_issued_by_due_date = Some(true);
+        // Step 1 says this IS a qualifying child, so Step 4's own relationship gate is NOT live.
+        ri.header.dependents[0].qc_relationship = Some(true);
+        let field = section(SectionId::Dependents)
+            .fields
+            .iter()
+            .find(|f| f.id == FieldId::DepGateQrRelationshipOrMemberOfHousehold)
+            .expect("the Step 4 relationship gate is a form field");
+        assert!(
+            !btctax_core::tax::dependent_gates::entry(
+                DependentGate::QrRelationshipOrMemberOfHousehold
+            )
+            .live(&ri, 0),
+            "the premise: this row took the qualifying-CHILD branch"
+        );
+        let addr = RowAddr(vec![0]);
+        assert_eq!(
+            (field.set)(&mut ri, &addr, FieldValue::TriState(Some(true))),
+            Err(SetError::NoSuchRow),
+            "`set` refuses a gate the flowchart does not put to this row"
+        );
+        assert_eq!(
+            (field.clear.expect("a tri-state gate is clearable"))(&mut ri, &addr),
+            Err(SetError::NoSuchRow),
+            "…and so must `clear` — one liveness rule, both directions"
+        );
+        // The POSITIVE control: on the qualifying-RELATIVE branch the same two calls succeed. The
+        // path there is walked by the fixture helper, not typed — Step 1's own block must be
+        // answered before Step 4 is reached at all.
+        ri.header.dependents[0].qc_relationship = Some(false);
+        btctax_core::tax::testonly::answer_all_dependent_gates(&mut ri);
+        (btctax_core::tax::dependent_gates::entry(
+            DependentGate::QrRelationshipOrMemberOfHousehold,
+        )
+        .clear)(&mut ri.header.dependents[0]);
+        assert!(
+            btctax_core::tax::dependent_gates::entry(
+                DependentGate::QrRelationshipOrMemberOfHousehold
+            )
+            .live(&ri, 0),
+            "the premise: the row is now on the qualifying-RELATIVE branch"
+        );
+        (field.set)(&mut ri, &addr, FieldValue::TriState(Some(true)))
+            .expect("the gate IS live on the Step 4 branch");
+        assert_eq!(
+            ri.header.dependents[0].qr_relationship_or_member_of_household,
+            Some(true)
+        );
+        (field.clear.expect("clearable"))(&mut ri, &addr).expect("and clearing it is allowed");
+        assert_eq!(
+            ri.header.dependents[0].qr_relationship_or_member_of_household,
+            None
+        );
+    }
 
     #[test]
     fn w2_repeating_with_nested_box12_reads_and_writes() {

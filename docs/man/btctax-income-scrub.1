@@ -10,7 +10,9 @@ Write a SHAREABLE copy of this year\*(Aqs inputs: every figure preserved, the id
 .PP
 For handing a real return to someone else — a maintainer, a reviewer — so they can reproduce a refusal or a wrong figure without receiving your PII. Names, SSNs, the address, employer and payer names are replaced with synthetic stand\-ins; the IP PIN is DROPPED, never faked, because a plausible\-looking one in a file marked safe to share is worse than none.
 .PP
-Everything the computation reads survives unchanged: every dollar figure, the filing status, dates of birth and death, blindness, the dependent count and each relationship, and every fail\-loud declaration. W\-2 EINs are replaced but keep their SAMENESS, because §6413(c)\*(Aqs excess\-social\-security credit turns on having more than one employer.
+Everything the computation reads survives unchanged: every dollar figure, the filing status, your own (and your spouse\*(Aqs) dates of birth and death, blindness, the dependent count and each relationship, and every fail\-loud declaration. W\-2 EINs are replaced but keep their SAMENESS, because §6413(c)\*(Aqs excess\-social\-security credit turns on having more than one employer, and two dependent rows that share an SSN still share one in the copy, because that is a refusal.
+.PP
+A DEPENDENT\*(Aqs date of birth is replaced with one the tax law cannot tell apart: the dependency tests read only the age the child is CONSIDERED to be at the end of the year, so the stand\-in reproduces that for every tax year — the child tax credit, the credit for other dependents and every refusal land exactly where they did — without a child\*(Aqs real birthday leaving your vault.
 .PP
 Every computed FIGURE is preserved — a guarantee held by `scrub_preserves_every_computed_figure`, which compares the whole assembled return, not a sampled line.
 .PP

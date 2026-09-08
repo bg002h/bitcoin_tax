@@ -368,7 +368,7 @@ fn leaves_the_seed_writes(seeded: &ReturnInputs) -> Vec<String> {
 /// | taxpayer / spouse name + SSN | who the return is FOR. Not testimony about the tax year. |
 /// | the two dates of birth | the `Durable` facts (`questions.rs`) — *shown*, and confirmed by the same keystroke a fresh answer takes. **No `AnswerRecord` comes with them.** |
 /// | the mailing address | where the return is sent; the same class as a payer's name. |
-/// | each dependent's name, SSN, relationship, date of birth | R10.4's *"each dependent"*. The PERSON crosses; the CLAIM does not — every one of T7's twenty §152 gates stays `None`, so the row is BLOCKING until the filer answers this year's flowchart for them (FR-70). |
+/// | each dependent's name, SSN, relationship | R10.4's *"each dependent"*. The PERSON crosses; the CLAIM does not — every one of T7's twenty §152 gates stays `None`, so the row is BLOCKING until the filer answers this year's flowchart for them (FR-70). Their **date of birth is `Durable`**, so it is *shown* beside the gate's prompt and confirmed by the same keystroke a fresh answer takes — never pre-filled (seam review I-3). |
 /// | each W-2 employer + EIN, each 1099 payer + TIN, per kind | R10.4's *"each payer by TIN"* — pre-named rows with **every box default**. |
 /// | each venue | the Form 1099-DA provider keys, each with **both cohort slots unanswered** (answered-ness lives in the slot, so an empty `CohortAnswers` claims nothing and `screen_broker_reporting` reads nothing from it). |
 ///
@@ -437,11 +437,32 @@ pub fn seed(prior: &ReturnInputs, to: i32) -> ReturnInputs {
                     name: d.name.clone(),
                     ssn: d.ssn.clone(),
                     relationship: d.relationship.clone(),
-                    // ★★ A birth date is the one `Durability::Durable` gate in `DEPENDENT_GATES`:
-                    //    it cannot change, and it is keyed to the SAME person by the SAME SSN. It
-                    //    crosses as an identity field, and `income answer` still puts it to the
-                    //    filer as a live class-(A) question with the value shown.
-                    date_of_birth: d.date_of_birth,
+                    // ★★★ **SEAM REVIEW I-3 — THE `Durable` DATE OF BIRTH IS SHOWN, NEVER
+                    //     PRE-FILLED**, exactly as `carry_person` does for the taxpayer ten lines
+                    //     above, and for the same reason.
+                    //
+                    //     `DEPENDENT_GATES` declares `DateOfBirth` as `Durability::Durable`, and
+                    //     `questions.rs` defines that as *"the prior MAY be displayed, but it still
+                    //     requires the same explicit keystroke as a fresh ask: **never
+                    //     Enter-to-accept, never pre-filled**"*. Seeding the value broke BOTH
+                    //     halves: `income answer`'s date gate treats a bare Enter as *keep what is
+                    //     on file* and then records `AnswerState::Given` unconditionally, so the
+                    //     filer got a record dated THIS year for a value they never typed — a
+                    //     prior-year answer satisfying this year's provenance, which is the one
+                    //     thing R10 exists to prevent. *"A diligence record that lies is worse than
+                    //     none."*
+                    //
+                    //     The build report argued the C-1 harm was specific to a SKIPPABLE, where
+                    //     Enter means *decline*. That disposes of half of it. The other half is the
+                    //     record, and here the value is load-bearing: Step 1's age test is computed
+                    //     from it and decides §152(c) versus §152(d) — the child tax credit versus
+                    //     the credit for other dependents.
+                    //
+                    //     So the seed leaves it blank and `opened_from` carries the year: `income
+                    //     answer` reads year N's row FOR THIS SSN and shows the date as a hint the
+                    //     filer types to confirm. A bare Enter leaves the gate blocking, which is
+                    //     what `Durable` means on a class-(A) question with no lawful decline.
+                    date_of_birth: None,
                     // ★★★ Every gate blank, spelled out with no `..Default::default()` tail: a gate
                     //     added later must be decided HERE, identity or declaration, and a missing
                     //     field is a compile error rather than a silent carry.

@@ -415,3 +415,320 @@ emitted output is unchanged — `btctax-forms` is green with no golden regenerat
    `Field.live` has no package, so the TUI renders the fallback label while the R12 panel correctly
    says *waiting*. The fallback names the missing package, so it is honest, but it is a second
    wording of the same gate.
+
+---
+
+## Fold (seam review C-1, I-1 … I-5, M-1 … M-5, N-1 … N-3)
+
+Single implementer, shared main tree, branch `main`, dispatched at `cce4347c`. **Not committed, not
+pushed.** No subagents. Every plant below was reverted from a `cp` backup under the session
+scratchpad — no `git checkout`/`restore`/`stash`. 16 files changed.
+
+### 1. C-1 — the banner is SHOWN, the registry's words are HASHED
+
+`crates/btctax-cli/src/cmd/answer.rs:833-834`, `:940`:
+
+```rust
+let words = gate.prompt_text(&ri, params.as_ref());
+let shown = format!("[{banner}] {words}");   // → `out`
+…
+record_answer(&mut ri, key, &words, now, AnswerState::Given);
+```
+
+The two inner `let shown = …` bindings in the Date and YesNo loops were renamed `current` (they hold
+the *currently on file* fragment, not the prompt), so `{shown}` in each `write!` is the banner-carrying
+line the filer reads. `record_answer` stays the only writer, and it now hashes exactly what
+`provenance::current_prompt` resolves — which is per-GATE and knows nothing of a row banner.
+
+**Kill, observed RED at `282a8a32`'s code before the fix, and again by planting the banner back into
+the hashed string** (`record_answer(&mut ri, key, &shown, …)`):
+
+```
+income_answer_asks_the_dependent_gates_and_the_sweep_settles panicked at answer.rs:1556:
+  left: WordingChanged
+ right: Given
+```
+
+### 2. I-1 — the KAT drives the REAL command
+
+`income_answer_asks_the_dependent_gates_and_the_sweep_settles` no longer re-implements the loop. It
+builds a vault, saves a TY2024 draft with two dependent rows, derives the keystrokes by simulating the
+sweep, and runs `answer_return_inputs` itself — the `open_next_year_t4b.rs::answer_the_draft` pattern.
+Four new helpers in the same test module carry it: `t7_pp`, `t7_vault`, `t7_draft`, `t7_script`.
+
+It then asserts, against the draft read back: both rows reach `ChildTaxCredit`; every demanded gate
+was asked AND has a record under the row's identity; **`answer_status` is `Given` for every one of
+them** (never `WordingChanged` — the C-1 kill; `AnswerStatus` has no `Current` variant, so `Given` is
+the only status a class-(A) gate can hold and the assertion is `assert_eq!`, not a `matches!`); the two
+rows' key sets are disjoint and equal in size; `screen_inputs(&ri, &table, &params).is_none()`; and the
+command's own trailing panel does not contain `provenance::WORDING_CHANGED_REASON`.
+
+The old `key_of` is gone; the emulation in `every_live_question_can_actually_be_answered_and_clears_the_screen`
+now uses `asked_key_of` (see I-2). `MAX_SWEEPS` is still asserted against the real constant.
+
+### 3. I-2 — the identity decision, as built
+
+**(a) Two rules, at two tiers, both in `return_refuse.rs`.**
+
+- `RefuseReason::DependentIdentityUnanswered { row }` — raised at the TOP of
+  `screen_dependent_gates` (`:1625`), before the walk's gates are demanded, when the row's `ssn` holds
+  no digits. Class (A), the same tier as `DateOfBirth`: it lives inside `if tier.unanswered_refuses`.
+- `RefuseReason::DependentSsnDuplicated { rows: (usize, usize) }` — raised in a NEW function
+  `screen_dependent_values` (`:1709`), which `screen_inputs_tiered` calls **unconditionally**, before
+  the unanswered tier. A VALUE rule: it refuses at `income import` too.
+
+Both judge on DIGITS (`ssn_digits`, `:1675`), because `dependent_ssn_hash` normalises punctuation —
+`"111-22-3333"` and `"111223333"` are one person. `dependent_label` (`:1681`) is the one spelling of
+`row N (Name)`, so the two refusals cannot name the same row two ways.
+
+**(b) The session key is `(row, gate)`.** `answer.rs` replaces `key_of` with a new private
+`enum AskedKey { Question, Skippable, DependentGate { row, gate } }` and `asked_key_of`. The STORED
+`answer_log` key is unchanged — still `AnswerKey::DependentGate { ssn_hash, gate }` — and the type's
+doc records why the two requirements are opposite.
+
+**(c) `income answer` REFUSES a blank or shared identity before the first question**, rather than
+asking for the SSN. Stated plainly because the brief asked which and why: **there is nothing to ask.**
+A dependent's name, SSN and relationship are identity fields the row is CREATED with (`income import`,
+or the tax-inputs form's Dependents section) — not registry questions — so "ask for the SSN first" has
+no registry entry to ask from, and minting one would widen `DependentGate::ALL` (21 → 22) for a field
+no §152 test reads, moving six pinned counts across three crates. The refusal names the row, names the
+two places the number is entered, offers "or remove the row", and says *Nothing was stored*.
+`screen_inputs` refuses the identical state at the commit gate, so this is the same rule met earlier,
+not a second one.
+
+**(d) `retire_dependent_identity` cannot cross-delete** — asserted in both halves rather than argued:
+the degenerate state DOES cross-delete (one `remove` clears two rows' records), and that state can
+never be stored, because `screen_param_free` refuses it.
+
+**Kills** (each planted, run, reverted):
+
+| kill | plant | red |
+|---|---|---|
+| `a_dependent_row_with_no_ssn_refuses_before_any_gate_and_names_the_row` | `if false && ssn_digits(&d.ssn).is_empty()` | *the identity is demanded BEFORE the flowchart, not after it — left: None, right: Some(DependentIdentityUnanswered { row: 0 })* |
+| `retiring_one_identity_cannot_take_anothers_records_because_a_shared_key_is_refused` | the duplicate scan neutered | *…and no committed or imported return may hold two rows under one key — left: None, right: Some(DependentSsnDuplicated { rows: (0, 1) })* |
+| `two_dependent_rows_with_the_same_ssn_refuse_at_commit_and_at_import` | same | (same plant; also policed structurally, below) |
+| `the_sessions_asked_key_is_the_row_so_a_shared_identity_starves_nobody` | `AskedKey::DependentGate { row: 0, … }` | *row 1's QcRelationship is live and was never asked — the other row's identical key filtered it out of every later round, so the interview ENDS with a live gate nobody put to the filer* |
+| `income_answer_refuses_a_dependent_row_with_no_identity_or_a_shared_one` | — | drives the real command over both shapes; asserts the message names the row(s) and that NOTHING reached the screen |
+
+★ The duplicate rule is also policed **structurally**, not only by its own test: because
+`screen_dependent_values` is called from the body, its `RefuseReason`s join the param-free census.
+`every_param_free_rule_is_censused_from_the_source_and_fires_on_both_paths` went RED the moment the
+function landed —
+
+```
+the fixture table and the source census must name the same param-free rules
+ left:  {… "DependentCareBenefit", "DependentSpouseUnsupported", …}
+ right: {… "DependentGateRefused", "DependentSpouseUnsupported", "DependentSsnDuplicated", …}
+```
+
+— and is satisfied only by fixtures that fire each rule through BOTH `screen_inputs` and
+`screen_param_free`. Three were added (`DependentSsnDuplicated`, `DependentGateRefused`,
+`DependentRefusedByQuestion`).
+
+### 4. I-3 — the seeded date of birth is SHOWN, never pre-filled
+
+`open_next_year::seed` now writes `date_of_birth: None` for each seeded dependent, with the reason
+recorded beside `carry_person`'s identical decision ten lines above. `answer.rs`'s Date gate reads
+`prior_year_row` (already in scope for the taxpayer's `Durable` hint), **matches the row by SSN hash —
+never by index**, and appends `"; TY{n}'s return gave {d} — type it to confirm"` when this year has no
+value. Nothing is written from it. A bare Enter with nothing on file re-asks (a class-(A) date has no
+lawful decline), so skipping confirms nothing.
+
+`a_dependent_identity_is_seeded_blocking_and_a_venue_key_is_not` was updated: the DOB assertion is now
+`None`, and the "every gate crosses blank" filter no longer exempts `DateOfBirth` — it reads
+`(g.get)(d).is_some() || (g.get_date)(d).is_some()` over the whole registry.
+
+New kill `a_bare_enter_does_not_confirm_a_seeded_dependents_date_of_birth` (in
+`open_next_year_t4b.rs`, on a new `answer_the_draft_with` helper that returns the command's Result AND
+the screen): seed → the prompt SHOWS `TY2024's return gave 2015-04-01 — type it to confirm` → a bare
+Enter → the command errs, `date_of_birth` is still `None`, there is **no** `DateOfBirth` record, and
+`interview_state` still lists the gate as blocking. Then the other half: typing `2015-06-01` succeeds,
+stores it, and writes the record.
+
+**Plant** (`date_of_birth: d.date_of_birth` restored in `seed`) — two red:
+
+```
+a_bare_enter_does_not_confirm_a_seeded_dependents_date_of_birth: the premise: the seed does not pre-fill it
+  left: Some(2015-04-01)  right: None
+a_dependent_identity_is_seeded_blocking_and_a_venue_key_is_not: the Durable date of birth does not cross …
+  left: Some(2015-04-01)  right: None
+```
+
+### 5. I-4 — the shipped words
+
+`cli.rs`'s two `income open-next-year` sentences rewritten: the closed WHAT-COMES-WITH-THEM list gains
+*"each dependent's name, SSN and relationship"*; the retracted *"Dependents and exchanges are named as
+questions but no row is created"* is replaced by *"A dependent crosses as a PERSON with every
+dependency question blank: the row blocks until you answer this year's 'Who Qualifies as Your
+Dependent' flowchart for that child or remove the row, so a child who aged out, moved out, or is
+claimed by their other parent is never carried over as claimed. An exchange is named as a question but
+no venue row is created."* The DOB clause now distinguishes the taxpayer's (skipping forgoes the
+age-65 addition) from a dependent's (not confirmed until typed).
+
+`make docs` regenerated `docs/man/btctax-income-open-next-year.1` (the only tracked file it touched;
+PDFs are gitignored). New snapshot `xtask::docs::tests::the_open_next_year_page_states_what_fr70_actually_does_with_dependents`
+pins BOTH halves — the retracted claim absent, five phrases of the new behaviour present, and the
+still-true venue clause surviving. It reads the committed page, which `gen_docs_is_deterministic`
+holds equal to the generated `--help`, so one assertion covers both surfaces.
+
+**Plant** (the old sentence restored in `cli.rs`, `xtask -- docs` re-run): red at `docs.rs:406`.
+
+### 6. I-5 — the three missing truth-table rows
+
+Added to `the_step_four_truth_table`:
+
+- **Step 4 q2, the citizen STOP** — a refusal row asserting the gate AND the fragment
+  *"covers an adopted person only"*, which is Step 4's own wording (Step 2's says *"adopted child
+  only"*), so the row also pins WHICH arm ran.
+- **Step 4 q4** — `can_be_claimed_as_dependent_taxpayer = None` on the relative path WAITS on
+  `DependentTaxpayer`; flipping the return to `Mfj` claims the person and reaches
+  `CreditForOtherDependents`. Blanking the declaration is what makes the Mfj arm the only thing that
+  can produce a verdict.
+- **Step 5 q1 answered No** on the relative path ⇒ `NoCreditBox`.
+
+**Plant** (the whole `if w.no(G::CitizenNationalResidentOrCanadaMexico)` block in `step4` deleted) —
+1318 tests run, 1 failed:
+
+```
+Step 4 q2 citizenship No ⇒ REFUSE — You can't claim this person as a dependent:
+  expected a refusal, got CreditForOtherDependents
+```
+
+(the review measured the same plant at 1315 passed / 0 failed).
+
+### 7. M-1 … M-5, N-1 … N-3
+
+**M-1 — the return-level STOP anchors on its question.** New `DependentQuestionRefusal { question,
+exit, rule }` and `DependentVerdict::RefusedByQuestion(_)`; `step2`/`step4`'s `ClaimedTaxpayer::Yes`
+arms use `refused_by_question(QuestionId::DependentTaxpayer, …)`. New
+`RefuseReason::DependentRefusedByQuestion { row, question }`; `screen_dependent_values` emits it with
+the identical detail shape; `attribute` returns `decl(*question)`; `interview_state`'s `Refusing` arm
+carries `AnswerKey::Question(q)` and the registry's own prompt. Kill:
+`the_return_level_dependent_stop_anchors_on_its_question_not_on_a_row_gate` asserts BOTH sides (the
+question anchor and the still-correct gate anchor), so a collapse back into one variant reds. The two
+truth tables' could-you-be-claimed rows were re-expressed against the new variant — the only existing
+rows that moved, and forced by M-1 rather than chosen; every other row is untouched.
+
+**M-2 — the 22-space runs.** The STOP detail is now `\`-continued (and reworded per M-4, below).
+`every_refuse_edge_names_its_rule_in_the_screen_detail` gained `assert!(!detail.contains("  "))` over
+its four refuse edges plus the two identity refusals and one unanswered gate. **Plant** (the literal
+restored): red, quoting the detail with the 22-space run intact.
+
+**M-3 (non-gating, secret-handling class) — a dependent's DOB is REPLACED.** New
+`scrub::synthetic_dependent_dob`. The only readers anywhere are `age_test` and `under_17_at_year_end`,
+both via `considered_age_at_year_end = year - dob.year() + (dob is January 1)` — so the birth YEAR and
+the January-1 flag are the whole of what a screen can see. The stand-in is July 1 of the same year;
+**a January-1 birth is shifted to July 1 of the PREVIOUS year**, because January 1 of *Y* and any
+ordinary day of *Y − 1* are the same considered age in every tax year — an equivalence, and without it
+the naive stand-in reproduced the property by reproducing the DATE for exactly those children (caught
+by the new test, red).
+
+Two consequences folded with it:
+- `scrub_header` now indexes each dependent's stand-in SSN by the FIRST row carrying those digits, so
+  duplication survives the scrub — since I-2 a screen reads it, and §3.2 requires every read property
+  to survive or the "shareable" copy FILES where the original refused.
+- `scrub_axis` gained `is_scalar_date`: `time`'s compact serde form is a two-number tuple, and both
+  walkers would otherwise treat a date's parts as instances of a repeated field (an index-shaped axis
+  member `…date_of_birth[]`, and a collision check demanding that the birth YEAR change). Pinned by
+  `a_date_is_one_value_and_a_row_vector_is_not`, in both directions.
+
+The derived matrix gained the row `header.dependents[].date_of_birth` (absent = `None`; empty and
+malformed are `NoSuchState` with reasons — a typed `Date` has no empty state and no predicate reads a
+validity class off it). Kill
+`a_scrubbed_dependent_reaches_the_same_verdict_including_across_the_january_boundary`: four birth
+dates × three tax years, asserting the stand-in differs AND that `walk_dependent`'s verdict and
+demanded-gate set are identical. **Two plants**: the DOB kept verbatim → *the child's real birth date
+must not ride into the shareable copy*; the January-1 convention ignored → *the flowchart must reach
+the same verdict on TY2025 — left: CreditForOtherDependents, right:
+Unanswered(SsnsValidForEmploymentIssuedByDueDate)*. `cli.rs`'s scrub help says so, and `make docs`
+regenerated `docs/man/btctax-income-scrub.1`.
+
+**M-4 — a stated STOP refuses at import.** `screen_dependent_values` runs on BOTH tiers;
+`DependentGateUnanswered`, `DependentIdentityUnanswered` and the R10.3 wording check stay inside
+`tier.unanswered_refuses`. The detail had to lose its `(btctax income answer)` parenthetical —
+`no_refusal_in_the_import_tier_prescribes_income_answer` forbids it, and correctly: a refused import
+creates no row for `income answer` to answer. It now names the two places the answer is entered.
+
+**M-5 — the §152(d) table left the `help`.** New derived check
+`no_dependent_gate_help_types_a_figure_the_params_carry` scans EVERY registry entry for `$` (so a
+figure typed into a future gate reds too) and carries a positive control that the words put to the
+filer still quote the year's figure. `xtask prompt-check` still OK — 54 assertions.
+
+**N-1 — the January-1 boundary, as a truth-table pair.** DOB 2009-01-01 ⇒ considered 17 ⇒
+`CreditForOtherDependents`; 2009-01-02 ⇒ considered 16 ⇒ `ChildTaxCredit`. **Plant** (the `+ i32::from(…)`
+term dropped from `considered_age_at_year_end`): red, *left: ChildTaxCredit, right:
+CreditForOtherDependents*.
+
+**N-2 — `Census::dependent_gate` records its leaf.** `Census::dependent_gates` is now
+`Vec<(DependentGate, Option<bool>)>`. New `every_classifier_row_pairs_its_gate_with_its_own_leaf` sets
+one gate at a time through the registry's own `set` and requires the census to report that value
+against that gate. **Plant** (`married`/`filing_joint_return` swapped between two calls): the new test
+red — *left: [(Married, Some(true))], right: [(FilingJointReturn, Some(true))]* — while the existing
+set-comparing `the_classifiers_gate_rows_line_up_with_the_registry` stayed GREEN, which is the finding.
+
+**N-3 — `clear` checks liveness like `set`.** `dep_gate_tristate!`'s `clear` now returns
+`SetError::NoSuchRow` on a row the walk does not demand the gate for. New
+`a_dependent_gate_clear_refuses_a_row_the_gate_is_not_live_for` asserts both directions plus a positive
+control (on the Step 4 branch both calls succeed). **Plant** (the guard neutered): *…and so must
+`clear` — one liveness rule, both directions. left: Ok(()), right: Err(NoSuchRow)*.
+
+### 8. Constraints, and everything the fold moved
+
+- **`record_answer` is still the only writer.** No new writer, no new call site.
+- **The T7 truth table's existing rows** are unchanged except the two could-you-be-claimed rows M-1
+  forced (Step 2 q4's expected verdict, and Step 4 q5 lifted out of the gate-typed loop into a block
+  that asserts the question, the exit sentence and the rule fragment).
+- **`stop-list`** — unmoved: *76 registry prompts scanned; no forbidden shape*.
+- **`census-join`** — unmoved: *290 unmodeled entries across 13 maps*.
+- **`line-coverage`** — unmoved: *373 money lines across 18 form(s), 31 exception(s) (ratchet 31), 0
+  unverifiable, 17 not line-bound*.
+- **`prompt-check`** — unmoved: *OK — 54 assertions, all verbatim*.
+- Also run clean: `cite-check` (51 quotations), `box-census` (268 boxes), `harness-check`,
+  `archive-check`, `authority-manifest`, `scripts/pii-scan-generic.sh` (*clean (HEAD)*).
+
+**Pinned numbers moved**
+
+| pin | old → new | cause |
+|---|---|---|
+| `param_free_fixtures()` / the source census | +3 rules | `DependentSsnDuplicated`, `DependentGateRefused`, `DependentRefusedByQuestion` now fire on both tiers |
+| the derived scrub axis | + `header.dependents[].date_of_birth` | M-3 replaces the field (and the matrix gained its row) |
+| `Census::dependent_gates` element type | `DependentGate` → `(DependentGate, Option<bool>)` | N-2 |
+| `docs/man/btctax-income-open-next-year.1` | regenerated | I-4 |
+| `docs/man/btctax-income-scrub.1` | regenerated | M-3 |
+
+No figure moved: `btctax-forms` and `btctax-adapters` are byte-identical suites, no golden was
+regenerated, and `docs/examples/examples.md` is untouched.
+
+**Synthetic identifiers**: every SSN introduced is `000-00-1111` / `000-00-2222` / `000-00-3333` —
+area 000 *and* group 00, never issued on two counts. No EIN added.
+
+### 9. Suite lines, per crate (`cargo nextest run --locked -p <crate> --no-fail-fast`)
+
+```
+btctax-core            1322 tests run: 1322 passed, 0 skipped     (was 1315 — +4 dependent_gates, +1 classifier, +1 scrub, +1 scrub_axis)
+btctax-cli              803 tests run:  803 passed, 1 skipped     (was 800 — +2 cmd::answer, +1 open_next_year_t4b)
+btctax-input-form        72 tests run:   72 passed, 0 skipped     (was 70 — +1 attribute, +1 spec::sections)
+xtask                   163 tests run:  163 passed, 1 skipped     (was 162 — +1 docs)
+btctax-forms            359 tests run:  359 passed, 4 skipped     (unchanged)
+btctax-adapters         103 tests run:  103 passed, 0 skipped     (unchanged)
+btctax-store             45 tests run:   45 passed, 0 skipped     (unchanged)
+btctax-tui              160 tests run:  160 passed, 2 skipped     (unchanged)
+btctax-tui-edit         392 tests run:  392 passed, 2 skipped     (unchanged)
+btctax-oracle-harness     5 tests run:    5 passed, 1 skipped     (unchanged)
+btctax-update-prices      5 tests run:    5 passed, 1 skipped     (unchanged)
+
+whole workspace        3429 tests run: 3429 passed, 12 skipped
+```
+
+`cargo fmt --all --check` — clean.
+`CARGO_TARGET_DIR=target-clippy cargo clippy --workspace --all-targets --all-features -- -D warnings`
+— clean (two lints of my own fixed on the way: a no-op `.clone()` on a `&Field`, and
+`get(&k).is_none()` → `!contains_key(&k)`).
+
+### 10. Nothing left unfinished
+
+Every numbered item of the brief is folded, each with a kill seen red once while RUNNING the
+instrument. One judgement call is flagged for the reviewer rather than buried: **I-2(c) refuses in
+`income answer` rather than asking for the SSN**, for the reason set out in §3(c) — there is no
+registry question to ask from, and adding one would widen `DependentGate::ALL` for a field no §152 test
+reads.
