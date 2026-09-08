@@ -3,7 +3,7 @@
   1││  ✓ Return options              ││  W-2s #1                                                                           │
   2││  … Taxpayer                    ││  Owner  [Taxpayer]                                                                 │
   3││  … Spouse                      ││  c Employer's name, address, and ZIP code  [ACME]                                  │
-  4││  ✓ Address                     ││  b Employer identification number (EIN)  []                                        │
+  4││  … Address                     ││  b Employer identification number (EIN)  []                                        │
   5││  ✓ Dependents                  ││  1 Wages, tips, other compensation  [$200000]                                      │
   6││> ✓ W-2s                        ││  2 Federal income tax withheld  [$40000]                                           │
   7││  ✓ Forms 1099-INT              ││  3 Social security wages  [$168600]                                                │
@@ -19,12 +19,12 @@
  17││  … Schedule A (itemized deducti││  14b Treasury Tipped Occupation Code(s)  []                                        │
  18││  ✓ Schedule A line 8b (mortgage││  Box 12 entries (0) →                                                              │
  19││  ✓ Sale of your main home      ││                                                                                    │
- 20││  … Payments                    ││  [Left/Esc] back to rows                                                           │
- 21││  … Carryforwards from last year││                                                                                    │
- 22││  … §199A limitation (only if yo││                                                                                    │
- 23││  ✓ Declarations                ││                                                                                    │
- 24││  ✓ Documents received          ││                                                                                    │
- 25││  … Income exclusions (§911/931/││                                                                                    │
+ 20││  … Direct deposit              ││  [Left/Esc] back to rows                                                           │
+ 21││  … Payments                    ││                                                                                    │
+ 22││  … Carryforwards from last year││                                                                                    │
+ 23││  … §199A limitation (only if yo││                                                                                    │
+ 24││  ✓ Declarations                ││                                                                                    │
+ 25││  ✓ Documents received          ││                                                                                    │
  26│└────────────────────────────────┘└────────────────────────────────────────────────────────────────────────────────────┘
  27│┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
  28││  active source: full return   ·   screens clean, except what report computes                                         │

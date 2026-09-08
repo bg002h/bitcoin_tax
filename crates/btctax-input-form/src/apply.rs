@@ -197,6 +197,9 @@ fn row_depth(id: SectionId) -> usize {
         | SectionId::Taxpayer
         | SectionId::Spouse
         | SectionId::Address
+        // ★ T10 / §5.4 — the direct-deposit block is an OPTIONAL SINGLETON, like `Spouse`: one
+        //   instruction per return, present or absent, never a row.
+        | SectionId::DirectDeposit
         | SectionId::ScheduleA
         | SectionId::Payments
         | SectionId::Carryforwards

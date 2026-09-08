@@ -27,7 +27,10 @@
 
 use crate::cells::{page_of, push_money, push_money_opt, render_ssn};
 use crate::error::FormsError;
-use crate::map::{CheckChoice, DependentsGridCells, Form1040HeaderCells, Form1040Map, MoneyCell};
+use crate::map::{
+    CheckChoice, DependentsGridCells, DirectDepositCells, Form1040HeaderCells, Form1040Map,
+    MoneyCell,
+};
 use crate::pdf;
 use crate::verify::{verify_flat, FlatPlacement};
 use btctax_core::tax::dependent_gates::CreditColumn;
@@ -122,6 +125,15 @@ pub fn fill_form_1040_full_with_map(
             )));
         }
         push_dependents_grid(&mut writes, &mut placements, grid, header)?;
+    }
+
+    // ★★★ **T10 / §5.4 — lines 35b-35d.** Written iff the map declares the block AND the filer gave
+    //     an instruction. Both halves matter and neither is a default: a map with no
+    //     `[direct_deposit]` writes nothing (the cells stay on the field census's UNCENSUSED
+    //     register), and a return with no `direct_deposit` writes nothing and gets
+    //     `Advisory::RefundByPaperCheck` instead.
+    if let Some(cells) = map.direct_deposit.as_ref() {
+        push_direct_deposit(&mut writes, &mut placements, cells, header);
     }
 
     // ── Page 1, AMOUNT column, top to bottom. Line 7 carries a LEADING MINUS on a loss year. ────
@@ -421,6 +433,59 @@ pub fn fill_form_1040_full_with_map(
     Ok(bytes)
 }
 
+/// ★★★ **T10 / §5.4 — write the direct-deposit block, 1040 lines 35b, 35c and 35d.**
+///
+/// Nothing here decides anything: `ReturnHeader::direct_deposit` is already a
+/// [`btctax_core::tax::packet::PrintedDirectDeposit`], whose routing and account numbers were
+/// canonicalized at the print boundary and whose account TYPE is an enum, so *"Don't check more
+/// than one box"* (`i1040gi--2025.txt:23988-23990`) is unrepresentable rather than screened.
+///
+/// ★ `None` writes NOTHING — not an empty string, not an unchecked box. A blank refund block is the
+///   normal case and is what `Advisory::RefundByPaperCheck` describes.
+fn push_direct_deposit(
+    w: &mut Vec<(String, pdf::FieldValue)>,
+    p: &mut Vec<FlatPlacement>,
+    cells: &DirectDepositCells,
+    header: &ReturnHeader,
+) {
+    use btctax_core::tax::return_inputs::DepositAccountKind;
+    let Some(dd) = header.direct_deposit.as_ref() else {
+        return;
+    };
+    w.push((
+        cells.routing.clone(),
+        pdf::FieldValue::Text(dd.routing.digits().to_string()),
+    ));
+    p.push(FlatPlacement::free(
+        cells.routing.clone(),
+        page_of(&cells.routing),
+    ));
+    // ★ The `match` is exhaustive on purpose: a third account type on a later revision reds here
+    //   rather than silently printing neither box.
+    let box_cell = match dd.kind {
+        DepositAccountKind::Checking => &cells.checking,
+        DepositAccountKind::Savings => &cells.savings,
+    };
+    w.push((
+        box_cell.field.clone(),
+        pdf::FieldValue::Check {
+            on: box_cell.on.clone(),
+        },
+    ));
+    p.push(FlatPlacement::check(
+        box_cell.field.clone(),
+        page_of(&box_cell.field),
+    ));
+    w.push((
+        cells.account.clone(),
+        pdf::FieldValue::Text(dd.account.characters().to_string()),
+    ));
+    p.push(FlatPlacement::free(
+        cells.account.clone(),
+        page_of(&cells.account),
+    ));
+}
+
 /// Write the 1040's identity block: names, SSNs, address, the checkbox row, and the dependents table.
 ///
 /// Every cell is a [`FlatPlacement::free`] (or `check`) — geometry-exempt, since none of them sits in a
@@ -515,11 +580,35 @@ fn push_header_block(
     if let Some(pin) = &header.ip_pin {
         text(w, p, &cells.ip_pin, pin.digits());
     }
+    // ★★★ **T10 — the SPOUSE's IP PIN, written on exactly the terms the taxpayer's is.** The map's
+    //     own census entry used to say this cell was left blank because *"ReturnInputs captures the
+    //     taxpayer's … but not the spouse's"*: one member of a joint return asked and the other not,
+    //     while a paper return omitting an ISSUED IP PIN is rejected. `None` still writes nothing —
+    //     most spouses have no PIN, and that blank is correct.
+    if let Some(pin) = &header.spouse_ip_pin {
+        text(w, p, &cells.spouse_ip_pin, pin.digits());
+    }
+    // ★★★ **T10 — the Sign Here block's "Phone no."** An empty one writes nothing: the cell is
+    //     optional on the form and a blank asserts nothing.
+    text(w, p, &cells.phone, &header.phone);
 
     text(w, p, &cells.address_street, &header.address_street);
     text(w, p, &cells.address_city, &header.address_city);
     text(w, p, &cells.address_state, &header.address_state);
     text(w, p, &cells.address_zip, &header.address_zip);
+    // ★★★ **T10 / §5.4 — the FOREIGN-ADDRESS row**, printed under the form's own *"If you have a
+    //     foreign address, also complete spaces below."*
+    //
+    // ★★ All three cells hang off ONE `Option`, so *"a province with no country"* cannot be
+    //    printed. That is the §5.4 liveness rule (*"live iff `foreign_country` is non-empty"*) made
+    //    structural in `ReturnHeader::build` rather than re-typed here — the province and the
+    //    postal code are not separately re-tested against the country, because there is no state in
+    //    which they could be reached without one.
+    if let Some(fa) = &header.foreign_address {
+        text(w, p, &cells.foreign_country, &fa.country);
+        text(w, p, &cells.foreign_province, &fa.province);
+        text(w, p, &cells.foreign_postal_code, &fa.postal_code);
+    }
 
     check(
         w,

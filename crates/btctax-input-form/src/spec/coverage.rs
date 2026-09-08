@@ -190,6 +190,24 @@ fn maximal_fixture() -> ReturnInputs {
     //      `DepSsn` setter's identity-supersede fire during the mutate-and-diff, moving a SECOND leaf
     //      and breaking the "exactly one leaf" derivation for reasons that have nothing to do with
     //      coverage.
+    // ★★★ **T10 / §5.4 — the TRAILER's two liveness primers.**
+    //
+    // ★ `foreign_country` non-empty is the §5.4 rule for the province and the postal code
+    //   (`HouseholdHeader::foreign_address_is_live`), so an unprimed fixture would cover neither
+    //   leaf and give false drift-protection for the whole foreign block. The value is non-default
+    //   and differs from the Text sentinel (`SENTINEL`), so the country's own diff stays exact.
+    ri.header.foreign_country = "Elbonia".to_string();
+    // ★ The direct-deposit block is an OPTIONAL SINGLETON: an absent one realizes no leaf at all
+    //   (spec §5.7 requires it PRESENT on the coverage fixture for exactly this reason). Both
+    //   strings differ from their own sentinels, and `Savings` differs from the Enum sentinel
+    //   `Checking` below.
+    ri.header.direct_deposit = Some(btctax_core::tax::return_inputs::DirectDeposit {
+        routing: "123456780".to_string(),
+        kind: btctax_core::tax::return_inputs::DepositAccountKind::Savings,
+        account: "0000000000".to_string(),
+    });
+    // ★ A spouse PIN, so the Secret leaf is realized (the spouse itself is created above).
+    ri.header.spouse_ip_pin = Some("000000".to_string());
     ri.answer_log.insert(
         btctax_core::tax::provenance::AnswerKey::Question(
             btctax_core::tax::questions::QuestionId::ForeignTrust,
@@ -261,6 +279,9 @@ fn sentinel(f: &Field) -> FieldValue {
                 //   which is not a variant at all, so every token differs; `NotMarried` is the one
                 //   the instruction states first and the only one that does not itself refuse.
                 FieldId::HohMaritalBasis => "NotMarried",
+                // ★ T10 — the fixture's block is `Savings`, so `Checking` is the choice that
+                //   differs. Both are real variants; there is no third.
+                FieldId::DdKind => "Checking",
                 other => panic!("no Enum sentinel for {other:?} — add a distinct real choice"),
             };
             FieldValue::Choice(choice.to_string())
@@ -809,7 +830,7 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     // change happened to keep the sets balanced.
     let field_count: usize = form_spec().iter().map(|s| s.fields.len()).sum();
     assert_eq!(
-        field_count, 271,
+        field_count, 279,
         "expected 216 Fields — 117 before T5, plus its FIFTY-EIGHT: the four document-less income \
          declarations (R3), W-2 boxes 13 and 14b, and the six document sections (1099-INT 14, \
          1099-DIV 14, 1099-B 8, 1099-G 7, 1098-E 4, and R5's five filer's-records leaves) — plus \
@@ -823,18 +844,18 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
          declaration (Form 8889 line 1 / line 3 rule 1) and M-1's document-less distribution door \
          (line 14a). ★★★ T7 / R6 added TWENTY-ONE: the twenty per-row §152 gates of Who \
          Qualifies as Your Dependent, plus Step 5 question 1 — the one gate that is about the \
-         FILER rather than about a row. \u{2605}\u{2605}\u{2605} R7 / T8 added TEN: Head of household's two tests, its MARITAL BASIS (a `Choice`, and the registry's first class-(A) skippable), the entry space for a non-dependent qualifying child, FR-67's \u{a7}6013(g)/(h) nonresident-alien-spouse election gate, and Qualifying surviving spouse's five conditions. \u{2605}\u{2605}\u{2605} R8 / T9 added TWENTY-TWO: the Form 1098 section's THIRTEEN (lender, TIN, transcription date, boxes 1, 2, 3, 4, 5, 6, 7, 8 and 10, and the per-row shared-interest gate), Schedule A line 8b's FOUR (the recipient's name, identifying number and address, and the amount), the sale-of-a-main-home section's FOUR, and Schedule A's Line 8a Caution (the Form 8396 mortgage interest credit). Line 8c replaced `SaMortgage1098` on the Schedule A section, so that one is a swap and not a twenty-third."
+         FILER rather than about a row. \u{2605}\u{2605}\u{2605} R7 / T8 added TEN: Head of household's two tests, its MARITAL BASIS (a `Choice`, and the registry's first class-(A) skippable), the entry space for a non-dependent qualifying child, FR-67's \u{a7}6013(g)/(h) nonresident-alien-spouse election gate, and Qualifying surviving spouse's five conditions. \u{2605}\u{2605}\u{2605} R8 / T9 added TWENTY-TWO: the Form 1098 section's THIRTEEN (lender, TIN, transcription date, boxes 1, 2, 3, 4, 5, 6, 7, 8 and 10, and the per-row shared-interest gate), Schedule A line 8b's FOUR (the recipient's name, identifying number and address, and the amount), the sale-of-a-main-home section's FOUR, and Schedule A's Line 8a Caution (the Form 8396 mortgage interest credit). Line 8c replaced `SaMortgage1098` on the Schedule A section, so that one is a swap and not a twenty-third. \u{2605}\u{2605}\u{2605} T10 / \u{a7}5.4 added EIGHT \u{2014} the TRAILER: the spouse's Identity Protection PIN (this census's own motivating gap), the header's three foreign-address cells, the signature block's phone number, and the direct-deposit block's three (routing, account type, account number). Every one of the eight was a TY2024 cell censused `unmodeled` behind `Advisory::UnmodeledReturnOptionsOmitted`; collecting them is what let nine census entries retire."
     );
     assert_eq!(
         covered.len(),
-        271,
-        "★★★ EVERY Field is now distinctly covered — 271 of 271, and the last gap closed at T9. \
+        279,
+        "★★★ EVERY Field is now distinctly covered — 279 of 279, and the last gap closed at T9. \
          It was 115 of 117 before T5, then 174 of 175, then 182 of 183, and the one always missing \
          was `DocForm1098`, whose census row was shadowed by the \
          `schedule_a.mortgage_interest_1098` scalar and so was never live. T9 replaced the scalar \
          with the `form_1098` document rows, `row_is_live` opened the row on the itemize election, \
          and the leaf became coverable. T16's thirty-three, the seam review's two, R7 / T8's ten \
-         and R8 / T9's twenty-two are all covered."
+         and R8 / T9's twenty-two are all covered, and so are T10's eight."
     );
 
     // ── 5. ★ I-6: PIN the observed FieldId → leaf-path map against a literal (kills TRANSPOSITION). ──
@@ -912,10 +933,19 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
         FieldId::SpPresidentialFund,
         "header.presidential_fund_spouse",
     ),
+    // ★★★ T10 / §5.4 — the trailer.
+    (FieldId::SpIpPin, "header.spouse_ip_pin"),
     (FieldId::AddrStreet, "header.address_street"),
     (FieldId::AddrCity, "header.address_city"),
     (FieldId::AddrState, "header.address_state"),
     (FieldId::AddrZip, "header.address_zip"),
+    (FieldId::AddrForeignCountry, "header.foreign_country"),
+    (FieldId::AddrForeignProvince, "header.foreign_province"),
+    (FieldId::AddrForeignPostalCode, "header.foreign_postal_code"),
+    (FieldId::AddrPhone, "header.phone"),
+    (FieldId::DdRouting, "header.direct_deposit.routing"),
+    (FieldId::DdKind, "header.direct_deposit.kind"),
+    (FieldId::DdAccount, "header.direct_deposit.account"),
     (FieldId::DepName, "header.dependents[0].name"),
     (FieldId::DepSsn, "header.dependents[0].ssn"),
     (

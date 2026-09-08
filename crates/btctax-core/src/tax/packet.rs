@@ -31,7 +31,7 @@ use crate::tax::printed::{printed_8275, Printed8275};
 use crate::tax::qbi::{form_8995_lines, Form8995Lines};
 use crate::tax::questions::{QuestionId, FORM_QUESTIONS};
 use crate::tax::return_1040::{is_aged, AbsoluteReturn};
-use crate::tax::return_inputs::{Owner, Person, ReturnInputs};
+use crate::tax::return_inputs::{DepositAccountKind, Owner, Person, ReturnInputs};
 use crate::tax::tables::TaxTable;
 use crate::tax::types::FilingStatus;
 use std::collections::BTreeMap;
@@ -129,6 +129,16 @@ pub enum HeaderError {
     /// filled (r3 M-6). Distinct from `Unanswered`: the spouse DECLARATION may be answered, yet the spouse
     /// IDENTITY is still absent.
     MfjWithoutSpouse,
+    /// ★★★ **T10 — a direct-deposit block that is not a bank instruction** (1040 lines 35b / 35d).
+    /// Fail-closed at the print boundary for the same reason [`Self::Ssn`] is: printing what was
+    /// typed would put a number the bank cannot route on a signed return.
+    Bank(BankNumberError),
+}
+
+impl From<BankNumberError> for HeaderError {
+    fn from(e: BankNumberError) -> Self {
+        HeaderError::Bank(e)
+    }
 }
 
 impl From<SsnError> for HeaderError {
@@ -150,6 +160,11 @@ impl fmt::Display for HeaderError {
                 f,
                 "a married-filing-jointly return has no spouse on file — the joint name and SSN cannot be \
                  printed; add the spouse's identity (`btctax set-pii`) or change the filing status"
+            ),
+            Self::Bank(e) => write!(
+                f,
+                "the direct-deposit block on 1040 lines 35b-35d {e} — correct it, or remove the \
+                 block and write the numbers on the printed form by hand"
             ),
         }
     }
@@ -189,6 +204,197 @@ impl fmt::Debug for IpPin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "IpPin(******)")
     }
+}
+
+/// ★★★ **T10 — why a routing or account number cannot be canonicalized (1040 lines 35b / 35d).**
+///
+/// A separate error from [`SsnError`] because the RULES are the form's own and are different: an SSN
+/// has one length rule, and a routing number has a length rule, a PREFIX rule the instruction states
+/// in a sentence, and a check digit the number itself carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BankNumberError {
+    /// Nothing was entered. A direct-deposit block with no routing number is a mistyped row, not an
+    /// instruction — §4.3's *"no default on a field whose absence is not a state"*.
+    Missing,
+    /// A character the cell cannot carry. The routing cell is nine digits; the account cell takes
+    /// *"both numbers and letters"* and hyphens, and nothing else.
+    BadCharacter(char),
+    /// The wrong number of characters: nine exactly for a routing number, at most 17 for an account.
+    WrongLength(usize),
+    /// **The instruction's own prefix rule** — *"The first two digits must be 01 through 12 or 21
+    /// through 32."* (`design/forms/extract/i1040gi--2025.txt:23967-23969`.) Carries the two digits
+    /// as entered, so the refusal can name them.
+    BadPrefix(u8),
+    /// **The ABA check digit does not verify.** See [`RoutingNumber::canonical`] for the rule and
+    /// for why btctax applies a rule the IRS instruction does not state.
+    BadCheckDigit,
+}
+
+impl fmt::Display for BankNumberError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Missing => write!(f, "is empty"),
+            Self::BadCharacter(c) => write!(f, "contains {c:?}, which this cell cannot carry"),
+            Self::WrongLength(n) => write!(f, "is {n} character(s) long"),
+            Self::BadPrefix(p) => write!(
+                f,
+                "starts {p:02} — the instructions for line 35b say the first two digits must be 01 \
+                 through 12 or 21 through 32"
+            ),
+            Self::BadCheckDigit => write!(
+                f,
+                "fails the ABA check digit, so at least one digit is mistyped"
+            ),
+        }
+    }
+}
+
+/// **1040 line 35b — a direct-deposit ROUTING NUMBER.**
+///
+/// ★★★ **Two rules from the instruction, verbatim, plus one from the number itself.**
+///
+/// > *"The routing number must be nine digits. The first two digits must be 01 through 12 or 21
+/// > through 32."* (`design/forms/extract/i1040gi--2025.txt:23967-23969`.)
+///
+/// 1. **Nine digits.** Spaces are stripped (a filer reading a cheque types them); nothing else is.
+/// 2. **The prefix.** 01–12 or 21–32, the instruction's own sentence.
+/// 3. **The ABA check digit** — `3(d1+d4+d7) + 7(d2+d5+d8) + (d3+d6+d9) ≡ 0 (mod 10)`.
+///
+/// ★★★ **Rule 3 is NOT in the IRS instruction, and that is stated here rather than hidden.** It is
+///     the check digit every ABA routing transit number has carried since the numbering scheme was
+///     published — the ninth digit exists for no other purpose — and it is the standard typo
+///     detector for exactly this field. btctax applies it because the instruction's own consequence
+///     for a mistyped number is severe and silent: *"You haven't given a valid account number"* is
+///     listed under **Reasons Your Direct Deposit Request Will Be Rejected**
+///     (`i1040gi--2025.txt:24031-24052`, the bullet at `:24049-24050`), and *"The IRS isn't
+///     responsible for a lost refund if you enter the wrong account information."*
+///     (`:24023-24026`.)
+///
+/// ★★ **The failure mode of applying it is SAFE, which is why it may refuse rather than warn.** A
+///    number that fails any of the three rules is not stored, so the return files with NO deposit
+///    block — and [`crate::tax::advisories::Advisory::RefundByPaperCheck`] then tells the filer, in
+///    words, that the IRS will mail a check and that they may write the numbers on the form by hand.
+///    Nothing is blocked and no figure moves; the only thing that cannot happen is a wrong number
+///    printed on a filed return.
+#[derive(Clone, PartialEq, Eq)]
+pub struct RoutingNumber(String);
+
+impl RoutingNumber {
+    /// Canonicalize, or say which of the three rules failed.
+    pub fn canonical(raw: &str) -> Result<Self, BankNumberError> {
+        let digits: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
+        if digits.is_empty() {
+            return Err(BankNumberError::Missing);
+        }
+        if let Some(c) = digits.chars().find(|c| !c.is_ascii_digit()) {
+            return Err(BankNumberError::BadCharacter(c));
+        }
+        if digits.len() != 9 {
+            return Err(BankNumberError::WrongLength(digits.len()));
+        }
+        let d: Vec<u32> = digits.chars().map(|c| c as u32 - '0' as u32).collect();
+        // *"The first two digits must be 01 through 12 or 21 through 32."*
+        let prefix = (d[0] * 10 + d[1]) as u8;
+        if !((1..=12).contains(&prefix) || (21..=32).contains(&prefix)) {
+            return Err(BankNumberError::BadPrefix(prefix));
+        }
+        // The ABA check digit: weights 3,7,1 repeating, sum ≡ 0 (mod 10).
+        let sum = 3 * (d[0] + d[3] + d[6]) + 7 * (d[1] + d[4] + d[7]) + (d[2] + d[5] + d[8]);
+        if !sum.is_multiple_of(10) {
+            return Err(BankNumberError::BadCheckDigit);
+        }
+        Ok(Self(digits))
+    }
+
+    /// The nine digits — the form's cell is a 9-character comb.
+    pub fn digits(&self) -> &str {
+        &self.0
+    }
+}
+
+/// ★ `Debug` is MASKED, exactly like [`Ssn`] and [`IpPin`]. A routing number alone is public
+/// information, but it appears only ever beside an account number, and a pair in a log or a panic
+/// message is a bank instruction in a log.
+impl fmt::Debug for RoutingNumber {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "RoutingNumber(*********)")
+    }
+}
+
+/// **1040 line 35d — a direct-deposit ACCOUNT NUMBER.**
+///
+/// > *"The account number can be up to 17 characters (both numbers and letters). Include hyphens but
+/// > omit spaces and special symbols. Enter the number from left to right and leave any unused boxes
+/// > blank."* (`design/forms/extract/i1040gi--2025.txt:24054-24059`.)
+///
+/// That sentence and nothing more: letters, digits and hyphens; spaces stripped rather than refused
+/// (*"omit spaces"* is an instruction to the filer, so obeying it for them is transcription, not a
+/// guess); at most 17 characters, which is also the AcroForm cell's own `/MaxLen`. An 18-character
+/// entry is refused rather than truncated — a truncated account number is a wrong number printed on
+/// a filed return, and it would be invisible on the page.
+#[derive(Clone, PartialEq, Eq)]
+pub struct AccountNumber(String);
+
+impl AccountNumber {
+    /// Canonicalize, or say which half of the instruction's sentence failed.
+    pub fn canonical(raw: &str) -> Result<Self, BankNumberError> {
+        // *"Include hyphens but omit spaces and special symbols."*
+        let kept: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
+        if kept.is_empty() {
+            return Err(BankNumberError::Missing);
+        }
+        if let Some(c) = kept
+            .chars()
+            .find(|c| !c.is_ascii_alphanumeric() && *c != '-')
+        {
+            return Err(BankNumberError::BadCharacter(c));
+        }
+        if kept.chars().count() > 17 {
+            return Err(BankNumberError::WrongLength(kept.chars().count()));
+        }
+        Ok(Self(kept))
+    }
+
+    /// The characters as they print — up to 17, left to right.
+    pub fn characters(&self) -> &str {
+        &self.0
+    }
+}
+
+/// ★ `Debug` is MASKED — a bank account number is the most directly actionable identifier on the
+/// return.
+impl fmt::Debug for AccountNumber {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "AccountNumber(*****)")
+    }
+}
+
+/// **The 1040 header's FOREIGN ADDRESS row as it PRINTS** — *"Foreign country name / Foreign
+/// province/state/county / Foreign postal code"* (`design/forms/extract/f1040--2024.txt:22`).
+///
+/// ★★★ The country is REQUIRED and the other two are plain `String`s that may be empty: the form
+///     prints three cells and the filer fills the ones their address has, but a province with no
+///     country is not an address. Building this from `HouseholdHeader` is therefore
+///     `foreign_country.is_empty() ⇒ None`, which is the §5.4 liveness rule expressed as a type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForeignAddress {
+    /// *"Foreign country name"* (`f1_15`).
+    pub country: String,
+    /// *"Foreign province/state/county"* (`f1_16`). Lawfully blank.
+    pub province: String,
+    /// *"Foreign postal code"* (`f1_17`). Lawfully blank.
+    pub postal_code: String,
+}
+
+/// **1040 lines 35b–35d as they PRINT** — derived once, so a filler can only transcribe.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrintedDirectDeposit {
+    /// Line 35b.
+    pub routing: RoutingNumber,
+    /// Line 35c — *"Don't check more than one box"*, which an enum makes unrepresentable.
+    pub kind: DepositAccountKind,
+    /// Line 35d.
+    pub account: AccountNumber,
 }
 
 /// A person as they appear ON the filed return.
@@ -516,6 +722,29 @@ pub struct ReturnHeader {
     /// an issued IP PIN is REJECTED or delayed (ARCH-P6.3a Q7 item 5). The spouse's IP PIN is not
     /// captured by `ReturnInputs` at all — a capture gap, recorded in LIMITATIONS rather than fabricated.
     pub ip_pin: Option<IpPin>,
+    /// ★★★ **T10 — the SPOUSE's IP PIN** (`f1040--2024.txt:133-135`, cell `f2_36`). The asymmetry
+    /// the doc above recorded as *"a capture gap … recorded in LIMITATIONS rather than fabricated"*
+    /// is closed: both members of a joint return are asked, and neither is guessed.
+    ///
+    /// ★ `None` on a return with no spouse, and on a joint return whose spouse was issued no PIN —
+    ///   two states that print identically (blank) and are both correct.
+    pub spouse_ip_pin: Option<IpPin>,
+    /// ★★★ **T10 — the Sign Here block's *"Phone no."*** (`f1040--2024.txt:137`, cell `f2_37`).
+    /// Empty is lawful and common; nothing on the return reads it.
+    pub phone: String,
+    /// ★★★ **T10 — the header's foreign-address block** (`f1040--2024.txt:22`, cells `f1_15` /
+    /// `f1_16` / `f1_17`), printed under *"If you have a foreign address, also complete spaces
+    /// below."*
+    ///
+    /// ★ The three are carried as ONE optional, not three strings, because the province and the
+    ///   postal code are live only under a country (§5.4) — and an `Option` makes *"a province with
+    ///   no country"* unrepresentable at the print boundary rather than screened there.
+    pub foreign_address: Option<ForeignAddress>,
+    /// ★★★ **T10 — 1040 lines 35b–35d.** `None` = no deposit instruction was given, which is what
+    /// [`crate::tax::advisories::Advisory::RefundByPaperCheck`] says out loud on a return due a
+    /// refund. Every part of a `Some` is canonicalized (`RoutingNumber` / `AccountNumber`), so the
+    /// filler can only transcribe.
+    pub direct_deposit: Option<PrintedDirectDeposit>,
     pub dependents: Vec<DependentRow>,
     /// ★★★ **The 1040 header's shared entry space, HoH/QSS half** — *"If you checked the HOH or QSS
     /// box, enter the child's name if the qualifying person is a child but not your dependent"*
@@ -649,6 +878,44 @@ impl ReturnHeader {
                 .ip_pin
                 .as_deref()
                 .map(IpPin::canonical)
+                .transpose()?,
+            // ★★★ T10 — the spouse's PIN, canonicalized on exactly the same terms as the
+            //     taxpayer's: a malformed one fails the header build rather than printing whatever
+            //     was typed into a six-character comb.
+            // ★★★ Through `spouse_ip_pin_if_live`, the ONE reader — never `ri.header.spouse_ip_pin`
+            //     directly. A PIN left behind by a deleted spouse must not reach the *"If the IRS
+            //     sent your spouse an Identity Protection PIN"* cell of a return with no spouse.
+            spouse_ip_pin: ri
+                .header
+                .spouse_ip_pin_if_live()
+                .map(IpPin::canonical)
+                .transpose()?,
+            phone: ri.header.phone.clone(),
+            // ★★★ T10 / §5.4 — the province and the postal code are LIVE IFF the country is
+            //     non-empty, and this is where that rule stops being a convention: a header with a
+            //     province and no country yields `None` and prints all three cells blank, so the
+            //     page can never carry half a foreign address.
+            foreign_address: ri.header.foreign_address_is_live().then(|| ForeignAddress {
+                country: ri.header.foreign_country.clone(),
+                province: ri.header.foreign_province.clone(),
+                postal_code: ri.header.foreign_postal_code.clone(),
+            }),
+            // ★★★ T10 — lines 35b–35d. Both numbers are canonicalized HERE, at the print boundary,
+            //     so a block that reached the vault by some path the screen did not run cannot be
+            //     printed: a wrong routing number on a filed return sends the refund somewhere
+            //     nobody can recall it from, and *"The IRS isn't responsible for a lost refund if
+            //     you enter the wrong account information"* (`i1040gi--2025.txt:24023-24026`).
+            direct_deposit: ri
+                .header
+                .direct_deposit
+                .as_ref()
+                .map(|dd| {
+                    Ok::<_, BankNumberError>(PrintedDirectDeposit {
+                        routing: RoutingNumber::canonical(&dd.routing)?,
+                        kind: dd.kind,
+                        account: AccountNumber::canonical(&dd.account)?,
+                    })
+                })
                 .transpose()?,
             dependents,
             // Carried for every status; the EMITTER decides which statuses print it (HoH and QSS —
@@ -1857,5 +2124,188 @@ mod tests {
             pr.forms.f8959.line1,
             crate::conventions::round_dollar(box5_sum)
         );
+    }
+}
+
+// ══ T10 / §5.4 — THE ROUTING AND ACCOUNT NUMBER VALIDATORS ══════════════════════════════════════
+
+#[cfg(test)]
+mod t10_bank_numbers {
+    use super::*;
+
+    /// ★★★ **THE INSTRUCTION'S OWN TWO RULES, ONE CASE EACH, PLUS THE CHECK DIGIT.**
+    ///
+    /// > *"The routing number must be nine digits. The first two digits must be 01 through 12 or 21
+    /// > through 32."* (`design/forms/extract/i1040gi--2025.txt:23967-23969`.)
+    ///
+    /// ★★ The PREFIX row is total over the boundary: 00 and 13 fail on either side of 01-12, 20 and
+    ///    33 on either side of 21-32, and 01, 12, 21, 32 all pass — so an off-by-one at either end
+    ///    of either range is caught rather than assumed. The prefixes the brief names (13, 20, 33)
+    ///    are three of the four failures.
+    #[test]
+    fn the_routing_prefix_rule_is_the_instructions_two_ranges_and_their_edges() {
+        // `body(p)` builds a nine-digit number with prefix `p` and the check digit its own first
+        // eight digits force, so ONLY the prefix rule can be what fails.
+        // The number is `PP000000C`: the prefix, six zeros, and C in the NINTH position, whose ABA
+        // weight is 1 — so `C = -(3·d1 + 7·d2) mod 10` makes the whole sum ≡ 0 for any prefix.
+        let body = |p: u32| -> String {
+            let check = (10 - (3 * (p / 10) + 7 * (p % 10)) % 10) % 10;
+            format!("{p:02}000000{check}")
+        };
+        // ★ `body` must actually produce a check-digit-valid number, or every "rejected" case below
+        //   would be rejected for the WRONG reason and the prefix rule would never be tested.
+        for p in [1, 12, 21, 32] {
+            assert!(
+                RoutingNumber::canonical(&body(p)).is_ok(),
+                "prefix {p:02} is inside the instruction's ranges: {}",
+                body(p)
+            );
+        }
+        for p in [0, 13, 20, 33, 61, 80] {
+            assert_eq!(
+                RoutingNumber::canonical(&body(p)),
+                Err(BankNumberError::BadPrefix(p as u8)),
+                "prefix {p:02} is outside \"01 through 12 or 21 through 32\": {}",
+                body(p)
+            );
+        }
+    }
+
+    /// ★★★ **THE ABA CHECK DIGIT, AND THE FIXTURE FOR IT IS THE IRS'S OWN SAMPLE CHECK.**
+    ///
+    /// The line-35b instructions print a sample cheque whose routing number is `250250025`
+    /// (`i1040gi--2025.txt:23965`, `:23970-23971`). Nine digits, prefix 25 — inside the instruction's
+    /// own range — and it **fails the ABA check digit**: `3(2+2+0) + 7(5+5+2) + (0+0+5) = 101`, and
+    /// `101 mod 10 = 1`. Which is exactly what a worked example should be: a number no bank holds.
+    ///
+    /// So this repo has a routing number *documented* to fail rule 3 rather than merely observed to,
+    /// and it is what `scrub` mints for a filer whose own entry failed the same rule.
+    #[test]
+    fn the_irs_sample_check_routing_number_fails_the_aba_check_digit() {
+        assert_eq!(
+            RoutingNumber::canonical("250250025"),
+            Err(BankNumberError::BadCheckDigit),
+            "the IRS's own sample-check number carries a wrong check digit — that is the point of a \
+             sample"
+        );
+        // …and one digit away, it passes: 96 + 4 ≡ 0 (mod 10). The rule is a check digit, not a
+        // blanket rejection of the shape.
+        assert!(RoutingNumber::canonical("250250024").is_ok());
+    }
+
+    /// The two remaining routing rules, each with the value that trips it and nothing else.
+    #[test]
+    fn a_routing_number_is_nine_digits_and_nothing_but_digits() {
+        assert_eq!(RoutingNumber::canonical(""), Err(BankNumberError::Missing));
+        assert_eq!(
+            RoutingNumber::canonical("   "),
+            Err(BankNumberError::Missing),
+            "whitespace only is nothing entered"
+        );
+        assert_eq!(
+            RoutingNumber::canonical("12345678"),
+            Err(BankNumberError::WrongLength(8))
+        );
+        assert_eq!(
+            RoutingNumber::canonical("1234567890"),
+            Err(BankNumberError::WrongLength(10))
+        );
+        assert_eq!(
+            RoutingNumber::canonical("12345678A"),
+            Err(BankNumberError::BadCharacter('A'))
+        );
+        // Spaces are stripped — a filer reading a cheque types them.
+        assert_eq!(
+            RoutingNumber::canonical("1234 5678 0")
+                .expect("spaces are stripped")
+                .digits(),
+            "123456780"
+        );
+    }
+
+    /// ★★★ **LINE 35d, AND THE RULE IS THE INSTRUCTION'S SENTENCE AND NOTHING MORE.**
+    ///
+    /// > *"The account number can be up to 17 characters (both numbers and letters). Include hyphens
+    /// > but omit spaces and special symbols."* (`i1040gi--2025.txt:24054-24059`.)
+    ///
+    /// ★ 17 passes and 18 REFUSES rather than truncating: the AcroForm cell is `/MaxLen 17`, so an
+    ///   over-long number would be silently cut on the printed page — a wrong account number that
+    ///   looks right, and *"The IRS isn't responsible for a lost refund if you enter the wrong
+    ///   account information."*
+    #[test]
+    fn an_account_number_is_the_instructions_sentence() {
+        assert_eq!(AccountNumber::canonical(""), Err(BankNumberError::Missing));
+        assert_eq!(
+            AccountNumber::canonical("A1-B2-C3")
+                .expect("letters, digits and hyphens")
+                .characters(),
+            "A1-B2-C3"
+        );
+        // "omit spaces" — obeyed for the filer, which is transcription, not a guess.
+        assert_eq!(
+            AccountNumber::canonical("0123 4567")
+                .expect("spaces are stripped")
+                .characters(),
+            "01234567"
+        );
+        assert_eq!(
+            AccountNumber::canonical("0123/4567"),
+            Err(BankNumberError::BadCharacter('/')),
+            "a special symbol is not one of the characters the cell takes"
+        );
+        assert!(
+            AccountNumber::canonical("01234567890123456").is_ok(),
+            "17 characters is the instruction's own limit and must pass"
+        );
+        assert_eq!(
+            AccountNumber::canonical("012345678901234567"),
+            Err(BankNumberError::WrongLength(18)),
+            "18 characters must REFUSE, never be truncated into the /MaxLen 17 cell"
+        );
+    }
+
+    /// ★★★ **THE PRINT BOUNDARY REFUSES WHAT THE SCREEN REFUSES.** `ReturnHeader::build` runs both
+    ///     canonicalizers, so a block that reached the vault by some path the screen did not run
+    ///     still cannot be printed. Fail-closed twice, exactly as the SSNs are.
+    #[test]
+    fn the_header_build_refuses_a_deposit_block_that_cannot_route() {
+        use crate::tax::return_inputs::{DepositAccountKind, DirectDeposit, ReturnInputs};
+        let base = || {
+            let mut ri = ReturnInputs {
+                tax_year: 2024,
+                ..Default::default()
+            };
+            ri.header.taxpayer.first_name = "Pat".into();
+            ri.header.taxpayer.last_name = "Roe".into();
+            ri.header.taxpayer.ssn = "000-00-2222".into();
+            crate::tax::testonly::answer_all_live_declarations(&mut ri);
+            ri
+        };
+        // A clean block builds.
+        let mut ok = base();
+        ok.header.direct_deposit = Some(DirectDeposit {
+            routing: "123456780".into(),
+            kind: DepositAccountKind::Checking,
+            account: "ACCT-1".into(),
+        });
+        assert!(ReturnHeader::build(&ok, 2024).is_ok());
+
+        for (bad, why) in [
+            ("250250025", BankNumberError::BadCheckDigit),
+            ("130000000", BankNumberError::BadPrefix(13)),
+            ("", BankNumberError::Missing),
+        ] {
+            let mut ri = base();
+            ri.header.direct_deposit = Some(DirectDeposit {
+                routing: bad.into(),
+                kind: DepositAccountKind::Checking,
+                account: "ACCT-1".into(),
+            });
+            assert_eq!(
+                ReturnHeader::build(&ri, 2024).err(),
+                Some(HeaderError::Bank(why)),
+                "{bad:?} must fail the print boundary, not print"
+            );
+        }
     }
 }

@@ -41,6 +41,27 @@ const INERT_BOX12_CODES: &[&str] = &["D", "E", "F", "G", "H", "S", "AA", "BB", "
 /// The §402(g) elective-deferral codes whose cross-employer sum is capped (SPEC F3).
 const ELECTIVE_DEFERRAL_CODES: &[&str] = &["D", "E", "F", "G", "S"];
 
+/// ★★★ **T10 / §5.4 — which cell of the direct-deposit block a refusal is about.**
+///
+/// Two cells, fixed two different ways: a routing number is re-read off the bottom left of a cheque
+/// and an account number off the middle, so the input form anchors them on different fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DirectDepositCell {
+    /// Line 35b — *"Routing number"*.
+    Routing,
+    /// Line 35d — *"Account number"*.
+    Account,
+}
+
+impl std::fmt::Display for DirectDepositCell {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Routing => write!(f, "routing number (line 35b)"),
+            Self::Account => write!(f, "account number (line 35d)"),
+        }
+    }
+}
+
 /// Why a full return is refused (fail-closed). One variant per SPEC §4.10 input-screenable row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RefuseReason {
@@ -311,6 +332,27 @@ pub enum RefuseReason {
     DependentIdentityUnanswered {
         /// The row's index in `header.dependents`, 0-based.
         row: usize,
+    },
+    /// ★★★ **T10 / §5.4 — THE DIRECT-DEPOSIT BLOCK IS NOT A BANK INSTRUCTION** (1040 lines 35b /
+    /// 35d).
+    ///
+    /// A **VALUE** rule, so it refuses at `income import` as well as at commit: the block is a fact
+    /// the filer stated, not a blank waiting to be filled, and no amount of answering questions
+    /// turns a mistyped routing number into a routable one.
+    ///
+    /// ★★ The exit is *remove the block*, never *answer something*. A return with NO deposit
+    ///    instruction is a perfectly good return — the refund arrives as a paper check and
+    ///    [`crate::tax::advisories::Advisory::RefundByPaperCheck`] says so — which is why this rule
+    ///    can afford to be strict: the cost of refusing is a cheque in the post, and the cost of
+    ///    accepting is a refund wired to a number nobody can recall it from
+    ///    (*"The IRS isn't responsible for a lost refund if you enter the wrong account
+    ///    information."*, `i1040gi--2025.txt:24023-24026`).
+    DirectDepositNumberMalformed {
+        /// Which of the two cells. An ENUM, not a string: the input form dispatches on it to anchor
+        /// the refusal, and a `&'static str` compared with `contains` is a spelling nobody checks.
+        cell: DirectDepositCell,
+        /// Which rule it failed, in the words [`crate::tax::packet::BankNumberError`] prints.
+        why: crate::tax::packet::BankNumberError,
     },
     /// ★★★ **T7 / R6, seam review I-2 — TWO DEPENDENT ROWS CARRY THE SAME SSN.**
     ///
@@ -2010,6 +2052,44 @@ fn screen_filing_status_assertions(ri: &ReturnInputs) -> Option<Refusal> {
 /// ★ Neither detail may prescribe `btctax income answer`: at import the row does not exist yet, so
 ///   that command refuses with *"no full-return inputs and no draft"*. Policed behaviourally by
 ///   `no_refusal_in_the_import_tier_prescribes_income_answer`.
+/// ★★★ **T10 / §5.4 — THE DIRECT-DEPOSIT BLOCK'S *VALUE* RULE, which refuses on BOTH tiers.**
+///
+/// A stated fact, not a blank, so it sits beside [`screen_dependent_values`] rather than inside the
+/// unanswered tier: `income import` is a path that can create the block, and a block that cannot
+/// route is not something answering a question fixes.
+///
+/// Both numbers go through the SAME canonicalizers the print boundary uses
+/// ([`crate::tax::packet::RoutingNumber`] / [`crate::tax::packet::AccountNumber`]) rather than a
+/// second copy of the rules, so the screen and the emitter can never disagree about what a bank
+/// instruction is.
+///
+/// ★ The exit is *correct it, or delete the block* — never *answer something*: a return with no
+///   deposit instruction is complete, and `income answer` is not reachable at import anyway
+///   (`no_refusal_in_the_import_tier_prescribes_income_answer`).
+fn screen_direct_deposit(ri: &ReturnInputs) -> Option<Refusal> {
+    use crate::tax::packet::{AccountNumber, BankNumberError, RoutingNumber};
+    let dd = ri.header.direct_deposit.as_ref()?;
+    let bad = |cell: DirectDepositCell, why: BankNumberError| {
+        refuse(
+            RefuseReason::DirectDepositNumberMalformed { cell, why },
+            format!(
+                "the direct-deposit {cell} on this return {why}. A refund sent to a number the bank \
+                 cannot route is not recoverable — the instructions say so (\"The IRS isn't \
+                 responsible for a lost refund if you enter the wrong account information.\"). \
+                 Correct it, or delete the direct-deposit block: a return with none is complete, \
+                 and the refund then arrives as a paper check."
+            ),
+        )
+    };
+    if let Err(why) = RoutingNumber::canonical(&dd.routing) {
+        return bad(DirectDepositCell::Routing, why);
+    }
+    if let Err(why) = AccountNumber::canonical(&dd.account) {
+        return bad(DirectDepositCell::Account, why);
+    }
+    None
+}
+
 fn screen_dependent_values(ri: &ReturnInputs) -> Option<Refusal> {
     use crate::tax::dependent_gates::{walk_dependent, DependentVerdict};
     for (row, d) in ri.header.dependents.iter().enumerate() {
@@ -2371,6 +2451,13 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
     //     btctax has not transcribed, is a STATED fact, and `income import` is the path that states
     //     it. Answering again cannot fix it; changing the status can.
     if let Some(r) = screen_filing_status_assertions(ri) {
+        return Some(r);
+    }
+    // ★★★ **T10 / §5.4 — the DIRECT-DEPOSIT block's value rule, on BOTH tiers, same reasoning:**
+    //     routing and account numbers are STATED facts and `income import` is the path that states
+    //     them. Answering a question cannot make a mistyped routing number routable; correcting it
+    //     or deleting the block can.
+    if let Some(r) = screen_direct_deposit(ri) {
         return Some(r);
     }
 
@@ -8651,6 +8738,18 @@ mod param_free_tier {
             itemizing_1098(r);
             r.claiming_mortgage_interest_credit = Some(true);
         });
+        // ★★★ **T10 / §5.4 — the direct-deposit block that cannot route.** The fixture uses the
+        //     routing number the IRS PRINTS ON ITS OWN SAMPLE CHECK (`250250025`,
+        //     `i1040gi--2025.txt:23965`), which is nine digits with a valid prefix and DOES NOT
+        //     satisfy the ABA check digit — exactly what a worked example should be, and the one
+        //     number in this repo documented to fail rule 3 rather than merely observed to.
+        add("DirectDepositNumberMalformed", &|r| {
+            r.header.direct_deposit = Some(crate::tax::return_inputs::DirectDeposit {
+                routing: "250250025".into(),
+                kind: crate::tax::return_inputs::DepositAccountKind::Checking,
+                account: "0000000000".into(),
+            });
+        });
         add("HomeSaleNotComputed", &|r| {
             r.home_sale = crate::tax::return_inputs::HomeSale {
                 sold_main_home: Some(true),
@@ -8743,12 +8842,22 @@ mod param_free_tier {
         //     here (the same treatment the registry loop's `q.unanswered` raises get).
         let dependent_values =
             body_after("fn screen_dependent_values(ri: &ReturnInputs) -> Option<Refusal> {");
+        // ★★★ **T10 — a rule that lives in its OWN helper is invisible to a census that reads only
+        //     the body, and this census already had two such helpers named explicitly.** A third
+        //     joined with `screen_direct_deposit`, so it is named here: without this line
+        //     `DirectDepositNumberMalformed` would never enter `named`, its fixture would look like
+        //     a duplicate, and the whole rule would be uncensused while the test still printed OK.
+        let direct_deposit =
+            body_after("fn screen_direct_deposit(ri: &ReturnInputs) -> Option<Refusal> {");
 
         let named: BTreeSet<String> = reasons_in(body)
             .union(&reasons_in(census_fn))
             .cloned()
             .collect::<BTreeSet<String>>()
             .union(&reasons_in(dependent_values))
+            .cloned()
+            .collect::<BTreeSet<String>>()
+            .union(&reasons_in(direct_deposit))
             .cloned()
             .collect();
         let package_gated: BTreeSet<String> =

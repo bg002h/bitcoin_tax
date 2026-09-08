@@ -1114,6 +1114,172 @@ pub struct HouseholdHeader {
     /// `the_certification_is_unreachable_without_the_dead_end` exists to kill.
     #[serde(default)]
     pub form8615_parent_identity_unobtainable: Option<bool>,
+    // ── ★★★ T10 / §5.4 — THE TRAILER: the cells a filed 1040 carries that btctax never asked for.
+    //    Every one is a NON-COMPUTING cell — none of them moves a figure — and every one of them was
+    //    censused `unmodeled` with `Advisory::UnmodeledReturnOptionsOmitted` in front of it, i.e.
+    //    announced rather than silent. T10 collects them, so the announcement shrinks by exactly
+    //    what is now asked. ──
+    /// ★★★ **T10 — the SPOUSE's Identity Protection PIN**, the mirror of [`Self::ip_pin`].
+    ///
+    /// *"If the IRS sent your spouse an Identity Protection PIN, enter it here (see inst.)"*
+    /// (`design/forms/extract/f1040--2024.txt:133-135`, cell `f2_36`.)
+    ///
+    /// ★★ The asymmetry this closes was named in the TY2024 map's own census entry: the TAXPAYER's
+    ///    IP PIN was captured and written (`f2_34`) and the spouse's was not, so one member of a
+    ///    joint return was asked and the other was not — and *a paper return that omits an ISSUED
+    ///    IP PIN is rejected or delayed*. No tax figure moves; the FILING fails.
+    ///
+    /// ★★★ **A SECRET, and asymmetric exactly as the taxpayer's is** (`seam.rs`'s `FieldKind::Secret`):
+    ///     `set` takes a `SecretEntry`, `get` returns presence only, the TUI shows a mask, `income
+    ///     show` prints `***`, and `scrub_pii` runs it through the same `scrub_ip_pin` carve-out —
+    ///     a VALID PIN is DROPPED rather than synthesised, because minting a well-formed one inside
+    ///     a file stamped shareable would fabricate a live IRS anti-fraud credential.
+    ///
+    /// ★ `Option<String>`, and `Some("")` is NOT `None`: an empty entry errs `Missing` at the packet
+    ///   boundary while an absent one is `Ok`, so the two are different states (see [`Self::ip_pin`]).
+    #[serde(default)]
+    pub spouse_ip_pin: Option<String>,
+    /// ★★★ **T10 — the filer's phone number**, printed in the 1040's Sign Here block
+    /// (*"Phone no."*, `design/forms/extract/f1040--2024.txt:137`, cell `f2_37`).
+    ///
+    /// ★ A `String`, not a declaration: the form asks for a NUMBER and a blank is LAWFUL — the
+    ///   instructions ask for it so the IRS can reach the filer about the return, and nothing on the
+    ///   return reads it. So nothing refuses on it, and a filer who leaves it blank has filed a
+    ///   correct return.
+    ///
+    /// ★ NOT validated into a shape. btctax does not know the filer's country's dialling plan, and
+    ///   coercing what they typed would be inventing testimony about how to reach them.
+    #[serde(default)]
+    pub phone: String,
+    /// ★★★ **T10 — the header's FOREIGN ADDRESS block, cell 1 of 3.**
+    ///
+    /// *"Foreign country name"* (`design/forms/extract/f1040--2024.txt:22`, cell `f1_15`), the first
+    /// of the three spaces the form's own address row prints beside *"If you have a foreign address,
+    /// also complete spaces below."*
+    ///
+    /// ★★ **This is the ADDRESS's country and is NOT [`ReturnInputs::foreign_country_names`]**,
+    ///    which is Schedule B line 7b — *"Enter the name of the foreign country where the financial
+    ///    account is located"*. A filer can have either without the other, and conflating them would
+    ///    print a bank's jurisdiction as a home address.
+    ///
+    /// ★★★ **It is the LIVENESS CARRIER for the other two**: [`Self::foreign_province`] and
+    ///     [`Self::foreign_postal_code`] are live iff this is non-empty (§5.4), because a province
+    ///     with no country is not an address any postal service can read.
+    #[serde(default)]
+    pub foreign_country: String,
+    /// ★★★ **T10 — the foreign address block, cell 2 of 3**: *"Foreign province/state/county"*
+    /// (`f1040--2024.txt:22`, cell `f1_16`). Live iff [`Self::foreign_country`] is non-empty.
+    #[serde(default)]
+    pub foreign_province: String,
+    /// ★★★ **T10 — the foreign address block, cell 3 of 3**: *"Foreign postal code"*
+    /// (`f1040--2024.txt:22`, cell `f1_17`). Live iff [`Self::foreign_country`] is non-empty.
+    #[serde(default)]
+    pub foreign_postal_code: String,
+    /// ★★★ **T10 / §5.4 — HOW THE REFUND ARRIVES (1040 lines 35b–35d).**
+    ///
+    /// `None` is the *absence of an instruction*, and that is deliberately NOT the same thing as
+    /// *"I want a paper check"*: btctax asks for deposit details and takes silence as *none given*,
+    /// which is what [`crate::tax::advisories::Advisory::RefundByPaperCheck`] then says out loud on
+    /// a return actually due a refund. A `Some` is the filer's own routing and account numbers and
+    /// silences that advisory, because there is nothing left to tell them.
+    ///
+    /// ★★ Class **(B)** in the §2 taxonomy (R14): the absence FORGOES a convenience and can move no
+    ///    figure — the refund is the same size either way — so it never refuses for being absent.
+    ///    What DOES refuse is a present block that cannot be a bank instruction (see
+    ///    [`DirectDeposit`]).
+    ///
+    /// ★ **Line 35a's split-refund box (Form 8888) is NOT built** and stays censused `unmodeled`
+    ///   (§2.2): one account, or none.
+    #[serde(default)]
+    pub direct_deposit: Option<DirectDeposit>,
+}
+
+impl HouseholdHeader {
+    /// ★★★ **T10 — THE ONE READER OF THE SPOUSE'S IP PIN.**
+    ///
+    /// `Some` only when the return actually carries a spouse. Every surface goes through this
+    /// rather than re-typing `spouse.is_some() && …`: the seam's `get`, and `ReturnHeader::build`,
+    /// which is what the emitter prints from.
+    ///
+    /// ★★★ **Why an accessor and not a convention.** A filer who entered a spouse, entered the
+    ///     spouse's PIN, and then deleted the spouse leaves a `Some` behind with nobody to own it —
+    ///     and `push_header_block` would print it into the *"If the IRS sent your spouse an
+    ///     Identity Protection PIN"* cell of a return that has no spouse. That is a credential
+    ///     asserted on a filed page under a condition the return does not assert. The section's
+    ///     `delete` clears the leaf as well, so nothing is left at rest either; this accessor is
+    ///     what makes the PRINT safe regardless of how the leaf got there.
+    #[must_use]
+    pub fn spouse_ip_pin_if_live(&self) -> Option<&str> {
+        self.spouse.as_ref()?;
+        self.spouse_ip_pin.as_deref()
+    }
+
+    /// ★★★ **T10 / §5.4 — THE ONE READER OF THE FOREIGN-ADDRESS LIVENESS RULE:** *"live iff
+    /// `foreign_country` is non-empty"*.
+    ///
+    /// The seam's province and postal-code fields and `ReturnHeader::build` both ask this rather
+    /// than each testing the country themselves, so a province can never be shown by one surface
+    /// and hidden by another — and can never be printed under a blank country.
+    #[must_use]
+    pub fn foreign_address_is_live(&self) -> bool {
+        !self.foreign_country.is_empty()
+    }
+}
+
+/// ★★★ **T10 / §5.4 — the 1040's direct-deposit block, lines 35b, 35c and 35d.**
+///
+/// Transcribed, one field per printed line, in the form's own numbering
+/// (`design/forms/extract/f1040--2024.txt:116-118`):
+///
+/// ```text
+/// Direct deposit?  b  Routing number      c Type:  Checking      Savings
+///                  d  Account number
+/// ```
+///
+/// ★★★ **NOT `#[serde(default)]` on any field** (§4.3): a block missing its routing number is not a
+///     lawful state of a direct-deposit instruction, it is a mistyped row — the same rule
+///     `Form1098.box1_interest` and `NonForm1098Interest.amount` are held to. The whole block is
+///     optional; no *part* of it is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirectDeposit {
+    /// **Line 35b — *"Routing number"*.** Nine digits, checked by
+    /// [`crate::tax::packet::RoutingNumber::canonical`] against the instruction's own rule:
+    ///
+    /// > *"The routing number must be nine digits. The first two digits must be 01 through 12 or 21
+    /// > through 32."* (`design/forms/extract/i1040gi--2025.txt:23967-23969`.)
+    pub routing: String,
+    /// **Line 35c — *"Type: Checking / Savings"*.**
+    ///
+    /// > *"Check the appropriate box for the type of account. Don't check more than one box. … You
+    /// > must check the correct box to ensure your deposit is accepted."*
+    /// > (`design/forms/extract/i1040gi--2025.txt:23988-23994`.)
+    ///
+    /// ★ An enum, so *"Don't check more than one box"* is unrepresentable rather than screened, and
+    ///   with **no `Default` and no `#[serde(default)]`**: there is no safe guess between a checking
+    ///   and a savings account, and the instruction says an incorrect box gets the deposit rejected.
+    pub kind: DepositAccountKind,
+    /// **Line 35d — *"Account number"*.**
+    ///
+    /// > *"The account number can be up to 17 characters (both numbers and letters). Include hyphens
+    /// > but omit spaces and special symbols. Enter the number from left to right and leave any
+    /// > unused boxes blank."* (`design/forms/extract/i1040gi--2025.txt:24054-24059`.)
+    ///
+    /// Checked by [`crate::tax::packet::AccountNumber::canonical`], which is that sentence and
+    /// nothing more.
+    pub account: String,
+}
+
+/// **1040 line 35c — the account type.** *"Check the appropriate box for the type of account. Don't
+/// check more than one box."* (`design/forms/extract/i1040gi--2025.txt:23988-23990`.)
+///
+/// ★ No `Default` and no `#[serde(other)]`: an unknown string must fail the parse rather than
+///   silently become an answer, exactly as [`HohMaritalBasis`] and [`ParentAliveAnswer`] record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DepositAccountKind {
+    /// The *"Checking"* box (`f1040--2024.txt:116`).
+    Checking,
+    /// The *"Savings"* box (`f1040--2024.txt:116`).
+    Savings,
 }
 
 /// Form 8615 condition 4's answer — **three-valued**.

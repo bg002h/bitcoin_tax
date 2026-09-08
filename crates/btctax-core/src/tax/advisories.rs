@@ -209,12 +209,18 @@ pub enum Advisory {
     UnmodeledDeductionsOmitted,
     /// ★★★ **R2.2 — the NO-DOLLAR side: return OPTIONS btctax never offers.**
     ///
-    /// A third of the Form 1040's unmodelled cells carry no dollar at all — a fiscal year, a foreign
-    /// address, the §6013(g)/(h) nonresident-alien-spouse election, the third-party designee block,
-    /// applying an overpayment to next year, the spouse's Identity Protection PIN, a phone number,
-    /// an email address. None of them can over- or understate the tax, so no existing advisory
-    /// covers them and none should refuse — but R2.2's rule is *announced OR refused, never
-    /// silent*, and before this they were silent.
+    /// A third of the Form 1040's unmodelled cells carry no dollar at all — a fiscal year, the
+    /// §6013(g)/(h) nonresident-alien-spouse election, the third-party designee block, applying an
+    /// overpayment to next year, splitting a refund across accounts (Form 8888), an email address.
+    /// None of them can over- or understate the tax, so no existing advisory covers them and none
+    /// should refuse — but R2.2's rule is *announced OR refused, never silent*, and before this they
+    /// were silent.
+    ///
+    /// ★★★ **T10 shortened this list from eight cells to six**: the FOREIGN ADDRESS, the SPOUSE'S
+    ///     IDENTITY PROTECTION PIN and the PHONE NUMBER are now collected and printed, so naming
+    ///     them here would tell a filer who supplied them that btctax never asked. Their census
+    ///     entries moved from `unmodeled` to mapped in the same change, which is what keeps this
+    ///     text and the map's own `covered_by` join saying the same thing.
     ///
     /// **Unconditional on a computed full return**, like its two siblings above: these are things
     /// btctax does not OFFER, so there is no input that could make the notice conditional.
@@ -578,14 +584,14 @@ impl Advisory {
             //     tool. An NRA-spouse GATE is FR-67 (owning task T8); the false clause did not wait
             //     for it.
             Advisory::UnmodeledReturnOptionsOmitted =>
-                "RETURN OPTIONS NOT OFFERED — v1 fills a calendar-year Form 1040 for a filer with a \
-                 domestic address, and it offers none of the following: a FISCAL YEAR (the \
-                 \"For the year Jan. 1–Dec. 31\" line stays as printed), a FOREIGN ADDRESS \
-                 (country, province, postal code), a THIRD-PARTY DESIGNEE (the \
+                "RETURN OPTIONS NOT OFFERED — v1 fills a calendar-year Form 1040, and it offers \
+                 none of the following: a FISCAL YEAR (the \
+                 \"For the year Jan. 1–Dec. 31\" line stays as printed), a THIRD-PARTY DESIGNEE (the \
                  \"Do you want to allow another person to discuss this return with the IRS?\" \
-                 block), applying an overpayment to NEXT YEAR'S ESTIMATED TAX (line 36), your \
-                 SPOUSE'S IDENTITY PROTECTION PIN, and your phone number or email address. None of \
-                 THOSE SEVEN changes your tax; each is a choice the printed return leaves blank \
+                 block), applying an overpayment to NEXT YEAR'S ESTIMATED TAX (line 36), SPLITTING \
+                 your refund across accounts (Form 8888, the line 35a box), and your email \
+                 address. None of THOSE FIVE changes your tax; each is a choice the printed return \
+                 leaves blank \
                  because btctax never asked, and if you want any of them, mark the form by hand \
                  before signing. ONE FURTHER CELL IS LEFT BLANK AND IT IS NOT ADMINISTRATIVE: the \
                  §6013(g)/(h) election to treat a NONRESIDENT-ALIEN SPOUSE as a U.S. resident, on \
@@ -599,9 +605,12 @@ impl Advisory {
                  under penalties of perjury. If it applies to you, this is a preparer's return."
                     .to_string(),
             Advisory::RefundByPaperCheck { refund } => format!(
-                "REFUND BY PAPER CHECK — your return is due a refund of {}, but v1 never fills the \
-                 direct-deposit block (1040 lines 35b–35d). As filed, the IRS will mail a check. Add your \
-                 routing and account numbers by hand if you want it deposited.",
+                "REFUND BY PAPER CHECK — your return is due a refund of {}, and no direct-deposit \
+                 instruction was given, so the 1040's lines 35b–35d are blank. As filed, the IRS \
+                 will mail a check. If you would rather have it deposited, add your routing and \
+                 account numbers in the tax-inputs editor (`btctax tui-edit`, then T on the year) \
+                 or through `btctax income import`, and re-export — or write them on the printed \
+                 form by hand.",
                 fmt_usd(*refund)
             ),
             // ★ §3.4 (r5 M-1): the text branches on the deduction actually taken. The itemized filer filed a
@@ -1340,8 +1349,18 @@ pub fn advisories(
     //    there is no input that could make "we never asked" conditional.
     out.push(Advisory::UnmodeledReturnOptionsOmitted);
 
-    // [★ P5-I2] SPEC §9.2 — no direct-deposit block is ever filled. Only actionable on a refund.
-    if refund > Usd::ZERO {
+    // ★★★ **T10 / §5.4 — CONDITIONAL ON BOTH HALVES NOW: a refund IS due, and no deposit
+    //     instruction was given.**
+    //
+    //     It used to fire on every refund unconditionally, because v1 never filled lines 35b-35d.
+    //     btctax collects them now, so an unconditional notice would tell a filer who HAS given
+    //     routing and account numbers that the IRS will mail them a check — false, and the kind of
+    //     false that sends someone to write numbers on a form that already carries them.
+    //
+    // ★★ **The absence of a block is read as *no instruction given*, never as *"I want a check"***
+    //    (owner question Q4 is open). That is exactly what the notice says out loud, which is what
+    //    makes silence a lawful state rather than an answer btctax supplied.
+    if refund > Usd::ZERO && ri.header.direct_deposit.is_none() {
         out.push(Advisory::RefundByPaperCheck { refund });
     }
 
@@ -2011,9 +2030,9 @@ mod tests {
     /// ★★★ **THE §6013(g)/(h) ELECTION IS NOT ADMINISTRATIVE, AND THE ADVISORY MUST NOT SAY IT IS**
     ///     (T3 seam review, I5).
     ///
-    /// The advisory names eight cells the printed return leaves blank. Seven are administrative and
-    /// the honest advice for them is *"none of these changes your tax — mark it by hand"*. The
-    /// eighth is the election that makes a joint return available to a filer married to a
+    /// The advisory names the cells the printed return leaves blank. All but one are administrative
+    /// and the honest advice for them is *"none of these changes your tax — mark it by hand"*. The
+    /// last is the election that makes a joint return available to a filer married to a
     /// nonresident alien **and subjects that spouse's worldwide income to U.S. tax**; btctax asks
     /// nothing about an NRA spouse and computes nothing for one. Telling that filer their tax is
     /// unaffected and instructing them to check the box by hand is an invitation to sign an
@@ -2021,6 +2040,14 @@ mod tests {
     /// its own clause.
     ///
     /// ★ This is the kill for that split: restoring the old blanket sentence reds here.
+    ///
+    /// ★★★ **T10 took the administrative list from SEVEN to FIVE, and the count word moved with
+    ///     it.** The foreign address, the spouse's Identity Protection PIN and the phone number are
+    ///     collected and printed now, so naming them would tell a filer who supplied them that
+    ///     btctax never asked; Form 8888's split-refund box joined the list in their place, because
+    ///     its census entry used to point at `RefundByPaperCheck` and that advisory is conditional
+    ///     since T10. `the_advisory_does_not_name_a_cell_t10_now_fills` below is what holds the
+    ///     list to what the map actually leaves blank — this assertion only holds the SCOPING.
     #[test]
     fn the_return_options_advisory_scopes_its_reassurance_and_warns_off_the_nra_election() {
         let msg = Advisory::UnmodeledReturnOptionsOmitted.message();
@@ -2032,8 +2059,8 @@ mod tests {
              {msg}"
         );
         assert!(
-            msg.contains("None of THOSE SEVEN changes your tax"),
-            "the reassurance must be scoped to the seven administrative cells: {msg}"
+            msg.contains("None of THOSE FIVE changes your tax"),
+            "the reassurance must be scoped to the administrative cells (five since T10): {msg}"
         );
 
         // …and the election is named, with what it actually does and what not to do.
@@ -2055,14 +2082,16 @@ mod tests {
             "…and name the exit, or the warning is a brick: {msg}"
         );
 
-        // The seven that ARE administrative are still all named — the split must not drop a cell.
+        // The administrative cells are still all named — the split must not drop one. ★ T10 took
+        // three of them OFF this list (the foreign address, the spouse's IP PIN and the phone) by
+        // COLLECTING them, and put Form 8888's split-refund box on it; the membership half is owned
+        // by `the_advisory_does_not_name_a_cell_t10_now_fills`, which asserts both directions.
         for cell in [
             "FISCAL YEAR",
-            "FOREIGN ADDRESS",
             "THIRD-PARTY DESIGNEE",
             "NEXT YEAR'S ESTIMATED TAX (line 36)",
-            "SPOUSE'S IDENTITY PROTECTION PIN",
-            "phone number or email address",
+            "SPLITTING your refund across accounts (Form 8888, the line 35a box)",
+            "email address",
         ] {
             assert!(
                 msg.contains(cell),
@@ -2926,6 +2955,134 @@ mod tests {
         );
         // The old $60,000 ceiling is the mutation: it would NOT have fired here.
         assert!(dec!(63000) > dec!(60000) && dec!(63000) < EIC_ADVISORY_AGI_CEILING);
+    }
+
+    /// ★★★ **T10 / §5.4 — `RefundByPaperCheck` IS SILENT EXACTLY WHEN A DEPOSIT IS GIVEN.**
+    ///
+    /// **Both directions, on ONE return that differs only in the deposit block**, so the difference
+    /// cannot be attributed to anything else. Before T10 the advisory was unconditional on a refund
+    /// (v1 never filled lines 35b-35d), and firing it now for a filer who HAS supplied routing and
+    /// account numbers would tell them the IRS will mail a cheque — false, and the kind of false
+    /// that sends someone to write numbers on a form that already carries them.
+    ///
+    /// ★★★ **The three-cell truth table is what makes this a kill rather than a spot check.**
+    ///     Dropping the `direct_deposit.is_none()` conjunct reds row 3; dropping the
+    ///     `refund > 0` conjunct reds row 1. Neither half can be removed without a red.
+    ///
+    /// ★ **Owner question Q4 stays OPEN and this test does not settle it.** Absence is asserted to
+    ///   mean *no instruction given* — the advisory says so out loud — never *"the filer wants a
+    ///   paper check"*. Both answers are expressible; btctax picks neither.
+    #[test]
+    fn the_paper_check_advisory_is_silent_exactly_when_a_deposit_is_given() {
+        use crate::tax::return_inputs::{DepositAccountKind, DirectDeposit};
+        let fires = |refund: Usd, deposit: Option<DirectDeposit>| -> bool {
+            let mut ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                ..Default::default()
+            };
+            ri.header.taxpayer.date_of_birth = Some(time::macros::date!(1980 - 01 - 01));
+            ri.header.direct_deposit = deposit;
+            advisories(
+                &ri,
+                &LedgerState::default(),
+                dec!(150000),
+                dec!(150000),
+                refund,
+                &params(),
+                2024,
+                false,
+            )
+            .iter()
+            .any(|a| matches!(a, Advisory::RefundByPaperCheck { .. }))
+        };
+        let block = || {
+            Some(DirectDeposit {
+                routing: "123456780".into(),
+                kind: DepositAccountKind::Checking,
+                account: "ACCT-1".into(),
+            })
+        };
+
+        // 1. A refund, no deposit block → the notice fires. (The pre-T10 behaviour, preserved.)
+        assert!(
+            fires(dec!(1234.56), None),
+            "a refund with no deposit instruction must still be announced"
+        );
+        // 2. No refund, no deposit block → silent: there is nothing to deposit or to mail.
+        assert!(!fires(Usd::ZERO, None));
+        // 3. A refund AND a deposit block → SILENT. This is the whole of T10's change here.
+        assert!(
+            !fires(dec!(1234.56), block()),
+            "a filer who gave routing and account numbers must NOT be told the IRS will mail a check"
+        );
+        // 4. No refund, a deposit block → silent, from either conjunct.
+        assert!(!fires(Usd::ZERO, block()));
+
+        // ★ And the wording matches the new condition: it reports that no instruction was given,
+        //   rather than that btctax cannot take one.
+        let m = Advisory::RefundByPaperCheck { refund: dec!(10) }.message();
+        assert!(
+            m.contains("no direct-deposit instruction was given"),
+            "the notice must describe THIS return's silence, not the product's old limitation: {m}"
+        );
+        // ★★★ **THE EXIT MUST BE A SURFACE THAT CAN ACTUALLY TAKE THE ANSWER.** The direct-deposit
+        //     block is class (B) and is NOT in any registry (R14), so `btctax income answer` — which
+        //     walks `FORM_QUESTIONS`, `SKIPPABLE_QUESTIONS` and `DEPENDENT_GATES` and nothing else —
+        //     cannot ask for it. Naming it here would send the filer to a command that never
+        //     mentions the block: a brick, and the exact class this repo's advisories are held to
+        //     ("it must name the action that actually works").
+        assert!(
+            !m.contains("income answer"),
+            "`income answer` cannot ask for a routing number — it walks the registries only: {m}"
+        );
+        assert!(
+            m.contains("tui-edit") && m.contains("income import"),
+            "the notice must name the two surfaces that CAN take the block: {m}"
+        );
+        assert!(
+            !m.contains("v1 never fills"),
+            "the old unconditional wording claimed btctax cannot fill the block; it can: {m}"
+        );
+    }
+
+    /// ★★★ **T10 — THE RETURN-OPTIONS ADVISORY MUST NOT NAME A CELL btctax NOW FILLS.**
+    ///
+    /// R2.2's rule is *announced OR refused, never silent*, and its converse matters just as much:
+    /// an announcement that names a cell the emitter fills tells a filer who supplied the value that
+    /// btctax never asked for it — and sends them to write it on the form by hand, on top of what is
+    /// already printed there.
+    ///
+    /// ★ This is the kill for the wording half of T10's census retirement: restoring FOREIGN
+    ///   ADDRESS, the SPOUSE'S IP PIN or the phone number to the list reds here, and so does
+    ///   dropping Form 8888 — which JOINED the list because its census entry used to point at
+    ///   `RefundByPaperCheck`, and that advisory is conditional since T10.
+    #[test]
+    fn the_advisory_does_not_name_a_cell_t10_now_fills() {
+        let msg = Advisory::UnmodeledReturnOptionsOmitted.message();
+        for gone in [
+            "FOREIGN ADDRESS",
+            "SPOUSE'S IDENTITY PROTECTION PIN",
+            "phone number",
+        ] {
+            assert!(
+                !msg.contains(gone),
+                "the advisory still names {gone:?}, which T10 collects and the emitter prints: {msg}"
+            );
+        }
+        // …and the cells that ARE still blank stay named, or the announcement has a hole.
+        for kept in [
+            "FISCAL YEAR",
+            "THIRD-PARTY DESIGNEE",
+            "NEXT YEAR'S ESTIMATED TAX",
+            "Form 8888",
+            "email",
+        ] {
+            assert!(
+                msg.contains(kept),
+                "the advisory no longer names {kept:?}, whose 1040 cell is still censused \
+                 `unmodeled` behind it: {msg}"
+            );
+        }
     }
 
     /// ★ **P5-I2** — the two OMISSIONS rows that LIMITATIONS.md promised fire an advisory, and which

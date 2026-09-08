@@ -91,10 +91,28 @@ line34  = "topmostSubform[0].Page2[0].f2_23[0]"   # overpayment
 line35a = "topmostSubform[0].Page2[0].f2_24[0]"   # refunded to you
 line37  = "topmostSubform[0].Page2[0].f2_28[0]"   # AMOUNT YOU OWE
 
-# UNMAPPED ON PURPOSE: the direct-deposit block (35b routing f2_25, 35c/d account f2_26) — v1 never
-# fills it, so a refund arrives as a paper check and the RefundByPaperCheck advisory says so. Line 36
-# (apply to next year) is pinned blank. Lines 27-30 (EIC, additional CTC, AOC) are §3.4 conservative
-# omissions and stay BLANK, never a misleading 0.
+# UNMAPPED ON PURPOSE: line 36 (apply an overpayment to next year) is pinned blank, and the line-35a
+# Form 8888 box (c2_4) stays unmodeled — btctax splits no refund across accounts. Lines 27-30 (EIC,
+# additional CTC, AOC) are §3.4 conservative omissions and stay BLANK, never a misleading 0.
+
+# ── ★★★ T10 / §5.4 — THE DIRECT-DEPOSIT BLOCK, lines 35b-35d ─────────────────────────────────────
+#
+# This block used to be UNMAPPED ON PURPOSE, and its note said so: "v1 never fills it, so a refund
+# arrives as a paper check and the RefundByPaperCheck advisory says so." btctax collects routing and
+# account numbers now, and that advisory fires only when no block is given.
+#
+# ★★ EVERY NAME AND ON-STATE MEASURED, never typed from the printed page: `cargo run -p xtask --
+#    dump-fields crates/btctax-forms/forms/2024/f1040.pdf` reports
+#      f2_25 maxlen=9  (RoutingNo subform)     c2_5[0] on=["1"] at x=377.4
+#      f2_26 maxlen=17 (AccountNo subform)     c2_5[1] on=["2"] at x=435.0
+#    and the printed row reads "b Routing number   c Type: Checking   Savings"
+#    (f1040--2024.txt:116), left to right — so c2_5[0] is Checking and c2_5[1] is Savings. The two
+#    on-states are distinct, which corroborates the mapping independently of the x-order.
+[direct_deposit]
+routing  = "topmostSubform[0].Page2[0].RoutingNo[0].f2_25[0]"
+checking = { field = "topmostSubform[0].Page2[0].c2_5[0]", on = "1" }
+savings  = { field = "topmostSubform[0].Page2[0].c2_5[1]", on = "2" }
+account  = "topmostSubform[0].Page2[0].AccountNo[0].f2_26[0]"
 
 # ── The 5-way filing-status group. Fully-qualified names ONLY — see the collision note above. ──
 [filing_status]
@@ -126,11 +144,26 @@ address_city    = "topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_12[0]"
 address_state   = "topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_13[0]"
 address_zip     = "topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_14[0]"
 mfs_spouse_name = "topmostSubform[0].Page1[0].f1_18[0]"
-# The page-2 signature block: occupations and the taxpayer's IP PIN (a 6-character comb — the spouse's
-# IP PIN cell exists (f2_36) but ReturnInputs does not capture one, so it is left BLANK, never guessed).
+# ★★★ T10 / §5.4 — the header's FOREIGN-ADDRESS row, printed under "If you have a foreign address,
+#     also complete spaces below." (f1040--2024.txt:22). All three were censused `unmodeled` with
+#     the reason "btctax models a domestic filer address"; it does not any more. The province and
+#     the postal code are written only under a non-empty country — the §5.4 liveness rule, carried
+#     to the print boundary by `ReturnHeader::foreign_address` being one Option rather than three
+#     strings.
+foreign_country      = "topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_15[0]"
+foreign_province     = "topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_16[0]"
+foreign_postal_code  = "topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_17[0]"
+# The page-2 signature block: occupations, BOTH Identity Protection PINs (6-character combs) and the
+# filer's phone number.
+#   ★★★ T10 — the SPOUSE's IP PIN (f2_36) is written now. This map's own census entry called the
+#       asymmetry out: the taxpayer's was captured and written and the spouse's was not, so one
+#       member of a joint return was asked and the other was not — and a return omitting an ISSUED
+#       IP PIN is rejected. Nothing is guessed: an absent PIN still writes nothing.
 occupation_taxpayer = "topmostSubform[0].Page2[0].f2_33[0]"
 occupation_spouse   = "topmostSubform[0].Page2[0].f2_35[0]"
 ip_pin              = "topmostSubform[0].Page2[0].f2_34[0]"
+spouse_ip_pin       = "topmostSubform[0].Page2[0].f2_36[0]"
+phone               = "topmostSubform[0].Page2[0].f2_37[0]"
 
 presidential_taxpayer      = { field = "topmostSubform[0].Page1[0].c1_1[0]",  on = "1" }
 presidential_spouse        = { field = "topmostSubform[0].Page1[0].c1_2[0]",  on = "1" }
@@ -179,9 +212,11 @@ odc          = { field = "topmostSubform[0].Page1[0].Table_Dependents[0].Row4[0]
 # `unmodeled` = btctax models no input that could reach the line; `artifact` = not an entry the filer
 # makes; `gap` = the line IS reachable and nothing populates it (a defect).
 #
-# ★ This form is where the census's own module doc points for its motivating example — the comment at
-#   line 122 above, recording in PROSE that the spouse's IP PIN cell "exists (f2_36) but ReturnInputs
-#   does not capture one, so it is left BLANK, never guessed". Censusing it makes that record checkable.
+# ★ This form is where the census's own module doc points for its motivating example: the spouse's IP
+#   PIN cell (f2_36), which this map once recorded in PROSE as "exists but ReturnInputs does not
+#   capture one, so it is left BLANK, never guessed". Censusing it made that record checkable; T10
+#   then CLOSED it — `header.spouse_ip_pin` is collected and f2_36 is mapped in [header] above — which
+#   is the census working end to end, from prose to entry to a filled cell.
 #
 # ★★ DIRECTION — lines 1b through 1h are INCOME. Unlike Schedule 3's credits, a wrongly-blank income
 #    line UNDERSTATES. None of these income streams is modelled at all, so no value could have been
@@ -265,9 +300,9 @@ extract_line = 128
 "topmostSubform[0].Page1[0].f1_03[0]" = { line = "FY end yr", rule = "unmodeled", reason = "The two-digit year of the fiscal-year end (/MaxLen 2) — same.", covered_by = "Advisory::UnmodeledReturnOptionsOmitted", part = "For the year Jan. 1" }
 
 # ── Header: the foreign-address row ──────────────────────────────────────────────────────────────
-"topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_15[0]" = { line = "foreign country",  rule = "unmodeled", reason = "Foreign country name — btctax models a domestic filer address (street/city/state/ZIP are mapped above).", covered_by = "Advisory::UnmodeledReturnOptionsOmitted", part = "Foreign country name" }
-"topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_16[0]" = { line = "foreign province", rule = "unmodeled", reason = "Foreign province/state/county — same.", covered_by = "Advisory::UnmodeledReturnOptionsOmitted", part = "Foreign country name" }
-"topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_17[0]" = { line = "foreign postcode", rule = "unmodeled", reason = "Foreign postal code — same.", covered_by = "Advisory::UnmodeledReturnOptionsOmitted", part = "Foreign country name" }
+# ★★★ T10 — all THREE cells (f1_15 country, f1_16 province, f1_17 postal code) are MAPPED in
+#     [header] above and are no longer censused. They were `unmodeled` with the reason "btctax
+#     models a domestic filer address", which stopped being true when §5.4 collected them.
 
 # ── Filing status: the nonresident-alien-spouse election ─────────────────────────────────────────
 # "If treating a nonresident alien or dual-status alien spouse as a U.S. resident for the entire tax
@@ -311,15 +346,25 @@ extract_line = 128
 "topmostSubform[0].Page2[0].f2_19[0]" = { line = "30", rule = "artifact", reason = "\"Reserved for future use.\" A printed cell that takes no entry from anyone — the second such on the return after Schedule 3 line 6e." }
 
 # ── Page 2, lines 35a-36: how the refund is delivered ────────────────────────────────────────────
-# ★ btctax fills the refund AMOUNT (line 35a, f2_24) and deliberately declares no direct-deposit
-#   cells. Routing and account numbers are high-value financial PII that the return does not need in
-#   order to be correct — a filer who wants direct deposit writes them on the printed form. This is a
-#   positive privacy decision consistent with the vault posture, not an unfinished feature.
-"topmostSubform[0].Page2[0].c2_4[0]"                  = { line = "35a Form 8888", rule = "unmodeled", reason = "\"If Form 8888 is attached, check here\" — btctax splits no refund across accounts and emits no Form 8888.", covered_by = "Advisory::RefundByPaperCheck" }
-"topmostSubform[0].Page2[0].RoutingNo[0].f2_25[0]"    = { line = "35b", rule = "unmodeled", reason = "Direct-deposit routing number (/MaxLen 9) — btctax collects no bank details; the refund amount is printed and the filer supplies deposit instructions themselves.", covered_by = "Advisory::RefundByPaperCheck" }
-"topmostSubform[0].Page2[0].c2_5[0]"                  = { line = "35c checking", rule = "unmodeled", reason = "Account type: Checking — same decision.", covered_by = "Advisory::RefundByPaperCheck" }
-"topmostSubform[0].Page2[0].c2_5[1]"                  = { line = "35c savings",  rule = "unmodeled", reason = "Account type: Savings — same decision.", covered_by = "Advisory::RefundByPaperCheck" }
-"topmostSubform[0].Page2[0].AccountNo[0].f2_26[0]"    = { line = "35d", rule = "unmodeled", reason = "Direct-deposit account number (/MaxLen 17) — same decision.", covered_by = "Advisory::RefundByPaperCheck" }
+# ★★★ T10 REPLACED THE NOTE THAT USED TO STAND HERE, and the replacement is the point of writing
+#     this down. It read: *"btctax fills the refund AMOUNT (line 35a, f2_24) and deliberately
+#     declares no direct-deposit cells. Routing and account numbers are high-value financial PII
+#     that the return does not need in order to be correct — a filer who wants direct deposit writes
+#     them on the printed form. This is a positive privacy decision consistent with the vault
+#     posture, not an unfinished feature."*
+#
+#     The PII sentence is still true and is why the numbers are scrubbed (`scrub_routing` /
+#     `scrub_account`), masked by `income show`, and never carried across a year boundary. What was
+#     never true is that a blank block is what the FILER wants: it is what btctax could not ask for.
+#     §5.4 asks, either answer is expressible, and a stale "positive decision" note is exactly the
+#     shape that sends a later reader defending a gap as a design.
+# ★★★ T10 — 35b, 35c and 35d are MAPPED in [direct_deposit] above. The 35a Form 8888 box is NOT,
+#     and its cover CHANGED with them: it used to point at `RefundByPaperCheck`, which now fires
+#     only when NO deposit block is given — so a filer who DOES give one and wants it split across
+#     accounts would have been covered by a notice they never see. `UnmodeledReturnOptionsOmitted`
+#     is unconditional on a computed full return and names Form 8888 in its own text, which is what
+#     an announcement has to do to be one.
+"topmostSubform[0].Page2[0].c2_4[0]"                  = { line = "35a Form 8888", rule = "unmodeled", reason = "\"If Form 8888 is attached, check here\" — btctax splits no refund across accounts and emits no Form 8888. ★ T10: lines 35b-35d ARE filled now, so this box is the only unmodelled cell left in the refund block, and it is a return OPTION btctax does not offer rather than a consequence of collecting no bank details.", covered_by = "Advisory::UnmodeledReturnOptionsOmitted" }
 "topmostSubform[0].Page2[0].f2_27[0]"                 = { line = "36", rule = "unmodeled", reason = "Amount of the overpayment applied to next year's estimated tax — btctax offers no such election; the whole overpayment is shown as refundable on line 35a.", covered_by = "Advisory::UnmodeledReturnOptionsOmitted" }
 
 # ── Page 2, line 38: the estimated-tax penalty ───────────────────────────────────────────────────
@@ -337,18 +382,13 @@ extract_line = 128
 "topmostSubform[0].Page2[0].f2_32[0]" = { line = "designee PIN",   rule = "unmodeled", reason = "Designee's personal identification number (/MaxLen 5) — same.", covered_by = "Advisory::UnmodeledReturnOptionsOmitted", part = "Third Party" }
 
 # ── Page 2: the Sign Here block ──────────────────────────────────────────────────────────────────
-# ★★ THE SPOUSE'S IP PIN — the census's own motivating example, now enforceable. The map (line 122)
-#    already recorded in prose that this cell "exists (f2_36) but ReturnInputs does not capture one,
-#    so it is left BLANK, never guessed". That is a correct decision and it stays.
-#
-#    ★ But the asymmetry is worth naming: the TAXPAYER's IP PIN *is* captured and written (f2_34).
-#      One member of a joint return is asked and the other is not. If the IRS issued the spouse an
-#      Identity Protection PIN, a return omitting it is REJECTED — no tax figure changes, but the
-#      filing fails. Closing it is one optional field on ReturnInputs. Recorded `unmodeled` because no
-#      input exists to write (which is the criterion), not because the gap is uninteresting.
-"topmostSubform[0].Page2[0].f2_36[0]" = { line = "spouse IP PIN", rule = "unmodeled", reason = "Spouse's Identity Protection PIN (/MaxLen 6) — ReturnInputs captures the taxpayer's (f2_34, mapped) but not the spouse's, so there is nothing to write and it is never guessed. ★ Asymmetric with the taxpayer's; a return omitting an issued spouse IP PIN is rejected.", covered_by = "Advisory::UnmodeledReturnOptionsOmitted", part = "Sign" }
-"topmostSubform[0].Page2[0].f2_37[0]" = { line = "phone",  rule = "unmodeled", reason = "Filer's phone number — optional contact detail; ReturnInputs collects no phone number.", covered_by = "Advisory::UnmodeledReturnOptionsOmitted", part = "Sign" }
-"topmostSubform[0].Page2[0].f2_38[0]" = { line = "email",  rule = "unmodeled", reason = "Filer's email address — same; and collecting one would add PII the return does not need.", covered_by = "Advisory::UnmodeledReturnOptionsOmitted", part = "Sign" }
+# ★★★ THE SPOUSE'S IP PIN was this census's own motivating example, and T10 CLOSED IT. The entry
+#     here used to say "ReturnInputs captures the taxpayer's (f2_34, mapped) but not the spouse's,
+#     so there is nothing to write" — a correct record of a real asymmetry: one member of a joint
+#     return was asked and the other was not, and a return omitting an ISSUED IP PIN is rejected.
+#     `header.spouse_ip_pin` exists now, and f2_36 is mapped in [header] above. The FILER'S PHONE
+#     (f2_37) went the same way in the same task. What remains here is the email address.
+"topmostSubform[0].Page2[0].f2_38[0]" = { line = "email",  rule = "unmodeled", reason = "Filer's email address — an optional contact detail the return does not need; collecting one would add PII with no reader. ★ T10 collected the phone number beside it (f2_37, mapped) because the IRS asks for a voice contact on the signature line; the email cell is the one that stays blank.", covered_by = "Advisory::UnmodeledReturnOptionsOmitted", part = "Sign" }
 
 # ── Page 2: Paid Preparer Use Only ───────────────────────────────────────────────────────────────
 # ★★ `artifact` in the strict sense — NOT AN ENTRY THE FILER MAKES. This block is completed and signed

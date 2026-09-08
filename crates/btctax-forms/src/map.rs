@@ -789,6 +789,22 @@ pub struct Form1040HeaderCells {
     /// The taxpayer's Identity Protection PIN cell (page 2, a 6-character comb). A paper return that
     /// omits an ISSUED IP PIN is rejected or delayed (ARCH-P6.3a Q7 item 5).
     pub ip_pin: String,
+    /// ★★★ **T10 — the SPOUSE's Identity Protection PIN cell** (page 2, `f2_36`, also a 6-character
+    /// comb): *"If the IRS sent your spouse an Identity Protection PIN, enter it here (see inst.)"*
+    /// (`f1040--2024.txt:133-135`). Censused `unmodeled` until T10 with the reason *"ReturnInputs
+    /// captures the taxpayer's … but not the spouse's"* — which is no longer true.
+    pub spouse_ip_pin: String,
+    /// ★★★ **T10 — the Sign Here block's *"Phone no."*** (page 2, `f2_37`,
+    /// `f1040--2024.txt:137`). Not the DESIGNEE's phone (`f2_31`) and not the preparer's firm
+    /// phone (`f2_42`); the form prints three phone cells and only this one is the filer's.
+    pub phone: String,
+    /// ★★★ **T10 — the header's foreign-address row** (page 1, `f1_15` / `f1_16` / `f1_17`):
+    /// *"Foreign country name | Foreign province/state/county | Foreign postal code"*
+    /// (`f1040--2024.txt:22`), printed under *"If you have a foreign address, also complete spaces
+    /// below."*
+    pub foreign_country: String,
+    pub foreign_province: String,
+    pub foreign_postal_code: String,
     /// The §6096 Presidential Election Campaign boxes.
     pub presidential_taxpayer: CheckChoice,
     pub presidential_spouse: CheckChoice,
@@ -838,6 +854,32 @@ pub struct DependentRowCells {
     pub ctc: CheckChoice,
     /// The Credit-for-Other-Dependents box. Never checked, same reason.
     pub odc: CheckChoice,
+}
+
+/// ★★★ **T10 / §5.4 — the 1040's DIRECT-DEPOSIT block, lines 35b, 35c and 35d.**
+///
+/// A section of its own rather than more [`Form1040HeaderCells`], because it is not identity: it is
+/// page 2's refund block, written from `ReturnHeader::direct_deposit` and printed only when the
+/// filer gave an instruction.
+///
+/// ★★ **Line 35c is TWO cells, not one field with two on-states** — measured, not assumed:
+///    `xtask dump-fields` reports `c2_5[0]` (on `1`) and `c2_5[1]` (on `2`) as separate widgets at
+///    (377.4, 457.0) and (435.0, 457.0). The instruction is *"Don't check more than one box"*, and
+///    an enum upstream is what makes writing both unrepresentable here.
+///
+/// ★ **Line 35a's Form 8888 box (`c2_4`) is NOT here and stays censused `unmodeled`** (§2.2): btctax
+///   splits no refund across accounts and emits no Form 8888.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DirectDepositCells {
+    /// **Line 35b** — *"Routing number"*. `/MaxLen 9`, so it takes the nine bare digits.
+    pub routing: String,
+    /// **Line 35c** — the *"Checking"* box (on-state `1`).
+    pub checking: CheckChoice,
+    /// **Line 35c** — the *"Savings"* box (on-state `2`).
+    pub savings: CheckChoice,
+    /// **Line 35d** — *"Account number"*. `/MaxLen 17`, which is the instruction's own limit.
+    pub account: String,
 }
 
 /// ★★★ **T8 / R6 — the TY2025+ DEPENDENTS GRID.**
@@ -1081,6 +1123,11 @@ pub struct Form1040Map {
     /// The 5-way filing-status checkbox group.
     #[serde(default)]
     pub filing_status: Option<FilingStatusBoxes>,
+    /// ★★★ **T10 / §5.4 — lines 35b–35d.** `None` on a map whose year has no verified names for the
+    /// block, in which case nothing is written and the cells stay on the field census's
+    /// `UNCENSUSED` register — the same discipline `dependents_grid` follows.
+    #[serde(default)]
+    pub direct_deposit: Option<DirectDepositCells>,
 }
 
 /// The 1040's **5-way filing-status checkbox group**.

@@ -344,6 +344,21 @@ fn mask_pii(ri: &ReturnInputs) -> ReturnInputs {
     if m.header.ip_pin.is_some() {
         m.header.ip_pin = Some("***".to_string());
     }
+    // ★★★ **T10 — THE SPOUSE'S IP PIN IS REDACTED ON EXACTLY THE SAME TERMS.** One member of a joint
+    //     return had their credential masked here and the other did not exist; now both are asked
+    //     and both are masked. Presence survives (a `Some("***")`), because *whether a PIN was
+    //     entered* is a fact the filer needs to see in `income show`; the digits do not.
+    if m.header.spouse_ip_pin.is_some() {
+        m.header.spouse_ip_pin = Some("***".to_string());
+    }
+    // ★★★ **T10 — AND THE BANK NUMBERS.** A routing/account pair is the most directly actionable
+    //     identifier the return carries, and `income show` writes to stdout, a scrollback and any
+    //     pipe it is given. The ACCOUNT TYPE is left alone: which box is checked says nothing about
+    //     who the filer is, and hiding it would make the display disagree with the printed form.
+    if let Some(dd) = m.header.direct_deposit.as_mut() {
+        dd.routing = "***".to_string();
+        dd.account = "***".to_string();
+    }
     m
 }
 
@@ -1554,6 +1569,146 @@ mod tests {
         assert_eq!(masked.header.ip_pin.as_deref(), Some("***"));
         assert_eq!(ri.header.taxpayer.ssn, "123-45-6789"); // original untouched
         assert_eq!(ri.header.spouse.as_ref().unwrap().ssn, "987-65-4321"); // original untouched
+    }
+
+    /// ★★★ **T10 — `income show` REDACTS THE SPOUSE'S IP PIN AND THE BANK NUMBERS.**
+    ///
+    /// The taxpayer's PIN was already masked here; T10 added a second credential and a routing /
+    /// account pair, and this command writes to stdout, a scrollback and any pipe it is handed.
+    ///
+    /// ★ Total over the leaves rather than a spot check: PRESENCE survives on all three (the filer
+    ///   needs to see that a value is on file), the digits do not, and the ACCOUNT TYPE is
+    ///   deliberately untouched — which box is checked identifies nobody, and hiding it would make
+    ///   the display disagree with the printed form.
+    #[test]
+    fn income_show_redacts_the_spouse_ip_pin_and_the_bank_numbers() {
+        use btctax_core::tax::return_inputs::{DepositAccountKind, DirectDeposit};
+        let mut ri = ReturnInputs::default();
+        ri.header.spouse_ip_pin = Some("654321".into());
+        ri.header.direct_deposit = Some(DirectDeposit {
+            routing: "123456780".into(),
+            kind: DepositAccountKind::Savings,
+            account: "ACCT-000123".into(),
+        });
+        let masked = mask_pii(&ri);
+        assert_eq!(masked.header.spouse_ip_pin.as_deref(), Some("***"));
+        let dd = masked
+            .header
+            .direct_deposit
+            .as_ref()
+            .expect("still present");
+        assert_eq!(dd.routing, "***");
+        assert_eq!(dd.account, "***");
+        assert_eq!(
+            dd.kind,
+            DepositAccountKind::Savings,
+            "the account TYPE is not identifying and must survive, or the display disagrees with \
+             the printed 35c box"
+        );
+        // The stored value is never mutated.
+        assert_eq!(
+            ri.header.direct_deposit.as_ref().unwrap().routing,
+            "123456780"
+        );
+        assert_eq!(ri.header.spouse_ip_pin.as_deref(), Some("654321"));
+
+        // ★ And nothing anywhere in the rendered display carries a digit of either credential.
+        let rendered = format!("{masked:?}");
+        for leaked in ["654321", "123456780", "ACCT-000123"] {
+            assert!(
+                !rendered.contains(leaked),
+                "{leaked} reached the display copy: {rendered}"
+            );
+        }
+    }
+
+    /// ★★★ **T10 / §4.3 — THE TRAILER'S TOML WIRE: every new key parses, and a misspelt one is
+    ///     REFUSED by name.**
+    ///
+    /// The `#[serde(default)]` discipline, asserted rather than described: the six header leaves are
+    /// optional (their absence is a lawful state — most filers have a domestic address, no spouse
+    /// PIN and no deposit instruction), and none of `DirectDeposit`'s three fields is, because a
+    /// block missing its routing number is a mistyped row rather than a state.
+    ///
+    /// ★ The unknown-key half is the load-bearing one on a TRANSCRIPTION surface: a filer who types
+    ///   `routing_number` instead of `routing` must be told, not silently given a return with no
+    ///   deposit block and a `RefundByPaperCheck` notice they cannot explain.
+    #[test]
+    fn the_trailer_round_trips_through_the_toml_wire_and_a_misspelt_key_is_named() {
+        use btctax_core::tax::return_inputs::DepositAccountKind;
+        let text = r#"
+            filing_status = "Single"
+
+            [header]
+            phone = "555-0100"
+            foreign_country = "Elbonia"
+            foreign_province = "Mud Province"
+            foreign_postal_code = "XY1 2AB"
+            spouse_ip_pin = "654321"
+
+            [header.direct_deposit]
+            routing = "123456780"
+            kind = "Savings"
+            account = "ACCT-000123"
+        "#;
+        let ri = parse_return_inputs_toml(text).expect("the trailer's keys are the struct's");
+        assert_eq!(ri.header.phone, "555-0100");
+        assert_eq!(ri.header.foreign_country, "Elbonia");
+        assert_eq!(ri.header.foreign_province, "Mud Province");
+        assert_eq!(ri.header.foreign_postal_code, "XY1 2AB");
+        assert_eq!(ri.header.spouse_ip_pin.as_deref(), Some("654321"));
+        let dd = ri.header.direct_deposit.as_ref().expect("the block parsed");
+        assert_eq!(dd.routing, "123456780");
+        assert_eq!(dd.kind, DepositAccountKind::Savings);
+        assert_eq!(dd.account, "ACCT-000123");
+
+        // ★ A TOML with NO trailer at all is lawful — every one of the six is `#[serde(default)]`,
+        //   because absence is a state (no foreign address, no spouse PIN, no deposit instruction).
+        let bare = parse_return_inputs_toml("filing_status = \"Single\"\n").expect("a bare return");
+        assert_eq!(bare.header.phone, "");
+        assert_eq!(bare.header.spouse_ip_pin, None);
+        assert_eq!(bare.header.direct_deposit, None);
+
+        // ★★ But no PART of the block is optional (§4.3): a deposit table without its routing
+        //    number is a mistyped row, and serde refuses it rather than defaulting to "".
+        let half = parse_return_inputs_toml(
+            "filing_status = \"Single\"\n[header.direct_deposit]\nkind = \"Checking\"\naccount = \"A1\"\n",
+        );
+        assert!(
+            half.is_err(),
+            "a direct-deposit block with no routing number must not parse — it is a mistyped row, \
+             not a lawful state"
+        );
+
+        // ★★★ And a misspelt key is NAMED, never silently dropped. TWO refusals, because the two
+        //     halves of §4.3's discipline produce different ones and both must be loud:
+        //
+        //   1. A misspelt key on a `#[serde(default)]` leaf parses cleanly and would VANISH; it is
+        //      `serde_ignored` that catches it, and the message carries the exact path.
+        let optional_typo =
+            parse_return_inputs_toml("filing_status = \"Single\"\n[header]\nphon = \"555-0100\"\n");
+        let err = format!(
+            "{:?}",
+            optional_typo.expect_err("an unknown key must refuse")
+        );
+        assert!(
+            err.contains("header.phon"),
+            "the refusal must name the exact path: {err}"
+        );
+        //   2. A misspelt key on a NON-defaulted leaf is caught one step earlier, by the missing
+        //      field it leaves behind — which is exactly why `DirectDeposit`'s three fields have no
+        //      serde default. The filer is told which key the block needs, not which one they typed.
+        let required_typo = parse_return_inputs_toml(
+            "filing_status = \"Single\"\n[header.direct_deposit]\nrouting_number = \"123456780\"\nkind = \"Checking\"\naccount = \"A1\"\n",
+        );
+        let err = format!(
+            "{:?}",
+            required_typo.expect_err("a mistyped block must refuse")
+        );
+        assert!(
+            err.contains("missing field `routing`") && err.contains("header.direct_deposit"),
+            "the refusal must name the missing key and the table it is missing from: {err}"
+        );
     }
 
     /// Malformed TOML is a typed `Usage` error, never a panic.

@@ -98,6 +98,17 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         //     tri-state, which merely routes the row to Step 4 and is refused there identically.
         R::DependentRefusedByQuestion { question, .. } => vec![decl(*question)],
         R::FilerTinUnanswered => vec![decl(QuestionId::FilerTinIssuedByDueDate)],
+        // ★★★ **T10 / §5.4 — the direct-deposit block anchors on the CELL that failed**, because
+        //     the two are fixed differently: a routing number is re-read off the cheque's bottom
+        //     left, an account number off the middle. The refusal's own exit names the other
+        //     remedy (delete the block), which is a section-level action rather than a `Field`.
+        R::DirectDepositNumberMalformed { cell, .. } => {
+            use btctax_core::tax::return_refuse::DirectDepositCell as C;
+            vec![Anchor::Field(match cell {
+                C::Routing => FieldId::DdRouting,
+                C::Account => FieldId::DdAccount,
+            })]
+        }
         // ★★★ R7 / T8 — HEAD OF HOUSEHOLD and QUALIFYING SURVIVING SPOUSE. Every one anchors on the
         //     control that can change it: the test's own tri-state, or the marital-basis choice.
         //     ★ `HohTestNotMet` / `QssTestNotMet` anchor on the ANSWERED question rather than on the

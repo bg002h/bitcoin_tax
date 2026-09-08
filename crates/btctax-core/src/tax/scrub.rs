@@ -226,6 +226,33 @@ pub(crate) const SCRUB_STATE: &str = "XX";
 pub(crate) const SCRUB_ZIP: &str = "00000";
 /// The stand-in for the HoH / QSS entry space's non-dependent qualifying child (R7).
 pub(crate) const SCRUB_QUALIFYING_CHILD: &str = "Qualifying Child";
+/// ★★★ **T10 — the stand-in for the 1040 line-35b ROUTING NUMBER.**
+///
+/// Digits 1–8 sequential, and the NINTH DERIVED: the ABA check digit forced by the first eight, so
+/// the number canonicalizes `Ok` and the scrubbed copy's `ReturnHeader::build` and `screen_inputs`
+/// behave exactly as the filer's do. Same family as the repo's other documented synthetics
+/// (`123-45-6789`, `12-3456789`) — a sequential pattern nobody could mistake for a bank's.
+pub(crate) const SCRUB_ROUTING: &str = "123456780";
+/// The stand-in for the Sign Here block's *"Phone no."* — the 555 exchange, which the North American
+/// Numbering Plan reserves so no subscriber can hold it.
+pub(crate) const SCRUB_PHONE: &str = "555-0100";
+/// The three stand-ins for the header's foreign-address row. Deliberately not plausible, exactly as
+/// `SCRUB_STREET` (`1 Example St`) and `SCRUB_ZIP` (`00000`) are.
+pub(crate) const SCRUB_FOREIGN_COUNTRY: &str = "Exampleland";
+pub(crate) const SCRUB_FOREIGN_PROVINCE: &str = "Example Province";
+pub(crate) const SCRUB_FOREIGN_POSTAL_CODE: &str = "00000";
+/// ★★★ **T10 — the stand-in for a routing number that FAILS THE ABA CHECK DIGIT**, and the value is
+/// not invented: it is `250250025`, the routing number the IRS PRINTS ON ITS OWN SAMPLE CHECK in the
+/// line-35b instructions (`design/forms/extract/i1040gi--2025.txt:23965`, `:23970-23971`).
+///
+/// ★★ **That number does not satisfy the ABA check digit** — `3(2+2+0) + 7(5+5+2) + (0+0+5) = 101`,
+///    and `101 mod 10 = 1`. Which is exactly right for a worked example: the IRS chose a number no
+///    bank can hold. It is therefore the one routing number in this repo that is *documented* to
+///    fail rule 3, so the scrubbed copy of a mistyped entry refuses on the same rule the filer's did.
+pub(crate) const SCRUB_ROUTING_BAD_CHECK_DIGIT: &str = "250250025";
+/// ★★★ **T10 — the stand-in for the 1040 line-35d ACCOUNT NUMBER.** All zeros, on the same principle
+/// as `SCRUB_ZIP`: a recipient must never mistake a scrubbed value for a real one.
+pub(crate) const SCRUB_ACCOUNT: &str = "0000000000";
 
 /// A synthetic SSN that the SSA can never have issued (middle group `00`), distinct per `n`.
 fn synthetic_ssn(n: usize) -> String {
@@ -417,6 +444,47 @@ fn scrub_ip_pin(real: &str) -> Option<String> {
     }
 }
 
+/// ★★★ **T10 — the ROUTING-NUMBER leg of [`class_preserving_stand_in`]**, with one stand-in per
+/// error variant so every rule the filer's copy trips, the recipient's copy trips identically.
+///
+/// ★ Unlike the IP PIN, a valid routing number IS replaced rather than dropped. Dropping it would
+///   drop the whole deposit block, and the block's PRESENCE is read: `Advisory::RefundByPaperCheck`
+///   fires exactly when a return due a refund carries none, so a dropped block would make the
+///   scrubbed copy advise where the filer's does not — the §3.3 direction this module forbids.
+fn scrub_routing(real: &str) -> String {
+    use crate::tax::packet::{BankNumberError as E, RoutingNumber};
+    match RoutingNumber::canonical(real) {
+        Ok(_) => SCRUB_ROUTING.to_string(),
+        // `absent → absent`: nothing was given, and inventing one would file where the filer's refused.
+        Err(E::Missing) => String::new(),
+        // A character of the filer's real entry. Coarsen it; keep the variant.
+        Err(E::BadCharacter(_)) => "x".to_string(),
+        // A digit COUNT is a shape, not content — and `n` is never 9 here (that is the `Ok`
+        // arm or one of the two rules below), so the stand-in cannot canonicalize.
+        Err(E::WrongLength(n)) => "1".repeat(n),
+        // The two digits the instruction's own sentence rejects, kept EXACTLY: the refusal names
+        // them, so a stand-in that changed them would refuse with a different message.
+        Err(E::BadPrefix(p)) => format!("{p:02}0000000"),
+        Err(E::BadCheckDigit) => SCRUB_ROUTING_BAD_CHECK_DIGIT.to_string(),
+    }
+}
+
+/// ★★★ **T10 — the ACCOUNT-NUMBER leg**, on the same terms.
+fn scrub_account(real: &str) -> String {
+    use crate::tax::packet::{AccountNumber, BankNumberError as E};
+    match AccountNumber::canonical(real) {
+        Ok(_) => SCRUB_ACCOUNT.to_string(),
+        Err(E::Missing) => String::new(),
+        // `*` is neither alphanumeric nor a hyphen, so it trips the same rule.
+        Err(E::BadCharacter(_)) => "*".to_string(),
+        // `n` is > 17 here by construction, so the stand-in is over-long exactly as the original is.
+        Err(E::WrongLength(n)) => "0".repeat(n),
+        // Neither rule can fire on an account number — the cell has no prefix and no check digit —
+        // but the match is exhaustive so a new rule on either number reds HERE before it ships.
+        Err(E::BadPrefix(_) | E::BadCheckDigit) => SCRUB_ACCOUNT.to_string(),
+    }
+}
+
 fn scrub_person(p: &Person, who: &str, n: usize) -> Person {
     // ★ No `..` — a new `Person` field must be classified here before this compiles.
     let Person {
@@ -592,6 +660,12 @@ fn scrub_header(h: &HouseholdHeader) -> HouseholdHeader {
         qss_child_lived_in_your_home_all_year,
         qss_paid_over_half_cost_of_keeping_up_home,
         qss_could_have_filed_jointly_in_year_of_death,
+        spouse_ip_pin,
+        phone,
+        foreign_country,
+        foreign_province,
+        foreign_postal_code,
+        direct_deposit,
     } = h;
     HouseholdHeader {
         taxpayer: scrub_person(taxpayer, "Taxpayer", 1),
@@ -683,6 +757,52 @@ fn scrub_header(h: &HouseholdHeader) -> HouseholdHeader {
         qss_paid_over_half_cost_of_keeping_up_home: *qss_paid_over_half_cost_of_keeping_up_home,
         qss_could_have_filed_jointly_in_year_of_death:
             *qss_could_have_filed_jointly_in_year_of_death,
+        // ★★★ **T10 — THE SPOUSE'S IP PIN GOES THROUGH THE SAME CARVE-OUT AS THE TAXPAYER'S**, and
+        //     through the same function, not a copy of it: valid → DROPPED (never a fabricated
+        //     credential), present-but-empty → `Some("")` (which still errs `Missing` at the packet
+        //     boundary), malformed → a malformed non-credential stand-in.
+        spouse_ip_pin: spouse_ip_pin.as_deref().and_then(scrub_ip_pin),
+        // ★★ A PHONE NUMBER is directly identifying — more so than the address, since it reaches a
+        //    person rather than a building. Replaced, emptiness preserved: nothing reads it, so only
+        //    the blank/non-blank shape has to survive.
+        phone: replace_preserving_emptiness(phone, SCRUB_PHONE.into()),
+        // ★★ The FOREIGN ADDRESS, replaced line by line exactly as the domestic one above is — and
+        //    for the extra reason that a foreign address is far more identifying than a domestic
+        //    one (there are few US filers in any one foreign town). Emptiness is preserved because
+        //    the COUNTRY's emptiness is the §5.4 liveness rule for the other two, and the packet
+        //    boundary reads it: a scrubbed copy must print a foreign block exactly when the filer's
+        //    does.
+        foreign_country: replace_preserving_emptiness(
+            foreign_country,
+            SCRUB_FOREIGN_COUNTRY.into(),
+        ),
+        foreign_province: replace_preserving_emptiness(
+            foreign_province,
+            SCRUB_FOREIGN_PROVINCE.into(),
+        ),
+        foreign_postal_code: replace_preserving_emptiness(
+            foreign_postal_code,
+            SCRUB_FOREIGN_POSTAL_CODE.into(),
+        ),
+        // ★★★ **T10 — THE DIRECT-DEPOSIT BLOCK: the most directly actionable pair on the return.**
+        //
+        //     PRESENCE is preserved (`Advisory::RefundByPaperCheck` reads it, and §3.3 forbids a
+        //     scrubbed copy advising differently), the ACCOUNT TYPE is kept (it is a form answer,
+        //     not an identity — which box is checked says nothing about who the filer is), and both
+        //     NUMBERS are replaced by class-preserving stand-ins so every rule the filer's copy
+        //     trips, the recipient's copy trips identically.
+        direct_deposit: direct_deposit.as_ref().map(|dd| {
+            let crate::tax::return_inputs::DirectDeposit {
+                routing,
+                kind,
+                account,
+            } = dd;
+            crate::tax::return_inputs::DirectDeposit {
+                routing: scrub_routing(routing),
+                kind: *kind,
+                account: scrub_account(account),
+            }
+        }),
     }
 }
 

@@ -2356,8 +2356,10 @@ fn form_1040_full_fills_every_line_and_reads_back() {
         Some("904")
     ); // L37 AMOUNT OWED
 
-    // The direct-deposit block is NEVER filled — a refund arrives as a paper check, and the
-    // RefundByPaperCheck advisory says so.
+    // ★ T10 — this household gave NO deposit instruction, so the block is blank and the
+    //   `RefundByPaperCheck` advisory says so. It is no longer blank *because btctax cannot fill it*:
+    //   `the_direct_deposit_block_prints_the_filers_numbers_and_exactly_one_type_box` drives the
+    //   filled case, and `no_direct_deposit_leaves_the_whole_refund_block_blank` owns this one.
     assert_eq!(
         g("topmostSubform[0].Page2[0].RoutingNo[0].f2_25[0]"),
         None,
@@ -4901,5 +4903,255 @@ fn the_shared_entry_space_prints_the_qualifying_childs_name_on_hoh_and_qss() {
             None,
             "{status:?}: an unentered name is a blank cell, never an empty string"
         );
+    }
+}
+
+// ══ T10 / §5.4 — THE TRAILER: direct deposit, the spouse's IP PIN, the phone, the foreign block ══
+
+const F2_25_ROUTING: &str = "topmostSubform[0].Page2[0].RoutingNo[0].f2_25[0]";
+const F2_26_ACCOUNT: &str = "topmostSubform[0].Page2[0].AccountNo[0].f2_26[0]";
+const C2_5_CHECKING: &str = "topmostSubform[0].Page2[0].c2_5[0]";
+const C2_5_SAVINGS: &str = "topmostSubform[0].Page2[0].c2_5[1]";
+const F2_36_SPOUSE_IP_PIN: &str = "topmostSubform[0].Page2[0].f2_36[0]";
+const F2_37_PHONE: &str = "topmostSubform[0].Page2[0].f2_37[0]";
+const F1_15_FOREIGN_COUNTRY: &str = "topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_15[0]";
+const F1_16_FOREIGN_PROVINCE: &str = "topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_16[0]";
+const F1_17_FOREIGN_POSTAL: &str = "topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_17[0]";
+
+/// A TY2024 MFJ return the caller mutates before the header is built, so each kill below states
+/// exactly one thing and nothing else in the trailer is populated.
+///
+/// ★ The routing number is `123456780`: digits 1-8 sequential with the NINTH DERIVED — 0 is the ABA
+///   check digit those eight force — and prefix 12, inside the instruction's *"01 through 12 or 21
+///   through 32"*. Same family as this repo's other documented synthetics (`123-45-6789`,
+///   `12-3456789`), and a number no bank could be reached at by looking it up here.
+fn t10_trailer_header(
+    mutate: impl FnOnce(&mut btctax_core::tax::return_inputs::ReturnInputs),
+) -> btctax_core::tax::packet::ReturnHeader {
+    use btctax_core::tax::return_inputs::{Person, ReturnInputs};
+    let mut ri = ReturnInputs {
+        tax_year: 2024,
+        filing_status: FilingStatus::Mfj,
+        ..Default::default()
+    };
+    ri.header.taxpayer.first_name = "Pat".into();
+    ri.header.taxpayer.last_name = "Roe".into();
+    ri.header.taxpayer.ssn = "000-00-2222".into();
+    ri.header.spouse = Some(Person {
+        first_name: "Sam".into(),
+        last_name: "Roe".into(),
+        ssn: "000-00-3333".into(),
+        ..Default::default()
+    });
+    mutate(&mut ri);
+    btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+    btctax_core::tax::packet::ReturnHeader::build(&ri, 2024)
+        .expect("the fixture's identifiers canonicalize")
+}
+
+/// ★★★ **T10 — LINES 35b-35d REACH THE PRINTED PAGE, AND THE ACCOUNT-TYPE BOX IS THE ONE THE FILER
+///     CHOSE.**
+///
+/// The TY2024 map's own note used to read *"UNMAPPED ON PURPOSE: the direct-deposit block (35b
+/// routing f2_25, 35c/d account f2_26) — v1 never fills it"*. This reads all four cells back off the
+/// really-filled TY2024 1040, both account types, and asserts the OTHER box is untouched each time:
+/// *"Don't check more than one box … You must check the correct box to ensure your deposit is
+/// accepted."* (`i1040gi--2025.txt:23988-23994`.)
+///
+/// ★ `box_on_state`, not `box_on`: the on-state STRING is the fact under test. `c2_5[0]` is on `1`
+///   and `c2_5[1]` on `2`, measured off the AcroForm dictionary — a value copied by analogy from a
+///   sibling form writes a box that renders BLANK while reading back as set.
+#[test]
+fn the_direct_deposit_block_prints_the_filers_numbers_and_exactly_one_type_box() {
+    use btctax_core::tax::return_inputs::{DepositAccountKind, DirectDeposit};
+    for (kind, on_field, on_state, off_field) in [
+        (
+            DepositAccountKind::Checking,
+            C2_5_CHECKING,
+            "1",
+            C2_5_SAVINGS,
+        ),
+        (
+            DepositAccountKind::Savings,
+            C2_5_SAVINGS,
+            "2",
+            C2_5_CHECKING,
+        ),
+    ] {
+        let h = t10_trailer_header(|ri| {
+            ri.header.direct_deposit = Some(DirectDeposit {
+                routing: "123456780".into(),
+                kind,
+                account: "ACCT-000123".into(),
+            });
+        });
+        let pdf = btctax_forms::fill_form_1040_full(&f1040(), &h, FilingStatus::Mfj, 2024).unwrap();
+        assert_eq!(
+            tv(&pdf, F2_25_ROUTING).as_deref(),
+            Some("123456780"),
+            "{kind:?}: line 35b must carry the nine bare digits"
+        );
+        assert_eq!(
+            tv(&pdf, F2_26_ACCOUNT).as_deref(),
+            Some("ACCT-000123"),
+            "{kind:?}: line 35d must carry the account number as entered"
+        );
+        assert_eq!(
+            box_on_state(&pdf, on_field).as_deref(),
+            Some(on_state),
+            "{kind:?}: line 35c's own box, at its own measured on-state"
+        );
+        assert!(
+            !box_on(&pdf, off_field),
+            "{kind:?}: \"Don't check more than one box\" — the other type box must stay blank"
+        );
+    }
+}
+
+/// ★★★ **T10 — AND A RETURN WITH NO DEPOSIT INSTRUCTION LEAVES ALL FOUR CELLS BLANK.**
+///
+/// The common case, and the one `Advisory::RefundByPaperCheck` describes. Nothing is written — not an
+/// empty string, not an unchecked box — so the page says exactly what the filer said, which is
+/// nothing. This is the assertion the map's old *"UNMAPPED ON PURPOSE"* note used to buy for free;
+/// now that the cells ARE mapped it has to be made.
+#[test]
+fn no_direct_deposit_leaves_the_whole_refund_block_blank() {
+    let h = t10_trailer_header(|_| {});
+    let pdf = btctax_forms::fill_form_1040_full(&f1040(), &h, FilingStatus::Mfj, 2024).unwrap();
+    assert_eq!(tv(&pdf, F2_25_ROUTING), None, "35b routing untouched");
+    assert_eq!(tv(&pdf, F2_26_ACCOUNT), None, "35d account untouched");
+    assert!(!box_on(&pdf, C2_5_CHECKING), "35c Checking untouched");
+    assert!(!box_on(&pdf, C2_5_SAVINGS), "35c Savings untouched");
+}
+
+/// ★★★ **T10 — THE SPOUSE'S IP PIN PRINTS, AND ONLY WHEN THERE IS A SPOUSE TO HOLD IT.**
+///
+/// This cell is the field census's own motivating example: the TY2024 map recorded in prose, then in
+/// a census entry, that `f2_36` *"exists but ReturnInputs does not capture one, so it is left BLANK,
+/// never guessed"* — one member of a joint return asked and the other not, while a paper return
+/// omitting an ISSUED IP PIN is rejected.
+///
+/// ★★★ The second half is the T9 lesson: a value entered under a condition the return later stops
+///     asserting must not print. A filer who entered a spouse, entered the spouse's PIN and then
+///     deleted the spouse leaves a `Some` behind; `HouseholdHeader::spouse_ip_pin_if_live` is the ONE
+///     reader, and this drives it through the real emitter rather than trusting the accessor.
+#[test]
+fn the_spouse_ip_pin_prints_and_never_without_a_spouse() {
+    let h = t10_trailer_header(|ri| ri.header.spouse_ip_pin = Some("654321".into()));
+    let pdf = btctax_forms::fill_form_1040_full(&f1040(), &h, FilingStatus::Mfj, 2024).unwrap();
+    assert_eq!(
+        tv(&pdf, F2_36_SPOUSE_IP_PIN).as_deref(),
+        Some("654321"),
+        "the spouse's IP PIN cell (f2_36) must carry the six digits"
+    );
+    // …and the taxpayer's own cell is untouched by it: two people, two cells.
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page2[0].f2_34[0]"),
+        None,
+        "the TAXPAYER's IP PIN cell must not receive the spouse's"
+    );
+
+    // ★ A PIN with no spouse on the return: the leaf is set, the spouse is gone, nothing prints.
+    let orphaned = t10_trailer_header(|ri| {
+        ri.header.spouse_ip_pin = Some("654321".into());
+        ri.header.spouse = None;
+        ri.filing_status = FilingStatus::Single;
+    });
+    let pdf =
+        btctax_forms::fill_form_1040_full(&f1040(), &orphaned, FilingStatus::Single, 2024).unwrap();
+    assert_eq!(
+        tv(&pdf, F2_36_SPOUSE_IP_PIN),
+        None,
+        "a spouse IP PIN left behind by a deleted spouse must never reach the page — it would \
+         assert a credential for a person this return does not carry"
+    );
+}
+
+/// ★★★ **T10 — THE PHONE NUMBER PRINTS IN THE SIGN HERE BLOCK, and a blank writes nothing.**
+///
+/// *"Phone no."* (`f1040--2024.txt:137`, cell `f2_37`) — and NOT the designee's phone (`f2_31`) or
+/// the preparer's firm phone (`f2_42`), which the form prints on the same page and which stay
+/// censused. Both of those are asserted blank here, because *"the phone cell"* is three cells on
+/// this form and writing into the wrong one grants or implies something the filer never said.
+#[test]
+fn the_phone_number_prints_in_the_signature_block_and_nowhere_else() {
+    let h = t10_trailer_header(|ri| ri.header.phone = "555-0100".into());
+    let pdf = btctax_forms::fill_form_1040_full(&f1040(), &h, FilingStatus::Mfj, 2024).unwrap();
+    assert_eq!(tv(&pdf, F2_37_PHONE).as_deref(), Some("555-0100"));
+    for other in [
+        "topmostSubform[0].Page2[0].f2_31[0]", // the third-party designee's phone
+        "topmostSubform[0].Page2[0].f2_42[0]", // the paid preparer's firm phone
+    ] {
+        assert_eq!(
+            tv(&pdf, other),
+            None,
+            "{other} is not the filer's phone cell and must stay blank"
+        );
+    }
+
+    let blank = t10_trailer_header(|_| {});
+    let pdf = btctax_forms::fill_form_1040_full(&f1040(), &blank, FilingStatus::Mfj, 2024).unwrap();
+    assert_eq!(
+        tv(&pdf, F2_37_PHONE),
+        None,
+        "an unentered phone number is a blank cell, never an empty string"
+    );
+}
+
+/// ★★★ **T10 / §5.4 — THE FOREIGN-ADDRESS BLOCK PRINTS ALL THREE CELLS, AND ONLY UNDER A COUNTRY.**
+///
+/// *"Foreign country name | Foreign province/state/county | Foreign postal code"*
+/// (`f1040--2024.txt:22`), printed under the form's own *"If you have a foreign address, also
+/// complete spaces below."* All three were censused `unmodeled` with the reason *"btctax models a
+/// domestic filer address"*.
+///
+/// ★★★ The second case is the liveness rule as a KILL: a province and a postal code with an EMPTY
+///     country print NOTHING. §5.4 says those two are live iff the country is non-empty, and
+///     `ReturnHeader::build` enforces it by carrying one `Option` rather than three strings — so
+///     half a foreign address is unrepresentable at the print boundary, not merely screened.
+#[test]
+fn the_foreign_address_prints_only_under_a_country() {
+    let h = t10_trailer_header(|ri| {
+        ri.header.foreign_country = "Elbonia".into();
+        ri.header.foreign_province = "Mud Province".into();
+        ri.header.foreign_postal_code = "XY1 2AB".into();
+    });
+    let pdf = btctax_forms::fill_form_1040_full(&f1040(), &h, FilingStatus::Mfj, 2024).unwrap();
+    assert_eq!(tv(&pdf, F1_15_FOREIGN_COUNTRY).as_deref(), Some("Elbonia"));
+    assert_eq!(
+        tv(&pdf, F1_16_FOREIGN_PROVINCE).as_deref(),
+        Some("Mud Province")
+    );
+    assert_eq!(tv(&pdf, F1_17_FOREIGN_POSTAL).as_deref(), Some("XY1 2AB"));
+
+    // ★ A province and a postal code with no country: nothing prints, on any of the three cells.
+    let headless = t10_trailer_header(|ri| {
+        ri.header.foreign_province = "Mud Province".into();
+        ri.header.foreign_postal_code = "XY1 2AB".into();
+    });
+    let pdf =
+        btctax_forms::fill_form_1040_full(&f1040(), &headless, FilingStatus::Mfj, 2024).unwrap();
+    for (fqn, what) in [
+        (F1_15_FOREIGN_COUNTRY, "country"),
+        (F1_16_FOREIGN_PROVINCE, "province"),
+        (F1_17_FOREIGN_POSTAL, "postal code"),
+    ] {
+        assert_eq!(
+            tv(&pdf, fqn),
+            None,
+            "the foreign {what} must not print without a country — half an address is not an address"
+        );
+    }
+
+    // ★ …and a domestic return leaves all three blank, which is the common case.
+    let domestic = t10_trailer_header(|_| {});
+    let pdf =
+        btctax_forms::fill_form_1040_full(&f1040(), &domestic, FilingStatus::Mfj, 2024).unwrap();
+    for fqn in [
+        F1_15_FOREIGN_COUNTRY,
+        F1_16_FOREIGN_PROVINCE,
+        F1_17_FOREIGN_POSTAL,
+    ] {
+        assert_eq!(tv(&pdf, fqn), None, "{fqn} on a domestic return");
     }
 }

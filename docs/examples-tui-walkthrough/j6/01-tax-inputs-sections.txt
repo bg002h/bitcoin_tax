@@ -3,7 +3,7 @@
   1││> ✓ Return options              ││  Filing status  [Mfj]                                                              │
   2││  … Taxpayer                    ││  Itemize election  [Auto]                                                          │
   3││  … Spouse                      ││                                                                                    │
-  4││  ✓ Address                     ││                                                                                    │
+  4││  … Address                     ││                                                                                    │
   5││  ✓ Dependents                  ││                                                                                    │
   6││  ✓ W-2s                        ││                                                                                    │
   7││  ✓ Forms 1099-INT              ││                                                                                    │
@@ -19,12 +19,12 @@
  17││  … Schedule A (itemized deducti││                                                                                    │
  18││  ✓ Schedule A line 8b (mortgage││                                                                                    │
  19││  ✓ Sale of your main home      ││                                                                                    │
- 20││  … Payments                    ││                                                                                    │
- 21││  … Carryforwards from last year││                                                                                    │
- 22││  … §199A limitation (only if yo││                                                                                    │
- 23││  ✓ Declarations                ││                                                                                    │
- 24││  ✓ Documents received          ││                                                                                    │
- 25││  … Income exclusions (§911/931/││                                                                                    │
+ 20││  … Direct deposit              ││                                                                                    │
+ 21││  … Payments                    ││                                                                                    │
+ 22││  … Carryforwards from last year││                                                                                    │
+ 23││  … §199A limitation (only if yo││                                                                                    │
+ 24││  ✓ Declarations                ││                                                                                    │
+ 25││  ✓ Documents received          ││                                                                                    │
  26│└────────────────────────────────┘└────────────────────────────────────────────────────────────────────────────────────┘
  27│┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
  28││  active source: full return   ·   screens clean, except what report computes                                         │

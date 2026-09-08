@@ -473,6 +473,29 @@ pub fn maximal_sentinel() -> ReturnInputs {
             qss_child_lived_in_your_home_all_year: Some(true),
             qss_paid_over_half_cost_of_keeping_up_home: Some(true),
             qss_could_have_filed_jointly_in_year_of_death: Some(true),
+            // ★★★ T10 / §5.4 — THE TRAILER, every leaf non-default for the same reason as the
+            //     block above: a leaf left at its default produces no differing path and drops out
+            //     of the derived axis entirely.
+            spouse_ip_pin: Some("123456".into()), // ★ VALID (six digits) — the baseline must be clean
+            phone: "SENTINEL_phone".into(),
+            foreign_country: "SENTINEL_foreign_country".into(),
+            foreign_province: "SENTINEL_foreign_province".into(),
+            foreign_postal_code: "SENTINEL_foreign_postal".into(),
+            // ★ VALID on both numbers — the baseline must be clean, exactly like `ip_pin` above.
+            //   `111111118` is the repeated-digit synthetic this repo uses everywhere (11-1111111,
+            //   111-11-1111) with the NINTH digit DERIVED: 8 is the ABA check digit the first eight
+            //   1s force, and 11 is inside the instruction's 01-12 prefix range. `SENTINEL-ACCT-1`
+            //   is 15 characters of letters, digits and hyphens, precisely what line 35d admits.
+            //
+            // ★★ It must NOT equal `SCRUB_ROUTING` (`123456780`), or the scrubbed copy is
+            //    byte-identical here, the path never differs, and the field DROPS OUT of the derived
+            //    axis — taking its whole matrix row with it. `no_fixture_value_collides_with_a_stand_in`
+            //    is the standing check for exactly that.
+            direct_deposit: Some(crate::tax::return_inputs::DirectDeposit {
+                routing: "111111118".into(),
+                kind: crate::tax::return_inputs::DepositAccountKind::Savings,
+                account: "SENTINEL-ACCT-1".into(),
+            }),
         },
         w2s: vec![w2("one", "11-1111111"), w2("two", "22-2222222")],
         int_1099: vec![int_1099("one", "33-3333333"), int_1099("two", "44-4444444")],
@@ -1161,6 +1184,92 @@ mod matrix {
                 Fixture(|r| r.header.ip_pin = None),
                 Fixture(|r| r.header.ip_pin = Some(String::new())),
                 Fixture(|r| r.header.ip_pin = Some("12345".into())),
+            ),
+            // ★★★ **T10 / §5.4 — THE TRAILER.** Six newly-replaced fields, six rows, every cell
+            //     decided rather than defaulted.
+            //
+            // ★ The SPOUSE's IP PIN has all three states for the same reason the taxpayer's does:
+            //   it is an `Option<String>` (so `absent` is real and distinct from `empty`) and
+            //   `IpPin::canonical` reads a validity class off it at the packet boundary.
+            (
+                "header.spouse_ip_pin",
+                Fixture(|r| r.header.spouse_ip_pin = None),
+                Fixture(|r| r.header.spouse_ip_pin = Some(String::new())),
+                Fixture(|r| r.header.spouse_ip_pin = Some("12345".into())),
+            ),
+            // ★ The phone number and the three foreign-address cells are plain `String`s with no
+            //   validity reader — the same three columns as the address lines directly above, and
+            //   for the same reasons. btctax validates no dialling plan and no postal format.
+            (
+                "header.phone",
+                NoSuchState(PLAIN_STRING),
+                Fixture(|r| r.header.phone = String::new()),
+                NoSuchState(NO_READER),
+            ),
+            // ★★ The COUNTRY's emptiness is load-bearing in a way the others' is not: it is the
+            //    §5.4 liveness rule (`foreign_address_is_live`), and `ReturnHeader::build` reads it
+            //    to decide whether the foreign block prints at all. Emptiness is preserved, so the
+            //    scrubbed copy prints a foreign block exactly when the filer's does.
+            (
+                "header.foreign_country",
+                NoSuchState(PLAIN_STRING),
+                Fixture(|r| r.header.foreign_country = String::new()),
+                NoSuchState(NO_READER),
+            ),
+            (
+                "header.foreign_province",
+                NoSuchState(PLAIN_STRING),
+                Fixture(|r| r.header.foreign_province = String::new()),
+                NoSuchState(NO_READER),
+            ),
+            (
+                "header.foreign_postal_code",
+                NoSuchState(PLAIN_STRING),
+                Fixture(|r| r.header.foreign_postal_code = String::new()),
+                NoSuchState(NO_READER),
+            ),
+            // ★★★ **The two DIRECT-DEPOSIT numbers, and both carry a MALFORMED state** — they are
+            //     the newest members of the small set §3.2's ★ mechanism names: fields a predicate
+            //     reads a VALIDITY CLASS off. `RoutingNumber::canonical` and
+            //     `AccountNumber::canonical` are read by `screen_direct_deposit` (which REFUSES) and
+            //     by `ReturnHeader::build` (which fails the print). A stand-in that canonicalized
+            //     where the original does not would hand a filer whose real return refuses a
+            //     "shareable" copy that FILES — the exact class this module exists to prevent.
+            //
+            // ★ `absent` is the whole BLOCK being `None`, which is a different path from an empty
+            //   string inside a present block: the first prints nothing and fires
+            //   `RefundByPaperCheck`, the second refuses.
+            //
+            // ★ The malformed routing number is `250250025`, the IRS's own sample-check number,
+            //   which fails the ABA check digit (`i1040gi--2025.txt:23965`); the malformed account
+            //   number is 18 characters against the instruction's *"up to 17"*.
+            (
+                "header.direct_deposit.routing",
+                Fixture(|r| r.header.direct_deposit = None),
+                Fixture(|r| {
+                    if let Some(d) = r.header.direct_deposit.as_mut() {
+                        d.routing = String::new();
+                    }
+                }),
+                Fixture(|r| {
+                    if let Some(d) = r.header.direct_deposit.as_mut() {
+                        d.routing = "250250025".into();
+                    }
+                }),
+            ),
+            (
+                "header.direct_deposit.account",
+                Fixture(|r| r.header.direct_deposit = None),
+                Fixture(|r| {
+                    if let Some(d) = r.header.direct_deposit.as_mut() {
+                        d.account = String::new();
+                    }
+                }),
+                Fixture(|r| {
+                    if let Some(d) = r.header.direct_deposit.as_mut() {
+                        d.account = "0123456789ABCDEFGH".into(); // 18 > the instruction's 17
+                    }
+                }),
             ),
             (
                 "w2s[].ein",

@@ -177,6 +177,25 @@ regions fall out, and they are **not** three equal thirds:
 | **trailer** (below the last numbered line) | 16 | third-party designee (name, phone, PIN, yes/no), signature block (IP PINs, phone, email), preparer block (name, PTIN, firm, EIN, address, self-employed) | almost entirely **not ours** — the filer signs by hand, the preparer block is another party's |
 | **body** | 30 | checkboxes and sub-boxes on lines we *partly* map — line 16's 8814/4972/other, line 26, sub-lines 1b–1h, 5b, 6b, and 35a's bank routing/account | **the interesting residue** — a mix of "needs a question", "not applicable", and possibly category 6 |
 
+★★★ **CLOSED, 2026-09-07 — interview T10 (`SPEC_interview.md` §5.4).** The measurement above stands as
+taken; what has changed is the tool. **Nine** of these TY2024 `f1040` cells are now COLLECTED and
+FILLED, and their `[census]` entries are gone from `forms/2024/f1040.map.toml` (`xtask census-join`:
+283 → 274 unmodeled entries):
+
+- the **header**'s three — `f1_15` / `f1_16` / `f1_17`. *"A filer abroad cannot have their address
+  printed, and today that is invisible"* was the sharpest sentence in this table, and it is no longer
+  true: `header.foreign_{country,province,postal_code}` are asked, the province and the postal code
+  live under a non-empty country, and all three print.
+- the **trailer**'s two that WERE ours — the **spouse's IP PIN** (`f2_36`, the census's own motivating
+  example) and the **filer's phone** (`f2_37`). The designee block, the email cell and the preparer
+  block stay exactly as classified: *not ours*.
+- the **body**'s *"35a's bank routing/account"* — lines 35b–35d, four cells (`f2_25`, `c2_5[0]`,
+  `c2_5[1]`, `f2_26`). Line 35a's Form 8888 split-refund box remains `unmodeled`, and its cover moved
+  to `Advisory::UnmodeledReturnOptionsOmitted`, because `RefundByPaperCheck` is conditional now.
+
+★ The ratio sentence below is left untouched: it was a projection from the measurement, and rewriting
+it would hide that the projection was made before any of this work.
+
 ★ So roughly **45% is header/trailer** and disposed of by a handful of blanket decisions, and
 **~55% is per-line body** — the part that needs real classification. If that ratio holds across the
 15 forms, the genuine work is ≈270 fields, not 496.

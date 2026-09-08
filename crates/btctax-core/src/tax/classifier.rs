@@ -444,7 +444,36 @@ fn classify_header(c: &mut Census, h: &HouseholdHeader) {
         qss_child_lived_in_your_home_all_year,
         qss_paid_over_half_cost_of_keeping_up_home,
         qss_could_have_filed_jointly_in_year_of_death,
+        // ★★★ T10 / §5.4 — THE TRAILER. Five of the six are scalars the `_` rule permits
+        //     (`String` / `Option<String>`, like `ip_pin` and `qualifying_child_name` above);
+        //     `direct_deposit` is an `Option<Struct>` and is CLASSIFIED below rather than waved
+        //     past.
+        spouse_ip_pin: _,       // Option<String> — scalar
+        phone: _,               // String — scalar
+        foreign_country: _,     // String — scalar
+        foreign_province: _,    // String — scalar
+        foreign_postal_code: _, // String — scalar
+        direct_deposit,
     } = h;
+    // ★★★ **T10 / R14 — the direct-deposit block is class (B).**
+    //
+    //     Absence FORGOES a convenience and can move no figure: the refund is the same size whether
+    //     it arrives by wire or by post. What makes it a *forgone benefit* rather than *no tax
+    //     direction* is that the forgo is REAL and is named —
+    //     `Advisory::RefundByPaperCheck` fires on a return due a refund with no block, and now fires
+    //     ONLY then, so the notice is a statement about this filer rather than about the product.
+    //
+    //     ★ Absence is NOT read as *"I want a paper check"* (owner question Q4 is open): it is read
+    //       as *no instruction given*, which is what the advisory says.
+    c.exempt(
+        direct_deposit,
+        Class::BenefitClaim,
+        "1040 lines 35b-35d (§5.4 / R14): the absence of a deposit instruction FORGOES direct \
+         deposit and moves no figure — the refund is the same size either way — and the forgo is \
+         announced by `Advisory::RefundByPaperCheck`, which fires exactly when a return is due a \
+         refund and carries no block. A block that IS present is not a default at all: none of its \
+         three fields has `#[serde(default)]` (§4.3)",
+    );
     // ★★★ R7 / T8 — HEAD OF HOUSEHOLD and QUALIFYING SURVIVING SPOUSE. Every one is a class-(A)
     //     DECLARATION: checking either box is an assertion about the filer's household that unlocks
     //     money (a wider bracket and standard deduction; the joint rates), so silence may not stand

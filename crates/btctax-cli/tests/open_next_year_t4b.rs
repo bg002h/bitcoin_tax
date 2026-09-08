@@ -1274,6 +1274,58 @@ fn the_ip_pin_does_not_cross_the_year_boundary() {
     assert_eq!(draft(&vault).header.ip_pin, None);
 }
 
+/// ★★★ **T10 / T4b — THE TRAILER SPLITS: WHERE THE FILER LIVES CROSSES; THEIR CREDENTIALS DO NOT.**
+///
+/// T4b's rule stated for the six leaves T10 added, and asserted in BOTH directions on ONE seeded
+/// year, so neither half can be satisfied by an accident:
+///
+/// | leaf | crosses? | why |
+/// |---|---|---|
+/// | `phone`, `foreign_country`/`province`/`postal_code` | **yes** | identity — where the filer is and how to reach them, the same class as the four address lines |
+/// | `spouse_ip_pin` | **no** | the IRS issues a new IP PIN every December; last year's is void |
+/// | `direct_deposit` | **no** | an account closed since April sends the refund somewhere it cannot be recalled from |
+///
+/// ★★★ The carrying half is what makes this a kill rather than an assertion that `Default` works:
+///     year N's values are non-default and distinctive, so *carried* is distinguishable from
+///     *defaulted* — the exact defect T4b's own I-1 was about. Dropping the four `clone()`s from
+///     `seed` reds the top half; adding a fifth for the PIN or the block reds the bottom half.
+#[test]
+fn the_trailer_splits_identity_from_the_per_year_credentials() {
+    use btctax_core::tax::return_inputs::{DepositAccountKind, DirectDeposit};
+    let (_dir, vault) = vault_with_year_n(|ri| {
+        a_year_with_money_in_it(ri);
+        ri.header.phone = "555-0100".into();
+        ri.header.foreign_country = "Elbonia".into();
+        ri.header.foreign_province = "Mud Province".into();
+        ri.header.foreign_postal_code = "XY1 2AB".into();
+        ri.header.spouse_ip_pin = Some("654321".into());
+        ri.header.direct_deposit = Some(DirectDeposit {
+            routing: "123456780".into(),
+            kind: DepositAccountKind::Savings,
+            account: "ACCT-000123".into(),
+        });
+    });
+    open(&vault, false);
+    let seed = draft(&vault);
+
+    // Identity crosses, and every value here is non-default, so this can tell carried from defaulted.
+    assert_eq!(seed.header.phone, "555-0100");
+    assert_eq!(seed.header.foreign_country, "Elbonia");
+    assert_eq!(seed.header.foreign_province, "Mud Province");
+    assert_eq!(seed.header.foreign_postal_code, "XY1 2AB");
+
+    // The credentials do not.
+    assert_eq!(
+        seed.header.spouse_ip_pin, None,
+        "an IP PIN is issued per year — carrying December's would print a void credential"
+    );
+    assert_eq!(
+        seed.header.direct_deposit, None,
+        "a bank account is RE-CONFIRMED every year, never assumed: an account closed since April \
+         sends this refund somewhere nobody can recall it from"
+    );
+}
+
 /// ★★★ **I-1 — identity crosses, and the test can TELL that it did.**
 ///
 /// The old assertion pinned `seed.filing_status == Single` on a fixture whose year N was Single: it

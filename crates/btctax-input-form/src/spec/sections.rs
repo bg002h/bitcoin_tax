@@ -18,8 +18,8 @@ use btctax_core::forms::{BrokerReported, Cohort};
 use btctax_core::tax::dependent_gates::DEPENDENT_GATES;
 use btctax_core::tax::questions::{FORM_QUESTIONS, SKIPPABLE_QUESTIONS};
 use btctax_core::tax::return_inputs::{
-    Box12Entry, CharitableClass, CharitableGift, Dependent, ItemizeElection, Person,
-    ScheduleAInputs, W2,
+    Box12Entry, CharitableClass, CharitableGift, Dependent, DepositAccountKind, DirectDeposit,
+    ItemizeElection, Person, ScheduleAInputs, W2,
 };
 use btctax_core::tax::types::FilingStatus;
 
@@ -443,6 +443,48 @@ const SPOUSE_FIELDS: &[Field] = &[
             Ok(())
         },
     },
+    // ★★★ **T10 / §5.4 — THE SPOUSE'S IDENTITY PROTECTION PIN**, the mirror of `FieldId::IpPin`
+    //     in the Taxpayer section above. *"If the IRS sent your spouse an Identity Protection PIN,
+    //     enter it here (see inst.)"* (`design/forms/extract/f1040--2024.txt:133-135`.)
+    //
+    // ★★★ **A SECRET, and asymmetric the same way**: `kind: FieldKind::Secret`, so `set` accepts
+    //     only a `SecretEntry` and `get` returns a `SecretView` — presence, never digits. The mask
+    //     is `mask_ip_pin`'s, which is the all-`*` token with ZERO digits (§ the module header),
+    //     not the SSN's last-4 reveal.
+    //
+    // ★ SPOUSE-GATED like every other leaf in this section: `get` is `None` and `set` is
+    //   `NoSuchRow` until the optional singleton exists. A PIN belongs to a person, and on a
+    //   return with no spouse there is nobody to hold it.
+    Field {
+        id: FieldId::SpIpPin,
+        clear: None,
+        label: "Spouse Identity Protection PIN",
+        help: "The IRS-issued 6-digit IP PIN for your spouse, if they have one. A paper return that omits an issued IP PIN is rejected or delayed. Stored as entered; shown masked.",
+        kind: FieldKind::Secret,
+        live: |_| true,
+        // ★★★ Through `spouse_ip_pin_if_live` — the ONE reader — so the form, the print boundary
+        //     and the emitter cannot disagree about whether a spouse PIN exists.
+        get: |ri, _| {
+            ri.header.spouse.as_ref().map(|_| {
+                FieldValue::Secret(
+                    ri.header
+                        .spouse_ip_pin_if_live()
+                        .map_or(SecretView::Empty, mask_ip_pin),
+                )
+            })
+        },
+        // ★ I-2's rule, carried over verbatim: an empty entry maps to `None`, NEVER `Some("")` — a
+        //   `Some("")` is screen-clean but bricks `export` (`IpPin::canonical("")` errors) and
+        //   renders identically to a healthy `None`.
+        set: |ri, _, v| {
+            let FieldValue::SecretEntry(s) = v else { return Err(SetError::WrongKind) };
+            if ri.header.spouse.is_none() {
+                return Err(SetError::NoSuchRow);
+            }
+            ri.header.spouse_ip_pin = if s.is_empty() { None } else { Some(s) };
+            Ok(())
+        },
+    },
 ];
 
 pub(crate) const SPOUSE: Section = Section {
@@ -455,7 +497,15 @@ pub(crate) const SPOUSE: Section = Section {
                 ri.header.spouse = Some(Person::default());
             }
         },
-        delete: |ri| ri.header.spouse = None,
+        // ★★★ T10 — deleting the spouse deletes the SPOUSE'S IP PIN with them. `push_header_block`
+        //     is already safe without this (it reads `spouse_ip_pin_if_live`), so this is about the
+        //     value AT REST: a live IRS anti-fraud credential belonging to a person no longer on
+        //     the return has no owner and no reader, and keeping it is the shape a later reader
+        //     mistakes for testimony.
+        delete: |ri| {
+            ri.header.spouse = None;
+            ri.header.spouse_ip_pin = None;
+        },
     },
     fields: SPOUSE_FIELDS,
 };
@@ -527,6 +577,95 @@ const ADDRESS_FIELDS: &[Field] = &[
             Ok(())
         },
     },
+    // ── ★★★ T10 / §5.4 — THE FOREIGN-ADDRESS ROW. ─────────────────────────────────────────────
+    //
+    // *"Foreign country name | Foreign province/state/county | Foreign postal code"*
+    // (`design/forms/extract/f1040--2024.txt:22`), the three spaces the form prints under
+    // *"If you have a foreign address, also complete spaces below."*
+    //
+    // ★★★ **The COUNTRY is the liveness carrier** (§5.4: the other two are *"live iff
+    //     `foreign_country` non-empty"*), and both of them ask `foreign_address_is_live()` rather
+    //     than testing the country themselves — one accessor, three readers (these two and
+    //     `ReturnHeader::build`), so a province cannot be typed into a form that will not print it.
+    //
+    // ★ Every one is a plain `Text` and a blank is LAWFUL — most filers have a domestic address and
+    //   leave all three empty, which is the correct return. Nothing refuses on any of them.
+    Field {
+        id: FieldId::AddrForeignCountry,
+        clear: None,
+        label: "Foreign country name",
+        help: "1040 header, foreign-address row: \"If you have a foreign address, also complete spaces below.\" Leave blank for a US address — the province and postal-code cells appear only once a country is entered.",
+        kind: FieldKind::Text,
+        live: |_| true,
+        get: |ri, _| Some(FieldValue::Text(ri.header.foreign_country.clone())),
+        set: |ri, _, v| {
+            let FieldValue::Text(s) = v else { return Err(SetError::WrongKind) };
+            ri.header.foreign_country = s;
+            Ok(())
+        },
+    },
+    Field {
+        id: FieldId::AddrForeignProvince,
+        clear: None,
+        label: "Foreign province/state/county",
+        help: "1040 header, foreign-address row. Live only once a foreign country is entered.",
+        kind: FieldKind::Text,
+        live: |ri| ri.header.foreign_address_is_live(),
+        get: |ri, _| {
+            ri.header
+                .foreign_address_is_live()
+                .then(|| FieldValue::Text(ri.header.foreign_province.clone()))
+        },
+        set: |ri, _, v| {
+            if !ri.header.foreign_address_is_live() {
+                return Err(SetError::NoSuchRow);
+            }
+            let FieldValue::Text(s) = v else { return Err(SetError::WrongKind) };
+            ri.header.foreign_province = s;
+            Ok(())
+        },
+    },
+    Field {
+        id: FieldId::AddrForeignPostalCode,
+        clear: None,
+        label: "Foreign postal code",
+        help: "1040 header, foreign-address row. Live only once a foreign country is entered.",
+        kind: FieldKind::Text,
+        live: |ri| ri.header.foreign_address_is_live(),
+        get: |ri, _| {
+            ri.header
+                .foreign_address_is_live()
+                .then(|| FieldValue::Text(ri.header.foreign_postal_code.clone()))
+        },
+        set: |ri, _, v| {
+            if !ri.header.foreign_address_is_live() {
+                return Err(SetError::NoSuchRow);
+            }
+            let FieldValue::Text(s) = v else { return Err(SetError::WrongKind) };
+            ri.header.foreign_postal_code = s;
+            Ok(())
+        },
+    },
+    // ★★★ T10 / §5.4 — the Sign Here block's *"Phone no."* (`f1040--2024.txt:137`). It prints on
+    //     page 2 rather than beside the address, but it is the same thing the filer is typing —
+    //     how to reach them — and §4.1 lists it in this section.
+    //
+    // ★ NOT coerced into a shape. btctax does not know the filer's dialling plan, and rewriting
+    //   what they typed would be inventing testimony about how to reach them.
+    Field {
+        id: FieldId::AddrPhone,
+        clear: None,
+        label: "Phone number",
+        help: "1040 signature block, \"Phone no.\" — how the IRS can reach you about this return. Optional: a blank is lawful and nothing on the return reads it.",
+        kind: FieldKind::Text,
+        live: |_| true,
+        get: |ri, _| Some(FieldValue::Text(ri.header.phone.clone())),
+        set: |ri, _, v| {
+            let FieldValue::Text(s) = v else { return Err(SetError::WrongKind) };
+            ri.header.phone = s;
+            Ok(())
+        },
+    },
 ];
 
 pub(crate) const ADDRESS: Section = Section {
@@ -534,6 +673,127 @@ pub(crate) const ADDRESS: Section = Section {
     title: "Address",
     kind: SectionKind::Singleton,
     fields: ADDRESS_FIELDS,
+};
+
+// ── ★★★ T10 / §5.4 — DIRECT DEPOSIT (OptionalSingleton): 1040 lines 35b-35d ────────────────────
+//
+// *"Direct deposit?  b Routing number   c Type: Checking  Savings   d Account number"*
+// (`design/forms/extract/f1040--2024.txt:116-118`.)
+//
+// ★★★ **An OPTIONAL SINGLETON, like `Spouse`, and that shape IS the answer to owner question Q4.**
+//     The block exists as a whole or not at all: none of the three cells means anything without the
+//     other two, and §4.3 gives none of them a serde default. Absence is therefore expressible and
+//     is NOT read as *"I want a paper check"* — it is read as *no instruction given*, which is
+//     exactly what `Advisory::RefundByPaperCheck` says on a return due a refund. Either answer is
+//     expressible; btctax picks neither.
+//
+// ★ Every leaf is block-gated: `get` is `None` and `set` is `NoSuchRow` until `create` runs, the
+//   same emulation the Spouse section uses.
+const DIRECT_DEPOSIT_FIELDS: &[Field] = &[
+    Field {
+        id: FieldId::DdRouting,
+        clear: None,
+        label: "Routing number (line 35b)",
+        help: "The nine-digit routing number from the BOTTOM LEFT of a check. The instructions say it \"must be nine digits\" and \"the first two digits must be 01 through 12 or 21 through 32\"; btctax also checks the ABA check digit, so a mistyped number is refused rather than printed. Ask your financial institution if the number on a deposit slip differs from the one on your checks.",
+        kind: FieldKind::Text,
+        live: |_| true,
+        get: |ri, _| {
+            ri.header
+                .direct_deposit
+                .as_ref()
+                .map(|d| FieldValue::Text(d.routing.clone()))
+        },
+        set: |ri, _, v| {
+            let FieldValue::Text(s) = v else { return Err(SetError::WrongKind) };
+            ri.header
+                .direct_deposit
+                .as_mut()
+                .ok_or(SetError::NoSuchRow)?
+                .routing = s;
+            Ok(())
+        },
+    },
+    Field {
+        id: FieldId::DdKind,
+        clear: None,
+        label: "Account type (line 35c)",
+        help: "Checking or Savings. \"Don't check more than one box … You must check the correct box to ensure your deposit is accepted.\" If the account is an IRA, HSA or brokerage account, ask your financial institution which one applies.",
+        kind: FieldKind::Enum(&["Checking", "Savings"]),
+        live: |_| true,
+        get: |ri, _| {
+            ri.header.direct_deposit.as_ref().map(|d| {
+                FieldValue::Choice(
+                    match d.kind {
+                        DepositAccountKind::Checking => "Checking",
+                        DepositAccountKind::Savings => "Savings",
+                    }
+                    .to_string(),
+                )
+            })
+        },
+        set: |ri, _, v| {
+            let FieldValue::Choice(c) = v else { return Err(SetError::WrongKind) };
+            let kind = match c.as_str() {
+                "Checking" => DepositAccountKind::Checking,
+                "Savings" => DepositAccountKind::Savings,
+                _ => return Err(SetError::WrongKind),
+            };
+            ri.header
+                .direct_deposit
+                .as_mut()
+                .ok_or(SetError::NoSuchRow)?
+                .kind = kind;
+            Ok(())
+        },
+    },
+    Field {
+        id: FieldId::DdAccount,
+        clear: None,
+        label: "Account number (line 35d)",
+        help: "\"The account number can be up to 17 characters (both numbers and letters). Include hyphens but omit spaces and special symbols.\" Do not include the check number.",
+        kind: FieldKind::Text,
+        live: |_| true,
+        get: |ri, _| {
+            ri.header
+                .direct_deposit
+                .as_ref()
+                .map(|d| FieldValue::Text(d.account.clone()))
+        },
+        set: |ri, _, v| {
+            let FieldValue::Text(s) = v else { return Err(SetError::WrongKind) };
+            ri.header
+                .direct_deposit
+                .as_mut()
+                .ok_or(SetError::NoSuchRow)?
+                .account = s;
+            Ok(())
+        },
+    },
+];
+
+pub(crate) const DIRECT_DEPOSIT: Section = Section {
+    id: SectionId::DirectDeposit,
+    title: "Direct deposit",
+    kind: SectionKind::OptionalSingleton {
+        present: |ri| ri.header.direct_deposit.is_some(),
+        // ★★ The new block starts EMPTY on both numbers and `Checking` on the type — and an empty
+        //    routing number REFUSES (`DirectDepositNumberMalformed`, the `Missing` leg), which is
+        //    the point: a half-created block is visible as a refusal rather than as a silently
+        //    blank refund row. `Checking` is not a guess about the filer's account; it is the
+        //    starting position of a two-way control the filer must confirm, and the block does not
+        //    reach a printed page until its numbers do.
+        create: |ri| {
+            if ri.header.direct_deposit.is_none() {
+                ri.header.direct_deposit = Some(DirectDeposit {
+                    routing: String::new(),
+                    kind: DepositAccountKind::Checking,
+                    account: String::new(),
+                });
+            }
+        },
+        delete: |ri| ri.header.direct_deposit = None,
+    },
+    fields: DIRECT_DEPOSIT_FIELDS,
 };
 
 // ★★★ **T7 / R6 — a per-row DEPENDENT GATE → a `TriState` `Field` over `DEPENDENT_GATES[$idx]`.**
@@ -1438,7 +1698,7 @@ mod tests {
     use crate::seam::{
         FieldId, FieldKind, FieldValue, RowAddr, SecretView, SectionId, SectionKind, SetError,
     };
-    use btctax_core::tax::return_inputs::ItemizeElection;
+    use btctax_core::tax::return_inputs::{Dependent, ItemizeElection, Person, W2};
     use btctax_core::tax::types::FilingStatus;
     use rust_decimal_macros::dec;
 
@@ -1675,6 +1935,105 @@ mod tests {
         assert_eq!(
             (sp_first.get)(&ri, &RowAddr::default()),
             Some(FieldValue::Text("Pat".into()))
+        );
+    }
+
+    /// ★★★ **T10 — EVERY `FieldKind::Secret` IN THE WHOLE FORM IS ASYMMETRIC, ENUMERATED FROM
+    ///     `form_spec()` AND NOT FROM A LIST.**
+    ///
+    /// The seam's rule is one sentence — *a secret is written, never read back* — and the test that
+    /// held it named `TpSsn` and `IpPin` by hand. T10 added a third secret (the spouse's IP PIN); a
+    /// fourth would have joined in silence. This walks every section, finds every `Secret` field,
+    /// writes digits through the real `set`, and asserts the real `get` returns none of them.
+    ///
+    /// ★ It cannot pass vacuously: the count is asserted, so a `Secret` field that stops being one
+    ///   (or a section dropped from `form_spec`) reds here rather than shrinking the sweep silently.
+    #[test]
+    fn every_secret_field_is_asymmetric_written_never_read_back() {
+        use crate::spec::form_spec;
+        const DIGITS: &str = "987654321";
+        let mut n = 0usize;
+        for section in form_spec() {
+            for f in section.fields {
+                if !matches!(f.kind, FieldKind::Secret) {
+                    continue;
+                }
+                n += 1;
+                // A maximal-enough return: a spouse and one dependent row, so every spouse-gated
+                // and per-row secret is live and addressable.
+                let mut ri = fresh_single();
+                ri.header.spouse = Some(Person::default());
+                ri.header.dependents = vec![Dependent::default()];
+                ri.w2s = vec![W2::default()];
+                // ★ R5's filer's-records rows carry the seller-financed mortgage payer's SSN — the
+                //   fifth secret in the form, and the one a hand-written list had already missed.
+                ri.schedule_b_filer_records =
+                    vec![btctax_core::tax::return_inputs::ScheduleBRecord::default()];
+                // The row address a section needs to name row 0 — depth 2 for the nested box-12
+                // group, 1 for the depth-1 repeating groups, 0 otherwise. A wrong depth panics or
+                // errs; it can never yield a false PASS.
+                let addr = match section.id {
+                    SectionId::W2Box12 => RowAddr(vec![0, 0]),
+                    _ if matches!(section.kind, SectionKind::Repeating { .. }) => RowAddr(vec![0]),
+                    _ => RowAddr::default(),
+                };
+
+                // 1. `set` takes ONLY a `SecretEntry` — a `Text` of the same digits is refused, so
+                //    no renderer can route a secret through the plain-text path by accident.
+                assert_eq!(
+                    (f.set)(&mut ri, &addr, FieldValue::Text(DIGITS.into())),
+                    Err(SetError::WrongKind),
+                    "{:?}: a Secret must refuse a Text value",
+                    f.id
+                );
+
+                (f.set)(&mut ri, &addr, FieldValue::SecretEntry(DIGITS.into()))
+                    .unwrap_or_else(|e| panic!("{:?}: set of a SecretEntry failed: {e:?}", f.id));
+
+                // 2. `get` returns PRESENCE, never digits — asserted over the rendered view, so a
+                //    mask that leaks through `Debug` is caught as well as one that leaks its value.
+                let got = (f.get)(&ri, &addr)
+                    .unwrap_or_else(|| panic!("{:?}: a live secret must have a view", f.id));
+                let FieldValue::Secret(view) = &got else {
+                    panic!(
+                        "{:?}: a Secret field's get must return FieldValue::Secret",
+                        f.id
+                    )
+                };
+                let rendered = format!("{view:?}");
+                // ★★ The UNIVERSAL half: no view ever returns the whole secret, and none ever
+                //    reveals its LEADING digits — the half that identifies (an SSN's area and
+                //    group, an IP PIN's first four).
+                assert!(
+                    !rendered.contains(DIGITS),
+                    "{:?}: the secret view returned the whole value: {rendered}",
+                    f.id
+                );
+                assert!(
+                    !rendered.contains(&DIGITS[..5]),
+                    "{:?}: the secret view leaked the LEADING digits: {rendered}",
+                    f.id
+                );
+                // ★★★ The PER-KIND half. An SSN's mask deliberately reveals the last four (it is
+                //     how a filer recognises which of several SSNs they are looking at); an IP PIN
+                //     reveals NOTHING, because it is an anti-fraud credential and four of its six
+                //     digits is most of it. This is the discipline `IpPin(******)` states, and T10's
+                //     second PIN is held to it by enumeration rather than by having been copied.
+                if matches!(f.id, FieldId::IpPin | FieldId::SpIpPin) {
+                    assert!(
+                        !rendered.chars().any(|c| c.is_ascii_digit()),
+                        "{:?}: an IP-PIN view must reveal ZERO digits: {rendered}",
+                        f.id
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            n, 6,
+            "the form carries SIX secrets: the taxpayer's SSN, the spouse's SSN, a dependent's SSN, \
+             R5's seller-financed-mortgage payer SSN, and — since T10 — BOTH Identity Protection \
+             PINs. Restate this count deliberately when a secret is added or removed; a sweep that \
+             silently visits fewer fields is the shape this test exists to prevent."
         );
     }
 

@@ -751,9 +751,21 @@ fn the_malformed_classes_survive_the_artifact_boundary() {
         "NotDigits must survive transport as NotDigits, got {:?}",
         landed.header.taxpayer.ssn
     );
+    // ★★★ **The filer's own offending BYTES, not the letter `Z` anywhere in the file.** The scan
+    //     used to be `contains('Z')`, which is a whole-file search for one common letter: T10 added
+    //     a foreign-address stand-in and the test went red on the STAND-IN rather than on a leak.
+    //     The token asserted is the tail of the fixture's own malformed SSN (`123-45-678Z`), which
+    //     no stand-in in `scrub.rs` could contain by accident — so the check still catches a leak
+    //     anywhere in the file, and can no longer be tripped by an unrelated synthetic value.
+    let emitted = std::fs::read_to_string(&out).unwrap();
     assert!(
-        !std::fs::read_to_string(&out).unwrap().contains('Z'),
-        "the filer's own offending character crossed the boundary into the shared FILE"
+        !emitted.contains("678Z"),
+        "the filer's own offending characters crossed the boundary into the shared FILE"
+    );
+    assert!(
+        !landed.header.taxpayer.ssn.contains('Z'),
+        "the coarsened stand-in still carries the filer's character: {:?}",
+        landed.header.taxpayer.ssn
     );
     assert_eq!(
         landed.header.ip_pin,

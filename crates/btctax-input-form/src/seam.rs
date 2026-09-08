@@ -16,6 +16,10 @@ pub enum SectionId {
     Taxpayer,
     Spouse,
     Address,
+    /// ★★★ T10 / §5.4 — 1040 lines 35b-35d, `ri.header.direct_deposit`. An **OptionalSingleton**,
+    /// exactly like `Spouse`: the block either exists as a whole or does not, and none of its three
+    /// cells is meaningful without the other two (§4.3 gives none of them a serde default).
+    DirectDeposit,
     Dependents,
     W2s,
     W2Box12,
@@ -101,11 +105,33 @@ pub enum FieldId {
     SpSsn,
     SpOccupation,
     SpPresidentialFund,
+    /// ★★★ T10 / §5.4 — the SPOUSE's Identity Protection PIN (`f1040--2024.txt:133-135`), a
+    /// `FieldKind::Secret` on exactly the terms [`FieldId::IpPin`] is: `set` takes a `SecretEntry`,
+    /// `get` returns presence only. Live iff the return carries a spouse.
+    SpIpPin,
     // Address
     AddrStreet,
     AddrCity,
     AddrState,
     AddrZip,
+    /// ★★★ T10 / §5.4 — the header's foreign-address row (`f1040--2024.txt:22`). The COUNTRY is the
+    /// liveness carrier: the province and the postal code are live iff it is non-empty.
+    AddrForeignCountry,
+    AddrForeignProvince,
+    AddrForeignPostalCode,
+    /// ★★★ T10 / §5.4 — the Sign Here block's *"Phone no."* (`f1040--2024.txt:137`). Contact
+    /// information rather than an address line, but the filer types it with the address, and §4.1
+    /// lists it in the same section.
+    AddrPhone,
+    // ★★★ T10 / §5.4 — the direct-deposit block, 1040 lines 35b-35d (`SectionId::DirectDeposit`,
+    //     an OPTIONAL singleton: absence is the common case and forgoes nothing but a convenience).
+    /// Line 35b — *"Routing number"*.
+    DdRouting,
+    /// Line 35c — *"Type: Checking / Savings"*. A `FieldKind::Enum`, because the instruction says
+    /// *"Don't check more than one box"*.
+    DdKind,
+    /// Line 35d — *"Account number"*.
+    DdAccount,
     // Dependents (per row)
     DepName,
     DepSsn,

@@ -53,6 +53,10 @@ pub fn form_spec() -> &'static [Section] {
         sections::NON_FORM_1098_INTEREST,
         sections::HOME_SALE,
         sections::SCHEDULE_A_CHARITABLE,
+        // ★★★ T10 / §5.4 — the direct-deposit block sits where §4.1's flow puts it: last of the
+        //     authored sections, after the money, because it is the only question about how the
+        //     answer ARRIVES rather than what it is.
+        sections::DIRECT_DEPOSIT,
         sections::PAYMENTS,
         sections::CARRYFORWARDS,
         sections::QBI_LIMITATION,

@@ -10717,7 +10717,7 @@ mod tests {
         }
         assert_eq!(
             app.tax_inputs_form.as_ref().unwrap().section_idx,
-            23,
+            24,
             "section cursor clamps at the last live section (18 on Single: Spouse hidden, \
              box12/charitable nested). ★ +1 for the §G-22 Carryforwards section — the two QBI loss \
              carryforwards were import-only, and omitting them UNDERSTATES tax. ★ +1 again for R3's \
@@ -10726,7 +10726,7 @@ mod tests {
              1099-B, 1099-G and 1098-E. ★ +3 for T16's: the Form 1099-SA and Form 5498-SA rows, and \
              Form 8889's own money leaves. ★ THE SCHEDULE-B FILER'S-RECORDS SECTION IS COUNTED even \
              though it is live only behind R3's door — the left pane lists every section and its \
-             fields report `live` individually, exactly as `Spouse` does on an MFJ return. ★ +3 for T9's: the Form 1098 rows, Schedule A line 8b's recipient rows, and the sale of a main home."
+             fields report `live` individually, exactly as `Spouse` does on an MFJ return. ★ +3 for T9's: the Form 1098 rows, Schedule A line 8b's recipient rows, and the sale of a main home. \u{2605} +1 for T10's: the direct-deposit block (1040 lines 35b-35d), an OPTIONAL singleton listed like `Spouse` whether or not the filer gave an instruction."
         );
         // Left past the start clamps at 0.
         for _ in 0..50 {

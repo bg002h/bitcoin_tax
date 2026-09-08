@@ -411,6 +411,27 @@ pub fn seed(prior: &ReturnInputs, to: i32) -> ReturnInputs {
             address_city: prior.header.address_city.clone(),
             address_state: prior.header.address_state.clone(),
             address_zip: prior.header.address_zip.clone(),
+            // ★★★ **T10 / T4b — THE TRAILER IS SPLIT, AND BOTH HALVES ARE NAMED HERE RATHER THAN
+            //     LEFT TO `..Default::default()`.**
+            //
+            //     What CROSSES is IDENTITY — where the filer lives and how to reach them, the same
+            //     class as the four address lines directly above and as a payer's name and TIN. A
+            //     foreign address does not become domestic between years, and the phone number is
+            //     the contact detail the IRS prints on the signature line.
+            //
+            //     What does NOT cross is below, and is not a `..Default` accident either:
+            //       * an IP PIN is issued PER YEAR — the IRS mails a new one every December, so
+            //         carrying last year's would print a credential that is already void; and
+            //       * a bank account is RE-CONFIRMED, never assumed. An account closed since last
+            //         April sends this year's refund somewhere it cannot be recalled from, and
+            //         *"The IRS isn't responsible for a lost refund if you enter the wrong account
+            //         information."*
+            //     Both are left at their `Default` (`None`) by the tail below, and
+            //     `the_trailer_splits_identity_from_the_per_year_credentials` is the kill.
+            phone: prior.header.phone.clone(),
+            foreign_country: prior.header.foreign_country.clone(),
+            foreign_province: prior.header.foreign_province.clone(),
+            foreign_postal_code: prior.header.foreign_postal_code.clone(),
             // ★★★ **FR-70 (T7) — DEPENDENTS ARE SEEDED AGAIN, as IDENTITIES with every gate blank.**
             //
             //     I-2 removed them for one reason and it has now been removed: *"there is nothing on
