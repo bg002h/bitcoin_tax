@@ -6514,6 +6514,39 @@ build, each with an owning phase.
   recompile and not a cached one. What to decide: whether the mitigation belongs in every build/fold
   brief as a rule, inside `make check` itself, or in a wrapper. Related: [[FR-88]] — both are ways an
   instrument reports something other than what it measured.
+- **FR-99 — ★★ THE DOMINANT DEFECT CLASS OF THE WHOLE INTERVIEW ARC: a hand-written list standing beside
+  a set that GROWS. Proposed `CLAUDE.md` rule — OWNER'S CALL, filed not actioned. Owning phase: the
+  harness / doctrine (owner), before the interview branch ships.**
+
+  Twelve tasks in, one shape accounts for more blocking findings than any other:
+
+  | task | finding | the list | the set that grew past it |
+  |---|---|---|---|
+  | T8 | I-2 | a fixture literal hardcoded to `year: 2024` | the bundled year packages |
+  | T9 | C-1 | three new rules each re-typing a liveness conjunct | the rules reading a 1098 row |
+  | T10 | I-1 | `CARRIED_IDENTITY`'s phrases | the leaves `seed` carries |
+  | T11 | I-4 | a `match` on two filing statuses | the five T8 had just built |
+  | T11 | C-2/I-1 | a completeness partition over `Usd` leaves | facts that *route* money |
+  | T12 | I-1 | five `RefuseReason` variants | **126** |
+  | T12 | I-2 | five document families | the eight carrying `transcribed_on` |
+
+  **Every one was correct when written.** None was a mistake at the time; each became wrong when a later
+  task widened the set beneath it — usually the very next task. That is what makes it a structural
+  problem rather than a care problem, and why "be careful" cannot fix it.
+
+  This repo already states the rule for data — *"no decision keys on a list you typed beside derived
+  data"* — and on this evidence it is the highest-yield rule it has. What is proposed is making it
+  **structural rather than a review reminder**: a list of this shape either derives from the set, or
+  carries a compiler-enforced totality check (an `_`-free `match`; an `ALL` const guarded by an
+  exhaustive match; a partition asserted against the type) that **reds when the set grows**. The three
+  folds that did this — T9's single accessor, T10's `maximal_sentinel` fixture, T11's routing partition —
+  each immediately surfaced further latent defects nobody had looked for (four money defects in T11's
+  case), which is the strongest available evidence that the derived form finds what the list form hides.
+  Adopting doctrine is the owner's decision, so this is recorded rather than applied.
+
+  Related: [[FR-88]] (the same disease on the TEST side — a derived checker paired with a hand-written
+  fixture, three consecutive tasks) and [[FR-90]] (an instrument reporting something other than what it
+  measured). All three are one family: **the thing that decides was not the thing that knows.**
 - **FR-91 — the oracle projection carries ONE wage figure, so W-2 box 3 and box 5 are modelled as
   equal to box 1 (T11 build, follow-up 1). Owning phase: ownerless residue (oracle-path fidelity).**
   `GoldenInputs.w2_income` is a single number and both drivers reuse it for the §1402(b)(1) OASDI
