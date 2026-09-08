@@ -285,22 +285,88 @@ pub fn open_next_year(
 /// [`ReturnInputs::filing_status`] has no `None`, so a Single filer's carried status is
 /// byte-identical to a defaulted one, and a diff can never see it. That is the miniature of the
 /// finding itself: *"the assertion cannot distinguish carried from defaulted"*.
-const CARRIED_IDENTITY: &[(&str, &[&str], bool)] = &[
+///
+/// ★★★ **THE FOURTH COLUMN IS THE SHIPPED HELP, AND IT IS NOT OPTIONAL.** *"Four surfaces"* was the
+/// original finding, and `render()` is only one of them: `cli.rs`'s long-help doc comment — the
+/// single source `--help`, `docs/man/btctax-income-open-next-year.1` and the TUI offer all print —
+/// carries its OWN prose copy of this list, ending *"and nothing else"*. That copy has now fallen
+/// behind `seed` **twice**: T7 added the dependents and did not update it, T10 added the phone and
+/// the foreign address and did not update it. So each row names a substring the shipped help must
+/// contain, and `cli::tests::the_shipped_help_names_everything_the_opener_carries` fails the build
+/// when it does not. A row cannot be added here without deciding what the filer is told.
+pub(crate) const CARRIED_IDENTITY: &[(&str, &[&str], bool, &str)] = &[
     (
         "the filing status (a divorce or a death changes it, and §7703(a)(1) determines it on the last day of the year)",
         &["filing_status", "filing_status_confirmed"],
         true,
+        "your filing status",
     ),
     (
         "your name and SSN",
-        &["header.taxpayer", "header.spouse"],
+        // ★★ The trailing dots are load-bearing: `header.spouse` would also swallow
+        //    `header.spouse_ip_pin`, which is a per-year CREDENTIAL and not part of anybody's name
+        //    — so a future `seed` that carried the spouse's IP PIN would have been absorbed by this
+        //    phrase and announced as "your name and SSN". A prefix that reaches past its own struct
+        //    is the same blindness as a fixture that never populates a leaf, one level down.
+        &["header.taxpayer.", "header.spouse."],
         false,
+        "your name and SSN",
     ),
-    ("your mailing address", &["header.address_"], false),
+    (
+        "your mailing address",
+        &["header.address_"],
+        false,
+        "your mailing address",
+    ),
+    // ★★★ **T10 seam review I-1 — the trailer's two identity phrases.**
+    //
+    //     `seed` learned to carry `header.phone` and the three foreign-address leaves and this
+    //     table did not grow with it, so the opener printed *"Everything else is blank"* over four
+    //     leaves that had crossed. The foreign one is the one that reaches a printed page:
+    //     `HouseholdHeader::foreign_address_is_live()` reads ONLY `foreign_country`, so a filer who
+    //     moves from abroad to the US, is told to confirm *"your mailing address"*, and corrects
+    //     the four domestic lines still has last year's country, province and postal code printed
+    //     into `f1_15`/`f1_16`/`f1_17` of a domestic return. Naming the row is what gives them the
+    //     reason to look.
+    (
+        "your phone number",
+        &["header.phone"],
+        false,
+        "your phone number",
+    ),
+    (
+        "your foreign address, if you have one",
+        &["header.foreign_"],
+        false,
+        "your foreign address",
+    ),
     (
         "each employer and payer, by name and EIN/TIN, with every box blank",
-        &["w2s", "int_1099", "div_1099", "g_1099", "b_1099"],
+        // ★ T9's Form 1098 lender and T16's Form 1099-SA payer / 5498-SA trustee are payers in
+        //   exactly the sense this phrase means, and `seed` has carried all three since those
+        //   tasks. They were missing here for the same reason the trailer's two were: the guard's
+        //   fixture never populated them. It is derived now, so it does.
+        &[
+            "w2s",
+            "int_1099",
+            "div_1099",
+            "g_1099",
+            "b_1099",
+            "form_1098",
+            "sa_1099",
+            "sa_5498",
+        ],
         false,
+        "each employer and payer",
+    ),
+    // ★★★ The PERSON crosses and the CLAIM does not (see `seed`), but the person crossing is
+    //     itself something the filer must confirm — and the only place the report said so was the
+    //     per-dependent `Identity` prompt, which this table's blankness claim does not speak for.
+    (
+        "each dependent, by name, SSN and relationship, with every §152 gate blank",
+        &["header.dependents"],
+        false,
+        "each dependent's name, SSN and relationship",
     ),
     (
         "the carryforwards computed on that return",
@@ -310,11 +376,13 @@ const CARRIED_IDENTITY: &[(&str, &[&str], bool)] = &[
             "qbi.",
         ],
         false,
+        "computed carryforwards",
     ),
     (
         "and which year this one was opened from",
         &["opened_from", "tax_year"],
         true,
+        "which year this one was opened from",
     ),
 ];
 
@@ -323,13 +391,13 @@ fn carried_identity(seeded: &ReturnInputs) -> Vec<String> {
     let changed = leaves_the_seed_writes(seeded);
     CARRIED_IDENTITY
         .iter()
-        .filter(|(_, prefixes, always)| {
+        .filter(|(_, prefixes, always, _)| {
             *always
                 || changed
                     .iter()
                     .any(|leaf| prefixes.iter().any(|p| leaf.starts_with(p)))
         })
-        .map(|(label, _, _)| (*label).to_string())
+        .map(|(label, _, _, _)| (*label).to_string())
         .collect()
 }
 

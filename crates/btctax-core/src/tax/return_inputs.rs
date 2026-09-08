@@ -1257,7 +1257,27 @@ pub struct DirectDeposit {
     /// ★ An enum, so *"Don't check more than one box"* is unrepresentable rather than screened, and
     ///   with **no `Default` and no `#[serde(default)]`**: there is no safe guess between a checking
     ///   and a savings account, and the instruction says an incorrect box gets the deposit rejected.
-    pub kind: DepositAccountKind,
+    ///
+    /// ★★★ **`Option`, and the `None` is the whole point** (T10 seam review I-2). The enum had two
+    ///     variants and no unanswered state, and the input form's `create` started it at
+    ///     `Checking`, so a filer who typed the two numbers off their cheque and never opened the
+    ///     *"Account type (line 35c)"* row filed with the **Checking** box checked — testimony they
+    ///     never gave, on a line whose own instruction says *"You must check the correct box to
+    ///     ensure your deposit is accepted."* A savings filer who left the default had the deposit
+    ///     rejected. `None` is *"not chosen yet"*, `return_refuse::screen_direct_deposit`
+    ///     refuses it on both tiers exactly as it refuses an empty routing number, and
+    ///     [`crate::tax::packet::PrintedDirectDeposit`] carries the non-`Option`, so the emitter's
+    ///     exhaustive `match` cannot print a box nobody chose.
+    ///
+    /// ★★ **AND THE §4.3 CONSEQUENCE, STATED HONESTLY.** No `#[serde(default)]` is written here —
+    ///    but serde's derive reads an absent `Option` field as `None` regardless, so this is the one
+    ///    key of the block whose absence from an imported TOML PARSES rather than refusing, unlike
+    ///    `routing` and `account`. That is not a hole, and it is not closed by serde: the block
+    ///    arrives with the type unchosen and `return_refuse::screen_direct_deposit` refuses it on
+    ///    both tiers, naming line 35c. `cmd::tax::tests::the_trailer_round_trips_through_the_toml_
+    ///    wire_and_a_misspelt_key_is_named` asserts the parse AND the refusal together, because
+    ///    either alone would misdescribe what happens.
+    pub kind: Option<DepositAccountKind>,
     /// **Line 35d — *"Account number"*.**
     ///
     /// > *"The account number can be up to 17 characters (both numbers and letters). Include hyphens

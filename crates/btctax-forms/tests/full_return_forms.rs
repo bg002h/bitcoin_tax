@@ -4949,6 +4949,65 @@ fn t10_trailer_header(
         .expect("the fixture's identifiers canonicalize")
 }
 
+/// ★★★ **T10 seam review M-1 — A YEAR WHOSE MAP HAS NO `[direct_deposit]` MUST REFUSE A RETURN
+///     THAT CARRIES ONE, NOT DROP IT IN SILENCE.**
+///
+/// The write used to be `if let Some(cells) = map.direct_deposit.as_ref()`, so the three cells
+/// simply went unwritten — and `Advisory::RefundByPaperCheck` was silent too, because it reads
+/// `ReturnInputs` and its guard is `direct_deposit.is_none()`. The filer's routing and account
+/// numbers disappeared between the vault and the page with nothing said on either side, and nothing
+/// in the suite red: the field census is satisfied by those cells staying on the `UNCENSUSED`
+/// register, which is a legal state for a cell with no writer.
+///
+/// ★★ **It was unreachable when it was found and is filed against the task that makes it
+///    reachable.** TY2024 is the only year that emits a full return today and it declares the
+///    block; FR-84 writes a TY2025 `[header]`, and from that moment a TY2025 map without
+///    `[direct_deposit]` walks straight into this. The kill is written now because the guard is
+///    written now.
+///
+/// ★ **Both directions**, so it cannot be satisfied by a refusal that always fires: a map with no
+///   block and a return with no instruction is the ordinary TY2025 state and must still FILL.
+#[test]
+fn a_map_with_no_direct_deposit_block_refuses_a_return_that_has_one() {
+    use btctax_core::tax::return_inputs::{DepositAccountKind, DirectDeposit};
+    let mut map = btctax_forms::Form1040Map::ty2024();
+    map.direct_deposit = None;
+
+    let with_block = t10_trailer_header(|ri| {
+        ri.header.direct_deposit = Some(DirectDeposit {
+            routing: "123456780".into(),
+            kind: Some(DepositAccountKind::Checking),
+            account: "ACCT-000123".into(),
+        });
+    });
+    // ★ Destructured rather than `expect_err`: the Ok payload is the whole filled PDF, and printing
+    //   a megabyte of bytes into a failure message hides the finding it is reporting.
+    let Err(err) = fill_form_1040_full_with_map(&f1040(), &with_block, FilingStatus::Mfj, &map)
+    else {
+        panic!(
+            "dropping the filer's bank details must not be silent — the fill returned Ok on a map \
+             with no [direct_deposit] and a return that carries one"
+        )
+    };
+    let FormsError::Geometry(m) = &err else {
+        panic!("expected Geometry, got {err:?}")
+    };
+    assert!(
+        m.contains("[direct_deposit]") && m.contains("routing and account numbers"),
+        "the refusal must name the missing map section AND what would have been dropped: {m}"
+    );
+    assert!(
+        m.contains("RefundByPaperCheck"),
+        "and it must say why nothing else would have told the filer: {m}"
+    );
+
+    // The other direction: no block mapped, no instruction given — the ordinary state of a year
+    // that has not mapped 35b-35d yet, and it must still fill.
+    let no_block = t10_trailer_header(|_| {});
+    fill_form_1040_full_with_map(&f1040(), &no_block, FilingStatus::Mfj, &map)
+        .expect("a return with no deposit instruction needs no [direct_deposit] block");
+}
+
 /// ★★★ **T10 — LINES 35b-35d REACH THE PRINTED PAGE, AND THE ACCOUNT-TYPE BOX IS THE ONE THE FILER
 ///     CHOSE.**
 ///
@@ -4981,7 +5040,7 @@ fn the_direct_deposit_block_prints_the_filers_numbers_and_exactly_one_type_box()
         let h = t10_trailer_header(|ri| {
             ri.header.direct_deposit = Some(DirectDeposit {
                 routing: "123456780".into(),
-                kind,
+                kind: Some(kind),
                 account: "ACCT-000123".into(),
             });
         });

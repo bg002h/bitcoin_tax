@@ -6432,6 +6432,38 @@ build, each with an owning phase.
   walk is the `1..=38` trap one level down."* Amending harness doctrine is the owner's decision, so this
   is recorded rather than applied. Related: [[FR-86]] (six T8 kills never watched red) and [[FR-87]] (an
   unreachable guard arm) — the same family, all owned by T12 or the owner.
+
+  **★ 2026-09-07 (T10 fold) — the T10 INSTANCE is closed structurally; the DOCTRINE question is
+  still the owner's.** `every_leaf_the_seed_carries_is_named_in_the_report` no longer writes its own
+  year N. It is fed from `scrub_axis::maximal_sentinel` — the repo's every-`Option`-`Some`,
+  two-rows-of-every-`Vec`, every-leaf-non-default `ReturnInputs`, written as an exhaustive struct
+  literal with no `..Default::default()`, so a leaf added to `ReturnInputs` is an `E0063` there and
+  is populated in the guard the day it is added — plus a FLOOR that calls `open_next_year::seed`
+  directly on that prior and asserts every leaf it writes was reached by the walk. Trimming the
+  fixture now reds; it used to just narrow the guard. **The derived fixture found four more
+  omissions the moment it was switched on**: `header.dependents` (T7), `form_1098` (T9), `sa_1099`
+  and `sa_5498` (T16) were all carried by `seed` and named by no phrase in `CARRIED_IDENTITY` — the
+  same defect as the phone and the foreign address, three tasks deep. That is the measurement the
+  proposed B1 amendment is arguing from, and it is now on the record rather than inferred.
+- **FR-89 — SECRET HANDLING (logged, NEVER gating, per the owner ruling of 2026-08-27): the routing
+  and account numbers are `FieldKind::Text`, not `Secret` (T10 build follow-up 2; confirmed by the
+  T10 seam review, M-4). Owning phase: ownerless residue.**
+
+  **Reproduction.** `btctax tui-edit` → `T` on the year → Direct deposit → `c`. The *"Routing number
+  (line 35b)"* and *"Account number (line 35d)"* cells echo what is typed and show it unmasked on
+  every revisit, whereas the taxpayer's and spouse's IP PINs — two sections away, `FieldKind::Secret`
+  — return presence only from `get` and never redisplay a digit.
+
+  **Deliberate, and the reasoning is sound as far as it goes:** a filer must be able to read a
+  routing number back against the bottom of their cheque, and a `Secret` field cannot show them
+  anything. It is recorded because it is a real asymmetry, not because the call is wrong.
+
+  **Bounded, and each bound has a test:** both numbers are replaced by `scrub_routing` /
+  `scrub_account` (class-preserving, held by §3.3's derived matrix), redacted to `***` by `income
+  show`'s `mask_pii` (`income_show_redacts_the_spouse_ip_pin_and_the_bank_numbers`, with a plant),
+  masked in `Debug` (`RoutingNumber(*********)` / `AccountNumber(*****)`), and never carried across a
+  year (`the_trailer_splits_identity_from_the_per_year_credentials`). What is unbounded is only the
+  on-screen echo in the editor and whatever a terminal scrollback keeps of it.
 - **FR-82 — `tax_tables.rs`'s TY2026 doc comment cites Rev. Proc. 2025-32 §2.14 / §2.10 for figures
   that sit in its Section 4 (T7 build, follow-up 2; pre-existing). Owning phase: ownerless residue
   (doc-consistency).** The new §4.23 cite beside them is accurate.

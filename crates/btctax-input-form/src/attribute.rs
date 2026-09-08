@@ -106,6 +106,9 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
             use btctax_core::tax::return_refuse::DirectDepositCell as C;
             vec![Anchor::Field(match cell {
                 C::Routing => FieldId::DdRouting,
+                // ★ T10 seam review I-2 — line 35c is not on the cheque; the cursor goes to the
+                //   two-way control the filer chooses it on.
+                C::Kind => FieldId::DdKind,
                 C::Account => FieldId::DdAccount,
             })]
         }

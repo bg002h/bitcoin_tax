@@ -64,7 +64,7 @@ distinct, so the mapping is corroborated independently of the x-order.
 | piece | where |
 |---|---|
 | `HouseholdHeader::direct_deposit: Option<DirectDeposit>` | `return_inputs.rs` |
-| `DirectDeposit { routing: String, kind: DepositAccountKind, account: String }` — **no `#[serde(default)]` on any field** (§4.3) | `return_inputs.rs` |
+| `DirectDeposit { routing: String, kind: DepositAccountKind, account: String }` — **no `#[serde(default)]` on any field** (§4.3). ★ **Corrected by seam review I-2:** `kind` is now `Option<DepositAccountKind>`, `create` leaves it `None`, and line 35c refuses until the filer chooses — see the fold report | `return_inputs.rs` |
 | `DepositAccountKind { Checking, Savings }` — no `Default`, no `#[serde(other)]` | `return_inputs.rs` |
 | `RoutingNumber` / `AccountNumber` / `BankNumberError` / `PrintedDirectDeposit` | `packet.rs` |
 | `RefuseReason::DirectDepositNumberMalformed { cell: DirectDepositCell, why: BankNumberError }` + `screen_direct_deposit` (a **value** rule, refuses on BOTH tiers) | `return_refuse.rs` |
@@ -222,10 +222,39 @@ it is applied anyway: the ninth digit of an ABA routing transit number exists fo
 the instruction's own consequences for a mistyped number are severe and silent (*"You haven't given a
 valid account number"* under **Reasons Your Direct Deposit Request Will Be Rejected**,
 `i1040gi--2025.txt:24031-24052`, `:24049-24050`; and *"The IRS isn't responsible for a lost refund if
-you enter the wrong account information."*, `:24023-24026`); and **the failure mode of applying it is
-safe** — a refused number is simply not stored, the return files with no deposit block, and
-`RefundByPaperCheck` tells the filer in words. Nothing is blocked and no figure moves. The one thing
-that cannot happen is a wrong number printed on a filed return.
+you enter the wrong account information."*, `:24023-24026`).
+
+> ★★★ **CORRECTED BY THE T10 SEAM REVIEW (I-3), 2026-09-07 — the sentence that stood here was false
+> in all three of its claims and is retained struck through, because the argument it made is the one
+> a future maintainer must NOT reason from.**
+>
+> ~~"and **the failure mode of applying it is safe** — a refused number is simply not stored, the
+> return files with no deposit block, and `RefundByPaperCheck` tells the filer in words. Nothing is
+> blocked and no figure moves."~~
+>
+> The number **is** stored (the seam's `set` writes the raw string with no validation); the return
+> does **not** file (`screen_direct_deposit` is a VALUE rule outside the answered-ness tier, so it
+> refuses on both tiers, `resolve.rs` fails closed on it, and `ReturnHeader::build` refuses again at
+> the print boundary); and `RefundByPaperCheck` **never fires**, because advisories are computed only
+> after the screen passes and its guard is `direct_deposit.is_none()` — a present-but-malformed block
+> silences it.
+>
+> **The rule is still right, on the true terms: this refusal BLOCKS A RETURN, and is defensible
+> because it is loud, cell-anchored and self-clearing** — it names the cell, the rule and both
+> remedies, the input form anchors the cursor on the failing field, and deleting the block makes the
+> return file and the advisory speak. What must not be carried anywhere else is the inference the
+> false version licensed: *"a btctax-only validity rule costs nothing, because a failure just means a
+> paper check."* Every such rule blocks a return until the filer acts, and adding one to another cell
+> has to be argued on its own near-zero false-refusal rate, its own remedy and its own unrecoverable
+> harm from accepting.
+>
+> Source of record: `crates/btctax-core/src/tax/packet.rs` (`RoutingNumber::canonical`'s doc), with
+> `advisories::tests::a_malformed_routing_number_blocks_the_return_and_the_paper_check_notice_stays_silent`
+> asserting the corrected behaviour in its own order. The same false claim also went into the T10
+> commit message (`f8768e93`), which cannot be rewritten; the review ledger and this note are its
+> correction of record.
+
+The one thing that cannot happen is a wrong number printed on a filed return.
 
 > ★★★ **A finding worth its own line: the routing number the IRS PRINTS ON ITS OWN SAMPLE CHECK does
 > not satisfy the ABA check digit.** `250250025` — `3(2+2+0) + 7(5+5+2) + (0+0+5) = 101`, and

@@ -1301,7 +1301,7 @@ fn the_trailer_splits_identity_from_the_per_year_credentials() {
         ri.header.spouse_ip_pin = Some("654321".into());
         ri.header.direct_deposit = Some(DirectDeposit {
             routing: "123456780".into(),
-            kind: DepositAccountKind::Savings,
+            kind: Some(DepositAccountKind::Savings),
             account: "ACCT-000123".into(),
         });
     });
@@ -1360,49 +1360,90 @@ fn the_filers_identity_crosses_and_the_per_year_header_facts_do_not() {
 // I-1 — what crossed is NAMED, and the carried filing status has a surface
 // ════════════════════════════════════════════════════════════════════════════════════════════════
 
+/// Every serde leaf on which `ri` DIFFERS from a blank return for the same year — the same walk
+/// `open_next_year::leaves_the_seed_writes` performs, with T1's own machinery rather than a
+/// hand-list.
+fn leaves_that_differ_from_blank(ri: &ReturnInputs) -> Vec<String> {
+    use btctax_core::tax::provenance::leaf_walk;
+    let blank = serde_json::to_value(ReturnInputs {
+        tax_year: ri.tax_year,
+        ..Default::default()
+    })
+    .unwrap();
+    let doc = serde_json::to_value(ri).unwrap();
+    let mut leaves = Vec::new();
+    leaf_walk::walk(&doc, "", &mut leaves);
+    leaves
+        .into_iter()
+        .filter(|path| leaf_walk::at(&blank, path) != leaf_walk::at(&doc, path))
+        .collect()
+}
+
+/// The repo's MAXIMAL `ReturnInputs`, re-yeared to `FROM` — the derived fixture this file's I-1
+/// guard is fed from. See [`every_leaf_the_seed_carries_is_named_in_the_report`].
+fn maximal_year_n() -> ReturnInputs {
+    let mut ri = btctax_core::tax::scrub_axis::maximal_sentinel();
+    ri.tax_year = FROM;
+    ri
+}
+
 /// ★★★ **Every leaf the seed writes is claimed by a phrase the report prints.**
 ///
 /// The finding was four surfaces asserting *"every box is blank and every question is unanswered"*
 /// while five fields crossed. This walks the seed against a blank return for the same year — with
 /// T1's own machinery, not a hand-list — and requires each differing leaf to be named. A field added
 /// to `seed` tomorrow fails HERE unless the report grows a phrase for it.
+///
+/// ★★★ **THE FIXTURE IS DERIVED, NOT REMEMBERED — T10 seam review I-1, and the reason this test is
+///     shaped this way rather than the obvious way.**
+///
+/// It shipped green through a real defect: T10 taught `seed` to carry `header.phone` and the three
+/// foreign-address leaves, `CARRIED_IDENTITY` grew no phrase for them, and this guard said OK —
+/// because its year-N fixture never *populated* those leaves, so they never differed from a blank
+/// return and the walk never reached them. T9's Critical and T8's I-1 were the same shape: **a
+/// derived checker paired with a hand-written fixture, where the fixture decides what the checker
+/// can see.** Three consecutive tasks.
+///
+/// So the fixture is no longer written here. [`maximal_year_n`] is
+/// [`btctax_core::tax::scrub_axis::maximal_sentinel`] — the repo's every-`Option`-`Some`,
+/// two-rows-of-every-`Vec`, every-leaf-non-default `ReturnInputs`, written as an **exhaustive
+/// struct literal with no `..Default::default()` anywhere**, so a leaf added to `ReturnInputs`
+/// tomorrow is an `E0063` *there* and is populated *here* the day it is added. A leaf `seed`
+/// starts carrying can therefore no longer be invisible to this walk.
+///
+/// ★ Two fixtures, because one cannot reach everything: the maximal sentinel's Form 8960 line 9b
+///   makes its year-N return refuse, so its carryforward chain is `not_carried` and the
+///   carryforward phrases would go unexercised. [`a_year_with_money_in_it`] computes, and covers
+///   them. The floor below is what makes the pair a *measurement* rather than a hope: it asserts
+///   that between them they reach **every leaf a direct `seed(&maximal, TO)` writes**, so trimming
+///   either fixture reds HERE rather than at the next omission.
 #[test]
 fn every_leaf_the_seed_carries_is_named_in_the_report() {
-    use btctax_core::tax::provenance::leaf_walk;
-    let (_dir, vault) = vault_with_year_n(|ri| {
-        a_year_with_money_in_it(ri);
-        ri.filing_status = FilingStatus::HoH;
-        ri.header.spouse = None;
-    });
-    let opened = open(&vault, false);
-    let seed = draft(&vault);
-    let blank = serde_json::to_value(ReturnInputs {
-        tax_year: TO,
-        ..Default::default()
-    })
-    .unwrap();
-    let doc = serde_json::to_value(&seed).unwrap();
-    let mut leaves = Vec::new();
-    leaf_walk::walk(&doc, "", &mut leaves);
-    let changed: Vec<String> = leaves
-        .into_iter()
-        .filter(|path| leaf_walk::at(&blank, path) != leaf_walk::at(&doc, path))
-        .collect();
-    assert!(
-        changed.len() >= 8,
-        "the fixture must actually carry things, or this test is vacuous: {changed:?}"
-    );
     // The phrases the report prints, and the leaf prefixes each stands for. This list is the TEST's,
     // deliberately: it is what the reader of `render` would understand, checked against what the
     // code did.
     const NAMED: &[(&str, &[&str])] = &[
         ("filing status", &["filing_status"]),
-        ("name and SSN", &["header.taxpayer", "header.spouse"]),
+        // ★★ Trailing dots: `header.spouse` would also swallow `header.spouse_ip_pin`, a per-year
+        //    credential that is not part of anybody's name. Mirrors `CARRIED_IDENTITY`.
+        ("name and SSN", &["header.taxpayer.", "header.spouse."]),
         ("mailing address", &["header.address_"]),
+        ("phone number", &["header.phone"]),
+        ("foreign address", &["header.foreign_"]),
         (
             "employer and payer",
-            &["w2s", "int_1099", "div_1099", "g_1099", "b_1099"],
+            &[
+                "w2s",
+                "int_1099",
+                "div_1099",
+                "g_1099",
+                "b_1099",
+                "form_1098",
+                "sa_1099",
+                "sa_5498",
+            ],
         ),
+        ("dependent", &["header.dependents"]),
         (
             "carryforwards",
             &[
@@ -1413,27 +1454,73 @@ fn every_leaf_the_seed_carries_is_named_in_the_report() {
         ),
         ("opened from", &["opened_from", "tax_year"]),
     ];
-    let rendered = opened.render();
-    for leaf in &changed {
-        let hit = NAMED
-            .iter()
-            .find(|(_, prefixes)| prefixes.iter().any(|p| leaf.starts_with(p)));
-        let (phrase, _) = hit.unwrap_or_else(|| {
-            panic!(
-                "the seed writes `{leaf}`, and no phrase in the opener's report names it — a filer \
-                 reading \"everything else is blank\" would have no reason to look. Report:\n{rendered}"
-            )
-        });
+
+    let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for (what, mutate) in [
+        (
+            "the MAXIMAL sentinel (every leaf non-default, compiler-enforced)",
+            &(|ri: &mut ReturnInputs| *ri = maximal_year_n()) as &dyn Fn(&mut ReturnInputs),
+        ),
+        (
+            "a year with money in it (the carryforward chain, which the sentinel cannot compute)",
+            &(|ri: &mut ReturnInputs| {
+                a_year_with_money_in_it(ri);
+                ri.filing_status = FilingStatus::HoH;
+                ri.header.spouse = None;
+            }),
+        ),
+    ] {
+        let (_dir, vault) = vault_with_year_n(mutate);
+        let opened = open(&vault, false);
+        let seed = draft(&vault);
+        let changed = leaves_that_differ_from_blank(&seed);
         assert!(
-            opened.carried_identity.iter().any(|c| c.contains(phrase)),
-            "`{leaf}` is covered by \"{phrase}\", which the report does not print: {:?}",
-            opened.carried_identity
+            changed.len() >= 8,
+            "{what}: the fixture must actually carry things, or this test is vacuous: {changed:?}"
+        );
+        let rendered = opened.render();
+        for leaf in &changed {
+            let hit = NAMED
+                .iter()
+                .find(|(_, prefixes)| prefixes.iter().any(|p| leaf.starts_with(p)));
+            let (phrase, _) = hit.unwrap_or_else(|| {
+                panic!(
+                    "{what}: the seed writes `{leaf}`, and no phrase in the opener's report names \
+                     it — a filer reading \"everything else is blank\" would have no reason to \
+                     look. Report:\n{rendered}"
+                )
+            });
+            assert!(
+                opened.carried_identity.iter().any(|c| c.contains(phrase)),
+                "{what}: `{leaf}` is covered by \"{phrase}\", which the report does not print: {:?}",
+                opened.carried_identity
+            );
+            seen.insert(leaf.clone());
+        }
+        assert!(
+            rendered.contains("Carried from TY2024 — CONFIRM each:")
+                && rendered.contains("Everything else is blank"),
+            "{what}: and the blankness claim is BOUNDED by its exceptions: {rendered}"
         );
     }
+
+    // ★★★ **THE FLOOR — the fixtures are checked against `seed` itself, never trusted.**
+    //
+    //     `seed` is called DIRECTLY on the maximal prior (no vault, no carryforward chain, so this
+    //     cannot be defeated by a year-N return that refuses), and every leaf it writes must be one
+    //     the loop above actually reached and named. Trim a fixture and this reds; teach `seed` a
+    //     new carry and this reds. It is the assertion the three green-but-blind guards did not
+    //     have.
+    let direct =
+        leaves_that_differ_from_blank(&btctax_cli::open_next_year::seed(&maximal_year_n(), TO));
+    let unreached: Vec<&String> = direct.iter().filter(|l| !seen.contains(*l)).collect();
     assert!(
-        rendered.contains("Carried from TY2024 — CONFIRM each:")
-            && rendered.contains("Everything else is blank"),
-        "and the blankness claim is BOUNDED by its exceptions: {rendered}"
+        unreached.is_empty(),
+        "`seed` writes {n} leaves that NO fixture above reached, so the walk could never have \
+         asked whether the report names them — extend the fixture, do not narrow the assertion. \
+         The first ten: {first:?}",
+        n = unreached.len(),
+        first = &unreached[..unreached.len().min(10)]
     );
 }
 

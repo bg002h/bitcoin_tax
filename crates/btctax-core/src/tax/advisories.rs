@@ -225,8 +225,20 @@ pub enum Advisory {
     /// **Unconditional on a computed full return**, like its two siblings above: these are things
     /// btctax does not OFFER, so there is no input that could make the notice conditional.
     UnmodeledReturnOptionsOmitted,
-    /// §3.4 / SPEC §9.2 conservative omission: v1 never fills the 1040 direct-deposit block (L35b–d),
-    /// so a refund arrives as a **paper check**. Fires only when the return is actually due a refund.
+    /// ★★★ **Fires when the return is due a refund AND the filer gave no direct-deposit
+    ///     instruction** (§5.4 / T10). The block itself is collected and printed when they do give
+    ///     one, so this is a statement about THIS return, not about the product.
+    ///
+    /// ★ Seam review M-2: this comment used to repeat the pre-T10 limitation — that the product
+    ///   never filled lines 35b–35d, so a refund always arrived as a paper check — which the same
+    ///   change had already retracted from the variant's `message()`, from its fire condition and
+    ///   from `LIMITATIONS.md`. The doc comment was the one copy nothing asserted on, which is why
+    ///   it survived; `the_paper_check_advisory_is_silent_exactly_when_a_deposit_is_given` now
+    ///   scans this module's own source for the retracted sentence, so every copy is covered.
+    ///
+    /// ★★ Its guard is `direct_deposit.is_none()`, so a block that is PRESENT but malformed
+    ///    silences it — the return is refused instead, and the refusal names the remedy. See
+    ///    `RoutingNumber::canonical`'s doc (seam review I-3) for why that matters.
     RefundByPaperCheck { refund: Usd },
     /// ★ §163(h)(3)(F) (P9 §2.7 / §3.4): the filer declared a MIXED-USE mortgage, and v1 cannot compute the
     /// Pub. 936 allocation — so Schedule A line 8a was treated as $0 and the line-8 box was checked. This can
@@ -2998,7 +3010,7 @@ mod tests {
         let block = || {
             Some(DirectDeposit {
                 routing: "123456780".into(),
-                kind: DepositAccountKind::Checking,
+                kind: Some(DepositAccountKind::Checking),
                 account: "ACCT-1".into(),
             })
         };
@@ -3039,9 +3051,131 @@ mod tests {
             m.contains("tui-edit") && m.contains("income import"),
             "the notice must name the two surfaces that CAN take the block: {m}"
         );
+        // ★ The needle is assembled from two literals, and is the ONLY spelling of it in this
+        //   file, so the source scan below cannot trip on this line. A checker that reds on its own
+        //   text is one nobody can satisfy, and the temptation is then to weaken it.
+        let needle = concat!("v1 never ", "fills");
         assert!(
-            !m.contains("v1 never fills"),
+            !m.contains(needle),
             "the old unconditional wording claimed btctax cannot fill the block; it can: {m}"
+        );
+
+        // ★★★ **Seam review M-2 — AND NOT ANYWHERE ELSE IN THIS FILE EITHER.** The retracted claim
+        //     survived T10 in the variant's own DOC COMMENT, three lines from the `message()` this
+        //     test reads, because a doc comment is the one copy no assertion could reach. This scans
+        //     the module's own source for it, so every copy in this file is covered — comment,
+        //     message and condition alike.
+        let src = include_str!("advisories.rs");
+        assert!(
+            !src.contains(needle),
+            "`advisories.rs` still claims {needle:?} somewhere — T10 fills the direct-deposit \
+             block, and the sentence is retracted in the message, the fire condition and \
+             LIMITATIONS.md. A doc comment saying otherwise is the copy that outlives them."
+        );
+    }
+
+    /// ★★★ **T10 seam review I-3 — THE ABA RULE'S DOCUMENTED FAILURE MODE IS THE ONE IT ACTUALLY
+    ///     HAS.**
+    ///
+    /// `RoutingNumber::canonical`'s doc is the whole argument for applying a validity rule the IRS
+    /// instruction does not state, so what it says about the consequence of a failure is
+    /// load-bearing: it is what a future maintainer will reason from when deciding whether that
+    /// class of rule may be extended to another cell. The version that shipped said a bad number
+    /// *"is not stored"*, that the return *"files with NO deposit block"*, and that *"Nothing is
+    /// blocked"*. Every one of the three was false, and the argument they made — *"this costs
+    /// nothing, because a failure just means a paper check"* — is exactly the licence that must not
+    /// be given.
+    ///
+    /// This asserts the behaviour the CORRECTED paragraph describes, in its own order, so the
+    /// record cannot drift back: **a malformed number blocks the return on both boundaries, the
+    /// compensating advisory does NOT fire while the block is present, and deleting the block is
+    /// what makes the return file and the advisory speak.** The rule is defensible on those terms —
+    /// loud, cell-anchored, self-clearing — and this test is what keeps the terms true.
+    #[test]
+    fn a_malformed_routing_number_blocks_the_return_and_the_paper_check_notice_stays_silent() {
+        use crate::tax::packet::{BankNumberError, HeaderError, ReturnHeader};
+        use crate::tax::return_inputs::{DepositAccountKind, DirectDeposit};
+        use crate::tax::return_refuse::{screen_param_free, DirectDepositCell, RefuseReason};
+
+        let base = || {
+            let mut ri = ReturnInputs {
+                tax_year: 2024,
+                filing_status: FilingStatus::Single,
+                ..Default::default()
+            };
+            ri.header.taxpayer.first_name = "Pat".into();
+            ri.header.taxpayer.last_name = "Roe".into();
+            ri.header.taxpayer.ssn = "000-00-2222".into();
+            ri.header.taxpayer.date_of_birth = Some(time::macros::date!(1980 - 01 - 01));
+            crate::tax::testonly::answer_all_live_declarations(&mut ri);
+            ri
+        };
+        let paper_check_fires = |ri: &ReturnInputs| {
+            advisories(
+                ri,
+                &LedgerState::default(),
+                dec!(150000),
+                dec!(150000),
+                dec!(1234.56),
+                &params(),
+                2024,
+                false,
+            )
+            .iter()
+            .any(|a| matches!(a, Advisory::RefundByPaperCheck { .. }))
+        };
+
+        // The IRS's own sample-check number, which is nine digits with a lawful prefix and fails
+        // the ABA check digit — the one number in this repo DOCUMENTED to fail rule 3.
+        let mut bad = base();
+        bad.header.direct_deposit = Some(DirectDeposit {
+            routing: "250250025".into(),
+            kind: Some(DepositAccountKind::Checking),
+            account: "ACCT-1".into(),
+        });
+
+        // 1. It IS stored. (The seam's own `set` writes the raw string with no validation; this
+        //    asserts the state that reaches the screen, which is the claim that matters.)
+        assert_eq!(
+            bad.header.direct_deposit.as_ref().unwrap().routing,
+            "250250025",
+            "the malformed number is stored, not silently dropped"
+        );
+        // 2. Nothing files: it refuses on the param-free (import) tier, naming the cell and rule.
+        assert_eq!(
+            screen_param_free(&bad).map(|r| r.reason),
+            Some(RefuseReason::DirectDepositNumberMalformed {
+                cell: DirectDepositCell::Routing,
+                why: BankNumberError::BadCheckDigit,
+            }),
+            "a bad check digit must BLOCK the return — this rule is not a warning"
+        );
+        // 3. And again at the print boundary.
+        assert_eq!(
+            ReturnHeader::build(&bad, 2024).err(),
+            Some(HeaderError::Bank(BankNumberError::BadCheckDigit)),
+            "the print boundary is the second refusal, not a fallback that prints something else"
+        );
+        // 4. The compensating advisory does NOT rescue it: its guard is `direct_deposit.is_none()`,
+        //    so a present-but-malformed block silences it. This is the claim whose falsity made the
+        //    old paragraph's argument work.
+        assert!(
+            !paper_check_fires(&bad),
+            "RefundByPaperCheck is guarded on the block being ABSENT — a malformed block silences \
+             it, so the filer is NOT told a check is coming"
+        );
+        // 5. The remedy the refusal names is real: delete the block, and the return files and the
+        //    advisory speaks. That is what makes the refusal self-clearing rather than a dead end.
+        let mut cleared = bad.clone();
+        cleared.header.direct_deposit = None;
+        assert_eq!(
+            screen_param_free(&cleared),
+            None,
+            "a return with no deposit instruction is complete"
+        );
+        assert!(
+            paper_check_fires(&cleared),
+            "and THEN the paper-check notice fires — on the cleared return, never on the refused one"
         );
     }
 

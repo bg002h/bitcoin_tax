@@ -763,8 +763,10 @@ fn scrub_header(h: &HouseholdHeader) -> HouseholdHeader {
         //     boundary), malformed → a malformed non-credential stand-in.
         spouse_ip_pin: spouse_ip_pin.as_deref().and_then(scrub_ip_pin),
         // ★★ A PHONE NUMBER is directly identifying — more so than the address, since it reaches a
-        //    person rather than a building. Replaced, emptiness preserved: nothing reads it, so only
-        //    the blank/non-blank shape has to survive.
+        //    person rather than a building. Replaced, emptiness preserved: no FIGURE is computed
+        //    from it (it prints verbatim in the signature block, `f2_37`), so only the blank/
+        //    non-blank shape has to survive. Seam review N-1 — the earlier wording, *"nothing reads
+        //    it"*, was said of a field that reaches the printed page.
         phone: replace_preserving_emptiness(phone, SCRUB_PHONE.into()),
         // ★★ The FOREIGN ADDRESS, replaced line by line exactly as the domestic one above is — and
         //    for the extra reason that a foreign address is far more identifying than a domestic

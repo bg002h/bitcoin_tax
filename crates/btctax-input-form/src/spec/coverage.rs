@@ -203,7 +203,7 @@ fn maximal_fixture() -> ReturnInputs {
     //   `Checking` below.
     ri.header.direct_deposit = Some(btctax_core::tax::return_inputs::DirectDeposit {
         routing: "123456780".to_string(),
-        kind: btctax_core::tax::return_inputs::DepositAccountKind::Savings,
+        kind: Some(btctax_core::tax::return_inputs::DepositAccountKind::Savings),
         account: "0000000000".to_string(),
     });
     // ★ A spouse PIN, so the Secret leaf is realized (the spouse itself is created above).

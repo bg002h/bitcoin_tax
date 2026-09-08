@@ -493,7 +493,9 @@ pub fn maximal_sentinel() -> ReturnInputs {
             //    is the standing check for exactly that.
             direct_deposit: Some(crate::tax::return_inputs::DirectDeposit {
                 routing: "111111118".into(),
-                kind: crate::tax::return_inputs::DepositAccountKind::Savings,
+                // ★ MAXIMAL means non-default here too: `Savings`, and `Some` — a `None` leaf is
+                //   identical on both sides of the scrub and drops out of the derived axis.
+                kind: Some(crate::tax::return_inputs::DepositAccountKind::Savings),
                 account: "SENTINEL-ACCT-1".into(),
             }),
         },

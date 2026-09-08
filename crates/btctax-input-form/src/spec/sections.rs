@@ -598,8 +598,20 @@ const ADDRESS_FIELDS: &[Field] = &[
         kind: FieldKind::Text,
         live: |_| true,
         get: |ri, _| Some(FieldValue::Text(ri.header.foreign_country.clone())),
+        // ★★★ **Seam review M-3 — CLEARING THE COUNTRY CLEARS THE WHOLE ROW.**
+        //
+        //     Emptying the country makes the other two dead (`live` → false, `get` → `None`, `set`
+        //     → `NoSuchRow`) but used to leave their values at rest — so entering ANY country later
+        //     brought last year's province and postal code back live, and they then print. The
+        //     foreign row is one address, and this is the same rule the Spouse section's `delete`
+        //     keeps for `spouse_ip_pin`: what a control makes unreachable, it also clears, or the
+        //     unreachable value is a fact about the return that nothing on screen can show.
         set: |ri, _, v| {
             let FieldValue::Text(s) = v else { return Err(SetError::WrongKind) };
+            if s.is_empty() {
+                ri.header.foreign_province.clear();
+                ri.header.foreign_postal_code.clear();
+            }
             ri.header.foreign_country = s;
             Ok(())
         },
@@ -656,7 +668,10 @@ const ADDRESS_FIELDS: &[Field] = &[
         id: FieldId::AddrPhone,
         clear: None,
         label: "Phone number",
-        help: "1040 signature block, \"Phone no.\" — how the IRS can reach you about this return. Optional: a blank is lawful and nothing on the return reads it.",
+        // ★ Seam review N-1: this used to end *"nothing on the return reads it"*, said of a field
+        //   that PRINTS on the return (`f2_37`, the signature block) — which is the whole reason it
+        //   is collected. A filer reading it could reasonably conclude the opposite.
+        help: "1040 signature block, \"Phone no.\" — how the IRS can reach you about this return. Optional: a blank is lawful, and no figure on the return is computed from it; it prints in the signature block.",
         kind: FieldKind::Text,
         live: |_| true,
         get: |ri, _| Some(FieldValue::Text(ri.header.phone.clone())),
@@ -720,15 +735,22 @@ const DIRECT_DEPOSIT_FIELDS: &[Field] = &[
         help: "Checking or Savings. \"Don't check more than one box … You must check the correct box to ensure your deposit is accepted.\" If the account is an IRA, HSA or brokerage account, ask your financial institution which one applies.",
         kind: FieldKind::Enum(&["Checking", "Savings"]),
         live: |_| true,
+        // ★★★ **T10 seam review I-2 — an unchosen type reads as UNANSWERED, not as `Checking`.**
+        //
+        //     `and_then`, not `map`: the row exists (the block is present) but its answer does not,
+        //     which is exactly what `None` means to every reader of a `Field`. The editor shows it
+        //     blank, `screen_direct_deposit` refuses it, and nothing prints.
         get: |ri, _| {
-            ri.header.direct_deposit.as_ref().map(|d| {
-                FieldValue::Choice(
-                    match d.kind {
-                        DepositAccountKind::Checking => "Checking",
-                        DepositAccountKind::Savings => "Savings",
-                    }
-                    .to_string(),
-                )
+            ri.header.direct_deposit.as_ref().and_then(|d| {
+                d.kind.map(|k| {
+                    FieldValue::Choice(
+                        match k {
+                            DepositAccountKind::Checking => "Checking",
+                            DepositAccountKind::Savings => "Savings",
+                        }
+                        .to_string(),
+                    )
+                })
             })
         },
         set: |ri, _, v| {
@@ -742,7 +764,7 @@ const DIRECT_DEPOSIT_FIELDS: &[Field] = &[
                 .direct_deposit
                 .as_mut()
                 .ok_or(SetError::NoSuchRow)?
-                .kind = kind;
+                .kind = Some(kind);
             Ok(())
         },
     },
@@ -776,17 +798,23 @@ pub(crate) const DIRECT_DEPOSIT: Section = Section {
     title: "Direct deposit",
     kind: SectionKind::OptionalSingleton {
         present: |ri| ri.header.direct_deposit.is_some(),
-        // ★★ The new block starts EMPTY on both numbers and `Checking` on the type — and an empty
-        //    routing number REFUSES (`DirectDepositNumberMalformed`, the `Missing` leg), which is
-        //    the point: a half-created block is visible as a refusal rather than as a silently
-        //    blank refund row. `Checking` is not a guess about the filer's account; it is the
-        //    starting position of a two-way control the filer must confirm, and the block does not
-        //    reach a printed page until its numbers do.
+        // ★★ The new block starts EMPTY on all three cells — and an empty routing number REFUSES
+        //    (`DirectDepositNumberMalformed`, the `Missing` leg), which is the point: a half-created
+        //    block is visible as a refusal rather than as a silently blank refund row.
+        //
+        // ★★★ **THE TYPE STARTS UNCHOSEN** (T10 seam review I-2). It used to start at `Checking`,
+        //     and the comment here called that *"the starting position of a two-way control the
+        //     filer must confirm"* — a confirmation step that did not exist. Nothing read `kind`
+        //     between `create` and the printed page, so a filer who typed the two numbers off their
+        //     cheque and never opened the type row filed with the Checking box checked: testimony
+        //     they never gave, on the one line whose instruction says *"You must check the correct
+        //     box to ensure your deposit is accepted."* Now it is `None`, and line 35c refuses
+        //     exactly as an empty routing number does.
         create: |ri| {
             if ri.header.direct_deposit.is_none() {
                 ri.header.direct_deposit = Some(DirectDeposit {
                     routing: String::new(),
-                    kind: DepositAccountKind::Checking,
+                    kind: None,
                     account: String::new(),
                 });
             }
@@ -1701,6 +1729,178 @@ mod tests {
     use btctax_core::tax::return_inputs::{Dependent, ItemizeElection, Person, W2};
     use btctax_core::tax::types::FilingStatus;
     use rust_decimal_macros::dec;
+
+    /// ★★★ **T10 seam review M-3 — CLEARING THE FOREIGN COUNTRY CLEARS THE ROW, so a later
+    ///     country cannot resurrect last year's province.**
+    ///
+    /// The three foreign cells are one address and the country is its liveness carrier. Emptying
+    /// the country made the other two dead but left their values at rest, so a filer who moved from
+    /// Elbonia to Ruritania — clear the country, type the new one — got Elbonia's province and
+    /// postal code back, live and printing, without ever seeing them in between.
+    ///
+    /// ★ Both directions: the resurrection is asserted impossible, and a country that is merely
+    ///   CHANGED (not cleared) still keeps the two cells, because that is one edit of one address
+    ///   and clearing them there would throw away what the filer typed.
+    #[test]
+    fn clearing_the_foreign_country_clears_the_row_so_a_later_country_cannot_resurrect_it() {
+        let addr = section(SectionId::Address);
+        let field = |id: FieldId| {
+            addr.fields
+                .iter()
+                .find(|f| f.id == id)
+                .unwrap_or_else(|| panic!("{id:?} is an Address field"))
+        };
+        let set = |ri: &mut _, id: FieldId, v: &str| {
+            (field(id).set)(ri, &RowAddr::default(), FieldValue::Text(v.into()))
+        };
+
+        let mut ri = fresh_single();
+        set(&mut ri, FieldId::AddrForeignCountry, "Elbonia").unwrap();
+        set(&mut ri, FieldId::AddrForeignProvince, "Mud Province").unwrap();
+        set(&mut ri, FieldId::AddrForeignPostalCode, "XY1 2AB").unwrap();
+
+        // A country CHANGE keeps the row — one address, one edit.
+        set(&mut ri, FieldId::AddrForeignCountry, "Ruritania").unwrap();
+        assert_eq!(ri.header.foreign_province, "Mud Province");
+        assert_eq!(ri.header.foreign_postal_code, "XY1 2AB");
+
+        // A country CLEAR empties the row.
+        set(&mut ri, FieldId::AddrForeignCountry, "").unwrap();
+        assert_eq!(
+            (
+                ri.header.foreign_province.as_str(),
+                ri.header.foreign_postal_code.as_str()
+            ),
+            ("", ""),
+            "clearing the country must clear the row, not leave it dead but at rest"
+        );
+
+        // …and the resurrection the review named is now impossible.
+        set(&mut ri, FieldId::AddrForeignCountry, "Ruritania").unwrap();
+        assert!(
+            ri.header.foreign_address_is_live(),
+            "the new country makes the row live again"
+        );
+        assert_eq!(
+            (
+                ri.header.foreign_province.as_str(),
+                ri.header.foreign_postal_code.as_str()
+            ),
+            ("", ""),
+            "a new country must not bring back the OLD country's province and postal code — they \
+             would print on this year's return without the filer ever having seen them"
+        );
+    }
+
+    /// ★★★ **T10 seam review I-2 — LINE 35c CANNOT PRINT A BOX THE FILER NEVER CHOSE.**
+    ///
+    /// The defect this pins was reachable by the shortest plausible path there is: press `c` on the
+    /// Direct deposit section, type the two numbers off the bottom of a cheque, and stop. `create`
+    /// wrote `kind: Checking`, `DepositAccountKind` had no unanswered state,
+    /// `screen_direct_deposit` read only the two strings, and the emitter's `match` printed
+    /// whichever variant the enum held — so the return filed with the **Checking** box checked,
+    /// testimony the filer never gave, on the one line whose instruction says *"You must check the
+    /// correct box to ensure your deposit is accepted."* A savings filer who left the default had
+    /// the deposit rejected and the refund delayed.
+    ///
+    /// ★★ **It drives the REAL `create` and the REAL `set`s** — not a hand-built `DirectDeposit` —
+    ///    because the defect lived in `create`, and a fixture that constructs the struct itself
+    ///    cannot see it. Then it checks both boundaries the block has to cross (`screen_param_free`
+    ///    and `ReturnHeader::build`) and both directions (unchosen refuses; chosen prints what was
+    ///    chosen, `Savings`, which is not the value the old default would have produced).
+    #[test]
+    fn the_account_type_is_unanswered_until_the_filer_chooses_it_and_refuses_until_then() {
+        use btctax_core::tax::packet::{HeaderError, ReturnHeader};
+        use btctax_core::tax::return_inputs::DepositAccountKind;
+        use btctax_core::tax::return_refuse::{screen_param_free, DirectDepositCell, RefuseReason};
+
+        let dd = section(SectionId::DirectDeposit);
+        let SectionKind::OptionalSingleton { create, .. } = dd.kind else {
+            panic!("the Direct deposit section is an OptionalSingleton");
+        };
+        let field = |id: FieldId| {
+            dd.fields
+                .iter()
+                .find(|f| f.id == id)
+                .unwrap_or_else(|| panic!("{id:?} is a Direct deposit field"))
+        };
+
+        let mut ri = fresh_single();
+        ri.header.taxpayer.first_name = "Pat".into();
+        ri.header.taxpayer.last_name = "Roe".into();
+        ri.header.taxpayer.ssn = "000-00-2222".into();
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+
+        // The filer's whole interaction: create the block, type the two numbers, stop.
+        create(&mut ri);
+        (field(FieldId::DdRouting).set)(
+            &mut ri,
+            &RowAddr::default(),
+            FieldValue::Text("123456780".into()),
+        )
+        .expect("the routing cell takes text");
+        (field(FieldId::DdAccount).set)(
+            &mut ri,
+            &RowAddr::default(),
+            FieldValue::Text("ACCT-000123".into()),
+        )
+        .expect("the account cell takes text");
+
+        // 1. The type reads back as UNANSWERED, not as a value nobody entered.
+        assert_eq!(
+            (field(FieldId::DdKind).get)(&ri, &RowAddr::default()),
+            None,
+            "a type nobody chose must read as unanswered, or the editor shows the filer an answer \
+             they did not give"
+        );
+
+        // 2. Both boundaries refuse, and the refusal names line 35c rather than a number.
+        let refusal = screen_param_free(&ri).expect("an unchosen account type must refuse");
+        assert_eq!(
+            refusal.reason,
+            RefuseReason::DirectDepositNumberMalformed {
+                cell: DirectDepositCell::Kind,
+                why: btctax_core::tax::packet::BankNumberError::Missing,
+            },
+            "the refusal must name line 35c's cell: {refusal:?}"
+        );
+        assert!(
+            refusal.detail.contains("account type (line 35c)")
+                || refusal.detail.contains("line 35c"),
+            "the message must name the line the filer has to go and check: {}",
+            refusal.detail
+        );
+        assert_eq!(
+            ReturnHeader::build(&ri, 2024).err(),
+            Some(HeaderError::DepositTypeUnchosen),
+            "and the print boundary refuses it too, so a caller that skips the screen still cannot \
+             print a guessed box"
+        );
+
+        // 3. Answer it — with SAVINGS, which the old default would never have produced — and the
+        //    block goes through, carrying the answer the filer actually gave.
+        (field(FieldId::DdKind).set)(
+            &mut ri,
+            &RowAddr::default(),
+            FieldValue::Choice("Savings".into()),
+        )
+        .expect("the type cell takes a choice");
+        assert_eq!(
+            screen_param_free(&ri),
+            None,
+            "a complete block must screen clean"
+        );
+        let header = ReturnHeader::build(&ri, 2024).expect("a complete block builds");
+        assert_eq!(
+            header
+                .direct_deposit
+                .as_ref()
+                .expect("the block reaches the print boundary")
+                .kind,
+            DepositAccountKind::Savings,
+            "line 35c must carry the box the filer chose"
+        );
+    }
 
     /// ★★★ **SEAM REVIEW N-3 — `clear` REFUSES A NON-LIVE GATE EXACTLY AS `set` DOES.**
     ///

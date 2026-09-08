@@ -128,12 +128,38 @@ pub fn fill_form_1040_full_with_map(
     }
 
     // ★★★ **T10 / §5.4 — lines 35b-35d.** Written iff the map declares the block AND the filer gave
-    //     an instruction. Both halves matter and neither is a default: a map with no
-    //     `[direct_deposit]` writes nothing (the cells stay on the field census's UNCENSUSED
-    //     register), and a return with no `direct_deposit` writes nothing and gets
-    //     `Advisory::RefundByPaperCheck` instead.
-    if let Some(cells) = map.direct_deposit.as_ref() {
-        push_direct_deposit(&mut writes, &mut placements, cells, header);
+    //     an instruction — and the one combination that is NEITHER is a hard error, not a skip.
+    //
+    //     ★★★ **Seam review M-1 — the silent drop, and why it needed a refusal rather than a
+    //         comment.** This used to be `if let Some(cells) = map.direct_deposit.as_ref()`, so a
+    //         year whose map lacks the section printed lines 35b–35d blank on a return that carried
+    //         routing and account numbers — and `Advisory::RefundByPaperCheck` was silent too,
+    //         because it reads `ReturnInputs` rather than the map and its guard is
+    //         `direct_deposit.is_none()`. The filer's bank details vanished between the vault and
+    //         the page with nothing said on either side, and NOTHING RED: the field census is
+    //         satisfied by those cells staying on the `UNCENSUSED` register, which is legal.
+    //
+    //         Not reachable at the time it was found (TY2024 is the only year that emits a full
+    //         return, and it declares the block) — but FR-84 writes a TY2025 `[header]`, and the
+    //         moment it does, omitting `[direct_deposit]` stops being an honest "no writer yet" and
+    //         becomes this. The same function already refuses this way for a missing money cell
+    //         eleven lines down (`need(&map.line1a, …)?`); this is that rule applied to the block.
+    match (map.direct_deposit.as_ref(), header.direct_deposit.as_ref()) {
+        (Some(cells), _) => push_direct_deposit(&mut writes, &mut placements, cells, header),
+        (None, Some(_)) => {
+            return Err(FormsError::Geometry(format!(
+                "the TY{y} 1040 map has no `[direct_deposit]` block, and this return carries a \
+                 deposit instruction. Printing it blank would drop the filer's routing and account \
+                 numbers with no notice — the paper-check advisory (`RefundByPaperCheck`) is \
+                 guarded on the return having NO block, so it stays silent too, and the refund \
+                 would be mailed to an address the filer never chose. Map lines 35b-35d for TY{y}, \
+                 or delete the deposit \
+                 instruction from the return."
+            )))
+        }
+        // A year with no block mapped and a return with no instruction: nothing to print, and
+        // `RefundByPaperCheck` says so on the return itself.
+        (None, None) => {}
     }
 
     // ── Page 1, AMOUNT column, top to bottom. Line 7 carries a LEADING MINUS on a loss year. ────

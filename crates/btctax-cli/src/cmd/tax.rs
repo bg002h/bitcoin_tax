@@ -1587,7 +1587,7 @@ mod tests {
         ri.header.spouse_ip_pin = Some("654321".into());
         ri.header.direct_deposit = Some(DirectDeposit {
             routing: "123456780".into(),
-            kind: DepositAccountKind::Savings,
+            kind: Some(DepositAccountKind::Savings),
             account: "ACCT-000123".into(),
         });
         let masked = mask_pii(&ri);
@@ -1601,7 +1601,7 @@ mod tests {
         assert_eq!(dd.account, "***");
         assert_eq!(
             dd.kind,
-            DepositAccountKind::Savings,
+            Some(DepositAccountKind::Savings),
             "the account TYPE is not identifying and must survive, or the display disagrees with \
              the printed 35c box"
         );
@@ -1659,7 +1659,7 @@ mod tests {
         assert_eq!(ri.header.spouse_ip_pin.as_deref(), Some("654321"));
         let dd = ri.header.direct_deposit.as_ref().expect("the block parsed");
         assert_eq!(dd.routing, "123456780");
-        assert_eq!(dd.kind, DepositAccountKind::Savings);
+        assert_eq!(dd.kind, Some(DepositAccountKind::Savings));
         assert_eq!(dd.account, "ACCT-000123");
 
         // ★ A TOML with NO trailer at all is lawful — every one of the six is `#[serde(default)]`,
@@ -1678,6 +1678,35 @@ mod tests {
             half.is_err(),
             "a direct-deposit block with no routing number must not parse — it is a mistyped row, \
              not a lawful state"
+        );
+        // ★★★ **Seam review I-2 — the ACCOUNT TYPE is the ONE key of this block whose absence
+        //     PARSES, and the screen is what closes it. Measured, not assumed.**
+        //
+        //     `kind` became `Option<DepositAccountKind>` so that *"not chosen yet"* is expressible
+        //     at all, and serde's derive treats a missing `Option` field as `None` whether or not
+        //     `#[serde(default)]` is written — so §4.3's *"no PART of the block is optional"* no
+        //     longer holds on the wire for this one key, and saying otherwise in a comment would be
+        //     exactly the load-bearing-false-record class the same review raised as I-3.
+        //
+        //     It is safe because it fails closed rather than because serde stops it: the imported
+        //     block arrives with the type unchosen, and `screen_direct_deposit` refuses it on both
+        //     tiers, naming line 35c. Both halves are asserted here — the parse AND the refusal —
+        //     because the first alone would read as a hole.
+        let no_kind = parse_return_inputs_toml(
+            "filing_status = \"Single\"\n[header.direct_deposit]\nrouting = \"123456780\"\naccount = \"A1\"\n",
+        )
+        .expect("a missing `kind` parses: serde reads an absent Option field as None");
+        assert_eq!(
+            no_kind.header.direct_deposit.as_ref().unwrap().kind,
+            None,
+            "and it arrives UNCHOSEN, never as a guessed Checking"
+        );
+        let refusal = btctax_core::tax::return_refuse::screen_param_free(&no_kind)
+            .expect("an imported block with no account type must refuse");
+        assert!(
+            refusal.detail.contains("line 35c"),
+            "the import tier is what closes this, and it must name the line: {}",
+            refusal.detail
         );
 
         // ★★★ And a misspelt key is NAMED, never silently dropped. TWO refusals, because the two

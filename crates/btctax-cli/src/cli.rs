@@ -579,11 +579,14 @@ pub enum IncomeCmd {
     /// unanswered, and the computed carryforwards carried as data.
     ///
     /// WHAT COMES WITH THEM, and nothing else: your filing status, your name and SSN (and your
-    /// spouse's), your mailing address, each dependent's name, SSN and relationship, each employer
-    /// and payer by name and EIN/TIN with every box blank, and last year's computed carryforwards.
-    /// Every one of those is printed for you to confirm, and the filing status gets its own
-    /// question — marital status is determined on the last day of the tax year, so last year's is
-    /// not testimony for this one.
+    /// spouse's), your mailing address, your phone number, your foreign address if you have one,
+    /// each dependent's name, SSN and relationship, each employer and payer by name and EIN/TIN
+    /// with every box blank, and last year's computed carryforwards. Every one of those is printed
+    /// for you to confirm — the report names which year this one was opened from as well — and the
+    /// filing status gets its own question, because marital status is determined on the last day of
+    /// the tax year, so last year's is not testimony for this one. Check the foreign address in
+    /// particular if you have moved: a country left over from last year prints the whole foreign
+    /// row onto this year's return.
     ///
     /// Nothing else crosses. A prior year's "no" is not testimony for this year, so every question
     /// starts unanswered and every box starts blank. A date of birth is SHOWN beside its prompt (it
@@ -1330,6 +1333,34 @@ mod tests {
     // a text EXAMPLE. Tokens are comma/brace-joined (no spaces) so help-wrapping can never break
     // them (verified against the real binary output). This is the single source of truth that
     // clap_mangen also renders into the per-subcommand man page (Task 2).
+
+    /// ★★★ **THE SHIPPED HELP CANNOT FALL BEHIND `seed` — the fourth surface of T4b's I-1.**
+    ///
+    /// `render()` has had a derived guard since T4b
+    /// (`open_next_year_t4b::every_leaf_the_seed_carries_is_named_in_the_report`), but the prose
+    /// below — the one source `--help`, `docs/man/btctax-income-open-next-year.1` and the TUI offer
+    /// all print — was a hand-written second copy ending *"and nothing else"*, and it went stale
+    /// twice: T7 taught `seed` to carry dependents, T10 taught it the phone and the foreign
+    /// address, and neither updated it. So every row of [`CARRIED_IDENTITY`] now names the
+    /// substring the help must contain, and adding a row without telling the filer fails here.
+    ///
+    /// ★ Whitespace is normalized first: clap re-wraps the long help at the terminal width, so a
+    ///   multi-word token would otherwise straddle a line break and the check would be testing
+    ///   clap's wrapping rather than the words.
+    #[test]
+    fn the_shipped_help_names_everything_the_opener_carries() {
+        let raw = long_help_of(&["income", "open-next-year"]);
+        let help = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+        for (phrase, _, _, token) in crate::open_next_year::CARRIED_IDENTITY {
+            assert!(
+                help.contains(token),
+                "`btctax income open-next-year --help` must say {token:?} — the opener carries \
+                 {phrase:?}, and this text is what tells the filer to go and confirm it. Add it to \
+                 the doc comment and re-run `cargo run -p xtask -- docs` so the man page follows:\n\
+                 {raw}"
+            );
+        }
+    }
 
     #[test]
     fn help_documents_key_backup_format() {

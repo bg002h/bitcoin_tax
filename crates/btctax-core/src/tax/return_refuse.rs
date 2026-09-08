@@ -43,12 +43,19 @@ const ELECTIVE_DEFERRAL_CODES: &[&str] = &["D", "E", "F", "G", "S"];
 
 /// ★★★ **T10 / §5.4 — which cell of the direct-deposit block a refusal is about.**
 ///
-/// Two cells, fixed two different ways: a routing number is re-read off the bottom left of a cheque
-/// and an account number off the middle, so the input form anchors them on different fields.
+/// Three cells, fixed three different ways: a routing number is re-read off the bottom left of a
+/// cheque, an account number off the middle, and the account TYPE is not on the cheque at all — it
+/// is something the filer knows or asks their bank. So the input form anchors each on its own
+/// field, and the `match` in `btctax_input_form::attribute` is exhaustive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DirectDepositCell {
     /// Line 35b — *"Routing number"*.
     Routing,
+    /// ★★★ **Line 35c — *"Type: Checking / Savings"*** (T10 seam review I-2). Not a number, and
+    ///     the variant it travels in is named for one; the message is what carries the truth. It is
+    ///     this cell rather than its own [`RefuseReason`] because it is the same refusal about the
+    ///     same block with the same two remedies, and the input form dispatches on the cell.
+    Kind,
     /// Line 35d — *"Account number"*.
     Account,
 }
@@ -57,6 +64,7 @@ impl std::fmt::Display for DirectDepositCell {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Routing => write!(f, "routing number (line 35b)"),
+            Self::Kind => write!(f, "account type (line 35c)"),
             Self::Account => write!(f, "account number (line 35d)"),
         }
     }
@@ -2083,6 +2091,35 @@ fn screen_direct_deposit(ri: &ReturnInputs) -> Option<Refusal> {
     };
     if let Err(why) = RoutingNumber::canonical(&dd.routing) {
         return bad(DirectDepositCell::Routing, why);
+    }
+    // ★★★ **T10 seam review I-2 — line 35c, screened in the form's own order (35b, 35c, 35d).**
+    //
+    //     The type used to have no unanswered state and `create` started it at `Checking`, so a
+    //     filer who typed the two numbers off their cheque and never opened the type row filed with
+    //     the Checking box checked. The instruction is explicit about what that costs: *"Check the
+    //     appropriate box for the type of account. Don't check more than one box. … You must check
+    //     the correct box to ensure your deposit is accepted."*
+    //     (`design/forms/extract/i1040gi--2025.txt:23988-23994`.) A savings filer who leaves a
+    //     guessed Checking has the deposit REJECTED and the refund delayed.
+    //
+    //     ★ Its own message rather than the numeric one: nothing here is malformed, the box is
+    //       simply not chosen, and the remedy is to choose it (or to delete the block) rather than
+    //       to correct a typo.
+    if dd.kind.is_none() {
+        return refuse(
+            RefuseReason::DirectDepositNumberMalformed {
+                cell: DirectDepositCell::Kind,
+                why: BankNumberError::Missing,
+            },
+            "the direct-deposit account type (line 35c) has not been chosen. \"Check the \
+             appropriate box for the type of account. Don't check more than one box. … You must \
+             check the correct box to ensure your deposit is accepted.\" btctax will not guess \
+             between checking and savings: a deposit sent against the wrong box is rejected and the \
+             refund is delayed. Choose Checking or Savings on line 35c, or delete the \
+             direct-deposit block: a return with none is complete, and the refund then arrives as a \
+             paper check."
+                .to_string(),
+        );
     }
     if let Err(why) = AccountNumber::canonical(&dd.account) {
         return bad(DirectDepositCell::Account, why);
@@ -8746,7 +8783,7 @@ mod param_free_tier {
         add("DirectDepositNumberMalformed", &|r| {
             r.header.direct_deposit = Some(crate::tax::return_inputs::DirectDeposit {
                 routing: "250250025".into(),
-                kind: crate::tax::return_inputs::DepositAccountKind::Checking,
+                kind: Some(crate::tax::return_inputs::DepositAccountKind::Checking),
                 account: "0000000000".into(),
             });
         });

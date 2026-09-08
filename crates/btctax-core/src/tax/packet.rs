@@ -133,6 +133,14 @@ pub enum HeaderError {
     /// Fail-closed at the print boundary for the same reason [`Self::Ssn`] is: printing what was
     /// typed would put a number the bank cannot route on a signed return.
     Bank(BankNumberError),
+    /// ★★★ **T10 seam review I-2 — line 35c's box was never chosen.**
+    ///
+    /// The second boundary behind `return_refuse::screen_direct_deposit`, and the
+    /// reason [`PrintedDirectDeposit::kind`] is NOT an `Option`: a caller that skips the screen
+    /// still cannot reach the emitter with an unchosen type, so the exhaustive `match` that picks
+    /// the checkbox has no third arm to invent. *"You must check the correct box to ensure your
+    /// deposit is accepted."* (`design/forms/extract/i1040gi--2025.txt:23988-23994`.)
+    DepositTypeUnchosen,
 }
 
 impl From<BankNumberError> for HeaderError {
@@ -165,6 +173,13 @@ impl fmt::Display for HeaderError {
                 f,
                 "the direct-deposit block on 1040 lines 35b-35d {e} — correct it, or remove the \
                  block and write the numbers on the printed form by hand"
+            ),
+            Self::DepositTypeUnchosen => write!(
+                f,
+                "the direct-deposit account type on 1040 line 35c has not been chosen, and btctax \
+                 will not guess between checking and savings — \"You must check the correct box to \
+                 ensure your deposit is accepted.\" Choose it, or remove the block and write the \
+                 numbers on the printed form by hand"
             ),
         }
     }
@@ -270,12 +285,39 @@ impl fmt::Display for BankNumberError {
 ///     responsible for a lost refund if you enter the wrong account information."*
 ///     (`:24023-24026`.)
 ///
-/// ★★ **The failure mode of applying it is SAFE, which is why it may refuse rather than warn.** A
-///    number that fails any of the three rules is not stored, so the return files with NO deposit
-///    block — and [`crate::tax::advisories::Advisory::RefundByPaperCheck`] then tells the filer, in
-///    words, that the IRS will mail a check and that they may write the numbers on the form by hand.
-///    Nothing is blocked and no figure moves; the only thing that cannot happen is a wrong number
-///    printed on a filed return.
+/// ★★★ **THIS RULE BLOCKS A RETURN — read what follows before adding a btctax-only validity rule
+///     to any other cell.** (T10 seam review I-3. The paragraph that stood here said the opposite,
+///     in three separate false claims: that a failing number *"is not stored"*, that the return
+///     *"files with NO deposit block"*, and that *"Nothing is blocked"*. All three were wrong, and
+///     the argument they made — *"this class of rule costs nothing, because a failure just means a
+///     paper check"* — is precisely the licence a future maintainer must not be given.)
+///
+/// **What actually happens.** The number IS stored: the input form's `set` writes the raw string
+/// with no validation. Nothing then files: `return_refuse::screen_direct_deposit` is a
+/// VALUE rule, outside the answered-ness tier, so it refuses on both tiers, and
+/// `resolve.rs` fails closed on any input-screenable refusal. [`ReturnHeader::build`] refuses again
+/// at the print boundary ([`HeaderError::Bank`]). And
+/// [`crate::tax::advisories::Advisory::RefundByPaperCheck`] does **not** fire: advisories are
+/// computed only after the screen passes, and its guard is `direct_deposit.is_none()` — a present
+/// block, however malformed, silences it.
+///
+/// ★★ **Why the rule may still refuse rather than warn — on the true terms.** Not because the
+///    failure degrades gracefully; it does not degrade at all. Because the refusal is **loud,
+///    cell-anchored and self-clearing**: it names the cell (line 35b or 35d), the rule that failed
+///    and both remedies — *"Correct it, or delete the direct-deposit block: a return with none is
+///    complete, and the refund then arrives as a paper check"* — and `btctax_input_form::attribute`
+///    puts the editor's cursor on the exact field. A deleted block then files, and `RefundByPaperCheck`
+///    does fire on THAT return. The filer is never stuck and never silently downgraded; they are
+///    stopped and told. Against that, a false refusal of a genuine routing number is very close to
+///    impossible — the ninth digit of an ABA routing transit number IS the check digit, assigned
+///    with the number — while the cost of accepting a mistyped one is a refund wired somewhere
+///    nobody can recall it from.
+///
+/// ★ **The inference this does NOT license.** *"A btctax-only validity rule is cheap"* is false as
+///   stated: every one of them blocks a return until the filer acts. Adding one to another cell has
+///   to be argued on the same three points made above — near-zero false-refusal rate, a refusal that
+///   names the cell and a remedy, and a harm from accepting that is unrecoverable — and not by
+///   analogy with this one.
 #[derive(Clone, PartialEq, Eq)]
 pub struct RoutingNumber(String);
 
@@ -392,6 +434,11 @@ pub struct PrintedDirectDeposit {
     /// Line 35b.
     pub routing: RoutingNumber,
     /// Line 35c — *"Don't check more than one box"*, which an enum makes unrepresentable.
+    ///
+    /// ★★★ **NOT an `Option`, deliberately** (T10 seam review I-2): `ReturnInputs` carries the
+    ///     unanswered state and [`HeaderError::DepositTypeUnchosen`] is where it is spent, so
+    ///     everything downstream of this struct — including the emitter's exhaustive `match` on the
+    ///     two checkbox cells — is talking about a box the filer actually chose.
     pub kind: DepositAccountKind,
     /// Line 35d.
     pub account: AccountNumber,
@@ -910,9 +957,10 @@ impl ReturnHeader {
                 .direct_deposit
                 .as_ref()
                 .map(|dd| {
-                    Ok::<_, BankNumberError>(PrintedDirectDeposit {
+                    Ok::<_, HeaderError>(PrintedDirectDeposit {
                         routing: RoutingNumber::canonical(&dd.routing)?,
-                        kind: dd.kind,
+                        // ★★★ I-2 — an unchosen type refuses HERE too, not just at the screen.
+                        kind: dd.kind.ok_or(HeaderError::DepositTypeUnchosen)?,
                         account: AccountNumber::canonical(&dd.account)?,
                     })
                 })
@@ -2285,7 +2333,7 @@ mod t10_bank_numbers {
         let mut ok = base();
         ok.header.direct_deposit = Some(DirectDeposit {
             routing: "123456780".into(),
-            kind: DepositAccountKind::Checking,
+            kind: Some(DepositAccountKind::Checking),
             account: "ACCT-1".into(),
         });
         assert!(ReturnHeader::build(&ok, 2024).is_ok());
@@ -2298,7 +2346,7 @@ mod t10_bank_numbers {
             let mut ri = base();
             ri.header.direct_deposit = Some(DirectDeposit {
                 routing: bad.into(),
-                kind: DepositAccountKind::Checking,
+                kind: Some(DepositAccountKind::Checking),
                 account: "ACCT-1".into(),
             });
             assert_eq!(
