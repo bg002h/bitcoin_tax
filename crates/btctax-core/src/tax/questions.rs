@@ -342,6 +342,15 @@ pub enum QuestionId {
     HsaArcherMsaActivity,
     /// Form 8889 **Part III** — failure to remain an eligible individual during a testing period.
     HsaTestingPeriodFailure,
+    // ── ★★★ SEAM REVIEW I-3 / M-1 — appended at the END, for the `decl_tristate!` array-index
+    //    reason recorded above. ─────────────────────────────────────────────────────────────────
+    /// Form 8889 **line 1 and line 3 rule 1** — did your SPOUSE have family HDHP coverage? The
+    /// instructions ask about *"you or your spouse"* and say the answer counts *"regardless of
+    /// whether you file jointly or separately"*.
+    HsaSpouseFamilyCoverage,
+    /// **R3's document-less door for Form 8889 line 14a** — a distribution taken with no Form
+    /// 1099-SA behind it. Live exactly on a `Sa1099` census `No` beside an affirmed HSA trigger.
+    HsaDistributionWithout1099sa,
 }
 
 impl QuestionId {
@@ -397,6 +406,9 @@ impl QuestionId {
         QuestionId::HsaBothSpousesHaveHsas,
         QuestionId::HsaArcherMsaActivity,
         QuestionId::HsaTestingPeriodFailure,
+        // ★★★ Seam review I-3 and M-1 — indices 50 and 51.
+        QuestionId::HsaSpouseFamilyCoverage,
+        QuestionId::HsaDistributionWithout1099sa,
     ];
 }
 
@@ -1872,11 +1884,14 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
     //    the return can answer. ──────────────────────────────────────────────────────────────────
     FormQuestion {
         id: QuestionId::HsaFamilyCoverage,
-        prompt: "Form 8889 line 1: was your high-deductible health plan (HDHP) coverage FAMILY coverage? \
-                 (Yes = the form's \"Family\" box; No = its \"Self-only\" box. If you were covered by \
-                 both at different times, check the plan that was in effect for the longer period; \
-                 if you were covered by both at the same time, you are treated as having family \
-                 coverage.)",
+        prompt: "Form 8889 line 1: was YOUR OWN high-deductible health plan (HDHP) coverage FAMILY \
+                 coverage? (Yes = the form's \"Family\" box; No = its \"Self-only\" box. \"If you were \
+                 covered, or considered covered, by a self-only HDHP and a family HDHP at different \
+                 times during the year, check the box for the plan that was in effect for a longer \
+                 period. If you were covered by both a self-only HDHP and a family HDHP at the same \
+                 time, you are treated as having family coverage during that period.\" Your \
+                 spouse's plan is asked separately by the next question, because the instructions \
+                 count it too.)",
         unanswered: RefuseReason::Form8889Unanswered {
             question: QuestionId::HsaFamilyCoverage,
         },
@@ -2008,6 +2023,62 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         durability: Durability::PerYear,
         neutral: false,
     },
+
+    // ── ★★★ SEAM REVIEW I-3 — THE SPOUSE'S PLAN, which the instructions ask about and no other
+    //    field on the return can answer. Appended at the END for the `decl_tristate!` array-index
+    //    reason recorded above. ───────────────────────────────────────────────
+    FormQuestion {
+        id: QuestionId::HsaSpouseFamilyCoverage,
+        // ★ The INSTRUCTIONS' own two sentences, not a paraphrase of them.
+        prompt: "Form 8889 lines 1 and 3: did your SPOUSE have an HDHP with FAMILY coverage? (\"If \
+                 you and your spouse are considered covered by a family HDHP, you are considered \
+                 covered by a family HDHP regardless of whether you file jointly or separately.\" \
+                 And line 3 rule 1: \"Use the family coverage amount if you or your spouse had an \
+                 HDHP with family coverage. Disregard any plan with self-only coverage.\")",
+        unanswered: RefuseReason::Form8889Unanswered {
+            question: QuestionId::HsaSpouseFamilyCoverage,
+        },
+        unanswered_detail: "Form 8889 line 1's box and line 3's contribution limit both turn on whether EITHER spouse \
+             had family coverage \u{2014} the instructions say so in as many words, and say it counts \
+             \"regardless of whether you file jointly or separately\". Answering only for your own \
+             plan puts the self-only figure on line 3 where the instructions say the family one, \
+             which can make a lawful contribution look like an excess one. Run `btctax income answer`",
+        live: hsa_spouse_question_live,
+        get: |ri| ri.hsa.spouse_family_coverage,
+        set: |ri, v| ri.hsa.spouse_family_coverage = Some(v),
+        durability: Durability::PerYear,
+        neutral: false,
+    },
+    // ── ★★★ SEAM REVIEW M-1 — R3's DOCUMENT-LESS DOOR, for Form 8889 line 14a. ────────────
+    FormQuestion {
+        id: QuestionId::HsaDistributionWithout1099sa,
+        prompt: "Form 8889 line 14a: did you take any money out of an HSA this year that no Form \
+                 1099-SA reports? (Line 14a is \"Total distributions you received in 2024 from all \
+                 HSAs\", and its instruction is \"These amounts should be shown on Form 1099-SA, box \
+                 1.\" A trustee must issue one for every distribution, so this is normally No \u{2014} \
+                 but a census \"no\" must never close a line the form says to report.)",
+        unanswered: RefuseReason::Form8889Unanswered {
+            question: QuestionId::HsaDistributionWithout1099sa,
+        },
+        unanswered_detail: "you answered that you received no Form 1099-SA, and Form 8889 line 14a asks for the TOTAL \
+             distributions you received from all HSAs. btctax fills line 14a only from transcribed \
+             Form 1099-SA rows, so a \"no\" on the census would leave that line blank \u{2014} and a \
+             distribution missing from line 14a is missing gross income under \u{a7}223(f) plus the 20% \
+             additional tax. Run `btctax income answer`",
+        // ★ Live EXACTLY on R3's pairing: the census row says "I received none" AND the §223
+        //   trigger is affirmed. A filer with no HSA is never asked it, and a filer who transcribed
+        //   a 1099-SA takes their distributions from the document.
+        live: |ri| {
+            ri.sch1.hsa_activity == Some(true)
+                && ri.documents.get(crate::tax::document_census::DocumentRow::Sa1099) == Some(false)
+        },
+        get: |ri| ri.hsa_distribution_without_1099sa,
+        set: |ri, v| ri.hsa_distribution_without_1099sa = Some(v),
+        durability: Durability::PerYear,
+        // ★ Neutral at FALSE: no undocumented distribution needs no row and forgoes nothing. A
+        //   `Yes` REFUSES — btctax has no surface for a distribution that arrives with no form.
+        neutral: false,
+    },
 ];
 
 /// ★★★ **T16 — the ONE liveness predicate for every Form 8889 question.**
@@ -2022,6 +2093,25 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
 /// §2.9 records — asking only where btctax already knew the answer.
 fn hsa_question_live(ri: &ReturnInputs) -> bool {
     ri.sch1.hsa_activity == Some(true)
+}
+
+/// ★★★ **Seam review I-3 — Form 8889's one question about the OTHER person's plan.**
+///
+/// Live iff the form is open AND there is a spouse to have a plan. **MFS counts**, and that is the
+/// instruction's own word rather than an inference: *"If you and your spouse are considered covered
+/// by a family HDHP, you are considered covered by a family HDHP **regardless of whether you file
+/// jointly or separately**"* (`i8889--2024.txt:466-470`). Scoping it to MFJ would ask a married
+/// filer the question on one return and not on the other, and get line 3's limit wrong on the
+/// second.
+///
+/// ★ A single filer has no spouse's plan to declare, so the question is not live and the leaf stays
+///   `None` — the "absent" state, which is distinct from "unanswered".
+fn hsa_spouse_question_live(ri: &ReturnInputs) -> bool {
+    hsa_question_live(ri)
+        && matches!(
+            ri.filing_status,
+            crate::tax::types::FilingStatus::Mfj | crate::tax::types::FilingStatus::Mfs
+        )
 }
 
 /// The identity of each SKIPPABLE prompt (§2, class B) — the questions where silence is LAWFUL: a bare
@@ -2951,6 +3041,9 @@ mod tests {
                 QuestionId::HsaBothSpousesHaveHsas => 47,
                 QuestionId::HsaArcherMsaActivity => 48,
                 QuestionId::HsaTestingPeriodFailure => 49,
+                // ★ Seam review I-3 (the spouse's plan) and M-1 (the document-less distribution).
+                QuestionId::HsaSpouseFamilyCoverage => 50,
+                QuestionId::HsaDistributionWithout1099sa => 51,
             };
             assert_eq!(idx, i, "QuestionId::ALL is out of order / missing {id:?}");
             assert_eq!(
@@ -2961,12 +3054,13 @@ mod tests {
         }
         assert_eq!(
             QuestionId::ALL.len(),
-            50,
+            52,
             "17 declarations + the 20 R3 document-census rows + R10.4's filing-status confirmation \
              + T5's four document-less-income-door questions + R9/T6's Digital Assets question \
-             + T16's seven Form 8889 questions"
+             + T16's seven Form 8889 questions + the T16 seam review's two (the SPOUSE's HDHP \
+             plan, and R3's document-less distribution door)"
         );
-        assert_eq!(FORM_QUESTIONS.len(), 50, "one entry per declaration");
+        assert_eq!(FORM_QUESTIONS.len(), 52, "one entry per declaration");
     }
 
     /// ★★★ §G-6/ISO — THE OUT-OF-SCOPE QUESTION MUST NAME THE ISO EXERCISE, WHICH IS NOT INCOME.

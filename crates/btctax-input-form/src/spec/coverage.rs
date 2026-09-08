@@ -329,6 +329,16 @@ fn fixture_for(field: &Field, base: &ReturnInputs) -> ReturnInputs {
                 Some(false),
             );
         }
+        // ★★★ Seam review M-1 — the SAME structural reason one form over: the door is live exactly
+        //     when the Form 1099-SA census row says `No`, and the maximal fixture transcribes a
+        //     1099-SA row (so `reconcile` answers that row `Yes`). One fixture cannot both hold the
+        //     document and open the door that exists for its absence.
+        FieldId::DeclHsaDistributionWithout1099sa => {
+            ri.documents.set(
+                btctax_core::tax::document_census::DocumentRow::Sa1099,
+                Some(false),
+            );
+        }
         // ★ R5 — the filer's-records ROWS need the door both live AND answered YES: the section is
         //   invisible otherwise, and a row nobody could see would be testimony never given.
         FieldId::SbRecordPayerName
@@ -676,7 +686,7 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     // change happened to keep the sets balanced.
     let field_count: usize = form_spec().iter().map(|s| s.fields.len()).sum();
     assert_eq!(
-        field_count, 216,
+        field_count, 218,
         "expected 216 Fields — 117 before T5, plus its FIFTY-EIGHT: the four document-less income \
          declarations (R3), W-2 boxes 13 and 14b, and the six document sections (1099-INT 14, \
          1099-DIV 14, 1099-B 8, 1099-G 7, 1098-E 4, and R5's five filer's-records leaves) — plus \
@@ -686,15 +696,17 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
          defect T5 itself was fixing. ★ R9 / T6 added the 183rd, Form 1040 page 1's DIGITAL ASSETS \
          question. ★★★ T16 / FR-76 added THIRTY-THREE for Form 8889: two census rows, the Form \
          1099-SA section's 8 and the Form 5498-SA section's 9, Form 8889's own 7 money leaves, and \
-         its 7 declarations."
+         its 7 declarations. \u{2605} The T16 SEAM REVIEW added TWO more: I-3's spouse-plan \
+         declaration (Form 8889 line 1 / line 3 rule 1) and M-1's document-less distribution door \
+         (line 14a)."
     );
     assert_eq!(
         covered.len(),
-        215,
+        217,
         "expected 215 distinctly-covered in-scope leaves — every one of the 216 Fields but \
          `DocForm1098`, whose row is still shadowed by the `schedule_a.mortgage_interest_1098` \
          scalar (T9) and so is never live. It was 115 of 117 before T5, then 174 of 175, then 182 \
-         of 183; T16's thirty-three are all covered."
+         of 183; T16's thirty-three and the seam review's two are all covered."
     );
 
     // ── 5. ★ I-6: PIN the observed FieldId → leaf-path map against a literal (kills TRANSPOSITION). ──
@@ -1237,6 +1249,15 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
     (
         FieldId::DeclHsaTestingPeriodFailure,
         "hsa.testing_period_failure",
+    ),
+    // ── ★★★ The T16 SEAM REVIEW's two declarations. ──
+    (
+        FieldId::DeclHsaSpouseFamilyCoverage,
+        "hsa.spouse_family_coverage",
+    ),
+    (
+        FieldId::DeclHsaDistributionWithout1099sa,
+        "hsa_distribution_without_1099sa",
     ),
     // ── ★★★ R5 / T5 — the filer's-records rows for Schedule B lines 1 and 5. ──
     (

@@ -282,7 +282,21 @@ pub fn employer_contributions_from_w2s(ri: &ReturnInputs) -> Usd {
 #[must_use]
 pub fn compute(ri: &ReturnInputs, params: &HsaParams) -> Form8889 {
     let h = &ri.hsa;
-    let coverage = if h.family_coverage == Some(true) {
+    // ★★★ SEAM REVIEW I-3 — *"YOU OR YOUR SPOUSE"*, which is what the instructions say twice.
+    //
+    //     Line 1: *"If you and your spouse are considered covered by a family HDHP, you are
+    //     considered covered by a family HDHP regardless of whether you file jointly or
+    //     separately."* (`i8889--2024.txt:466-470`)
+    //
+    //     Line 3 rule 1: *"Use the family coverage amount if you or your spouse had an HDHP with
+    //     family coverage. Disregard any plan with self-only coverage."* (`:497-499`)
+    //
+    //     Both the line-1 checkbox and the line-3 base used to read the filer's OWN plan alone, so
+    //     a married filer with self-only coverage whose spouse had family coverage got the wrong
+    //     box and the self-only limit — and at a contribution above that limit the return refused
+    //     `HsaExcessContributionsNeedForm5329`, telling a compliant filer they may owe the §4973
+    //     excise tax. `spouse_family_coverage` is not live without a spouse, where it stays `None`.
+    let coverage = if h.family_coverage == Some(true) || h.spouse_family_coverage == Some(true) {
         HdhpCoverage::Family
     } else {
         HdhpCoverage::SelfOnly
@@ -551,6 +565,200 @@ mod tests {
             s2.line21,
             dec!(360),
             "line 21 sums line 18 into total other taxes → 1040 line 23"
+        );
+
+        // ★★★ SEAM REVIEW C-1 / I-1 — …AND THE **COMPUTED** CHAIN CARRIES THEM TOO.
+        //
+        //     The assertions above stop one line short: they prove Form 8889's figures reach the
+        //     PRINTED Schedule 1 and Schedule 2, and say nothing about `AbsoluteReturn`, which is a
+        //     second chain assembled by different code and is the one the §221 phase-out, the §1411
+        //     MAGI, the AMT, the §170(b) base and the CTC/ODC screen all read. On this very fixture
+        //     the two disagreed by $1,800 of AGI and $576 of total tax — line 8f was placed into
+        //     `Schedule1Parts` and never summed into `schedule_1_income`, and Schedule 2 lines
+        //     17c/17d never entered `schedule_2_other_taxes`.
+        let pr = crate::tax::packet::assemble_printed_return(
+            &ri,
+            &Default::default(),
+            &std::collections::BTreeMap::new(),
+            &ar,
+            &ty2024_table(),
+            2024,
+            &[],
+            crate::forms::InformationReturnRegime::NONE,
+        )
+        .expect("this household has a header");
+        use crate::conventions::round_dollar;
+        assert_eq!(
+            round_dollar(ar.agi),
+            pr.forms.f1040.line11,
+            "the absolute AGI and the FILED 1040 line 11 must be the same number — line 8f is \
+             Schedule 1 PART I income and reaches line 9 through line 10"
+        );
+        assert_eq!(
+            round_dollar(ar.taxable_income),
+            pr.forms.f1040.line15,
+            "…and so must taxable income, which is figured from that AGI"
+        );
+        assert_eq!(
+            round_dollar(ar.total_tax),
+            pr.forms.f1040.line24,
+            "…and total tax, which carries Schedule 2 lines 17c and 17d through line 21 to 1040 \
+             line 23"
+        );
+    }
+
+    /// ★★★ **SEAM REVIEW C-1 — THE $1,500 THAT REACHED A SIGNED PAGE.**
+    ///
+    /// The AGI gap is not an unread number. §221(b)(2)'s phase-out reads it, and a Form 8889
+    /// distribution that misses `total_income` therefore *overstates* the student-loan interest
+    /// deduction printed on Schedule 1 line 21.
+    ///
+    /// $85,000 of wages, $2,500 of Form 1098-E interest, and a $9,000 HSA distribution that meets an
+    /// exception in full (so the §223(f)(4) 20% tax is out of the picture and only the AGI term
+    /// moves). The MAGI the return actually has is $94,000 — inside the TY2024 $80,000–$95,000
+    /// unmarried range — so §221(b)(2) leaves $167 of the $2,500 deductible. With line 8f missing
+    /// from `total_income` the phase-out saw $85,000 and printed **$1,667**: a $1,500 overstated
+    /// above-the-line deduction, i.e. an UNDERSTATEMENT of tax, on a return signed under §6065.
+    ///
+    /// ★ The filer contributes NOTHING of their own here, so Form 8889 line 13 is $0 and the
+    ///   worksheet's line 3 (*"the total of the amounts from Schedule 1, lines 11 through 20…"*)
+    ///   is empty. That isolates the INCOME leg, which is what this test is about;
+    ///   `the_hsa_deduction_is_inside_the_section_221_magi` exercises the other side.
+    #[test]
+    fn the_hsa_income_leg_moves_the_printed_student_loan_deduction() {
+        let mut ri = hsa_household();
+        ri.hsa.line2_contributions_you_made = Usd::ZERO;
+        ri.w2s[0].box1_wages = dec!(85000);
+        ri.w2s[0].box3_ss_wages = dec!(85000);
+        ri.w2s[0].box5_medicare_wages = dec!(85000);
+        ri.documents.set(DocumentRow::Sa1099, Some(true));
+        ri.sa_1099.push(Form1099Sa {
+            payer: "HSA TRUSTEE".into(),
+            box1_gross_distribution: dec!(9000),
+            box3_distribution_code: "1".into(),
+            box5_account_type: Some(SaAccountType::Hsa),
+            ..Default::default()
+        });
+        // The whole distribution meets an exception, so line 17b is $0 and the ONLY thing the
+        // distribution moves is line 16 → Schedule 1 line 8f → 1040 line 9 → AGI.
+        ri.hsa.line16_amount_meeting_an_exception = dec!(9000);
+        ri.documents.set(DocumentRow::Form1098e, Some(true));
+        ri.form_1098e.push(crate::tax::return_inputs::Form1098E {
+            lender: "STUDENT LOAN SERVICER".into(),
+            box1_interest: dec!(2500),
+            ..Default::default()
+        });
+        assert_eq!(refuse(&ri), None, "this return files");
+
+        let f = form(&ri);
+        assert_eq!(f.line16, dec!(9000), "the whole distribution is taxable");
+        assert_eq!(f.line17b, Usd::ZERO, "…and all of it meets an exception");
+
+        let ar = assemble_absolute(
+            &ri,
+            &Default::default(),
+            &ty2024_params(),
+            &ty2024_table(),
+            2024,
+        );
+        let pr = crate::tax::packet::assemble_printed_return(
+            &ri,
+            &Default::default(),
+            &std::collections::BTreeMap::new(),
+            &ar,
+            &ty2024_table(),
+            2024,
+            &[],
+            crate::forms::InformationReturnRegime::NONE,
+        )
+        .expect("this household has a header");
+        let s1 = pr.forms.sch_1.as_ref().expect("Schedule 1 files");
+        assert_eq!(s1.line8f, dec!(9000), "Schedule 1 line 8f carries line 16");
+        assert_eq!(
+            crate::conventions::round_dollar(ar.total_income),
+            dec!(94000),
+            "1040 line 9 is $85,000 of wages PLUS the $9,000 taxable distribution — and with no \
+             other Schedule 1 lines 11–20 adjustment on this fixture, that IS the §221 MAGI"
+        );
+        assert_eq!(
+            s1.line21,
+            dec!(167),
+            "§221(b)(2) on a $94,000 MAGI: $2,500 × (95,000 − 94,000) / 15,000 = $167. It printed \
+             $1,667 while line 8f was missing from `total_income` — a $1,500 overstated deduction"
+        );
+    }
+
+    /// ★★★ **THE OTHER HALF OF THE SAME SEAM — Form 8889 line 13 IS INSIDE THE §221 MAGI.**
+    ///
+    /// Found while folding C-1, in the same function and the same shape: T16 added the HSA
+    /// deduction to `adjustments` and not to `agi_before_student_loan`, which is the §221(b)(2)
+    /// MAGI. The Form 1040 instructions' *Student Loan Interest Deduction Worksheet—Schedule 1, Line
+    /// 21* leaves no room:
+    ///
+    /// > **2.** Enter the amount from Form 1040 or 1040-SR, line 9
+    /// > **3.** Enter the total of the amounts from **Schedule 1, lines 11 through 20**, and 23 and 25
+    /// > **4.** Subtract line 3 from line 2
+    ///
+    /// The HSA deduction is Schedule 1 **line 13**, so it is inside worksheet line 3 and reduces the
+    /// MAGI. Leaving it out inflated the MAGI, which OVERSTATES the tax — the opposite direction to
+    /// C-1 and just as wrong on a signed page.
+    ///
+    /// Same household as the test above but with the fixture's own $2,000 contribution restored:
+    /// 1040 line 9 = $94,000, Schedule 1 line 13 = $2,000, so the MAGI is $92,000 and §221(b)(2)
+    /// leaves $2,500 × (95,000 − 92,000) / 15,000 = **$500** — not the $167 the un-netted $94,000
+    /// gives.
+    #[test]
+    fn the_hsa_deduction_is_inside_the_section_221_magi() {
+        let mut ri = hsa_household();
+        ri.w2s[0].box1_wages = dec!(85000);
+        ri.w2s[0].box3_ss_wages = dec!(85000);
+        ri.w2s[0].box5_medicare_wages = dec!(85000);
+        ri.documents.set(DocumentRow::Sa1099, Some(true));
+        ri.sa_1099.push(Form1099Sa {
+            payer: "HSA TRUSTEE".into(),
+            box1_gross_distribution: dec!(9000),
+            box3_distribution_code: "1".into(),
+            box5_account_type: Some(SaAccountType::Hsa),
+            ..Default::default()
+        });
+        ri.hsa.line16_amount_meeting_an_exception = dec!(9000);
+        ri.documents.set(DocumentRow::Form1098e, Some(true));
+        ri.form_1098e.push(crate::tax::return_inputs::Form1098E {
+            lender: "STUDENT LOAN SERVICER".into(),
+            box1_interest: dec!(2500),
+            ..Default::default()
+        });
+        assert_eq!(refuse(&ri), None, "this return files");
+
+        let ar = assemble_absolute(
+            &ri,
+            &Default::default(),
+            &ty2024_params(),
+            &ty2024_table(),
+            2024,
+        );
+        let pr = crate::tax::packet::assemble_printed_return(
+            &ri,
+            &Default::default(),
+            &std::collections::BTreeMap::new(),
+            &ar,
+            &ty2024_table(),
+            2024,
+            &[],
+            crate::forms::InformationReturnRegime::NONE,
+        )
+        .expect("this household has a header");
+        let s1 = pr.forms.sch_1.as_ref().expect("Schedule 1 files");
+        assert_eq!(
+            s1.line13,
+            dec!(2000),
+            "Schedule 1 line 13 — the HSA deduction"
+        );
+        assert_eq!(
+            s1.line21,
+            dec!(500),
+            "the worksheet's line 3 nets Schedule 1 lines 11 through 20, so the MAGI is $92,000, \
+             not $94,000"
         );
     }
 
@@ -874,6 +1082,312 @@ mod tests {
             refuse(&ri),
             Some(RefuseReason::HsaEmployerContributionWithoutActivity),
             "the W-2 and the declaration cannot both be true"
+        );
+    }
+
+    /// ★★★ **EVERY SENTENCE THE TWO NEW PROMPTS QUOTE IS THE DOCUMENT'S OWN, AND BOTH HALVES ARE
+    ///     CHECKED** — `prompt-check`'s discipline (SPEC §9 G7) applied to the two questions this
+    ///     fold added, against the IN-CRATE text layers rather than a reader's memory.
+    ///
+    /// (a) the clause is verbatim in the extract it is sourced from, and (b) it is verbatim in the
+    /// question's own `prompt`. (b) alone lets the table drift from the form; (a) alone lets the
+    /// prompt drift from the table. Together a paraphrase anywhere reds.
+    ///
+    /// ★ `prompt-check` itself covers only the Form 8615 SKIPPABLES (it is keyed on `SkippableId`),
+    ///   so a `FormQuestion` prompt has no checker today. Extending it to the whole registry is its
+    ///   own piece of work; this holds the two sentences this fold is answerable for.
+    #[test]
+    fn the_two_new_prompts_are_the_documents_own_words() {
+        const I8889: &str = include_str!("fixtures/f8889_2024_instructions.txt");
+        const F8889: &str = include_str!("fixtures/f8889_2024_form.txt");
+        // Whitespace only: `pdftotext -layout` wraps a clause mid-sentence, and a `\` continuation
+        // in a Rust literal already collapses to one space. Nothing else is folded — a checker that
+        // folded punctuation could be satisfied by a near-quote.
+        fn norm(s: &str) -> String {
+            s.split_whitespace().collect::<Vec<_>>().join(" ")
+        }
+        let prompt_of = |id: crate::tax::questions::QuestionId| -> &'static str {
+            crate::tax::questions::FORM_QUESTIONS
+                .iter()
+                .find(|q| q.id == id)
+                .expect("a registered question")
+                .prompt
+        };
+        use crate::tax::questions::QuestionId as Q;
+        for (id, source, clause) in [
+            // I-3 — the two sentences the instructions state the spouse rule in.
+            (
+                Q::HsaSpouseFamilyCoverage,
+                I8889,
+                "If you and your spouse are considered covered by a family HDHP, you are considered \
+                 covered by a family HDHP regardless of whether you file jointly or separately.",
+            ),
+            (
+                Q::HsaSpouseFamilyCoverage,
+                I8889,
+                "Use the family coverage amount if you or your spouse had an HDHP with family \
+                 coverage. Disregard any plan with self-only coverage.",
+            ),
+            // The line-1 prompt, widened to the instruction's other two sentences.
+            (
+                Q::HsaFamilyCoverage,
+                I8889,
+                "If you were covered, or considered covered, by a self-only HDHP and a family HDHP \
+                 at different times during the year, check the box for the plan that was in effect \
+                 for a longer period.",
+            ),
+            (
+                Q::HsaFamilyCoverage,
+                I8889,
+                "If you were covered by both a self-only HDHP and a family HDHP at the same time, \
+                 you are treated as having family coverage during that period.",
+            ),
+            // M-1 — the line the door exists for, and the instruction that names the document.
+            (
+                Q::HsaDistributionWithout1099sa,
+                F8889,
+                "Total distributions you received in 2024 from all HSAs",
+            ),
+            (
+                Q::HsaDistributionWithout1099sa,
+                I8889,
+                "These amounts should be shown on Form 1099-SA, box 1.",
+            ),
+        ] {
+            let want = norm(clause);
+            assert!(
+                norm(source).contains(&want),
+                "{id:?}: the clause is not in its source document: {want:?}"
+            );
+            assert!(
+                norm(prompt_of(id)).contains(&want),
+                "{id:?}: the prompt does not carry the clause verbatim.\n  clause: {want:?}\n  \
+                 prompt: {:?}",
+                prompt_of(id)
+            );
+        }
+    }
+
+    /// ★★★ **SEAM REVIEW I-3 — THE SPOUSE'S FAMILY PLAN PUTS THIS FILER ON THE FAMILY LIMIT.**
+    ///
+    /// The instructions say it twice and in as many words:
+    ///
+    /// > *"If you and your spouse are considered covered by a family HDHP, you are considered
+    /// > covered by a family HDHP **regardless of whether you file jointly or separately**."*
+    /// > (Line 1, `i8889--2024.txt:466-470`)
+    ///
+    /// > *"1. Use the family coverage amount **if you or your spouse** had an HDHP with family
+    /// > coverage. Disregard any plan with self-only coverage."*
+    /// > (Line 3, `i8889--2024.txt:497-499`)
+    ///
+    /// A married filer with **self-only** coverage whose spouse has **family** coverage answers the
+    /// line-1 question "No" truthfully about their own plan. Before this fold that gave them the
+    /// self-only box and $4,150 on line 3 where the instructions say $8,300 — and at a $6,000
+    /// contribution line 2 then exceeded line 13, so the return REFUSED
+    /// `HsaExcessContributionsNeedForm5329`: a fully compliant filer told they have excess
+    /// contributions and may owe the §4973 excise tax.
+    ///
+    /// Both legs are pinned, because "the family limit applies" and "the excess refusal does not
+    /// fire" are different claims and only the pair is the change.
+    #[test]
+    fn a_spouses_family_plan_puts_a_self_only_filer_on_the_family_limit() {
+        let p = ty2024_params();
+        let mfj = |spouse_family: bool| {
+            let mut ri = hsa_household();
+            ri.filing_status = FilingStatus::Mfj;
+            ri.header.spouse = Some(crate::tax::return_inputs::Person {
+                first_name: "Robin".into(),
+                last_name: "Roe".into(),
+                // ★ Never-issued area 000 — `scripts/pii-scan-generic.sh`'s impossible-SSN space.
+                ssn: "000-66-6666".into(),
+                ..Default::default()
+            });
+            // The taxpayer's OWN plan is self-only; only the spouse's is family.
+            ri.hsa.family_coverage = Some(false);
+            ri.hsa.spouse_family_coverage = Some(spouse_family);
+            ri.hsa.line2_contributions_you_made = dec!(6000);
+            answer_all_live_declarations(&mut ri);
+            ri
+        };
+
+        // ── The spouse HAS family coverage: the family amount, and the contribution is lawful. ──
+        let ri = mfj(true);
+        let f = form(&ri);
+        assert_eq!(
+            f.line1_coverage,
+            HdhpCoverage::Family,
+            "line 1's box follows \"you and your spouse\", not this filer's own plan"
+        );
+        assert_eq!(
+            f.line3,
+            p.hsa.family_limit,
+            "line 3 rule 1: \"Use the family coverage amount if you or your spouse had an HDHP with \
+             family coverage\""
+        );
+        assert_eq!(f.line13, dec!(6000), "the whole contribution is deductible");
+        assert_eq!(
+            refuse(&ri),
+            None,
+            "a lawful contribution under the family limit must not be refused as an excess one"
+        );
+
+        // ── The same return with BOTH plans self-only: the self-only amount, and the excess. ──
+        let both_self_only = mfj(false);
+        let g = form(&both_self_only);
+        assert_eq!(g.line1_coverage, HdhpCoverage::SelfOnly);
+        assert_eq!(g.line3, p.hsa.self_only_limit);
+        assert_eq!(
+            refuse(&both_self_only),
+            Some(RefuseReason::HsaExcessContributionsNeedForm5329),
+            "$6,000 against the self-only limit IS an excess contribution, and the form says so"
+        );
+
+        // ★ And the question is not asked of a filer who has no spouse to answer it about.
+        let single = hsa_household();
+        assert!(
+            !crate::tax::questions::question_is_live(
+                crate::tax::questions::QuestionId::HsaSpouseFamilyCoverage,
+                &single
+            ),
+            "a single filer has no spouse's plan to declare"
+        );
+        let mut mfs = hsa_household();
+        mfs.filing_status = FilingStatus::Mfs;
+        assert!(
+            crate::tax::questions::question_is_live(
+                crate::tax::questions::QuestionId::HsaSpouseFamilyCoverage,
+                &mfs
+            ),
+            "MFS is live too — \"regardless of whether you file jointly or separately\""
+        );
+    }
+
+    /// ★★★ **SEAM REVIEW M-1 — A DISTRIBUTION WITH NO FORM 1099-SA HAS A DOOR, AND THE DOOR NAMES
+    ///     THE FORM THE TRUSTEE OWES.**
+    ///
+    /// R3's pattern one form over. `hsa_activity` is a four-way disjunction, so a `Yes` does not say
+    /// WHICH trigger fired; a filer whose only trigger is *"(b) you took money out of one"* and
+    /// whose Form 1099-SA census row says "none" produced line 14a = $0 with no refusal and no
+    /// advisory — missing gross income under §223(f) plus the 20% additional tax.
+    ///
+    /// Liveness is pinned on all four corners of the pair, because a door that is live too widely
+    /// asks a filer a question they cannot answer and one that is live too narrowly is silent.
+    #[test]
+    fn the_document_less_distribution_door_is_live_exactly_on_the_pair_and_names_the_1099_sa() {
+        use crate::tax::questions::{question_is_live, QuestionId};
+        let live =
+            |ri: &ReturnInputs| question_is_live(QuestionId::HsaDistributionWithout1099sa, ri);
+
+        // (1) trigger affirmed + census row "none" → LIVE.
+        let mut open = hsa_household();
+        open.documents.set(DocumentRow::Sa1099, Some(false));
+        assert!(
+            live(&open),
+            "a census No beside an affirmed trigger opens it"
+        );
+
+        // (2) trigger affirmed + a transcribed 1099-SA → not live: line 14a comes from the document.
+        let mut has_doc = hsa_household();
+        has_doc.documents.set(DocumentRow::Sa1099, Some(true));
+        assert!(!live(&has_doc));
+
+        // (3) no HSA trigger at all → not live, whatever the census says.
+        let mut no_hsa = hsa_household();
+        no_hsa.sch1.hsa_activity = Some(false);
+        no_hsa.documents.set(DocumentRow::Sa1099, Some(false));
+        assert!(!live(&no_hsa), "a filer with no HSA is never asked it");
+
+        // (4) the trigger UNANSWERED → not live either; `HsaActivity` blocks first.
+        let mut unanswered = hsa_household();
+        unanswered.sch1.hsa_activity = None;
+        unanswered.documents.set(DocumentRow::Sa1099, Some(false));
+        assert!(!live(&unanswered));
+
+        // ── The `None` blocks, and the `Yes` refuses naming the trustee's form. ──
+        let mut blank = open.clone();
+        blank.hsa_distribution_without_1099sa = None;
+        assert_eq!(
+            refuse(&blank),
+            Some(RefuseReason::Form8889Unanswered {
+                question: QuestionId::HsaDistributionWithout1099sa
+            }),
+            "a live door left blank blocks like every other class-(A) declaration"
+        );
+
+        let mut no = open.clone();
+        no.hsa_distribution_without_1099sa = Some(false);
+        assert_eq!(refuse(&no), None, "\"there were none\" needs no section");
+
+        let mut yes = open.clone();
+        yes.hsa_distribution_without_1099sa = Some(true);
+        let r = screen_inputs(&yes, &ty2024_table(), &ty2024_params())
+            .expect("a distribution with no document must refuse");
+        assert_eq!(r.reason, RefuseReason::HsaDistributionWithoutForm1099Sa);
+        assert!(
+            r.detail.contains("LINE 14a"),
+            "the refusal must name the line the distribution belongs on: {}",
+            r.detail
+        );
+        assert!(
+            r.detail.contains(
+                "File Form 1099-SA, Distributions From an HSA, Archer MSA, or Medicare Advantage \
+                 MSA, to report distributions made from a health savings account (HSA)"
+            ),
+            "…in the instructions' own words, so the filer knows the trustee owes them the form: {}",
+            r.detail
+        );
+    }
+
+    /// ★★★ **SEAM REVIEW I-2 — AN UNANSWERED DECLARATION IS NOT A CONTRADICTION, AND THE IMPORT
+    ///     TIER MUST NOT SAY IT IS.**
+    ///
+    /// The contradiction rule sits inside the unconditional W-2 loop — outside the
+    /// `tier.unanswered_refuses` gate — so it runs on `screen_param_free`, the tier `income import`
+    /// uses. That tier's whole premise is that *"the import is the only row-creating path and
+    /// `income answer` the only answering one, so demanding the answers here would make answering
+    /// unreachable"*. Keyed on `!= Some(true)` the rule fired on `None` too, and told an ordinary
+    /// HSA filer that *"this return says no health savings account activity happened"* — which the
+    /// return does not say, because nobody has been asked. `cmd/tax.rs` turns that into
+    /// *"the {year} inputs were NOT stored"*, so a filer whose Form W-2 carries box 12 code W could
+    /// not import it at all, and the remedy the message offers second ("correct the box 12 entry")
+    /// invites deleting a true entry off an information return.
+    ///
+    /// `None` loses nothing: `HsaActivity` is a `FORM_QUESTIONS` declaration with `live: |_| true`,
+    /// so the registry loop blocks it on every tier that answers.
+    #[test]
+    fn an_unanswered_hsa_declaration_does_not_contradict_a_code_w_w2() {
+        use crate::tax::return_refuse::screen_param_free;
+
+        let mut unanswered = hsa_household();
+        unanswered.sch1.hsa_activity = None;
+        assert!(
+            unanswered.w2s.iter().any(|w| w
+                .box12
+                .iter()
+                .any(|e| e.code == "W" && e.amount > Usd::ZERO)),
+            "the fixture must carry the code-W amount, or this asserts nothing"
+        );
+        assert_eq!(
+            screen_param_free(&unanswered).map(|r| r.reason),
+            None,
+            "an UNANSWERED declaration beside a code-W W-2 is a question waiting to be asked, not \
+             two statements that disagree — the import tier must let the W-2 in"
+        );
+
+        // …and the answering tiers still block it, through the registry rather than through here.
+        assert_eq!(
+            refuse(&unanswered),
+            Some(RefuseReason::HsaActivityUnanswered),
+            "the tier that answers refuses the blank declaration by name"
+        );
+
+        // The contradiction the rule exists for is unchanged and still sharp.
+        let mut answered_no = hsa_household();
+        answered_no.sch1.hsa_activity = Some(false);
+        let r = screen_param_free(&answered_no).expect("a No beside a code-W W-2 contradicts");
+        assert_eq!(
+            r.reason,
+            RefuseReason::HsaEmployerContributionWithoutActivity
         );
     }
 }

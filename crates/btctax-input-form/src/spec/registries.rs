@@ -339,6 +339,16 @@ const DECL_FIELDS: &[Field] = &[
         ri.hsa.testing_period_failure = None;
         Ok(())
     }),
+    // ★★★ Indices 50 and 51 — the T16 SEAM REVIEW's two declarations (I-3's spouse plan, M-1's
+    //     document-less distribution door). Appended at the END for the array-index reason above.
+    decl_tristate!(50, FieldId::DeclHsaSpouseFamilyCoverage, |ri| {
+        ri.hsa.spouse_family_coverage = None;
+        Ok(())
+    }),
+    decl_tristate!(51, FieldId::DeclHsaDistributionWithout1099sa, |ri| {
+        ri.hsa_distribution_without_1099sa = None;
+        Ok(())
+    }),
     FOREIGN_COUNTRY_NAMES,
 ];
 
@@ -664,6 +674,8 @@ pub fn field_to_question(id: FieldId) -> Option<QuestionId> {
         FieldId::DeclHsaBothSpousesHaveHsas => QuestionId::HsaBothSpousesHaveHsas,
         FieldId::DeclHsaArcherMsaActivity => QuestionId::HsaArcherMsaActivity,
         FieldId::DeclHsaTestingPeriodFailure => QuestionId::HsaTestingPeriodFailure,
+        FieldId::DeclHsaSpouseFamilyCoverage => QuestionId::HsaSpouseFamilyCoverage,
+        FieldId::DeclHsaDistributionWithout1099sa => QuestionId::HsaDistributionWithout1099sa,
         _ => return None,
     })
 }
@@ -744,6 +756,8 @@ pub fn question_to_field(id: QuestionId) -> FieldId {
         QuestionId::HsaBothSpousesHaveHsas => FieldId::DeclHsaBothSpousesHaveHsas,
         QuestionId::HsaArcherMsaActivity => FieldId::DeclHsaArcherMsaActivity,
         QuestionId::HsaTestingPeriodFailure => FieldId::DeclHsaTestingPeriodFailure,
+        QuestionId::HsaSpouseFamilyCoverage => FieldId::DeclHsaSpouseFamilyCoverage,
+        QuestionId::HsaDistributionWithout1099sa => FieldId::DeclHsaDistributionWithout1099sa,
     }
 }
 

@@ -298,6 +298,12 @@ pub enum FieldId {
     DeclHsaArcherMsaActivity,
     /// Part III — failure to remain an eligible individual during a testing period.
     DeclHsaTestingPeriodFailure,
+    /// ★ Seam review I-3 — L1 / L3 rule 1: did the SPOUSE have family HDHP coverage? Live only with
+    ///   a spouse (MFJ or MFS — the instruction says "regardless of whether you file jointly or
+    ///   separately").
+    DeclHsaSpouseFamilyCoverage,
+    /// ★ Seam review M-1 — R3's door for Form 8889 line 14a: a distribution with no Form 1099-SA.
+    DeclHsaDistributionWithout1099sa,
     // ── ★★★ R4 / T5 — Form 1099-INT (per row). One Field per COLLECTED box, named for the box. ──
     /// The payer as printed on the form.
     Int1099Payer,

@@ -412,6 +412,10 @@ pub fn maximal_sentinel() -> ReturnInputs {
         w2_wages_without_w2: Some(false),
         interest_or_dividends_without_1099: Some(true),
         state_refund_without_1099g: Some(false),
+        // ★ Seam review M-1 — R3's fourth door. NOT live on this fixture (the Sa1099 census row
+        //   is answered `false` and `hsa_activity` is `Some(false)`), but a maximal fixture leaves
+        //   no `Option` at `None`: a leaf `None` on both sides drops out of the derived axis.
+        hsa_distribution_without_1099sa: Some(false),
         // ★ LIVE (1099-G box 2 above is non-zero) and answered the §111(a) NEUTRAL: no prior-year
         //   itemizing ⇒ no tax benefit ⇒ the refund is not income and Schedule 1 line 1 is blank by
         //   decision. `Some(true)` would refuse and mask every cell of the matrix.

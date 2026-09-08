@@ -1073,6 +1073,30 @@ pub struct HsaInputs {
     /// deduction. [`HdhpCoverage`] is the transcription struct's type; this is the answer it reads.
     #[serde(default)]
     pub family_coverage: Option<bool>,
+    /// **L1 and L3 rule 1 — the SPOUSE's plan**, which the instructions ask about and no other field
+    /// on this return can answer.
+    ///
+    /// > *"If you and your spouse are considered covered by a family HDHP, you are considered
+    /// > covered by a family HDHP **regardless of whether you file jointly or separately**."*
+    /// > (`i8889--2024.txt:466-470`, Line 1)
+    ///
+    /// > *"1. Use the family coverage amount **if you or your spouse** had an HDHP with family
+    /// > coverage. Disregard any plan with self-only coverage."*
+    /// > (`i8889--2024.txt:497-499`, Line 3)
+    ///
+    /// ★★★ **Seam review I-3.** Both the line-1 box and the line-3 base used to be derived from
+    /// [`Self::family_coverage`] alone — the filer's OWN plan. A married filer with self-only
+    /// coverage whose spouse has family coverage answers that question "No" truthfully, and got the
+    /// wrong box on line 1 and $4,150 on line 3 where the instructions say $8,300. The direction is
+    /// conservative for the deduction and the consequence is not benign: at a $6,000 contribution
+    /// line 2 then exceeds line 13 and the return REFUSES
+    /// [`super::return_refuse::RefuseReason::HsaExcessContributionsNeedForm5329`] — telling a fully
+    /// compliant filer they have excess contributions and may owe the §4973 excise tax.
+    ///
+    /// ★ Live iff there is a spouse — MFJ **or** MFS, because the sentence says so in as many
+    /// words. `None` refuses like every other class-(A) declaration.
+    #[serde(default)]
+    pub spouse_family_coverage: Option<bool>,
     /// **L3's own condition** — *"If you were under age 55 at the end of 2024 and, on the first day
     /// of every month during 2024, you were, or were considered, an eligible individual with the
     /// same coverage, enter $4,150 ($8,300 for family coverage). All others, see the instructions
@@ -1863,6 +1887,22 @@ pub struct ReturnInputs {
     /// Tax Refund Worksheet** — the same exit 1099-G box 2 takes.
     #[serde(default)]
     pub state_refund_without_1099g: Option<bool>,
+    /// ★★★ **Seam review M-1 — an HSA DISTRIBUTION with no Form 1099-SA.** R3's fourth door, and
+    /// it is R3's own pattern one form over: live iff `documents.sa_1099 == Some(false)` **and**
+    /// [`Schedule1Inputs::hsa_activity`] is `Some(true)`.
+    ///
+    /// Form 8889 line 14a asks for *"Total distributions you received in 2024 from all HSAs"*, and
+    /// `form8889::total_hsa_distributions` fills it from transcribed Form 1099-SA rows alone. The
+    /// §223 trigger is a four-way disjunction, so a `Yes` on it does not say WHICH trigger fired —
+    /// a filer whose only trigger is *"(b) you took money out of one"* and whose census row says
+    /// "none" would produce line 14a = $0 with no refusal and no advisory. That is missing gross
+    /// income plus a 20% additional tax.
+    ///
+    /// `Some(true)` REFUSES naming the trustee's Form 1099-SA: a trustee **must** issue one for
+    /// every distribution (*"File Form 1099-SA … to report distributions made from a … health
+    /// savings account"*, `i1099sa`), so the honest answer is to get the form, not to invent a row.
+    #[serde(default)]
+    pub hsa_distribution_without_1099sa: Option<bool>,
     /// ★★★ **R3/I1 — did you itemize on your PRIOR-YEAR return?** RETURN-LEVEL, never a `Form1099G`
     /// row field, *because a gate may not ride on a row that might not exist*: the identical answer
     /// is owed by a filer with no 1099-G at all, through [`Self::state_refund_without_1099g`].
@@ -2015,6 +2055,7 @@ impl Default for ReturnInputs {
             w2_wages_without_w2: None,
             interest_or_dividends_without_1099: None,
             state_refund_without_1099g: None,
+            hsa_distribution_without_1099sa: None,
             itemized_prior_year: None,
             // ★★★ R9 — `None`: a fresh return has not been asked the Digital Assets question. A
             //     defaulted `Some(false)` would swear "no digital assets" on the filer's behalf,

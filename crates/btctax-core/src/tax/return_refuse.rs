@@ -586,6 +586,19 @@ pub enum RefuseReason {
     /// a row would fabricate an employer, an EIN and a withholding figure. Refusing is the only
     /// honest answer — dropping the income would UNDERSTATE.
     WagesWithoutW2,
+    /// ★★★ **Seam review M-1 — the filer declared an HSA distribution with no Form 1099-SA.**
+    ///
+    /// R3's door one form over. Form 8889 line 14a is *"Total distributions you received in 2024
+    /// from all HSAs"*, and `form8889::total_hsa_distributions` fills it from transcribed Form
+    /// 1099-SA rows alone — so a census `No` beside an affirmed §223 trigger would print $0 on a
+    /// line the form says to report, hiding gross income under §223(f) plus the 20% additional tax.
+    ///
+    /// ★ Unlike its three R3 siblings this one names the DOCUMENT rather than a worksheet, because
+    /// the document is owed: *"File Form 1099-SA, Distributions From an HSA, Archer MSA, or Medicare
+    /// Advantage MSA, to report distributions made from a health savings account (HSA)…"*
+    /// (`i1099sa--2024.txt:70-73`). The trustee must issue one, so the honest remedy is to get the
+    /// form, not to invent a row with an amount and a distribution code nobody can attest to.
+    HsaDistributionWithoutForm1099Sa,
     /// **A live `interest_or_dividends_without_1099` is `None`** — UNANSWERED class.
     InterestOrDividendsWithout1099Unanswered,
     /// ★★★ **The filer declared interest or dividends with no 1099 behind them, and transcribed no
@@ -781,6 +794,7 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         w2_wages_without_w2: _,
         interest_or_dividends_without_1099: _,
         state_refund_without_1099g: _,
+        hsa_distribution_without_1099sa: _,
         itemized_prior_year: _,
         schedule_c,
         schedule_a,
@@ -1134,6 +1148,7 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
     {
         let crate::tax::return_inputs::HsaInputs {
             family_coverage: _,
+            spouse_family_coverage: _,
             eligible_every_month_same_coverage: _,
             age_55_or_older_at_year_end: _,
             enrolled_in_medicare_any_month: _,
@@ -1873,6 +1888,25 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
              with a preparer, or file it yourself with those earnings on line 1a",
         );
     }
+    // ★★★ Seam review M-1 — the same door, for Form 8889 line 14a.
+    if crate::tax::questions::question_is_live(
+        crate::tax::questions::QuestionId::HsaDistributionWithout1099sa,
+        ri,
+    ) && ri.hsa_distribution_without_1099sa == Some(true)
+    {
+        return refuse(
+            RefuseReason::HsaDistributionWithoutForm1099Sa,
+            "you answered that you took money out of an HSA and that no Form 1099-SA reports it. \
+             Form 8889 LINE 14a is \"Total distributions you received in 2024 from all HSAs\", and \
+             btctax fills it only from transcribed Form 1099-SA rows — so it has nowhere to put a \
+             distribution that arrives without the document, and inventing a row would fabricate a \
+             trustee, an amount and a distribution code on a return signed under §6065. The form is \
+             owed to you: the trustee must \"File Form 1099-SA, Distributions From an HSA, Archer \
+             MSA, or Medicare Advantage MSA, to report distributions made from a health savings \
+             account (HSA)\". Ask the trustee for it and transcribe it, or file the return with a \
+             preparer",
+        );
+    }
     if crate::tax::questions::question_is_live(
         crate::tax::questions::QuestionId::InterestOrDividendsWithout1099,
         ri,
@@ -2371,7 +2405,16 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
             //     things about the same fact, and the one nobody typed would win: line 9 would go
             //     unread, the contribution would sit outside every limit test, and §223(a) requires
             //     the Form 8889 whenever a contribution is made.
-            if code == "W" && entry.amount > Usd::ZERO && ri.sch1.hsa_activity != Some(true) {
+            // ★★★ SEAM REVIEW I-2 — `== Some(false)`, NOT `!= Some(true)`. This rule sits in the
+            //     unconditional W-2 loop, outside the `tier.unanswered_refuses` gate, so it also
+            //     runs on `screen_param_free` — the tier `income import` uses precisely so an
+            //     UNANSWERED declaration is lawful there (answering is `income answer`'s job, and
+            //     importing is what creates the rows to answer about). On `None` the message
+            //     asserted something false — *"this return says no health savings account activity
+            //     happened"* — about a return nobody had asked. A blank is not a contradiction; it
+            //     is the registry's to block, and `HsaActivity` is `live: |_| true`, so every tier
+            //     that answers still refuses `HsaActivityUnanswered` by name.
+            if code == "W" && entry.amount > Usd::ZERO && ri.sch1.hsa_activity == Some(false) {
                 return refuse(
                     RefuseReason::HsaEmployerContributionWithoutActivity,
                     format!(
@@ -4034,6 +4077,25 @@ mod tests {
             | QuestionId::HsaArcherMsaActivity
             | QuestionId::HsaTestingPeriodFailure => {
                 r.sch1.hsa_activity = Some(true);
+            }
+            // ★★★ Seam review I-3 — the SPOUSE's plan needs the trigger AND a spouse. MFJ is chosen
+            //     over MFS because the instruction's *"regardless of whether you file jointly or
+            //     separately"* makes both live, and MFJ is the one that does not drag in the three
+            //     §63(f) MFS conditions (`spouse_had_no_income` and friends) as a side effect.
+            QuestionId::HsaSpouseFamilyCoverage => {
+                r.sch1.hsa_activity = Some(true);
+                r.filing_status = FilingStatus::Mfj;
+            }
+            // ★★★ Seam review M-1 — R3's door: the trigger affirmed AND the Form 1099-SA census row
+            //     answered "I received none". `ri()` already answers every census row `false`, so
+            //     only the trigger has to be set — but the row is set explicitly here so the
+            //     scenario states its own precondition rather than inheriting it.
+            QuestionId::HsaDistributionWithout1099sa => {
+                r.sch1.hsa_activity = Some(true);
+                r.documents.set(
+                    crate::tax::document_census::DocumentRow::Sa1099,
+                    Some(false),
+                );
             }
             QuestionId::AmtDepreciationSameAsRegular => {
                 // A nonzero FLAT expense total is the whole liveness condition — btctax cannot see
@@ -6684,6 +6746,13 @@ mod param_free_tier {
                     amount: dec!(1500),
                 }]
             }));
+        });
+        // ★★★ Seam review M-1 — R3's fourth door. The trigger affirmed, the census row answered
+        //     "I received none", and the door answered Yes: a distribution with no Form 1099-SA.
+        add("HsaDistributionWithoutForm1099Sa", &|r| {
+            r.sch1.hsa_activity = Some(true);
+            r.documents.set(DocumentRow::Sa1099, Some(false));
+            r.hsa_distribution_without_1099sa = Some(true);
         });
         add("SaAccountTypeNotTranscribed", &|r| {
             r.documents.set(DocumentRow::Sa1099, Some(true));

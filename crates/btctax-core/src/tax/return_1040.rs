@@ -2104,10 +2104,35 @@ pub fn assemble_absolute(
     //     profit, Schedule 1 line 3, Schedule SE, and the §199A QBI base.
     let schedule_c_gross = crypto.business_se_gross + other_gross_receipts;
     let schedule_c_net = (schedule_c_gross - schedule_c_expenses).max(Usd::ZERO);
+    // ★★★ T16 — FORM 8889, computed ONCE. Schedule 1 lines 8f and 13, Schedule 2 lines 17c and
+    //     17d, and the packet's attached PDF all read this. It files exactly when the §223 trigger
+    //     declaration is affirmed (`Form8889::must_file`), never on a threshold: an all-zero Part II
+    //     and a $0 deduction are legitimately blank parts of a form that still files.
+    //
+    // ★★ SEAM REVIEW C-1 — it is derived HERE, above `schedule_1_income`, because line 8f is one of
+    //    that sum's terms. It needs only `ri` and `params.hsa` (`screen_inputs` calls `compute` with
+    //    nothing more), so nothing about the derivation wanted the old position 30 lines below; what
+    //    the old position produced was a `hsa_income_8f` that reached `Schedule1Parts` — where only
+    //    `printed::schedule_1_lines` reads it — and never `total_income`.
+    let form_8889 = crate::tax::form8889::Form8889::must_file(ri)
+        .then(|| crate::tax::form8889::compute(ri, &params.hsa));
+    // Form 8889 line 16 + line 20, the form's own two routings to Schedule 1 Part I line 8f.
+    let hsa_income_8f = form_8889
+        .as_ref()
+        .map_or(Usd::ZERO, |f| f.schedule_1_line_8f());
+    let hsa_deduction_13 = form_8889
+        .as_ref()
+        .map_or(Usd::ZERO, |f| f.schedule_1_line_13());
     let schedule_1_income = ri.sch1.state_refund_taxable
         + sum_unemployment(ri)
         + schedule_c_net
-        + crypto.nonbusiness_ordinary;
+        + crypto.nonbusiness_ordinary
+        // ★★★ SEAM REVIEW C-1 — Schedule 1 line 8f. Every other Schedule 1 Part I income is in this
+        //     sum; this was the one omission, and `agi` is the argument to `student_loan_deduction`,
+        //     `form_8960` (the §1411 MAGI), `assemble_amt`, the §170(b) contribution base, the
+        //     §213(a) floor, `ctc_odc_line19` and the itemize-vs-standard election. It printed a
+        //     §221 deduction $1,500 too large on the review's second probe.
+        + hsa_income_8f;
 
     let total_income =
         wages + taxable_interest + ordinary_dividends + capital_gain + schedule_1_income; // L9
@@ -2115,32 +2140,30 @@ pub fn assemble_absolute(
     // ── Adjustments L10 (Sch 1 L26), AGI L11 ──────────────────────────────────────────────────────
     // §221 MAGI for the student-loan phase-out is AGI computed WITHOUT the student-loan deduction but WITH
     // ½-SE and the early-withdrawal penalty (Form 1040 / Sch 1 order).
+    //
+    // ★★★ AND WITH THE HSA DEDUCTION, which is Schedule 1 LINE 13. The Form 1040 instructions'
+    //     *Student Loan Interest Deduction Worksheet—Schedule 1, Line 21* names the whole block
+    //     rather than any one line: step 2 *"Enter the amount from Form 1040 or 1040-SR, line 9"*,
+    //     step 3 *"Enter the total of the amounts from **Schedule 1, lines 11 through 20**, and 23
+    //     and 25"*, step 4 *"Subtract line 3 from line 2"*. Lines 15 (½-SE) and 18 (early
+    //     withdrawal) were the only two members btctax modelled until T16 added line 13; adding it
+    //     to `adjustments` and not here inflated the MAGI and OVERSTATED the tax. Held by
+    //     `form8889::tests::the_hsa_deduction_is_inside_the_section_221_magi`.
+    //
+    //     ★ It is a BLOCK, not a list: a future Schedule 1 lines 11–20 adjustment belongs here the
+    //       day it is added, and the worksheet's own sentence is the rule that says so.
     let early_wd: Usd = ri
         .int_1099
         .iter()
         .map(|i| i.box2_early_withdrawal_penalty)
         .sum();
-    let agi_before_student_loan = total_income - early_wd - half_se;
+    let agi_before_student_loan = total_income - early_wd - half_se - hsa_deduction_13;
     let student_loan = student_loan_deduction(
         sum_student_loan_interest(ri),
         agi_before_student_loan,
         status,
         params,
     );
-    // ★★★ T16 — FORM 8889, computed ONCE. Schedule 1 lines 8f and 13, Schedule 2 lines 17c and
-    //     17d, and the packet's attached PDF all read this. It files exactly when the §223 trigger
-    //     declaration is affirmed (`Form8889::must_file`), never on a threshold: an all-zero Part II
-    //     and a $0 deduction are legitimately blank parts of a form that still files.
-    let form_8889 = crate::tax::form8889::Form8889::must_file(ri)
-        .then(|| crate::tax::form8889::compute(ri, &params.hsa));
-    let hsa_income_8f = form_8889
-        .as_ref()
-        .map_or(Usd::ZERO, |f| f.schedule_1_line_8f());
-    let hsa_deduction_13 = form_8889
-        .as_ref()
-        .map_or(Usd::ZERO, |f| f.schedule_1_line_13());
-    // ★ Line 8f is Schedule 1 PART I income, so it belongs in `total_income` through line 10 — see
-    //   `schedule_1_income` below, which is what 1040 line 8 prints.
     let adjustments = early_wd + half_se + student_loan + hsa_deduction_13;
     let agi = total_income - adjustments; // 1040 L11 (with-crypto AGI)
 
@@ -2469,9 +2492,29 @@ pub fn assemble_absolute(
     let l18 = regular_tax + amt.line11; // L16 + L17
     let nonrefundable_credits = ctc_odc_credit + foreign_tax_credit; // L21 = L19 + L20 (v1: FTC only)
     let tax_after_credits = (l18 - nonrefundable_credits).max(Usd::ZERO); // L22
-                                                                          // Sch 2 Part II (L21) → 1040 L23 = SE (L4) + Additional Medicare (L11) + NIIT (L12).
-    let schedule_2_other_taxes =
-        se_tax_sch2_l4 + additional_medicare.additional_medicare_tax + niit.tax;
+                                                                          // Sch 2 Part II (L21) → 1040 L23 = SE (L4) + Additional Medicare (L11) + NIIT (L12) + L18.
+                                                                          // ★★★ SEAM REVIEW I-1 — LINE 18's HSA ADDITIONAL TAXES ARE PART OF LINE 21.
+                                                                          //
+                                                                          //     Form 8889 line 17b → Schedule 2 line 17c (the §223(f)(4) 20% tax on a distribution not
+                                                                          //     used for qualified medical expenses) and Form 8889 line 21 → line 17d (the §223(b)(8)
+                                                                          //     10% testing-period tax). The PRINTED chain already sums them — `printed.rs`'s
+                                                                          //     `line18 = 17c + 17d` and `line21 = line4 + line11 + line12 + line18` — so leaving them
+                                                                          //     out here made the two chains disagree by the whole HSA additional tax, in the
+                                                                          //     UNDERSTATEMENT direction, and `total_tax` is what `amount_owed` / `overpayment_refund`
+                                                                          //     and every advisory over them read.
+                                                                          //
+                                                                          //     ★ This is the defect the doc comment 40 lines above records as having happened once
+                                                                          //       already with the AMT. The comparison written in response
+                                                                          //       (`packet.rs::the_absolute_total_tax_equals_the_printed_1040_line_24`) ran over a
+                                                                          //       HAND-LISTED pair of households, neither with an HSA, so it passed. That instrument is
+                                                                          //       now structural — see `every_money_leaf_household`.
+    let hsa_additional_taxes = form_8889.as_ref().map_or(Usd::ZERO, |f| {
+        f.schedule_2_line_17c() + f.schedule_2_line_17d()
+    });
+    let schedule_2_other_taxes = se_tax_sch2_l4
+        + additional_medicare.additional_medicare_tax
+        + niit.tax
+        + hsa_additional_taxes;
     let total_tax = tax_after_credits + schedule_2_other_taxes; // L24
 
     // ── Excess-SS + payments → refund/owed (SPEC §5 stages 8–9) ─────────────────────────────────────

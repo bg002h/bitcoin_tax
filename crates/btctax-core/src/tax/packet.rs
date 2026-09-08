@@ -762,7 +762,8 @@ mod tests {
     use crate::tax::return_1040::assemble_absolute;
     use crate::tax::return_inputs::{Dependent, HouseholdHeader, ScheduleCInputs, W2};
     use crate::tax::testonly::{
-        amt_owing_household, kitchen_sink_household, ty2024_params, ty2024_table, w2_only_household,
+        amt_owing_household, every_money_leaf_household, kitchen_sink_household, ty2024_params,
+        ty2024_table, w2_only_household,
     };
     use rust_decimal_macros::dec;
     use time::macros::date;
@@ -1432,6 +1433,85 @@ mod tests {
         }
     }
 
+    /// ★★★ **THE TWO-CHAIN COMPARISON'S HOUSEHOLDS, AND THE ANTI-VACUITY GUARD EACH ONE CARRIES.**
+    ///
+    /// Two named households that exercise a specific term, and — since the T16 seam review — one
+    /// STRUCTURAL fixture that exercises **every money leaf `ReturnInputs` has**
+    /// ([`every_money_leaf_household`], derived from `maximal_sentinel` and the type-driven money
+    /// detector, so a leaf added tomorrow is populated with nobody remembering to do it).
+    ///
+    /// ★★ **Why the third row is not just a third fixture.** The first two are a HAND LIST, and a
+    /// hand list is written by whoever adds the term — which is exactly how T16 added Schedule 1
+    /// line 8f and Schedule 2 lines 17c/17d to the printed chain, left them out of
+    /// `AbsoluteReturn`, and left this test green. The structural row cannot be defeated that way:
+    /// any future money leaf that reaches a printed line without reaching the absolute chain reds
+    /// here **without anyone naming a household**.
+    ///
+    /// Each row asserts its own non-vacuity, because a comparison that no longer exercises the term
+    /// it was written for passes forever.
+    fn two_chain_households() -> Vec<(&'static str, AbsoluteReturn, PrintedReturn)> {
+        let mut out = Vec::new();
+        for (name, hh) in [
+            ("kitchen sink", kitchen_sink_household()),
+            ("AMT-owing", amt_owing_household()),
+            ("every money leaf", every_money_leaf_household()),
+        ] {
+            let (ri, state) = hh;
+            let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
+            let pr = assemble_printed_return(
+                &ri,
+                &state,
+                &BTreeMap::new(),
+                &ar,
+                &ty2024_table(),
+                2024,
+                &[],
+                crate::forms::InformationReturnRegime::NONE,
+            )
+            .unwrap();
+            let zero = crate::conventions::Usd::ZERO;
+            match name {
+                // §G-6 — the AMT term, which is what this comparison was originally written for.
+                "kitchen sink" => assert!(
+                    ar.amt.line11 <= zero,
+                    "kitchen sink must NOT owe AMT, or the FALSE case of the Schedule-2-line-2 \
+                     biconditional has no witness"
+                ),
+                "AMT-owing" => assert!(
+                    ar.amt.line11 > zero,
+                    "AMT-owing must exercise AMT, else this comparison goes vacuous on the one term \
+                     it exists to catch"
+                ),
+                // The T16 seam review's two legs, plus the claim that makes the row structural.
+                "every money leaf" => {
+                    let money = crate::tax::provenance::leaf_walk::money_leaves(&ri);
+                    let nonzero = crate::tax::provenance::leaf_walk::nonzero_money_leaves(&ri);
+                    let blank: Vec<&String> =
+                        money.iter().filter(|p| !nonzero.contains_key(*p)).collect();
+                    assert!(
+                        blank.is_empty(),
+                        "every money leaf must carry a figure or this row is silent on it: {blank:?}"
+                    );
+                    let s1 = pr.forms.sch_1.as_ref().expect("Schedule 1 files");
+                    let s2 = pr.forms.sch_2.as_ref().expect("Schedule 2 files");
+                    assert!(
+                        s1.line8f > zero,
+                        "the fixture must produce a non-zero Schedule 1 line 8f — the income leg \
+                         C-1 found missing from `schedule_1_income`"
+                    );
+                    assert!(
+                        s2.line17c.is_some_and(|v| v > zero),
+                        "…and a non-zero Schedule 2 line 17c — the additional-tax leg I-1 found \
+                         missing from `schedule_2_other_taxes`"
+                    );
+                }
+                other => panic!("no anti-vacuity guard for {other:?}"),
+            }
+            out.push((name, ar, pr));
+        }
+        out
+    }
+
     /// ★★★ §G-6 — THE ABSOLUTE `total_tax` EQUALS THE PRINTED 1040 LINE 24.
     ///
     /// btctax carries two chains: the unrounded `AbsoluteReturn` and the whole-dollar printed packet.
@@ -1451,36 +1531,55 @@ mod tests {
     /// a $13,461 understatement. **If a future fixture reds this for a rounding reason, the fix is to
     /// say so in the message and widen to a named tolerance — NOT to weaken it to something that would
     /// also have passed with the AMT missing.**
+    ///
+    /// ★★★ **T16 SEAM REVIEW I-1 — it happened again, and this test did not see it.** Form 8889 line
+    /// 17b → Schedule 2 line 17c and line 21 → 17d were summed by the printed chain and not by
+    /// `schedule_2_other_taxes`. The test was green because its fixture list held two households,
+    /// neither with an HSA. The list is now `two_chain_households`, whose third row is derived from
+    /// every money leaf the input type has — so the next term added to one chain and not the other
+    /// reds here whether or not anyone thinks to add a household.
     #[test]
     fn the_absolute_total_tax_equals_the_printed_1040_line_24() {
-        for (name, hh, expect_amt) in [
-            ("kitchen sink", kitchen_sink_household(), false),
-            ("AMT-owing", amt_owing_household(), true),
-        ] {
-            let (ri, state) = hh;
-            let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
-            let pr = assemble_printed_return(
-                &ri,
-                &state,
-                &BTreeMap::new(),
-                &ar,
-                &ty2024_table(),
-                2024,
-                &[],
-                crate::forms::InformationReturnRegime::NONE,
-            )
-            .unwrap();
-            assert_eq!(
-                ar.amt.line11 > crate::conventions::Usd::ZERO,
-                expect_amt,
-                "{name}: fixture must exercise AMT = {expect_amt}, else this comparison goes vacuous \
-                 on the one term it exists to catch"
-            );
+        for (name, ar, pr) in two_chain_households() {
             assert_eq!(
                 crate::conventions::round_dollar(ar.total_tax),
                 pr.forms.f1040.line24,
                 "{name}: the absolute total tax and the FILED 1040 line 24 must be the same number. \
                  A gap here is what the filer signs versus what the engine believes."
+            );
+        }
+    }
+
+    /// ★★★ **THE TWIN, ONE STAGE UPSTREAM — the absolute AGI equals the printed 1040 line 11, and
+    ///     the absolute taxable income equals line 15.**
+    ///
+    /// T16 seam review **C-1**. `total_tax` is not the only figure the two chains both produce, and
+    /// it is not the earliest: `agi` is the argument to `student_loan_deduction`, `form_8960` (the
+    /// §1411 MAGI), `assemble_amt`, the §170(b) contribution base, the §213(a) medical floor,
+    /// `ctc_odc_line19`, `ti_before_qbi`, the itemize-vs-standard election and `regular_tax`. Four
+    /// of those produce PRINTED figures, so an absolute AGI that disagrees with the filed line 11
+    /// does not merely sit unread — it moves a signed line. It did: with Schedule 1 line 8f missing
+    /// from `schedule_1_income`, an $85,000 household with a $9,000 HSA distribution printed a
+    /// §221 student-loan deduction $1,500 too large.
+    ///
+    /// ★ Line 24's test could not catch it. On a fully-excepted distribution the §223(f)(4) tax is
+    ///   zero, so `total_tax` moved only through the phase-out — and a comparison that starts at
+    ///   line 24 sees an AGI error only when it survives every credit and every floor between here
+    ///   and there. The earliest common figure is the right place to compare.
+    #[test]
+    fn the_absolute_agi_equals_the_printed_1040_line_11() {
+        for (name, ar, pr) in two_chain_households() {
+            assert_eq!(
+                crate::conventions::round_dollar(ar.agi),
+                pr.forms.f1040.line11,
+                "{name}: the absolute AGI and the FILED 1040 line 11 must be the same number — \
+                 every Schedule 1 Part I income reaches line 9 through line 10, and every Part II \
+                 adjustment reaches line 11 through line 10a"
+            );
+            assert_eq!(
+                crate::conventions::round_dollar(ar.taxable_income),
+                pr.forms.f1040.line15,
+                "{name}: …and so must taxable income, which is figured from that AGI"
             );
         }
     }

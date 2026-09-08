@@ -155,6 +155,19 @@ pub enum CollectedFrom {
         stem: &'static str,
         /// The box's own label, e.g. `"1"`, `"2a"`, `"12b"`.
         box_label: &'static str,
+        /// ★★★ **Seam review N-1 — THE OTHER SLOTS THIS LINE READS, when a line reads a REPEATING
+        /// box rather than a single one.**
+        ///
+        /// Form W-2 prints four box-12 slots (`12a`–`12d`) and btctax models them as one
+        /// `Vec<Box12Entry>`; `form8889::employer_contributions_from_w2s` sums **every** slot whose
+        /// code is `W`, not just the first. A row naming `12a` alone read as if only the first slot
+        /// were consulted — the label was narrower than the code, which is the same
+        /// blank-vs-blank confusion one layer up: a census that names one slot cannot be told
+        /// apart from a census that means one slot.
+        ///
+        /// Empty for every ordinary box, and the checker validates each label the same way, so a
+        /// slot the census stops deciding reds here whichever of the four it is.
+        also_labels: &'static [&'static str],
     },
     /// **No issuing third party** — the figure is the filer's own record (R5): line 26's estimated
     /// payments, Schedule A 5b/5c, the charitable rows, a prior-year carryover.
@@ -176,7 +189,26 @@ pub enum CollectedFrom {
 impl Production {
     /// A [`Production::Collected`] line transcribed from a numbered box on an information return.
     pub const fn doc_box(stem: &'static str, box_label: &'static str) -> Production {
-        Production::Collected(CollectedFrom::DocBox { stem, box_label })
+        Production::Collected(CollectedFrom::DocBox {
+            stem,
+            box_label,
+            also_labels: &[],
+        })
+    }
+
+    /// ★ Seam review N-1 — a [`Production::Collected`] line transcribed from a REPEATING box: the
+    /// form prints several identical slots and the code reads all of them. `first` is the label the
+    /// row is named for; `also` are the rest, and the checker validates every one.
+    pub const fn doc_box_slots(
+        stem: &'static str,
+        first: &'static str,
+        also: &'static [&'static str],
+    ) -> Production {
+        Production::Collected(CollectedFrom::DocBox {
+            stem,
+            box_label: first,
+            also_labels: also,
+        })
     }
 
     /// A [`Production::Collected`] line the filer supplies from their own records (R5).
@@ -1699,7 +1731,9 @@ pub fn cover_form8889(p: &crate::tax::form8889::Form8889) -> Coverage {
         f,
         "9",
         "line9",
-        Production::doc_box("fw2", "12a"),
+        // ★ Seam review N-1 — line 9 reads EVERY box-12 slot whose code is W (12a–12d are one
+        //   `Vec<Box12Entry>`), so the census says so instead of naming the first.
+        Production::doc_box_slots("fw2", "12a", &["12b", "12c", "12d"]),
         "Employer contributions made to your HSAs for 2024",
     );
     c.line(*line10, f, "10", "line10",

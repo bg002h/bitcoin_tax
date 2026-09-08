@@ -271,6 +271,15 @@ fn m1_preserve_order_value_output_sites_are_enumerated() {
         //   serde through `save_draft`, untouched by this). Same audit, same conclusion, as
         //   `scrub_axis.rs` and `provenance.rs` above.
         "btctax-cli/src/open_next_year.rs",
+        // ★ AUDITED 2026-09-07 (T16 seam review I-1). `testonly.rs`'s `Value` use is
+        //   `every_money_leaf_household`: it serializes `maximal_sentinel`, overwrites the leaves
+        //   `provenance::leaf_walk::money_leaves` classifies as money, and immediately
+        //   re-deserializes into a typed `ReturnInputs`. The `Value` dies inside the function — it
+        //   returns `(ReturnInputs, LedgerState)` and its only callers are the two-chain
+        //   assertions in `packet.rs` — so key order cannot reach persisted or fingerprinted bytes,
+        //   which is the invariant this enumeration protects. Same audit and same conclusion as
+        //   `scrub_axis.rs` and `provenance.rs`, whose walks it is built on.
+        "btctax-core/src/tax/testonly.rs",
     ];
     let crates_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()

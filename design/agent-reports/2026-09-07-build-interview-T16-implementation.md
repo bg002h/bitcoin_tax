@@ -608,3 +608,372 @@ sha256sum -c legal/SHA256SUMS 50 OK
 
 Nothing committed; nothing pushed. `CONTINUITY.md`, `design/ROADMAP_STATUS.md` and the controller's
 `design/agent-reports/BRIEF-*.md` / `…-T6-reverify.md` files were not touched.
+
+---
+
+## Fold (seam review C-1, I-1, I-2, I-3, M-1, M-2, N-1)
+
+Folder's report. Shared main tree, branch `main`, HEAD `b9c21f8f` at dispatch (nothing committed).
+Brief: `design/agent-reports/BRIEF-fold-interview-T16-review.md`. Review:
+`2026-09-07-build-interview-T16-review.md`; ledger `…-review-VERIFICATION.md`. Every plant below was
+reverted from a `cp` backup under the scratchpad — never `git checkout --`.
+
+**Every item folded, plus one defect of the same shape found while folding (§C-1b).** Workspace
+green, fmt clean, clippy clean, every conformance gate OK, both oracles re-run live on the T16 cell.
+
+### 1. C-1 — Schedule 1 line 8f enters AGI
+
+`return_1040.rs`: the `form_8889` / `hsa_income_8f` / `hsa_deduction_13` derivation is **hoisted
+above** `schedule_1_income` (it needs only `ri` and `params.hsa`), and `+ hsa_income_8f` is now one
+of that sum's terms beside the state refund, unemployment, Schedule C net and crypto 8v. The comment
+that pointed at *"`schedule_1_income` below"* — a binding that did not exist, 27 lines the other way
+— is replaced by the reason the derivation sits where it does.
+
+### 2. I-1 — Schedule 2 lines 17c/17d enter total tax
+
+`schedule_2_other_taxes = se_tax_sch2_l4 + additional_medicare + niit + hsa_additional_taxes`, where
+`hsa_additional_taxes = f.schedule_2_line_17c() + f.schedule_2_line_17d()` — the two legs the
+printed lane already sums into line 18 and carries to 1040 line 23.
+
+### 3. C-1b — Form 8889 line 13 is inside the §221 MAGI (found while folding, same function)
+
+The Form 1040 instructions' *Student Loan Interest Deduction Worksheet—Schedule 1, Line 21*
+(`i1040gi--2024.txt:42253+`) reads: **2.** *"Enter the amount from Form 1040 or 1040-SR, line 9"*;
+**3.** *"Enter the total of the amounts from **Schedule 1, lines 11 through 20**, and 23 and 25"*;
+**4.** *"Subtract line 3 from line 2"*. The HSA deduction is Schedule 1 **line 13**, so it is inside
+step 3. T16 added it to `adjustments` and not to `agi_before_student_loan`; lines 15 (½-SE) and 18
+(early withdrawal) were the only members btctax modelled before, so the omission is exactly T16's.
+`agi_before_student_loan` now subtracts it, with the worksheet quoted at the site and a note that
+this is a **block** — a future Schedule 1 lines 11–20 adjustment belongs there the day it is added.
+
+★ **Direction and disclosure.** This one OVERSTATES tax (an inflated MAGI phases the deduction out
+too fast), the opposite direction to C-1. It is reported rather than folded silently because it
+moves the brief's own expected number: with the fixture's $2,000 contribution restored, §221(b)(2)
+on the correct $92,000 MAGI gives **$500**, not the $167 the un-netted $94,000 gives. So the C-1
+probe test contributes **$0** of its own (line 13 = $0, worksheet step 3 empty), which isolates the
+income leg and reproduces the review's $1,667 → $167 exactly; C-1b has its own fixture and its own
+kill.
+
+### The two probes — before and after
+
+| figure | fixture | before the fold | after |
+|---|---|---|---|
+| `AbsoluteReturn::agi` vs printed 1040 **line 11** | reach ($3,000 distributed, $1,200 qualified) | **58000** vs 59800 | 59800 = 59800 |
+| `AbsoluteReturn::taxable_income` vs printed **line 15** | same | 43400 vs 45200 | 45200 = 45200 |
+| `AbsoluteReturn::total_tax` vs printed **line 24** | same | **4979** vs 5555 (both legs missing); **5195** vs 5555 (I-1's leg alone) | 5555 = 5555 |
+| printed Schedule 1 **line 21** | probe 2 ($85,000 wages, $2,500 of 1098-E interest, a $9,000 fully-excepted distribution, **no** own contribution) | **1667** | **167** |
+| printed Schedule 1 **line 21** | probe 2 **with** the fixture's $2,000 contribution (C-1b) | 2000 → 167 | **500** |
+
+Reds, verbatim:
+
+```
+an_unqualified_distribution_reaches_schedule_1_line_8f_and_schedule_2_line_17c panicked at
+form8889.rs:577: assertion `left == right` failed: the absolute AGI and the FILED 1040 line 11 must
+be the same number — line 8f is Schedule 1 PART I income and reaches line 9 through line 10
+  left: 58000   right: 59800
+
+…panicked at form8889.rs:602: …and total tax, which carries Schedule 2 lines 17c and 17d through
+line 21 to 1040 line 23
+  left: 5195   right: 5555
+
+the_hsa_income_leg_moves_the_printed_student_loan_deduction panicked at form8889.rs:683:
+assertion `left == right` failed: §221(b)(2) on a $94,000 MAGI: $2,500 × (95,000 − 94,000) / 15,000
+= $167. It printed $1,667 while line 8f was missing from `total_income` — a $1,500 overstated
+deduction
+  left: 1667   right: 167
+
+the_hsa_deduction_is_inside_the_section_221_magi panicked at form8889.rs:757:
+assertion `left == right` failed: the worksheet's line 3 nets Schedule 1 lines 11 through 20, so the
+MAGI is $92,000, not $94,000
+  left: 167   right: 500          (and left: 2000 with C-1 also reverted)
+```
+
+### 4. The equality instrument is now STRUCTURAL
+
+**How the maximal fixture reaches it.** The brief's first choice —
+`btctax-input-form::spec::coverage::maximal_fixture` — is unreachable **and would be vacuous**:
+`btctax-core` cannot depend on `btctax-input-form` (that is the dependency direction), and every
+money leaf in that fixture is deliberately **zero** (its sentinels are what the mutate-and-diff
+compares against), so an equality test over it would compare `$0` to `$0` on every line. So the
+brief's stated alternative was taken — *"build an equivalent from `LEAF_SOURCE`'s money leaves with
+a guard that every money leaf is non-zero, and say which"*:
+
+`testonly.rs::every_money_leaf_household()` — derived in two steps, neither naming a field:
+
+1. `scrub_axis::maximal_sentinel()` — the repo's maximal `ReturnInputs`: every `Option` `Some`,
+   every `Vec` two rows, written as an exhaustive struct literal with **no `..`**, so a field added
+   anywhere fails to compile *there*;
+2. every leaf `provenance::leaf_walk::money_leaves` classifies as money — **by type**, by
+   round-tripping a decimal probe through `Decimal`'s own deserializer — is overwritten with a
+   distinct non-zero whole-dollar amount (`1_000 + 137 * i`).
+
+Then `sch1.hsa_activity = Some(true)` (the sentinel answers it `Some(false)`, which closes Form 8889
+entirely) and `answer_all_live_declarations`. **One ordering constraint is stated in the fixture**:
+`hsa.line16_amount_meeting_an_exception = $1`, because line 17b is *"20% … of the distributions
+included on line 16 that are subject to the additional 20% tax"* and the derived pass cannot know
+that two of its leaves sit on opposite sides of one subtraction. The anti-vacuity guard is what
+forced that to be said rather than discovered.
+
+`packet.rs` now has `two_chain_households()` — kitchen sink, AMT-owing, **every money leaf** — each
+carrying its own anti-vacuity guard (kitchen sink must **not** owe AMT; AMT-owing must; the
+structural row asserts *every* money leaf is non-zero via `nonzero_money_leaves`, plus a non-zero
+Schedule 1 line 8f and Schedule 2 line 17c). Two tests loop over it:
+`the_absolute_total_tax_equals_the_printed_1040_line_24` and the new twin
+`the_absolute_agi_equals_the_printed_1040_line_11` (which also asserts taxable income ↔ line 15).
+
+★ **No tolerance was needed.** Exact equality holds on all three households, so the strictness the
+original doc comment defends is intact.
+
+**Kills — all three reds are on the structural row, and NO HSA household is named anywhere:**
+
+```
+(a) remove `+ hsa_income_8f` again →
+    the_absolute_agi_equals_the_printed_1040_line_11 panicked at packet.rs:1572:
+    assertion `left == right` failed: every money leaf: the absolute AGI and the FILED 1040 line 11
+    must be the same number …
+      left: 168809   right: 177577
+
+(b) remove `+ hsa_additional_taxes` again →
+    the_absolute_total_tax_equals_the_printed_1040_line_24 panicked at packet.rs:1544:
+    assertion `left == right` failed: every money leaf: the absolute total tax and the FILED 1040
+    line 24 must be the same number. …
+      left: 0   right: 1753
+
+(c) a BRAND-NEW money leaf, printed only — `ReturnInputs::plant_line8z` → `Schedule1Parts::plant_8z`
+    → `printed::schedule_1_lines`'s line 9, and nothing else →
+    the_absolute_agi_equals_the_printed_1040_line_11 panicked at packet.rs:1572: … every money leaf …
+      left: 179347   right: 193362
+```
+
+(c) is the one that matters: nobody added a fixture, and the field did not exist when the test was
+written. The derived pass populated it the moment it appeared.
+
+### 5. I-2 — the code-W contradiction is keyed on `Some(false)`
+
+`return_refuse.rs`: `ri.sch1.hsa_activity == Some(false)`. `None` is the registry's to block
+(`HsaActivity` is `live: |_| true`), so the import tier — whose premise is that an unanswered
+declaration is lawful there — lets a code-W W-2 in. Kill
+(`an_unanswered_hsa_declaration_does_not_contradict_a_code_w_w2`), with the rule keyed back on
+`!= Some(true)`:
+
+```
+panicked at form8889.rs:1279: assertion `left == right` failed: an UNANSWERED declaration beside a
+code-W W-2 is a question waiting to be asked, not two statements that disagree — the import tier
+must let the W-2 in
+  left: Some(HsaEmployerContributionWithoutActivity)   right: None
+```
+
+The test pins all three states: `None` → no param-free refusal but `HsaActivityUnanswered` on the
+answering tier; `Some(false)` → the contradiction, unchanged and as sharp as before.
+
+### 6. I-3 — the spouse's plan is collected, and OR'd into coverage
+
+- `HsaInputs::spouse_family_coverage: Option<bool>`, `#[serde(default)]`, doc-commented with both
+  instruction sentences (`i8889--2024.txt:466-470` and `:497-499`).
+- `QuestionId::HsaSpouseFamilyCoverage` (ordinal **50**), a class-(A) `FormQuestion` whose
+  `unanswered` is `Form8889Unanswered { question }`, live iff `hsa_question_live && (Mfj | Mfs)` —
+  **MFS included**, because the instruction says *"regardless of whether you file jointly or
+  separately"* in as many words.
+- `compute`: `coverage = family_coverage == Some(true) || spouse_family_coverage == Some(true)`,
+  which fixes **line 1's box**, **line 3's base**, and — because the same `coverage` feeds
+  `additional_contribution_split` — **line 7's** *"married, and you or your spouse had family
+  coverage"* condition.
+- The `HsaFamilyCoverage` prompt is widened to the instruction's own other two sentences (the
+  different-times and same-time rules) and now says the spouse's plan is asked separately.
+- Wired through `classifier.rs`, `seam.rs` (`FieldId::DeclHsaSpouseFamilyCoverage`),
+  `registries.rs` (`decl_tristate!(50, …)` + both directions of the FieldId↔QuestionId map),
+  `coverage.rs`'s leaf-path table, and the `scenario_for` builders in `return_refuse.rs` and
+  `cmd/answer.rs`. **`LEAF_SOURCE` is not touched: it maps MONEY leaf prefixes and this is a bool**
+  — the KAT audits money leaves only and stays green.
+
+Kill (`a_spouses_family_plan_puts_a_self_only_filer_on_the_family_limit`), with the `||` removed:
+
+```
+panicked at form8889.rs:1129: assertion `left == right` failed: line 1's box follows "you and your
+spouse", not this filer's own plan
+  left: SelfOnly   right: Family
+```
+
+The test pins both directions on MFJ, taxpayer self-only, $6,000 contributed: spouse family →
+line 3 = `params.hsa.family_limit`, line 13 = $6,000, **no** `HsaExcessContributionsNeedForm5329`;
+both self-only → `self_only_limit` and the excess refusal. Plus liveness: not live for Single, live
+for MFS.
+
+### 7. M-1 — the document-less distribution door (R3's pattern)
+
+- `ReturnInputs::hsa_distribution_without_1099sa: Option<bool>`, beside its three R3 siblings.
+- `QuestionId::HsaDistributionWithout1099sa` (ordinal **51**), live iff
+  `hsa_activity == Some(true) && documents.sa_1099 == Some(false)`, neutral `false`.
+- `RefuseReason::HsaDistributionWithoutForm1099Sa` on a `Yes`, naming **Form 8889 LINE 14a** and
+  quoting the trustee's own obligation from `i1099sa--2024.txt:70-73`: *"File Form 1099-SA,
+  Distributions From an HSA, Archer MSA, or Medicare Advantage MSA, to report distributions made
+  from a health savings account (HSA)"*. `attribute.rs` anchors it on its own declaration; a census
+  fixture was added so the source-derived refusal census sees it on both paths.
+
+Kill (`the_document_less_distribution_door_is_live_exactly_on_the_pair_and_names_the_1099_sa`), with
+the refusal's condition falsified:
+
+```
+panicked at form8889.rs:1233: a distribution with no document must refuse
+```
+
+The test pins liveness on **all four** corners of the pair (trigger + census-No → live; a
+transcribed 1099-SA → not; no trigger → not; trigger unanswered → not), the `None` block, the `No`
+pass, and both quoted sentences of the refusal text.
+
+### 8. M-2 — both editions of Form 8889 are checked
+
+`xtask/line_coverage_check.rs` gains `EDITIONS_SHARING_ONE_TRANSCRIPTION` — the pairs this build
+claims ONE transcription struct serves, currently one row (`f8889`, 2024 → 2025) — and rule **(4c)**:
+every sentence the table quotes from the first edition must be verbatim in the second **with the tax
+year substituted, and nothing else relaxed**. Measured: all 22 line-bound Form 8889 quotations pass
+that way. The rule is a per-pair CLAIM and says so: `LineSet` alone would make eleven other forms
+two-edition pairs whose TY2025 sentences nobody has checked, and adding rows without doing that work
+would report a completeness the checker does not have. A form absent from the table entirely stays
+`cover_fns_not_registered`'s business, so the kill tests' synthetic single-row tables are unaffected.
+
+Kill, committed as
+`a_sentence_missing_from_the_second_edition_is_caught_and_a_year_difference_is_not` (three
+directions: the real table silent; a real drift shape — the 2024 §223(b) figures, which the 2025
+revision moved to $4,300/$8,550 — red; a year-only difference silent). Watched red end to end on the
+committed table too:
+
+```
+xtask line-coverage: line-coverage FAILED (2 problem(s)):
+  - f8889:3 (line3) is quoted from f8889--2024 and this build serves f8889--2025 from the SAME
+    struct (…), but the sentence is NOT in f8889--2025.txt with the year substituted:
+      "were, or were considered, an eligible individual with the same coverage, enter $4,150 ($8,300 for"
+```
+
+### 9. N-1 — the line-9 census names every box-12 slot the code reads
+
+`CollectedFrom::DocBox` gains `also_labels: &'static [&'static str]` (empty for every ordinary box);
+`Production::doc_box_slots(stem, first, also)` is the constructor for a line that reads a REPEATING
+box. Form 8889 line 9 is now `doc_box_slots("fw2", "12a", &["12b", "12c", "12d"])` — which is what
+`employer_contributions_from_w2s` actually sums. The checker's DocBox arm was refactored into
+`one_box_slot(...)` and loops over the whole set, so **every** slot must be printed by the edition
+in force, decided by the box census, and captioned in the document's own words. The variant's doc
+comment states the rule and why the narrower label was the defect.
+
+Kill, committed as `every_box_12_slot_form_8889_line_9_reads_is_checked_and_a_bogus_slot_reds`
+(the real row silent; `also_labels: &["12b","12c","12e"]` red naming 12e). Watched red end to end by
+deleting the box-12d census entry:
+
+```
+xtask line-coverage: line-coverage FAILED (1 problem(s)):
+  - f8889:9 (line9) names fw2--2024 box 12d, which that edition prints but the box census does not
+    decide — a collected figure with no decided box is the 'we forgot this box' defect one layer up
+```
+
+### 10. The prompts are the documents' own words, and that is now a test
+
+`prompt-check` is keyed on `SkippableId` and covers only Form 8615, so a `FormQuestion` prompt has
+no checker. `form8889.rs::the_two_new_prompts_are_the_documents_own_words` asserts each of the six
+clauses this fold put in front of a filer **twice** — verbatim in the in-crate text layer it is
+sourced from (`fixtures/f8889_2024_instructions.txt`, `…_form.txt`) **and** verbatim in the
+question's own `prompt`. Kill (one word changed, *"Disregard any plan"* → *"Disregard plans"*):
+
+```
+panicked at form8889.rs:1158: HsaSpouseFamilyCoverage: the prompt does not carry the clause verbatim.
+  clause: "Use the family coverage amount if you or your spouse had an HDHP with family coverage.
+           Disregard any plan with self-only coverage."
+```
+
+### The oracles
+
+Both engines re-run **live** on the T16 corpus cell `single_w2_with_an_hsa_deduction`
+(`OTS_DIR=/home/bcg/OpenTaxSolver2024_22.07_linux64 .venv/bin/python`), compared field-by-field
+against the baked expectations:
+
+```
+OTS   AGI 90850.0  TI 76250.0  total 11834.0     drift vs baked: NONE
+TAXC  AGI 90850.0  TI 76250.0  total 11828.0     drift vs baked: NONE
+```
+
+(the $6 gap is the pre-existing Tax-Table-vs-formula difference the corpus already carries).
+`every_golden_household_matches_the_independent_oracles` 7/7; the golden file is **unchanged**.
+★ The cell has no distribution and no student-loan interest, so neither C-1/I-1 nor C-1b moves it —
+which is the same limit the cell's own `why` already records.
+
+### Every pinned number moved
+
+| where | old → new | cause |
+|---|---|---|
+| `QuestionId::ALL.len()` / `FORM_QUESTIONS.len()` | 50 → **52** | I-3's spouse declaration, M-1's door |
+| `declarations_section_delegates…` decl count | 28 → **30**; section fields 29 → **31** | the same two |
+| `coverage.rs` field count | 216 → **218**; covered 215 → **217** | the same two |
+| `stop-list` registry prompts scanned | 73 → **75** | the same two (a reported figure; its floor is 50) |
+| `docs/examples/examples.md` | +2 lines | the two new `null` leaves in a printed `ReturnInputs` |
+| `btctax-core` tests | 1294 → **1301** | 7 new tests |
+| `xtask` tests | 157 → **159** | the M-2 and N-1 kills |
+| workspace tests | 3388 → **3397** | the 9 above |
+
+**Counts that did NOT move, and that is the claim:** `line-coverage` **373 money lines / 18 forms /
+f8889:27**, exceptions **31** (ratchet 31), unverifiable **0**, not-line-bound **17** (ratchet 17);
+`box-census` **268 / 19 / 9**; `census-join` **290**; `cite-check` **51 quotations, 7/38 pairs, 0
+unaccounted**; `prompt-check` **20 assertions**. No production and no line changed — M-2 adds a
+second-edition check over the SAME rows, and N-1 widens one row's slot set without adding a row.
+
+### Suite lines
+
+```
+workspace              3397 tests run: 3397 passed, 12 skipped
+btctax-core            1301 tests run: 1301 passed, 0 skipped
+btctax-forms            359 tests run:  359 passed, 4 skipped
+btctax-input-form        70 tests run:   70 passed, 0 skipped
+btctax-cli              798 tests run:  798 passed, 1 skipped
+btctax-adapters         103 tests run:  103 passed, 0 skipped
+xtask                   159 tests run:  159 passed, 1 skipped
+btctax-oracle-harness     5 tests run:    5 passed, 1 skipped
+btctax-tui              160 tests run:  160 passed, 2 skipped
+btctax-tui-edit         392 tests run:  392 passed, 2 skipped
+btctax-update-prices      5 tests run:    5 passed, 1 skipped
+```
+
+Gates:
+
+```
+cargo fmt --all --check                                                clean
+CARGO_TARGET_DIR=target-clippy cargo clippy --workspace --all-targets
+  --all-features -- -D warnings                                        clean
+line-coverage        OK: 373 money lines across 18 form(s) … f8889:27
+box-census           OK: 268 printed boxes across 19 archived editions of 9 information returns
+census-join          290 unmodeled entries across 13 maps, every one placed
+cite-check           OK — 51 quotations; 7/38 pairs, 31 excused, 0 unaccounted
+prompt-check         OK — 20 assertions, all verbatim
+stop-list            no forbidden shape
+harness-check        OK — 2 hook(s) wired
+archive-check        no primary source outside the 5 accounted-for tree(s)
+authority-manifest   OK — every entry resolves and every source is listed
+authority-conflicts  0 entries recorded, 0 undecided, 0 overdue
+scripts/pii-scan-generic.sh   clean (HEAD)
+```
+
+### Deviations from the brief, and follow-ups worth filing
+
+1. **The structural fixture is built from `maximal_sentinel` + `money_leaves`, not from
+   `coverage.rs::maximal_fixture`** — the brief's own stated alternative. Two reasons, both
+   measured: the crate dependency runs `btctax-input-form → btctax-core`, and that fixture's money
+   leaves are all zero, so the comparison would have been vacuous. §4 says which.
+2. **C-1b is an extra fix** (the §221 MAGI), not in the brief. It is the same seam, the same
+   function and the same shape as C-1, the instructions settle it in one sentence, and leaving it
+   would have printed a wrong Schedule 1 line 21 on any return with both an HSA deduction and
+   student-loan interest. It moves the brief's expected $167 to $500 on a fixture that has both,
+   which is why the C-1 probe fixture contributes $0 of its own and the two are tested separately.
+3. **`crates/btctax-cli/tests/tax_profile.rs`'s `ALLOWED` list gained
+   `btctax-core/src/tax/testonly.rs`** — the M-1 `serde_json::Value` enumeration. Audited and
+   recorded inline: the `Value` dies inside `every_money_leaf_household`, which returns a typed
+   `ReturnInputs`, so key order reaches no persisted or fingerprinted bytes. Same audit as
+   `scrub_axis.rs` and `provenance.rs`, whose walks it is built on.
+4. **Follow-up — extend M-2's second-edition check to the other two-edition forms.** Eleven forms
+   (`f1040`, `f8949`, `f8959`, `f8960`, `f8995`, `f1040sa`, `f1040sb`, `f1040sc`, `f1040s2`,
+   `f1040s3`, `schedule_d`/`schedule_se`) have a TY2025 `LineSet` served by the same schema and a
+   TY2024-quoted table. Whether their sentences survive year substitution is unmeasured.
+5. **Follow-up — `prompt-check` covers only `SkippableId`.** The 52 `FormQuestion` prompts have no
+   checker; §10's test holds the six clauses this fold is answerable for and nothing more.
+6. **Follow-up — the age-55 line-3/line-7 split now reads the OR'd coverage** and so is correct for
+   a filer whose only family coverage is the spouse's, but no fixture exercises that combination;
+   `the_age_55_amount_lands_on_line_3_or_line_7_by_marital_status_and_coverage` still drives it from
+   `family_coverage` alone.
+
+Nothing committed; nothing pushed. `CONTINUITY.md` was left untouched.

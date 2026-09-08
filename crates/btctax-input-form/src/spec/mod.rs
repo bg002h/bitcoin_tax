@@ -170,7 +170,7 @@ mod tests {
             );
         }
         assert_eq!(
-            decl_count, 28,
+            decl_count, 30,
             "28 declarations are Decl* fields (the other two dedup to Schedule A). ★ R10.4 / T4b \
              added the sixteenth (the carried filing status's confirmation); ★ R3 / T5 added the \
              four of the DOCUMENT-LESS INCOME DOOR — wages with no W-2, interest or dividends with \
@@ -178,7 +178,10 @@ mod tests {
              ★ R9 / T6 added the twenty-first, Form 1040 page 1's DIGITAL ASSETS question; \
              ★ T16 / FR-76 added SEVEN — Form 8889's coverage box, its line-3 eligibility \
              condition, the age-55 amount, Medicare enrolment, the both-spouses heading condition, \
-             the line-4 Archer MSA gate and Part III's testing period."
+             the line-4 Archer MSA gate and Part III's testing period. \u{2605}\u{2605}\u{2605} The T16 SEAM \
+             REVIEW added the twenty-ninth and thirtieth: I-3's SPOUSE-plan declaration (the \
+             instructions' line 1 and line 3 rule 1 both read \"you or your spouse\") and M-1's \
+             document-less HSA distribution door (line 14a)."
         );
         assert_eq!(
             deduped,
@@ -192,8 +195,8 @@ mod tests {
         // 21 delegating Decl* fields + the foreign_country_names Text field.
         assert_eq!(
             decls.fields.len(),
-            29,
-            "28 declarations + foreign_country_names"
+            31,
+            "30 declarations + foreign_country_names"
         );
         assert!(decls
             .fields

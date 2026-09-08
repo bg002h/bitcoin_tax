@@ -272,6 +272,11 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::WagesWithoutW2Unanswered | R::WagesWithoutW2 => {
             vec![decl(QuestionId::WagesWithoutW2Question)]
         }
+        // ★ Seam review M-1 — the same shape: the ADVERSE leg anchors on its own declaration, which
+        //   is where a filer who answered by mistake fixes it.
+        R::HsaDistributionWithoutForm1099Sa => {
+            vec![decl(QuestionId::HsaDistributionWithout1099sa)]
+        }
         R::InterestOrDividendsWithout1099Unanswered => {
             vec![decl(QuestionId::InterestOrDividendsWithout1099)]
         }

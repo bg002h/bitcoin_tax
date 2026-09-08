@@ -790,7 +790,11 @@ fn check_collected_from(
     use line_coverage::CollectedFrom;
     let at = format!("{form}:{line} ({field})");
     match from {
-        CollectedFrom::DocBox { stem, box_label } => {
+        CollectedFrom::DocBox {
+            stem,
+            box_label,
+            also_labels,
+        } => {
             let Ok(tax_year) = year.parse::<u32>() else {
                 return vec![format!("{at}: the row's year {year:?} is not a tax year")];
             };
@@ -820,36 +824,13 @@ fn check_collected_from(
                 Ok(p) => p,
                 Err(e) => return vec![format!("{at}: {stem}--{edition}: {e}")],
             };
-            let Some(caption) = printed.get(box_label) else {
-                return vec![format!(
-                    "{at} names {stem}--{edition} box {box_label}, which that form does not print in \
-                     the edition in force for TY{year} — the box grid enumerated from its own \
-                     extract has {:?}",
-                    printed.keys().collect::<Vec<_>>()
-                )];
-            };
-            let entries: Vec<&crate::box_census::BoxEntry> = crate::box_census::entries_for(doc)
-                .into_iter()
-                .filter(|b| b.label == box_label)
-                .collect();
-            match entries.as_slice() {
-                [] => vec![format!(
-                    "{at} names {stem}--{edition} box {box_label}, which that edition prints but the \
-                     box census does not decide — a collected figure with no decided box is the \
-                     'we forgot this box' defect one layer up (instructions: {})",
-                    doc.instructions
-                )],
-                [entry] if normalize(entry.caption) != normalize(caption) => vec![format!(
-                    "{at} is Collected from {stem}--{edition} box {box_label}, whose census entry \
-                     quotes {:?}, but the extract prints {caption:?} — the box caption is the \
-                     document's text, never ours (instructions: {})",
-                    entry.caption, doc.instructions
-                )],
-                [_] => Vec::new(),
-                _ => vec![format!(
-                    "{at}: {stem}--{edition} box {box_label} has more than one census entry"
-                )],
+            // ★★★ Seam review N-1 — EVERY slot the line reads, not just the one it is named for.
+            //     For an ordinary box `also_labels` is empty and this is one iteration.
+            let mut errs = Vec::new();
+            for slot in std::iter::once(box_label).chain(also_labels.iter().copied()) {
+                errs.extend(one_box_slot(doc, &printed, &at, stem, edition, year, slot));
             }
+            errs
         }
         CollectedFrom::FilerRecords { instruction_line } => {
             if normalize(instruction_line).is_empty() {
@@ -903,6 +884,119 @@ fn check_collected_from(
             )]
         }
     }
+}
+
+/// One slot of a [`CollectedFrom::DocBox`] row: the edition must PRINT it, the box census must
+/// DECIDE it, and the census entry's caption must be the document's own text.
+///
+/// ★ Extracted at seam review N-1 so a line that reads several identical slots (Form W-2 box 12's
+///   four) is checked on every one of them by the same rule, rather than on the first alone.
+fn one_box_slot(
+    doc: &crate::box_census::DocumentAuthority,
+    printed: &BTreeMap<String, String>,
+    at: &str,
+    stem: &str,
+    edition: &str,
+    year: &str,
+    slot: &str,
+) -> Vec<String> {
+    let Some(caption) = printed.get(slot) else {
+        return vec![format!(
+            "{at} names {stem}--{edition} box {slot}, which that form does not print in the edition \
+             in force for TY{year} — the box grid enumerated from its own extract has {:?}",
+            printed.keys().collect::<Vec<_>>()
+        )];
+    };
+    let entries: Vec<&crate::box_census::BoxEntry> = crate::box_census::entries_for(doc)
+        .into_iter()
+        .filter(|b| b.label == slot)
+        .collect();
+    match entries.as_slice() {
+        [] => vec![format!(
+            "{at} names {stem}--{edition} box {slot}, which that edition prints but the box census \
+             does not decide — a collected figure with no decided box is the 'we forgot this box' \
+             defect one layer up (instructions: {})",
+            doc.instructions
+        )],
+        [entry] if normalize(entry.caption) != normalize(caption) => vec![format!(
+            "{at} is Collected from {stem}--{edition} box {slot}, whose census entry quotes {:?}, \
+             but the extract prints {caption:?} — the box caption is the document's text, never \
+             ours (instructions: {})",
+            entry.caption, doc.instructions
+        )],
+        [_] => Vec::new(),
+        _ => vec![format!(
+            "{at}: {stem}--{edition} box {slot} has more than one census entry"
+        )],
+    }
+}
+
+/// ★★★ **SEAM REVIEW M-2 — THE EDITIONS ONE TRANSCRIPTION STRUCT IS CLAIMED TO SERVE.**
+///
+/// `cover_form8889` opens with `Coverage::quoting("2024")`, and one `Form8889` struct fills BOTH the
+/// TY2024 and the TY2025 revision. The claim was measured once, by hand, when the form was
+/// transcribed — *"the normalised diff of the two extracts is the line-13 dot leader and the
+/// footer"* — and then nothing watched it. A TY2025 revision that reworded a line would leave the
+/// build green with the wrong sentence cited on every TY2025 return.
+///
+/// So the claim is a row here, and the checker verifies it: every sentence the table quotes from the
+/// FIRST edition must appear VERBATIM in the SECOND, with the tax year substituted. **The year is
+/// the only substitution.** A form prints its own year in a dozen sentences (*"…contributed to your
+/// HSA for 2024"*), and rewriting that token is what makes the two editions comparable at all;
+/// rewriting anything else would be the checker deciding a sentence is close enough, which is the
+/// defect this file exists to prevent. Measured on Form 8889: all 22 line-bound quotations pass with
+/// the year substituted and no other relaxation.
+///
+/// ★ **Scope, stated rather than hidden.** This is a per-pair CLAIM, not a derivation over every
+/// form: `LineSet` alone would make eleven other forms two-edition pairs (`f1040`, `f8949`, `f8959`,
+/// …), whose tables are TY2024-quoted and whose TY2025 sentences nobody has checked. Extending the
+/// rule to them is a real piece of work and belongs in its own change; adding a row here without
+/// doing that work would report a completeness the checker does not have. A pair with no row is
+/// simply unchecked, exactly as it was before.
+///
+/// ★ A form absent from the table entirely is NOT this rule's business — `cover_fns_not_registered`
+/// is what catches a `cover_*` function dropped from `all()`, and duplicating that here would make
+/// the synthetic single-row tables the kill tests build fail for the wrong reason.
+const EDITIONS_SHARING_ONE_TRANSCRIPTION: &[(&str, &str, &str, &str)] = &[(
+    "f8889",
+    "2024",
+    "2025",
+    "T16 / FR-76 — one `Form8889` struct, two `LineSet` revisions (`F8889_2024`, `F8889_2025`) and \
+     two maps whose `label-boxes` grids are identical",
+)];
+
+/// The rule above, as a pure function of its inputs, so a planted quotation drift can be watched
+/// going red (harness B1).
+fn second_edition_problems(
+    rows: &[line_coverage::LineCoverage],
+    form: &str,
+    quoted: &str,
+    other: &str,
+    why: &str,
+    other_text: &str,
+) -> Vec<String> {
+    let hay = normalize(other_text);
+    let mut errs = Vec::new();
+    for e in rows
+        .iter()
+        .filter(|e| e.form == form && e.year == quoted && e.line != "(none)")
+    {
+        if e.instruction.trim().is_empty() {
+            continue; // rule (2)'s empty-quote error already fires on this row.
+        }
+        let want = normalize(&e.instruction.replace(quoted, other));
+        if !hay.contains(&want) {
+            errs.push(format!(
+                "{form}:{} ({}) is quoted from {form}--{quoted} and this build serves \
+                 {form}--{other} from the SAME struct ({why}), but the sentence is NOT in \
+                 {form}--{other}.txt with the year substituted:\n      {:?}\n   Either the second \
+                 edition reworded the line — in which case the struct no longer serves both and the \
+                 table needs its own rows for {other} — or the quotation is wrong.",
+                e.line, e.field, e.instruction
+            ));
+        }
+    }
+    errs
 }
 
 pub fn check(cov: &line_coverage::Coverage) -> Result<String, String> {
@@ -1170,6 +1264,23 @@ pub fn check(cov: &line_coverage::Coverage) -> Result<String, String> {
         errs.extend(cover_fns_not_registered(&cov_src));
     }
 
+    // ★★★ (4c) SEAM REVIEW M-2 — the second edition of a form one struct serves.
+    for (form, quoted, other, why) in EDITIONS_SHARING_ONE_TRANSCRIPTION {
+        if !cov.0.iter().any(|e| e.form == *form && e.year == *quoted) {
+            continue; // see the const's own note: an absent form is `cover_fns_not_registered`'s.
+        }
+        let path = root.join(format!("design/forms/extract/{form}--{other}.txt"));
+        match std::fs::read_to_string(&path) {
+            Ok(text) => errs.extend(second_edition_problems(
+                &cov.0, form, quoted, other, why, &text,
+            )),
+            Err(e) => errs.push(format!(
+                "{form}: this build serves {form}--{other} from the same struct as                  {form}--{quoted} ({why}), but {} cannot be read: {e}",
+                path.display()
+            )),
+        }
+    }
+
     // (5) Duplicate coverage of one LINE would let two rows disagree.
     //
     // ★ Keyed on (form, LINE, field), not (form, field) — the population pass proved why: a nested
@@ -1338,6 +1449,129 @@ fn mentions_ident(hay: &str, ident: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ★★★ THE KILL TEST for the box-12 SLOT SET (harness B1, seam review N-1).
+    ///
+    /// The census row used to name `fw2` box **12a** while
+    /// `form8889::employer_contributions_from_w2s` sums every box-12 slot whose code is `W`
+    /// (12a–12d are one `Vec<Box12Entry>`). The label was narrower than the code, and nothing could
+    /// tell *"this line reads one slot"* from *"this line reads four and we wrote one"*.
+    ///
+    /// Both directions: the real row is silent, and a slot the form does not print reds NAMING that
+    /// slot — which is what proves the checker walks the whole set rather than the first label.
+    #[test]
+    fn every_box_12_slot_form_8889_line_9_reads_is_checked_and_a_bogus_slot_reds() {
+        let root = repo_root();
+        let row = line_coverage::all()
+            .0
+            .into_iter()
+            .find(|e| e.form == "f8889" && e.line == "9")
+            .expect("Form 8889 line 9 is in the table");
+        let line_coverage::Production::Collected(from) = row.production else {
+            panic!("line 9 is Collected from the W-2: {:?}", row.production);
+        };
+        let line_coverage::CollectedFrom::DocBox {
+            stem,
+            box_label,
+            also_labels,
+        } = from
+        else {
+            panic!("line 9 is a DocBox row");
+        };
+        assert_eq!((stem, box_label), ("fw2", "12a"));
+        assert_eq!(
+            also_labels,
+            ["12b", "12c", "12d"],
+            "the census must name every slot the code reads, or it says something narrower than \
+             the sum it describes"
+        );
+        assert!(
+            check_collected_from(&root, "f8889", "9", "line9", row.year, from).is_empty(),
+            "the real four-slot row must be silent"
+        );
+
+        // ★ A slot the Form W-2 grid does not print. It is only reachable through `also_labels`,
+        //   so a checker that stopped at `box_label` would report nothing at all.
+        let bogus = line_coverage::CollectedFrom::DocBox {
+            stem: "fw2",
+            box_label: "12a",
+            also_labels: &["12b", "12c", "12e"],
+        };
+        let errs = check_collected_from(&root, "f8889", "9", "line9", row.year, bogus);
+        assert_eq!(
+            errs.len(),
+            1,
+            "exactly the bogus slot is reported: {errs:?}"
+        );
+        assert!(
+            errs[0].contains("box 12e") && errs[0].contains("does not print"),
+            "the message must name the slot and why: {}",
+            errs[0]
+        );
+    }
+
+    /// ★★★ THE KILL TEST for `second_edition_problems` (harness B1, seam review M-2).
+    ///
+    /// The defect it exists to catch is *"one struct serves two revisions, and only ONE of them was
+    /// ever checked"* — the shape the T16 build's own note asserted by hand and nothing watched. It
+    /// is exercised in three directions, because a rule that only ever sees a clean table has not
+    /// been seen discriminating:
+    ///
+    /// 1. the REAL table against the REAL second extract → silent;
+    /// 2. a quotation that exists on the first edition and NOT the second → red, naming the row;
+    /// 3. a quotation whose only difference is the YEAR → silent, which is the whole reason the
+    ///    substitution exists (a form prints its own year in a dozen sentences).
+    #[test]
+    fn a_sentence_missing_from_the_second_edition_is_caught_and_a_year_difference_is_not() {
+        let root = repo_root();
+        let f8889_2025 = std::fs::read_to_string(root.join("design/forms/extract/f8889--2025.txt"))
+            .expect("the TY2025 Form 8889 extract is archived");
+
+        // (1) The committed table is clean against the second edition.
+        let real = line_coverage::all();
+        assert!(
+            second_edition_problems(&real.0, "f8889", "2024", "2025", "why", &f8889_2025)
+                .is_empty(),
+            "the committed Form 8889 rows must all be present in the TY2025 extract: {:?}",
+            second_edition_problems(&real.0, "f8889", "2024", "2025", "why", &f8889_2025)
+        );
+
+        // (2) ★ A REAL drift shape, not a nonsense string: the §223(b) figures, which the 2025
+        //     revision moved to $4,300 / $8,550. A table that carried the 2024 sentence forward
+        //     would quote a limit that edition does not print.
+        let planted = vec![line_coverage::LineCoverage {
+            form: "f8889",
+            year: "2024",
+            line: "3".to_string(),
+            field: "line3",
+            production: line_coverage::Production::Constant,
+            instruction: "enter $4,150 ($8,300 for family coverage)",
+            reason: None,
+        }];
+        let errs = second_edition_problems(&planted, "f8889", "2024", "2025", "why", &f8889_2025);
+        assert_eq!(errs.len(), 1, "the drifted row must be reported: {errs:?}");
+        assert!(
+            errs[0].contains("f8889:3") && errs[0].contains("NOT in f8889--2025.txt"),
+            "the message must name the row and the edition it is missing from: {}",
+            errs[0]
+        );
+
+        // (3) …and a sentence that differs ONLY by the year is not a drift.
+        let year_only = vec![line_coverage::LineCoverage {
+            form: "f8889",
+            year: "2024",
+            line: "9".to_string(),
+            field: "line9",
+            production: line_coverage::Production::Combine,
+            instruction: "Employer contributions made to your HSAs for 2024",
+            reason: None,
+        }];
+        assert!(
+            second_edition_problems(&year_only, "f8889", "2024", "2025", "why", &f8889_2025)
+                .is_empty(),
+            "a sentence whose only difference is the tax year must pass"
+        );
+    }
 
     /// ★★★ THE KILL TEST for `cover_fns_not_registered` (harness B1: no checker exists until it has
     /// been observed RED on a planted defect).
@@ -1862,6 +2096,7 @@ mod tests {
                 CollectedFrom::DocBox {
                     stem: "f1099g",
                     box_label: "10",
+                    also_labels: &[],
                 },
                 "which that form does not print",
             ),
@@ -1871,6 +2106,7 @@ mod tests {
                 CollectedFrom::DocBox {
                     stem: "f1099int",
                     box_label: "99",
+                    also_labels: &[],
                 },
                 "which that form does not print",
             ),
@@ -1880,6 +2116,7 @@ mod tests {
                 CollectedFrom::DocBox {
                     stem: "f1099nec",
                     box_label: "1",
+                    also_labels: &[],
                 },
                 "no such information return is archived",
             ),

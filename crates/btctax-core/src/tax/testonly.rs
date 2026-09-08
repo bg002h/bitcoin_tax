@@ -600,6 +600,82 @@ pub fn amt_owing_household() -> (ReturnInputs, LedgerState) {
     (ri, LedgerState::default())
 }
 
+/// ★★★ **THE STRUCTURAL FIXTURE — every money leaf of `ReturnInputs` is realized AND non-zero.**
+///
+/// Built for the seam review's I-1 disposition: the two-chain comparison
+/// (`packet::tests::the_absolute_total_tax_equals_the_printed_1040_line_24` and its AGI twin) ran
+/// over a HAND-LISTED pair of households, so T16 could add a term to the printed 1040 line 24 and
+/// not to `AbsoluteReturn::total_tax`, and the one test written to catch exactly that passed. **A
+/// fixture list is the wrong instrument for "did a NEW leaf reach only one chain", because the list
+/// is written by the person who added the leaf.**
+///
+/// So this fixture is DERIVED, in two steps, and neither step names a field:
+///
+/// 1. [`crate::tax::scrub_axis::maximal_sentinel`] is the repo's maximal `ReturnInputs` — every
+///    `Option` `Some`, every `Vec` two rows, every nested struct present, written as an exhaustive
+///    struct literal with **no `..`**, so a field added anywhere fails to compile *there*.
+/// 2. Every leaf [`leaf_walk::money_leaves`] classifies as money — by TYPE, by round-tripping a
+///    decimal probe through `Decimal`'s own deserializer, never by a list — is then overwritten with
+///    a distinct non-zero whole-dollar amount.
+///
+/// A money leaf added to `ReturnInputs` tomorrow is therefore populated here with nobody
+/// remembering to do it, and if it reaches a printed line without reaching the absolute chain, the
+/// comparison reds. That is the difference between an instrument that catches this class and one
+/// that catches the instance somebody thought of.
+///
+/// ★ **Distinct amounts, not one constant.** Two leaves carrying the same figure can cancel — a
+///   missing term on one side matched by a spurious one on the other — and the whole point is that
+///   the two chains are assembled by different code. The step of 7 makes every pair of leaves differ
+///   and every sum distinct from every other.
+///
+/// ★★ **Whole dollars.** The absolute chain sums exact cents and rounds once; the printed chain
+///   rounds every line. Whole-dollar leaves keep the two comparable, so a red is a MISSING TERM
+///   rather than SPEC §3.1's per-line rounding — which is the strictness
+///   `the_absolute_total_tax_equals_the_printed_1040_line_24` deliberately keeps.
+///
+/// ★ `hsa_activity` is affirmed (the sentinel answers it `Some(false)`, which closes Form 8889
+///   entirely), and the declarations are then answered at their registry neutrals. Without that the
+///   HSA money leaves are realized and reach nothing, and the row would be vacuous on the very legs
+///   the review found missing.
+///
+/// This is a FIXTURE, not a taxpayer: the household it describes is nobody, and the figures are
+/// sentinels. Nothing here is validated against an oracle and nothing should be.
+#[must_use]
+pub fn every_money_leaf_household() -> (ReturnInputs, LedgerState) {
+    use crate::tax::provenance::leaf_walk::{money_leaves, set_at};
+
+    let base = crate::tax::scrub_axis::maximal_sentinel();
+    let mut doc = serde_json::to_value(&base).expect("ReturnInputs serializes");
+    for (i, path) in money_leaves(&base).into_iter().enumerate() {
+        // Distinct, whole-dollar, and large enough that the household owes tax — a fixture whose
+        // taxable income is $0 compares $0 to $0 on 1040 line 24 and is silent on every term.
+        let amount = 1_000 + 137 * i;
+        assert!(
+            set_at(
+                &mut doc,
+                &path,
+                serde_json::Value::String(amount.to_string())
+            ),
+            "money leaf {path} is walkable but not settable — the two walks have diverged"
+        );
+    }
+    let mut ri: ReturnInputs =
+        serde_json::from_value(doc).expect("every money leaf takes a decimal string");
+    // ★ §223's trigger, affirmed: Form 8889 files exactly on this declaration, so the HSA leaves
+    //   above reach Schedule 1 lines 8f/13 and Schedule 2 lines 17c/17d only with it.
+    ri.sch1.hsa_activity = Some(true);
+    // ★★ ONE ORDERING CONSTRAINT, stated rather than discovered. Form 8889 line 17b is *"20%
+    //    (0.20) of the distributions included on line 16 that are subject to the additional 20%
+    //    tax"* — line 16 LESS the part meeting an exception — so an exception amount at or above
+    //    line 16 zeroes the line, and the fixture would then be silent on the §223(f)(4) leg the
+    //    seam review found missing from `schedule_2_other_taxes`. The derived pass above cannot
+    //    know that two of its leaves are on opposite sides of one subtraction; the anti-vacuity
+    //    guard in `packet::tests::two_chain_households` is what forces it to be said here.
+    ri.hsa.line16_amount_meeting_an_exception = Usd::ONE;
+    answer_all_live_declarations(&mut ri);
+    (ri, LedgerState::default())
+}
+
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
 // P7 — the GOLDEN-RETURN matrix.
 //

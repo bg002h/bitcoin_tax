@@ -707,6 +707,7 @@ $ btctax --vault v.pgp income show --year 2024
   },
   "hsa": {
     "family_coverage": null,
+    "spouse_family_coverage": null,
     "eligible_every_month_same_coverage": null,
     "age_55_or_older_at_year_end": null,
     "enrolled_in_medicare_any_month": null,
@@ -769,6 +770,7 @@ $ btctax --vault v.pgp income show --year 2024
   "w2_wages_without_w2": null,
   "interest_or_dividends_without_1099": null,
   "state_refund_without_1099g": null,
+  "hsa_distribution_without_1099sa": null,
   "itemized_prior_year": null,
   "digital_asset_activity": true,
   "schedule_b_filer_records": [],

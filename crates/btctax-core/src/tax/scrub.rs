@@ -613,6 +613,7 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
         w2_wages_without_w2: _,
         interest_or_dividends_without_1099: _,
         state_refund_without_1099g: _,
+        hsa_distribution_without_1099sa: _,
         itemized_prior_year: _,
         // ★ R9 / T6 — one yes/no about the FILER'S OWN activity; carries no identity.
         digital_asset_activity: _,

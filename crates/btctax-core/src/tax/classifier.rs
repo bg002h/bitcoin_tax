@@ -108,6 +108,7 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         w2_wages_without_w2,
         interest_or_dividends_without_1099,
         state_refund_without_1099g,
+        hsa_distribution_without_1099sa,
         itemized_prior_year,
         digital_asset_activity,
         schedule_c,
@@ -310,6 +311,14 @@ pub fn classify(ri: &ReturnInputs) -> Census {
     c.declaration(
         state_refund_without_1099g,
         QuestionId::StateRefundWithout1099g,
+    );
+    // ★★★ Seam review M-1 — R3's fourth door, Form 8889 line 14a. Class (A) for the same reason
+    //     its three siblings are: a `false` btctax assumed rather than asked would leave line 14a
+    //     blank on the filer's behalf, and a distribution missing from line 14a is missing gross
+    //     income under §223(f) plus the 20% additional tax.
+    c.declaration(
+        hsa_distribution_without_1099sa,
+        QuestionId::HsaDistributionWithout1099sa,
     );
     // ★★★ R3/I1 — the prior-year itemize gate, RETURN-LEVEL because a filer with no 1099-G owes the
     //     same answer. Class (A): §111(a)'s tax-benefit rule decides whether the refund is income,
@@ -955,6 +964,7 @@ fn classify_charitable_gift(c: &mut Census, g: &CharitableGift) {
 fn classify_hsa(c: &mut Census, h: &crate::tax::return_inputs::HsaInputs) {
     let crate::tax::return_inputs::HsaInputs {
         family_coverage,
+        spouse_family_coverage,
         eligible_every_month_same_coverage,
         age_55_or_older_at_year_end,
         enrolled_in_medicare_any_month,
@@ -970,6 +980,12 @@ fn classify_hsa(c: &mut Census, h: &crate::tax::return_inputs::HsaInputs) {
         testing_period_failure,
     } = h;
     c.declaration(family_coverage, QuestionId::HsaFamilyCoverage);
+    // ★★★ Seam review I-3 — the SPOUSE's plan. Class (A) and live only with a spouse: the
+    //     instructions' line 1 and line 3 rule 1 both read "you OR your spouse", so a filer with
+    //     self-only coverage and a family-covered spouse is on the FAMILY limit — and answering it
+    //     for them would either overstate their limit or, in the other direction, refuse a lawful
+    //     contribution as an excess one.
+    c.declaration(spouse_family_coverage, QuestionId::HsaSpouseFamilyCoverage);
     c.declaration(
         eligible_every_month_same_coverage,
         QuestionId::HsaEligibleEveryMonth,

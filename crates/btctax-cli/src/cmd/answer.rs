@@ -1038,6 +1038,22 @@ mod tests {
             | QuestionId::HsaTestingPeriodFailure => {
                 r.sch1.hsa_activity = Some(true);
             }
+            // ★★★ Seam review I-3 — the SPOUSE's plan needs the trigger AND a spouse; the
+            //     instruction's *"regardless of whether you file jointly or separately"* makes both
+            //     married statuses live, and MFJ is the one that drags in no §63(f) side conditions.
+            QuestionId::HsaSpouseFamilyCoverage => {
+                r.sch1.hsa_activity = Some(true);
+                r.filing_status = btctax_core::tax::types::FilingStatus::Mfj;
+            }
+            // ★★★ Seam review M-1 — R3's fourth door: the trigger affirmed and the Form 1099-SA
+            //     census row answered "I received none".
+            QuestionId::HsaDistributionWithout1099sa => {
+                r.sch1.hsa_activity = Some(true);
+                r.documents.set(
+                    btctax_core::tax::document_census::DocumentRow::Sa1099,
+                    Some(false),
+                );
+            }
             // ★★★ R3 / T5 — THE DOCUMENT-LESS INCOME DOOR. Each of the three paired questions is
             //     live EXACTLY when its census row says `No` — the pairing R3 states — so the
             //     scenario answers that row and nothing else.
