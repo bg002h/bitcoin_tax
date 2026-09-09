@@ -6536,6 +6536,23 @@ build, each with an owning phase.
   recompile and not a cached one. What to decide: whether the mitigation belongs in every build/fold
   brief as a rule, inside `make check` itself, or in a wrapper. Related: [[FR-88]] — both are ways an
   instrument reports something other than what it measured.
+- **★ OWNER Q1, PARTIAL ANSWER 2026-09-07 — "I won't have social security income this year."** T14 is
+  gated on **1099-R *or* SSA-1099**, so this closes the SSA-1099 half only. The 1099-R half (an IRA,
+  pension or annuity distribution — including a rollover or a Roth conversion, both of which generate a
+  1099-R even when no tax is owed) is **still unanswered**, and T14 stands or falls on it.
+
+- **★ FACT ESTABLISHED 2026-09-07 — the owner's FILED TY2024 return contains NO Schedule C.** The form
+  set is Forms 1040, Sch 2, Sch A, Sch B, Sch D, 8949, 8889, 8959, 8960 (recorded in `CONTINUITY.md`).
+  No Schedule C and **no Schedule SE**, which is the corroborating absence: self-employment income of any
+  size would normally bring both.
+  ★★ **This CONTRADICTS a load-bearing claim in the spec.** `SPEC_interview.md:1287` says *"P0 says
+  self-employment income, which makes Marketplace enrolment likely"* — and that inference is the entire
+  reason Form 1095-A is flagged as a probable **whole-return refusal** (Form 8962 is not built and no task
+  builds it). If P0's self-employment claim is stale or was about the product's target user rather than
+  the owner, the 1095-A risk drops sharply and so does the case for T13. **Resolve before scheduling
+  T13.** Owning phase: owner (Q1). Related: [[FR-64]] — the owner's real return is the reference and never
+  enters the repo, so this must be settled by the owner stating it, not by the repo inspecting anything.
+
 - **★ OWNER Q1, PARTIAL ANSWER 2026-09-07 — "I might have a 1099-MISC this year." NOT a decision; the
   box is unknown and the consequence branches on it. Owning phase: owner (Q1), before T13 is scheduled.**
   Today a `yes` on the `NecMiscK1099` census row REFUSES the return with its reason
