@@ -6838,6 +6838,47 @@ build, each with an owning phase.
   reading. Watched RED on a verbatim plant of `return_refuse.rs:2498`, and green on seven near misses
   plus six scanner-blinding hazards. Controller's independent plant reds it too, naming the site and
   stating the corrected mechanism in its own message.
+- **FR-110 — no PER-LOT representation for a non-crypto brokerage 1099-B; only an aggregate. A "many
+  small lots with adjustments" stock household cannot file its stock activity at all (journey walk 2,
+  2026-09-09). Owning phase: OWNER SCOPE DECISION, before v1 is offered to anyone but the owner.**
+  `Form1099B` exists (`return_inputs.rs:2137`) and takes an aggregate *"basis reported, no adjustments"*
+  total. A filer whose 1099-B carries per-lot adjustments (wash sales, a basis correction, a
+  non-covered lot) meets a **well-worded but total refusal at `income import`** and cannot proceed.
+  ★ Not obviously a defect: btctax is a **bitcoin** tax tool and an aggregate stock path may be the
+  intended ceiling. But walk 2 filed a household with 24 stock sells purely because none of them needed
+  an adjustment — a slightly less lucky household stops dead. The decision is *"is the aggregate the
+  ceiling, or is per-lot in scope?"*, and it is the owner's, not an implementer's.
+
+- **FR-111 — ★ `LIMITATIONS.md` says *"btctax has no 1099-B / 1099-DA input at all"*, which is FALSE
+  since T5 (controller find, 2026-09-09). Owning phase: with FR-110's decision, and before v1 is
+  offered to anyone.** `crates/btctax-cli/LIMITATIONS.md:416`. `Form1099B` has existed since T5 built
+  the 1099 sections, and journey walk 2 imported one and filed with it. Two consequences, in order:
+  · The sentence is **stale in the one document whose entire job is to say truthfully what the tool
+    cannot do** — the document a filer reads to decide whether to use it at all. That is the FR-108
+    class (filer-facing text that is untrue) in the highest-stakes place it can occur.
+  · The claim next to it — *"every ledger disposition is un-reported by construction. Never Box C/F"*
+    — rests on the same false premise and must be re-derived, not merely reworded. If a 1099-B with
+    basis reported can now be entered, the Form 8949 box selection is a question again, and Box C/F is
+    the *"reported to you"* case. Walk 2 did not observe a wrong box, so this is a re-derivation, not
+    an observed defect — **check it before rewording**.
+
+- **FR-112 — the "Federal tax attributable to crypto" section prints two WHOLE-RETURN levels under a
+  crypto heading (journey walk 2; mechanism confirmed by the controller in the source). Owning phase:
+  ownerless residue (UX / filer-facing text).** `render.rs:1404-1410` prints `r.st_net` and `r.lt_net`
+  as *"net short-term / net long-term"*. `compute.rs:210-212` says in terms that only `ltcg_tax`,
+  `niit` and `total_federal_tax_attributable` are crypto-attributable **deltas**, while `st_net`,
+  `lt_net`, `ordinary_from_crypto` and the rest *"describe the WITH-crypto filing position"* — i.e.
+  whole-return levels including stock and dividend capital-gain distributions. **The code knows the
+  distinction and the renderer does not surface it**: the very next line is labelled *"crypto ordinary
+  income (level)"*, so the section already distinguishes elsewhere. No wrong figure — a money line
+  under a heading that does not describe it. Fix is a label, not arithmetic.
+
+- **FR-113 — Form 8949's pages interleave Part I and Part II rather than grouping them (journey walk 2).
+  Owning phase: ownerless residue (UX).** With 39 rows over 4 pages all rows paginated correctly and
+  none was dropped — verified by counting emitted rows against those entered — but a reader flipping the
+  packet meets short-term and long-term sections alternating. Cosmetic; the IRS does not require
+  grouping. Recorded because a human assembling a paper packet by hand is a step this product owns.
+
 - **FR-99 — ★★ THE DOMINANT DEFECT CLASS OF THE WHOLE INTERVIEW ARC: a hand-written list standing beside
   a set that GROWS. Proposed `CLAUDE.md` rule — OWNER'S CALL, filed not actioned. Owning phase: the
   harness / doctrine (owner), before the interview branch ships.**
