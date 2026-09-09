@@ -6643,6 +6643,19 @@ build, each with an owning phase.
   reused the column constant its neighbours used; every review and re-verification passed because the
   suite never presented the case.
 
+  **✅ FIXED 2026-09-07, owner-approved.** Each Schedule 2 page-2 line now declares its OWN column —
+  `plan: [(Usd, usize); 9]` — with 17c/17d as `COL_MID` and the rest `COL_AMOUNT`, so an indented line
+  can no longer inherit its neighbour's constant. The declaration stays INDEPENDENT of the PDF on
+  purpose: the map says where a value should go, the blank form says where the field is, and
+  `verify_flat` compares them — deriving the column from the field's own geometry would make the check
+  agree with itself and catch nothing.
+  **The KAT is the first HSA fixture ever driven through this page** —
+  `schedule_2_prints_the_hsa_block_in_the_indented_column_and_the_fill_succeeds`. Mutation (17c/17d back
+  to `COL_AMOUNT`) reds it with the production error verbatim:
+  `Geometry("form1[0].Page2[0].f2_04[0]: x-center 446.0 not in column 1 cluster (504.0, 576.0)")`.
+  End-to-end: the repro vault's `export-irs-pdf` now writes the whole packet — `00_f1040`, `01_f1040s1`,
+  `02_f1040s2`, `07_f1040sa`, `08_f1040sb`, `52_f8889`, `71_f8959`, `72_f8960`. Gate: `make gate` 3544
+  passed / 12 skipped, five instruments unmoved.
 - **FR-103 — TY2024 accepts car-loan interest SILENTLY and discards it (journey walk finding #2). Owning
   phase: the TY2025 package (S1), or sooner if cheap.** `income import` takes a fully detailed
   `[[schedule_1a.vehicles]]` row with exit 0 and **no message of any kind**; `income show` echoes the

@@ -55,21 +55,37 @@ pub fn fill_schedule_2_with_map(
     //     through 17z", which line 21 sums. With no Form 8889 in the packet a printed `0` on any of
     //     the three would swear the filer figured an HSA tax on a form the IRS never receives.
     let hsa = lines.line17c.is_some();
-    let plan: [Usd; 9] = [
-        lines.line2.unwrap_or(Usd::ZERO),
-        lines.line3,
-        lines.line4,
-        lines.line11,
-        lines.line12,
-        lines.line17c.unwrap_or(Usd::ZERO),
-        lines.line17d.unwrap_or(Usd::ZERO),
-        lines.line18,
-        lines.line21,
+    // ★★★ **EACH LINE CARRIES ITS OWN COLUMN** (FR-102, 2026-09-07). Schedule 2 page 2 has TWO money
+    //     columns — `SCH_CLUSTERS` = MID `[410, 482]` then AMOUNT `[504, 576]` — because lines 17a
+    //     through 17z are INDENTED sub-entries that line 18 then totals into the amount column. This
+    //     list used to push all nine entries with a single `COL_AMOUNT`, which made 17c and 17d claim
+    //     a column their fields are not in, and `verify_flat` correctly refused the whole export:
+    //
+    //         form1[0].Page2[0].f2_04[0]: x-center 446.0 not in column 1 cluster (504.0, 576.0)
+    //
+    //     Zero bytes written, for **every filer with a Form 8889** — the return computed correctly and
+    //     could not be printed. Declaring the column per line rather than once for the loop is what
+    //     makes the next indented line impossible to get wrong by inheriting its neighbour's constant.
+    //
+    //     ★ The declaration stays INDEPENDENT of the PDF on purpose: the map says where a value should
+    //       go, the blank form says where the field is, and `verify_flat` compares them. Deriving the
+    //       column from the field's own geometry would make the check agree with itself and catch
+    //       nothing.
+    let plan: [(Usd, usize); 9] = [
+        (lines.line2.unwrap_or(Usd::ZERO), COL_AMOUNT),
+        (lines.line3, COL_AMOUNT),
+        (lines.line4, COL_AMOUNT),
+        (lines.line11, COL_AMOUNT),
+        (lines.line12, COL_AMOUNT),
+        (lines.line17c.unwrap_or(Usd::ZERO), COL_MID), // "Additional tax on HSA distributions"
+        (lines.line17d.unwrap_or(Usd::ZERO), COL_MID), // HSA — failure to maintain HDHP coverage
+        (lines.line18, COL_AMOUNT),                    // "Add lines 17a through 17z"
+        (lines.line21, COL_AMOUNT),
     ];
 
     // Descent is grouped BY PAGE (line 21 is on page 2). Ordinals restart per page.
     let mut ord_on_page = [0u32; 2];
-    for (i, (cell, value)) in map.lines().iter().zip(plan).enumerate() {
+    for (i, (cell, (value, col))) in map.lines().iter().zip(plan).enumerate() {
         if i < 2 && !part_i {
             continue; // §G-6 — no Form 6251 attached ⇒ Part I carries NO testimony
         }
@@ -84,7 +100,7 @@ pub fn fill_schedule_2_with_map(
             &mut placements,
             cell,
             value,
-            COL_AMOUNT,
+            col,
             Some((page, ord)),
         );
     }

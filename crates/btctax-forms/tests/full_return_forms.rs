@@ -954,6 +954,68 @@ fn schedule_2_fills_part_ii_and_leaves_part_i_blank() {
     }
 }
 
+/// ★★★ **FR-102 — A FILER WITH AN HSA CAN PRINT THEIR RETURN.**
+///
+/// Schedule 2 page 2 has TWO money columns: the MID column `[410, 482]`, where lines 17a–17z are
+/// printed as indented sub-entries, and the AMOUNT column `[504, 576]`, where line 18 totals them.
+/// `fill_schedule_2` used to push all nine of its plan entries with one shared `COL_AMOUNT`, so
+/// lines 17c and 17d claimed a column their fields are not in and `verify_flat` — correctly —
+/// refused the **entire** fill:
+///
+/// ```text
+/// form1[0].Page2[0].f2_04[0]: x-center 446.0 not in column 1 cluster (504.0, 576.0)
+/// ```
+///
+/// The blast radius was every filer holding a Form 8889: the return computed correctly and then
+/// **zero bytes** were written — not one printable page. Found 2026-09-07 by the first end-to-end
+/// journey walk, on a household with wages, a mortgage, four dependents and an HSA and **no crypto
+/// at all** (`design/agent-reports/2026-09-07-journey-walk-TY2024-TY2025.md`).
+///
+/// ★★ **Why nothing caught it, which is the reason this test exists.** `verify_flat` was right and
+/// did its job. What was missing was a FIXTURE: no test had ever driven this page with `line17c`
+/// populated, so the checker was never shown an HSA household. That is `HARNESS.md`'s **B1a** — *the
+/// fixture is half the checker* — and this is the case it was blind to.
+///
+/// Mutation: push 17c/17d with `COL_AMOUNT` again and `fill_schedule_2` returns `Err(Geometry)`
+/// instead of bytes.
+#[test]
+fn schedule_2_prints_the_hsa_block_in_the_indented_column_and_the_fill_succeeds() {
+    let lines = Schedule2Lines {
+        line2: None,
+        line3: Usd::ZERO,
+        line4: dec!(29871),
+        line11: dec!(693),
+        line12: dec!(1406),
+        // The Form 8889 legs — the case that could not be printed.
+        line17c: Some(dec!(240)),
+        line17d: Some(dec!(120)),
+        line18: dec!(360),   // "Add lines 17a through 17z"
+        line21: dec!(32330), // 29,871 + 693 + 1,406 + 360
+    };
+    // The fill itself is the assertion: `verify_flat` runs inside it and fails closed on a
+    // mis-declared column, so reaching bytes at all is the guarantee.
+    let pdf = btctax_forms::fill_schedule_2(&lines, &kitchen_sink_header(), 2024)
+        .expect("a return carrying a Form 8889 HSA block must PRINT");
+
+    let g = |fqn: &str| tv(&pdf, fqn);
+    // 17c and 17d land in the indented column, and 18 totals them in the amount column.
+    assert_eq!(
+        g("form1[0].Page2[0].f2_04[0]").as_deref(),
+        Some("240"),
+        "L17c"
+    );
+    assert_eq!(
+        g("form1[0].Page2[0].f2_05[0]").as_deref(),
+        Some("120"),
+        "L17d"
+    );
+    assert_eq!(
+        g("form1[0].Page2[0].f2_25[0]").as_deref(),
+        Some("32330"),
+        "L21"
+    );
+}
+
 /// ★★★ §G-6 — THE ATTACHED CASE: Part I prints line 2 **and line 3**.
 ///
 /// Line 3 is *"Add lines 1z and 2"*, and **Form 1040 line 17 names it by number** — so a filed packet
