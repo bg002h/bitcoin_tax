@@ -6699,6 +6699,14 @@ build, each with an owning phase.
   figure. Closing it means giving the form seam the year's package, which changes `apply`'s signature
   and the `Field` label contract (§10 freezes the seam), so it is a cycle rather than an edit. Pinned
   by `the_params_quoting_gate_records_the_fallback_it_drew_and_is_re_asked_once_the_figure_lands`.
+  **✅ CLOSED 2026-09-07 (`f88838f6`), before the whole-branch review as this entry scheduled.**
+  `answer_key_for` takes the `RowAddr` and the return; the key is DERIVED from one total
+  `gate_to_field` map in `spec/registries.rs` with `field_to_dependent_gate` as its inverse over
+  `DependentGate::ALL`. All 21 gates record on the editor surface, byte-identical to `income answer`
+  for the 20 whose words the seam can state; the 21st (the date leaf) is a NAMED exception with its
+  own test. T1's kill was widened rather than copied — a cross-surface byte comparison plus a
+  set-equality partition, no hand list on either side, so a 22nd gate is a compile error. Controller
+  plant (drop one gate from the inverse walk) reds both: `left: ["DepGateQcRelationship"] right: []`.
 - **FR-98 — the interview's own render surfaces are NOT in the R15 `progress_shaped_fields` walk,
   and the reason is a false positive worth recording (T12 build). Owning phase: ownerless residue
   (harness).** `xtask stop-list`'s field-name check reads four `btctax-core` modules. T12 tried to
