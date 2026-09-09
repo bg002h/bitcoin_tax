@@ -17,6 +17,7 @@ use crate::seam::{
     Field, FieldId, FieldKind, FieldValue, Section, SectionId, SectionKind, SetError,
 };
 use btctax_core::tax::document_census::DocumentRow;
+use btctax_core::tax::provenance::DependentGate;
 use btctax_core::tax::questions::{
     QuestionId, SkippableId, FORM_QUESTIONS, HOH_MARITAL_BASIS_CHOICES, PARENT_ALIVE_CHOICES,
     SKIPPABLE_QUESTIONS,
@@ -917,4 +918,63 @@ pub fn skippable_to_field(id: SkippableId) -> FieldId {
         }
         SkippableId::HohMaritalBasis => FieldId::HohMaritalBasis,
     }
+}
+
+/// ★★★ **T7 / R6 / FR-97 — [`DependentGate`] → the Dependents-section `Field` that carries it.**
+/// **TOTAL** (an exhaustive `match`, no `_` arm), exactly like [`question_to_field`] and
+/// [`skippable_to_field`]: a new gate is a compile error here until it is placed.
+///
+/// `DateOfBirth` resolves to the pre-existing `DepDob` leaf rather than a new one — the row already
+/// had a date field, and R6 changed its CLASS (required, blocking) rather than adding a second one.
+///
+/// ★ It lives HERE rather than in `attribute.rs` (where it was written for T7) because it is the
+///   third registry↔form map and it now has a second consumer: `apply`'s answer-log key
+///   ([`crate::answer_key_for`]) is derived from it, so the gates record on the editor surface the
+///   way the declarations and skippables already do.
+pub fn gate_to_field(gate: DependentGate) -> FieldId {
+    use DependentGate as G;
+    match gate {
+        G::DateOfBirth => FieldId::DepDob,
+        G::QcRelationship => FieldId::DepGateQcRelationship,
+        G::YoungerThanYouOrSpouse => FieldId::DepGateYoungerThanYouOrSpouse,
+        G::FullTimeStudent => FieldId::DepGateFullTimeStudent,
+        G::PermanentlyAndTotallyDisabled => FieldId::DepGatePermanentlyAndTotallyDisabled,
+        G::ProvidedOverHalfOwnSupport => FieldId::DepGateProvidedOverHalfOwnSupport,
+        G::FilingJointReturn => FieldId::DepGateFilingJointReturn,
+        G::JointReturnOnlyToClaimRefund => FieldId::DepGateJointReturnOnlyToClaimRefund,
+        G::LivedWithYouOverHalfYear => FieldId::DepGateLivedWithYouOverHalfYear,
+        G::LivedWithYouInUs => FieldId::DepGateLivedWithYouInUs,
+        G::QualifyingChildOfAnotherPerson => FieldId::DepGateQualifyingChildOfAnotherPerson,
+        G::CitizenNationalResidentOrCanadaMexico => {
+            FieldId::DepGateCitizenNationalResidentOrCanadaMexico
+        }
+        G::Married => FieldId::DepGateMarried,
+        G::TinIssuedByDueDate => FieldId::DepGateTinIssuedByDueDate,
+        G::CitizenNationalOrResidentAlien => FieldId::DepGateCitizenNationalOrResidentAlien,
+        G::SsnsValidForEmploymentIssuedByDueDate => {
+            FieldId::DepGateSsnsValidForEmploymentIssuedByDueDate
+        }
+        G::QrRelationshipOrMemberOfHousehold => FieldId::DepGateQrRelationshipOrMemberOfHousehold,
+        G::QualifyingChildOfAnyTaxpayer => FieldId::DepGateQualifyingChildOfAnyTaxpayer,
+        G::GrossIncomeUnderLimit => FieldId::DepGateGrossIncomeUnderLimit,
+        G::YouProvidedOverHalfSupport => FieldId::DepGateYouProvidedOverHalfSupport,
+        G::DivorcedSeparatedMultipleSupportOrKidnappedRuleApplies => {
+            FieldId::DepGateDivorcedSeparatedMultipleSupportOrKidnappedRuleApplies
+        }
+    }
+}
+
+/// FieldId → the [`DependentGate`] it carries, if it carries one (else `None`).
+///
+/// ★★★ **DERIVED as [`gate_to_field`]'s inverse over [`DependentGate::ALL`] — never a second
+///     hand-written match.** `field_to_question` / `field_to_skippable` are each a second list that
+///     a delegation test has to hold against the first; this one cannot drift, because there is only
+///     one list. A twenty-second gate is a compile error in `gate_to_field` and then appears here for
+///     free — which is the whole reason FR-97 was a *seam* change rather than twenty new lines.
+#[must_use]
+pub fn field_to_dependent_gate(id: FieldId) -> Option<DependentGate> {
+    DependentGate::ALL
+        .iter()
+        .copied()
+        .find(|g| gate_to_field(*g) == id)
 }

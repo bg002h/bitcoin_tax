@@ -6652,6 +6652,53 @@ build, each with an owning phase.
   key, so `answer_key_for` has to take the `RowAddr` and the return — a seam change, which is why
   this is filed rather than done. A kill exists to copy: T1's identical-records test, widened to the
   dependent gates.
+  **★ CLOSED 2026-09-07 (FR-97 build).** `answer_key_for(id, ri, addr)` now takes the row and the
+  return, and the gate arm is DERIVED rather than listed: T7's total `DependentGate → FieldId` map
+  moved out of `attribute.rs` into `spec/registries.rs` as `gate_to_field` (beside `question_to_field`
+  and `skippable_to_field`), and `field_to_dependent_gate` is its INVERSE over `DependentGate::ALL` —
+  one list, so a twenty-second gate is a compile error there (observed: `E0004 … PlantedTwentySecond
+  Gate not covered`, `registries.rs:936`) and reaches the answer log for free once placed. The words
+  hashed are the gate registry's own (`entry(gate).prompt_text(ri, None)`) — the same comparand
+  `current_prompt` resolves and `income answer` writes — and provenance follows the leaf, so emptying
+  `DepDob` forgets the record instead of dating a blank. **T1's kill is widened, not copied**:
+  `the_editor_and_income_answer_write_the_same_dependent_gate_records` (btctax-cli `tax_report.rs`)
+  drives `income answer` and `Edit::SetField` over one dependent row and compares every
+  `DependentGate` record byte for byte, deriving the gate set from what the keyboard recorded and each
+  answer from the CLI's own row; and `the_fields_that_record_an_answer_are_exactly_the_three_
+  registries_images` asserts an EQUALITY between the three registries' image and the set of fields for
+  which `answer_key_for` yields a key — no hand list on either side. Both were watched red on the
+  planted original defect (the editor recorded 0 of 15 gates while T1's own kill stayed GREEN, which
+  is the finding restated as a measurement). Two residues filed: [[FR-100]] and [[FR-101]].
+- **FR-100 — `DepDob` draws a CAPTION where the gate registry asks a QUESTION (FR-97 build). Owning
+  phase: ownerless residue (renderer wording).** The twenty tri-state gate `Field`s take
+  `label: DEPENDENT_GATES[$idx].prompt` from the `dep_gate_tristate!` macro, so the dependents pane
+  draws the exact sentence the answer record hashes. `DepDob` predates T7's registry and keeps its own
+  caption — *"Date of birth"*, help *"The dependent's date of birth."* — while
+  `DependentGate::DateOfBirth`'s registry prompt is *"What is this person's date of birth?"*. The
+  record hashes the REGISTRY's words, and must: `current_prompt` and `income answer` both resolve
+  those, so hashing the caption instead would make the editor's own answer read `WordingChanged`
+  forever (D-1's class). Provenance is therefore correct and the residue is a rendering one — the
+  editor shows fewer words than the sentence the record stands for. It is pinned rather than left
+  loose: `the_gate_fields_draw_the_words_they_hash_except_the_one_named_date_leaf` allows EXACTLY this
+  one divergence, derived by `GateKind` (`Date` is `DateOfBirth` alone), and reds on a second — a new
+  yes/no gate whose label drifts is a finding, not a new exception. Closing it means giving `DepDob`
+  the registry's prompt and help, which is a golden-screen change in `btctax-tui-edit`.
+- **FR-101 — the form seam holds no `FullReturnParams`, so the params-quoting dependent gate is DRAWN
+  (and now recorded) with its figureless fallback even on a year whose package IS bundled (FR-97
+  build; the label half is PRE-EXISTING). Owning phase: whichever cycle next touches the form seam's
+  signature.** FR-83 closed the params-LESS half of this two-surface split; this is the params-HAVING
+  half. A gate `Field`'s label is the registry's STATIC `prompt` and nothing in `btctax-tui-edit` calls
+  `prompt_text` (`grep -rn "prompt_text" crates/btctax-tui-edit/src` → no matches), so on TY2024 the
+  dependents pane draws *"Step 4's gross income test … WAITING ON THE TAX YEAR'S PARAMETER PACKAGE …
+  not yet yours to answer"* while the answer panel two keystrokes away — which loads
+  `BundledFullReturnTables` — lists the rendered §152(d)(1)(B) question as blocking. FR-97 makes the
+  consequence VISIBLE rather than silent: an answer given to that fallback in the editor records the
+  fallback's hash, so `interview_state_with_params` and `screen_dependent_gates` re-ask it under R10.3
+  instead of counting it answered under words nobody was shown, and `Edit::ClearField` withdraws it.
+  That is the honest behaviour, not the desired one — the desired one is for the pane to state the
+  figure. Closing it means giving the form seam the year's package, which changes `apply`'s signature
+  and the `Field` label contract (§10 freezes the seam), so it is a cycle rather than an edit. Pinned
+  by `the_params_quoting_gate_records_the_fallback_it_drew_and_is_re_asked_once_the_figure_lands`.
 - **FR-98 — the interview's own render surfaces are NOT in the R15 `progress_shaped_fields` walk,
   and the reason is a false positive worth recording (T12 build). Owning phase: ownerless residue
   (harness).** `xtask stop-list`'s field-name check reads four `btctax-core` modules. T12 tried to

@@ -3392,6 +3392,238 @@ fn the_editor_and_income_answer_write_the_same_answer_record() {
     );
 }
 
+/// ★★★ **T1's CENTRAL KILL, WIDENED TO THE DEPENDENT GATES (FR-97).**
+///
+/// The test above proves the two writers agree on a return-level DECLARATION. It could not see the
+/// twenty-one per-row §152 gates, and that is exactly where they had drifted: `apply`'s
+/// `answer_key_for` returned `None` for every `DepGate*` field (and for `DepDob`), so an answer given
+/// in the EDITOR set the leaf and recorded nothing, while `income answer` recorded the identical
+/// answer with its date and its prompt hash. Both surfaces stored the filer's answer; only the
+/// provenance differed, and nothing on the printed return would ever show it. The consequence was
+/// R10.3's re-ask rule silently disabled for a TUI-answered gate — `interview_state` found no record
+/// and counted the row answered under words it may never have shown.
+///
+/// ★★ **Nothing here is hand-listed.** The gate set is whatever `income answer` actually recorded;
+///    the editor answers each one with the value read back off the CLI's OWN row, through
+///    `gate_to_field`; and liveness comes from `walk_dependent`'s own demands, because answering one
+///    gate is what makes the next live. A twenty-second gate joins the comparison by existing.
+///
+/// ★ **What it does not cover, stated rather than implied:** `GrossIncomeUnderLimit`, whose prompt
+///   quotes the year's §152(d)(1)(B) figure. The form seam holds no `FullReturnParams`, so the two
+///   surfaces genuinely show different sentences for that one gate and their records genuinely
+///   differ — the editor hashes FR-83's figureless fallback, `income answer` hashes the rendered
+///   question, and R10.3 then re-asks it. That boundary is pinned by its own test in
+///   `btctax-input-form` (`the_params_quoting_gate_records_the_fallback_it_drew_…`); this fixture is
+///   a qualifying CHILD, whose flowchart path never reaches Step 4.
+#[test]
+fn the_editor_and_income_answer_write_the_same_dependent_gate_records() {
+    use btctax_core::tax::dependent_gates::{
+        entry, gate_bool, gate_is_answered, walk_dependent, GateKind,
+    };
+    use btctax_core::tax::provenance::{AnswerKey, DependentGate};
+    use btctax_core::tax::questions::QuestionId;
+    use btctax_input_form::{
+        apply, gate_to_field, question_to_field, Edit, FieldId, FieldValue, RowAddr, SectionId,
+    };
+
+    const NOW: time::Date = time::macros::date!(2026 - 09 - 01);
+    // A never-issued SSN (area 000), as every fixture in this repo uses.
+    const DEP_SSN: &str = "000-00-1234";
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2025(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+
+    // ── Surface 1: the KEYBOARD, on a return carrying ONE dependent row. ──
+    let toml = csv_dir.path().join("ri.toml");
+    std::fs::write(
+        &toml,
+        format!(
+            "filing_status = \"Single\"\n[header]\n[header.taxpayer]\nfirst_name = \"A\"\n\
+             last_name = \"B\"\nssn = \"123-45-6789\"\n\
+             [[header.dependents]]\nname = \"Kid Example\"\nssn = \"{DEP_SSN}\"\n\
+             relationship = \"daughter\"\n"
+        ),
+    )
+    .unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false, false).unwrap();
+    let script = {
+        let s = btctax_cli::Session::open(&vault, &pp()).unwrap();
+        let row = btctax_cli::return_inputs::get(s.conn(), 2024)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            row.header.dependents.len(),
+            1,
+            "the premise: one dependent row"
+        );
+        answer_script(&row, &[])
+    };
+    let mut keystrokes: &[u8] = &script;
+    let mut screen: Vec<u8> = Vec::new();
+    cmd::answer::answer_return_inputs(
+        &vault,
+        &pp(),
+        2024,
+        NOW,
+        &mut keystrokes,
+        &mut screen,
+        false,
+    )
+    .unwrap();
+    let s = btctax_cli::Session::open(&vault, &pp()).unwrap();
+    let from_cli = btctax_cli::return_inputs::get(s.conn(), 2024)
+        .unwrap()
+        .unwrap();
+    drop(s);
+    let cli_gates: Vec<DependentGate> = DependentGate::ALL
+        .iter()
+        .copied()
+        .filter(|g| {
+            from_cli.answer_log.contains_key(&AnswerKey::DependentGate {
+                ssn_hash: btctax_core::tax::provenance::dependent_ssn_hash(DEP_SSN),
+                gate: *g,
+            })
+        })
+        .collect();
+    assert!(
+        cli_gates.len() >= 10,
+        "the premise: the keyboard recorded a real gate set for this row, not one or two: \
+         {cli_gates:?}"
+    );
+
+    // ── Surface 2: the EDITOR. The same row, the same answers, the same `now`, every one of them
+    //    through `Edit::SetField` — the layer a keystroke in the TUI actually reaches.
+    let mut working: btctax_input_form::Working = None;
+    apply(
+        &mut working,
+        Edit::SetField {
+            id: FieldId::FilingStatus,
+            addr: RowAddr::default(),
+            value: FieldValue::Choice("Single".into()),
+        },
+        NOW,
+    )
+    .unwrap();
+    // The tax year is carried by the renderer, not by a `Field` (`TaxInputsFormState::fresh`).
+    working.as_mut().unwrap().tax_year = 2024;
+    apply(
+        &mut working,
+        Edit::AddRow {
+            section: SectionId::Dependents,
+            parent: RowAddr::default(),
+        },
+        NOW,
+    )
+    .unwrap();
+    for (id, v) in [
+        (FieldId::DepName, FieldValue::Text("Kid Example".into())),
+        (FieldId::DepSsn, FieldValue::SecretEntry(DEP_SSN.into())),
+        (
+            FieldId::DepRelationship,
+            FieldValue::Text("daughter".into()),
+        ),
+    ] {
+        apply(
+            &mut working,
+            Edit::SetField {
+                id,
+                addr: RowAddr(vec![0]),
+                value: v,
+            },
+            NOW,
+        )
+        .unwrap();
+    }
+    // ★ FR-85's lesson: the flowchart WAITS on a return-level declaration (Step 2 question 4), so a
+    //   row whose return has not answered it demands no gate at all. Answered through the seam too.
+    apply(
+        &mut working,
+        Edit::SetField {
+            id: question_to_field(QuestionId::DependentTaxpayer),
+            addr: RowAddr::default(),
+            value: FieldValue::TriState(from_cli.header.can_be_claimed_as_dependent_taxpayer),
+        },
+        NOW,
+    )
+    .unwrap();
+    // Answer every gate the walk demands, with the CLI's own value, until the walk stops growing.
+    for _ in 0..=DependentGate::ALL.len() {
+        let demanded = walk_dependent(working.as_ref().unwrap(), 0).demanded_gates();
+        let mut progressed = false;
+        for g in demanded {
+            if gate_is_answered(&working.as_ref().unwrap().header.dependents[0], g) {
+                continue;
+            }
+            let d = &from_cli.header.dependents[0];
+            let value = match entry(g).kind {
+                GateKind::Date => FieldValue::Date(Some(
+                    d.date_of_birth
+                        .expect("the keyboard answered the date gate"),
+                )),
+                GateKind::YesNo => FieldValue::TriState(Some(
+                    gate_bool(d, g).unwrap_or_else(|| panic!("the keyboard answered {g:?}")),
+                )),
+            };
+            apply(
+                &mut working,
+                Edit::SetField {
+                    id: gate_to_field(g),
+                    addr: RowAddr(vec![0]),
+                    value,
+                },
+                NOW,
+            )
+            .unwrap_or_else(|e| panic!("{g:?} is demanded, so the editor must accept it: {e:?}"));
+            progressed = true;
+        }
+        if !progressed {
+            break;
+        }
+    }
+    let from_editor = working.unwrap();
+
+    // ── THE COMPARISON. The same keys, and the same records byte for byte once serialized. ──
+    let gate_keys = |ri: &btctax_core::tax::return_inputs::ReturnInputs| -> Vec<String> {
+        ri.answer_log
+            .keys()
+            .filter(|k| matches!(k, AnswerKey::DependentGate { .. }))
+            .map(|k| format!("{k:?}"))
+            .collect()
+    };
+    assert_eq!(
+        gate_keys(&from_cli),
+        gate_keys(&from_editor),
+        "the two surfaces recorded DIFFERENT dependent-gate keys for the same row and the same \
+         answers — before FR-97 the editor's list was EMPTY"
+    );
+    for g in cli_gates {
+        let key = AnswerKey::DependentGate {
+            ssn_hash: btctax_core::tax::provenance::dependent_ssn_hash(DEP_SSN),
+            gate: g,
+        };
+        let a = from_cli
+            .answer_log
+            .get(&key)
+            .expect("`income answer` recorded it");
+        let b = from_editor.answer_log.get(&key).unwrap_or_else(|| {
+            panic!(
+                "{g:?}: the editor set the leaf and recorded NOTHING — §6065 testimony with no \
+                 date and no prompt hash, and R10.3's re-ask rule disabled for the row (FR-97)"
+            )
+        });
+        assert_eq!(
+            serde_json::to_string(a).unwrap(),
+            serde_json::to_string(b).unwrap(),
+            "{g:?}: the two writers produced DIFFERENT records for the same answer at the same \
+             BTCTAX_NOW — the drift a single `record_answer` exists to make impossible"
+        );
+        assert_eq!(
+            a.answered_on, NOW,
+            "{g:?}: the seam's date, not a wall clock"
+        );
+    }
+}
+
 /// ★★★ **C1 KILL (a) — THE IMPORT SURFACE CANNOT SIGN THE ANSWER LOG.**
 ///
 /// `answer_log` / `answer_log_history` are `#[serde(default)]` and `income import` is a whole-blob

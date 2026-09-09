@@ -12,7 +12,7 @@ use crate::seam::{
 };
 use crate::spec::form_spec;
 use btctax_core::tax::provenance::{
-    current_prompt, forget_answer, record_answer, AnswerKey, AnswerState,
+    current_prompt, dependent_ssn_hash, forget_answer, record_answer, AnswerKey, AnswerState,
 };
 use btctax_core::tax::return_inputs::ReturnInputs;
 use btctax_core::Usd;
@@ -31,14 +31,95 @@ pub type Working = Option<ReturnInputs>;
 /// [`WrongFirstEdit`]: ApplyError::WrongFirstEdit
 /// ★★★ **R10.3 — the answer-log key a `FieldId` writes to, or `None` for a plain leaf.**
 ///
-/// Derived from the two registry maps that already exist ([`crate::spec::field_to_question`] /
-/// [`crate::spec::field_to_skippable`]), so the set of fields that RECORD is the set of fields that
-/// delegate to a registry question — by identity, not by a second hand-written list that can drift.
-fn answer_key_for(id: FieldId) -> Option<AnswerKey> {
+/// Derived from the THREE registry maps that already exist ([`crate::spec::field_to_question`] /
+/// [`crate::spec::field_to_skippable`] / [`crate::spec::field_to_dependent_gate`]), so the set of
+/// fields that RECORD is the set of fields that delegate to a registry question — by identity, not
+/// by a second hand-written list that can drift.
+///
+/// ★★★ **FR-97 — it takes the ROW and the RETURN, and that is why it was a seam change.** A
+///     dependent gate's key is `AnswerKey::DependentGate { ssn_hash, gate }`: the gate names the
+///     question and the row's own SSN names *whose* answer it is. Neither is knowable from a bare
+///     `FieldId`, so before this the twenty `DepGate*` fields (and `DepDob`, the twenty-first gate)
+///     returned `None` here — `Edit::SetField` set the leaf and recorded **nothing**, while `income
+///     answer` recorded the identical answer in full. Two surfaces, two provenances, and the
+///     difference invisible on the printed return.
+///
+/// ★ The `addr` is the DEPENDENTS row address, so it must be the one the edit was applied at, and
+///   the `ri` must be read AFTER the set (a gate `set` never touches the `ssn`, so the identity is
+///   the same either way; reading it after keeps one rule for `SetField` and `ClearField` both).
+///   A row the addr does not name is `None` — no row, no identity, no record.
+#[must_use]
+pub fn answer_key_for(id: FieldId, ri: &ReturnInputs, addr: &RowAddr) -> Option<AnswerKey> {
     if let Some(q) = crate::spec::field_to_question(id) {
         return Some(AnswerKey::Question(q));
     }
-    crate::spec::field_to_skippable(id).map(AnswerKey::Skippable)
+    if let Some(s) = crate::spec::field_to_skippable(id) {
+        return Some(AnswerKey::Skippable(s));
+    }
+    let gate = crate::spec::field_to_dependent_gate(id)?;
+    let row = ri.header.dependents.get(*addr.0.first()?)?;
+    Some(AnswerKey::DependentGate {
+        ssn_hash: dependent_ssn_hash(&row.ssn),
+        gate,
+    })
+}
+
+/// ★★★ **The words THIS SURFACE put in front of the filer** — the comparand `record_answer` hashes.
+///
+/// For a question or a skippable that is [`current_prompt`], the one resolver R10.4/M-4 leaves.
+/// A dependent gate resolves through the same registry, with `params: None`, **because the form seam
+/// has no year package** — and the registry's words are what every other surface resolves too
+/// (`current_prompt`, and `income answer`), so a record written here reads as `Given` rather than as
+/// `WordingChanged` the instant it is written. Hashing anything else is seam review C-1's brick.
+/// Each tri-state gate `Field` draws exactly this sentence (`dep_gate_tristate!` takes its `label`
+/// from the registry); `DepDob` draws a shorter caption, which is FR-100 and a rendering item.
+///
+/// ★★ **The consequence, stated rather than hidden.** `DependentGate::GrossIncomeUnderLimit` quotes
+///    the year's §152(d)(1)(B) figure, so with no package its words are the FIGURELESS fallback
+///    (*"…WAITING ON THE TAX YEAR'S PARAMETER PACKAGE…"*, FR-83). An answer given to that sentence in
+///    the editor therefore does NOT stand once the figure is known: `interview_state_with_params` and
+///    `screen_dependent_gates` compare the stored hash against the RENDERED question and re-ask it.
+///    That is R10.3 working — *"an answer given under earlier words does not stand under later
+///    ones"* — and it is strictly better than the alternative this replaces, which was to record
+///    nothing and let the gate count as answered under words nobody was shown. `income answer` holds
+///    the package and asks the real question; the editor's own `ClearField` un-answers it.
+///    ★ `current_prompt` returns `None` for that one gate on purpose, so it cannot be used here.
+fn prompt_for_record(key: &AnswerKey, ri: &ReturnInputs) -> Option<std::borrow::Cow<'static, str>> {
+    match key {
+        AnswerKey::DependentGate { gate, .. } => {
+            Some(btctax_core::tax::dependent_gates::entry(*gate).prompt_text(ri, None))
+        }
+        _ => current_prompt(key, ri),
+    }
+}
+
+/// ★★★ **Record what the edit actually left on the row — provenance FOLLOWS the leaf.**
+///
+/// The twenty tri-state gates cannot be set to "unanswered" (`Field::set` refuses a
+/// `TriState(None)`), but the twenty-first — `DepDob`, a plain `Date` leaf — accepts `Date(None)`,
+/// and a `Given` record for a date that is not there would be a record of testimony nobody gave
+/// (*"an entry is testimony"*). So a set that leaves a gate ANSWERED records, and one that empties
+/// it forgets, exactly as `ClearField` does. Non-gate keys are unaffected: their `set` cannot land
+/// on a row at all.
+fn record_or_forget(ri: &mut ReturnInputs, key: AnswerKey, addr: &RowAddr, now: Date) {
+    if let AnswerKey::DependentGate { gate, .. } = &key {
+        let answered = addr
+            .0
+            .first()
+            .and_then(|i| ri.header.dependents.get(*i))
+            .is_some_and(|d| btctax_core::tax::dependent_gates::gate_is_answered(d, *gate));
+        if !answered {
+            forget_answer(ri, &key);
+            return;
+        }
+    }
+    // ★ R10.4 — the words are RENDERED FROM THE RETURN, so a question that quotes a value hashes
+    //   the sentence the filer actually saw. Owned first, because `record_answer` takes `&mut ri`
+    //   and the rendered text borrows it.
+    let prompt = prompt_for_record(&key, ri).map(std::borrow::Cow::into_owned);
+    if let Some(prompt) = prompt {
+        record_answer(ri, key, &prompt, now, AnswerState::Given);
+    }
 }
 
 pub fn apply(w: &mut Working, e: Edit, now: Date) -> Result<(), ApplyError> {
@@ -79,14 +160,8 @@ fn apply_to(ri: &mut ReturnInputs, e: Edit, now: Date) -> Result<(), ApplyError>
             //     function with the same `now`, which is why the two surfaces produce byte-identical
             //     records for the same answer. Recorded only AFTER the set succeeds: a refused edit
             //     changed nothing, so it is not an answer.
-            if let Some(key) = answer_key_for(id) {
-                // ★ R10.4 — the words are RENDERED FROM THE RETURN (`prompt_text`), so a question
-                //   that quotes a value hashes the sentence the filer actually saw. Owned first,
-                //   because `record_answer` takes `&mut ri` and the rendered text borrows it.
-                let prompt = current_prompt(&key, ri).map(std::borrow::Cow::into_owned);
-                if let Some(prompt) = prompt {
-                    record_answer(ri, key, &prompt, now, AnswerState::Given);
-                }
+            if let Some(key) = answer_key_for(id, ri, &addr) {
+                record_or_forget(ri, key, &addr, now);
             }
             Ok(())
         }
@@ -107,7 +182,7 @@ fn apply_to(ri: &mut ReturnInputs, e: Edit, now: Date) -> Result<(), ApplyError>
             //   history (§5.6 says exactly what history holds, and a clear is neither).
             if let Some(clear) = field.clear {
                 clear(ri, &addr).map_err(ApplyError::SetError)?;
-                if let Some(key) = answer_key_for(id) {
+                if let Some(key) = answer_key_for(id, ri, &addr) {
                     forget_answer(ri, &key);
                 }
                 return Ok(());
@@ -122,7 +197,7 @@ fn apply_to(ri: &mut ReturnInputs, e: Edit, now: Date) -> Result<(), ApplyError>
                 FieldKind::Enum(_) => unreachable!("Enum returned Immutable above"),
             };
             (field.set)(ri, &addr, empty).map_err(ApplyError::SetError)?;
-            if let Some(key) = answer_key_for(id) {
+            if let Some(key) = answer_key_for(id, ri, &addr) {
                 forget_answer(ri, &key);
             }
             Ok(())
@@ -1532,6 +1607,413 @@ mod tests {
                 time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
+        );
+    }
+
+    // ── ★★★ FR-97 — THE ANSWER-LOG SEAM: THE TWENTY-ONE DEPENDENT GATES RECORD HERE TOO ──────────
+    //
+    // `answer_key_for` returned `None` for every `DepGate*` field (and for `DepDob`), so an answer
+    // given in the EDITOR set the leaf and recorded nothing while `income answer` recorded the
+    // identical answer in full. The five tests below hold the fix at the layer the filer enters:
+    // through `apply(Edit::SetField)`, never by assembling an `AnswerRecord` by hand.
+
+    /// A working return carrying ONE dependent row at `RowAddr(vec![0])`, built THROUGH the seam
+    /// (materialize → `AddRow` → `SetField`) so nothing here reaches past the layer under test.
+    ///
+    /// ★ The SSN is from the never-issued space (area 000), and the year is set directly because the
+    ///   tax year is not a form `Field` at all — the renderer carries it (`TaxInputsFormState::fresh`).
+    fn with_one_dependent(ssn: &str) -> Working {
+        let mut w: Working = None;
+        materialize(&mut w, FilingStatus::Single);
+        w.as_mut().expect("materialized").tax_year = 2024;
+        apply(
+            &mut w,
+            Edit::AddRow {
+                section: SectionId::Dependents,
+                parent: RowAddr::default(),
+            },
+            NOW,
+        )
+        .unwrap();
+        apply(
+            &mut w,
+            Edit::SetField {
+                id: FieldId::DepSsn,
+                addr: RowAddr(vec![0]),
+                value: FieldValue::SecretEntry(ssn.to_string()),
+            },
+            NOW,
+        )
+        .unwrap();
+        w
+    }
+
+    /// The date this module's FR-97 tests answer at. One constant, so a record's `answered_on` is
+    /// checkable against the seam's own date rather than a wall clock.
+    const NOW: time::Date = time::macros::date!(2026 - 09 - 01);
+
+    /// ★★★ **FR-97's COVERAGE CHECK, AND IT IS DERIVED — no hand-written list of what records.**
+    ///
+    /// FR-99's shape (seven instances in this arc) is *a hand list standing beside a set that grows*:
+    /// every one was right when written and wrong after a later task widened the set. So this does not
+    /// enumerate the fields that record. It asserts an EQUALITY between two derived sets:
+    ///
+    ///   * **expected** — the image of the three registry→form maps, over the three registries'
+    ///     own totality (`FORM_QUESTIONS`, `SKIPPABLE_QUESTIONS`, `DependentGate::ALL`);
+    ///   * **actual** — every `Field` in `form_spec()` for which `answer_key_for` yields a key.
+    ///
+    /// A twenty-second dependent gate is a compile error in `gate_to_field` until it is placed, then
+    /// lands in `expected` here for free — and if `answer_key_for` ever stopped deriving from that map
+    /// (the FR-97 defect, which was exactly this: twenty fields in a registry and none of them in the
+    /// key function), the two sets separate and this reds with both differences printed.
+    ///
+    /// ★ **What it does NOT check**: whether a field that records records the RIGHT key, or the right
+    ///   words. That is the next three tests' job, and the cross-surface byte-comparison in
+    ///   `btctax-cli`'s `tax_report.rs`.
+    #[test]
+    fn the_fields_that_record_an_answer_are_exactly_the_three_registries_images() {
+        use btctax_core::tax::provenance::{dependent_ssn_hash, DependentGate};
+        use btctax_core::tax::questions::{FORM_QUESTIONS, SKIPPABLE_QUESTIONS};
+        use std::collections::BTreeSet;
+
+        const SSN: &str = "000-00-0000";
+        let w = with_one_dependent(SSN);
+        let ri = w.as_ref().expect("materialized");
+        let addr = RowAddr(vec![0]);
+
+        let name = |id: FieldId| format!("{id:?}");
+        let expected: BTreeSet<String> = FORM_QUESTIONS
+            .iter()
+            .map(|q| crate::spec::question_to_field(q.id))
+            .chain(
+                SKIPPABLE_QUESTIONS
+                    .iter()
+                    .map(|s| crate::spec::skippable_to_field(s.id)),
+            )
+            .chain(
+                DependentGate::ALL
+                    .iter()
+                    .map(|g| crate::spec::gate_to_field(*g)),
+            )
+            .map(name)
+            .collect();
+        let actual: BTreeSet<String> = crate::spec::form_spec()
+            .iter()
+            .flat_map(|s| s.fields.iter())
+            .filter(|f| super::answer_key_for(f.id, ri, &addr).is_some())
+            .map(|f| name(f.id))
+            .collect();
+        assert_eq!(
+            expected.difference(&actual).collect::<Vec<_>>(),
+            Vec::<&String>::new(),
+            "a registry owns these fields and `answer_key_for` records NONE of them — an answer \
+             given in the editor would set the leaf and write no provenance at all (FR-97)"
+        );
+        assert_eq!(
+            actual.difference(&expected).collect::<Vec<_>>(),
+            Vec::<&String>::new(),
+            "these fields record an answer that no registry owns — a key nothing can ever resolve \
+             back to a question"
+        );
+
+        // ★ …and the GATES resolve to the row's own identity, which is the half a set comparison
+        //   cannot see: the key must name WHOSE answer it is.
+        for g in DependentGate::ALL.iter().copied() {
+            assert_eq!(
+                super::answer_key_for(crate::spec::gate_to_field(g), ri, &addr),
+                Some(btctax_core::tax::provenance::AnswerKey::DependentGate {
+                    ssn_hash: dependent_ssn_hash(SSN),
+                    gate: g,
+                }),
+                "{g:?} must key on the ROW's salted SSN, exactly as `income answer` keys it"
+            );
+        }
+    }
+
+    /// Answer, through the seam, every gate the walk currently DEMANDS — repeating until the walk
+    /// stops growing, because answering one gate is what makes the next live. Each yes/no takes the
+    /// gate's own declared `claim_path` polarity, except the gates named in `flip`, which take its
+    /// negation (that is how one row is steered onto the qualifying-RELATIVE branch).
+    ///
+    /// ★ Nothing here reaches past `apply`: the fixture is built by the same `Edit`s a keystroke
+    ///   produces, and the gate set comes from `walk_dependent`'s own demands rather than a list.
+    fn answer_demanded_gates(
+        w: &mut Working,
+        dob: time::Date,
+        flip: &[btctax_core::tax::provenance::DependentGate],
+    ) {
+        use btctax_core::tax::dependent_gates::{
+            entry, gate_is_answered, walk_dependent, GateKind, DEPENDENT_GATES,
+        };
+        for _ in 0..=DEPENDENT_GATES.len() {
+            let demanded = walk_dependent(w.as_ref().expect("materialized"), 0).demanded_gates();
+            let mut progressed = false;
+            for g in demanded {
+                if gate_is_answered(&w.as_ref().unwrap().header.dependents[0], g) {
+                    continue;
+                }
+                let q = entry(g);
+                let value = match q.kind {
+                    GateKind::Date => FieldValue::Date(Some(dob)),
+                    GateKind::YesNo => {
+                        let yes = q.claim_path.expect("a YesNo gate declares its claim path");
+                        FieldValue::TriState(Some(if flip.contains(&g) { !yes } else { yes }))
+                    }
+                };
+                apply(
+                    w,
+                    Edit::SetField {
+                        id: crate::spec::gate_to_field(g),
+                        addr: RowAddr(vec![0]),
+                        value,
+                    },
+                    NOW,
+                )
+                .unwrap_or_else(|e| {
+                    panic!("{g:?} is demanded, so the editor must accept it: {e:?}")
+                });
+                progressed = true;
+            }
+            if !progressed {
+                return;
+            }
+        }
+        panic!("the gate walk never settled");
+    }
+
+    /// ★★★ **FR-97's KILL — every gate the flowchart DEMANDS, answered through `apply`, is recorded
+    ///     under the row's identity and hashes the REGISTRY's words.**
+    ///
+    /// It enters where the filer enters (`Edit::SetField`) and derives both halves it checks: the
+    /// gate set from `walk_dependent`'s own demands, and the expected hash from the gate registry —
+    /// which is also what `income answer` hashes and what `current_prompt` resolves, so a record
+    /// written here reads as `Given` rather than as `WordingChanged` the instant it is written
+    /// (seam review C-1's brick, from the other side).
+    #[test]
+    fn every_demanded_dependent_gate_answered_through_apply_records_the_registrys_words() {
+        use btctax_core::tax::dependent_gates::{entry, walk_dependent};
+        use btctax_core::tax::provenance::{
+            answer_status, dependent_ssn_hash, prompt_hash, AnswerKey, AnswerState, AnswerStatus,
+        };
+
+        const SSN: &str = "000-00-0001";
+        let mut w = with_one_dependent(SSN);
+        answer_demanded_gates(&mut w, date!(2014 - 06 - 01), &[]);
+
+        let ri = w.as_ref().expect("materialized");
+        let demanded = walk_dependent(ri, 0).demanded_gates();
+        assert!(
+            demanded.len() >= 10,
+            "the premise: the qualifying-child path demands a real gate set, not one or two: \
+             {demanded:?}"
+        );
+        for g in demanded {
+            let key = AnswerKey::DependentGate {
+                ssn_hash: dependent_ssn_hash(SSN),
+                gate: g,
+            };
+            let rec = ri.answer_log.get(&key).unwrap_or_else(|| {
+                panic!(
+                    "{g:?} was answered in the EDITOR and recorded nothing — the row counts as \
+                     answered under words it may never have been shown (FR-97)"
+                )
+            });
+            assert_eq!(
+                rec.answered_on, NOW,
+                "{g:?}: the seam's date, not a wall clock"
+            );
+            assert_eq!(rec.state, AnswerState::Given, "{g:?}");
+            assert_eq!(
+                rec.prompt_hash,
+                prompt_hash(&entry(g).prompt_text(ri, None)),
+                "{g:?}: the record must hash the gate REGISTRY's words — the same comparand \
+                 `current_prompt` resolves and `income answer` writes"
+            );
+            assert_eq!(
+                answer_status(ri, &key),
+                AnswerStatus::Given,
+                "{g:?}: …and it must therefore read as ANSWERED, not as re-ask-me"
+            );
+        }
+    }
+
+    /// ★★★ **WHAT THE FILER SAW vs WHAT WAS HASHED — the one gate where they differ, named with its
+    ///     reason rather than left to be discovered.**
+    ///
+    /// Hashing something other than the words on the screen is seam review C-1, so the correspondence
+    /// is checked rather than assumed: every `GateKind::YesNo` gate's `Field` draws the registry
+    /// prompt verbatim (the `dep_gate_tristate!` macro takes `label` from the registry), so the
+    /// hashed sentence IS the drawn one. `GateKind::Date` — `DateOfBirth` alone, and the registry
+    /// says so — is the exception: `DepDob` is a plain leaf that predates T7's gate registry and
+    /// draws the caption *"Date of birth"*, while the record hashes the registry's question.
+    ///
+    /// That is deliberate and it is the only correct choice: `current_prompt` and `income answer`
+    /// both resolve the registry's words, so hashing the caption instead would make the editor's own
+    /// answer read `WordingChanged` forever. The residue — a caption and a question that are not the
+    /// same sentence — is a RENDERER wording item, recorded in `FOLLOWUPS.md` (FR-100), not a
+    /// provenance defect.
+    #[test]
+    fn the_gate_fields_draw_the_words_they_hash_except_the_one_named_date_leaf() {
+        use btctax_core::tax::dependent_gates::{entry, GateKind};
+        use btctax_core::tax::provenance::DependentGate;
+
+        let w = with_one_dependent("000-00-0004");
+        let ri = w.as_ref().expect("materialized");
+        let label_of = |id: FieldId| {
+            crate::spec::form_spec()
+                .iter()
+                .flat_map(|s| s.fields.iter())
+                .find(|f| f.id == id)
+                .expect("every gate has a Field")
+                .label
+        };
+        let mut different = Vec::new();
+        for g in DependentGate::ALL.iter().copied() {
+            let drawn = label_of(crate::spec::gate_to_field(g));
+            let hashed = entry(g).prompt_text(ri, None);
+            if drawn != hashed {
+                different.push((g, entry(g).kind));
+            }
+        }
+        assert_eq!(
+            different
+                .iter()
+                .filter(|(_, k)| *k == GateKind::YesNo)
+                .collect::<Vec<_>>(),
+            Vec::<&(DependentGate, GateKind)>::new(),
+            "a yes/no gate that draws one sentence and hashes another is C-1 again: the filer's \
+             answer would read as given under words they never saw"
+        );
+        assert_eq!(
+            different.iter().map(|(g, _)| *g).collect::<Vec<_>>(),
+            vec![DependentGate::DateOfBirth],
+            "exactly ONE gate may draw words other than the ones it hashes, and it is the plain \
+             `Date` leaf that predates the registry — a second one is a new defect, not a new \
+             exception"
+        );
+    }
+
+    /// ★★★ **Provenance follows the LEAF: emptying the date of birth un-answers it.**
+    ///
+    /// `DepDob` is the one gate whose `set` accepts an empty value (`Date(None)`), and a `Given`
+    /// record dated today for a date that is not on the row would be a record of testimony nobody
+    /// gave — the same act `Durability::Durable` refuses at the keyboard, where a bare Enter on a
+    /// seeded row leaves *"no value, no record, and the gate still blocking"*.
+    #[test]
+    fn emptying_a_dependents_date_of_birth_forgets_its_record_rather_than_dating_a_blank() {
+        use btctax_core::tax::provenance::{dependent_ssn_hash, AnswerKey, DependentGate};
+
+        const SSN: &str = "000-00-0002";
+        let mut w = with_one_dependent(SSN);
+        let key = AnswerKey::DependentGate {
+            ssn_hash: dependent_ssn_hash(SSN),
+            gate: DependentGate::DateOfBirth,
+        };
+        let set = |w: &mut Working, v: Option<time::Date>| {
+            apply(
+                w,
+                Edit::SetField {
+                    id: FieldId::DepDob,
+                    addr: RowAddr(vec![0]),
+                    value: FieldValue::Date(v),
+                },
+                NOW,
+            )
+            .unwrap();
+        };
+        set(&mut w, Some(date!(2014 - 06 - 01)));
+        assert!(
+            w.as_ref().unwrap().answer_log.contains_key(&key),
+            "a date TYPED in the editor is testimony, and it is recorded"
+        );
+        set(&mut w, None);
+        assert!(
+            !w.as_ref().unwrap().answer_log.contains_key(&key),
+            "…and emptying it takes the record with it: a record for a blank date is testimony \
+             nobody gave"
+        );
+        assert!(
+            w.as_ref().unwrap().answer_log_history.is_empty(),
+            "un-answering writes no history (§5.6 holds superseded WORDINGS, not withdrawals)"
+        );
+    }
+
+    /// ★★★ **THE BOUNDARY, STATED AS A TEST — the one gate whose words the editor cannot state.**
+    ///
+    /// `GrossIncomeUnderLimit` quotes the year's §152(d)(1)(B) figure, and the form seam holds no
+    /// `FullReturnParams` (`Field.live` has none, and a gate `Field`'s label IS the registry's static
+    /// prompt). So the editor draws FR-83's figureless fallback — *"…WAITING ON THE TAX YEAR'S
+    /// PARAMETER PACKAGE…"* — and records THAT, which is the only honest comparand: it is what the
+    /// filer read.
+    ///
+    /// The consequence is R10.3 doing its job rather than a defect hidden: once the package is in
+    /// hand the stored hash disagrees with the rendered question, so the panel lists the gate as
+    /// blocking and `screen_dependent_gates` refuses. `income answer` holds the package and asks the
+    /// real question; `ClearField` withdraws the editor's answer. What this must never be again is
+    /// the pre-FR-97 behaviour — **no record at all**, which let the gate count as ANSWERED under
+    /// words nobody was shown.
+    #[test]
+    fn the_params_quoting_gate_records_the_fallback_it_drew_and_is_re_asked_once_the_figure_lands()
+    {
+        use btctax_core::tax::dependent_gates::{entry, walk_dependent};
+        use btctax_core::tax::provenance::{
+            dependent_ssn_hash, prompt_hash, AnswerKey, DependentGate,
+        };
+
+        const SSN: &str = "000-00-0003";
+        let mut w = with_one_dependent(SSN);
+        // The qualifying-RELATIVE path — Step 1's relationship test answered against its claim path
+        // sends the row to Step 4, which is where the gross income test lives. Every answer goes
+        // through the seam, and the gate SET comes from the walk's own demands.
+        answer_demanded_gates(
+            &mut w,
+            date!(1950 - 03 - 04),
+            &[DependentGate::QcRelationship],
+        );
+        let ri = w.as_ref().unwrap();
+        assert!(
+            walk_dependent(ri, 0).demands(DependentGate::GrossIncomeUnderLimit),
+            "the premise: this row is on the qualifying-relative path, where Step 4 asks the gross \
+             income test"
+        );
+
+        let key = AnswerKey::DependentGate {
+            ssn_hash: dependent_ssn_hash(SSN),
+            gate: DependentGate::GrossIncomeUnderLimit,
+        };
+        let rec = ri
+            .answer_log
+            .get(&key)
+            .expect("an answer given in the editor is testimony, and testimony gets provenance");
+        assert_eq!(
+            rec.prompt_hash,
+            prompt_hash(&entry(DependentGate::GrossIncomeUnderLimit).prompt_text(ri, None)),
+            "the record hashes the FIGURELESS fallback, because that is the sentence the pane drew"
+        );
+
+        // …and with the year's package in hand, that answer does NOT stand: the question the filer
+        // must answer quotes a figure their screen never showed.
+        let params = btctax_core::tax::testonly::ty2024_params();
+        let st = btctax_core::tax::interview_state::interview_state_with_params(ri, &params);
+        assert!(
+            st.blocking.iter().any(|b| b.item == key
+                && b.reason == btctax_core::tax::provenance::WORDING_CHANGED_REASON),
+            "R10.3 — an answer given under earlier words does not stand under later ones: {:?}",
+            st.blocking
+        );
+        // The editor's own withdrawal works: clearing returns it to never-asked.
+        apply(
+            &mut w,
+            Edit::ClearField {
+                id: FieldId::DepGateGrossIncomeUnderLimit,
+                addr: RowAddr(vec![0]),
+            },
+            NOW,
+        )
+        .unwrap();
+        assert!(
+            !w.as_ref().unwrap().answer_log.contains_key(&key),
+            "`ClearField` un-answers a gate — the record goes with the leaf"
         );
     }
 }

@@ -27,42 +27,16 @@ fn skip(s: btctax_core::tax::questions::SkippableId) -> Anchor {
     Anchor::Field(crate::spec::skippable_to_field(s))
 }
 
-/// ★★★ **T7 / R6 — `DependentGate` → the Dependents-section `Field` that carries it.** TOTAL: an
-/// exhaustive `match` with no `_` arm, so a new gate is a compile error here until it is placed.
+/// ★★★ **T7 / R6 — `DependentGate` → the Dependents-section `Field` that carries it.**
 ///
-/// `DateOfBirth` resolves to the pre-existing `DepDob` leaf rather than a new one — the row already
-/// had a date field, and R6 changed its CLASS (required, blocking) rather than adding a second one.
+/// ★ **FR-97 — the map itself moved to `spec/registries.rs`** ([`crate::gate_to_field`]), beside
+///   [`crate::question_to_field`] and [`crate::skippable_to_field`], because `apply`'s answer-log key
+///   needs the same correspondence and a SECOND copy of it is precisely the shape this repo keeps
+///   getting wrong. It is still TOTAL — an exhaustive `match` with no `_` arm, so a new gate is a
+///   compile error there until it is placed — and `DateOfBirth` still resolves to the pre-existing
+///   `DepDob` leaf rather than a new one.
 fn dependent_gate_field(gate: btctax_core::tax::provenance::DependentGate) -> FieldId {
-    use btctax_core::tax::provenance::DependentGate as G;
-    match gate {
-        G::DateOfBirth => FieldId::DepDob,
-        G::QcRelationship => FieldId::DepGateQcRelationship,
-        G::YoungerThanYouOrSpouse => FieldId::DepGateYoungerThanYouOrSpouse,
-        G::FullTimeStudent => FieldId::DepGateFullTimeStudent,
-        G::PermanentlyAndTotallyDisabled => FieldId::DepGatePermanentlyAndTotallyDisabled,
-        G::ProvidedOverHalfOwnSupport => FieldId::DepGateProvidedOverHalfOwnSupport,
-        G::FilingJointReturn => FieldId::DepGateFilingJointReturn,
-        G::JointReturnOnlyToClaimRefund => FieldId::DepGateJointReturnOnlyToClaimRefund,
-        G::LivedWithYouOverHalfYear => FieldId::DepGateLivedWithYouOverHalfYear,
-        G::LivedWithYouInUs => FieldId::DepGateLivedWithYouInUs,
-        G::QualifyingChildOfAnotherPerson => FieldId::DepGateQualifyingChildOfAnotherPerson,
-        G::CitizenNationalResidentOrCanadaMexico => {
-            FieldId::DepGateCitizenNationalResidentOrCanadaMexico
-        }
-        G::Married => FieldId::DepGateMarried,
-        G::TinIssuedByDueDate => FieldId::DepGateTinIssuedByDueDate,
-        G::CitizenNationalOrResidentAlien => FieldId::DepGateCitizenNationalOrResidentAlien,
-        G::SsnsValidForEmploymentIssuedByDueDate => {
-            FieldId::DepGateSsnsValidForEmploymentIssuedByDueDate
-        }
-        G::QrRelationshipOrMemberOfHousehold => FieldId::DepGateQrRelationshipOrMemberOfHousehold,
-        G::QualifyingChildOfAnyTaxpayer => FieldId::DepGateQualifyingChildOfAnyTaxpayer,
-        G::GrossIncomeUnderLimit => FieldId::DepGateGrossIncomeUnderLimit,
-        G::YouProvidedOverHalfSupport => FieldId::DepGateYouProvidedOverHalfSupport,
-        G::DivorcedSeparatedMultipleSupportOrKidnappedRuleApplies => {
-            FieldId::DepGateDivorcedSeparatedMultipleSupportOrKidnappedRuleApplies
-        }
-    }
+    crate::spec::gate_to_field(gate)
 }
 
 /// Where a screen-refusal points in the input form (spec §7). An EXHAUSTIVE `match` — no `_` arm — so a new

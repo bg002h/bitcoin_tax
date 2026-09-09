@@ -185,11 +185,15 @@ fn maximal_fixture() -> ReturnInputs {
     //    would then fire on a perfectly correct exemption — the same trap the census exists to spring
     //    on a real one.
     //
-    //    ★ Deliberately `Question`/`Skippable` keys and NO `DependentGate`: nothing in the form spec
-    //      writes a dependent-gate record (that registry is task T7), and seeding one would make the
-    //      `DepSsn` setter's identity-supersede fire during the mutate-and-diff, moving a SECOND leaf
-    //      and breaking the "exactly one leaf" derivation for reasons that have nothing to do with
-    //      coverage.
+    //    ★ Deliberately `Question`/`Skippable` keys and NO `DependentGate`: seeding one would make
+    //      the `DepSsn` setter's identity-supersede fire during the mutate-and-diff, moving a SECOND
+    //      leaf and breaking the "exactly one leaf" derivation for reasons that have nothing to do
+    //      with coverage.
+    //
+    //    ★★ **FR-97 — `apply` DOES write a dependent-gate record now**, so the old reason given here
+    //       (*"nothing in the form spec writes a dependent-gate record"*) is retired. This census is
+    //       unaffected because it drives each `Field`'s own `set`, never `apply`: the answer log is
+    //       written one layer up, which is exactly why `answer_log` is EXEMPT by prefix below.
     // ★★★ **T10 / §5.4 — the TRAILER's two liveness primers.**
     //
     // ★ `foreign_country` non-empty is the §5.4 rule for the province and the postal code
