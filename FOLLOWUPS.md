@@ -6536,6 +6536,25 @@ build, each with an owning phase.
   recompile and not a cached one. What to decide: whether the mitigation belongs in every build/fold
   brief as a rule, inside `make check` itself, or in a wrapper. Related: [[FR-88]] — both are ways an
   instrument reports something other than what it measured.
+- **★★ OWNER Q1 / SCOPE, RULED 2026-09-07 — *"I won't have a 1099R this year"* and *"Let us defer
+  1099-MISC."* Together with the two rulings below, this SETTLES v1's task scope: T13, T14 and T15 are
+  all off the critical path.**
+  · **T14 is CLOSED — not needed.** It was gated on 1099-R *or* SSA-1099 and the owner has ruled out
+    both. No retirement screens, no Simplified Method worksheet, no Social Security Benefits worksheet.
+  · **T13 is DEFERRED** at the owner's direction. Its Schedule C half was already out (no
+    self-employment); its remaining half — the 1099-NEC/MISC/K screen and Schedule 1 line 8z — is
+    deferred rather than built.
+  · **T15 was already deferred** (owner Q2: the CTC is zero at this income).
+  ★★ **What deferring T13 actually means, stated plainly so it is not mistaken for "no consequence":** if
+  a 1099-MISC does arrive, btctax **refuses the return** — `DocumentRow::NecMiscK1099` is built and its
+  refusal names the reason (`document_census.rs:186`). So the failure mode is a **named stop, not a wrong
+  filing**, which is why deferring is safe. But it is a stop: that year then needs T13 built at the time,
+  or a preparer. The decision is reversible; the deadline is not, so the trigger to watch is the arrival
+  of the form, not the filing date.
+  · Still open from Q1, and cheap: **Form 1095-A** — the one row that refuses the ENTIRE return (Form
+    8962 is not built and no task builds it). Everything else on Q1's list is either answered, built, or
+    a named refusal the owner can accept when it arrives.
+
 - **★★ OWNER Q1, ANSWERED 2026-09-07 — *"I have no self employment income / Or business."*** This is a
   RULING, not a partial: it closes the Schedule C question outright and **corrects the spec**.
   · **T13's Schedule C half is OUT.** No Schedule C, no Schedule SE, no Schedule C Part II transcription.
