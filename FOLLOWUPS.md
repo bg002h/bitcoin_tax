@@ -6608,6 +6608,76 @@ build, each with an owning phase.
   forcing a rebuild does not tax the loop that FINDS defects in order to protect the run that CERTIFIES
   them. The Makefile comment carries the measurement and names the false-green risk. Standing rule
   alongside it: `touch` the file after every restore.
+- **FR-102 — ★★★ CRITICAL, SHIPPED, LIVE TODAY: a filer with an HSA cannot print ANY of their return.
+  Schedule 2 lines 17c/17d are pushed in the wrong COLUMN, and the geometric verifier fails the whole
+  export closed. Found by the 2026-09-07 journey walk; mechanism CONFIRMED and the fix PROVEN by the
+  controller. Owning phase: IMMEDIATE — before anything ships, and before the B3 whole-branch review.**
+
+  **Reproduction (controller's own, independent of the walk's vault):** a plain MFJ household — $800,000
+  wages, $2,500 interest, four dependents, a mortgage, an HSA — **no crypto ledger at all**. `report`
+  computes correctly (TOTAL TAX $208,856). Then:
+  ```
+  $ btctax --vault v.pgp export-irs-pdf --out irs --tax-year 2024
+  error: IRS form fill: geometric read-back FAILED (mis-mapped cell):
+    form1[0].Page2[0].f2_04[0]: x-center 446.0 not in column 1 cluster (504.0, 576.0) (mis-mapped column)
+  ```
+  Exit 2, **zero bytes written, no `irs/` directory** — not one printable page of an otherwise complete
+  and correct return.
+
+  **Mechanism, established:** `schedule23.rs`'s Schedule 2 page-2 loop pushes all nine plan entries with
+  the single hardcoded `COL_AMOUNT` (= 1). But `SCH_CLUSTERS = [(410,482), (504,576)]`, and lines **17c
+  and 17d are the INDENTED sub-lines** — `form1[0].Page2[0].f2_04[0]` measures at x 410.4–481.6, centre
+  **446**, i.e. cluster **0** (`COL_MID`, which is defined in the same file and unused in that loop).
+  Only the line-18 total belongs in the AMOUNT column. The trigger is `hsa = lines.line17c.is_some()`, so
+  it fires for **any** return carrying a Form 8889 HSA block.
+
+  **Fix proven, not applied** (the owner approved reproduce-and-file, not fix): passing `COL_MID` for the
+  17c/17d indices makes the same export write **8 PDFs**. Reverted; the failure returns; the tree is
+  untouched. It is a one-line change plus the KAT that must red without it.
+
+  ★★ **Why nothing caught it, which is the more important half.** `verify_flat` is CORRECT and did
+  exactly its job — it refused to write a misplaced cell. What was missing is a fixture: no test drives
+  Schedule 2 page 2 with `line17c` populated, so the checker was never shown an HSA household. That is
+  **[[FR-88]] / B1a** — *the fixture is half the checker* — arriving in production one task after the rule
+  was adopted, and it is the strongest possible argument for B1a. T16 added 17c/17d/18 to that loop and
+  reused the column constant its neighbours used; every review and re-verification passed because the
+  suite never presented the case.
+
+- **FR-103 — TY2024 accepts car-loan interest SILENTLY and discards it (journey walk finding #2). Owning
+  phase: the TY2025 package (S1), or sooner if cheap.** `income import` takes a fully detailed
+  `[[schedule_1a.vehicles]]` row with exit 0 and **no message of any kind**; `income show` echoes the
+  figure back; `Schedule1A::compute` then returns `None` before 2025 because the form has no line, and no
+  advisory anywhere mentions it. **Every other out-of-scope item in this codebase refuses or advises —
+  this is the one silent exception found.** A filer who did not already know Schedule 1-A is TY2025+
+  would have no way to learn it from the tool, and would believe a deduction was taken.
+
+- **FR-104 — `export-irs-pdf --tax-year 2025` reports SUCCESS and writes a 2-file crypto-only packet
+  that does not reflect the imported household (journey walk finding #3). Owning phase: the TY2025
+  package (S1).** `Filled IRS forms for tax year 2025 → irs/f8949.pdf irs/schedule_d.pdf`, exit 0, no
+  warning — identical output for a filer who carefully entered wages, dependents, mortgage and HSA and
+  for one who never ran `income import` at all. The dispatch's answers-driven branch checks only the
+  TY2026+ broker-reporting table. Near a deadline this is a misleading success, which is worse than the
+  clean refusal `report` gives for the same year.
+
+- **FR-105 — the dependent §152 gates are re-asked in full every `income answer` session (journey walk
+  finding #4). Owning phase: ownerless residue (UX).** ~64 additional y/n/date prompts per session for
+  four dependents, even when every leaf was already answered truthfully via the imported TOML. A bare
+  Enter re-confirms, so it is correct — but nothing explains WHY an already-answered gate is asked again,
+  and the volume is the difference between a session a filer finishes and one they abandon.
+
+- **FR-106 — the answer panel's BLOCKING count is a moving target with no warning (journey walk finding
+  #5). Owning phase: ownerless residue (UX).** The panel printed *"BLOCKING (36)"* at session start;
+  two further questions became live mid-session, triggered by the filer's own census answers in the same
+  pass. Correct by design (the M-3 seam-review fix), but the number a filer reads to gauge "how much is
+  left" grows while they work, and nothing says it can.
+
+- **FR-107 — Form 5498-SA's census row has no honest answer for "not yet received" (journey walk finding
+  #6). Owning phase: ownerless residue, with the census tri-state work.** Form 5498-SA is legally issued
+  only AFTER the April deadline (HSA contributions run to the return's due date), so an early filer can
+  never truthfully answer *Yes*, yet the true state is *not yet received*, not *will never receive*. The
+  census asks a plain y/n at the keyboard even though the spec itself describes a tri-state for exactly
+  this. Narrow, but it is a row where the tool asks for testimony the filer cannot give truthfully.
+
 - **FR-99 — ★★ THE DOMINANT DEFECT CLASS OF THE WHOLE INTERVIEW ARC: a hand-written list standing beside
   a set that GROWS. Proposed `CLAUDE.md` rule — OWNER'S CALL, filed not actioned. Owning phase: the
   harness / doctrine (owner), before the interview branch ships.**
