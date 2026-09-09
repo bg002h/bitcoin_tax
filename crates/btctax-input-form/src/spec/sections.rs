@@ -11,7 +11,8 @@
 //! depend on that single source.
 
 use crate::seam::{
-    Field, FieldId, FieldKind, FieldValue, SecretView, Section, SectionId, SectionKind, SetError,
+    Field, FieldId, FieldKind, FieldValue, LabelSource, SecretView, Section, SectionId,
+    SectionKind, SetError,
 };
 use btctax_core::conventions::Usd;
 use btctax_core::forms::{BrokerReported, Cohort};
@@ -57,6 +58,7 @@ fn mask_ip_pin(raw: &str) -> SecretView {
 macro_rules! w2_money {
     ($id:expr, $label:literal, $help:literal, $field:ident) => {
         Field {
+            label_source: LabelSource::Authored,
             id: $id,
             clear: None,
             label: $label,
@@ -79,6 +81,7 @@ macro_rules! w2_money {
 macro_rules! scha_money {
     ($id:expr, $label:literal, $help:literal, $field:ident) => {
         Field {
+            label_source: LabelSource::Authored,
             id: $id,
             clear: None,
             label: $label,
@@ -101,6 +104,7 @@ macro_rules! scha_money {
 macro_rules! ret_money {
     ($id:expr, $label:literal, $help:literal, $field:ident) => {
         Field {
+            label_source: LabelSource::Authored,
             id: $id,
             clear: None,
             label: $label,
@@ -160,6 +164,7 @@ pub(crate) const INCOME_EXCLUSION_FIELDS: &[Field] = &[
 
 const RETURN_OPTIONS_FIELDS: &[Field] = &[
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::FilingStatus,
         clear: None,
         label: "Filing status",
@@ -181,6 +186,7 @@ const RETURN_OPTIONS_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::ItemizeElection,
         clear: None,
         label: "Itemize election",
@@ -215,6 +221,7 @@ pub(crate) const RETURN_OPTIONS: Section = Section {
 
 const TAXPAYER_FIELDS: &[Field] = &[
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::TpFirstName,
         clear: None,
         label: "First name",
@@ -229,6 +236,7 @@ const TAXPAYER_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::TpLastName,
         clear: None,
         label: "Last name",
@@ -243,6 +251,7 @@ const TAXPAYER_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::TpSsn,
         clear: None,
         label: "SSN",
@@ -257,6 +266,7 @@ const TAXPAYER_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::TpOccupation,
         clear: None,
         label: "Occupation",
@@ -271,6 +281,7 @@ const TAXPAYER_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::TpPresidentialFund,
         clear: None,
         label: "Presidential Election Campaign Fund",
@@ -285,6 +296,7 @@ const TAXPAYER_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::IpPin,
         clear: None,
         label: "Identity Protection PIN",
@@ -331,6 +343,7 @@ const TAXPAYER_FIELDS: &[Field] = &[
     //   you don't enter the name, it will take us longer to process your return."* Nothing refuses
     //   on it, and the help says when to leave it blank.
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::QualifyingChildName,
         clear: None,
         label: "Qualifying child's name (HoH / QSS entry space)",
@@ -368,6 +381,7 @@ pub(crate) const TAXPAYER: Section = Section {
 
 const SPOUSE_FIELDS: &[Field] = &[
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::SpFirstName,
         clear: None,
         label: "Spouse first name",
@@ -382,6 +396,7 @@ const SPOUSE_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::SpLastName,
         clear: None,
         label: "Spouse last name",
@@ -396,6 +411,7 @@ const SPOUSE_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::SpSsn,
         clear: None,
         label: "Spouse SSN",
@@ -410,6 +426,7 @@ const SPOUSE_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::SpOccupation,
         clear: None,
         label: "Spouse occupation",
@@ -424,6 +441,7 @@ const SPOUSE_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::SpPresidentialFund,
         clear: None,
         label: "Spouse Presidential Election Campaign Fund",
@@ -456,6 +474,7 @@ const SPOUSE_FIELDS: &[Field] = &[
     //   `NoSuchRow` until the optional singleton exists. A PIN belongs to a person, and on a
     //   return with no spouse there is nobody to hold it.
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::SpIpPin,
         clear: None,
         label: "Spouse Identity Protection PIN",
@@ -514,6 +533,7 @@ pub(crate) const SPOUSE: Section = Section {
 
 const ADDRESS_FIELDS: &[Field] = &[
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::AddrStreet,
         clear: None,
         label: "Street address",
@@ -530,6 +550,7 @@ const ADDRESS_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::AddrCity,
         clear: None,
         label: "City",
@@ -546,6 +567,7 @@ const ADDRESS_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::AddrState,
         clear: None,
         label: "State",
@@ -562,6 +584,7 @@ const ADDRESS_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::AddrZip,
         clear: None,
         label: "ZIP code",
@@ -591,6 +614,7 @@ const ADDRESS_FIELDS: &[Field] = &[
     // ★ Every one is a plain `Text` and a blank is LAWFUL — most filers have a domestic address and
     //   leave all three empty, which is the correct return. Nothing refuses on any of them.
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::AddrForeignCountry,
         clear: None,
         label: "Foreign country name",
@@ -617,6 +641,7 @@ const ADDRESS_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::AddrForeignProvince,
         clear: None,
         label: "Foreign province/state/county",
@@ -638,6 +663,7 @@ const ADDRESS_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::AddrForeignPostalCode,
         clear: None,
         label: "Foreign postal code",
@@ -665,6 +691,7 @@ const ADDRESS_FIELDS: &[Field] = &[
     // ★ NOT coerced into a shape. btctax does not know the filer's dialling plan, and rewriting
     //   what they typed would be inventing testimony about how to reach them.
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::AddrPhone,
         clear: None,
         label: "Phone number",
@@ -706,6 +733,7 @@ pub(crate) const ADDRESS: Section = Section {
 //   same emulation the Spouse section uses.
 const DIRECT_DEPOSIT_FIELDS: &[Field] = &[
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::DdRouting,
         clear: None,
         label: "Routing number (line 35b)",
@@ -729,6 +757,7 @@ const DIRECT_DEPOSIT_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::DdKind,
         clear: None,
         label: "Account type (line 35c)",
@@ -769,6 +798,7 @@ const DIRECT_DEPOSIT_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::DdAccount,
         clear: None,
         label: "Account number (line 35d)",
@@ -837,6 +867,7 @@ pub(crate) const DIRECT_DEPOSIT: Section = Section {
 macro_rules! dep_gate_tristate {
     ($idx:literal, $fid:expr) => {
         Field {
+            label_source: LabelSource::Authored,
             id: $fid,
             label: DEPENDENT_GATES[$idx].prompt,
             help: DEPENDENT_GATES[$idx].help,
@@ -892,6 +923,7 @@ macro_rules! dep_gate_tristate {
 
 const DEPENDENT_FIELDS: &[Field] = &[
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::DepName,
         clear: None,
         label: "Dependent name",
@@ -917,6 +949,7 @@ const DEPENDENT_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::DepSsn,
         clear: None,
         label: "Dependent SSN",
@@ -959,6 +992,7 @@ const DEPENDENT_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::DepRelationship,
         clear: None,
         label: "Relationship",
@@ -984,6 +1018,7 @@ const DEPENDENT_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::DepDob,
         clear: None,
         label: "Date of birth",
@@ -1067,6 +1102,7 @@ pub(crate) const DEPENDENTS: Section = Section {
 
 const W2_FIELDS: &[Field] = &[
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::W2Owner,
         clear: None,
         label: "Owner",
@@ -1086,6 +1122,7 @@ const W2_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::W2Employer,
         clear: None,
         label: "c Employer's name, address, and ZIP code",
@@ -1102,6 +1139,7 @@ const W2_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::W2Ein,
         clear: None,
         label: "b Employer identification number (EIN)",
@@ -1141,6 +1179,7 @@ const W2_FIELDS: &[Field] = &[
     w2_money!(FieldId::Box8AllocTips, "8 Allocated tips", "Box 8 \u{201c}Allocated tips\u{201d} \u{2014} unreported tip income needing Form 4137, which btctax does not build, so any amount refuses.", box8_allocated_tips),
     w2_money!(FieldId::Box10DepCare, "10 Dependent care benefits", "Box 10 \u{201c}Dependent care benefits\u{201d} \u{2014} needs Form 2441, which btctax does not build, so any amount refuses.", box10_dependent_care),
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::W2Box13StatutoryEmployee,
         clear: None,
         label: "13 Statutory employee",
@@ -1159,6 +1198,7 @@ const W2_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::W2Box14bTtoc,
         clear: None,
         label: "14b Treasury Tipped Occupation Code(s)",
@@ -1211,6 +1251,7 @@ pub(crate) const W2S: Section = Section {
 
 const W2_BOX12_FIELDS: &[Field] = &[
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::Box12Code,
         clear: None,
         label: "Box 12 — code",
@@ -1234,6 +1275,7 @@ const W2_BOX12_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::Box12Amount,
         clear: None,
         label: "Box 12 — amount",
@@ -1351,6 +1393,7 @@ const SCHEDULE_A_FIELDS: &[Field] = &[
     //    would turn "I claimed nothing" into the sworn statement "my allocable state income tax is
     //    zero" — a printed 0 on a signed return instead of a blank line.
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::Nii8960Line9b,
         clear: Some(|ri, _| {
             ri.form_8960_line9b = None;
@@ -1431,6 +1474,7 @@ pub(crate) const SCHEDULE_A: Section = Section {
 
 const CHARITABLE_FIELDS: &[Field] = &[
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::CharClass,
         clear: None,
         label: "Gift class",
@@ -1470,6 +1514,7 @@ const CHARITABLE_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::CharAmount,
         clear: None,
         label: "Gift amount",
@@ -1527,6 +1572,7 @@ pub(crate) const SCHEDULE_A_CHARITABLE: Section = Section {
 
 const PAYMENTS_FIELDS: &[Field] = &[
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::PayEstimated,
         clear: None,
         label: "Estimated tax payments",
@@ -1543,6 +1589,7 @@ const PAYMENTS_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::PayExtension,
         clear: None,
         label: "Extension payment",
@@ -1559,6 +1606,7 @@ const PAYMENTS_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::PayOtherWh,
         clear: None,
         label: "Other withholding",
@@ -1587,6 +1635,7 @@ const PAYMENTS_FIELDS: &[Field] = &[
 /// ★ Line 7's hole shipped in v0.14.0; line 3's was created and closed in the same branch.
 const CARRYFORWARD_FIELDS: &[Field] = &[
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::QbiReitPtpCarryforwardIn,
         clear: None,
         label: "Prior-year qualified REIT dividend / PTP LOSS carryforward (Form 8995 line 7)",
@@ -1608,6 +1657,7 @@ const CARRYFORWARD_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::QbiCarryforwardIn,
         clear: None,
         label: "Prior-year qualified business net LOSS carryforward (Form 8995 line 3)",
@@ -1631,6 +1681,7 @@ const CARRYFORWARD_FIELDS: &[Field] = &[
 /// §G-28/B1b — Form 8995-A Part II's two inputs. Live only when there IS a trade or business.
 const QBI_LIMITATION_FIELDS: &[Field] = &[
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::QbiW2Wages,
         // ★★★ A DEDICATED `clear`, and it is load-bearing. These two — and `Nii8960Line9b`, which
         //     carries its own `clear` for the same reason — are the `Option<Usd>` leaves in
@@ -1674,6 +1725,7 @@ const QBI_LIMITATION_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::QbiUbia,
         // ★★★ Same reason as `QbiW2Wages` above — see that comment.
         clear: Some(|ri, _| {
@@ -2477,6 +2529,7 @@ fn broker_set(
 
 const BROKER_FIELDS: &[Field] = &[
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::BrokerCovered,
         clear: None,
         label: "Covered lots — bought on this venue on/after 2026-01-01",
@@ -2492,6 +2545,7 @@ const BROKER_FIELDS: &[Field] = &[
         set: |ri, a, v| broker_set(ri, a, Cohort::Covered, v),
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::BrokerNoncovered,
         clear: None,
         label: "Noncovered lots — everything else this venue sold for you",
@@ -2719,6 +2773,7 @@ mod broker_block_tests {
 macro_rules! doc_money {
     ($id:expr, $vec:ident, $label:literal, $help:expr, $field:ident) => {
         Field {
+            label_source: LabelSource::DocumentCaption,
             id: $id,
             clear: None,
             label: $label,
@@ -2741,6 +2796,7 @@ macro_rules! doc_money {
 macro_rules! doc_text {
     ($id:expr, $vec:ident, $label:literal, $help:expr, $field:ident) => {
         Field {
+            label_source: LabelSource::DocumentCaption,
             id: $id,
             clear: None,
             label: $label,
@@ -2768,6 +2824,7 @@ macro_rules! doc_text {
 macro_rules! doc_transcribed_on {
     ($id:expr, $vec:ident) => {
         Field {
+            label_source: LabelSource::Authored,
             id: $id,
             clear: Some(|ri, a| {
                 ri.$vec
@@ -2925,6 +2982,7 @@ const B_1099_FIELDS: &[Field] = &[
     doc_money!(FieldId::B1099Box13Bartering, b_1099, "13 Bartering",
         "Box 13 \u{201c}Bartering\u{201d} \u{2014} the fair market value of what a barter exchange arranged for you. It is income, and it reaches Schedule 1 line 8z \u{201c}Other income. List type and amount\u{201d}, or Schedule C if the bartering was in a trade or business. btctax fills line 8z from nothing and will not route income to a Schedule C you did not declare, so any amount refuses.", box13_bartering),
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::B1099BasisReportedNoAdjustments,
         clear: Some(|ri, a| {
             ri.b_1099
@@ -3013,6 +3071,7 @@ const FORM_1098_FIELDS: &[Field] = &[
     doc_money!(FieldId::Form1098Box2Principal, form_1098, "2 Outstanding mortgage principal",
         "Box 2 \u{201c}Outstanding mortgage principal\u{201d} \u{2014} it reaches NO line. btctax adds box 2 across every Form 1098 and compares the total against the \u{a7}163(h)(3)(B) limit for your filing status and origination date ($750,000, or $1,000,000 for debt taken out on or before December 15, 2017; half of each if married filing separately). Over the limit it shows a WARNING and changes nothing: line 8a stays what you answered about the debt limits, because the deductible figure comes off Pub. 936's Deductible Home Mortgage Interest Worksheet, which btctax does not compute.", box2_outstanding_principal),
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::Form1098Box3OriginationDate,
         // ★ `None` is a real state (the box was not transcribed), and it is READ: an untranscribed
         //   date is measured against the STRICTER post-2017 ceiling, so clearing it cannot silence
@@ -3055,6 +3114,7 @@ const FORM_1098_FIELDS: &[Field] = &[
     doc_money!(FieldId::Form1098Box6Points, form_1098, "6 Points paid on purchase of principal residence",
         "Box 6 \u{201c}Points paid on purchase of principal residence\u{201d} \u{2014} Schedule A line 8a, added to box 1. Points NOT reported on a Form 1098 go on line 8c instead, which btctax asks for on the Schedule A screen.", box6_points),
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::Form1098Box7AddressSame,
         clear: None,
         label: "7 If address of property securing mortgage is the same as PAYER'S/BORROWER'S address, check the box",
@@ -3083,6 +3143,7 @@ const FORM_1098_FIELDS: &[Field] = &[
     doc_text!(FieldId::Form1098Box10Other, form_1098, "10 Other",
         "Box 10 \u{201c}Other\u{201d} \u{2014} whatever the lender chose to report; real-estate taxes paid from escrow are the common one. It reaches no line by itself: if it is property tax you paid, enter it on Schedule A line 5b (\u{201c}Real-estate taxes\u{201d}) as well.", box10_other),
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::Form1098OtherBorrowerPaid,
         // ★ `None` is a real state and it REFUSES — clearing un-answers the gate rather than
         //   writing "no", which would be the whole deduction claimed on the filer's behalf.
@@ -3135,6 +3196,7 @@ pub(crate) const FORM_1098S: Section = Section {
 macro_rules! sa8b_text {
     ($id:expr, $label:literal, $help:expr, $field:ident) => {
         Field {
+            label_source: LabelSource::Authored,
             id: $id,
             clear: None,
             label: $label,
@@ -3173,6 +3235,7 @@ const NON_FORM_1098_INTEREST_FIELDS: &[Field] = &[
     sa8b_text!(FieldId::Sa8bRecipientAddress, "Recipient's address",
         "Schedule A line 8b \u{2014} the third of the three things the instruction says to write on the dotted lines beside the figure.", recipient_address),
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::Sa8bAmount,
         clear: None,
         label: "Interest paid to this recipient",
@@ -3329,6 +3392,7 @@ const SA_1099_FIELDS: &[Field] = &[
     doc_money!(FieldId::Sa1099Box4Fmv, sa_1099, "4 FMV on date of death",
         "Box 4 \u{201c}FMV on date of death\u{201d} \u{2014} the account's fair market value when the owner died. If you inherited this account and were not the owner's spouse, that value is income to you on Schedule 1 line 8z, which btctax fills from nothing, so any amount here refuses.", box4_fmv_on_date_of_death),
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::Sa1099Box5AccountType,
         clear: Some(|ri, a| {
             ri.sa_1099
@@ -3385,6 +3449,7 @@ const SA_5498_FIELDS: &[Field] = &[
     doc_money!(FieldId::Sa5498Box5Fmv, sa_5498, "5 Fair market value of HSA, Archer MSA, or MA MSA",
         "Box 5 \u{201c}Fair market value of HSA, Archer MSA, or MA MSA\u{201d} \u{2014} what the account was worth at the end of the year. No line of Form 8889 or the Form 1040 chain reads it; it is transcribed so your record of the account is complete.", box5_fair_market_value),
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::Sa5498Box6AccountType,
         clear: Some(|ri, a| {
             ri.sa_5498
@@ -3441,6 +3506,7 @@ fn form_8889_live(ri: &btctax_core::tax::return_inputs::ReturnInputs) -> bool {
 macro_rules! hsa_money {
     ($id:expr, $label:literal, $help:expr, $field:ident) => {
         Field {
+            label_source: LabelSource::Authored,
             id: $id,
             clear: None,
             label: $label,
@@ -3514,6 +3580,7 @@ fn schedule_b_records_live(ri: &btctax_core::tax::return_inputs::ReturnInputs) -
 
 const SB_RECORD_FIELDS: &[Field] = &[
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::SbRecordPayerName,
         clear: None,
         label: "Name of payer",
@@ -3536,6 +3603,7 @@ const SB_RECORD_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::SbRecordPayerSsn,
         clear: None,
         label: "Buyer's SSN (seller-financed mortgage only)",
@@ -3560,6 +3628,7 @@ const SB_RECORD_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::SbRecordPayerAddress,
         clear: None,
         label: "Buyer's address (seller-financed mortgage only)",
@@ -3582,6 +3651,7 @@ const SB_RECORD_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::SbRecordAmount,
         clear: None,
         label: "Amount",
@@ -3604,6 +3674,7 @@ const SB_RECORD_FIELDS: &[Field] = &[
         },
     },
     Field {
+        label_source: LabelSource::Authored,
         id: FieldId::SbRecordKind,
         clear: None,
         label: "Interest or dividend?",

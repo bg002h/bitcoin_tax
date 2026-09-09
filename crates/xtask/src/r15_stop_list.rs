@@ -384,6 +384,95 @@ fn registry_prompts() -> Vec<(String, String)> {
     out
 }
 
+/// The label every `form_spec()` field label is filed under, and the prefix the [`run`] floor guard
+/// counts. One place, so the guard and the walk cannot drift apart.
+const FORM_SPEC_LABEL: &str = "form_spec ";
+
+/// The two halves of a label walk — the AUTHORED labels R15 governs, and the TRANSCRIBED captions it
+/// exempts — each as `(finding label, text)`. Aliased so the pair stays inside clippy's
+/// type-complexity budget, exactly as `seam::ClearFn` is.
+type LabelSplit = (Vec<(String, String)>, Vec<(String, String)>);
+
+/// ★★★ **FR-114 — the SAME ban, over `btctax-input-form`'s field LABELS.**
+///
+/// [`registry_prompts`] reads `btctax-core`'s two question registries. But the interview asks
+/// through the typed form as well: a `Field`'s **`label` is the sentence a filer reads while typing
+/// into it**, and R9's *"the interview never re-asks a ledger question"* binds it exactly as it
+/// binds a registry prompt. Nothing scanned those labels until FR-114 — the same shape `CLAUDE.md`
+/// records seven times over: *a list that was correct on the day it was typed*. The ban's input set
+/// was `btctax-core`'s registries, and a whole second question surface grew up beside it.
+///
+/// ★★ **Derived from the TYPE — never a hand list of sections, never a regex over source text.**
+/// The other three R15 checks read source strings because they hunt *shapes* a type cannot express;
+/// this one has a typed registry (`form_spec() -> &'static [Section]`), so a section or a field
+/// added tomorrow is walked with no edit here. That is `CLAUDE.md`'s FR-99 option 1, and the reason
+/// a per-site allow list was rejected: an allow list inside the fix for the eighth FR-99 instance
+/// would be the disease reproduced in its own cure.
+///
+/// ★★★ **THE BOUNDARY, stated rather than implied (FR-99 option 3; owner ruling, 2026-09-09).**
+///
+/// **`Field.help` is NOT scanned. Only `Field.label` is.** R15's target is the interview *re-asking*
+/// a ledger question, and the **label is the question**; `help` explains how to answer the question
+/// the label already asked, which means talking about the filer's documents in the documents' own
+/// words. Three help strings in `spec/sections.rs` say *lot* or *transfer* today and all three are
+/// correct Form 1099-DA / Form 1099-B vocabulary (*"the rows this venue sold that arrived by
+/// transfer"*). A check that reds on correct text is deleted by the next person who trips it.
+///
+/// **The residue that leaves, named so it is reviewable:** *a ledger question phrased inside help
+/// text is not caught.* If a `help` string ever **asks** rather than explains — *"enter the FMV at
+/// receipt"* — nothing here reds.
+///
+/// ★★★ **AND THE SECOND EXEMPTION — a TRANSCRIBED caption is not scanned either (owner ruling,
+/// 2026-09-09).** R15 means *"the interview must not **author** a ledger question."* A box caption
+/// copied off a document is the opposite of `reconcile` re-asking: the filer is reading a figure off
+/// a form already in their hand, and `CLAUDE.md`'s transcription rule requires the label to say
+/// exactly what the box says. Form 1099-SA box 4 is captioned *"4 FMV on date of death"*
+/// (`design/forms/extract/f1099sa--2025.txt`), so `Sa1099Box4Fmv` says `fmv` and must.
+///
+/// **The exemption is derived from PROVENANCE, never from a list of sites.** `Field.label_source`
+/// is set to [`LabelSource::DocumentCaption`] by the `doc_money!` / `doc_text!` macros and to
+/// `Authored` by every hand-written literal — and the enum has no `Default`, so a new `Field` is an
+/// `E0063` until someone declares which it is. A per-site allow list was rejected as the FR-99
+/// disease reproduced inside the fix for the eighth FR-99 instance.
+///
+/// ★★★ **THE RESIDUE THIS ONE LEAVES — and it is NOT covered elsewhere, checked rather than
+/// assumed.** `xtask box-census` joins each archived box caption to the `Field` that collects it and
+/// requires the caption's words to appear in `field_words` — which is
+/// `format!("{} {}", f.label, f.help)` (`box_census.rs:1391`, compared at `:1572`). That is a
+/// **containment in one direction**: it proves the caption is *present*, never that nothing else is.
+/// So a ledger question **appended to** a `doc_*!` label leaves the caption still present and
+/// box-census still green, while R15 now skips the label entirely. **A ledger question typed into a
+/// transcribed label is caught by neither check.** Written down rather than left for a reader to
+/// assume coverage.
+///
+/// Returns `(authored, transcribed)` — the labels R15 governs, and the captions it does not. A
+/// label is in exactly one, which [`run`] then asserts against the count derived from the type.
+fn section_labels(sections: &[btctax_input_form::Section]) -> LabelSplit {
+    let mut authored = Vec::new();
+    let mut transcribed = Vec::new();
+    for s in sections {
+        for f in s.fields {
+            let entry = (
+                format!("{FORM_SPEC_LABEL}{:?}/{:?}", s.id, f.id),
+                f.label.to_string(),
+            );
+            // ★ `_`-free on purpose: a third `LabelSource` is an `E0004` here rather than a label
+            //   silently landing in whichever half an `else` happened to be.
+            match f.label_source {
+                btctax_input_form::LabelSource::Authored => authored.push(entry),
+                btctax_input_form::LabelSource::DocumentCaption => transcribed.push(entry),
+            }
+        }
+    }
+    (authored, transcribed)
+}
+
+/// Every `Field.label` in the committed `form_spec()`, labelled by section and field so a finding
+/// names *which question* said it rather than a line number, and split by provenance.
+fn form_spec_labels() -> LabelSplit {
+    section_labels(btctax_input_form::form_spec())
+}
+
 /// ★★★ The four checks, over the committed tree. `Ok` carries the counts it actually scanned, so a
 /// walk that found nothing cannot report success quietly.
 pub fn run() -> Result<String, String> {
@@ -428,6 +517,62 @@ pub fn run() -> Result<String, String> {
              over a region it cannot see"
         ));
     }
+    // ★★★ FR-114 — the FIELD LABELS join the same scan, through the same ban. `Field.label` is the
+    //     sentence a filer reads while typing into the field, so R9's *"the interview never re-asks
+    //     a ledger question"* binds it exactly as it binds a registry prompt. See `section_labels`
+    //     for what is scanned, what is deliberately NOT (`Field.help`, and a TRANSCRIBED caption),
+    //     and why.
+    let sections_walked = btctax_input_form::form_spec().len();
+    let expected_labels: usize = btctax_input_form::form_spec()
+        .iter()
+        .map(|s| s.fields.len())
+        .sum();
+    // ★ A walk that finds nothing must not pass by finding nothing. These floors are LOOSE on
+    //   purpose: the equality below is the sharp instrument, and a floor pinned to today's exact
+    //   count would red on every legitimate section edit — which is how a gate gets raised without
+    //   ever being read.
+    if sections_walked < 20 || expected_labels < 100 {
+        return Err(format!(
+            "the form_spec walk found {sections_walked} section(s) carrying {expected_labels} \
+             field label(s) — a check that scans nothing passes by finding nothing"
+        ));
+    }
+    let registry_count = prompts.len();
+    let (authored_labels, transcribed_labels) = form_spec_labels();
+    let exempt_labels = transcribed_labels.len();
+    let mut scanned = prompts;
+    scanned.extend(authored_labels);
+    // ★★★ FR-114 — the labels must be IN the scanned set, not merely producible. Same shape as the
+    //     RENDERED equality above and for the same reason: dropping the extend, or narrowing the
+    //     walk to some of the sections, leaves a set that still clears the floor while the checker
+    //     goes quietly blind on the questions a filer is actually shown.
+    //
+    //     ★★★ AND THE EXEMPTION IS COUNTED INTO THE SAME EQUALITY. Every label must be scanned or
+    //     exempt, never neither — all three numbers derived from `form_spec()`, none typed. This is
+    //     what stops the transcription exemption from becoming a place labels quietly go: if a
+    //     future edit marks a section `DocumentCaption` wholesale, the scanned count falls, the
+    //     exempt count rises to match, and `run()`'s success string SAYS SO. An exemption nobody can
+    //     count is an exemption nobody can review.
+    //
+    //     ★ WHAT THIS EQUALITY CANNOT CATCH, stated rather than implied: a section dropping out of
+    //     `spec/mod.rs`'s `SECTIONS` moves BOTH sides of it, so such a drop reds HERE only if it
+    //     takes the count under the floor above. It is caught elsewhere, and measured rather than
+    //     assumed — deleting `sections::HOME_SALE` from `SECTIONS` reds three `btctax-input-form`
+    //     tests, `spec::coverage::every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt`
+    //     among them. This guard's job is the narrower one the others cannot do: that the labels
+    //     `form_spec()` DOES carry actually reached the ban.
+    let scanned_labels = scanned
+        .iter()
+        .filter(|(label, _)| label.starts_with(FORM_SPEC_LABEL))
+        .count();
+    if scanned_labels + exempt_labels != expected_labels {
+        return Err(format!(
+            "{scanned_labels} scanned + {exempt_labels} exempt != {expected_labels} form_spec field \
+             labels — a label must be one or the other, never neither. The LABEL \
+             is the question a filer is asked, and a registry-only scan reports success over a \
+             region it cannot see"
+        ));
+    }
     let mut findings = Vec::new();
     for (rule, hits) in [
         (
@@ -446,9 +591,9 @@ pub fn run() -> Result<String, String> {
             progress_widgets(&renderers),
         ),
         (
-            "R15/R9: a return-registry prompt asks a LEDGER question — those belong to `reconcile`, \
-             and the interview never re-asks one",
-            ledger_words_in_registry_prompts(&prompts),
+            "R15/R9: a return-registry prompt or a form_spec field LABEL asks a LEDGER question — \
+             those belong to `reconcile`, and the interview never re-asks one",
+            ledger_words_in_registry_prompts(&scanned),
         ),
     ] {
         if !hits.is_empty() {
@@ -458,11 +603,12 @@ pub fn run() -> Result<String, String> {
     if findings.is_empty() {
         Ok(format!(
             "R15 stop list: {} btctax-input-form sources, {} state-bearing sources, {} renderer \
-             source(s) and {} registry prompts scanned; no forbidden shape",
+             source(s), {registry_count} registry prompts and {scanned_labels} AUTHORED form_spec \
+             field labels across {sections_walked} sections scanned ({exempt_labels} transcribed \
+             captions exempt); no forbidden shape",
             form.len(),
             state.len(),
             renderers.len(),
-            prompts.len()
         ))
     } else {
         Err(findings.join("\n\n"))
@@ -693,5 +839,202 @@ mod tests {
             "Did the plot of land allot you a slot in the transferable pool?".to_string(),
         )])
         .is_empty());
+        // ★★★ FR-114 — THE PLURAL/SINGULAR BOUNDARY, pinned because a controller brief got it
+        //     wrong. FR-114's own written premise claimed `BROKER_FIELDS`' *"Covered lots"* would
+        //     red and needed excusing as correct §6045 vocabulary. It does not red: the ban matches
+        //     WHOLE words and `"lots" != "lot"`. Nothing needed excusing, and the excuse would have
+        //     been the allow list this task exists to avoid. Both halves are asserted here so the
+        //     next person re-derives the boundary from a test rather than from memory.
+        assert!(
+            ledger_words_in_registry_prompts(&[(
+                "q".to_string(),
+                "Covered lots — bought on this venue on/after 2026-01-01".to_string(),
+            )])
+            .is_empty(),
+            "`lots` is the broker's own §6045 cohort word and is NOT the ledger's `lot`"
+        );
+        assert_eq!(
+            ledger_words_in_registry_prompts(&[(
+                "q".to_string(),
+                "Which lot did you sell?".to_string(),
+            )])
+            .len(),
+            1,
+            "…while the SINGULAR is the ledger question, and must still red"
+        );
+    }
+
+    /// A `Section` carrying `fields`, for planting a defect the static `form_spec()` cannot be made
+    /// to carry. Only `id`/`title`/`fields` matter to [`section_labels`]; the accessors are inert.
+    fn planted_section(fields: &'static [btctax_input_form::Field]) -> btctax_input_form::Section {
+        btctax_input_form::Section {
+            id: btctax_input_form::SectionId::BrokerReporting,
+            title: "Broker reporting",
+            kind: btctax_input_form::SectionKind::Singleton,
+            fields,
+        }
+    }
+
+    /// ★★★ **B1 — FR-114's label scan, watched RED on a planted ledger question in a field LABEL
+    ///     and green on the near-miss beside it.**
+    ///
+    /// The plant goes through the real instruments — [`section_labels`] walks it, and the SAME
+    /// [`ledger_words_in_registry_prompts`] the registry scan uses judges it — rather than a second
+    /// copy of either. `form_spec()` is `&'static` and cannot be mutated, so the defect is planted
+    /// in a `Section` of the same type: the walk cannot tell the difference, which is the point.
+    #[test]
+    fn the_label_scan_reds_on_a_ledger_question_in_a_field_label_and_names_the_field() {
+        use btctax_input_form::{Field, FieldId, FieldKind, LabelSource};
+        // ★ The plant and its near-miss sit in ONE section, so the assertion below is that the scan
+        //   discriminates BETWEEN them — not merely that it fires when handed a bad label alone.
+        const PLANTED: &[Field] = &[
+            Field {
+                id: FieldId::BrokerCovered,
+                clear: None,
+                label: "Covered lots — bought on this venue on/after 2026-01-01",
+                label_source: LabelSource::Authored,
+                help: "",
+                kind: FieldKind::Text,
+                live: |_| true,
+                get: |_, _| None,
+                set: |_, _, _| Ok(()),
+            },
+            Field {
+                id: FieldId::BrokerNoncovered,
+                clear: None,
+                label: "Which lot did you sell?",
+                label_source: LabelSource::Authored,
+                help: "",
+                kind: FieldKind::Text,
+                live: |_| true,
+                get: |_, _| None,
+                set: |_, _, _| Ok(()),
+            },
+        ];
+        let (walked, transcribed) = section_labels(&[planted_section(PLANTED)]);
+        assert_eq!(walked.len(), 2, "the walk reads every field of the section");
+        assert!(transcribed.is_empty(), "both plants are AUTHORED labels");
+        let hits = ledger_words_in_registry_prompts(&walked);
+        assert_eq!(
+            hits,
+            vec!["form_spec BrokerReporting/BrokerNoncovered: says \"lot\"".to_string()],
+            "the ledger question must be the ONLY finding, and it must name the section and field \
+             that asked it — a line number does not tell a reader which question a filer is shown"
+        );
+    }
+
+    /// ★★★ **B1a — the FIXTURE is half the checker.** The test above plants into a hand-built
+    /// section; this one holds the other half, that the REAL `form_spec()` is what `run()` scans:
+    /// the walk is non-trivial, its count is the one derived from the type, and the discriminating
+    /// near-miss is the label the shipped form actually carries rather than a copy typed here. If
+    /// `BROKER_FIELDS`' wording ever changes to the singular, this reds — which is the whole reason
+    /// to read it out of the registry instead of restating it.
+    #[test]
+    fn the_real_form_spec_labels_are_the_scanned_set_and_are_clean() {
+        let (walked, transcribed) = form_spec_labels();
+        let derived: usize = btctax_input_form::form_spec()
+            .iter()
+            .map(|s| s.fields.len())
+            .sum();
+        assert_eq!(
+            walked.len() + transcribed.len(),
+            derived,
+            "every field label is scanned or exempt, never neither"
+        );
+        assert!(
+            walked.len() > 100 && btctax_input_form::form_spec().len() > 20,
+            "the form_spec walk has stopped being populated: {} labels over {} sections",
+            walked.len(),
+            btctax_input_form::form_spec().len()
+        );
+        assert!(
+            !transcribed.is_empty() && transcribed.len() < walked.len(),
+            "the exemption must be a MINORITY of the labels, and non-empty — {} exempt of {} \
+             total. If it ever swallowed the form, this is where that shows up",
+            transcribed.len(),
+            derived
+        );
+        let covered = walked
+            .iter()
+            .find(|(l, _)| l == "form_spec BrokerReporting/BrokerCovered")
+            .expect("the BrokerCovered label is in the walked set");
+        assert!(
+            covered.1.contains("Covered lots"),
+            "the near-miss must be read off the SHIPPED label, not retyped here: {covered:?}"
+        );
+        assert!(
+            ledger_words_in_registry_prompts(std::slice::from_ref(covered)).is_empty(),
+            "…and the shipped label must stay green"
+        );
+        assert!(
+            ledger_words_in_registry_prompts(&walked).is_empty(),
+            "no shipped AUTHORED field label asks a ledger question"
+        );
+    }
+
+    /// ★★★ **B1 — THE DISCRIMINATION THE OWNER'S RULING CREATES, pinned in one test.**
+    ///
+    /// The ruling is *"the interview must not **author** a ledger question"*, so the exemption turns
+    /// on **provenance, not on wording** — and that is precisely the claim a test has to hold, because
+    /// the two cases are indistinguishable by the words alone. Both halves say `fmv`:
+    ///
+    /// - the **real, shipped** `Sa1099Box4Fmv` caption — read out of `form_spec()`, never retyped here
+    ///   (B1a) — must be **green**, and green *because it is exempt*, which the middle assertion
+    ///   proves by showing the ban fires on that very string when it is handed over directly;
+    /// - an **authored** label saying the same word must be **RED**.
+    ///
+    /// If a future edit lets the exemption swallow authored labels too, the second half reds. If it
+    /// stops covering transcribed captions, the first does.
+    #[test]
+    fn the_exemption_covers_a_transcribed_caption_and_never_an_authored_ledger_question() {
+        use btctax_input_form::{Field, FieldId, FieldKind, LabelSource};
+        const KEY: &str = "form_spec Sa1099s/Sa1099Box4Fmv";
+        let (authored, transcribed) = form_spec_labels();
+
+        // ── (a) the shipped caption: EXEMPT, and green only because of that. ──
+        let caption = transcribed
+            .iter()
+            .find(|(l, _)| l == KEY)
+            .expect("Form 1099-SA box 4 is a transcribed caption in the shipped registry");
+        assert!(
+            caption.1.contains("FMV on date of death"),
+            "read off the SHIPPED label, not retyped: {caption:?}"
+        );
+        assert!(
+            !authored.iter().any(|(l, _)| l == KEY),
+            "a label is exempt or scanned, never both"
+        );
+        // ★★★ The load-bearing one: the ban DOES fire on this exact string. So the caption is green
+        //     because of its PROVENANCE, not because of how it happens to be worded — which is the
+        //     whole content of the owner's ruling, and the thing a reader would otherwise assume.
+        assert_eq!(
+            ledger_words_in_registry_prompts(std::slice::from_ref(caption)).len(),
+            1,
+            "the exemption, not the wording, is what makes the caption green"
+        );
+
+        // ── (b) an AUTHORED label saying the same word: RED. ──
+        const AUTHORED_FMV: &[Field] = &[Field {
+            id: FieldId::Sa1099Box4Fmv,
+            clear: None,
+            label: "What was the FMV at receipt?",
+            label_source: LabelSource::Authored,
+            help: "",
+            kind: FieldKind::Money,
+            live: |_| true,
+            get: |_, _| None,
+            set: |_, _, _| Ok(()),
+        }];
+        let (planted_authored, planted_exempt) = section_labels(&[planted_section(AUTHORED_FMV)]);
+        assert!(
+            planted_exempt.is_empty(),
+            "an authored label must never land in the exempt half"
+        );
+        assert_eq!(
+            ledger_words_in_registry_prompts(&planted_authored).len(),
+            1,
+            "the interview AUTHORING a ledger question is exactly what R15 forbids, and the \
+             transcription exemption must not reach it"
+        );
     }
 }

@@ -15,7 +15,29 @@ _Last updated: **2026-09-09**. Written at a deliberate pause; safe to exit. **Re
 > `HEAD == origin/main`. **Both journey walks FILE a correct packet.** v1 task scope settled: T13
 > DEFERRED, T14 CLOSED (not needed), T15 DEFERRED.
 >
-> **★ TWO OF THE THREE DECISIONS ARE MADE (owner, 2026-09-09). Both are recorded in `FOLLOWUPS.md`.**
+> ## ★★★ RESUME 2026-09-09 (later) — **FR-110, FR-111 AND FR-114 ARE ALL CLOSED. THE NEXT THING IS B3.**
+>
+> All three were decisions before they were code, and all three decisions were taken. `make gate`
+> **3561 passed / 12 skipped** (+3 kills), `cargo fmt --all --check` clean, everything pushed,
+> `HEAD == origin/main`. Fire B3 from `design/agent-reports/PLAN-b3-whole-branch-review.md` (`bbbd6bc8`)
+> — range `121c8805..HEAD`, ONE opus reviewer in a worktree, four seams; **do not improvise the brief.**
+> ★ Tell it the range now ends *after* this session's six commits, and that FR-110/111/114 are settled.
+>
+> **What closed:** FR-110 (aggregate 1099-B is the permanent ceiling — owner) · FR-111 (the Form 8949 box
+> paragraph was **inverted**, not stale: it named TY2025's boxes in a TY2024-only document and denied the
+> only pair TY2024 prints) · FR-114 (R15 now scans authored labels; transcribed captions exempt by
+> provenance, `LabelSource` held by the compiler). **New:** FR-115, FR-116.
+>
+> ★★★ **THE LESSON OF THIS SESSION, and it cost four refuted premises to learn:** *a hand-written scan
+> over one syntactic form is not a measurement of a set produced by another.* FR-114's author measured
+> `"Covered lots"`; the controller measured `label:` literals; both were careful, both were wrong, and
+> the second was committed **in the brief written to prevent the first**. Each time the implementer
+> **stopped and reported instead of building on it** — which is the only reason none of them shipped.
+> Keep telling every agent to do exactly that. Full write-up in `FOLLOWUPS.md` FR-99's table.
+>
+> ---
+>
+> **★ (superseded by the block above) TWO OF THE THREE DECISIONS ARE MADE (owner, 2026-09-09).**
 > 1. **FR-110 — ✅ DECIDED: the aggregate 1099-B is the PERMANENT CEILING.** A row with any adjustment
 >    refuses (`Form1099BNeedsForm8949`) and that is final — no per-lot securities path, do not re-file
 >    it as a defect. The owner asked whether §1091 changes it; it does not (wash sale reaches *"stock

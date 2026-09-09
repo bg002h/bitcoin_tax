@@ -679,11 +679,43 @@ impl fmt::Debug for FieldValue {
 /// stays within clippy's type-complexity budget.
 pub type ClearFn = fn(&mut ReturnInputs, &RowAddr) -> Result<(), SetError>;
 
+/// ★★★ **FR-114 — where a `Field`'s LABEL came from.** The distinction R15/R9 actually turns on, made
+/// STRUCTURAL rather than left to a reader's judgement.
+///
+/// R15 forbids the interview from *re-asking a ledger question* — *which transfer is this? which lot? what
+/// was the FMV?* Those are `reconcile`'s, and the words `transfer` / `lot` / `fmv` in an interview prompt
+/// are the first symptom. But **a transcribed box caption is not the interview asking anything**: the filer
+/// is copying a figure off a document already in their hand, and the label is the document's own printed
+/// words. Form 1099-SA box 4 is captioned *"4 FMV on date of death"*
+/// (`design/forms/extract/f1099sa--2025.txt`), and `CLAUDE.md`'s transcription rule requires that label to
+/// say exactly that.
+///
+/// So the rule is *"the interview must not **author** a ledger question"* (owner ruling, 2026-09-09), and
+/// this enum is what lets a checker tell the two apart **by provenance rather than by a list of exempt
+/// sites**. A per-site allow list was rejected: it is the FR-99 disease reproduced inside the fix for the
+/// eighth FR-99 instance.
+///
+/// ★★ **It has no `Default` and no `_` escape on purpose.** Every `Field` literal must say which it is, so
+/// a field added tomorrow is an `E0063` rather than a silent inheritance of whatever the neighbour said.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LabelSource {
+    /// **We wrote this sentence.** Every question the interview composes — declarations, skippables,
+    /// census rows, and every hand-written `Field` literal. R15's ban applies in full.
+    Authored,
+    /// **The document wrote this sentence.** A box caption transcribed verbatim from the archived form
+    /// extract, produced by the `doc_money!` / `doc_text!` macros. R15's ban does not apply, because
+    /// nothing here is the interview asking a question — see [`LabelSource`]'s own note.
+    DocumentCaption,
+}
+
 /// A leaf field (spec §5.2). Accessors are monomorphic over `(&ReturnInputs, RowAddr)` — the row type never
 /// appears (spec §4). Secret `get` returns presence; `set` accepts only `SecretEntry`.
 pub struct Field {
     pub id: FieldId,
     pub label: &'static str,
+    /// ★★★ FR-114 — whether we AUTHORED this label or transcribed it off a document. See
+    /// [`LabelSource`]; `xtask stop-list` reads it to decide whether R15's ledger-word ban applies.
+    pub label_source: LabelSource,
     pub help: &'static str,
     pub kind: FieldKind,
     pub live: fn(&ReturnInputs) -> bool,

@@ -6976,6 +6976,51 @@ build, each with an owning phase.
   **Order: widen the scan to labels → state the boundary → plant `label: "Which lot did you sell?"` and
   watch it red naming the field.**
 
+  ✅ **CLOSED 2026-09-09 — and the "zero labels red" premise was refuted too, this time by the
+  CONTROLLER.** Report `REPORT-build-fr114-label-scan.md` (persisted `b9b3810f`, `## Resolution`
+  appended in the fold).
+
+  ★★★ **The build STOPPED first, on a real collision between two standing rules.** One label reds:
+  `Sa1099Box4Fmv`'s *"4 FMV on date of death"* (`sections.rs:3329`) — the **verbatim** Form 1099-SA box 4
+  caption (`design/forms/extract/f1099sa--2025.txt:12`). *Transcribe IRS forms, never paraphrase* says it
+  must say exactly that; R15 says no prompt may say `fmv`. Neither rule is wrong; they simply meet there.
+  The implementer added no allow list, reworded no label, weakened no ban, and reported.
+
+  ★★★ **Why the controller's "zero labels red" measurement missed it — the lesson of the whole session.**
+  It scanned `label:` **literals**; **209 of 279 labels are macro-generated** and invisible to that scan,
+  and the offender was in the blind set. That is *green because it never ran over the region that
+  mattered* — committed **in the brief written to prevent it**, one commit after retracting FR-114's own
+  premise for the same underlying reason. **A hand-written scan over one syntactic form is not a
+  measurement of a set produced by another.** The derived walk this task added surfaced the defect the
+  moment it existed, which is the argument for FR-99 stated better than FR-99 states it.
+
+  **OWNER RULING (2026-09-09): R15 means *"the interview must not AUTHOR a ledger question."*** A
+  `doc_*!` label is the document's own caption — the filer copying a number off a form in their hand,
+  the opposite of `reconcile` re-asking them. So it is exempt, and the label is not reworded.
+
+  **Built:** `LabelSource { Authored, DocumentCaption }` on `Field.label_source` (`seam.rs:701`) — the
+  exemption derived from **provenance** and **held by the compiler**: no `Default`, no `_`, so every
+  `Field` must declare itself and a new one is an `E0063`, not a silent inheritance. ★ The blast radius
+  did real work rather than ceremony — it caught `FOREIGN_COUNTRY_NAMES`, a literal the implementer's
+  line-pattern edit had missed. `doc_transcribed_on!` stays `Authored` deliberately: *"Transcribed on"*
+  is our provenance question, not a printed caption.
+
+  **Counts, machine-checked by the controller independently:** `51 doc_money! + 19 doc_text! = 70` exempt
+  (exactly the eight information-return sections); **209 authored scanned + 70 exempt = 279**, pinned by a
+  three-way derived equality so a label can never fall out of both. `make gate` **3561 passed / 12
+  skipped**; `cargo fmt --all --check` clean.
+
+  **Controller's independent kill:** flipping `doc_money!` to `LabelSource::Authored` reds with
+  `form_spec Sa1099s/Sa1099Box4Fmv: says "fmv"` — proving the exemption is what suppresses the finding
+  and the ban still detects the word. Restored by file copy, `diff`-verified.
+
+  ★ **Corrected during the fold:** the controller's stated residue was that `box-census` gates these
+  captions via `help` only. **False** — `box_census::field_words` (`box_census.rs:1391`) is
+  `format!("{} {}", f.label, f.help)` and reads the label too. The conclusion survives in *stronger* form
+  and that is what went into source: the check is a **one-directional containment**
+  (`box_census.rs:1572`), so it proves the caption is *present*, never that nothing else is — a ledger
+  question appended to a `doc_*!` label is caught by neither check. **Stated residue, not a silent one.**
+
 - **FR-115 — btctax's INTERNAL architecture shows through to a filer in `B1099…NoAdjustments.help`
   (split out of FR-114, 2026-09-09). Owning phase: ownerless residue (UX / filer-facing text).**
   `spec/sections.rs:2937` ends *"…anything else belongs on Form 8949 one row at a time, which btctax
@@ -7013,10 +7058,26 @@ build, each with an owning phase.
   | T11 | C-2/I-1 | a completeness partition over `Usd` leaves | facts that *route* money |
   | T12 | I-1 | five `RefuseReason` variants | **126** |
   | T12 | I-2 | five document families | the eight carrying `transcribed_on` |
+  | FR-114 | — | the follow-up's own `"Covered lots"` reasoning | whole-word matching (`"lots" != "lot"`) |
+  | FR-114 | — | ★ **the CONTROLLER's `label:` literal scan** | **209 of 279 labels are macro-generated** |
 
   **Every one was correct when written.** None was a mistake at the time; each became wrong when a later
   task widened the set beneath it — usually the very next task. That is what makes it a structural
   problem rather than a care problem, and why "be careful" cannot fix it.
+
+  ★★★ **The last two rows are a different and worse shape, added 2026-09-09: the disease infected the
+  INSTRUMENT-WRITER, not the code.** Neither was a list in a source file — both were *measurements taken
+  to decide what to build*. The follow-up's author measured two labels and concluded that widening the
+  checker would break IRS vocabulary; the controller then measured `label:` **literals** and told the
+  implementer "zero labels red." Both were careful, both were wrong, and the second was committed **in
+  the brief written to prevent the first**. The generalisation this session earned:
+
+  > **A hand-written scan over one syntactic form is not a measurement of a set produced by another.**
+  > Derive it from the type, or state in the source exactly what it cannot see.
+
+  ★ And the evidence that deriving is not merely tidier holds again, for the third time: the derived
+  `form_spec()` walk surfaced the `Sa1099Box4Fmv` collision **the moment it existed** — a defect two
+  careful hand-measurements had both looked straight past.
 
   This repo already states the rule for data — *"no decision keys on a list you typed beside derived
   data"* — and on this evidence it is the highest-yield rule it has. What is proposed is making it

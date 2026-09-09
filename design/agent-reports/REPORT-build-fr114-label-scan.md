@@ -269,3 +269,145 @@ on hardest.
 - No subagents were spawned. Nothing was committed, added, pushed, checked out, or branched. Every
   mutation was restored by file copy from a scratchpad backup, and the final `r15_stop_list.rs` was
   `diff`-verified identical to the intended state after the plant/measure/restore loop.
+
+---
+
+## Resolution — owner ruling folded, FR-114 lands GREEN (2026-09-09)
+
+Everything above is left intact as the record of why the shape below exists. **The STOP was resolved by
+an owner ruling, not by a workaround:**
+
+> **R15 means "the interview must not AUTHOR a ledger question."** A `doc_*!`-generated label is the
+> document's own caption — the filer is copying a number off a form in their hand, which is the opposite
+> of `reconcile` re-asking them. `"4 FMV on date of death"` therefore does not red, and the label is NOT
+> reworded.
+
+```
+$ cargo run -q -p xtask -- stop-list
+R15 stop list: 8 btctax-input-form sources, 4 state-bearing sources, 6 renderer source(s),
+91 registry prompts and 209 AUTHORED form_spec field labels across 30 sections scanned
+(70 transcribed captions exempt); no forbidden shape
+```
+
+`209 + 70 = 279`. `make gate` **EXIT=0**, `3561 tests run: 3561 passed, 12 skipped`. `cargo fmt --all
+--check` clean.
+
+### What changed
+
+**`crates/btctax-input-form/src/seam.rs`** — the exemption is derived from **provenance**, made
+structural:
+
+```rust
+pub enum LabelSource { Authored, DocumentCaption }
+```
+
+on `Field.label_source`. **No `Default`, no `_` escape** — so every `Field` literal must declare which it
+is, and a field added tomorrow is an `E0063` rather than a silent inheritance. That is `CLAUDE.md`'s
+*"prefer designs in which an omission does not compile"*, and it is the whole reason this shape was chosen
+over anything cheaper: the alternatives I considered were a per-site allow list (rejected by the brief,
+and rightly — it is the FR-99 disease inside the fix for the eighth FR-99 instance), a section list (the
+same disease one level up), and a *"label begins with a box number"* shape heuristic (derived, but not
+compiler-held, and it would silently reclassify a label someone reworded). The marker is the only option
+that is both derived **and** held by the compiler.
+
+**`spec/sections.rs`** — `doc_money!` and `doc_text!` set `DocumentCaption`; **`doc_transcribed_on!` sets
+`Authored`**, deliberately: its label is `"Transcribed on"`, which is *our* provenance question, not a
+printed caption. 70 hand-written literals plus `FOREIGN_COUNTRY_NAMES` in **`spec/registries.rs`** (whose
+5 registry macros are all `Authored`) declared themselves.
+
+★ The `E0063` blast radius did real work, not ceremony: my script annotated every literal whose line was
+exactly `Field {`, and the compiler immediately caught the one that was not —
+`const FOREIGN_COUNTRY_NAMES: Field = Field {`. A grep-driven edit would have missed it silently.
+
+**`crates/xtask/src/r15_stop_list.rs`** —
+
+- `section_labels` now returns `LabelSplit` — `(authored, transcribed)` — splitting on an **`_`-free
+  match**, so a third `LabelSource` is a compile error rather than a label landing in whichever half an
+  `else` happened to be. **Measured:** planting a third variant gives
+  `error[E0004]: non-exhaustive patterns: LabelSource::Experiment not covered --> crates/xtask/src/r15_stop_list.rs:461:19`.
+- `run()` scans only the authored half, and the equality guard became **three-way and fully derived**:
+  `scanned_labels + exempt_labels != expected_labels` ⇒ red. *A label must be scanned or exempt, never
+  neither.*
+- **The exempt count is reported** in the success string, beside the others.
+- The boundary comment was extended with the second exemption and its residue.
+
+### The exemption's actual reach, measured not assumed
+
+The 70 exempt labels are exactly the **eight information-return document sections** — and nothing else:
+
+```
+      7 B1099s   15 Div1099s    3 Form1098Es    9 Form1098s
+     10 G1099s   13 Int1099s    6 Sa1099s       7 Sa5498s
+```
+
+Every one is a printed box caption (`"PAYER'S name"`, `"1 Interest income"`, `"4 FMV on date of death"`).
+`W2s` is **not** among them — its labels are hand-written literals and stay scanned, which is the
+conservative direction. Same eight families `CLAUDE.md`'s FR-99 table names as carrying `transcribed_on`.
+
+### ★ a correction to requirement 3's stated mechanism
+
+The dispatch asked me to write into source that *"`xtask box-census` checks these captions against
+`design/forms/extract/` via the field's **`help`**, not its `label`."* **That mechanism is wrong**, and I
+did not write it. `box_census::field_words` (`crates/xtask/src/box_census.rs:1391`) is
+`format!("{} {}", f.label, f.help)` — its own doc comment says *"its label and its help, run together"* —
+compared at `:1572`.
+
+**The conclusion survives, and is what I wrote instead**, in a stronger form: the comparison is
+`normalize(label + " " + help).contains(caption_words)`, a **containment in one direction**. It proves the
+caption is *present*; it never proves nothing else is. So a ledger question **appended to** a `doc_*!`
+label leaves the caption present and box-census green, while R15 now skips the label — **caught by
+neither.** That residue is written into `section_labels`'s doc comment with both line citations.
+
+### The kill
+
+The four earlier mutations stand (K2 re-run against the new code below). Three new ones pin the
+discrimination the ruling creates. Every one restored by file copy; final file `diff`-verified identical.
+
+**K5 — the discrimination, one test, both halves.**
+`the_exemption_covers_a_transcribed_caption_and_never_an_authored_ledger_question`. It reads the real
+`Sa1099Box4Fmv` caption **out of the shipped registry** (B1a — not retyped), and plants an authored
+`"What was the FMV at receipt?"` beside it. Its load-bearing assertion is the middle one: handed that same
+caption string directly, the ban **does** fire — so the caption is green *because of its provenance*, not
+because of how it happens to be worded. That is the entire content of the ruling, and the thing a reader
+would otherwise have to take on trust.
+
+- *exemption swallows authored labels* (`Authored => transcribed`):
+  ```
+  panicked at crates/xtask/src/r15_stop_list.rs:1029:9:
+  an authored label must never land in the exempt half
+  ```
+- *exemption stops covering captions* (`DocumentCaption => authored`):
+  ```
+  xtask stop-list: R15/R9: ... asks a LEDGER question:
+    form_spec Sa1099s/Sa1099Box4Fmv: says "fmv"
+  ```
+
+**K6 — a label in neither half** (`DocumentCaption => drop(entry)`), the guard requirement 2 asks for:
+
+```
+xtask stop-list: 209 scanned + 0 exempt != 279 form_spec field labels — a label must be one or the other, never neither. ...
+```
+
+**K2, re-run against the new code** (`scanned.extend(authored_labels)` deleted):
+
+```
+xtask stop-list: 0 scanned + 70 exempt != 279 form_spec field labels — a label must be one or the other, never neither. ...
+```
+
+### Gate
+
+| check | result |
+|---|---|
+| `make gate` | **EXIT=0** — `3561 tests run: 3561 passed, 12 skipped` |
+| `cargo fmt --all --check` | clean |
+| `cargo clippy -p xtask --all-targets --all-features -- -D warnings` | clean (needed a `LabelSplit` type alias — clippy's type-complexity budget, same reason `seam::ClearFn` exists) |
+| `the_real_form_spec_labels_are_the_scanned_set_and_are_clean` | **passes**, including its last assertion |
+
+`git status` shows exactly four files, all mine, all uncommitted:
+`crates/btctax-input-form/src/seam.rs`, `spec/sections.rs`, `spec/registries.rs`,
+`crates/xtask/src/r15_stop_list.rs`. **Nothing committed.**
+
+### Anything I could not do
+
+Nothing outstanding. The `SECTIONS` exhaustiveness finding above is unchanged and still belongs to a
+follow-up, not to this task.

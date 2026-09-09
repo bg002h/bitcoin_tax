@@ -14,7 +14,7 @@
 //! resolves every one.
 
 use crate::seam::{
-    Field, FieldId, FieldKind, FieldValue, Section, SectionId, SectionKind, SetError,
+    Field, FieldId, FieldKind, FieldValue, LabelSource, Section, SectionId, SectionKind, SetError,
 };
 use btctax_core::tax::document_census::DocumentRow;
 use btctax_core::tax::provenance::DependentGate;
@@ -38,6 +38,7 @@ use btctax_core::tax::questions::{
 macro_rules! decl_tristate {
     ($idx:literal, $fid:expr, |$ri:ident| $clear:expr) => {
         Field {
+            label_source: LabelSource::Authored,
             id: $fid,
             label: FORM_QUESTIONS[$idx].prompt,
             help: FORM_QUESTIONS[$idx].unanswered_detail,
@@ -72,6 +73,7 @@ macro_rules! decl_tristate {
 macro_rules! skippable_tristate {
     ($idx:literal, $fid:expr, |$ri:ident| $clear:expr) => {
         Field {
+            label_source: LabelSource::Authored,
             id: $fid,
             label: SKIPPABLE_QUESTIONS[$idx].prompt,
             help: SKIPPABLE_QUESTIONS[$idx].help,
@@ -104,6 +106,7 @@ macro_rules! skippable_tristate {
 macro_rules! skippable_date {
     ($idx:literal, $fid:expr, |$ri:ident| $clear:expr) => {
         Field {
+            label_source: LabelSource::Authored,
             id: $fid,
             label: SKIPPABLE_QUESTIONS[$idx].prompt,
             help: SKIPPABLE_QUESTIONS[$idx].help,
@@ -140,6 +143,7 @@ macro_rules! skippable_date {
 macro_rules! skippable_choice {
     ($idx:literal, $fid:expr, $options:expr, |$ri:ident| $clear:expr) => {
         Field {
+            label_source: LabelSource::Authored,
             id: $fid,
             label: SKIPPABLE_QUESTIONS[$idx].prompt,
             help: SKIPPABLE_QUESTIONS[$idx].help,
@@ -182,6 +186,7 @@ macro_rules! skippable_choice {
 /// when line 7a is answered Yes, so a "Yes" 7a is answerable in-form (else commit refuses
 /// `ScheduleBForeignCountryMissing` with no in-form remedy — spec §5.8).
 const FOREIGN_COUNTRY_NAMES: Field = Field {
+    label_source: LabelSource::Authored,
     id: FieldId::ForeignCountryNames,
     label: "Schedule B line 7b — foreign country name(s)",
     help: "Schedule B Part III line 7b: name the foreign country/countries. Live (and required) only when \
@@ -429,6 +434,7 @@ pub(crate) const INCOME_EXCLUSIONS: Section = Section {
 macro_rules! census_tristate {
     ($idx:literal, $fid:expr, $row:expr) => {
         Field {
+            label_source: LabelSource::Authored,
             id: $fid,
             label: FORM_QUESTIONS[$idx].prompt,
             help: FORM_QUESTIONS[$idx].unanswered_detail,
