@@ -1284,9 +1284,15 @@ re-verification (S6).
    you hold or expect any of: **Form 1099-R** (IRA, pension, annuity) · **Form SSA-1099 / RRB-1099** ·
    **Form 1099-NEC / 1099-MISC / 1099-K** · **Schedule K-1** (any) · **rental real estate or royalties
    (Schedule E)** · **Form 1099-S or a sale of real property** · **Form 1099-OID** · **Form W-2G** ·
-   **Form 1099-C** (canceled debt) · **Form 1095-A** (Marketplace — P0 says self-employment income, which
-   makes Marketplace enrolment likely, and a 1095-A refuses the *whole* return because Form 8962 is not
-   built and no task builds it) · **Form 1098-T** (education) · **an HSA (a W-2 box 12 code W) or a
+   **Form 1099-C** (canceled debt) · **Form 1095-A** (Marketplace — ★ **CORRECTED 2026-09-07 by the
+   owner: *"I have no self employment income / Or business."*** The premise here was P0's
+   self-employment claim, and it is WRONG for this filer: the filed TY2024 return carries no Schedule C
+   and no Schedule SE. The *"Marketplace enrolment is likely"* inference that rested on it is withdrawn.
+   The refusal itself stands unchanged — a 1095-A still refuses the **whole** return because Form 8962
+   is not built and no task builds it — but it is no longer a *probable* row for this filer, and the
+   corroborating signals point the other way: Form 8959 with no Schedule SE means wages, and Form 8889
+   means an HSA, which means an HDHP, which is usually employer-sponsored. **Still ask it** — employer
+   coverage is an inference, not an answer, and this is the one row that stops the entire return) · **Form 1098-T** (education) · **an HSA (a W-2 box 12 code W) or a
    deductible IRA contribution**? And from the supported side: a **Form 1098** (mortgage)? **Dependents**
    — how many, any full-time student aged 19–23, any born in 2026, and are you filing as **HoH** or
    **QSS**? A **1099-G** with a state refund, or a taxable state refund with no 1099-G — and did you

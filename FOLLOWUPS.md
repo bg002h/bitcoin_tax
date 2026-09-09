@@ -6536,6 +6536,23 @@ build, each with an owning phase.
   recompile and not a cached one. What to decide: whether the mitigation belongs in every build/fold
   brief as a rule, inside `make check` itself, or in a wrapper. Related: [[FR-88]] — both are ways an
   instrument reports something other than what it measured.
+- **★★ OWNER Q1, ANSWERED 2026-09-07 — *"I have no self employment income / Or business."*** This is a
+  RULING, not a partial: it closes the Schedule C question outright and **corrects the spec**.
+  · **T13's Schedule C half is OUT.** No Schedule C, no Schedule SE, no Schedule C Part II transcription.
+    Confirmed by the filed TY2024 return, which carries neither.
+  · **`SPEC_interview.md:1287`'s P0 premise is WITHDRAWN** — *"P0 says self-employment income, which
+    makes Marketplace enrolment likely"*. The claim was wrong for this filer; the spec now records the
+    correction and the owner's words. **The 1095-A refusal itself is unchanged** (Form 8962 is not built
+    and no task builds it) — what is withdrawn is the inference that it is a *likely* row here.
+  · **T13 does NOT close.** Its remaining half is the 1099-NEC/MISC/K screen, and a 1099-MISC **box 3**
+    (prizes, awards, research-study pay, a settlement) is *"other income"* on Schedule 1 line 8z — which
+    is **not** self-employment and is still not built. So T13's fate rests entirely on the box, per the
+    1099-MISC row above.
+  · ★ Corroborating signals now point away from Marketplace: Form 8959 (Additional Medicare Tax) with no
+    Schedule SE means **wages**, and Form 8889 means an HSA, which means an HDHP, usually employer-
+    sponsored. That is an inference, not an answer — the 1095-A row is the one that stops the ENTIRE
+    return, so it is still worth one yes/no from the owner.
+
 - **★ OWNER Q1, PARTIAL ANSWER 2026-09-07 — "I won't have social security income this year."** T14 is
   gated on **1099-R *or* SSA-1099**, so this closes the SSA-1099 half only. The 1099-R half (an IRA,
   pension or annuity distribution — including a rollover or a Roth conversion, both of which generate a
