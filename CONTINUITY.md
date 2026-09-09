@@ -1,6 +1,6 @@
 # CONTINUITY — bitcoin_tax (TaxApp)
 
-_Last updated: **2026-09-07**. Written at a deliberate pause; safe to exit. **Read this file first.**_
+_Last updated: **2026-09-09**. Written at a deliberate pause; safe to exit. **Read this file first.**_
 
 ---
 
@@ -8,7 +8,47 @@ _Last updated: **2026-09-07**. Written at a deliberate pause; safe to exit. **Re
 
 > ## ★★★ HANDOFF TO AN OPUS COORDINATOR (owner, 2026-09-07: "Let's find a time to switch to opus") — the loop from here is dispatch → machine-check → persist → ledger → fold → re-verify → push, and it needs no Fable: every remaining task (T8 in flight, T9–T12; T13/T14 on the owner's Q1; T15 post-v1) already has `BRIEF-build-interview-Tn.md`, `BRIEF-review-interview-Tn.md` and `BRIEF-reverify-interview-Tn.md` committed under `design/agent-reports/`. The rules that hold the loop: ONE opus builder or reviewer at a time (a sonnet verifier may run beside it, in a worktree); the builder edits the shared main tree and NOTHING is committed while it works (the pre-commit gate runs `make check` over the working tree); reviewers and verifiers run in `isolation: worktree` with `CARGO_TARGET_DIR=/scratch/code/bitcoin_tax/target-review` and their report is COPIED out, then `git worktree remove --force` + `git branch -D`; the report is persisted VERBATIM in its own commit before anything is folded; every measurable claim is machine-checked into `…-VERIFICATION.md` before acting; the fold is its own commit with the gate output in the message; push after each gate closes (`git push origin main`; the pre-push PII hook scans the range — synthetic identifiers only from the never-issued SSN space or `scripts/pii-scan-generic.sh`'s `ALLOWED_EIN`); commit messages via `git commit -q -F - <<'EOF'` with the two trailers. A stopped background agent is RESUMED by `SendMessage` with its id, never restarted while its edits are in the tree. The standing lessons every dispatch prompt repeats: no decision keys on a list typed beside derived data; a kill CALLS the instrument; a prompt hash keys on the registry's words, never display chrome; a new money leaf must reach the absolute chain (`every_money_leaf_household()`); a build's kills ask what the NEXT SURFACE does with what it wrote; a `Durable` fact is shown, never pre-filled; transcribe forms from the text layer. Owner-only items (never actioned autonomously): Q1/Q2/Q4, S1/S2/S7, T7's Notice 2026-20 order, the simulated real return (FR-64, the owner's TY2024 return is the reference and never enters the repo). The progress page is the artifact "Overnight Return" (scratchpad `overnight-return.html`; republish the same path to keep the URL).
 >
-> ## ★★★ RESUME 2026-09-07 — **THE INTERVIEW ARC IS BUILT. T1–T12 AND T16 ALL CLOSED AT 0C/0I. THE NEXT GATE IS THE OWNER'S.** — Everything is committed and PUSHED to `origin/main` (`bdbee23e`); `make check` 3537 passed / 12 skipped; `make docs` clean, no man-page diff; instruments `line-coverage` 375/18/31 (ratchet 31)/0/17, `census-join` 274 across 13 maps, `stop-list` 8+4+6 renderer sources / 91 prompts, `prompt-check` 88, `box-census` 268/19/9. Every task ran the full loop: build → machine-check → commit+push → ONE opus seam review in a worktree → persist VERBATIM → controller ledger → fold → commit+push → ONE sonnet re-verification → close. T12's four owned follow-ups (FR-73/83/86/87) were burned down IN the task that owned them, and five stale entries (FR-67/68/70/86/87) were reconciled and marked closed with evidence.
+> ## ★★★ RESUME 2026-09-09 — NEXT: **FR-110, FR-111, FR-114** (owner-chosen), then the B3 whole-branch review.
+>
+> **State:** interview arc BUILT (T1–T12 + T16, all 0C/0I). `make gate` **3558 passed / 12 skipped**;
+> five instruments stable (375/18/31/0/17 · 274/13 · 8+4+6/91 · 90 · 268/19/9); everything pushed;
+> `HEAD == origin/main`. **Both journey walks FILE a correct packet.** v1 task scope settled: T13
+> DEFERRED, T14 CLOSED (not needed), T15 DEFERRED.
+>
+> **★ Do these three first, in this order — all three are DECISIONS before they are code:**
+> 1. **FR-110** — is an aggregate 1099-B the ceiling for a *bitcoin* tax tool, or is per-lot in scope?
+>    Walk 2 filed only because none of its 24 stock sells needed an adjustment; one wash sale stops the
+>    return dead at `income import`. **Owner scope call.**
+> 2. **FR-111** — `crates/btctax-cli/LIMITATIONS.md:416` says *"btctax has no 1099-B / 1099-DA input at
+>    all"*. FALSE since T5 (`Form1099B` at `return_inputs.rs:2137`; walk 2 imported one and filed).
+>    ★ The adjacent claim — *"every ledger disposition is un-reported by construction. Never Box C/F"* —
+>    rests on the same false premise and must be **RE-DERIVED, not reworded**: if a 1099-B with basis
+>    reported can be entered, the Form 8949 box choice is live again and Box C/F is the "reported to
+>    you" case. Walk 2 saw no wrong box, so this is a re-derivation, not an observed defect.
+> 3. **FR-114** — R15's ledger-word ban never scans `btctax-input-form`'s `Field.label`/`help`.
+>    ★★ **Decide the exemption BEFORE widening the checker.** Two live strings would red and are
+>    probably CORRECT: `BROKER_FIELDS`' *"Covered lots"* / *"Noncovered lots"* are the IRS's own §6045
+>    vocabulary, not the ledger-jargon leak R15 hunts. Widening naively invites rewording IRS
+>    terminology into something vaguer — a regression caused by a checker aimed at the wrong target.
+>
+> **Then B3.** The plan is written and committed: `design/agent-reports/PLAN-b3-whole-branch-review.md`
+> (`bbbd6bc8`) — range `121c8805..HEAD`, ONE opus reviewer in a worktree, four seams, with what the
+> earlier passes already covered so budget goes to the seams. Its preconditions are now MET (walk 2 and
+> the sweep are filed). Fire it from that plan; do not improvise the brief.
+>
+> **Also open (no owner action needed to start):** FR-112/113 (labels, 8949 page order), FR-98 (R15's
+> hand-picked source lists), FR-100/101, FR-103's residue. Owner questions still open: Q1's 1095-A row
+> (the only row that refuses the WHOLE return), Q4 (deposit vs check), S1/S2/S7.
+>
+> **Doctrine adopted this session (owner-approved):** HARNESS `B1a` (the fixture is half the checker),
+> `make gate` (FR-90, touch-then-check — note it does NOT run `cargo fmt`, and the pre-commit hook
+> blocks on that), and `CLAUDE.md`'s *"Derive the list, or make the compiler hold it"* (FR-99).
+>
+> ★ Two controller briefs were refuted by measurement this session (FR-105's and FR-108's stated
+> mechanisms). Both times the implementer stopped instead of building on them. **Keep telling every
+> agent to stop and report rather than implement from a premise it can disprove.**
+>
+> ## ★★★ (superseded) RESUME 2026-09-07 — **THE INTERVIEW ARC IS BUILT. T1–T12 AND T16 ALL CLOSED AT 0C/0I. THE NEXT GATE IS THE OWNER'S.** — Everything is committed and PUSHED to `origin/main` (`bdbee23e`); `make check` 3537 passed / 12 skipped; `make docs` clean, no man-page diff; instruments `line-coverage` 375/18/31 (ratchet 31)/0/17, `census-join` 274 across 13 maps, `stop-list` 8+4+6 renderer sources / 91 prompts, `prompt-check` 88, `box-census` 268/19/9. Every task ran the full loop: build → machine-check → commit+push → ONE opus seam review in a worktree → persist VERBATIM → controller ledger → fold → commit+push → ONE sonnet re-verification → close. T12's four owned follow-ups (FR-73/83/86/87) were burned down IN the task that owned them, and five stale entries (FR-67/68/70/86/87) were reconciled and marked closed with evidence.
 >
 > **★★ DO NOT START THE NEXT PHASE AUTONOMOUSLY.** The work below the interview is owner-gated. What is open, in the order it matters:
 >
