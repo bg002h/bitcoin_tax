@@ -15,21 +15,29 @@ _Last updated: **2026-09-09**. Written at a deliberate pause; safe to exit. **Re
 > `HEAD == origin/main`. **Both journey walks FILE a correct packet.** v1 task scope settled: T13
 > DEFERRED, T14 CLOSED (not needed), T15 DEFERRED.
 >
-> **★ Do these three first, in this order — all three are DECISIONS before they are code:**
-> 1. **FR-110** — is an aggregate 1099-B the ceiling for a *bitcoin* tax tool, or is per-lot in scope?
->    Walk 2 filed only because none of its 24 stock sells needed an adjustment; one wash sale stops the
->    return dead at `income import`. **Owner scope call.**
-> 2. **FR-111** — `crates/btctax-cli/LIMITATIONS.md:416` says *"btctax has no 1099-B / 1099-DA input at
->    all"*. FALSE since T5 (`Form1099B` at `return_inputs.rs:2137`; walk 2 imported one and filed).
->    ★ The adjacent claim — *"every ledger disposition is un-reported by construction. Never Box C/F"* —
->    rests on the same false premise and must be **RE-DERIVED, not reworded**: if a 1099-B with basis
->    reported can be entered, the Form 8949 box choice is live again and Box C/F is the "reported to
->    you" case. Walk 2 saw no wrong box, so this is a re-derivation, not an observed defect.
-> 3. **FR-114** — R15's ledger-word ban never scans `btctax-input-form`'s `Field.label`/`help`.
->    ★★ **Decide the exemption BEFORE widening the checker.** Two live strings would red and are
->    probably CORRECT: `BROKER_FIELDS`' *"Covered lots"* / *"Noncovered lots"* are the IRS's own §6045
->    vocabulary, not the ledger-jargon leak R15 hunts. Widening naively invites rewording IRS
->    terminology into something vaguer — a regression caused by a checker aimed at the wrong target.
+> **★ TWO OF THE THREE DECISIONS ARE MADE (owner, 2026-09-09). Both are recorded in `FOLLOWUPS.md`.**
+> 1. **FR-110 — ✅ DECIDED: the aggregate 1099-B is the PERMANENT CEILING.** A row with any adjustment
+>    refuses (`Form1099BNeedsForm8949`) and that is final — no per-lot securities path, do not re-file
+>    it as a defect. The owner asked whether §1091 changes it; it does not (wash sale reaches *"stock
+>    or securities"* only, never bitcoin — already encoded at `forms.rs:380`, `optimize.rs:7-15` and
+>    `tests/optimize_wash_sale.rs`), and the reasoning is written up in the FR-110 entry. Remaining
+>    work is DOCUMENTARY and folds into FR-111.
+> 2. **FR-111 — UNBLOCKED, in progress.** `LIMITATIONS.md:415-417` is false and must be RE-DERIVED, not
+>    reworded. ★ Do not fix only that sentence — the sweep already found the document **contradicting
+>    itself**: `LIMITATIONS.md:281-283` ("Form 1099-DA answers are a keystroke… There is no 1099-DA
+>    entry screen") is CORRECT and refutes line 416 three sections earlier. A sonnet recon is deriving
+>    the full box truth table and every stale filer-facing claim into
+>    `design/agent-reports/RECON-fr111-8949-box-truth.md`. Ground already established: a `[[b_1099]]`
+>    row NEVER becomes a Form 8949 row (it is the Schedule D line 1a/8a summary); 8949 rows come from
+>    the crypto ledger only; `route_8949_boxes` (`forms.rs:139`) then re-routes them from the filer's
+>    1099-DA answers, so **G/H/J/K are reachable** and "Never Box C/F" is false pre-TY2025 anyway.
+> 3. **FR-114 — ✅ DECIDED: scan `Field.label` ONLY**, with the boundary stated in the source and the
+>    residue named (a ledger question inside `help` is not caught). ★★★ **Its stated premise was
+>    REFUTED by measurement and is retracted** — *"Covered lots"* / *"Noncovered lots"* do **not** red,
+>    because the checker matches whole words and those say `lots`. The three strings that do red are
+>    all in `help`, all explanatory, none a question; the *"widening would break IRS vocabulary"*
+>    worry never existed. One of them (`sections.rs:2937`, *"its own crypto lot engine"*) is a genuine
+>    UX leak of a different kind and was split out as **FR-115**.
 >
 > **Then B3.** The plan is written and committed: `design/agent-reports/PLAN-b3-whole-branch-review.md`
 > (`bbbd6bc8`) — range `121c8805..HEAD`, ONE opus reviewer in a worktree, four seams, with what the

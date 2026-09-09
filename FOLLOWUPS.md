@@ -6838,9 +6838,32 @@ build, each with an owning phase.
   reading. Watched RED on a verbatim plant of `return_refuse.rs:2498`, and green on seven near misses
   plus six scanner-blinding hazards. Controller's independent plant reds it too, naming the site and
   stating the corrected mechanism in its own message.
-- **FR-110 — no PER-LOT representation for a non-crypto brokerage 1099-B; only an aggregate. A "many
+- **FR-110 — ✅ DECIDED 2026-09-09 (owner): the AGGREGATE 1099-B is the PERMANENT CEILING.** A row
+  carrying any adjustment refuses via `Form1099BNeedsForm8949` and that is the intended, final
+  behaviour — not a gap to be closed. No per-lot securities path will be built; do not re-file this
+  as a defect. The remaining work is **documentary**: say the boundary plainly where a filer decides
+  whether to use the tool (folded into FR-111, which owns that document).
+  ★ The owner asked whether §1091 changes this. It does not, and the reasoning is now on record:
+  wash sale reaches *"stock or securities"* only, so it never touches bitcoin — `forms.rs:380`
+  (*"Column (f): adjustment code — always empty. No §1091 (wash sale is N/A to crypto)"*),
+  `optimize.rs:7-15` (documented, with a MONITOR for enactment) and `tests/optimize_wash_sale.rs`
+  (a KAT that harvests a loss INSIDE the 30-day window and asserts it applies in full). It bears on
+  the *stock* 1099-B, where §1091 does apply — `box_census.rs:865` registers `f1099b` box **1g
+  "Wash sale loss disallowed"**. Two consequences, both supporting the decision:
+  · A blank column (g) is **permanently correct for bitcoin**, not a v1 shortcut. The only thing that
+    could force btctax to build column (g) is an asset class it does not model.
+  · Wash sale is one of **four** triggers on the prompt (`sections.rs:2937` also names box 1f accrued
+    market discount, box 7 disallowed loss, box 5 noncovered security), so the decision never rested
+    on §1091 in the first place.
+  ★★ And the rule is already SYMMETRIC across both asset classes — *"no adjustment is modelled, and
+  anything needing one refuses"*: the one crypto case that would need an adjustment code (a 1099-DA
+  reporting basis that differs from btctax's column (e) — Form 8949 code **B**) already refuses via
+  `BrokerReported::BasisDiffers → BrokerRouteError::BasisDiffers` (`forms.rs:157`). So the stock
+  refusal is not a stock-only hole; it is one rule applied twice.
+
+  _Was:_ no PER-LOT representation for a non-crypto brokerage 1099-B; only an aggregate. A "many
   small lots with adjustments" stock household cannot file its stock activity at all (journey walk 2,
-  2026-09-09). Owning phase: OWNER SCOPE DECISION, before v1 is offered to anyone but the owner.**
+  2026-09-09). Owning phase: OWNER SCOPE DECISION, before v1 is offered to anyone but the owner.
   `Form1099B` exists (`return_inputs.rs:2137`) and takes an aggregate *"basis reported, no adjustments"*
   total. A filer whose 1099-B carries per-lot adjustments (wash sales, a basis correction, a
   non-covered lot) meets a **well-worded but total refusal at `income import`** and cannot proceed.
@@ -6886,19 +6909,47 @@ build, each with an owning phase.
   on word boundaries, over **`btctax-core`'s question registries only**. `btctax-input-form`'s
   `Field.label` / `Field.help` — text a filer reads while typing — is never scanned. A clean synthetic
   plant confirmed the silence.
-  ★★ **But do NOT simply widen the scan, because two live strings would red and they are probably
-  CORRECT.** `spec/sections.rs`'s `BROKER_FIELDS` carries *"Covered lots — bought on this venue on/after
-  2026-01-01"*, *"Noncovered lots — everything else this venue sold for you"*, *"a per-lot import"* and
-  *"arrived by transfer"*. R15's stated purpose is that *"the ledger's questions (which transfer is
-  this?, which lot?, what was the FMV?) belong to `reconcile`, and the interview must never re-ask
-  them"* — a ledger-jargon leak. These are the **IRS's own §6045 / 1099-DA vocabulary for the broker's
-  reporting category**, which is the opposite of that leak: the form's word for the form's concept.
-  Widening the checker naively would red on them, and the likely "fix" would be to reword the IRS's own
-  terminology into something vaguer — a real regression produced by a checker doing its job on the
-  wrong target.
-  **So the order is: decide the exemption (a per-site allow with a stated reason, or a narrower rule
-  that keys on the QUESTION rather than the word), then widen the scan, then plant and watch it red.**
-  Recorded rather than fixed for exactly that reason.
+  ★★★ **RETRACTED PREMISE — the paragraph below was WRONG, and measurement refuted it (controller,
+  2026-09-09).** It claimed *"two live strings would red and they are probably CORRECT: `BROKER_FIELDS`'
+  'Covered lots' / 'Noncovered lots' … the IRS's own §6045 vocabulary"*, and concluded that widening the
+  scan would invite rewording IRS terminology. **Neither label reds.** `ledger_words_in_registry_prompts`
+  splits on non-alphanumerics and matches WHOLE words (`BANNED.contains(&w)`), and those labels say
+  **`lots`** — `"lots" != "lot"`. Verified by replicating the split exactly:
+  `["Covered lots — …"] → []`, `["Noncovered lots — …"] → []`, `["Which lot did you sell?"] → ["lot"]`.
+  **The IRS-vocabulary tension this entry was written around does not exist.** Logged per the standing
+  rule that a controller brief refuted by measurement is reported, never built on.
+
+  **The three strings that DO red are a different animal — all in `help`, none in a `label`, and none of
+  them a ledger QUESTION:**
+
+  | # | site | word | text |
+  |---|---|---|---|
+  | 1 | `sections.rs:2483` `BrokerCovered.help` | `lot` | *"…the correction in (g), a **per-lot** import"* |
+  | 2 | `sections.rs:2498` `BrokerNoncovered.help` | `transfer` | *"…the rows this venue sold that **arrived by transfer**…"* |
+  | 3 | `sections.rs:2937` `B1099…NoAdjustments.help` | `lot` | *"…btctax fills from its own **crypto lot engine** alone"* |
+
+  All three EXPLAIN a mechanism rather than ask anything. (#3 is arguably a leak of a different kind —
+  *"crypto lot engine"* is btctax's internal architecture showing through to a filer — but that is a UX
+  finding, not an R15 one. Filed as **FR-115**.)
+
+  ✅ **DECIDED 2026-09-09 (owner): scan `Field.label` ONLY.** R15's stated target is the interview
+  RE-ASKING a ledger question, and the label *is* the question — `help` explains. Zero labels red today,
+  so the extension lands clean and its planted-defect kill is honest rather than performative. Per FR-99
+  option 3 the boundary is **stated in the source**: `Field.help` is not scanned, with the reason, and
+  the residue named — a ledger question phrased inside help text is not caught. Rejected: a per-site
+  allow list, which would be the FR-99 disease reproduced inside the fix for the eighth FR-99 instance.
+  **Order: widen the scan to labels → state the boundary → plant `label: "Which lot did you sell?"` and
+  watch it red naming the field.**
+
+- **FR-115 — btctax's INTERNAL architecture shows through to a filer in `B1099…NoAdjustments.help`
+  (split out of FR-114, 2026-09-09). Owning phase: ownerless residue (UX / filer-facing text).**
+  `spec/sections.rs:2937` ends *"…anything else belongs on Form 8949 one row at a time, which btctax
+  fills from **its own crypto lot engine** alone."* A filer has no idea what a "lot engine" is; the
+  sentence is explaining a refusal, which is exactly the moment the wording has to land. Not an R15
+  finding (R15 bans re-ASKING a ledger question, and this asks nothing) and not caught by the
+  label-only scan FR-114 settled on — recorded so it is not lost between the two. Fix is one sentence,
+  and it must keep saying the true thing FR-110 decided: btctax reports securities only as Schedule D
+  line 1a/8a totals, never per transaction.
 
 - **FR-99 — ★★ THE DOMINANT DEFECT CLASS OF THE WHOLE INTERVIEW ARC: a hand-written list standing beside
   a set that GROWS. Proposed `CLAUDE.md` rule — OWNER'S CALL, filed not actioned. Owning phase: the
