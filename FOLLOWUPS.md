@@ -7043,6 +7043,23 @@ build, each with an owning phase.
   the downstream refusal is loud and correctly worded; the fix is one clause ("accept" → "act on", or
   "stored but refused as unread"). Recorded rather than fixed to keep the FR-111 fold to its own scope.
 
+- **FR-117 — a PART-authored, PART-caption label is exempted from R15 wholesale (re-verification of the
+  FR-114 fold, 2026-09-09). Owning phase: the harness. Minor — currently inert, and the residue is
+  already stated in source.**
+  `LabelSource::DocumentCaption` is set per **field**, so a label that mixes our framing with the form's
+  caption is exempt in **both** halves. Six such labels exist; four verified by the controller at
+  `sections.rs:2974-2980` — *"**Short-term total:** 1d Proceeds"*, *"**Short-term total:** 1e Cost or
+  other basis"* and their long-term twins, where the `… total:` prefix is **ours** and `1d Proceeds` is
+  the 1099-B's. The authored half rides the caption's exemption.
+  **No current false negative** — the re-verifier read all 70 `doc_*!` labels and none contains
+  `transfer` / `lot` / `fmv`. And it is **not silent**: `r15_stop_list.rs`'s `section_labels` doc comment
+  already states that a ledger question typed into a transcribed label is caught by neither R15 nor
+  `box-census` (FR-99 option 3 satisfied), so this is a stated boundary rather than an undisclosed one.
+  ★ Recorded because the *mechanism* is the interesting part: the exemption's unit is the field, while
+  the thing being exempted is a **span of text**. If it ever needs closing, the fix is to exempt only the
+  caption substring `box-census` can match against the extract — not the whole label. Do not "fix" it by
+  adding a seventh label to a list.
+
 - **FR-99 — ★★ THE DOMINANT DEFECT CLASS OF THE WHOLE INTERVIEW ARC: a hand-written list standing beside
   a set that GROWS. Proposed `CLAUDE.md` rule — OWNER'S CALL, filed not actioned. Owning phase: the
   harness / doctrine (owner), before the interview branch ships.**

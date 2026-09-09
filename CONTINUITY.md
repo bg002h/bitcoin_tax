@@ -26,7 +26,16 @@ _Last updated: **2026-09-09**. Written at a deliberate pause; safe to exit. **Re
 > **What closed:** FR-110 (aggregate 1099-B is the permanent ceiling — owner) · FR-111 (the Form 8949 box
 > paragraph was **inverted**, not stale: it named TY2025's boxes in a TY2024-only document and denied the
 > only pair TY2024 prints) · FR-114 (R15 now scans authored labels; transcribed captions exempt by
-> provenance, `LabelSource` held by the compiler). **New:** FR-115, FR-116.
+> provenance, `LabelSource` held by the compiler). **New:** FR-115, FR-116, FR-117.
+>
+> **Both folds RE-VERIFIED 0C/0I** by a sonnet agent in a worktree (`REVERIFY-fr111-fr114.md`, persisted
+> `fd6adda8`): every `Field` literal in the whole workspace sets `label_source`, the `E0063` mechanism is
+> real, classification correct at 15+ spot-checked sites, the three-way equality guard mutation-tested
+> red, and nothing false found in the new filer-facing prose. Its one Minor is FR-117. ★ Its `make gate`
+> showed 7 failures — all worktree-environment artifacts (gitignored `design/forms/2026/` PDF fixtures
+> are not shared across worktrees, plus the mandated `CARGO_TARGET_DIR` tripping a hook-lookup test).
+> **A worktree verifier's suite result is not comparable to the main tree's** — corroborate in `main`
+> before believing a red, as was done here.
 >
 > ★★★ **THE LESSON OF THIS SESSION, and it cost four refuted premises to learn:** *a hand-written scan
 > over one syntactic form is not a measurement of a set produced by another.* FR-114's author measured
