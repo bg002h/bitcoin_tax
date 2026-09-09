@@ -355,10 +355,42 @@ impl DocumentRow {
                 "Did you receive one or more Form 1099-SA (the trustee of a health savings account \
                  must send you one for any distribution — Form 8889 line 14a instructions)?"
             }
+            // ★★★ **FR-107 (journey walk finding #6) — THE ONE ROW WHOSE y/n WAS NOT ANSWERABLE.**
+            //
+            //     Every other row asks about a document the filer either has or will not get. Form
+            //     5498-SA is neither: the trustee's own furnishing deadline falls AFTER the filing
+            //     deadline (HSA contributions run to the return's due date), so an early filer can
+            //     never truthfully answer *Yes* — yet *"I have not received it"* and *"I will never
+            //     receive one"* are the same `No`, and the walk answered `n` calling it "defensible
+            //     but not literally true".
+            //
+            // ★★ **Reworded rather than given the census's `None` tri-state, and the reason is that
+            //    the tri-state would BRICK this row.** `None` means *not asked / not yet received*
+            //    and BLOCKS commit (this module's own table) — which is right for a broker who has
+            //    not mailed by February and will mail in March. Here the form cannot arrive before
+            //    the return is due, so *not yet received* would block a correct return until June,
+            //    permanently, for every early filer. The honest fix is to ask a question whose
+            //    answer the filer HAS: what is in their hands today.
+            //
+            // ★ The timing clause is the instruction's own sentence, VERBATIM and year-free
+            //   (`i1099sa--2025.txt`, *Statements to Participants*), pinned by
+            //   `xtask prompt-check`. It also states the consequence, because a filer who reads
+            //   "No" as "I am filing without a document I need" would go looking for one they
+            //   cannot get: no line of Form 8889 sums any box of this form.
+            //
+            // ★ The timing comes BEFORE the question, not after it, for two reasons that happen to
+            //   agree: the row's own invariants require a prompt that ENDS in a question mark and
+            //   cites its attributing instruction (`every_prompt_names_the_document_and_is_a_question`),
+            //   and a filer who is told the deadline before being asked answers once instead of
+            //   answering and then wondering.
             DocumentRow::Sa5498 => {
-                "Did you receive one or more Form 5498-SA (the trustee of a health savings account \
-                 sends one reporting the year's contributions and the account's fair market value \
-                 — see the instructions for Forms 1099-SA and 5498-SA)?"
+                "Form 5498-SA is furnished AFTER the filing deadline: the instructions for Forms \
+                 1099-SA and 5498-SA tell the trustee \"you must provide a statement to the \
+                 participant (generally Copy B) by June 1\", and no line of Form 8889 reads this \
+                 form — so if it has not arrived, answer No, and nothing on your return changes. \
+                 Do you have one or more Form 5498-SA IN HAND for this year (the trustee of a \
+                 health savings account sends one reporting the year's contributions and the \
+                 account's fair market value)?"
             }
             DocumentRow::R1099 => {
                 "Did you receive one or more Form 1099-R (the payer of an IRA, pension or annuity \

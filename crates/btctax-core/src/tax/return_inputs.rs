@@ -1924,6 +1924,32 @@ pub struct Schedule1aInputs {
     pub vehicles: Vec<Schedule1aVehicle>,
 }
 
+impl Schedule1aInputs {
+    /// ★★★ **FR-103 — does this return CLAIM anything on Schedule 1-A?** The predicate
+    /// [`crate::tax::return_refuse::RefuseReason::Schedule1aNotOnThisYearsReturn`] reads before it
+    /// refuses a year that has no such schedule.
+    ///
+    /// ★★ **It is a DESTRUCTURE with no `..`, and that is the guarantee.** A fourth Part collected
+    /// here — Part V's senior deduction is the obvious next one — is then a **compile error** in
+    /// this function rather than a silent hole in the refusal, which is `CLAUDE.md`'s *"Derive the
+    /// list, or make the compiler hold it"* in its second form. The three-field version of this
+    /// test, typed once and correct on the day, is precisely the shape FR-99 counts seven instances
+    /// of across the interview arc.
+    ///
+    /// ★ *Carrying data* is the presence of the CLAIM, not a nonzero amount: `Some(tips)` with a
+    /// zero figure is still the filer having filled in a Part that this year's Form 1040 does not
+    /// carry, and telling them so is the point.
+    #[must_use]
+    pub fn carries_data(&self) -> bool {
+        let Self {
+            tips,
+            overtime,
+            vehicles,
+        } = self;
+        tips.is_some() || overtime.is_some() || !vehicles.is_empty()
+    }
+}
+
 /// Part II — qualified tips (§224). Every bool is a YES-condition defaulting to `false`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Schedule1aTips {

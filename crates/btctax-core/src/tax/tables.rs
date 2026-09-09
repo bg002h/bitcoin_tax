@@ -1201,6 +1201,19 @@ impl Schedule1aParams {
     }
 }
 
+/// ★★★ **THE YEARS A SCHEDULE 1-A EXISTS FOR — the ONE place the window is written.**
+///
+/// [`schedule_1a_params`] tests membership of it and
+/// [`crate::tax::return_refuse::RefuseReason::Schedule1aNotOnThisYearsReturn`] states it to the
+/// filer, so the refusal's sentence and the table's `None` can never name different years
+/// (`CLAUDE.md`, *"Derive the list, or make the compiler hold it"* — a window retyped inside a
+/// message is exactly the list that a later sunset edit walks past).
+///
+/// The form was created by Pub. L. 119-21 (OBBBA), and the four provisions it carries expire after
+/// TY2028 — §224(f) (tips), §225(f) (overtime), §163(h)(4)(F) (car-loan interest) and §151(d)(5)(D)
+/// (the senior deduction).
+pub const SCHEDULE_1A_YEARS: std::ops::RangeInclusive<i32> = 2025..=2028;
+
 /// Schedule 1-A parameters for `year`, or `None` where the form does not exist.
 ///
 /// ★★ **`None` for TY2029+ is the load-bearing behaviour, not an omission.** The four provisions
@@ -1211,7 +1224,7 @@ impl Schedule1aParams {
 /// Values are identical across 2025-2028 because **nothing here is indexed**; they are written once
 /// and returned for each year in range rather than duplicated per year, so no year can drift.
 pub fn schedule_1a_params(year: i32) -> Option<Schedule1aParams> {
-    if !(2025..=2028).contains(&year) {
+    if !SCHEDULE_1A_YEARS.contains(&year) {
         return None;
     }
     Some(Schedule1aParams {

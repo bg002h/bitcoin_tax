@@ -325,7 +325,19 @@ struct QuestionClause {
     text: &'static str,
     /// `Some(year)` ⇒ compare against `prompt_text` on a return of that year.
     rendered: Option<i32>,
+    /// ★★★ **FR-107 — the extract this clause is SOURCED FROM, per clause.**
+    ///
+    /// It was a single hardcoded `i1040gi--2025.txt` for the whole table, which is precisely the
+    /// shape [`Clause`]'s own doc warns against three hundred lines up — *"a single-extract table
+    /// would either fail on that clause or silently check the prompt against the wrong document"*.
+    /// The document census asks about documents whose words live in THEIR OWN instructions (Form
+    /// 5498-SA's furnishing deadline is in `i1099sa`, and appears nowhere in the 1040 booklet), so
+    /// the column had to become real before such a clause could be checked at all.
+    extract: &'static str,
 }
+
+/// The Form 1040 instruction booklet — where all but the census clauses are sourced.
+const I1040GI: &str = "design/forms/extract/i1040gi--2025.txt";
 
 /// The clause table for R7's ten filer-facing strings.
 ///
@@ -346,17 +358,20 @@ const QUESTION_CLAUSES: &[QuestionClause] = &[
         id: btctax_core::tax::questions::QuestionId::HohQualifyingPerson,
         text: "You paid over half the cost of keeping up a home that was the main home",
         rendered: None,
+        extract: I1040GI,
     },
     QuestionClause {
         id: btctax_core::tax::questions::QuestionId::HohQualifyingPerson,
         text: "your parent whom you can claim as a dependent, except under a multiple support \
                agreement",
         rendered: None,
+        extract: I1040GI,
     },
     QuestionClause {
         id: btctax_core::tax::questions::QuestionId::HohQualifyingPerson,
         text: "Your parent didn\u{2019}t have to live with you.",
         rendered: None,
+        extract: I1040GI,
     },
     QuestionClause {
         id: btctax_core::tax::questions::QuestionId::HohQualifyingPerson,
@@ -364,17 +379,20 @@ const QUESTION_CLAUSES: &[QuestionClause] = &[
             "you paid over half the cost of keeping up a home in which you lived and in which one \
                of the following also lived for more than half of the year",
         rendered: None,
+        extract: I1040GI,
     },
     QuestionClause {
         id: btctax_core::tax::questions::QuestionId::HohPaidOverHalfCostOfKeepingUpHome,
         text: "You paid over half the cost of keeping up a home",
         rendered: None,
+        extract: I1040GI,
     },
     QuestionClause {
         id: btctax_core::tax::questions::QuestionId::NraSpouseResidentElection,
         text: "you and your spouse can choose to be treated as U.S. residents for the entire year \
                and file a joint return",
         rendered: None,
+        extract: I1040GI,
     },
     // ★★★ THE RENDERED ONE. TY2025's window is the instruction's own printed sentence, verbatim.
     QuestionClause {
@@ -382,27 +400,32 @@ const QUESTION_CLAUSES: &[QuestionClause] = &[
         text:
             "Your spouse died in 2023 or 2024 and you didn\u{2019}t remarry before the end of 2025.",
         rendered: Some(2025),
+        extract: I1040GI,
     },
     QuestionClause {
         id: btctax_core::tax::questions::QuestionId::QssChildYouCanClaim,
         text:
             "You have a child or stepchild (not a foster child) whom you can claim as a dependent",
         rendered: None,
+        extract: I1040GI,
     },
     QuestionClause {
         id: btctax_core::tax::questions::QuestionId::QssChildYouCanClaim,
         text: "The child filed a joint return",
         rendered: None,
+        extract: I1040GI,
     },
     QuestionClause {
         id: btctax_core::tax::questions::QuestionId::QssChildLivedInYourHomeAllYear,
         text: "This child lived in your home for all of",
         rendered: None,
+        extract: I1040GI,
     },
     QuestionClause {
         id: btctax_core::tax::questions::QuestionId::QssPaidOverHalfCostOfKeepingUpHome,
         text: "You paid over half the cost of keeping up your home.",
         rendered: None,
+        extract: I1040GI,
     },
     QuestionClause {
         id: btctax_core::tax::questions::QuestionId::QssCouldHaveFiledJointlyInYearOfDeath,
@@ -410,6 +433,23 @@ const QUESTION_CLAUSES: &[QuestionClause] = &[
             "You could have filed a joint return with your spouse the year your spouse died, even \
                if you didn\u{2019}t actually do so.",
         rendered: None,
+        extract: I1040GI,
+    },
+    // ── ★★★ FR-107 — THE FORM 5498-SA CENSUS ROW'S TIMING CLAUSE. ───────────────────────────────
+    //
+    //     The row asks a yes/no about a document that CANNOT have arrived by the filing deadline,
+    //     and the prompt now says so in the instruction's own words rather than in a paraphrase a
+    //     reader would have to take on trust. Sourced from `i1099sa`, which is why this table needed
+    //     a per-clause `extract` at all: the sentence appears nowhere in the 1040 booklet.
+    //
+    // ★ The span stops short of the YEAR the instructions print (*"by June 1, 2026"*), for the same
+    //   reason every other span here does — the prompt is asked of every year, and typing one would
+    //   be a second copy of derived data.
+    QuestionClause {
+        id: btctax_core::tax::questions::QuestionId::DocSa5498,
+        text: "you must provide a statement to the participant (generally Copy B) by June 1",
+        rendered: None,
+        extract: "design/forms/extract/i1099sa--2025.txt",
     },
 ];
 
@@ -421,14 +461,15 @@ fn check_questions(root: &std::path::Path) -> Result<usize, String> {
     use btctax_core::tax::questions::FORM_QUESTIONS;
     let mut failures: Vec<String> = Vec::new();
     let mut passed = 0usize;
-    let extract = "design/forms/extract/i1040gi--2025.txt";
-    let raw = std::fs::read_to_string(root.join(extract))
-        .map_err(|e| format!("cannot read {extract}: {e}"))?;
-    let hay = normalise(&raw);
     for (i, c) in QUESTION_CLAUSES.iter().enumerate() {
         let n = i + 1;
         let clause = normalise(c.text);
-        // (a) — the clause really is the manual's.
+        // (a) — the clause really is the manual's. ★ FR-107: the manual is named PER CLAUSE, so a
+        //       census row's clause is checked against ITS OWN document's instructions.
+        let extract = c.extract;
+        let raw = std::fs::read_to_string(root.join(extract))
+            .map_err(|e| format!("cannot read {extract}: {e}"))?;
+        let hay = normalise(&raw);
         if hay.contains(&clause) {
             passed += 1;
         } else {
@@ -642,6 +683,85 @@ pub fn run() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ★★★ **FR-107's B1 PAIRING — the Form 5498-SA timing clause, watched RED on the wording it
+    /// replaced.**
+    ///
+    /// The journey walk found the one census row whose y/n a filer cannot answer truthfully: Form
+    /// 5498-SA is furnished AFTER the filing deadline, so an early filer can never say *Yes*, while
+    /// *No* reads as *"I will never receive one"*. The reword answers it by saying what the
+    /// instructions say — and a citation nobody checks is a paraphrase waiting to happen, which is
+    /// this module's whole reason for existing.
+    ///
+    /// ★ Three states, and the middle one is the kill: GREEN on the shipped prompt, RED on the
+    ///   PRE-FR-107 wording (pasted verbatim below — the actual text that shipped), RED on a
+    ///   plausible softening of the deadline itself.
+    #[test]
+    fn the_5498sa_prompt_quotes_the_furnishing_deadline_and_the_old_wording_reds() {
+        use btctax_core::tax::questions::{QuestionId, FORM_QUESTIONS};
+        let root = repo_root();
+        let c = QUESTION_CLAUSES
+            .iter()
+            .find(|c| c.id == QuestionId::DocSa5498)
+            .expect("FR-107 added the 5498-SA clause");
+        let clause = normalise(c.text);
+
+        // (a) the clause really is the instruction's, in ITS OWN document.
+        let raw = std::fs::read_to_string(root.join(c.extract)).expect("the extract is committed");
+        assert!(
+            normalise(&raw).contains(&clause),
+            "the timing clause must be `i1099sa`'s own sentence, not a paraphrase of it"
+        );
+
+        // (b) GREEN on the shipped prompt.
+        let prompt = FORM_QUESTIONS
+            .iter()
+            .find(|q| q.id == QuestionId::DocSa5498)
+            .expect("the census row is a registry question")
+            .prompt;
+        assert!(
+            normalise(prompt).contains(&clause),
+            "the unmutated prompt must PASS — a checker that reds on everything is \
+             indistinguishable from one that works"
+        );
+
+        // (c) RED on the wording FR-107 replaced. It asks about RECEIPT, in the past tense, and
+        //     cites nothing — so the filer holding no form has no way to know that *No* is the
+        //     truthful answer rather than a claim they will never get one.
+        const PRE_FR107: &str =
+            "Did you receive one or more Form 5498-SA (the trustee of a health \
+                                 savings account sends one reporting the year's contributions and \
+                                 the account's fair market value — see the instructions for Forms \
+                                 1099-SA and 5498-SA)?";
+        assert!(
+            !normalise(PRE_FR107).contains(&clause),
+            "PLANTED DEFECT NOT CAUGHT: the prompt the walk was asked passed the check that exists \
+             to hold the reword in place"
+        );
+
+        // (d) RED on a softening of the deadline — the shape an editor tidying prose would commit.
+        let softened = prompt.replace("(generally Copy B) by June 1", "in June");
+        assert_ne!(softened, prompt, "the mutation must change the prompt");
+        assert!(
+            !normalise(&softened).contains(&clause),
+            "PLANTED DEFECT NOT CAUGHT: the deadline was softened out of the instruction's own \
+             words and the check still passed"
+        );
+
+        // ★ …and the answerable half, which is what the finding was actually about: the prompt asks
+        //   what the filer HAS, and says plainly what a No costs them (nothing).
+        for needle in [
+            "IN HAND",
+            "if it has not arrived, answer No",
+            "no line of Form 8889 reads",
+        ] {
+            assert!(
+                prompt.contains(needle),
+                "the prompt must be answerable at the keyboard on filing day — missing {needle:?}: \
+                 {prompt}"
+            );
+        }
+    }
 
     /// ★★★ **T7 / R6 — THE B1 PAIRING FOR ROW (5)(a): the verbatim check is observed RED on a
     /// planted defect and GREEN on the shipped help.**

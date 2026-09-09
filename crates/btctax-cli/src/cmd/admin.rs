@@ -315,6 +315,25 @@ pub struct IrsPdfReport {
     /// list. `Some` only on arm (2): the year's answers are stored, its full-return parameters are
     /// not bundled, and what was written is an ATTACHMENT SET rather than a return.
     pub slice_attachment_note: Option<String>,
+    /// ★★★ **FR-104 (journey walk finding #3) — WHAT THIS PACKET DOES *NOT* CONTAIN.**
+    ///
+    /// `Some` exactly when the CRYPTO SLICE was written for a year that HOLDS full-return inputs —
+    /// the wages, dependents, deductions and documents the filer entered — because those inputs
+    /// reach none of the files this arm writes. The walk's TY2025 run got
+    /// *"Filled IRS forms for tax year 2025 → irs/f8949.pdf irs/schedule_d.pdf"*, exit 0, no
+    /// warning: **byte-identical output for a filer who had carefully entered a whole household and
+    /// for one who had never run `income import` at all.**
+    ///
+    /// ★★ Why a NOTE and not a refusal, decided rather than defaulted. `report --tax-year` already
+    ///    refuses this year cleanly, and refusing the export too would leave a filer whose Bitcoin
+    ///    disposals ARE reportable holding nothing at all — near a deadline that is the worse
+    ///    outcome, and the slice is a legitimate artifact for a params-less year (it is what arm (2)
+    ///    exists to produce). The defect the walk found is the SILENCE, not the bytes. So the bytes
+    ///    stay and the silence goes.
+    ///
+    /// ★ It is printed with a `⚠`, not a `note:` — the two sentences a filer must read here are
+    ///   *"this is not your return"* and *"do not put it in the envelope on its own"*.
+    pub full_return_omitted_note: Option<String>,
     /// ★ spec 1099-DA R6 (M-14) — the §6.3 [`crate::input_form_store::StaleNote`], rendered the way
     /// `scrub` renders it, for printing BEFORE the file list: a schema-stale WIP draft was skipped,
     /// so the answers filed came from the committed row (or none). `None` on every other path.
@@ -1378,6 +1397,44 @@ pub(crate) fn export_irs_pdf_from_session_with_regime(
         // ★ spec 1099-DA R6 (M-6) — what this packet IS, said once, on the arm that files from the
         //   stored answers. `form_1040_capgains.pdf` renders as a Form 1040 and is a WORKSHEET; the
         //   set as a whole is an attachment to the filer's OWN 1040, not a return.
+        // ★★★ **FR-104 — THE HOUSEHOLD THIS PACKET DOES NOT CONTAIN, SAID OUT LOUD.**
+        //
+        //     The predicate is the year holding a WORKING return at all — `working` is the same
+        //     resolution every other arm-(2)/(3) gate reads, so this note and those gates cannot
+        //     see different returns. It is deliberately NOT scoped to arm (2): the walk's TY2025
+        //     household fell to arm (3), because `answers_stored` reads `broker_reporting`, which
+        //     is empty on TY2025 (the Form 1099-DA question is not live before TY2026). Scoping the
+        //     note to the arm that already had one would have missed the exact case that was found.
+        //
+        // ★ The REASON clause follows `params_bundled`, the same split `form_1040v_note` below
+        //   makes: a year with no bundled package cannot compute a Form 1040 at all, while a year
+        //   that HAS one and still reached this arm has inputs that were never committed. Asserting
+        //   the first on the second would be a false sentence about the filer's own vault.
+        full_return_omitted_note: working.as_ref().map(|_| {
+            let why = if params_bundled {
+                format!(
+                    "TY{tax_year} HAS a full-return package in this build, but the inputs you \
+                     entered for it are not committed — a draft, or withdrawn — so no Form 1040 \
+                     was computed from them"
+                )
+            } else {
+                format!(
+                    "no TY{tax_year} full-return package is bundled in this build, so no Form 1040 \
+                     can be computed for that year at all"
+                )
+            };
+            format!(
+                "TY{tax_year} HOLDS FULL-RETURN INPUTS, AND THEY ARE NOT IN THIS PACKET. What was \
+                 written is the Bitcoin capital-gains slice, and nothing else: {why}. The wages, \
+                 dependents, deductions, credits, payments and documents on this year's return \
+                 reach NO file above. Nor does any capital-gain item other than your ledger's own \
+                 disposals — this Schedule D is filled from the ledger totals alone, so a Form \
+                 1099-DIV box 2a capital-gain distribution, a capital-loss carryover and a broker's \
+                 Form 1099-B all print BLANK on it even where you have entered them. Do not file \
+                 this as your return. Run `btctax report --tax-year {tax_year}` for what is \
+                 missing and why."
+            )
+        }),
         slice_attachment_note: files_from_answers.then(|| {
             format!(
                 "TY{tax_year}: full-return parameters are not bundled in this build — this is the \
@@ -2082,6 +2139,8 @@ fn export_full_return(
     Ok(IrsPdfReport {
         // The FULL return is a return, not an attachment set, and it files from the COMMITTED row
         // (spec 1099-DA R6's one deliberate exception) — so neither slice note applies here.
+        // ★ FR-104 likewise: this arm IS the household's return, so there is nothing omitted to name.
+        full_return_omitted_note: None,
         slice_attachment_note: None,
         stale_draft_note: None,
         advisories,

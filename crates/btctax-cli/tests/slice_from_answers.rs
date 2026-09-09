@@ -220,6 +220,110 @@ fn ty2025_with_stored_answers_prints_the_slice_from_either_row() {
     }
 }
 
+/// ★★★ **FR-104's KILL (journey walk finding #3) — THE HOUSEHOLD THIS PACKET LEAVES OUT IS NAMED.**
+///
+/// The walk imported a whole TY2025 household — wages, four dependents, a mortgage, an HSA — and
+/// then ran `export-irs-pdf --tax-year 2025`. It got
+/// *"Filled IRS forms for tax year 2025 → irs/f8949.pdf irs/schedule_d.pdf"*, exit 0, **no warning
+/// of any kind**, and output byte-identical to what a filer who had never run `income import` would
+/// get. Near a deadline that is a misleading success, and worse than the clean refusal `report`
+/// gives for the same year.
+///
+/// ★★ **The fixture is half the checker (B1a), and this one carries the household.** A
+///    `broker_reporting`-only fixture — the one every other test in this file uses — would exercise
+///    the note's code path while presenting none of the data the note is ABOUT, and would still be
+///    green if the predicate were narrowed to something that has nothing to do with a household.
+///    So the row here holds a W-2 and a dependent, and the *negative* half runs the same export on
+///    a vault with no stored row at all: that pair is the exact comparison the walk made.
+///
+/// ★ **And it goes down ARM (3), not arm (2)** — `broker_reporting` is empty, because the Form
+///   1099-DA question is not live before TY2026. That is the arm the walk actually hit, and the arm
+///   that had no note; a kill written against arm (2) would have passed over the finding.
+#[test]
+fn a_slice_written_for_a_year_holding_a_household_says_the_household_is_not_in_it() {
+    // ── The household. Not a `broker_reporting` stub: the wages and the child are the things the
+    //    note claims are missing, so they must be present for the claim to be about anything.
+    let household = || {
+        let mut ri = ReturnInputs {
+            tax_year: 2025,
+            filing_status: btctax_core::tax::types::FilingStatus::Mfj,
+            ..Default::default()
+        };
+        ri.w2s.push(btctax_core::tax::return_inputs::W2 {
+            owner: btctax_core::tax::return_inputs::Owner::Taxpayer,
+            employer: "Ledger Analytics Inc".into(),
+            box1_wages: dec!(800000),
+            ..Default::default()
+        });
+        ri.header
+            .dependents
+            .push(btctax_core::tax::return_inputs::Dependent {
+                name: "Nova Testcase".into(),
+                ssn: "000-11-4444".into(),
+                relationship: "Daughter".into(),
+                ..Default::default()
+            });
+        ri
+    };
+
+    // ── (1) THE WALK'S CASE. A committed TY2025 row holding that household, exported with the
+    //        REAL command and the year's REAL (proceeds-only) regime — so this is arm (3).
+    let (_d, vault) = make_vault(&one_provider());
+    save_committed(&vault, 2025, &household());
+    let out = tempfile::tempdir().unwrap();
+    let dir = out.path().join("slice");
+    let rep = cmd::admin::export_irs_pdf(&vault, &pp(), &dir, 2025, &[], None, Default::default())
+        .expect("the TY2025 crypto slice still prints — the bytes were never the defect");
+    assert!(
+        rep.full_return_paths.is_empty() && dir.join("schedule_d.pdf").exists(),
+        "premise: the slice arm ran and wrote the two-file packet the walk received"
+    );
+    assert!(
+        rep.slice_attachment_note.is_none(),
+        "premise: this is ARM (3) — `broker_reporting` is empty, so the arm-(2) note is silent and \
+         nothing but FR-104's note stands between the filer and a packet that is not their return"
+    );
+    let note = rep.full_return_omitted_note.clone().expect(
+        "★ THE KILL: TY2025 holds this filer's wages and their child, and none of it is in the two \
+         files just listed — exiting 0 in silence is what the walk received",
+    );
+    for needle in [
+        // the fact
+        "HOLDS FULL-RETURN INPUTS, AND THEY ARE NOT IN THIS PACKET",
+        // the reason, on the branch that actually holds
+        "no TY2025 full-return package is bundled",
+        // the Schedule D trap: the slice fills it from the ledger alone
+        "1099-DIV box 2a",
+        "capital-loss carryover",
+        // the instruction
+        "Do not file this as your return",
+        "btctax report --tax-year 2025",
+    ] {
+        assert!(
+            note.contains(needle),
+            "the warning must say {needle:?}: {note}"
+        );
+    }
+
+    // ── (2) THE OTHER HALF OF THE WALK'S COMPARISON — the vault that never ran `income import`.
+    //        Its packet is the same two files, and it is now DISTINGUISHABLE, which is the finding.
+    let (_d2, empty) = make_vault(&one_provider());
+    let out2 = tempfile::tempdir().unwrap();
+    let dir2 = out2.path().join("slice");
+    let bare =
+        cmd::admin::export_irs_pdf(&empty, &pp(), &dir2, 2025, &[], None, Default::default())
+            .expect("a vault with no stored answers still prints its crypto slice");
+    assert!(
+        dir2.join("schedule_d.pdf").exists(),
+        "premise: the same two files"
+    );
+    assert_eq!(
+        bare.full_return_omitted_note, None,
+        "a year holding NO full-return inputs omits nothing, and a warning about an absent \
+         household would be a sentence about nobody"
+    );
+}
+
 /// ★★★ THE T8 KILL, END TO END — a live-regime `basis_matches` slice puts the **G** total on
 /// Schedule D line **1b** and leaves line **3 BLANK**, and the Form 8949 behind it is boxed G.
 ///

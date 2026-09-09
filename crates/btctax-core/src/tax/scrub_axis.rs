@@ -414,7 +414,15 @@ pub fn maximal_sentinel() -> ReturnInputs {
             }],
             ..Default::default()
         },
-        tax_year: 2024,
+        // ★★★ FR-103 — TY2025, and the year is load-bearing rather than incidental. This fixture
+        //     carries a `[[schedule_1a.vehicles]]` row (above), and a Schedule 1-A entry on a year
+        //     with no Schedule 1-A now REFUSES — so a TY2024 sentinel is not a fileable return, and
+        //     the baseline assertion below (which is the whole reason the matrix discriminates)
+        //     would compare that one refusal to itself in every cell. The two lawful fixtures were
+        //     "drop the vehicle" and "state a year the schedule exists in"; dropping it would leave
+        //     the scrub guarantee asserted over a free-text field nothing populates, which is the
+        //     B1a defect one level down.
+        tax_year: 2025,
         // ★ R3 — the census carries no identity, so the axis fixture answers it the way a real
         //   W-2 household would: yes to the W-2 it transcribes, no to everything else.
         documents: {

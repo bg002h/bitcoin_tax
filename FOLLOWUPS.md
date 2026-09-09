@@ -6678,6 +6678,52 @@ build, each with an owning phase.
   Enter re-confirms, so it is correct — but nothing explains WHY an already-answered gate is asked again,
   and the volume is the difference between a session a filer finishes and one they abandon.
 
+  ★★ **MEASURED 2026-09-07 (during the FR-103-107 implementation) — the mechanism is NOT what this
+  entry invites a reader to assume, and the item is deliberately left OPEN and unimplemented.** The
+  re-ask has nothing to do with the answer log. `income answer` puts EVERY live question to the filer
+  every session, gates and return-level declarations alike, and its ask loop (`cmd/answer.rs` —
+  `live_questions_with` plus the sweep) never consults `answer_status` or `ri.answer_log` at all.
+  Probe, on a return whose every §152 gate leaf was answered by import and which carries no answer
+  records: `screen_param_free` = `None`, `interview_state().blocking.len()` = 0, and **15
+  dependent-gate asks still put to the filer**; add a `Given` `AnswerRecord` for all 15 gates and it
+  is still **15**. (33 answered declarations are re-asked in the same run.) So *"the leaf has a value
+  but no `AnswerRecord`, therefore it is re-asked"* is not the cause. The corollary matters more: an
+  imported leaf with no record ALREADY stands as answered everywhere — `screen_dependent_gates` gates
+  on `gate_is_answered` (the leaf) and reads the record only for `WordingChanged`, exactly as the
+  `FORM_QUESTIONS` tier gates on `(q.get)(ri).is_none()`. Suppressing the re-ask therefore could not
+  "promote imported data to sworn testimony": that promotion, if it is one, happens at import and is
+  a different question from this entry's.
+
+  **✅ CLOSED 2026-09-07 — but NOT the way the controller ruled, and the ruling was WRONG.** The
+  controller directed *"fix the explanation, not the behaviour"* on the reading that the gates re-ask
+  because an imported leaf carries no `AnswerRecord`. The implementer was told to verify first and
+  **refuted it by measurement**: stamping a `Given` record on all 15 gates changes the ask count by
+  **zero** (15 → 15), the ask loop (`live_questions_with` + the sweep) never reads `ri.answer_log` at
+  all — every log read in `cmd/answer.rs` is inside `mod tests` (which begins at `:1110`) — and
+  liveness is `(q.live)(&ri)` / `walk_dependent(ri,row).demands(gate)`, neither of which knows about
+  answered-ness. The same session re-asked **33 already-answered declarations** too, so it was never
+  dependent-specific.
+  ★ The implementer also correctly declined to write the explanation as ruled, because it would have
+  stated a motive the code does not have — a false sentence in filer-facing text, which is worse than
+  the silence it replaced. **That refusal is the right call and is recorded as the model for it.**
+  The fix as shipped states the MECHANISM: `income answer` now prints *"every question that applies to
+  this return is asked again each time — this command does not skip the ones already on file. Press
+  Enter to keep the answer shown."*
+
+- **FR-109 — does `income import` create sworn testimony without the filer answering a question?
+  Surfaced by FR-105's refutation, 2026-09-07. OWNER'S question — filed, not actioned. Owning phase:
+  the answered-ness boundary, before v1 is trusted with a real return.** An imported leaf with **no**
+  `AnswerRecord` already stands as answered everywhere: `screen_param_free` returns `None`, the panel's
+  `blocking` is `0`, and both `screen_dependent_gates` and the `FORM_QUESTIONS` tier gate on the LEAF
+  (`gate_is_answered` / `(q.get)(ri).is_none()`), reading the record only for the `WordingChanged`
+  staleness check. So if importing a TOML is a promotion of data to testimony, it happens **at import**
+  — silently, with no date and no prompt hash.
+  Two readings, and it is the owner's to pick: (a) the filer WROTE that file, so it is their assertion
+  and the provenance gap is cosmetic; or (b) it is the [[FR-97]] defect at a third writer — the TUI was
+  fixed to record, `income answer` records, and `income import` still does not, so R10.3's re-ask on a
+  reworded question cannot fire for an imported value, and a filer who imports and goes straight to
+  `report` never meets a prompt at all. Note this is currently masked by FR-105's mechanism: because
+  `income answer` re-asks EVERYTHING, anyone who runs it is asked afresh regardless.
 - **FR-106 — the answer panel's BLOCKING count is a moving target with no warning (journey walk finding
   #5). Owning phase: ownerless residue (UX).** The panel printed *"BLOCKING (36)"* at session start;
   two further questions became live mid-session, triggered by the filer's own census answers in the same
@@ -6690,6 +6736,20 @@ build, each with an owning phase.
   never truthfully answer *Yes*, yet the true state is *not yet received*, not *will never receive*. The
   census asks a plain y/n at the keyboard even though the spec itself describes a tri-state for exactly
   this. Narrow, but it is a row where the tool asks for testimony the filer cannot give truthfully.
+
+- **FR-108 — 34 string literals print with runs of six or more spaces inside filer-facing text (found
+  while implementing FR-103-107, 2026-09-07). FILED, NOT FIXED. Owning phase: ownerless residue
+  (UX / doc-consistency).** A Rust `\`-newline continuation inside a string literal eats the newline
+  and KEEPS the next source line's indentation, so text written to look wrapped in the source prints
+  with a gap in it. Measured over `crates/**/*.rs`: **34** single-logical-line literals longer than
+  120 chars carrying a run of six or more interior spaces, across 13 files. At least six reach a
+  person verbatim — `return_refuse.rs:2500` and `:2507` (the two Schedule 1-A trade-or-business
+  REFUSAL details), `return_1040.rs:6266` (an advisory), `cmd/tax.rs:399` (the `income scrub`
+  stale-draft note), and `spec/sections.rs:1652` / `:1683` (two Form 8995-A field help strings a
+  filer reads while typing). Never a wrong figure — but it is in the exit sentences this product's
+  fail-closed posture rests on, and it is machine-detectable, so the fix is one pass plus a lint
+  rather than a reading. The detector is in
+  `design/agent-reports/2026-09-07-fr103-107-journey-fixes.md`.
 
 - **FR-99 — ★★ THE DOMINANT DEFECT CLASS OF THE WHOLE INTERVIEW ARC: a hand-written list standing beside
   a set that GROWS. Proposed `CLAUDE.md` rule — OWNER'S CALL, filed not actioned. Owning phase: the

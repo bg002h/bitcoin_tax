@@ -269,6 +269,15 @@ pub fn import_return_inputs(
     //
     // ★ It is placed ABOVE the FR-48 note deliberately. That note says *"these inputs are stored
     //   now"*, and printing it and then refusing would tell the filer the opposite of what happened.
+    // ★★★ **FR-103 — THE YEAR IS STAMPED BEFORE THE SCREEN, NOT AFTER IT.**
+    //
+    //     §G-15 makes the ROW KEY authoritative for `tax_year`, and until now the stamp happened
+    //     inside `return_inputs::set` — BELOW this screen. So the screen read the TOML's `0` ("not
+    //     stated"), and any rule that asks *"which tax year is this?"* was structurally silent on
+    //     `income import`, the one command that creates a row. FR-103's refusal was written for
+    //     exactly this path and did not fire on the journey walk's own TOML until the stamp moved
+    //     up. The disagreement rule is `set`'s, called rather than copied.
+    return_inputs::stamp_year(&mut ri, year)?;
     if let Some(refusal) = btctax_core::tax::return_refuse::screen_param_free(&ri) {
         return Err(CliError::Usage(format!(
             "the {year} inputs were NOT stored — [{:?}] {}",

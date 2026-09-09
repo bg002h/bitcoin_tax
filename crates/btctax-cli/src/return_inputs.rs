@@ -104,13 +104,19 @@ pub fn get(conn: &Connection, year: i32) -> Result<Option<ReturnInputs>, CliErro
     }
 }
 
-/// Persist `ri` as the [`ReturnInputs`] for `year` (upsert — replaces any prior value).
-pub fn set(conn: &Connection, year: i32, ri: &ReturnInputs) -> Result<(), CliError> {
-    init_table(conn)?;
-    // ★★ §G-15 — refuse a DISAGREEMENT rather than silently preferring one side. `0` is "not
-    // stated" and is stamped from the key; any other mismatch means the caller believes this is a
-    // different year's return, and writing it under `year` would file one year's answers as
-    // another's.
+/// ★★★ **§G-15 — STAMP `tax_year` FROM THE ROW KEY, REFUSING A DISAGREEMENT.** `0` is *"not
+/// stated"* and takes the key's year; any other mismatch means the caller believes this is a
+/// different year's return, and writing it under `year` would file one year's answers as another's.
+///
+/// ★★ **It is a named function rather than three lines inside [`set`] because a caller sometimes
+/// needs the stamp to have happened BEFORE the write** — and FR-103 is the case that proved it.
+/// `income import` screened the parsed row with `screen_param_free` and only then called [`set`],
+/// so at screening time `tax_year` was still the TOML's `0` and **every year-scoped rule in the
+/// screen was silent on the one command that creates a row**. FR-103's refusal was the first rule to
+/// need the year, and it did not fire on the exact journey-walk case it was written for. Extracting
+/// the rule rather than re-typing it at the second site is the point: two copies of *"which year is
+/// this row"* is precisely how they come to disagree.
+pub fn stamp_year(ri: &mut ReturnInputs, year: i32) -> Result<(), CliError> {
     if ri.tax_year != 0 && ri.tax_year != year {
         return Err(CliError::BadConfigValue {
             key: format!("return_inputs[{year}].tax_year"),
@@ -122,10 +128,15 @@ pub fn set(conn: &Connection, year: i32, ri: &ReturnInputs) -> Result<(), CliErr
             ),
         });
     }
-    let stamped = ReturnInputs {
-        tax_year: year,
-        ..ri.clone()
-    };
+    ri.tax_year = year;
+    Ok(())
+}
+
+/// Persist `ri` as the [`ReturnInputs`] for `year` (upsert — replaces any prior value).
+pub fn set(conn: &Connection, year: i32, ri: &ReturnInputs) -> Result<(), CliError> {
+    init_table(conn)?;
+    let mut stamped = ri.clone();
+    stamp_year(&mut stamped, year)?;
     let j = serde_json::to_string(&stamped).map_err(|e| CliError::BadConfigValue {
         key: format!("return_inputs[{year}]"),
         value: e.to_string(),

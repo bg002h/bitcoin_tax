@@ -504,6 +504,12 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::QualifiedTipsCautionNotMet => vec![Anchor::NotInForm {
             note: "the Schedule 1-A Part II conditions (occupation_on_treasury_list, excludes_unlisted_occupation_tips, meets_qualified_tip_criteria) are TOML-only until the Sch 1-A form section lands — set them under `[schedule_1a.tips]`, or remove the claim",
         }],
+        // ★ FR-103 — `NotInForm`, and this one will NEVER become a field. The cure is not to answer
+        //   anything: the year has no Schedule 1-A at all, so no form section built for any year
+        //   could carry these entries onto a TY2024 return. The note names the two real exits.
+        R::Schedule1aNotOnThisYearsReturn { .. } => vec![Anchor::NotInForm {
+            note: "there is no Schedule 1-A on this year's return (the schedule is TY2025-TY2028, Pub. L. 119-21) — remove the `[schedule_1a]` entries from this year's input, or import them onto the year they belong to",
+        }],
         R::KiddieTax => vec![Anchor::NotInForm {
             note: "the §1(g) kiddie-tax screen is computed at `report`, not a v1 form field",
         }],
@@ -857,15 +863,19 @@ mod tests {
         //   DELIBERATELY and says by how much, so the source stays the counter: a sixth
         //   re-attribution, or a second new `NotInForm` refusal, still reds this.
         const ADDED_BY_I4: usize = 1;
+        // ★ FR-103 (journey walk finding #2) added the second — `Schedule1aNotOnThisYearsReturn`,
+        //   whose cure is never a form field on any year, because the year has no Schedule 1-A.
+        const ADDED_BY_FR103: usize = 1;
         let now = src[start..end].matches("Anchor::NotInForm {").count();
         assert_eq!(
             now,
-            BEFORE_T5 - 5 + ADDED_BY_I4,
+            BEFORE_T5 - 5 + ADDED_BY_I4 + ADDED_BY_FR103,
             "T5 re-attributed exactly five anchors (PrivateActivityBondAmt, \
              UnrecapturedOrSpecialRateGain, InconsistentDividendSubset, ForeignTaxOverCeiling, \
-             Form1099BNeedsForm8949) and the I-4 fold added one (QualifiedTipsCautionNotMet); the \
-             source now has {now} `NotInForm` anchors, not {}",
-            BEFORE_T5 - 5 + ADDED_BY_I4
+             Form1099BNeedsForm8949), the I-4 fold added one (QualifiedTipsCautionNotMet) and \
+             FR-103 added one (Schedule1aNotOnThisYearsReturn); the source now has {now} \
+             `NotInForm` anchors, not {}",
+            BEFORE_T5 - 5 + ADDED_BY_I4 + ADDED_BY_FR103
         );
 
         // The five, and every anchor each yields must be a real Field or Section of `form_spec()`.

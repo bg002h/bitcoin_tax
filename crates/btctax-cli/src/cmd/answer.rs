@@ -349,6 +349,27 @@ pub fn panel_lines(
         for b in &st.blocking {
             out.push(format!("    • {} [{}]", b.prompt, b.reason));
         }
+        // ★★★ **FR-106 (journey walk finding #5) — THE COUNT CAN GROW, AND NOW IT SAYS SO.**
+        //
+        //     The walk read *"BLOCKING (36)"*, worked through the list, and met two questions that
+        //     had not been in it — opened mid-session by its own earlier census answers. That is
+        //     the M-3 sweep design working exactly as intended (`live_questions` is re-derived
+        //     after every answer, because a question whose liveness depends on an answer cannot be
+        //     known before it), and the return is correct either way. What was missing is that the
+        //     number a filer reads to gauge *how much is left* is a snapshot of NOW, and nothing
+        //     told them so — which reads from the driver's seat as the interview changing its mind
+        //     about how many questions there are.
+        //
+        // ★ It states the RULE and enumerates no mechanism. A list of "a census No opens…, a
+        //   dependent's answer opens…" would be correct today and one registry entry away from
+        //   being a lie, which is the FR-99 shape; the rule covers every entry that exists and
+        //   every entry that will.
+        out.push(
+            "  ↑ this is what is live NOW, and answering can make it GROW: some questions \
+             become live only once an earlier answer opens them, so the list is re-derived after \
+             every answer rather than fixed at the start."
+                .to_string(),
+        );
     }
     if !st.refusing.is_empty() {
         out.extend(refusing_lines(st));
@@ -602,6 +623,25 @@ pub fn answer_return_inputs(
     // ★ r3 NIT-2 — the questions say "in this tax year" but the registry prompts are `&'static str` and
     // cannot interpolate the year; a one-line banner anchors them so the filer need not hold it in their head.
     writeln!(out, "Answering full-return questions for tax year {year}:")?;
+    // ★★★ **FR-105 — SAY THAT EVERY LIVE QUESTION IS PUT AGAIN.** This command asks every question
+    //     that is LIVE, not every question that is UNANSWERED: liveness is `(q.live)(&ri)` for a
+    //     declaration and `walk_dependent(ri, row).demands(gate)` for a dependent gate, and neither
+    //     consults the answer log. So a filer who imported a complete TOML, or who ran this
+    //     yesterday, is asked the whole set again — measured on the 2026-09-07 journey walk at 33
+    //     already-answered declarations plus 15 dependent gates in one session, with nothing on
+    //     screen saying why.
+    //
+    //     ★ The sentence states the MECHANISM, not a motive. An earlier reading held that the
+    //       re-ask was provenance-driven — that an imported leaf lacks an `AnswerRecord` and so is
+    //       not yet testimony — and that reading was REFUTED by measurement: stamping a `Given`
+    //       record on all 15 gates changes the ask count by zero. Explaining a reason the code does
+    //       not have would be a filer-facing sentence that is simply false, which is worse than the
+    //       silence it replaces.
+    writeln!(
+        out,
+        "  (every question that applies to this return is asked again each time — this command does \
+         not skip the ones already on file. Press Enter to keep the answer shown.)"
+    )?;
     // ★★★ T4/R11 — THE YEAR GATE, stated before the first question: which of the two states this
     //     year has, in R11's own words, so a filer on a params-less year knows that authoring and
     //     saving work while computing and committing wait for the package.
@@ -2273,6 +2313,64 @@ mod tests {
         assert!(
             !rendered.contains('%') && !rendered.to_lowercase().contains("progress"),
             "R15 — no progress bar, ever: {rendered}"
+        );
+    }
+
+    /// ★★★ **FR-106's KILL — THE CAVEAT IS PRINTED, AND WHAT IT CLAIMS IS TRUE.**
+    ///
+    /// The journey walk read *"BLOCKING (36)"* at the start of its session and then met two
+    /// questions that were not in that list, opened by its own earlier answers in the same pass.
+    /// Correct by design; unannounced.
+    ///
+    /// ★★ **Both halves, because either alone is decoration.** A test that only greps for the
+    ///    sentence passes on a sentence that is FALSE (nothing checks that a count can actually
+    ///    grow), and a test that only demonstrates growth passes while the filer is told nothing.
+    ///    So this asserts the words are beside the count AND drives a return whose blocking count
+    ///    really does rise when one live question is answered — the walk's own experience, in a
+    ///    fixture.
+    ///
+    /// ★ The growth is produced through the registry's own liveness, not by hand: answering
+    ///   `sold_main_home` YES is what makes the three §121 home-sale tests live (R8 / T9), so the
+    ///   count goes DOWN by the question answered and UP by the three it opened. A registry change
+    ///   that removed every such dependency would red the second half — and at that point the
+    ///   sentence would deserve to be deleted.
+    #[test]
+    fn the_blocking_count_says_it_can_grow_and_it_really_can() {
+        const CAVEAT: &str = "answering can make it GROW";
+
+        // ── (1) THE WORDS, beside the count they qualify.
+        let st = btctax_core::tax::interview_state::interview_state(&single());
+        let lines = panel_lines(&st, "before");
+        let at = lines
+            .iter()
+            .position(|l| l.contains("BLOCKING ("))
+            .expect("a fresh Single return blocks on something");
+        assert!(
+            lines[at + 1..]
+                .iter()
+                .take_while(|l| !l.trim_start().starts_with("REFUSING")
+                    && !l.trim_start().starts_with("FORGOING"))
+                .any(|l| l.contains(CAVEAT)),
+            "★ THE KILL: the BLOCKING count is a snapshot of NOW and the filer is not told, so \
+             a number they read as \"how much is left\" grows while they work: {lines:#?}"
+        );
+
+        // ── (2) …AND THE CLAIM IS TRUE. One answer, given the way a filer gives it, and the count
+        //        this panel prints goes UP.
+        let mut ri = single();
+        ri.home_sale.sold_main_home = None;
+        let before = btctax_core::tax::interview_state::interview_state(&ri)
+            .blocking
+            .len();
+        ri.home_sale.sold_main_home = Some(true);
+        let after = btctax_core::tax::interview_state::interview_state(&ri)
+            .blocking
+            .len();
+        assert!(
+            after > before,
+            "the caveat asserts a behaviour this interview must actually have: answering \
+             `sold_main_home` YES opens the three §121 tests, so the blocking count must RISE \
+             ({before} -> {after})"
         );
     }
 

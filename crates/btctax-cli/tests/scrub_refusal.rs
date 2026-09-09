@@ -35,6 +35,17 @@ use time::UtcOffset;
 /// OUTSIDE it and outside `SCRUB_YEAR - 1`, isolating the disjunct each test is about.
 const SCRUB_YEAR: i32 = 2024;
 
+/// ★★★ **FR-103 — the year the MAXIMAL SENTINEL is stored and scrubbed under, DERIVED from the
+/// fixture itself.** The two tests below drive `maximal_sentinel`, which carries a
+/// `[[schedule_1a.vehicles]]` row; a Schedule 1-A entry on a year with no Schedule 1-A now refuses
+/// at `income import`, and the storage boundary refuses a row stored under a year its own
+/// `tax_year` disagrees with. Reading the year off the fixture rather than typing `2025` beside it
+/// means a later move of that fixture's year cannot leave this file quietly pointing at the wrong
+/// one (`CLAUDE.md`, *"Derive the list, or make the compiler hold it"*).
+fn sentinel_year() -> i32 {
+    btctax_core::tax::scrub_axis::maximal_sentinel().tax_year
+}
+
 /// Identity the wage-only fixture actually STORES, so the positive control's canary can fire.
 /// ★ The SSN is `000-`-prefixed: structurally impossible, so `pii-scan`'s own rule admits it and it
 /// cannot collide with `synthetic_ssn`, which emits `1NN-00-NNNN`.
@@ -690,10 +701,11 @@ fn the_malformed_classes_survive_the_artifact_boundary() {
             w.ein = Some("11111111".into()); // eight digits — undecidable, must stay so
         }
         let mut s = Session::open(&vault, &pp()).unwrap();
-        btctax_cli::return_inputs::set(s.conn(), SCRUB_YEAR, &ri).unwrap();
+        btctax_cli::return_inputs::set(s.conn(), sentinel_year(), &ri).unwrap();
         s.save().unwrap();
     }
 
+    let year = sentinel_year().to_string();
     let out = dir.path().join("scrubbed.toml");
     let (code, _o, stderr) = run_btctax(
         &vault,
@@ -701,7 +713,7 @@ fn the_malformed_classes_survive_the_artifact_boundary() {
             "income",
             "scrub",
             "--year",
-            "2024",
+            &year,
             "--out",
             out.to_str().unwrap(),
         ],
@@ -717,7 +729,7 @@ fn the_malformed_classes_survive_the_artifact_boundary() {
             "income",
             "import",
             "--year",
-            "2024",
+            &year,
             "--file",
             out.to_str().unwrap(),
             "--force",
@@ -727,7 +739,7 @@ fn the_malformed_classes_survive_the_artifact_boundary() {
 
     let landed = {
         let s = Session::open(&recipient, &pp()).unwrap();
-        btctax_cli::return_inputs::get(s.conn(), 2024)
+        btctax_cli::return_inputs::get(s.conn(), sentinel_year())
             .unwrap()
             .unwrap()
     };
@@ -736,12 +748,12 @@ fn the_malformed_classes_survive_the_artifact_boundary() {
     //   their copy refuses where the filer's did.
     assert!(
         matches!(
-            ReturnHeader::build(&landed, 2024).err(),
+            ReturnHeader::build(&landed, sentinel_year()).err(),
             Some(btctax_core::tax::packet::HeaderError::Ssn(_))
         ),
         "the recipient's copy must still fail the packet boundary on an SSN, or it EXPORTS where the \
          filer's return refused: {:?}",
-        ReturnHeader::build(&landed, 2024).err()
+        ReturnHeader::build(&landed, sentinel_year()).err()
     );
     assert!(
         matches!(
@@ -822,13 +834,14 @@ fn the_scrubbed_toml_round_trips_back_through_import() {
         let mut s = Session::open(&vault, &pp()).unwrap();
         btctax_cli::return_inputs::set(
             s.conn(),
-            SCRUB_YEAR,
+            sentinel_year(),
             &btctax_core::tax::scrub_axis::maximal_sentinel(),
         )
         .unwrap();
         s.save().unwrap();
     }
 
+    let year = sentinel_year().to_string();
     let out = dir.path().join("scrubbed.toml");
     let (code, _o, stderr) = run_btctax(
         &vault,
@@ -836,7 +849,7 @@ fn the_scrubbed_toml_round_trips_back_through_import() {
             "income",
             "scrub",
             "--year",
-            "2024",
+            &year,
             "--out",
             out.to_str().unwrap(),
         ],
@@ -852,7 +865,7 @@ fn the_scrubbed_toml_round_trips_back_through_import() {
             "income",
             "import",
             "--year",
-            "2024",
+            &year,
             "--file",
             out.to_str().unwrap(),
             "--force",
@@ -878,14 +891,14 @@ fn the_scrubbed_toml_round_trips_back_through_import() {
     //     The filer's own scrubbed return is the only expectation that can red on emitter loss.
     let mut sent: btctax_core::tax::return_inputs::ReturnInputs = {
         let s = Session::open(&vault, &pp()).unwrap();
-        let stored = btctax_cli::return_inputs::get(s.conn(), 2024)
+        let stored = btctax_cli::return_inputs::get(s.conn(), sentinel_year())
             .unwrap()
             .unwrap();
         btctax_core::tax::scrub::scrub_pii(&stored)
     };
     let mut landed = {
         let s = Session::open(&recipient, &pp()).unwrap();
-        btctax_cli::return_inputs::get(s.conn(), 2024)
+        btctax_cli::return_inputs::get(s.conn(), sentinel_year())
             .unwrap()
             .unwrap()
     };

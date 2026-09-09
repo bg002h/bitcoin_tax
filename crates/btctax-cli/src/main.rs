@@ -927,6 +927,13 @@ fn run() -> Result<ExitCode, CliError> {
             if let Some(note) = &report.slice_attachment_note {
                 eprintln!("note: {note}");
             }
+            // ★★★ FR-104 — WHAT THIS PACKET IS NOT. Louder than the note above, and deliberately
+            //     so: that one says what the slice IS on a year designed for it, while this one
+            //     says that a household the filer entered is absent from the files just listed. The
+            //     walk's TY2025 run exited 0 with nothing distinguishing it from an empty vault's.
+            if let Some(note) = &report.full_return_omitted_note {
+                eprintln!("\n⚠ {note}");
+            }
             // ★★★ (T6 seam review C-1) THE SLICE'S OWN HAND MARK, and it needs no manifest because
             //     it prints the sentence itself. `form_1040_capgains.pdf` writes Form 1040 page 1's
             //     Digital Assets box from the filer's ANSWER since the C-1 fold — and when the year

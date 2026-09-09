@@ -687,6 +687,28 @@ pub enum RefuseReason {
     /// THE COMPUTE (line 4c reading the three inside
     /// [`crate::tax::schedule_1a::Schedule1A::compute`]) stays **FR-72**, Schedule 1-A's own track.
     QualifiedTipsCautionNotMet,
+    /// ★★★ **FR-103 (journey walk finding #2) — SCHEDULE 1-A DATA ON A YEAR THAT HAS NO SCHEDULE
+    /// 1-A.**
+    ///
+    /// UNSUPPORTED class, and the walk found it as **the one silent exception in this codebase**.
+    /// `income import` took a fully detailed `[[schedule_1a.vehicles]]` row on TY2024 with exit 0
+    /// and no message of any kind; `income show` echoed the figure back;
+    /// [`crate::tax::schedule_1a::Schedule1A::compute`] then returned `None` because the year has no
+    /// such form, and nothing anywhere mentioned it. A filer who did not already know Schedule 1-A
+    /// is a TY2025 form had no way to learn it from the tool, and every reason to believe the
+    /// deduction had been taken.
+    ///
+    /// ★★ **Why a refusal and not an advisory.** The neighbouring rule is
+    /// [`Self::QualifiedTipsCautionNotMet`], and its reasoning is the same one line over: a figure
+    /// the filer typed and a deduction they believe they took must never differ silently. An
+    /// advisory prints beside a return that still exits 0; this data can reach no line at all, so
+    /// there is nothing for the filer to check and nothing for a later reader to see. Fail closed,
+    /// like its neighbours.
+    ///
+    /// ★ The `year` rides in the payload so the message can name it, and the WINDOW comes from
+    /// [`crate::tax::tables::SCHEDULE_1A_YEARS`] rather than a second copy of `2025..=2028` — the
+    /// table's `None` and this sentence cannot then disagree when the provisions sunset.
+    Schedule1aNotOnThisYearsReturn { year: i32 },
     // ── ★★★ R3 / §5.1 — THE DOCUMENT CENSUS's four refusals. ────────────────────────────────────
     //
     // Each carries the ROW, never a string, so the message table lives in one place
@@ -2421,6 +2443,48 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
     //
     //     ★ Gated on the row carrying an AMOUNT: an all-zero 1099-B row asserts nothing and reports
     //       nothing, so demanding a confirmation for it would be a refusal with no purpose.
+    // ★★★ FR-103 — SCHEDULE 1-A DATA ON A YEAR WITH NO SCHEDULE 1-A, refused BEFORE every other
+    //     Schedule 1-A rule below. The order is the finding, not a preference: on TY2024 a claimed
+    //     Part II would otherwise be met by `QualifiedTipsCautionNotMet`, which tells the filer to
+    //     set three §224 conditions — three answers that cannot help, on a schedule that will still
+    //     not exist once they are given. "This year's return has no such line" is the prior fact,
+    //     so it is the sentence the filer gets.
+    //
+    // ★ Param-free BY CONSTRUCTION and deliberately so: the year comes from `ri.tax_year` (§G-15),
+    //   which the storage boundary stamps from the row key, so `income import` — the command that
+    //   accepted the row in silence — is the one that now refuses it. Reading `p.year` off the
+    //   package instead would have made this a commit-tier rule and left the import silent, which
+    //   is the whole defect.
+    //
+    // ★ `tax_year == 0` is §G-15's "not stated" and cannot be judged, so it is left alone: a
+    //   yearless `ReturnInputs` is a test convenience, and refusing it would be an assertion about
+    //   a year nobody named.
+    if ri.tax_year != 0
+        && ri.schedule_1a.carries_data()
+        && crate::tax::tables::schedule_1a_params(ri.tax_year).is_none()
+    {
+        let years = crate::tax::tables::SCHEDULE_1A_YEARS;
+        return refuse(
+            RefuseReason::Schedule1aNotOnThisYearsReturn { year: ri.tax_year },
+            format!(
+                "this return is for tax year {year}, and it carries Schedule 1-A entries under \
+                 `[schedule_1a]` — qualified tips, qualified overtime, or car-loan interest. There \
+                 is no Schedule 1-A on a TY{year} return. The schedule was created by \
+                 Pub. L. 119-21 (the One Big Beautiful Bill Act) and exists for tax years {first} \
+                 through {last} only: §224 (tips), §225 (overtime), §163(h)(4) (car-loan interest) \
+                 and §151(d)(5) (the senior deduction) all begin in {first} and expire after \
+                 {last}. So the figures you entered reach NO line of this year's Form 1040 — not a \
+                 zero, not a smaller deduction, no line — and btctax will not store them where they \
+                 would sit beside a return that silently ignored them. Remove the `[schedule_1a]` \
+                 entries from this year's input, or import them onto a TY{first}-TY{last} return \
+                 if that is the year they belong to.",
+                year = ri.tax_year,
+                first = years.start(),
+                last = years.end(),
+            ),
+        );
+    }
+
     // ★★★ T3a — Schedule 1-A lines 5 and 14b read 1099-NEC / 1099-MISC / 1099-K, and btctax has no
     //     struct for any of them. Where the line's own predicate could be TRUE, refuse rather than
     //     print a zero nobody swore to. Both are CONJUNCTIONS: the part must be claimed AND the
@@ -7919,6 +7983,10 @@ mod tests {
         //     trade or business, so line 5's predicate is determinately FALSE and blank is correct.
         //     This case reds if the predicate is ever widened to the claim gate alone.
         let mut employee = ri();
+        // ★ FR-103 — a Schedule 1-A rule is tested on a year that HAS a Schedule 1-A. `ri()` is
+        //   TY2024, where the new year rule refuses first and rightly: there is no Part II on a
+        //   TY2024 return to have a line 5.
+        employee.tax_year = 2025;
         employee.schedule_1a.tips = Some(claiming_tips());
         assert!(
             screen_inputs(&employee, &table, &params).is_none(),
@@ -7940,6 +8008,7 @@ mod tests {
 
         // (3) BOTH limbs true ⇒ the amount cannot be established and a printed 0 would be sworn.
         let mut both = ri();
+        both.tax_year = 2025; // FR-103 — see (1)
         both.schedule_c = Some(ScheduleCInputs::default());
         both.schedule_1a.tips = Some(claiming_tips());
         assert!(
@@ -7959,6 +8028,7 @@ mod tests {
         let params = params();
 
         let mut employee = ri();
+        employee.tax_year = 2025; // FR-103 — Part III exists only on a Schedule 1-A year
         employee.schedule_1a.overtime = Some(Schedule1aOvertime {
             qualified_overtime_reported: dec!(2000),
             is_flsa_premium_half_only: true,
@@ -7971,6 +8041,7 @@ mod tests {
         );
 
         let mut both = ri();
+        both.tax_year = 2025; // FR-103 — Part III exists only on a Schedule 1-A year
         both.schedule_c = Some(ScheduleCInputs::default());
         both.schedule_1a.overtime = Some(Schedule1aOvertime {
             qualified_overtime_reported: dec!(2000),
@@ -8002,6 +8073,7 @@ mod tests {
     fn a_claimed_part_ii_with_any_caution_condition_false_refuses_and_quotes_the_caution() {
         // The review's own probe fixture: the whole claim, none of the conditions.
         let mut bare = ri();
+        bare.tax_year = 2025; // FR-103 — the Caution belongs to a year that prints the Caution
         bare.schedule_1a.tips = Some(Schedule1aTips {
             qualified_tips_reported: dec!(3000),
             ..Default::default()
@@ -8045,6 +8117,7 @@ mod tests {
                 _ => t.meets_qualified_tip_criteria = false,
             }
             let mut r0 = ri();
+            r0.tax_year = 2025; // FR-103 — a Schedule 1-A year
             r0.schedule_1a.tips = Some(t);
             assert_eq!(
                 screen_inputs(&r0, &tbl(), &params()).map(|x| x.reason),
@@ -8057,6 +8130,7 @@ mod tests {
         // (i) All three affirmed — the return files and line 4c is unchanged (FR-72 keeps the
         //     compute; this fold only added the gate).
         let mut ok = ri();
+        ok.tax_year = 2025; // FR-103 — a Schedule 1-A year
         ok.schedule_1a.tips = Some(claiming_tips());
         assert_eq!(
             screen_inputs(&ok, &tbl(), &params()).map(|x| x.reason),
@@ -8066,11 +8140,131 @@ mod tests {
         // (ii) A Part II present but claiming NOTHING asserts nothing and is owed nothing, so
         //      demanding three confirmations for it would be a refusal with no purpose.
         let mut nothing = ri();
+        nothing.tax_year = 2025; // FR-103 — a Schedule 1-A year
         nothing.schedule_1a.tips = Some(Schedule1aTips::default());
         assert_eq!(
             screen_inputs(&nothing, &tbl(), &params()).map(|x| x.reason),
             None,
             "a Part II claiming zero tips must not refuse"
+        );
+    }
+
+    /// ★★★ **FR-103's KILL — THE ONE SILENT EXCEPTION IN THIS CODEBASE NOW REFUSES.**
+    ///
+    /// The 2026-09-07 journey walk typed $1,850 of 2024 car-loan interest into a fully detailed
+    /// `[[schedule_1a.vehicles]]` row. `income import` took it with **exit 0 and no message of any
+    /// kind**, `income show` echoed the figure back, and
+    /// [`crate::tax::schedule_1a::Schedule1A::compute`] then returned `None` because TY2024 has no
+    /// Schedule 1-A. The filer's evidence that a $10,000-capped deduction had been taken was a
+    /// figure on their own screen; the return's evidence was nothing at all.
+    ///
+    /// ★★ **Both directions, and the year is the ONLY thing that differs between them.** A rule
+    ///    that fired on every Schedule 1-A block would refuse the TY2025 filer the schedule exists
+    ///    for, and a rule that fired on none is the shipped defect. So the same block is driven
+    ///    through both, and the window is read from
+    ///    [`crate::tax::tables::SCHEDULE_1A_YEARS`] rather than typed here — a year added to the
+    ///    table arrives with this test already covering it.
+    ///
+    /// ★ **BOTH TIERS.** `income import` is where the walk met the silence, and that path holds no
+    ///   year package, so a commit-tier-only rule would have left the finding exactly where it was.
+    #[test]
+    fn schedule_1a_data_on_a_year_with_no_schedule_1a_refuses_on_both_tiers() {
+        let years = crate::tax::tables::SCHEDULE_1A_YEARS;
+        let vehicle = || Schedule1aVehicle {
+            description: "2025 pickup".into(),
+            interest_paid: dec!(1850),
+            // ★ Every §163(h)(4) condition affirmed, so nothing about the CLAIM is what refuses:
+            //   this is the walk's own row, the one a filer who read the form would write.
+            loan_originated_after_2024: true,
+            loan_originated_by_you: true,
+            proceeds_used_to_purchase: true,
+            personal_use: true,
+            secured_by_first_lien: true,
+            original_use_starts_with_you: true,
+            ..Default::default()
+        };
+
+        // ── (1) THE WALK'S CASE. TY2024, the year `ri()` already is. ─────────────────────────────
+        let mut walk = ri();
+        walk.schedule_1a.vehicles.push(vehicle());
+        for (tier, got) in [
+            ("commit", screen_inputs(&walk, &tbl(), &params())),
+            ("import", screen_param_free(&walk)),
+        ] {
+            let r = got.unwrap_or_else(|| {
+                panic!(
+                    "★ THE KILL ({tier} tier): $1,850 of car-loan interest on a TY2024 return \
+                     reaches no line of any form, and taking it in silence is what the filer reads \
+                     as a deduction"
+                )
+            });
+            assert_eq!(
+                r.reason,
+                RefuseReason::Schedule1aNotOnThisYearsReturn { year: 2024 },
+                "{tier} tier"
+            );
+            // …and it must say the three things the filer needs: their year, the window, and that
+            // the figure reaches no line.
+            for want in ["2024", "no line", "Pub. L. 119-21"] {
+                assert!(
+                    r.detail.contains(want),
+                    "the refusal must name {want:?}: {}",
+                    r.detail
+                );
+            }
+            assert!(
+                r.detail.contains(&years.start().to_string())
+                    && r.detail.contains(&years.end().to_string()),
+                "the refusal must state the window the TABLE holds, not a year typed beside it: {}",
+                r.detail
+            );
+        }
+
+        // ── (2) THE DIRECTION THAT MUST NOT REFUSE — every year the schedule EXISTS for. ────────
+        for year in years.clone() {
+            let mut ok = ri();
+            ok.tax_year = year;
+            ok.schedule_1a.vehicles.push(vehicle());
+            assert_eq!(
+                screen_param_free(&ok).map(|r| r.reason),
+                None,
+                "TY{year} HAS a Schedule 1-A — refusing the car-loan row there would refuse the \
+                 population Part IV was written for"
+            );
+        }
+
+        // ── (3) THE SUNSET, from the same window. TY2029 has no Schedule 1-A either, and the rule
+        //        must reach it without a second edit — §163(h)(4)(F) expires after TY2028.
+        let mut after = ri();
+        after.tax_year = years.end() + 1;
+        after.schedule_1a.vehicles.push(vehicle());
+        assert!(
+            matches!(
+                screen_param_free(&after).map(|r| r.reason),
+                Some(RefuseReason::Schedule1aNotOnThisYearsReturn { .. })
+            ),
+            "the provisions expire after TY{}, so a Schedule 1-A claim on TY{} must refuse too",
+            years.end(),
+            years.end() + 1
+        );
+
+        // ── (4) THE PREDICATE IS *CARRIES DATA*, NOT *A NONZERO AMOUNT*. A claimed Part with a
+        //        zero figure is still a Part the year does not have — and an empty `[schedule_1a]`
+        //        is not a claim at all, so the ordinary TY2024 return must still file.
+        let mut zero = ri();
+        zero.schedule_1a.tips = Some(Schedule1aTips::default());
+        assert!(
+            matches!(
+                screen_param_free(&zero).map(|r| r.reason),
+                Some(RefuseReason::Schedule1aNotOnThisYearsReturn { .. })
+            ),
+            "a claimed Part II on TY2024 refuses even at zero — the Part does not exist"
+        );
+        assert_eq!(
+            screen_param_free(&ri()).map(|r| r.reason),
+            None,
+            "a TY2024 return with NO Schedule 1-A block must still file — this rule may not become \
+             a wall for the year btctax exists to file"
         );
     }
 
@@ -8293,7 +8487,8 @@ mod param_free_tier {
     use crate::tax::document_census::DocumentRow;
     use crate::tax::return_inputs::{
         Box12Entry, CharitableClass, CharitableGift, Form1099B, Form1099Div, Form1099Int, Owner,
-        ReturnInputs, Schedule1aOvertime, Schedule1aTips, ScheduleAInputs, ScheduleCInputs, W2,
+        ReturnInputs, Schedule1aOvertime, Schedule1aTips, Schedule1aVehicle, ScheduleAInputs,
+        ScheduleCInputs, W2,
     };
     use rust_decimal_macros::dec;
     use std::collections::BTreeSet;
@@ -8430,7 +8625,22 @@ mod param_free_tier {
             r.documents.set(DocumentRow::W2, Some(true));
             r.w2s.push(w2(|w| w.box1_wages = dec!(-1)));
         });
+        // ★★★ FR-103 — the walk's own probe: the fully detailed `[[schedule_1a.vehicles]]` row that
+        //     `income import` took on TY2024 with exit 0 and no message. [`ri`] is a TY2024 return,
+        //     so the year needs no perturbation — which is exactly the point of the finding.
+        add("Schedule1aNotOnThisYearsReturn", &|r| {
+            r.schedule_1a.vehicles.push(Schedule1aVehicle {
+                description: "2025 pickup".into(),
+                interest_paid: dec!(1850),
+                ..Default::default()
+            });
+        });
+        // ★ FR-103 — the three Schedule 1-A rules below test something the schedule's own year
+        //   decides, so their fixtures state a year the schedule EXISTS in. On TY2024 the new rule
+        //   above refuses first and correctly (there is no Part II to have a Caution about), which
+        //   the census test would report as this fixture reaching the wrong rule.
         add("Schedule1aTipsFromTradeOrBusiness", &|r| {
+            r.tax_year = 2025;
             r.schedule_c = Some(sched_c());
             r.schedule_1a.tips = Some(Schedule1aTips {
                 qualified_tips_reported: dec!(1000),
@@ -8441,12 +8651,14 @@ mod param_free_tier {
         //   gating condition at its `#[serde(default)]` FALSE, which is what a TOML author writing
         //   only `qualified_tips_reported = "3000"` produces.
         add("QualifiedTipsCautionNotMet", &|r| {
+            r.tax_year = 2025;
             r.schedule_1a.tips = Some(Schedule1aTips {
                 qualified_tips_reported: dec!(3000),
                 ..Default::default()
             });
         });
         add("Schedule1aOvertimeFromTradeOrBusiness", &|r| {
+            r.tax_year = 2025;
             r.schedule_c = Some(sched_c());
             r.schedule_1a.overtime = Some(Schedule1aOvertime {
                 qualified_overtime_reported: dec!(1000),

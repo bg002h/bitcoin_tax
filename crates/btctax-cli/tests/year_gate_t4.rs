@@ -72,6 +72,78 @@ fn an_unsupported_census_declaration_refuses_at_import_and_writes_no_committed_r
     );
 }
 
+/// ★★★ **FR-103's END-TO-END KILL — THE JOURNEY WALK'S OWN TOML, THROUGH THE COMMAND IT WAS TYPED
+/// INTO.**
+///
+/// The walk imported a fully detailed `[[schedule_1a.vehicles]]` row onto TY2024 and got **exit 0
+/// and no message of any kind**; the figure was stored, `income show` echoed it back, and it reached
+/// no line of any form. Every other out-of-scope item in this codebase refuses or advises; this was
+/// the one silent exception found.
+///
+/// ★★★ **AND THIS TEST EXISTS BECAUSE THE UNIT-LEVEL KILL WAS NOT ENOUGH.** The rule was written,
+///     the `screen_param_free` KAT passed on both tiers — and the shipped command still imported the
+///     walk's TOML in silence. `income import` screened the parsed row BEFORE `return_inputs::set`
+///     stamped `tax_year` from the row key (§G-15), so the screen saw `0` ("not stated") and every
+///     year-scoped rule in it was structurally blind on the one command that creates a row. Nothing
+///     in the unit tier could see that: they hand the screen a `ReturnInputs` whose year is already
+///     set. A KILL THAT DRIVES THE COMMAND IS THE ONLY ONE THAT COULD HAVE CAUGHT IT.
+///
+/// ★★ **Both halves.** The SAME TOML on TY2025 must import and be STORED — a rule that refused every
+///    Schedule 1-A block would pass the first half while bricking the year the schedule exists for,
+///    which is the population Part IV was written to serve.
+#[test]
+fn a_schedule_1a_claim_on_a_pre_2025_year_refuses_at_import_and_writes_no_row() {
+    const CAR_LOAN: &str = "filing_status = \"Single\"\n\
+                            [[schedule_1a.vehicles]]\n\
+                            description = \"2025 pickup\"\n\
+                            interest_paid = \"1850\"\n\
+                            loan_originated_after_2024 = true\n\
+                            loan_originated_by_you = true\n\
+                            proceeds_used_to_purchase = true\n\
+                            personal_use = true\n\
+                            secured_by_first_lien = true\n\
+                            original_use_starts_with_you = true\n";
+
+    // ── TY2024: the walk's year. There is no Schedule 1-A on it.
+    let (dir, vault) = fresh_vault();
+    let toml = write_toml(&dir, "carloan.toml", CAR_LOAN);
+    let err = cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false, false).expect_err(
+        "★ THE KILL: $1,850 of car-loan interest on a TY2024 return reaches no line of any form, \
+         and the walk was told nothing at all",
+    );
+    let msg = err.to_string();
+    for needle in [
+        "There is no Schedule 1-A on a TY2024 return",
+        "Pub. L. 119-21",
+        "2025 through 2028",
+        "reach NO line",
+    ] {
+        assert!(
+            msg.contains(needle),
+            "the refusal must say {needle:?}: {msg}"
+        );
+    }
+    assert_eq!(
+        cmd::tax::show_return_inputs(&vault, &pp(), 2024).unwrap(),
+        None,
+        "a refused import must leave NO committed row — a stored figure nothing reads is exactly \
+         what the filer mistakes for a deduction"
+    );
+
+    // ── TY2025: the year the schedule exists for. Same bytes, and they are STORED.
+    let (dir2, vault2) = fresh_vault();
+    let toml2 = write_toml(&dir2, "carloan.toml", CAR_LOAN);
+    cmd::tax::import_return_inputs(&vault2, &pp(), 2025, &toml2, false, false)
+        .expect("TY2025 HAS a Schedule 1-A — the same row must import there");
+    let stored = cmd::tax::show_return_inputs(&vault2, &pp(), 2025)
+        .unwrap()
+        .expect("the TY2025 row is stored");
+    assert!(
+        stored.contains("1850"),
+        "…and the figure the filer typed is actually on the row: {stored}"
+    );
+}
+
 /// ★★★ **T9 / R8 — A FORM 1098 BOX 4 REFUND REFUSES AT IMPORT, NAMES LINE 8z, AND WRITES NOTHING.**
 ///
 /// The rule is param-free — it reads a box, not a table — so it belongs in the tier `income import`
