@@ -3692,7 +3692,8 @@ fn a_full_return_8283_map_without_page2_identity_fails_closed() {
     map.identity_page2 = None; // the exact omission
     let err = match fill_8283_full_with_map(&printed, &kitchen_sink_header(), &map) {
         Ok(_) => panic!(
-            "a map with no [identity_page2] FILLED — page 2 goes out with no identifying header, so a              detached Section B page cannot be tied to its return"
+            "a map with no [identity_page2] FILLED — page 2 goes out with no identifying header, \
+             so a detached Section B page cannot be tied to its return"
         ),
         Err(e) => format!("{e}"),
     };

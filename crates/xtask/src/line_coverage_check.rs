@@ -1275,7 +1275,8 @@ pub fn check(cov: &line_coverage::Coverage) -> Result<String, String> {
                 &cov.0, form, quoted, other, why, &text,
             )),
             Err(e) => errs.push(format!(
-                "{form}: this build serves {form}--{other} from the same struct as                  {form}--{quoted} ({why}), but {} cannot be read: {e}",
+                "{form}: this build serves {form}--{other} from the same struct as \
+                 {form}--{quoted} ({why}), but {} cannot be read: {e}",
                 path.display()
             )),
         }

@@ -326,6 +326,7 @@ fn run() -> Result<ExitCode, CliError> {
             }
             IncomeCmd::Answer {
                 year,
+                re_answer,
                 discard_draft,
             } => {
                 let pp = passphrase(false)?;
@@ -341,7 +342,15 @@ fn run() -> Result<ExitCode, CliError> {
                     btctax_core::conventions::tax_date(now, UtcOffset::UTC),
                     &mut input,
                     &mut out,
-                    discard_draft,
+                    cmd::answer::AnswerOptions {
+                        discard_draft,
+                        // ★ FR-109 — the flag IS the scope; there is no third state.
+                        scope: if re_answer {
+                            cmd::answer::AskScope::Every
+                        } else {
+                            cmd::answer::AskScope::StillNeeded
+                        },
+                    },
                 )?;
                 println!("Answered the full-return questions for tax year {year}.");
             }

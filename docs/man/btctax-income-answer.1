@@ -4,17 +4,26 @@
 .SH NAME
 answer \- Answer the return\*(Aqs fail\-loud questions interactively — the yes/no boxes that have no safe default (can someone claim you as a dependent? Schedule B\*(Aqs foreign\-account and foreign\-trust lines) plus the optional dates of birth
 .SH SYNOPSIS
-\fBanswer\fR <\fB\-\-year\fR> [\fB\-\-discard\-draft\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+\fBanswer\fR <\fB\-\-year\fR> [\fB\-\-re\-answer\fR] [\fB\-\-discard\-draft\fR] [\fB\-h\fR|\fB\-\-help\fR] 
 .SH DESCRIPTION
 Answer the return\*(Aqs fail\-loud questions interactively — the yes/no boxes that have no safe default (can someone claim you as a dependent? Schedule B\*(Aqs foreign\-account and foreign\-trust lines) plus the optional dates of birth.
 .PP
 These questions REFUSE the return until they are answered: guessing "no" on your behalf would understate your tax and print an unchecked box you never affirmed. This is the only way to answer them without editing a TOML file. It never asks for a secret — SSNs and the IP PIN belong to `set\-pii`, which does not echo what you type.
+.PP
+Only the questions this return still needs are asked. One you have already answered — in the words it is asked in now — is skipped; `\-\-re\-answer` puts every one of them again.
 .PP
 Requires an existing return for the year (create one with `income import`).
 .SH OPTIONS
 .TP
 \fB\-\-year\fR \fI<YEAR>\fR
 The tax year (e.g. 2024)
+.TP
+\fB\-\-re\-answer\fR
+Ask EVERY question that applies to this return, including the ones already answered.
+
+The default asks only what is still needed: a question whose answer is on file, recorded against the words it is asked in now, is skipped. Use this to walk the whole return again — before you sign it, or when you are not sure what you answered last time.
+
+It changes nothing on its own: a bare Enter keeps the answer shown, exactly as it does on a first pass.
 .TP
 \fB\-\-discard\-draft\fR
 Discard a work\-in\-progress tax\-inputs DRAFT for this year that holds an interview — recorded answers, transcribed documents, dependents or a Schedule A.

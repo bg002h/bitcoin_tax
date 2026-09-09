@@ -663,11 +663,24 @@ pub enum IncomeCmd {
     /// them without editing a TOML file. It never asks for a secret — SSNs and the IP PIN belong to
     /// `set-pii`, which does not echo what you type.
     ///
+    /// Only the questions this return still needs are asked. One you have already answered — in the
+    /// words it is asked in now — is skipped; `--re-answer` puts every one of them again.
+    ///
     /// Requires an existing return for the year (create one with `income import`).
     Answer {
         /// The tax year (e.g. 2024).
         #[arg(long)]
         year: i32,
+        /// Ask EVERY question that applies to this return, including the ones already answered.
+        ///
+        /// The default asks only what is still needed: a question whose answer is on file, recorded
+        /// against the words it is asked in now, is skipped. Use this to walk the whole return
+        /// again — before you sign it, or when you are not sure what you answered last time.
+        ///
+        /// It changes nothing on its own: a bare Enter keeps the answer shown, exactly as it does
+        /// on a first pass.
+        #[arg(long)]
+        re_answer: bool,
         /// Discard a work-in-progress tax-inputs DRAFT for this year that holds an interview —
         /// recorded answers, transcribed documents, dependents or a Schedule A.
         ///

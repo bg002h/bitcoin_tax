@@ -386,7 +386,8 @@ fn the_pii_exclusion_rule_admits_only_impossible_identifiers() {
         (
             "99-1000000",
             true,
-            "the pad-not-truncate boundary of synthetic_malformed_ein, computed by two fold checks              — a value that was never emitted, recorded because it WAS the defect",
+            "the pad-not-truncate boundary of synthetic_malformed_ein, computed by two fold checks \
+             — a value that was never emitted, recorded because it WAS the defect",
         ),
         (
             "56-1234567",

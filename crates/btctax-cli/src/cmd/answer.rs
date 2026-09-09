@@ -10,9 +10,12 @@
 //! no-echo. `answer` is an ordinary echoing prompt — routing a secret through it would print a crown jewel
 //! into terminal scrollback.
 use crate::{return_inputs, CliError, Session};
-use btctax_core::tax::dependent_gates::{DependentGateQuestion, GateKind, DEPENDENT_GATES};
+use btctax_core::tax::dependent_gates::{
+    gate_is_answered, DependentGateQuestion, GateKind, DEPENDENT_GATES,
+};
 use btctax_core::tax::provenance::{
-    dependent_ssn_hash, record_answer, AnswerKey, AnswerState, DependentGate,
+    answer_status, dependent_ssn_hash, record_answer, AnswerKey, AnswerState, AnswerStatus,
+    DependentGate,
 };
 use btctax_core::tax::questions::{
     FormQuestion, QuestionId, SkippableKind, SkippableQuestion, FORM_QUESTIONS, SKIPPABLE_QUESTIONS,
@@ -195,6 +198,88 @@ enum AskedKey {
         row: usize,
         gate: DependentGate,
     },
+}
+
+/// ★★★ **FR-109 — WHICH of the live questions are put to the filer.**
+///
+/// Liveness (`(q.live)(&ri)`, `walk_dependent(ri, row).demands(gate)`) says which questions *apply
+/// to this return*. It says nothing about whether the filer has already answered them, and until
+/// FR-109 nothing else did either: every live question was asked every session — measured on the
+/// 2026-09-07 journey walk at **33 already-answered declarations plus 15 dependent gates in one
+/// run**, all of them re-confirmed with a bare Enter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AskScope {
+    /// The default: ask what the answer log says still needs asking. See [`needs_asking`].
+    #[default]
+    StillNeeded,
+    /// `--re-answer`: put EVERY live question again, including ones already on file. The behaviour
+    /// every session had before FR-109, kept because re-reading the whole set is a legitimate thing
+    /// to want — a filer walking their return end to end before signing it, or one who is not sure
+    /// what a past self answered.
+    Every,
+}
+
+/// The two knobs [`answer_return_inputs`] takes beyond the year and the streams.
+///
+/// ★ A struct rather than two more parameters: the function already takes seven, and clippy's
+///   `too_many_arguments` is on at `-D warnings`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AnswerOptions {
+    /// Discard a work-in-progress tax-inputs DRAFT for this year that holds an interview.
+    pub discard_draft: bool,
+    /// Which live questions to ask.
+    pub scope: AskScope,
+}
+
+/// The `answer_log` key one [`Ask`] is stored under — `None` for a dependent gate whose row has
+/// gone (the walk will not offer one, so this is defence, not a path).
+fn answer_key_of(ri: &ReturnInputs, ask: &Ask) -> Option<AnswerKey> {
+    Some(match ask {
+        Ask::Declaration(q) => AnswerKey::Question(q.id),
+        Ask::Skippable(sk) => AnswerKey::Skippable(sk.id),
+        Ask::DependentGate { gate, row } => AnswerKey::DependentGate {
+            ssn_hash: dependent_ssn_hash(&ri.header.dependents.get(*row)?.ssn),
+            gate: gate.gate,
+        },
+    })
+}
+
+/// ★★★ **FR-109 — does this live question still need putting to the filer?**
+///
+/// The line is drawn by [`AnswerStatus`], whose variants already draw it, and the answer is a
+/// conjunction of two different facts because **the log and the leaf can disagree**:
+///
+/// | status | verdict | why |
+/// |---|---|---|
+/// | `NeverAsked` | **ASK** | no record. Either the leaf is empty (the ordinary unanswered case) or it holds a value that arrived by `income import` — and an imported value has no prompt hash, so R10.3's re-ask on reworded question could never fire for it. Asking stamps a record, so this CONVERGES: asked once after an import, skipped every session after. |
+/// | `WordingChanged` | **ASK** | the variant's own doc is *"Treated as UNANSWERED everywhere"*. The filer answered a different sentence, so there is no answer to the question now on the screen. Consistency, not an exception. |
+/// | `Given` | **SKIP** | answered, under these words. |
+/// | `Declined` | **SKIP** | *asked and deliberately passed over* — a recorded decision, and R12 still lists the benefit as forgone, so the filer is not left uninformed by the silence. |
+///
+/// ★★ **…and then the LEAF, for a class-(A) ask only.** A `Given` record standing over an empty
+///    leaf is a record of testimony the return does not carry. Skipping there would be the one
+///    outcome worse than re-asking: the question is class (A), so `screen_inputs` refuses the
+///    commit, R12 lists it as blocking, and the command that exists to fix it would refuse to ask
+///    — a **brick**, and the same shape as the T7 seam review's starved dependent row. The rule
+///    there is the rule here: *fail-closed on the claim, fail-OPEN on the interview.* A class-(B)
+///    skippable takes no leaf test, because for it an empty leaf IS a lawful answer (`Declined`).
+#[must_use]
+pub fn needs_asking(ri: &ReturnInputs, ask: &Ask) -> bool {
+    let Some(key) = answer_key_of(ri, ask) else {
+        return true;
+    };
+    match answer_status(ri, &key) {
+        AnswerStatus::NeverAsked | AnswerStatus::WordingChanged => true,
+        AnswerStatus::Given | AnswerStatus::Declined => match ask {
+            Ask::Declaration(q) => (q.get)(ri).is_none(),
+            Ask::DependentGate { gate, row } => !ri
+                .header
+                .dependents
+                .get(*row)
+                .is_some_and(|d| gate_is_answered(d, gate.gate)),
+            Ask::Skippable(_) => false,
+        },
+    }
 }
 
 fn asked_key_of(a: &Ask) -> AskedKey {
@@ -546,8 +631,12 @@ pub fn answer_return_inputs(
     now: time::Date,
     input: &mut impl std::io::BufRead,
     out: &mut impl Write,
-    discard_draft: bool,
+    opts: AnswerOptions,
 ) -> Result<(), CliError> {
+    let AnswerOptions {
+        discard_draft,
+        scope,
+    } = opts;
     let mut s = Session::open(vault, pp)?;
     let target = answer_target(&s, year, discard_draft)?;
     let (mut ri, into_draft, coherence) = match target {
@@ -623,24 +712,31 @@ pub fn answer_return_inputs(
     // ★ r3 NIT-2 — the questions say "in this tax year" but the registry prompts are `&'static str` and
     // cannot interpolate the year; a one-line banner anchors them so the filer need not hold it in their head.
     writeln!(out, "Answering full-return questions for tax year {year}:")?;
-    // ★★★ **FR-105 — SAY THAT EVERY LIVE QUESTION IS PUT AGAIN.** This command asks every question
-    //     that is LIVE, not every question that is UNANSWERED: liveness is `(q.live)(&ri)` for a
-    //     declaration and `walk_dependent(ri, row).demands(gate)` for a dependent gate, and neither
-    //     consults the answer log. So a filer who imported a complete TOML, or who ran this
-    //     yesterday, is asked the whole set again — measured on the 2026-09-07 journey walk at 33
-    //     already-answered declarations plus 15 dependent gates in one session, with nothing on
-    //     screen saying why.
+    // ★★★ **FR-109 — SAY WHICH QUESTIONS ARE COMING, and the sentence must track the CODE.**
     //
-    //     ★ The sentence states the MECHANISM, not a motive. An earlier reading held that the
-    //       re-ask was provenance-driven — that an imported leaf lacks an `AnswerRecord` and so is
-    //       not yet testimony — and that reading was REFUTED by measurement: stamping a `Given`
-    //       record on all 15 gates changes the ask count by zero. Explaining a reason the code does
-    //       not have would be a filer-facing sentence that is simply false, which is worse than the
-    //       silence it replaces.
+    //     FR-105 put a sentence here saying *"every question that applies to this return is asked
+    //     again each time — this command does not skip the ones already on file"*. That was true of
+    //     the command as it then stood and is **false of it now**, which is the FR-108 class in
+    //     prose: a filer-facing sentence left standing over a mechanism that moved underneath it.
+    //     So it is rewritten rather than kept, and it is written per SCOPE — a `--re-answer` run
+    //     really does put everything again, and must say so.
+    //
+    // ★ The wording states the MECHANISM, not a motive, which is the rule FR-105 established: the
+    //   skip is *"already answered, in the words it is asked in now"* (`answer_status`), never a
+    //   claim about what the filer meant.
     writeln!(
         out,
-        "  (every question that applies to this return is asked again each time — this command does \
-         not skip the ones already on file. Press Enter to keep the answer shown.)"
+        "{}",
+        match scope {
+            AskScope::StillNeeded =>
+                "  (only what this return still needs is asked: a question already answered — in \
+                 the words it is asked in now — is skipped. A value that arrived by `income \
+                 import` is asked once, so that it gets a record. Press Enter to keep an answer \
+                 shown, or re-run with `--re-answer` to be put through every question again.)",
+            AskScope::Every =>
+                "  (`--re-answer`: every question that applies to this return is put again, \
+                 including the ones already answered. Press Enter to keep the answer shown.)",
+        }
     )?;
     // ★★★ T4/R11 — THE YEAR GATE, stated before the first question: which of the two states this
     //     year has, in R11's own words, so a filer on a params-less year knows that authoring and
@@ -728,6 +824,16 @@ pub fn answer_return_inputs(
         let round: Vec<Ask> = live_questions_with(&ri, params.as_ref())
             .into_iter()
             .filter(|a| !asked.contains(&asked_key_of(a)))
+            // ★★★ FR-109 — and of those, the ones that still NEED asking. `Every` is `--re-answer`,
+            //     which is the pre-FR-109 behaviour verbatim.
+            //
+            // ★ The sweep still terminates: a skipped ask is not inserted into `asked`, but nothing
+            //   this loop does can turn a `Given` back into a `NeverAsked`, so the same question is
+            //   filtered out again on the next pass and `round` empties. The one direction that
+            //   DOES change mid-session is toward asking MORE — an answer given now can reword a
+            //   question that quotes it (R10.4), and the next sweep picks that up, which is exactly
+            //   right.
+            .filter(|a| scope == AskScope::Every || needs_asking(&ri, a))
             .collect();
         if round.is_empty() {
             break;
@@ -1105,6 +1211,30 @@ pub fn answer_return_inputs(
                 record_answer(&mut ri, AnswerKey::Skippable(sk.id), sk.prompt, now, state);
             }
         }
+    }
+
+    // ★★★ **FR-109 — A SESSION THAT ASKED NOTHING SAYS SO.**
+    //
+    //     Before FR-109 this could not happen: something was always asked. Now the common case for
+    //     a filer who imported a TOML and ran this yesterday is that nothing is due — and a command
+    //     that prints two panels and no questions looks broken. It is not enough for the panel to
+    //     say the return is complete; the filer asked to be *asked*, and the honest answer is that
+    //     there was nothing to ask **and how to be asked anyway**.
+    if asked.is_empty() {
+        writeln!(
+            out,
+            "{}",
+            match scope {
+                AskScope::StillNeeded => format!(
+                    "\nNothing to ask: every question this return needs is already answered, in \
+                     the words it is asked in now. Run `btctax income answer --year {year} \
+                     --re-answer` to be put through all of them again."
+                ),
+                AskScope::Every =>
+                    "\nNothing to ask: no question in the registry applies to this return."
+                        .to_string(),
+            }
+        )?;
     }
 
     // ★★★ R12 / §4.2 — THE PANEL, AFTER the last question. Printed BEFORE the write, so a filer
@@ -1670,7 +1800,7 @@ mod tests {
             time::macros::date!(2026 - 02 - 03),
             &mut keys,
             &mut screen,
-            false,
+            AnswerOptions::default(),
         )
         .expect("every live question is scripted");
         let screen = String::from_utf8(screen).unwrap();
@@ -1896,7 +2026,7 @@ mod tests {
                 time::macros::date!(2026 - 02 - 03),
                 &mut keys,
                 &mut screen,
-                false,
+                AnswerOptions::default(),
             )
             .expect_err("a row with no owner cannot be interviewed");
             let msg = err.to_string();
@@ -2655,5 +2785,410 @@ mod tests {
             Ok(Some(time::macros::date!(1960 - 01 - 02)))
         );
         assert!(parse_date("Jan 2 1960").is_err());
+    }
+    // ── FR-109: the four kills ────────────────────────────────────────────────────────────────
+    //
+    // ★★★ Each drives the REAL `answer_return_inputs` from a keystroke script and reads the SCREEN
+    //     — never a re-implementation of its loop. That is the T7 seam-review lesson: an emulation
+    //     that omits the step under test is green because it never ran it (B1).
+
+    /// The day every FR-109 fixture answers on. One constant so `record_answer`'s `answered_on` is
+    /// not a moving part of the comparison.
+    const FR109_DAY: time::Date = time::macros::date!(2026 - 02 - 03);
+
+    fn fr109_params() -> FullReturnParams {
+        use btctax_core::tax::tables::FullReturnTables;
+        btctax_adapters::BundledFullReturnTables::load()
+            .full_return_for(2024)
+            .cloned()
+            .expect("TY2024 params are bundled")
+    }
+
+    /// A TY2024 seed with two dependents — so the fixture covers the gates FR-105 measured (15 in
+    /// one session) and the return-level declarations (33) in the same run.
+    fn fr109_seed() -> ReturnInputs {
+        let mut seed = single();
+        seed.tax_year = 2024;
+        seed.header.dependents = vec![
+            btctax_core::tax::return_inputs::Dependent {
+                name: "First Kid".into(),
+                ssn: "000-00-1111".into(),
+                relationship: "Daughter".into(),
+                ..Default::default()
+            },
+            btctax_core::tax::return_inputs::Dependent {
+                name: "Second Kid".into(),
+                ssn: "000-00-2222".into(),
+                relationship: "Son".into(),
+                ..Default::default()
+            },
+        ];
+        seed
+    }
+
+    /// How many questions a session actually PUT to the filer, read off the screen. Every prompt in
+    /// the command — declaration, skippable in each of its three shapes, and dependent gate — ends
+    /// with the same `]: ` before the cursor, and nothing else the command prints does.
+    ///
+    /// ★ It is cross-checked against the derived live set in
+    ///   [`re_answer_puts_every_live_question_again`], so a counter that drifted from the prompts it
+    ///   counts fails there rather than reporting a comfortable number here.
+    fn fr109_prompts(screen: &str) -> usize {
+        screen.matches("]: ").count()
+    }
+
+    /// One `income answer` session against `vault`, driven by `script`. Returns the screen.
+    fn fr109_run(
+        vault: &std::path::Path,
+        script: &str,
+        scope: AskScope,
+    ) -> Result<String, CliError> {
+        let mut keys = script.as_bytes();
+        let mut screen: Vec<u8> = Vec::new();
+        answer_return_inputs(
+            vault,
+            &t7_pp(),
+            2024,
+            FR109_DAY,
+            &mut keys,
+            &mut screen,
+            AnswerOptions {
+                discard_draft: false,
+                scope,
+            },
+        )?;
+        Ok(String::from_utf8(screen).unwrap())
+    }
+
+    /// A vault whose TY2024 draft has had every live question ANSWERED by the real command, so the
+    /// answer log holds a record for each. Returns the vault and how many prompts that first pass
+    /// put to the filer.
+    fn fr109_answered_vault() -> (tempfile::TempDir, std::path::PathBuf, usize) {
+        let (dir, vault) = t7_vault();
+        let seed = fr109_seed();
+        {
+            let mut s = Session::open(&vault, &t7_pp()).unwrap();
+            crate::input_form_store::save_draft(&mut s, 2024, &seed).unwrap();
+        }
+        let (script, _, _) = t7_script(&seed, Some(&fr109_params()));
+        let screen = fr109_run(&vault, &script, AskScope::StillNeeded)
+            .expect("every live question is scripted");
+        let n = fr109_prompts(&screen);
+        assert!(
+            n >= 40,
+            "the fixture must present a REAL session — {n} prompts is not one (FR-105 measured 33 \
+             declarations plus 15 gates)"
+        );
+        (dir, vault, n)
+    }
+
+    /// ★★★ **KILL 1 — a session over a fully-answered return asks NOTHING, and says so.**
+    ///
+    /// The input is EMPTY. Before FR-109 that could only end one way: the command put its first
+    /// question, `read_line` returned 0, and it exited *"input ended before every question was
+    /// answered — nothing was stored"*. So the empty stdin is the kill — it cannot pass unless the
+    /// command genuinely asked nothing.
+    ///
+    /// ★★ **B1a — the fixture is asserted to present the case.** A fixture whose questions were
+    ///    somehow NOT answered would also ask nothing new for the wrong reason, so every live
+    ///    question is measured `Given` or `Declined` first, from the log.
+    #[test]
+    fn a_fully_answered_return_asks_nothing_and_says_so() {
+        let (_dir, vault, first) = fr109_answered_vault();
+        let params = fr109_params();
+        let ri = t7_draft(&vault, 2024);
+
+        // B1a — every live question really is on file, and under the words asked NOW.
+        let live = live_questions_with(&ri, Some(&params));
+        assert!(!live.is_empty(), "the fixture has no live questions at all");
+        for ask in &live {
+            let key = answer_key_of(&ri, ask).expect("a live ask has a key");
+            let st = answer_status(&ri, &key);
+            assert!(
+                matches!(st, AnswerStatus::Given | AnswerStatus::Declined),
+                "{key:?} reads {st:?} after being answered — the fixture does not present the case"
+            );
+        }
+
+        let screen = fr109_run(&vault, "", AskScope::StillNeeded)
+            .expect("a fully-answered return must not read a single keystroke");
+        assert_eq!(
+            fr109_prompts(&screen),
+            0,
+            "a question was put to the filer over a fully-answered return:\n{screen}"
+        );
+        assert!(
+            screen.contains("Nothing to ask:"),
+            "a session that asks nothing must SAY so — two panels and silence looks broken:\n\
+             {screen}"
+        );
+        assert!(
+            screen.contains("--re-answer"),
+            "…and must say how to be asked anyway:\n{screen}"
+        );
+        // The first pass really did ask; this is the same command on the same return.
+        assert!(first >= 40, "the first pass asked {first}");
+    }
+
+    /// ★★★ **KILL 2 — `--re-answer` restores the old behaviour exactly: every live question again.**
+    ///
+    /// The comparison is against the FIRST pass's own prompt count on the same return, so it cannot
+    /// drift with the registry: add a question and both numbers move together.
+    ///
+    /// ★ It also CROSS-CHECKS the screen counter against the derived live set. Without that,
+    ///   `fr109_prompts` could be counting something else entirely and every FR-109 assertion would
+    ///   be measuring a number nobody has tied to a prompt.
+    #[test]
+    fn re_answer_puts_every_live_question_again() {
+        let (_dir, vault, first) = fr109_answered_vault();
+        let params = fr109_params();
+        let ri = t7_draft(&vault, 2024);
+        let live = live_questions_with(&ri, Some(&params)).len();
+
+        // A bare Enter keeps every answer on file, so one per live question is a complete script.
+        let script = "\n".repeat(live + MAX_SWEEPS);
+        let screen = fr109_run(&vault, &script, AskScope::Every)
+            .expect("Enter keeps every answer that is already on file");
+        let asked = fr109_prompts(&screen);
+        assert_eq!(
+            asked, live,
+            "`--re-answer` must put every LIVE question — the screen counter and the derived live \
+             set disagree, so one of them is not measuring prompts:\n{screen}"
+        );
+        assert_eq!(
+            asked, first,
+            "`--re-answer` must ask what the first pass asked: that IS the behaviour it restores"
+        );
+        assert!(
+            !screen.contains("Nothing to ask:"),
+            "a session that asked {asked} questions must not claim it asked none"
+        );
+        // …and the default, on the same return, asks none of them.
+        let default = fr109_run(&vault, "", AskScope::StillNeeded).expect("nothing is due");
+        assert_eq!(
+            fr109_prompts(&default),
+            0,
+            "the flag is what changes the behaviour, and without it nothing is asked"
+        );
+    }
+
+    /// ★★★ **KILL 3 — a `WordingChanged` answer is asked again WITHOUT the flag.**
+    ///
+    /// [`AnswerStatus::WordingChanged`]'s own doc is *"Treated as UNANSWERED everywhere: blocking
+    /// for class (A), forgoing for class (B), and refused by `screen_inputs`."* If the FR-109 skip
+    /// treated it as answered, `income answer` would become the one surface in the product that
+    /// disagrees — and a filer whose question was reworded could no longer reach it from the
+    /// keyboard at all, while the commit gate kept refusing. A brick, and R10.3's whole re-ask rule
+    /// dead on arrival.
+    ///
+    /// The plant re-records ONE live declaration under words the filer was never shown, leaving the
+    /// leaf's value untouched — exactly what a reworded registry prompt does to an old record.
+    #[test]
+    fn a_reworded_question_is_asked_again_without_the_flag() {
+        let (_dir, vault, _) = fr109_answered_vault();
+        let params = fr109_params();
+        let mut ri = t7_draft(&vault, 2024);
+        let victim = live_questions_with(&ri, Some(&params))
+            .iter()
+            .find_map(Ask::declaration_id)
+            .expect("the fixture has a live declaration");
+        let key = AnswerKey::Question(victim);
+
+        // ── THE PLANT ──
+        assert_eq!(
+            answer_status(&ri, &key),
+            AnswerStatus::Given,
+            "the victim must start ANSWERED, or the plant proves nothing"
+        );
+        let before = (FORM_QUESTIONS
+            .iter()
+            .find(|q| q.id == victim)
+            .expect("a registry question")
+            .get)(&ri);
+        record_answer(
+            &mut ri,
+            key.clone(),
+            "a sentence the filer was never shown",
+            FR109_DAY,
+            AnswerState::Given,
+        );
+        // B1a — the fixture presents the case: stale record, value intact.
+        assert_eq!(
+            answer_status(&ri, &key),
+            AnswerStatus::WordingChanged,
+            "the plant did not produce a wording change"
+        );
+        assert_eq!(
+            (FORM_QUESTIONS
+                .iter()
+                .find(|q| q.id == victim)
+                .expect("a registry question")
+                .get)(&ri),
+            before,
+            "the plant must leave the LEAF alone — otherwise it is an unanswered question, not a \
+             reworded one"
+        );
+        {
+            let mut s = Session::open(&vault, &t7_pp()).unwrap();
+            crate::input_form_store::save_draft(&mut s, 2024, &ri).unwrap();
+        }
+
+        // ── THE MEASUREMENT — default scope, NO flag. ──
+        let screen = fr109_run(&vault, "\n", AskScope::StillNeeded)
+            .expect("Enter keeps the value already on file");
+        assert_eq!(
+            fr109_prompts(&screen),
+            1,
+            "exactly the reworded question must be asked, and nothing else:\n{screen}"
+        );
+        assert!(
+            screen.contains(btctax_core::tax::provenance::WORDING_CHANGED_REASON),
+            "the panel must tell the filer WHY it is asking again:\n{screen}"
+        );
+        assert!(
+            !screen.contains("Nothing to ask:"),
+            "a stale record is not nothing to ask"
+        );
+        // …and answering it under the current words settles it.
+        assert_eq!(
+            answer_status(&t7_draft(&vault, 2024), &key),
+            AnswerStatus::Given,
+            "the re-ask must have re-recorded against the words on the screen"
+        );
+    }
+
+    /// ★★★ **KILL 4 — an IMPORTED leaf is asked once, and not twice.**
+    ///
+    /// `income import` writes values and no records, so every leaf reads answered while
+    /// `answer_status` reads `NeverAsked` (FR-109's own question, and FR-105's refutation measured
+    /// exactly this state). The skip rule asks it, which is what stamps the record — so the second
+    /// session skips it. **That convergence is the point:** skipping a recordless leaf outright
+    /// would honour the owner's ruling and leave the value with no prompt hash forever, which is
+    /// R10.3's re-ask rule permanently unable to fire for anything a filer imported.
+    ///
+    /// The fixture is built by clearing the log off an answered draft — the imported shape, derived
+    /// rather than hand-typed.
+    #[test]
+    fn an_imported_leaf_is_asked_once_and_not_twice() {
+        let (_dir, vault, first) = fr109_answered_vault();
+        let params = fr109_params();
+        let mut ri = t7_draft(&vault, 2024);
+        ri.answer_log.clear();
+        ri.answer_log_history.clear();
+        {
+            let mut s = Session::open(&vault, &t7_pp()).unwrap();
+            crate::input_form_store::save_draft(&mut s, 2024, &ri).unwrap();
+        }
+
+        // B1a — the fixture presents the case: values everywhere, records nowhere.
+        let ri = t7_draft(&vault, 2024);
+        assert!(
+            ri.answer_log.is_empty(),
+            "the imported shape has no records"
+        );
+        let live = live_questions_with(&ri, Some(&params));
+        assert!(!live.is_empty());
+        for ask in &live {
+            let key = answer_key_of(&ri, ask).expect("a live ask has a key");
+            assert_eq!(
+                answer_status(&ri, &key),
+                AnswerStatus::NeverAsked,
+                "{key:?} must read NeverAsked in the imported shape"
+            );
+        }
+
+        // ── PASS ONE — asked, exactly as a first pass is. ──
+        let script = "\n".repeat(live.len() + MAX_SWEEPS);
+        let one = fr109_run(&vault, &script, AskScope::StillNeeded)
+            .expect("Enter keeps every imported value");
+        assert_eq!(
+            fr109_prompts(&one),
+            first,
+            "an imported return must be put through the whole set once — that is what gives its \
+             values a prompt hash:\n{one}"
+        );
+
+        // ── PASS TWO — nothing, because pass one recorded. ──
+        let two = fr109_run(&vault, "", AskScope::StillNeeded)
+            .expect("the second pass must not read a keystroke");
+        assert_eq!(
+            fr109_prompts(&two),
+            0,
+            "an imported leaf must be asked ONCE, not every session:\n{two}"
+        );
+        assert!(two.contains("Nothing to ask:"));
+    }
+    /// ★★★ **KILL 5 — the LEAF conjunct, watched discriminating.**
+    ///
+    /// [`needs_asking`] does not read the log alone: for a class-(A) ask it also requires the leaf
+    /// to hold what the record says was given. A `Given` record standing over an EMPTY class-(A)
+    /// leaf is a record of testimony the return does not carry, and skipping there is the one
+    /// outcome worse than re-asking — `screen_inputs` refuses the commit, R12 lists the question as
+    /// blocking, and the command that exists to fix it declines to ask. A brick.
+    ///
+    /// The three rows below are the whole rule, and the last two are what stop the conjunct from
+    /// simply reding on everything: **fail-closed on the claim, fail-OPEN on the interview.**
+    #[test]
+    fn a_record_standing_over_an_empty_class_a_leaf_is_still_asked() {
+        let params = fr109_params();
+
+        // ── (a) a DECLARATION: `Given` record, empty leaf ⇒ ASK. ──
+        let mut ri = fr109_seed();
+        let ask = live_questions_with(&ri, Some(&params))
+            .into_iter()
+            .find(|a| matches!(a, Ask::Declaration(_)))
+            .expect("the seed has a live declaration");
+        let Ask::Declaration(q) = &ask else {
+            unreachable!("filtered above")
+        };
+        assert!(
+            (q.get)(&ri).is_none(),
+            "the fixture must present an EMPTY leaf, or it proves nothing"
+        );
+        let key = AnswerKey::Question(q.id);
+        let words = q.prompt_text(&ri).into_owned();
+        record_answer(&mut ri, key.clone(), &words, FR109_DAY, AnswerState::Given);
+        assert_eq!(
+            answer_status(&ri, &key),
+            AnswerStatus::Given,
+            "the fixture must present a record the log calls ANSWERED"
+        );
+        assert!(
+            needs_asking(&ri, &ask),
+            "a `Given` record over an empty class-(A) leaf must still be asked — skipping it is a \
+             brick: the commit refuses and the command that fixes it will not ask"
+        );
+
+        // ── (b) the NEAR MISS — same record, leaf now filled ⇒ SKIP. Without this the conjunct
+        //       reds on everything and FR-109 buys nothing. ──
+        (q.set)(&mut ri, q.neutral);
+        let words = q.prompt_text(&ri).into_owned();
+        record_answer(&mut ri, key.clone(), &words, FR109_DAY, AnswerState::Given);
+        assert!(
+            !needs_asking(&ri, &ask),
+            "an answered leaf with a matching record is exactly what FR-109 skips"
+        );
+
+        // ── (c) a SKIPPABLE takes NO leaf test: an empty leaf IS its lawful answer. ──
+        let mut ri = fr109_seed();
+        let sk_ask = live_questions_with(&ri, Some(&params))
+            .into_iter()
+            .find(|a| matches!(a, Ask::Skippable(_)))
+            .expect("the seed has a live skippable");
+        let Ask::Skippable(sk) = &sk_ask else {
+            unreachable!("filtered above")
+        };
+        record_answer(
+            &mut ri,
+            AnswerKey::Skippable(sk.id),
+            sk.prompt,
+            FR109_DAY,
+            AnswerState::Declined,
+        );
+        assert!(
+            !needs_asking(&ri, &sk_ask),
+            "`Declined` is provenance — asked and passed over — and R12 still lists the benefit as \
+             forgone, so re-asking it every session is the behaviour FR-109 removes"
+        );
     }
 }

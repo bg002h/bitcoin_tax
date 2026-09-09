@@ -608,7 +608,7 @@ fn answer_the_draft_with(
         time::macros::date!(2026 - 02 - 03),
         &mut keys,
         &mut screen,
-        false,
+        cmd::answer::AnswerOptions::default(),
     );
     (r, String::from_utf8(screen).unwrap())
 }
@@ -629,7 +629,7 @@ fn answer_the_draft(
         time::macros::date!(2026 - 02 - 03),
         &mut keys,
         &mut screen,
-        false,
+        cmd::answer::AnswerOptions::default(),
     )
     .expect("the seeded draft is answerable");
     String::from_utf8(screen).unwrap()
@@ -1009,7 +1009,7 @@ fn answering_no_to_the_census_removes_the_pre_named_rows() {
         time::macros::date!(2026 - 02 - 03),
         &mut keys,
         &mut screen,
-        false,
+        cmd::answer::AnswerOptions::default(),
     )
     .expect("answering the seeded draft");
 

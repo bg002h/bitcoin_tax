@@ -993,7 +993,7 @@ fn income_answer_prints_step_0_before_the_first_census_question() {
         date!(2026 - 09 - 01),
         &mut keystrokes,
         &mut screen,
-        false,
+        cmd::answer::AnswerOptions::default(),
     )
     .unwrap();
     let out = String::from_utf8(screen).unwrap();

@@ -6263,7 +6263,9 @@ mod tests {
                                 &ty2024_params()
                             )
                             .is_none(),
-                            "…and none of them is recorded as certified — in particular neither of                              the two PROCEED rows that are the filer's own NO, which take no                              position and attach no disclosure"
+                            "…and none of them is recorded as certified — in particular neither of \
+                             the two PROCEED rows that are the filer's own NO, which take no \
+                             position and attach no disclosure"
                         );
                     }
                     // The dead-end fact is not even OFFERED unless condition 4 is CANNOT KNOW.

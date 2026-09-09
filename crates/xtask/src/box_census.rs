@@ -1473,7 +1473,8 @@ pub fn join_failures_for(entries: &[BoxEntry]) -> Vec<String> {
                 }
                 let Some(section) = own else {
                     bad.push(format!(
-                        "{}/{}: `Collected` needs the document's OWN section, and {} has none —                          use `CollectedElsewhere`",
+                        "{}/{}: `Collected` needs the document's OWN section, and {} has none — \
+                         use `CollectedElsewhere`",
                         b.stem, b.label, b.stem
                     ));
                     continue;
@@ -1490,7 +1491,9 @@ pub fn join_failures_for(entries: &[BoxEntry]) -> Vec<String> {
                         ));
                     } else if !secs.contains(&section) {
                         bad.push(format!(
-                            "{}/{}: {f:?} is in {secs:?}, not in this document's own section                              ({section:?}) — a box collected somewhere else is                              `CollectedElsewhere`, with the reason said out loud",
+                            "{}/{}: {f:?} is in {secs:?}, not in this document's own section \
+                             ({section:?}) — a box collected somewhere else is \
+                             `CollectedElsewhere`, with the reason said out loud",
                             b.stem, b.label
                         ));
                     }
@@ -1545,7 +1548,8 @@ pub fn join_failures_for(entries: &[BoxEntry]) -> Vec<String> {
                         b.stem, b.label
                     )),
                     Some(section) if !sections_of(field).contains(&section) => bad.push(format!(
-                        "{}/{}: the refuse-guard field {field:?} must live on this document's own                          row — a guard the filer cannot reach is a brick",
+                        "{}/{}: the refuse-guard field {field:?} must live on this document's own \
+                         row — a guard the filer cannot reach is a brick",
                         b.stem, b.label
                     )),
                     Some(_) => carriers.push(field),
@@ -1554,7 +1558,8 @@ pub fn join_failures_for(entries: &[BoxEntry]) -> Vec<String> {
             BoxDecision::NotRead(reason) => {
                 if reason.trim().is_empty() {
                     bad.push(format!(
-                        "{}/{}: a NotRead with an EMPTY reason — the reason is the whole value of                          the entry, and without it this is \"we forgot this box\" with extra steps",
+                        "{}/{}: a NotRead with an EMPTY reason — the reason is the whole value of \
+                         the entry, and without it this is \"we forgot this box\" with extra steps",
                         b.stem, b.label
                     ));
                 }
@@ -1567,7 +1572,9 @@ pub fn join_failures_for(entries: &[BoxEntry]) -> Vec<String> {
                     .any(|f| field_words(*f).is_some_and(|s| normalize(&s).contains(w.as_str())))
             {
                 bad.push(format!(
-                    "{}/{}: the box prints {w:?}, and no field that collects it ({carriers:?}) says                      so — a box whose caption moved between revisions must not keep pointing at a                      field describing the old one",
+                    "{}/{}: the box prints {w:?}, and no field that collects it ({carriers:?}) \
+                     says so — a box whose caption moved between revisions must not keep pointing \
+                     at a field describing the old one",
                     b.stem, b.label
                 ));
             }

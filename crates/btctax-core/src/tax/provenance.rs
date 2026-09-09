@@ -1617,7 +1617,9 @@ mod tests {
         );
         assert!(
             r.answer_log.contains_key(&k),
-            "a record refused for changed wording must STAY in the log until it is re-answered —              sweeping it out on load turns `WordingChanged` into `NeverAsked`, and an absent record              is not a mismatch"
+            "a record refused for changed wording must STAY in the log until it is re-answered — \
+             sweeping it out on load turns `WordingChanged` into `NeverAsked`, and an absent \
+             record is not a mismatch"
         );
 
         // ── THE RE-ANSWER. No sweep is called; `record_answer` is the whole path.

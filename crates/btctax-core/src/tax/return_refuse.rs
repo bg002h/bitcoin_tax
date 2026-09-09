@@ -2495,14 +2495,19 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
         if ri.schedule_1a.tips.is_some() {
             return refuse(
                 RefuseReason::Schedule1aTipsFromTradeOrBusiness,
-                "Schedule 1-A line 5 asks for qualified tips reported on Form 1099-NEC box 1,                  1099-MISC box 3 or 1099-K box 1a. btctax has no input for those forms, and this                  return has a trade or business, so the amount cannot be established. Entering                  nothing would look identical to having none."
+                "Schedule 1-A line 5 asks for qualified tips reported on Form 1099-NEC box 1, \
+                 1099-MISC box 3 or 1099-K box 1a. btctax has no input for those forms, and this \
+                 return has a trade or business, so the amount cannot be established. Entering \
+                 nothing would look identical to having none."
                     .to_string(),
             );
         }
         if ri.schedule_1a.overtime.is_some() {
             return refuse(
                 RefuseReason::Schedule1aOvertimeFromTradeOrBusiness,
-                "Schedule 1-A line 14b asks for qualified overtime reported on Form 1099-NEC box 1                  or 1099-MISC box 3. btctax has no input for those forms, and this return has a                  trade or business, so the amount cannot be established."
+                "Schedule 1-A line 14b asks for qualified overtime reported on Form 1099-NEC box 1 \
+                 or 1099-MISC box 3. btctax has no input for those forms, and this return has a \
+                 trade or business, so the amount cannot be established."
                     .to_string(),
             );
         }

@@ -43,6 +43,8 @@ mod r15_stop_list;
 #[cfg(test)]
 mod schedule_1a_membership;
 mod verdict_reach;
+/// FR-108 — a filer-facing sentence with the wrap indentation still inside its quotes.
+mod wrapped_literal_check;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -276,6 +278,18 @@ fn main() {
                 Ok(msg) => println!("{msg}"),
                 Err(e) => {
                     eprintln!("xtask stop-list: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        Some("wrapped-literals") => {
+            // ★★★ FR-108: a string literal left on one source line with the next line's
+            //   indentation typed in as real spaces prints a gap in the middle of a sentence.
+            //   See `wrapped_literal_check`'s module doc for what it covers and what it does not.
+            match wrapped_literal_check::run() {
+                Ok(msg) => println!("{msg}"),
+                Err(e) => {
+                    eprintln!("xtask wrapped-literals: {e}");
                     std::process::exit(1);
                 }
             }

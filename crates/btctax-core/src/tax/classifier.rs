@@ -487,7 +487,11 @@ fn classify_header(c: &mut Census, h: &HouseholdHeader) {
     c.exempt(
         hoh_marital_basis,
         Class::SerdeRequired,
-        "R7 — the HoH marital basis is a CHOICE (`HohMaritalBasis`), so it is asked through          `SkippableId::HohMaritalBasis` rather than as an `Option<bool>` declaration. Its silence is          NOT lawful: the registry entry carries `unanswered: Some(RefuseReason::         HohMaritalBasisUnanswered)`, which `screen_inputs` and the R12 panel both read, and no          serde default names a variant",
+        "R7 — the HoH marital basis is a CHOICE (`HohMaritalBasis`), so it is asked through \
+         `SkippableId::HohMaritalBasis` rather than as an `Option<bool>` declaration. Its silence \
+         is NOT lawful: the registry entry carries \
+         `unanswered: Some(RefuseReason::HohMaritalBasisUnanswered)`, which `screen_inputs` \
+         and the R12 panel both read, and no serde default names a variant",
     );
     c.declaration(hoh_qualifying_person, QuestionId::HohQualifyingPerson);
     c.declaration(
@@ -994,17 +998,26 @@ fn classify_schedule_1a(c: &mut Census, s1a: &Schedule1aInputs) {
         c.exempt(
             occupation_on_treasury_list,
             Class::BenefitClaim,
-            "§224 / Sch 1-A Part II Caution — tips must be received in an occupation listed at              IRS.gov/TippedOccupations. `false` no longer merely forgoes: a claimed Part II              (line 4a > 0) with this or either sibling condition false REFUSES              (`RefuseReason::QualifiedTipsCautionNotMet`), because the three are              `#[serde(default)] bool` and a silent default would take the deduction with the              Caution unmet. Unclaimed, `false` still forgoes and cannot overstate.",
+            "§224 / Sch 1-A Part II Caution — tips must be received in an occupation listed at \
+             IRS.gov/TippedOccupations. `false` no longer merely forgoes: a claimed Part II (line \
+             4a > 0) with this or either sibling condition false REFUSES \
+             (`RefuseReason::QualifiedTipsCautionNotMet`), because the three are \
+             `#[serde(default)] bool` and a silent default would take the deduction with the \
+             Caution unmet. Unclaimed, `false` still forgoes and cannot overstate.",
         );
         c.exempt(
             excludes_unlisted_occupation_tips,
             Class::BenefitClaim,
-            "Sch 1-A Part II line 4 — \"Do not include tips received in occupations that are              not included on this list in line 4a, 4b, or 4c\". `false` beside a claimed              line 4a refuses (`RefuseReason::QualifiedTipsCautionNotMet`); unclaimed, it              forgoes.",
+            "Sch 1-A Part II line 4 — \"Do not include tips received in occupations that are not \
+             included on this list in line 4a, 4b, or 4c\". `false` beside a claimed line 4a \
+             refuses (`RefuseReason::QualifiedTipsCautionNotMet`); unclaimed, it forgoes.",
         );
         c.exempt(
             meets_qualified_tip_criteria,
             Class::BenefitClaim,
-            "§224(d) — cash medium, voluntary, unnegotiated, customer-determined; service charges              and automatic gratuities are not qualified tips. `false` beside a claimed line 4a              refuses (`RefuseReason::QualifiedTipsCautionNotMet`); unclaimed, it forgoes.",
+            "§224(d) — cash medium, voluntary, unnegotiated, customer-determined; service charges \
+             and automatic gratuities are not qualified tips. `false` beside a claimed line 4a \
+             refuses (`RefuseReason::QualifiedTipsCautionNotMet`); unclaimed, it forgoes.",
         );
     }
     if let Some(o) = overtime {
@@ -1017,17 +1030,20 @@ fn classify_schedule_1a(c: &mut Census, s1a: &Schedule1aInputs) {
         c.exempt(
             is_flsa_premium_half_only,
             Class::BenefitClaim,
-            "§225 — only the FLSA premium HALF qualifies, not double-time's second half nor              holiday/weekend premiums paid absent >40 hours",
+            "§225 — only the FLSA premium HALF qualifies, not double-time's second half nor \
+             holiday/weekend premiums paid absent >40 hours",
         );
         c.exempt(
             entitlement_arises_under_flsa,
             Class::BenefitClaim,
-            "§225 — the entitlement must arise under FLSA §7; state-law-only overtime paid to an              FLSA-ineligible employee does not qualify",
+            "§225 — the entitlement must arise under FLSA §7; state-law-only overtime paid to an \
+             FLSA-ineligible employee does not qualify",
         );
         c.exempt(
             excludes_amounts_counted_as_tips,
             Class::BenefitClaim,
-            "§225 — excludes any amount received as a qualified tip; the same dollars must not be              deducted under Part II and Part III both",
+            "§225 — excludes any amount received as a qualified tip; the same dollars must not be \
+             deducted under Part II and Part III both",
         );
     }
     for v in vehicles {
@@ -1080,7 +1096,9 @@ fn classify_schedule_1a(c: &mut Census, s1a: &Schedule1aInputs) {
             c.exempt(
                 leaf,
                 Class::BenefitClaim,
-                "§163(h)(4) / Sch 1-A Part IV — a stated eligibility condition; `false` forgoes the                  deduction. An earlier round shipped this part with NO eligibility at all and handed                  every filer who typed a figure up to $10,000, which UNDERSTATES tax.",
+                "§163(h)(4) / Sch 1-A Part IV — a stated eligibility condition; `false` forgoes \
+                 the deduction. An earlier round shipped this part with NO eligibility at all and \
+                 handed every filer who typed a figure up to $10,000, which UNDERSTATES tax.",
             );
         }
     }

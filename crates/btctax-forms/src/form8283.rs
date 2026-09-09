@@ -511,7 +511,8 @@ fn fill_one(
         // a full return may not attach an unnamed page of a substantiation form.
         let identity_page2 = map.identity_page2.as_ref().ok_or_else(|| {
             FormsError::Geometry(format!(
-                "the {} Form 8283 map has no [identity_page2] block — page 2 would go out with no                  identifying header, so a detached Section B page could not be tied to its return",
+                "the {} Form 8283 map has no [identity_page2] block — page 2 would go out with no \
+                 identifying header, so a detached Section B page could not be tied to its return",
                 map.year
             ))
         })?;
@@ -541,7 +542,8 @@ fn fill_one(
             for pair in [&map.line5a, &map.line5b, &map.line5c] {
                 let pair = pair.as_ref().ok_or_else(|| {
                     FormsError::Geometry(format!(
-                        "the {} Form 8283 map has no 5a/5b/5c pair — a full return may not file a                          Section B with its restriction questions blank when the filer HAS answered",
+                        "the {} Form 8283 map has no 5a/5b/5c pair — a full return may not file a \
+                         Section B with its restriction questions blank when the filer HAS answered",
                         map.year
                     ))
                 })?;

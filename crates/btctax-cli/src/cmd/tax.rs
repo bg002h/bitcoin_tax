@@ -405,7 +405,8 @@ pub fn scrub_return_inputs(
         //   `s.save()`, so nothing is persistently discarded here. The load-bearing half is that the
         //   draft the filer was editing was SKIPPED, and the committed row is what travels.
         eprintln!(
-            "note: your {}-schema draft for {} could not be read by this build (expected v{}), so              the last COMMITTED return is what was scrubbed. Nothing was deleted.",
+            "note: your {}-schema draft for {} could not be read by this build (expected v{}), so \
+             the last COMMITTED return is what was scrubbed. Nothing was deleted.",
             note.found, note.year, note.expected
         );
     }

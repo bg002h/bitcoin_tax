@@ -6727,12 +6727,15 @@ mod tests {
                 handoff: "btctax reconcile classify-inbound-income <event>".into(),
             }],
             venues: vec![Step0Row {
-                what: "river has 4 noncovered row(s) on this year's Form 8949 and NO Form 1099-DA                        answer on file — a venue you disposed on is not accounted for"
+                what: "river has 4 noncovered row(s) on this year's Form 8949 and NO Form 1099-DA \
+                       answer on file — a venue you disposed on is not accounted for"
                     .into(),
                 handoff: "btctax income answer --year 2024".into(),
             }],
             standing_orders: vec![Step0Row {
-                what: "exchange:river:default: your first custodial disposition of 2024 is dated                        2024-05-01, and no standing order (a dated method election) was in force                        for it — expect box 1g to reflect the broker's default"
+                what: "exchange:river:default: your first custodial disposition of 2024 is dated \
+                       2024-05-01, and no standing order (a dated method election) was in force \
+                       for it — expect box 1g to reflect the broker's default"
                     .into(),
                 handoff: "btctax config --set-forward-method hifo".into(),
             }],
@@ -7409,12 +7412,14 @@ mod tests {
         let step0 = Step0Panel {
             year: 2024,
             venues: vec![Step0Row {
-                what: "river has 4 noncovered row(s) on this year's Form 8949 and NO Form 1099-DA                        answer on file — a venue you disposed on is not accounted for"
+                what: "river has 4 noncovered row(s) on this year's Form 8949 and NO Form 1099-DA \
+                       answer on file — a venue you disposed on is not accounted for"
                     .into(),
                 handoff: "btctax income answer --year 2024".into(),
             }],
             standing_orders: vec![Step0Row {
-                what: "exchange:river:default: no standing order was in force for the 2024-05-01                        sale — expect box 1g to reflect the broker's default, and SENTINEL_TAIL"
+                what: "exchange:river:default: no standing order was in force for the 2024-05-01 \
+                       sale — expect box 1g to reflect the broker's default, and SENTINEL_TAIL"
                     .into(),
                 handoff: "btctax config --set-forward-method hifo".into(),
             }],

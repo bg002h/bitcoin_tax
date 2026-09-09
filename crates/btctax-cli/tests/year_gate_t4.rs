@@ -656,7 +656,7 @@ fn income_answer_on_a_draft_only_year_writes_the_draft_and_commits_nothing() {
         time::macros::date!(2026 - 09 - 02),
         &mut keystrokes,
         &mut screen,
-        false,
+        cmd::answer::AnswerOptions::default(),
     )
     .expect("a draft-only year is answerable");
     let screen = String::from_utf8(screen).unwrap();
@@ -708,7 +708,7 @@ fn income_answer_still_refuses_a_year_with_neither_a_row_nor_a_draft() {
         time::macros::date!(2026 - 09 - 02),
         &mut keystrokes,
         &mut screen,
-        false,
+        cmd::answer::AnswerOptions::default(),
     )
     .expect_err("nothing to answer");
     assert!(
@@ -1110,7 +1110,7 @@ fn a_question_that_dies_earlier_in_the_same_round_is_never_put_to_the_filer() {
         time::macros::date!(2026 - 09 - 02),
         &mut keystrokes,
         &mut screen,
-        false,
+        cmd::answer::AnswerOptions::default(),
     )
     .expect("a draft-only year is answerable");
     let screen = String::from_utf8(screen).unwrap();

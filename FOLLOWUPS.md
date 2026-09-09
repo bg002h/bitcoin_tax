@@ -6709,6 +6709,10 @@ build, each with an owning phase.
   The fix as shipped states the MECHANISM: `income answer` now prints *"every question that applies to
   this return is asked again each time — this command does not skip the ones already on file. Press
   Enter to keep the answer shown."*
+  ★ **SUPERSEDED 2026-09-08 by [[FR-109]].** That sentence became FALSE the moment the behaviour it
+  describes changed — the FR-108 class in prose — so it was rewritten in the same change. `income
+  answer` now asks only what the answer log says still needs asking, and `--re-answer` restores the
+  behaviour this entry describes.
 
 - **FR-109 — does `income import` create sworn testimony without the filer answering a question?
   Surfaced by FR-105's refutation, 2026-09-07. OWNER'S question — filed, not actioned. Owning phase:
@@ -6724,6 +6728,47 @@ build, each with an owning phase.
   reworded question cannot fire for an imported value, and a filer who imports and goes straight to
   `report` never meets a prompt at all. Note this is currently masked by FR-105's mechanism: because
   `income answer` re-asks EVERYTHING, anyone who runs it is asked afresh regardless.
+
+  ✅ **ANSWERED AND BUILT 2026-09-08 — OWNER'S RULING: *"For 109, don't re-ask unless a command line
+  option to re-answer questions is present."*** `income answer` now asks only what needs asking, and
+  `--re-answer` restores the old every-question pass. The line is drawn by `answer_status`
+  (`provenance.rs:965`) — its variants already drew it:
+
+  | status | behaviour | why |
+  |---|---|---|
+  | leaf unanswered | **ASK** | unchanged |
+  | `WordingChanged` | **ASK**, flag or no flag | its own doc is *"Treated as UNANSWERED everywhere"* — the filer answered a different sentence, so this is consistency, not an exception |
+  | `NeverAsked` (a leaf with a value and no record — the imported TOML) | **ASK, once** | asking stamps a record, so it converges: asked once after an import, skipped thereafter |
+  | `Given` | **SKIP** | answered, under these words |
+  | `Declined` | **SKIP** | a recorded decision, and R12 still lists the benefit as forgone |
+
+  ★ **That `NeverAsked` row answers the owner's question rather than deferring it.** It honours the
+  ruling — no re-asking session after session — while closing reading (b) for free: an imported value
+  gains provenance on its first pass instead of being skipped forever with no prompt hash, which would
+  leave R10.3's wording-change re-ask permanently unable to fire for anything a filer imported.
+  ★★ **And the skip is a CONJUNCTION, because the log and the leaf can disagree.** For a class-(A) ask
+  the leaf must also hold what the record says was given: a `Given` record over an empty declaration is
+  a record of testimony the return does not carry, and skipping there would be a **brick** —
+  `screen_inputs` refuses the commit, R12 lists the question as blocking, and the command that exists to
+  fix it declines to ask. *Fail-closed on the claim, fail-OPEN on the interview*, the T7 seam review's
+  rule. A class-(B) skippable takes no leaf test: for it an empty leaf IS a lawful answer.
+
+  Five kills in `cmd/answer.rs`, each watched RED on its own mutation:
+  `a_fully_answered_return_asks_nothing_and_says_so`, `re_answer_puts_every_live_question_again`,
+  `a_reworded_question_is_asked_again_without_the_flag`, `an_imported_leaf_is_asked_once_and_not_twice`,
+  `a_record_standing_over_an_empty_class_a_leaf_is_still_asked`. Measured on the fixture: **69** live
+  questions asked on the first pass, **0** on the second, **69** again with `--re-answer`.
+  **✅ RULED AND CLOSED 2026-09-08. Owner:** *"For 109, don't re-ask unless a command line option to
+  re-answer questions is present."* `income answer` now asks only what `answer_status` says still needs
+  asking, and `--re-answer` restores the old every-question pass. The rule:
+  `NeverAsked` → **ask once** (so an imported value gains a prompt hash, which is what retires this
+  entry's own concern rather than accepting it); `WordingChanged` → **ask, flag or no flag** (its doc
+  says *"treated as UNANSWERED everywhere"*); `Given`/`Declined` → skip.
+  ★ **Plus a leaf conjunct the controller's brief did not name**, added by the implementer: a `Given`
+  record standing over an EMPTY class-(A) leaf is still asked, because skipping it would be a brick —
+  a return that can never be completed. Controller planted the conjunct away and
+  `a_record_standing_over_an_empty_class_a_leaf_is_still_asked` reds. Five kills, each on its own
+  mutation. FR-105's header sentence, false under the new behaviour, was rewritten in the same pass.
 - **FR-106 — the answer panel's BLOCKING count is a moving target with no warning (journey walk finding
   #5). Owning phase: ownerless residue (UX).** The panel printed *"BLOCKING (36)"* at session start;
   two further questions became live mid-session, triggered by the filer's own census answers in the same
@@ -6751,6 +6796,48 @@ build, each with an owning phase.
   rather than a reading. The detector is in
   `design/agent-reports/2026-09-07-fr103-107-journey-fixes.md`.
 
+  ★★ **MEASURED 2026-09-08 — THE MECHANISM NAMED ABOVE IS WRONG, and the correction is what makes a
+  fix converge.** A Rust `\`-newline continuation does **not** keep the next line's indentation: it
+  skips the newline **and that line's leading whitespace**, which is why every correctly-wrapped
+  literal in this repo puts the space *before* the backslash. Measured with `rustc`: `"alpha \"` +
+  newline + spaces + `beta"` prints `alpha beta`; drop the trailing space and it prints `alphabeta`.
+  So a continuation is the CURE, not the disease — the defect is a literal that was never wrapped at
+  all, written or joined as one physical line with the wrap indentation typed in as real spaces.
+  Recorded because a fix built from the stated mechanism would have re-wrapped these literals and left
+  the runs sitting inside them.
+
+  ★ **And 5 of the 34 are CORRECT AS WRITTEN**, separated by a predicate rather than by a list: a
+  literal carrying an embedded `\n` escape prints more than one line, so it is a table, a code sample
+  or an aligned key/value block, and a run of spaces in it is the point. Those five are
+  `repo_hygiene.rs:259` (a shell script), `draw_edit.rs:979`/`:1002`/`:1296` (aligned key/value
+  display blocks) and `r15_stop_list.rs:598` (a Rust source fixture). **29 are the defect.**
+
+  ✅ **FIXED 2026-09-08 — the 29, plus the lint that keeps them fixed.** Each literal was collapsed and
+  re-wrapped as a real `\`-newline continuation, round-trip asserted per site (the value reconstructed
+  from the emitted source lines by Rust's own rule equals the collapsed target). The lint is
+  `crates/xtask/src/wrapped_literal_check.rs` — `cargo run -p xtask -- wrapped-literals`, gated by
+  `no_committed_literal_carries_its_wrap_indentation`, enumerating `crates/**/*.rs` from the tree with
+  no site list anywhere in it. Its module doc states what it covers and what it deliberately does not
+  (comments and doc comments, raw strings, literals ≤120 chars, runs under six, anything assembled at
+  runtime), and it has **no allow list and no escape comment** on purpose — that is FR-99's shape with
+  a laundering path attached. Watched RED on a plant of `return_refuse.rs:2498` verbatim, and green on
+  seven near misses plus six scanner-blinding hazards (a quote inside a comment, a nested block
+  comment, a char literal, a raw string with hashes, a lifetime, an escaped quote).
+
+  **✅ CLOSED 2026-09-08 — and this entry's stated MECHANISM was WRONG.** It claimed *"a `\`-newline
+  continuation eats the newline and KEEPS the next source line's indentation."* The opposite is true,
+  measured with `rustc`: `"alpha \`⏎`        beta"` yields `"alpha beta"` — the continuation **strips**
+  the newline and the next line's leading whitespace, so it is the CURE. A literal wrapped WITHOUT the
+  backslash is the disease (`"alpha\n        beta"`), as is trailing whitespace left *before* the
+  backslash. The controller wrote that wrong mechanism into this entry from the finder's report and
+  repeated it in the fix brief; the implementer refuted it by measurement before writing anything.
+  ★ **5 of the 34 were correct as written** — they carry an embedded `\n` and are tables or aligned
+  blocks, where a run of spaces is the point. **29 fixed**, each with a round-trip assertion.
+  The lint is `crates/xtask/src/wrapped_literal_check.rs` (`cargo run -p xtask -- wrapped-literals`),
+  which enumerates from the tree — 356 sources, no site list — so the 35th is a red rather than a
+  reading. Watched RED on a verbatim plant of `return_refuse.rs:2498`, and green on seven near misses
+  plus six scanner-blinding hazards. Controller's independent plant reds it too, naming the site and
+  stating the corrected mechanism in its own message.
 - **FR-99 — ★★ THE DOMINANT DEFECT CLASS OF THE WHOLE INTERVIEW ARC: a hand-written list standing beside
   a set that GROWS. Proposed `CLAUDE.md` rule — OWNER'S CALL, filed not actioned. Owning phase: the
   harness / doctrine (owner), before the interview branch ships.**

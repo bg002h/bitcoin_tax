@@ -3213,7 +3213,7 @@ fn a_pre_d8_vault_refuses_until_answered_and_income_answer_is_the_way_out() {
         time::macros::date!(2026 - 09 - 01),
         &mut keystrokes,
         &mut screen,
-        false,
+        cmd::answer::AnswerOptions::default(),
     )
     .unwrap();
     let screen = String::from_utf8(screen).unwrap();
@@ -3312,7 +3312,7 @@ fn the_editor_and_income_answer_write_the_same_answer_record() {
         NOW,
         &mut keystrokes,
         &mut screen,
-        false,
+        cmd::answer::AnswerOptions::default(),
     )
     .unwrap();
     let s = btctax_cli::Session::open(&vault, &pp()).unwrap();
@@ -3467,7 +3467,7 @@ fn the_editor_and_income_answer_write_the_same_dependent_gate_records() {
         NOW,
         &mut keystrokes,
         &mut screen,
-        false,
+        cmd::answer::AnswerOptions::default(),
     )
     .unwrap();
     let s = btctax_cli::Session::open(&vault, &pp()).unwrap();
@@ -3776,7 +3776,7 @@ fn the_acquisition_debt_ceiling_is_shown_beside_the_debt_limit_question() {
         time::macros::date!(2026 - 09 - 01),
         &mut keystrokes,
         &mut screen,
-        false,
+        cmd::answer::AnswerOptions::default(),
     )
     .expect("the draft is answerable");
     let screen = String::from_utf8(screen).unwrap();
@@ -3855,7 +3855,7 @@ fn a_re_import_keeps_every_answer_record_already_on_the_row() {
         time::macros::date!(2026 - 09 - 01),
         &mut keystrokes,
         &mut screen,
-        false,
+        cmd::answer::AnswerOptions::default(),
     )
     .unwrap();
 
@@ -3972,7 +3972,7 @@ fn re_answering_at_the_keyboard_moves_the_stale_record_into_history_by_itself() 
         NOV,
         &mut keystrokes,
         &mut screen,
-        false,
+        cmd::answer::AnswerOptions::default(),
     )
     .unwrap();
 
@@ -4118,7 +4118,7 @@ fn income_answer_refuses_a_year_with_no_return() {
         time::macros::date!(2026 - 09 - 01),
         &mut keystrokes,
         &mut screen,
-        false,
+        cmd::answer::AnswerOptions::default(),
     )
     .unwrap_err();
     assert!(
