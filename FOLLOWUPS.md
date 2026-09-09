@@ -6265,11 +6265,17 @@ build, each with an owning phase.
   MFJ return for such a filer is computed on the U.S. spouse's income alone. The advisory's false
   reassurance was removed in the T3 fold; the honest mechanism is a `FormQuestion` beside the HoH /
   QSS gates whose `Yes` refuses naming the election and a preparer.
+  **✅ CLOSED 2026-09-07 by interview T8.** The §6013(g)/(h) gate is live and refuses on `Yes` naming
+  the election and a preparer (`NraSpouseElection` — five sites in `return_refuse.rs`); T8's seam review
+  verified seam 6 and its kill reproduces (`panicked at return_refuse.rs:4840`).
 - **FR-68 — the D11 direction flip reads "Subtract line X from line Y" only; the maps' `★ PAREN`
   entries (Schedule 1 lines 8a, 8d, 8s — printed in parentheses, subtracted inside the line-9 total)
   stay `Understates` (T3 seam review M4). Owning task: interview T5.** Conservative today (a `Yes`
   refuses where a forgo would do); derive the second sentence shape from the form's text the way the
   first is, never from the `★ PAREN` marker alone.
+  **✅ CLOSED 2026-09-07 (T3 fold / T5).** The `★ PAREN` entries now carry their direction reasoned from
+  the form's own sentence rather than defaulting — e.g. Schedule 1 line 8a reads *"A negative line, so
+  forgoing it overstates."*
 - **FR-69 — a draft that is exactly a fresh opener seed is reported as work (T4b build `44ca7075`).
   Owning phase: the interview build (T5–T12 residue).** Re-running `income open-next-year` on a year
   whose draft is untouched since the opener refuses naming the seeded rows as holdings; truthful and
@@ -6282,6 +6288,9 @@ build, each with an owning phase.
   literal in `open_next_year::seed` fail to compile (every field named, no `..Default` tail), which is
   the forcing function — T7 decides identity-vs-declaration per field and gives the prompt its
   surface. The T4b seam review checks whether a seeded row can reach a commit un-asked.
+  **✅ CLOSED 2026-09-07 by interview T7.** `DEPENDENT_GATES` gave the dependent rows their answer
+  surface, and the T7 fold decided the identity question: a blank SSN blocks before any gate and a
+  duplicate refuses on both tiers via the always-on `screen_dependent_values`.
 - **FR-71 — the generic PII-shape scan runs only at push and in CI, never at commit (found
   2026-09-07 when the first push in five weeks was rejected on 45 commits' fixture TINs). Owning
   phase: harness (class α).** `scripts/pre-commit` runs `make check` but not
@@ -6424,6 +6433,9 @@ build, each with an owning phase.
   ★ Note: two entries in this file also carry the number FR-84 — this one's neighbours above (the
   TY2025 grid name cells) and the T12 render-pass entry below. Same collision as FR-85; renumber both
   pairs when the ownerless residue is next swept.
+  **✅ CLOSED 2026-09-07 by interview T12, the task that owned it.** All six were planted once and **all
+  six red**, with no checker needing a change — which is the outcome this entry was filed to establish
+  rather than assume. The T12 seam reviewer independently reproduced two of the six verbatim.
 - **FR-87 — the home-sale rule's own `s_1099 == Some(true)` arm is UNREACHABLE (T9 fold, 2026-09-07).
   Owning task: interview T12 (the render pass), with FR-86's B1 sweep.**
   `return_refuse.rs`'s home-sale branch selector carries an `s_1099 == Some(true)` arm, but the
@@ -6449,6 +6461,10 @@ build, each with an owning phase.
   a home sale with a Form 1099-S and no Form 8949. The `s_1099.is_none()` arm STAYS: it is reachable
   at the param-free (import) tier, where the census's unanswered rule does not run. Both *"a
   documented fail-closed backstop, not a tested guard"* labels are gone from the tree.
+  **✅ CLOSED 2026-09-07 by interview T12, the task that owned it — DECIDED: the arm is DELETED.** The
+  branch selector became `return_refuse::home_sale_decision`, which §4.4's report also reads, so the rule
+  and the surface that displays it are one function. Planting the census's §2.2 rule away now reds the
+  home-sale cross table: `(true,true,true,s_1099=Some(true)) refused unexpectedly: None`.
 - **FR-88 — ★ THREE CONSECUTIVE TASKS' defects were a well-built guard blinded by its own hand-written
   FIXTURE (T8 I-1, T9 C-1, T10 I-1). Proposed `HARNESS.md` B1 amendment — OWNER'S CALL, filed not
   actioned. Owning phase: the harness (owner), before the interview branch's whole-branch review.**
