@@ -6879,6 +6879,27 @@ build, each with an owning phase.
   packet meets short-term and long-term sections alternating. Cosmetic; the IRS does not require
   grouping. Recorded because a human assembling a paper packet by hand is a step this product owns.
 
+- **FR-114 — ★ the eighth FR-99 instance is the HARNESS ITSELF: R15's ledger-word ban never scans
+  `btctax-input-form`'s own field text (cross-task pattern sweep, 2026-09-09). Owning phase: the
+  harness — and it needs an ADJUDICATION before the checker is extended, not after.**
+  `ledger_words_in_registry_prompts` (`xtask/src/r15_stop_list.rs:234`) bans `transfer` / `lot` / `fmv`
+  on word boundaries, over **`btctax-core`'s question registries only**. `btctax-input-form`'s
+  `Field.label` / `Field.help` — text a filer reads while typing — is never scanned. A clean synthetic
+  plant confirmed the silence.
+  ★★ **But do NOT simply widen the scan, because two live strings would red and they are probably
+  CORRECT.** `spec/sections.rs`'s `BROKER_FIELDS` carries *"Covered lots — bought on this venue on/after
+  2026-01-01"*, *"Noncovered lots — everything else this venue sold for you"*, *"a per-lot import"* and
+  *"arrived by transfer"*. R15's stated purpose is that *"the ledger's questions (which transfer is
+  this?, which lot?, what was the FMV?) belong to `reconcile`, and the interview must never re-ask
+  them"* — a ledger-jargon leak. These are the **IRS's own §6045 / 1099-DA vocabulary for the broker's
+  reporting category**, which is the opposite of that leak: the form's word for the form's concept.
+  Widening the checker naively would red on them, and the likely "fix" would be to reword the IRS's own
+  terminology into something vaguer — a real regression produced by a checker doing its job on the
+  wrong target.
+  **So the order is: decide the exemption (a per-site allow with a stated reason, or a narrower rule
+  that keys on the QUESTION rather than the word), then widen the scan, then plant and watch it red.**
+  Recorded rather than fixed for exactly that reason.
+
 - **FR-99 — ★★ THE DOMINANT DEFECT CLASS OF THE WHOLE INTERVIEW ARC: a hand-written list standing beside
   a set that GROWS. Proposed `CLAUDE.md` rule — OWNER'S CALL, filed not actioned. Owning phase: the
   harness / doctrine (owner), before the interview branch ships.**
@@ -7083,6 +7104,11 @@ build, each with an owning phase.
   `not_computed_lines` — a sixth surface reds it rather than escaping it. What is still unwalked is a
   *stored* progress field on a TUI struct. Closing it properly means typing the mechanism — a banned
   name is a finding only on a bare counter type — rather than naming the exception.
+  ★ **EXTENDED 2026-09-09 by the cross-task pattern sweep, with new plant evidence.** The gap is
+  wider than this entry documents: `state_bearing_sources()` and `renderer_sources()` are both
+  hand-picked FILE LISTS rather than directory walks, so the blind spot reaches other
+  `btctax-core/src/tax/` files and the widget check specifically — not just the render surfaces
+  named here. Same FR-99 shape, in the instrument rather than the code it checks.
 - **FR-82 — `tax_tables.rs`'s TY2026 doc comment cites Rev. Proc. 2025-32 §2.14 / §2.10 for figures
   that sit in its Section 4 (T7 build, follow-up 2; pre-existing). Owning phase: ownerless residue
   (doc-consistency).** The new §4.23 cite beside them is accurate.
