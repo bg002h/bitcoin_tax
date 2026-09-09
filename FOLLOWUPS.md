@@ -6497,6 +6497,12 @@ build, each with an owning phase.
   and `sa_5498` (T16) were all carried by `seed` and named by no phrase in `CARRIED_IDENTITY` — the
   same defect as the phone and the foreign address, three tasks deep. That is the measurement the
   proposed B1 amendment is arguing from, and it is now on the record rather than inferred.
+  **✅ CLOSED 2026-09-07 — OWNER-APPROVED and ACTIONED.** `design/HARNESS.md` gains **B1a — the FIXTURE
+  is half the checker**: a checker that walks a derived set must be fed a fixture derived from that same
+  set, or must assert in the test that its fixture covers it. The amendment carries the three-task
+  evidence table and the one-sentence question B1 never asked — *"what in this fixture makes the
+  checker's subject present at all?"* — plus the in-repo model (T10's `maximal_sentinel` rebuild, which
+  surfaced four more unnamed carries the moment it was switched on).
 - **FR-89 — SECRET HANDLING (logged, NEVER gating, per the owner ruling of 2026-08-27): the routing
   and account numbers are `FieldKind::Text`, not `Secret` (T10 build follow-up 2; confirmed by the
   T10 seam review, M-4). Owning phase: ownerless residue.**
@@ -6530,6 +6536,25 @@ build, each with an owning phase.
   recompile and not a cached one. What to decide: whether the mitigation belongs in every build/fold
   brief as a rule, inside `make check` itself, or in a wrapper. Related: [[FR-88]] — both are ways an
   instrument reports something other than what it measured.
+- **★ OWNER Q1, PARTIAL ANSWER 2026-09-07 — "I might have a 1099-MISC this year." NOT a decision; the
+  box is unknown and the consequence branches on it. Owning phase: owner (Q1), before T13 is scheduled.**
+  Today a `yes` on the `NecMiscK1099` census row REFUSES the return with its reason
+  (`document_census.rs:186`), so the failure mode is a named stop, not a wrong filing. Which box decides
+  what happens next:
+  · **box 3** (other income — prizes, awards, research-study pay) → Schedule 1 line 8z → **T13**.
+  · **box 7 / a 1099-NEC instead** (nonemployee compensation) → Schedule C Part II → **T13**.
+  · **box 1 or 2** (rents / royalties) → **Schedule E, which NO task covers** — `DocumentRow::ScheduleERental`
+    says *"A rental or royalty is a preparer's return for this year."*
+  ★ Note the payer-side signal: nonemployee compensation has been reported on 1099-**NEC** since 2020, so
+  a form the owner expects specifically as a MISC is more likely box 3 (or 1/2). Resolve the box before
+  scheduling T13 — its scope differs by half.
+
+  **✅ CLOSED 2026-09-07 — OWNER-APPROVED and ACTIONED.** The mitigation is now a COMMAND, not a
+  discipline: **`make gate`** touches every `.rs` file and then runs `check`. Use it for any run whose
+  result will be reported as evidence; plain `make check` stays for iteration, deliberately, so that
+  forcing a rebuild does not tax the loop that FINDS defects in order to protect the run that CERTIFIES
+  them. The Makefile comment carries the measurement and names the false-green risk. Standing rule
+  alongside it: `touch` the file after every restore.
 - **FR-99 — ★★ THE DOMINANT DEFECT CLASS OF THE WHOLE INTERVIEW ARC: a hand-written list standing beside
   a set that GROWS. Proposed `CLAUDE.md` rule — OWNER'S CALL, filed not actioned. Owning phase: the
   harness / doctrine (owner), before the interview branch ships.**
@@ -6563,6 +6588,16 @@ build, each with an owning phase.
   Related: [[FR-88]] (the same disease on the TEST side — a derived checker paired with a hand-written
   fixture, three consecutive tasks) and [[FR-90]] (an instrument reporting something other than what it
   measured). All three are one family: **the thing that decides was not the thing that knows.**
+  **✅ CLOSED 2026-09-07 — OWNER-APPROVED and ACTIONED.** `CLAUDE.md` (btctax) gains **"Derive the list,
+  or make the compiler hold it — never type one beside a set that grows"**, carrying the seven-row
+  evidence table, the three permitted forms (derive / compiler-enforced totality / state the boundary in
+  source), and the evidence that deriving is not merely tidier — each of the three folds that replaced a
+  list with a derivation immediately surfaced defects nobody had gone looking for, T11's routing
+  partition finding four latent money defects both oracles were blind to.
+  ★ **Kept btctax-scoped on purpose.** All seven instances are from this repo, and `design/HARNESS.md`'s
+  own scope rule forbids promoting a mechanism to `/scratch/code/CLAUDE.md` or `~/.claude/CLAUDE.md`
+  without independent evidence — *"false completeness at the largest possible scale."* It is a strong
+  promotion candidate once a second repo shows the same shape; that is the owner's call, not this entry's.
 - **FR-91 — the oracle projection carries ONE wage figure, so W-2 box 3 and box 5 are modelled as
   equal to box 1 (T11 build, follow-up 1). Owning phase: ownerless residue (oracle-path fidelity).**
   `GoldenInputs.w2_income` is a single number and both drivers reuse it for the §1402(b)(1) OASDI

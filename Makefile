@@ -29,6 +29,24 @@ check:
 	 if [ $$st -ne 0 ]; then echo "make check: FAILED"; fi; \
 	 exit $$st
 
+## gate: `check`, but from sources the compiler is forced to look at again (FR-90, owner-approved
+## 2026-09-07). Use this for any run whose RESULT YOU WILL REPORT AS EVIDENCE — a build's closing gate,
+## a fold's, a re-verification's — and use plain `check` while iterating.
+##
+## ★★ WHY IT EXISTS. `cargo`/`nextest` decide freshness by mtime, and the plant -> measure -> restore
+## loop that B1 *mandates* is precisely what races that decision. Measured 2026-09-07 during the T10
+## fold: a reverted plant stayed compiled into the `btctax-core` rlib and produced a PHANTOM RED at a
+## clean HEAD, costing about an hour. It bit as a false red, which is merely expensive — nothing
+## prevents the symmetric FALSE GREEN, which is a gate that cannot fail, the one defect class this
+## repo guards hardest against (`design/HARNESS.md`, class beta).
+##
+## ★ It is a separate target rather than a change to `check` on purpose: forcing a rebuild on every
+## iteration would tax the loop that finds defects in order to protect the run that certifies them.
+## The rule is "touch the file after every restore; run `make gate` before you report a number."
+gate:
+	@find crates -name '*.rs' -exec touch {} +
+	@$(MAKE) --no-print-directory check
+
 ## test: the full suite on its own (nextest — parallel across test binaries, unlike `cargo test`)
 test:
 	cargo nextest run --workspace --no-fail-fast

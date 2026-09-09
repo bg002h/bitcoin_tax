@@ -295,6 +295,35 @@ performatively, and produces real future failures rather than the appearance of 
 from a range"* — encode it as its own invariant in A3's shape, which is what the label-reader design
 already specifies. The general lint is the thing that does not work; the specific invariant does.
 
+##### B1a — the FIXTURE is half the checker (amended 2026-09-07, owner-approved, FR-88)
+
+**A checker that walks a derived set must be fed a fixture derived from that same set — or must assert,
+in the test, that its fixture covers it.** A hand-written fixture standing beside a derived walk is the
+`1..=38` trap one level down: the checker is correct, and the fixture silently decides what it may see.
+
+**Why this is an amendment and not a new rule.** B1 as originally written requires a checker be observed
+RED on a planted defect. It says nothing about the *input* the checker is given, and three consecutive
+tasks shipped a correctly-designed guard that was green for exactly that reason:
+
+| task | the guard | why it was green |
+|---|---|---|
+| interview T8, I-1 | *a gate the walk never demanded prints blank* | the test hand-set the leaf to `None`, so it tested `None ⇒ false` and never *not-demanded ⇒ blank* |
+| interview T9, C-1 | *a standard-deduction filer is asked nothing and refused nothing* | the fixture **pre-answered** both new gates, so no mutation of either rule could red it |
+| interview T10, I-1 | *every leaf the seed carries is named in the report* | the fixture **never populated** the leaves the guard walks |
+
+In all three the plant was made and the checker did not fire — B1 was satisfied on paper. What was never
+asked is the one-sentence question this amendment adds: **"what in this fixture makes the checker's
+subject present at all?"**
+
+★ The fix is cheap and has a model in-repo: interview T10's fold rebuilt its fixture from
+`scrub_axis::maximal_sentinel` — the compiler-enforced every-`Option`-`Some` literal — and switching it
+on immediately surfaced **four more** unnamed carries from earlier tasks plus a twice-stale man page.
+Deriving the fixture found what the guard was built for and could not see.
+
+★ Where derivation is genuinely impossible, the honest form is an explicit assertion that the fixture
+covers the walked set, plus a sentence naming what it does not. A stated boundary is reviewable; a
+silent one is the defect.
+
 #### B2 — pass-by-path payloads
 
 **Inter-agent payloads move as file paths the receiver reads — never as inlined content.** Truncation

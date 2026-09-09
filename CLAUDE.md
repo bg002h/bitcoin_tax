@@ -138,6 +138,49 @@ stale constants AND taxcalc omits the add-back. Three vectors owe AMT with *no* 
 sections each printing "OK" hid it; a **witness census** that counts independent witnesses per vector
 now surfaces it, and fails the run if any filing status loses its last two-oracle AMT-owing vector.
 
+## Derive the list, or make the compiler hold it — never type one beside a set that grows
+
+**Owner-approved 2026-09-07 (FR-99). This is the highest-yield rule this file has**, measured: across the
+twelve-task interview arc it accounts for more blocking findings than every other cause put together.
+
+**The shape.** Someone writes a list — of variants to check, of fields to carry, of statuses to map, of
+conditions to re-test — and it is *correct on the day it is written*. Later, a different task widens the
+set beneath it. The list does not know. Nothing reds. The surface goes on claiming completeness it no
+longer has.
+
+| task | the list that was typed | the set that grew past it |
+|---|---|---|
+| T8 | a fixture literal hardcoded to `year: 2024` | the bundled year packages |
+| T9 | three new rules each re-typing a liveness conjunct | every rule reading a Form 1098 row |
+| T10 | `CARRIED_IDENTITY`'s phrases | the leaves `open_next_year::seed` carries |
+| T11 | a `match` on two filing statuses | the five that had just been built |
+| T11 | a completeness partition over `Usd` leaves | facts that *route* money, not just carry it |
+| T12 | five `RefuseReason` variants | **126** |
+| T12 | five document families | the eight carrying `transcribed_on` |
+
+**Not one of these was a mistake when written.** That is the whole point: care cannot fix it, because the
+defect is introduced by a *later, unrelated* edit. Only structure can.
+
+**The rule.** A list of this shape must either
+
+1. **derive from the set** — walk `Enum::ALL`, read the type, enumerate from the form's extract, iterate
+   what the bundle registers; or
+2. **carry a compiler-enforced totality check** — an `_`-free `match`, an `ALL` const guarded by an
+   exhaustive match, a partition asserted against the type — so that widening the set is a **build
+   error** rather than a silent gap; or
+3. **state, in the source, exactly what it covers and what it does not.** An honest boundary is
+   reviewable. A silent one is the defect.
+
+**The evidence that the derived form is not merely tidier.** Each of the three folds that replaced a list
+with a derivation immediately surfaced further defects nobody had gone looking for: T9's single accessor,
+T10's `maximal_sentinel` fixture (four more unnamed carries), and T11's routing partition — which found
+**four latent money defects both oracles were blind to**, because the wrong figure was being sent to both.
+Deriving is not a style preference; it is how you find what the list was hiding.
+
+★ Corollary, and the reason this is not just [`B1a`](design/HARNESS.md): the same disease infects
+**fixtures** (a derived checker fed a hand-written input) and **instruments** (a gate reporting something
+other than what it measured). One family: *the thing that decides was not the thing that knows.*
+
 ## Tests for conformance, reviews for judgment
 
 **Do not review a document to check whether it faithfully describes a form. Write the test.** The form
