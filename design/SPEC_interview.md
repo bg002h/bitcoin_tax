@@ -1298,9 +1298,19 @@ re-verification (S6).
    assumption (`OWNER_DECISIONS_2026-09-04.md:61-63`: *"every income TYPE on the owner's real return is a
    member of P0's set … and nothing else"*) was ruled by a delegate; this is where you say it against the
    full list.*
-2. **Line 19 in v1.** Accept the visible forgo of the child tax credit until Schedule 8812 is
-   transcribed from the TY2026 final (T15), or pull T15 into v1 after finals? — *With dependents, up to
-   the statutory maximum per child is on the extension deadline; without, the question is moot.*
+2. **Line 19 in v1.** — **ANSWERED 2026-09-07: accept the forgo; T15 stays post-v1.** *"My income is
+   well above that limit. Defer it until later."* The §24(b) phaseout is **$400,000 MFJ / $200,000 all
+   other statuses**, reducing $50 per $1,000 above it (`i1040s8--2024.txt:100-101`), and the $500 ODC
+   phases out on the same schedule — so at the owner's income the child tax credit and the credit for
+   other dependents are **both zero on the merits**, and the forgo costs nothing. ★ Note what this means
+   on the page: `ctc_provably_zero` fires, so line 19 prints a sworn `0` rather than a blank — which is
+   the CORRECT testimony here (the filer genuinely claims no credit), not a forgo. **FR-85 stays open
+   regardless**: the stale $2,000 ceiling is a correctness defect at the margin (where
+   `2 × 2,000 ≤ L11 < 2 × 2,200`), and its pin is now derived over the bundle so it reds when TY2025's
+   package lands. It simply does not bite this filer's own return. *(original question follows)* —
+   Accept the visible forgo of the child tax credit until Schedule 8812 is transcribed from the TY2026
+   final (T15), or pull T15 into v1 after finals? — *With dependents, up to the statutory maximum per
+   child is on the extension deadline; without, the question is moot.*
 3. **Is the S1 rehearsal the interview's first live walk?** — **ANSWERED 2026-09-07: yes.** *"We will
    plan to use the interview to simulate a real tax return."* The simulated return is the lived journey;
    the first computable target is TY2024 (see `ROADMAP_STATUS.md` §0a), TY2025 on the S1 ruling, TY2026
