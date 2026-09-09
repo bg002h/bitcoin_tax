@@ -29,9 +29,10 @@ never understate it), with a loud advisory. The three lists below are exactly th
 and the crypto activity `btctax` already tracks (including a crypto miner/staker operating as a business).
 
 **Income:** W-2 wages (multi-employer, both spouses) · 1099-INT · 1099-DIV (ordinary, qualified,
-capital-gain distributions, §199A REIT dividends) · 1099-G unemployment · crypto capital gains (the existing
-8949/Schedule D pipeline) · crypto **ordinary** income — hobby/other → Schedule 1 line 8v; business/
-self-employment → **Schedule C** → Schedule 1 line 3.
+capital-gain distributions, §199A REIT dividends) · 1099-G unemployment · **1099-B brokerage sales — as the
+Schedule D line 1a/8a TOTALS only**, never per transaction (this is a hard ceiling; see REFUSALS) · crypto
+capital gains (the existing 8949/Schedule D pipeline) · crypto **ordinary** income — hobby/other →
+Schedule 1 line 8v; business/self-employment → **Schedule C** → Schedule 1 line 3.
 
 **Deductions:** standard (basic + §63(f) aged/blind + the §63(c)(5) dependent floor) vs **Schedule A**
 (medical over the 7.5% floor · SALT with the §164(b)(5) income-or-sales election, capped $10,000/$5,000 MFS ·
@@ -377,6 +378,10 @@ cannot model it correctly.
   class: §1202 small-business stock, §4952 investment interest, a net operating loss, a Form 8801 credit,
   and accelerated depreciation.
 - **A Form 6251 adjustment v1 cannot see, declared as present.** Three are handled by **declaration**: a non-AMT-qualified mortgaged dwelling (line 3), a divergent AMT capital-loss carryover (line 2k), and depreciation inside your Schedule C expense total whose AMT amount differs (line 2l). Each is asked only when it can apply — respectively a Schedule A carrying Form 1098 mortgage interest, a capital-loss carryforward, and Schedule C expenses above $0 — and must then be answered via `btctax income answer`. An adverse answer refuses, because computing without the add-back would understate your tax.
+- **A Form 1099-B carrying ANY adjustment — the stock ceiling, and it is permanent.** btctax takes your brokerage 1099-B as the **Schedule D line 1a/8a totals** — four numbers, no transaction list. That shortcut is the form's own: lines 1a/8a are for *"transactions reported on Form 1099-B for which basis was reported to the IRS and for which you have no adjustments."* btctax asks you to confirm **both** limbs, and **unanswered and "no" both refuse.** If either is untrue — a **wash sale** (box 1g), **accrued market discount** (box 1f), a **disallowed loss** (box 7), or a **noncovered security** (box 5) — those sales belong on Form 8949 one row at a time with an adjustment code, and btctax refuses rather than file totals on a line that cannot carry them.
+  - **This is a deliberate ceiling, not a gap awaiting a fix.** btctax fills Form 8949 from its own **bitcoin** lot engine and will not build a second one for securities. If your 1099-B carries an adjustment, this program cannot file your return — use a preparer.
+  - ★ **Wash sales are a stock phenomenon and never a bitcoin one.** §1091 disallows a loss only on *"stock or securities"*, and bitcoin is property, so no bitcoin disposition ever needs an adjustment on that account. That is why Form 8949 column (g) is blank on every row btctax prints — permanently correct for bitcoin, not a v1 shortcut. (If §1091 is ever extended to digital assets, this changes; it has not been.)
+  - **The same rule applies to your crypto, symmetrically.** The one bitcoin case that *would* need an adjustment code — a Form 1099-DA reporting a basis that differs from btctax's own figure — refuses too, rather than printing a number it cannot reconcile. One rule, both asset classes: **no adjustment is modelled, and anything needing one refuses.**
 - **Taxable income of $0 with a capital-loss carryforward you brought IN** — ★ **this used to refuse, and no longer does.** A wiped-out year that carries a capital loss in now files a 1040 and a Schedule D like any other. What changed is the DECISION, not the arithmetic: the §1211/§1212 worksheet was already modelled, and the objection was that emitting a return for this household widens the filing surface on a form you sign under penalties of perjury. That call has been taken.
   - **Not one printed figure moved.** The screen ran after the return was computed and only decided whether to emit it, so the 1040 and Schedule D this household now files are the same ones btctax was already computing. Its Schedule D is indistinguishable from that of a filer who realised the identical loss *this* year — which is the asymmetry that made the refusal hard to defend, because the form draws no such line.
   - **Carryforward OUT — modelled, and correct at the floor.** btctax transcribes the §1212(b)(2)(B) *Capital Loss Carryover Worksheet* from the 2025 Schedule D instructions (which is the sheet that figures a **2024** return's carryover into 2025). So a loss year whose taxable income lands **on the floor** carries the **full** loss forward: with no wages and a $20,000 long-term loss, 1040 line 7 shows the §1211(b) −$3,000 cap but **none of that $3,000 is actually absorbed**, and $20,000 — not $17,000 — survives to next year. At *positive* taxable income the allowance is absorbed and $17,000 survives. Both are computed; neither is a flat rule.
@@ -412,9 +417,27 @@ each one fits you:
 - **Schedule D QOF "No"** — checked unconditionally. btctax supports returns whose dispositions all come from
   the bitcoin ledger; a Qualified Opportunity Fund disposition has no input and no ledger representation, so a
   filer with one is outside the supported set.
-- **Form 8949 Box I (short-term) / Box L (long-term)** — checked on every Form 8949 with rows. These mean
-  "transactions NOT reported to you on Form 1099-B." btctax has no 1099-B / 1099-DA input at all, so every
-  ledger disposition is un-reported by construction. Never Box C/F.
+- **Form 8949 Box C (short-term) / Box F (long-term)** — checked on every Form 8949 row this program prints
+  for **TY2024**, the only year it files. They mean *"transactions NOT reported to you on Form 1099-B."*
+  **The scope assumption is that no broker reported your bitcoin to the IRS** — true for essentially every
+  TY2024 filer, because digital-asset broker reporting had not yet begun. **Verify it fits you:** if an
+  exchange did send you a 1099-B for bitcoin, those rows belong under **Box A or B** (short-term) /
+  **Box D or E** (long-term) on a **separate** Form 8949, and you must reclassify them by hand. btctax will
+  tell you when this is live: `report` prints an advisory naming how many of your dispositions occurred on
+  an exchange and so *may* carry broker reporting.
+  - ★ **Your 1099-B never changes any of this.** A brokerage 1099-B goes to Schedule D lines 1a/8a as
+    totals (above) and never produces a Form 8949 row at all, so it cannot affect which box is checked.
+    Every Form 8949 row btctax prints is one of *your bitcoin dispositions*.
+  - ★ **Box I/L is a later year's answer, not this one's.** The 2025 Form 8949 added digital-asset boxes,
+    and the instructions then forbid the securities boxes for digital assets — *"Do not use box C to report
+    digital asset transactions. Use box I"*. btctax follows the year: **C/F before TY2025, I/L from
+    TY2025.** Never the wrong pair for the year.
+  - ★★ **From TY2026 this stops being a scope answer and becomes yours.** Once brokers report *basis* on
+    digital assets, btctax asks — per venue, per covered/noncovered cohort — what your Form 1099-DA
+    actually said, and **your answer chooses the box**: nothing reported → **I/L**; proceeds only →
+    **H/K**; basis reported and matching btctax's figure → **G/J**. If a 1099-DA's basis **differs** from
+    btctax's, or the forms for one venue disagree with each other, the return **refuses** rather than guess
+    a letter. That answer is a keystroke you swear to, not a transcription — see "The crypto questions".
 - **Clergy self-employment is OUT OF SCOPE.** A minister, member of a religious order, or Christian
   Science practitioner who has filed Form 4361 or Form 4029 cannot be served by btctax: Schedule SE
   line A's exemption declaration is never asked, there is no Form 4361/4029 input, and there is no way

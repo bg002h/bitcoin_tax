@@ -6880,10 +6880,45 @@ build, each with an owning phase.
     cannot do** — the document a filer reads to decide whether to use it at all. That is the FR-108
     class (filer-facing text that is untrue) in the highest-stakes place it can occur.
   · The claim next to it — *"every ledger disposition is un-reported by construction. Never Box C/F"*
-    — rests on the same false premise and must be re-derived, not merely reworded. If a 1099-B with
-    basis reported can now be entered, the Form 8949 box selection is a question again, and Box C/F is
-    the *"reported to you"* case. Walk 2 did not observe a wrong box, so this is a re-derivation, not
-    an observed defect — **check it before rewording**.
+    — rests on the same false premise and must be re-derived, not merely reworded.
+
+  ✅ **RE-DERIVED AND CLOSED 2026-09-09.** Recon `RECON-fr111-8949-box-truth.md` (persisted `5a1a94be`),
+  controller-verified in the adjacent `-VERIFICATION.md`. Three findings, in ascending severity:
+
+  ★★★ **THIS ENTRY'S OWN STATED MECHANISM WAS WRONG, and is retracted.** It said *"if a 1099-B with basis
+  reported can now be entered, the Form 8949 box selection is a question again, and Box C/F is the
+  'reported to you' case."* That **conflates two different inputs.** `form_8949()` reads only
+  `state.disposals` — a `[[b_1099]]` row **never becomes a Form 8949 row of any box**, by IRS design
+  (Schedule D Exception 1/2 aggregate reporting). What reopens the box question is `BrokerReporting`
+  (the **1099-DA** answers), via `route_8949_boxes`. `Form1099B`'s falsity was only that the *input
+  exists*, never that it moves a box.
+
+  ★★★ **And the sentence was worse than "stale" — it named the WRONG YEAR'S BOXES AND DENIED THE RIGHT
+  ONES.** `LIMITATIONS.md:3` scopes the document to *"Tax year supported: TY2024 only"*, which is still
+  accurate (`tax_tables.rs:100-105` inserts exactly one year, so `full_return_for(2025)` is `None`). For
+  TY2024 every crypto row is **Box C/F unconditionally** (`kat_forms.rs:152-153` asserts it) — so the
+  paragraph advertised **I/L**, a later revision's boxes, and then explicitly ruled out **C/F**, the only
+  pair TY2024 can print. Not a false clause in a true paragraph; the paragraph was inverted.
+
+  **The derived truth** (full table in the recon): C/F before TY2025 · I/L from TY2025 · G/H/J/K only on a
+  year whose regime reports **basis**, which among bundled years is TY2026 alone (`YEAR.toml`:
+  2024 `false/false`, 2025 `true/false`, 2026 `true/true`) · `Mixed`/`BasisDiffers`/unanswered are a hard
+  `Err`, never a guessed letter.
+
+  **Also fixed in the same fold:** the *"Supported → Income"* list never mentioned 1099-B at all
+  (recon Q3-2) though walk 2 filed with one; and the **(ii) REFUSALS** list never documented the 1099-B
+  adjustment refusal — a refusal a filer can actually hit, undocumented. Both now present, the latter
+  carrying FR-110's ceiling and its §1091 reasoning.
+
+  **Checked and NOT changed:** `LIMITATIONS.md:281-283` (*"a keystroke, not a transcription… no 1099-DA
+  entry screen"*) is CORRECT and independently re-confirmed — it has no writer anywhere in `btctax-tui`.
+  It also **contradicted line 416 three sections earlier**, which is the sharpest evidence line 416 was
+  the wrong one. The export's I5 advisory is **not** stale either: its *"Box I/L (not-reported default)"*
+  wording is gated on `regime.basis == false`, and reaching G/H/J/K needs `regime.basis == true` — the two
+  are mutually exclusive on the same regime, so it cannot misdescribe a routed return. ★ That was a
+  controller premise the recon refuted; recorded so it is not re-investigated.
+
+  **Residue → FR-116** (`cli.rs:479`, minor/ambiguous).
 
 - **FR-112 — the "Federal tax attributable to crypto" section prints two WHOLE-RETURN levels under a
   crypto heading (journey walk 2; mechanism confirmed by the controller in the source). Owning phase:
@@ -6950,6 +6985,18 @@ build, each with an owning phase.
   label-only scan FR-114 settled on — recorded so it is not lost between the two. Fix is one sentence,
   and it must keep saying the true thing FR-110 decided: btctax reports securities only as Schedule D
   line 1a/8a totals, never per transaction.
+
+- **FR-116 — `cli.rs:479`'s *"Earlier years neither ask nor accept them"* is false on one reading of
+  "accept" (recon Q3-3, 2026-09-09). Owning phase: ownerless residue (doc wording), minor.**
+  The `income import` doc comment — which also generates `docs/man/btctax-income-import.1` — says earlier
+  years *"neither ask nor accept"* `[broker_reporting.*]` tables. Read as *ingest*, that is false:
+  `parse_return_inputs_toml` has no year gate, and `cmd/tax.rs:260-293` stores the row unconditionally
+  (`screen_param_free` explicitly ignores `broker_reporting` as a non-money field,
+  `return_refuse.rs:1046`). A TY2024 import **accepts and stores** the table; only later does
+  `screen_broker_reporting` (`return_refuse.rs:1734-1780`, `RefuseReason::BrokerAnswerUnread`) refuse it.
+  Read as *act on*, the sentence is defensible — no earlier-year answer ever reaches a box. Minor because
+  the downstream refusal is loud and correctly worded; the fix is one clause ("accept" → "act on", or
+  "stored but refused as unread"). Recorded rather than fixed to keep the FR-111 fold to its own scope.
 
 - **FR-99 — ★★ THE DOMINANT DEFECT CLASS OF THE WHOLE INTERVIEW ARC: a hand-written list standing beside
   a set that GROWS. Proposed `CLAUDE.md` rule — OWNER'S CALL, filed not actioned. Owning phase: the
