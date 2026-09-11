@@ -76,6 +76,26 @@ _Last updated: **2026-09-09**. Written at a deliberate pause; safe to exit. **Re
 > `db056c57` **fold** (gate output in the message) → `95027636` reverify brief → `5c86ce48` reverify
 > verbatim → `80aa7010` reverify ledger.
 >
+> ### ★★★ OWNER RULING 2026-09-11 — TY2025 IS NEVER FILED WITH THIS SOFTWARE
+>
+> Verbatim: *"We will not file a 2025 tax year return with this software. We only care about 2025 to the
+> extent that it helps us with 2026 and beyond."* Recorded in three places: the gate that enforces it
+> (`tax_tables.rs`, `ty2025_full_return_must_stay_fail_closed_until_complete`'s doc comment),
+> `design/ROADMAP_STATUS.md` §0a, and the memory `ty2025-is-the-blocker`.
+>
+> **The test for any TY2025 work is now TRANSFER to TY2026**, and it inverted step 5's two halves:
+> `f6251/2025` transfers its **whole field map** (62 fields, 0 renamed, 0 moved between the 2025 final
+> and the 2026 draft — only two text cells differ) and pre-pays a January-critical-path transcription,
+> so it is being built; `f1040s1a/2025` transfers almost nothing (TY2026's Schedule 1-A is a rebuild,
+> 10 of 219 fields survive) and may stay `Schema::Unwired` permanently with a stated reason.
+>
+> ★ **S1 is NOT killed by this.** S1 was always a *never-mailed* rehearsal ending in a line-by-line diff
+> against the return filed elsewhere — the purest case of "2025 helping 2026". Its cost now has to be
+> justified as 2026 readiness. Still the owner's open decision.
+>
+> ★ And **"TY2025 is the blocker" is retired as a framing.** It dated from when TY2025 was the year being
+> filed. TY2026 is the first filed year; the blockers are the January finals and OTS 2026.
+>
 > ### The next action is the OWNER'S
 >
 > **The interview arc is built, reviewed per-task, journey-walked twice, swept for cross-task patterns, and

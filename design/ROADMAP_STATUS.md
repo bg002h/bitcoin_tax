@@ -48,6 +48,33 @@ now is preparation against drafts, which is why `form-delta` and the draft discr
 Nothing can be transcribed from a draft; what CAN be done is every code-shape change that stops
 assuming TY2025, so the finals become a diff.
 
+### ★★★ RULED 2026-09-11 — **TY2025 IS NEVER FILED WITH THIS SOFTWARE**
+
+Owner, verbatim: *"We will not file a 2025 tax year return with this software. We only care about
+2025 to the extent that it helps us with 2026 and beyond."*
+
+**What it settles.** No TY2025 filing, ever, by this product. `full_return_for(2025)` stays `None`;
+its gate (`ty2025_full_return_must_stay_fail_closed_until_complete`) can no longer be lifted by a
+filing need. Every item of TY2025 work must now justify itself as TY2026 preparation, and the test is
+**transfer**: measured on step 5's two remaining halves —
+
+| TY2025 work | transfers to TY2026 | verdict |
+|---|---|---|
+| `f6251/2025` — the OBBBA Part I 1a/1b transcription | **the whole field map**: 62 fields, 0 renamed, 0 moved (`xtask form-delta <2025-final> <2026-draft>`, `TY2026_WORK_LIST.md:41`). Only two text cells differ — line 1a's Schedule 1-A cross-reference (37 → 43) and line 4's MFS threshold ($900,350 → $640,200) | **DO IT** — and it pre-pays a worksheet transcription that is otherwise on the January critical path |
+| `f1040s1a/2025` — the Schedule 1-A emitter | **almost nothing**: TY2026's Schedule 1-A is a REBUILD, 10 of 219 fields survive, 175 added | **SKIP** — may stay `Schema::Unwired` permanently with a stated reason, which is what `Unwired` is for |
+
+**What it does NOT settle.** **S1 is still open.** S1 was always a *never-mailed* rehearsal — encode
+TY2025 params, drive the owner's real 2025 exports to a packet, **diff every line against the return
+actually filed elsewhere, shred it**. That is the purest case of "2025 helping 2026", so the ruling
+does not kill it; it only means S1's cost must be justified as 2026 readiness rather than as filing.
+The lived journey still has not happened in 14 months.
+
+★ Also restated: **TY2025 is no longer "the blocker."** That framing dates from when TY2025 was the
+year being filed. TY2026 is the first filed year (§0a, 2026-09-05), and the blockers are the January
+finals and OTS 2026 — neither of which any amount of TY2025 work reaches.
+
+---
+
 ### ★★★ OWNER DECISIONS PENDING — raised by the Fable strategy review (2026-09-05)
 
 `design/agent-reports/2026-09-05-fable-strategy-review.md` (persisted `297ab7db`; ledger

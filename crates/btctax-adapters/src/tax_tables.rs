@@ -1068,7 +1068,24 @@ mod tests {
     }
 
     /// ★★ TY2025 FAILS CLOSED UNTIL IT IS **COMPLETE** — and this is the gate that makes adding it
-    /// safe to do in stages. It is scheduled to be deleted; it is not scheduled to be deleted *early*.
+    /// safe to do in stages.
+    ///
+    /// ★★★ **OWNER RULING 2026-09-11 — NO TY2025 RETURN WILL BE FILED WITH THIS SOFTWARE.** Verbatim:
+    /// *"We will not file a 2025 tax year return with this software. We only care about 2025 to the
+    /// extent that it helps us with 2026 and beyond."*
+    ///
+    /// That changes what this gate IS. It was a staging gate — "scheduled to be deleted, just not
+    /// early". It is now a gate that **no filing need can ever lift**, because there is no TY2025
+    /// filing. TY2025 work is justified only by what it contributes to TY2026+, which is why the
+    /// OBBBA-era Form 6251 transcription is being built against the 2025 FINAL (its field map is
+    /// TY2026's, byte-identical) while the TY2025 Schedule 1-A emitter is not (TY2026's is a rebuild).
+    ///
+    /// One path could still bundle these params: `design/ROADMAP_STATUS.md` §0a's **S1**, a
+    /// *never-mailed* TY2025 rehearsal whose exit is a line-by-line diff against the return the owner
+    /// filed elsewhere — still the owner's open decision, and consistent with the ruling because a
+    /// rehearsal is exactly "2025 helping 2026". Until S1 is ruled, the four conditions below are unmet
+    /// **by choice, not by schedule**, and the function's name is kept because those conditions are
+    /// still what would have to be true if S1 ever lifts it.
     ///
     /// **Why a partial TY2025 is worse than no TY2025.** `full_return_for(year) → Some` is the ONLY
     /// year gate on the full-return path (`btctax-cli/src/cmd/tax.rs:499`, `session.rs:517`/`560`,
