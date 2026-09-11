@@ -9,9 +9,9 @@
 //! revision added without an arm does not compile, with an explicit [`Schema::Unwired`] arm for the
 //! TY2025 maps whose revision has not been VERIFIED against a struct yet (step 5 wires them: each is
 //! a deletion from that arm, and forgetting one still cannot compile). **Step 5 (2026-09-05) wired
-//! eight**; two remain: `f6251/2025` (line 1 split into 1a/1b — a rebuild, a new struct, done once
-//! for TY2026 which shares the layout; TY2025 is paused) and `f1040s1a/2025` (no filler exists yet —
-//! the Schedule 1-A emitter is the missing 17th form).
+//! eight**, and `f6251/2025` followed (2026-09-11) into [`Schema::Form6251ObbbaMap`] — the new
+//! transcription struct for the line-1-split revision. **ONE remains, deliberately and
+//! permanently:** `f1040s1a/2025` — see [`Schema::Unwired`].
 //!
 //! ★ "Unwired" means unverified, not unparseable (steps-2/3 review Q3). Measured 2026-09-05 on the
 //! ten: **eight** (`f1040s2`, `f1040s3`, `f1040sa`, `f1040sb`, `f1040sc`, `f8959`, `f8960`,
@@ -19,6 +19,16 @@
 //! struct; `f6251/2025` would not (line 1 split into 1a/1b — a rebuild, a new struct); `f1040s1a`
 //! has no struct at all. The door is closed because the label/extract join has not been run for
 //! those revisions, which is step 5's criterion — `parse()` succeeding is not it.
+//!
+//! ★★★ **MANY-TO-ONE IS THE HAZARD THIS MODULE CARRIES, not a convenience.** Two revisions of one
+//! form can share a field map *and disagree about what a box means*. The OBBBA-era Form 6251 is the
+//! measured case: `xtask form-delta` reports the TY2025 → TY2026 field delta as **62 fields, 0
+//! renamed, 0 moved**, and yet eight numbered lines print DIFFERENT text, two of them
+//! cross-references — Schedule 1-A line **37** → **43** on line 1a, and Form 1040 line **7** →
+//! **7a** on line 7. A single struct serving both would fill either year's PDF with nothing red.
+//! So the year-varying cells of that layout live in [`crate::f6251_revision`], keyed per revision
+//! and held by an `_`-free match over [`LineSet`]: wiring `f6251/2026` onto this schema without
+//! stating its own cells is a **build error**.
 //!
 //! Many-to-one by design: several revisions may parse into one struct (`Form1040Map` absorbs
 //! 2024/2025 with `Option` lines today).
@@ -248,8 +258,13 @@ pub enum Schema {
     Form1040VMap,
     /// Parses into [`crate::map::Form4868Map`].
     Form4868Map,
-    /// Parses into [`crate::map::Form6251Map`].
+    /// Parses into [`crate::map::Form6251Map`] — the **TY2024** revision, whose Part I prints a
+    /// single line 1.
     Form6251Map,
+    /// Parses into [`crate::map::Form6251ObbbaMap`] — the **OBBBA-era** revision, whose Part I
+    /// splits line 1 into **1a/1b** (Pub. L. 119-21). TY2025 and TY2026 share this field map
+    /// exactly; their year-varying printed cells are [`crate::f6251_revision`]'s, per revision.
+    Form6251ObbbaMap,
     /// Parses into [`crate::map::Form8275Map`].
     Form8275Map,
     /// Parses into [`crate::map::Form8283Map`].
@@ -282,9 +297,19 @@ pub enum Schema {
     ScheduleDMap,
     /// Parses into [`crate::map::ScheduleSeMap`].
     ScheduleSeMap,
-    /// This revision has not been verified against a struct yet (design r2 §10 step 3 → step 5) —
-    /// eight of the ten would parse today; see the module doc. `for_year` returns
-    /// [`crate::FormsError::UnwiredLineSet`] for it — the map is bundled, listed, and refused.
+    /// No struct parses this revision: the map is **bundled, listed, and refused**. `for_year`
+    /// returns [`crate::FormsError::UnwiredLineSet`].
+    ///
+    /// ★★★ **Exactly one revision carries this, and it is a settled destination rather than a queue
+    /// position: `f1040s1a/2025`.** Owner ruling 2026-09-11 — *"We will not file a 2025 tax year
+    /// return with this software. We only care about 2025 to the extent that it helps us with 2026
+    /// and beyond."* So no TY2025 Schedule 1-A will ever be printed, and TY2026's Schedule 1-A is
+    /// not a constants bump but a REBUILD (`design/TY2026_WORK_LIST.md`: 10 of 219 fields survive,
+    /// 175 added), so a struct written against the TY2025 revision would have to be thrown away.
+    /// The map stays bound by `build.rs`, hash-pinned, extract-archived and 100 % censused — every
+    /// obligation except a filler — which is the state `Unwired` exists to express. `f6251/2025`
+    /// left this arm on 2026-09-11 for the opposite reason: its TY2026 field map is IDENTICAL, so
+    /// the struct written for it is TY2026's, a season early.
     Unwired,
 }
 
@@ -320,7 +345,7 @@ pub fn schema(ls: LineSet) -> Schema {
         LineSet::F1040sc_2025 => Schema::ScheduleCMap,
         LineSet::F1040v_2025 => Schema::Form1040VMap,
         LineSet::F4868_2025 => Schema::Form4868Map,
-        LineSet::F6251_2025 => Schema::Unwired,
+        LineSet::F6251_2025 => Schema::Form6251ObbbaMap,
         LineSet::F8283_2025 => Schema::Form8283Map,
         LineSet::F8949_2025 => Schema::Form8949Map,
         LineSet::F8889_2025 => Schema::Form8889Map,
@@ -351,15 +376,18 @@ mod tests {
         assert_eq!(LineSet::ALL.len(), 38);
     }
 
-    /// The Unwired set is EXACTLY the two that step 5 could not wire — a shrink-only pin: wiring
-    /// one edits this list down; a new unwired revision cannot appear without editing it up.
+    /// The Unwired set is EXACTLY `f1040s1a/2025` — a shrink-only pin: wiring one edits this list
+    /// down; a new unwired revision cannot appear without editing it up.
+    ///
+    /// 2 → 1 on 2026-09-11: `f6251/2025` was wired to [`Schema::Form6251ObbbaMap`]. The one that
+    /// remains is a settled destination, not a queue position — see [`Schema::Unwired`].
     #[test]
-    fn the_unwired_set_is_exactly_the_two_ty2025_maps_step_5_could_not_wire() {
+    fn the_unwired_set_is_exactly_the_schedule_1a_revision_that_will_never_be_filed() {
         let unwired: Vec<&str> = LineSet::ALL
             .iter()
             .filter(|ls| schema(**ls) == Schema::Unwired)
             .map(|ls| ls.as_str())
             .collect();
-        assert_eq!(unwired, ["f1040s1a/2025", "f6251/2025"]);
+        assert_eq!(unwired, ["f1040s1a/2025"]);
     }
 }

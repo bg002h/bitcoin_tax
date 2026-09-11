@@ -190,11 +190,18 @@ fn a_year_with_no_bundled_6251_map_refuses_instead_of_reusing_another_years_geom
         Form6251Map::for_year(2024).is_ok(),
         "TY2024 is bundled and must resolve"
     );
+    // ★ TY2025 is in this list for a DIFFERENT reason from 2023/2026 and the difference matters: it
+    //   HAS a bundled map, of a different REVISION (Part I line 1 split into 1a/1b), which parses
+    //   into `Form6251ObbbaMap` instead. This struct must still refuse it — by name, through the
+    //   `other` arm of its schema match — because filling the 1a/1b PDF through the single-line-1 map
+    //   writes 2a into 1b's box and walks everything below down one. Same refusal, now with a struct
+    //   on the other side of it; `tests/line_set_wiring.rs` holds that each revision refuses the
+    //   other's map, in both directions.
     for unmapped in [2023, 2025, 2026] {
         assert!(
             Form6251Map::for_year(unmapped).is_err(),
-            "TY{unmapped} has no bundled 6251 map and must REFUSE — silently reusing another \
-             year's field names puts the AMT in the wrong box"
+            "TY{unmapped} has no bundled 6251 map of THIS revision and must REFUSE — silently \
+             reusing another revision's field names puts the AMT in the wrong box"
         );
         assert!(
             Form8995AMap::for_year(unmapped).is_err(),

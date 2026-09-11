@@ -361,9 +361,9 @@ impl Form6251Map {
     ///
     /// A hardcode cannot express "no map for this year". This can, and it fails CLOSED: an
     /// unmapped year is a refusal, never a silent substitution of a neighbouring year's geometry.
-    /// ★ TY2025's map file is committed and field-verified but deliberately NOT wired here — its
-    /// 1a/1b split needs `Form6251Map` and the fill logic to change together, which is a build task
-    /// and not a review fold. Until then 2025 refuses, which is the honest state.
+    /// ★ TY2025's map is a DIFFERENT REVISION and parses into [`Form6251ObbbaMap`] (wired
+    /// 2026-09-11), so this struct refuses it by name through the `other` arm below rather than
+    /// mis-parsing it — which is the same refusal, now with a struct on the other side of it.
     /// The map for a tax year — design r2 §10 step 3: the file comes from the glob
     /// (`bundled::map_text`), the revision from its ROW, and the ONE exhaustive
     /// `line_set → schema` match (`line_set::schema`) decides whether THIS struct parses it.
@@ -472,6 +472,406 @@ impl Form6251Map {
         } = self;
         vec![
             &self.line1,
+            &self.line2a,
+            &self.line2b,
+            &self.line3,
+            &self.line4,
+            &self.line5,
+            &self.line6,
+            &self.line7,
+            &self.line8,
+            &self.line9,
+            &self.line10,
+            &self.line11,
+            &self.line12,
+            &self.line13,
+            &self.line14,
+            &self.line15,
+            &self.line16,
+            &self.line17,
+            &self.line18,
+            &self.line19,
+            &self.line20,
+            &self.line21,
+            &self.line22,
+            &self.line23,
+            &self.line24,
+            &self.line25,
+            &self.line26,
+            &self.line27,
+            &self.line28,
+            &self.line29,
+            &self.line30,
+            &self.line31,
+            &self.line32,
+            &self.line33,
+            &self.line34,
+            &self.line35,
+            &self.line36,
+            &self.line37,
+            &self.line38,
+            &self.line39,
+            &self.line40,
+        ]
+    }
+}
+
+/// **Form 6251** (Alternative Minimum Tax—Individuals), the **OBBBA-era revision** whose Part I
+/// splits line 1 into **1a/1b** — TY2025 and TY2026. §G-6.
+///
+/// ## ★★★ Read this before assuming what it is tested against
+///
+/// **Nothing exercises this struct through a filed packet, and for TY2025 nothing ever will.** Owner
+/// ruling 2026-09-11: *"We will not file a 2025 tax year return with this software. We only care
+/// about 2025 to the extent that it helps us with 2026 and beyond."* `full_return_for(2025)` is a
+/// deliberate tested `None`, and `packet.rs` still reaches for [`Form6251Map`] — the TY2024 struct —
+/// by name, so a TY2026 packet will REFUSE (`Structure`, naming this schema) until someone teaches
+/// it to dispatch on `line_set::schema`. That refusal is the honest state and is better than the
+/// alternative it replaced: filling a 1a/1b PDF through the single-line-1 TY2024 map, which writes
+/// 2a into 1b's box and walks everything below down one, landing **line 11, the AMT itself**, in
+/// line 10's box with nothing red.
+///
+/// **What this struct IS for: it is TY2026's field map, built against a FINAL document a season
+/// early.** `xtask form-delta` measures the TY2025 → TY2026 AcroForm delta as **62 fields, 0
+/// renamed, 0 moved** (`design/TY2026_WORK_LIST.md`), so the map written here against the
+/// finalised TY2025 PDF is the one TY2026 needs, and it did not have to wait for a 2026 final to be
+/// written. What could NOT be shared is the printed TEXT: eight numbered lines differ, two of them
+/// cross-references, and those live per revision in [`crate::f6251_revision`] where the compiler
+/// holds them.
+///
+/// ## What it covers
+///
+/// 42 of the form's 60 numbered money boxes: 1a, 1b, 2a, 2b, 3, and 4–40. Lines **2c–2t** are Part I
+/// add-backs `btctax-core` does not model and are CENSUSED — every one is an add-back, so silence
+/// UNDERSTATES tax, and the filer is REFUSED through the §G-22 out-of-scope declaration rather than
+/// filed with a laundered zero (the standing example being an ISO exercise printed as $0 on line 2i).
+///
+/// ## Why it is a separate struct and not `Option` fields on [`Form6251Map`]
+///
+/// The two revisions do not merely differ in which cells are populated — line 1 is a DIFFERENT SET of
+/// boxes (one in TY2024, two here), page 1's every field name from `f1_4` onward means a different
+/// line, and line 4 combines "lines 1b through 3" rather than "lines 1 through 3". Absorbing that
+/// into one struct with two optional cells would make "which revision is this?" a runtime question
+/// answered by whichever cells happened to be present, exactly where a wrong answer is a wrong AMT.
+/// `deny_unknown_fields` plus a per-revision struct makes it a parse-time answer instead: the TY2024
+/// map is missing `line1a`/`line1b` here, and the TY2025 map is missing `line1` there, and both
+/// refuse loudly.
+///
+/// ★ See `forms/2025/f6251.map.toml` for how the page-1 assignment was corroborated four independent
+/// ways — the inset trio (`f1_6`/`f1_10`/`f1_23`, w=64) landing exactly on the three parenthesised
+/// lines 2b/2f/2s, and `f1_3` (line 1a) being the only money widget OUTSIDE the right-hand amount
+/// column, at x=[410.4, 481.6].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Form6251ObbbaMap {
+    /// `"f6251"`.
+    pub form: String,
+    /// Tax year.
+    pub year: i32,
+    // ── design r2 §4 — the ROW. The same keys as [`MapRow`]; required ones REFUSE when missing. ──
+    /// IRS basename. See [`MapRow::irs_stem`].
+    pub irs_stem: String,
+    /// Annual or periodic. See [`MapRow::versioning`].
+    pub versioning: Versioning,
+    /// sha256 of the bundled PDF. See [`MapRow::template_sha256`].
+    pub template_sha256: String,
+    /// OPTIONAL — the manifest-join excuse. See [`MapRow::authority`].
+    #[serde(default)]
+    pub authority: Option<String>,
+    /// OPTIONAL — a second extract root. See [`MapRow::extract_override`].
+    #[serde(default)]
+    pub extract_override: Option<String>,
+    /// Instructions stem. See [`MapRow::instructions`].
+    pub instructions: String,
+    /// OPTIONAL — page range in an `i1040gi` booklet. See [`MapRow::instr_pages`].
+    #[serde(default)]
+    pub instr_pages: Option<[u32; 2]>,
+    /// The line-set revision. See [`MapRow::line_set`].
+    pub line_set: String,
+    /// OPTIONAL — absent on the 1040. See [`MapRow::attachment_sequence`].
+    #[serde(default)]
+    pub attachment_sequence: Option<String>,
+    /// The §G-13 **field census** — every AcroForm field on this year's PDF this build does NOT fill,
+    /// mapped to the [`CensusDecision`] that leaves it blank. See [`CensusDecision`].
+    #[serde(default)]
+    pub census: std::collections::BTreeMap<String, CensusDecision>,
+    /// ★★★ R2.2 — the `[direction]` table. See [`DirectionBlock`].
+    #[serde(default)]
+    pub direction: Vec<DirectionBlock>,
+    /// ★★★ R2.2's derived flip. See [`SubtractSentence`].
+    #[serde(default)]
+    pub subtracts: Vec<SubtractSentence>,
+
+    /// **L1a** — NEW in this revision (Pub. L. 119-21). The Schedule 1-A line it subtracts is
+    /// **per revision** and lives in [`crate::f6251_revision`]: TY2025 prints line 37, TY2026's
+    /// draft prints line 43, and no field name here can tell the two apart.
+    ///
+    /// ★ Its widget is the only money box on the form outside the right-hand amount column
+    /// (x=[410.4, 481.6] against [504, 576]), because 1a is a sub-total feeding 1b.
+    pub line1a: MoneyCell,
+    /// **L1b** — "Subtract line 1a from Form 1040, 1040-SR, or 1040-NR, line 11b (if less than zero,
+    /// enter as a negative amount)".
+    ///
+    /// ★★ **1b, not 1a, is what line 4 combines.** Not parenthesised on the face, so a negative 1b
+    /// takes a literal minus sign rather than a magnitude.
+    pub line1b: MoneyCell,
+    /// **L2a** — "If filing Schedule A (Form 1040), enter the taxes from Schedule A, line 7;
+    /// otherwise, enter the amount from Form 1040 or 1040-SR, line 12e".
+    ///
+    /// ★ Line **12e**, where TY2024 said line 12: the TY2025 Form 1040 exploded line 12 into 12a–12e.
+    /// Measured identical in the TY2026 draft, so it is not a per-revision cell.
+    pub line2a: MoneyCell,
+    /// **L2b** — "Tax refund from Schedule 1 (Form 1040), line 1 or line 8z". **PARENTHESISED** on
+    /// the face (`2b (   )`), so the digits written are a positive MAGNITUDE.
+    pub line2b: MoneyCell,
+    /// **L3** — "Other adjustments, including income-based related adjustments".
+    pub line3: MoneyCell,
+    /// **L4** — "Alternative minimum taxable income. Combine lines 1b through 3. (If married filing
+    /// separately and line 4 is more than $900,350, see instructions.)"
+    ///
+    /// ★★★ The dollar figure is per revision AND per year: TY2025 prints $900,350, the TY2026 draft
+    /// $640,200. It is never a literal in this crate — the value btctax computes with is
+    /// `AmtParams::mfs_kicker_start`, and the sentence the paper prints is
+    /// [`crate::f6251_revision::ObbbaRevision::line4`]. There is no widget for the kicker itself: it
+    /// is folded into line 4's own box, which is why no field map can catch it being dropped.
+    pub line4: MoneyCell,
+    /// **L5** — "Exemption." The status table printed on the face; its six figures moved between the
+    /// two revisions and are `AmtParams`', not this struct's.
+    pub line5: MoneyCell,
+    /// **L6** — "Subtract line 5 from line 4. If more than zero, go to line 7. If zero or less, enter
+    /// -0- here and on lines 7, 9, and 11, and go to line 10".
+    ///
+    /// ★ SPLIT across extract rows 57 and 63 by five brace-glyph rows. A row-wise reader stops at
+    /// "lines 7, 9," and silently drops **11** from the zero-out set.
+    pub line6: MoneyCell,
+    /// **L7** — Part III's line 40 when the form routes there, else the flat 26/28 % on line 6. Its
+    /// routing bullet cites a Form 1040 line that differs between revisions
+    /// ([`crate::f6251_revision::ObbbaRevision::line7_capital_gain_clause`]), and its breakpoint
+    /// constants are `AmtParams`'.
+    pub line7: MoneyCell,
+    /// **L8** — "Alternative minimum tax foreign tax credit (see instructions)".
+    pub line8: MoneyCell,
+    /// **L9** — "Tentative minimum tax. Subtract line 8 from line 7".
+    pub line9: MoneyCell,
+    /// **L10** — "Add Form 1040 or 1040-SR, line 16 (minus any tax from Form 4972), and Schedule 2
+    /// (Form 1040), line 1z. Subtract from the result Schedule 3 (Form 1040), line 1 and any negative
+    /// amount reported on Form 8978, line 14 (treated as a positive number). If zero or less, enter
+    /// -0-. …"
+    pub line10: MoneyCell,
+    /// **L11** — "AMT. Subtract line 10 from line 9. If zero or less, enter -0-. Enter here and on
+    /// Schedule 2 (Form 1040), line 2".
+    pub line11: MoneyCell,
+    /// **L12** — "Enter the amount from Form 6251, line 6. …"
+    pub line12: MoneyCell,
+    /// **L13** — "Enter the amount from line 4 of the Qualified Dividends and Capital Gain Tax
+    /// Worksheet … or … line 13 of the Schedule D Tax Worksheet …"
+    pub line13: MoneyCell,
+    /// **L14** — "Enter the amount from Schedule D (Form 1040), line 19 …"
+    pub line14: MoneyCell,
+    /// **L15** — "If you did not complete a Schedule D Tax Worksheet …, enter the amount from line
+    /// 13. Otherwise, add lines 13 and 14, and enter the smaller of that result or … line 10 of the
+    /// Schedule D Tax Worksheet …"
+    pub line15: MoneyCell,
+    /// **L16** — "Enter the smaller of line 12 or line 15".
+    pub line16: MoneyCell,
+    /// **L17** — "Subtract line 16 from line 12".
+    pub line17: MoneyCell,
+    /// **L18** — the 26/28 % split on line 17; its four constants are `AmtParams`'.
+    pub line18: MoneyCell,
+    /// **L19** — the 0 %-bracket ceiling by filing status; its three figures are the year's
+    /// `TaxTable`'s.
+    pub line19: MoneyCell,
+    /// **L20** — "Enter the amount from line 5 of the Qualified Dividends and Capital Gain Tax
+    /// Worksheet or … line 14 of the Schedule D Tax Worksheet … (as figured for the regular tax). …"
+    pub line20: MoneyCell,
+    /// **L21** — "Subtract line 20 from line 19. If zero or less, enter -0-".
+    pub line21: MoneyCell,
+    /// **L22** — "Enter the smaller of line 12 or line 13".
+    pub line22: MoneyCell,
+    /// **L23** — "Enter the smaller of line 21 or line 22. This amount is taxed at 0%".
+    pub line23: MoneyCell,
+    /// **L24** — "Subtract line 23 from line 22".
+    pub line24: MoneyCell,
+    /// **L25** — the 15 %-bracket ceiling by filing status; its four figures are the year's
+    /// `TaxTable`'s.
+    pub line25: MoneyCell,
+    /// **L26** — "Enter the amount from line 21".
+    pub line26: MoneyCell,
+    /// **L27** — "Enter the amount from line 5 of the Qualified Dividends and Capital Gain Tax
+    /// Worksheet or … line 21 of the Schedule D Tax Worksheet … (as figured for the regular tax). …"
+    pub line27: MoneyCell,
+    /// **L28** — "Add line 26 and line 27".
+    pub line28: MoneyCell,
+    /// **L29** — "Subtract line 28 from line 25. If zero or less, enter -0-".
+    pub line29: MoneyCell,
+    /// **L30** — "Enter the smaller of line 24 or line 29".
+    pub line30: MoneyCell,
+    /// **L31** — "Multiply line 30 by 15% (0.15)".
+    pub line31: MoneyCell,
+    /// **L32** — "Add lines 23 and 30".
+    pub line32: MoneyCell,
+    /// **L33** — "Subtract line 32 from line **22**".
+    ///
+    /// ★★★ FROM LINE **22**, and [`Self::line36`] four rows below reads "Subtract line 35 from line
+    /// **12**" — same verb, two-digit operands a few pixels apart on a rendered page. Transcribing
+    /// this line from the image once produced "from line 12", taxing the ordinary slice twice and
+    /// inflating the tentative minimum tax by $200,000 on one vector. Both re-read from the TEXT
+    /// LAYER, and `tests/f6251_obbba.rs` pins the pair explicitly.
+    pub line33: MoneyCell,
+    /// **L34** — "Multiply line 33 by 20% (0.20)".
+    pub line34: MoneyCell,
+    /// **L35** — "Add lines 17, 32, and 33".
+    pub line35: MoneyCell,
+    /// **L36** — "Subtract line 35 from line **12**". See [`Self::line33`].
+    pub line36: MoneyCell,
+    /// **L37** — "Multiply line 36 by 25% (0.25)".
+    pub line37: MoneyCell,
+    /// **L38** — "Add lines 18, 31, 34, and 37".
+    pub line38: MoneyCell,
+    /// **L39** — the 26/28 % split on line 12; its four constants are `AmtParams`'.
+    pub line39: MoneyCell,
+    /// **L40** — "Enter the smaller of line 38 or line 39 here and on line 7. …"
+    pub line40: MoneyCell,
+
+    /// Name + SSN. REQUIRED — a schedule that does not name its taxpayer is not filable.
+    pub identity: IdentityCells,
+}
+
+impl Form6251ObbbaMap {
+    /// The bundled TY2025 map — the one revision of this schema on disk today.
+    ///
+    /// ★ Named for the year, not `ty_obbba()`, because a second revision will be bundled and the
+    /// caller must say which. There is deliberately no `ty2026()`: TY2026's PDF is a DRAFT and
+    /// `forms/2026/` bundles no template (`YEAR.toml` declares `forms_expected = []`).
+    pub fn ty2025() -> Self {
+        Self::for_year(2025).expect("the bundled TY2025 map is wired and parses")
+    }
+
+    /// ★★★ Select the map by YEAR, refusing a year this build has no map of THIS REVISION for.
+    ///
+    /// The file comes from the glob (`bundled::map_text`), the revision from its ROW, and the ONE
+    /// exhaustive `line_set → schema` match ([`crate::line_set::schema`]) decides whether this struct
+    /// parses it — so a year whose map is a DIFFERENT revision refuses by name rather than being
+    /// parsed by whichever struct the caller happened to reach for.
+    pub fn for_year(year: i32) -> Result<Self, crate::FormsError> {
+        let text = crate::bundled::map_text(crate::bundled::Stem::F6251, year)
+            .ok_or(crate::FormsError::UnsupportedYear(year))?;
+        let row = MapRow::read(text).map_err(|e| {
+            crate::FormsError::Structure(format!(
+                "F6251 TY{year}: the map's row does not parse: {e}"
+            ))
+        })?;
+        let ls = crate::line_set::LineSet::parse(&row.line_set).ok_or_else(|| {
+            crate::FormsError::Structure(format!(
+                "F6251 TY{year}: line_set {:?} is not a revision this build knows",
+                row.line_set
+            ))
+        })?;
+        match crate::line_set::schema(ls) {
+            crate::line_set::Schema::Form6251ObbbaMap => Self::parse(text).map_err(|e| {
+                crate::FormsError::Structure(format!(
+                    "F6251 TY{year}: the bundled map does not parse: {e}"
+                ))
+            }),
+            crate::line_set::Schema::Unwired => Err(crate::FormsError::UnwiredLineSet {
+                stem: "F6251",
+                year,
+                line_set: ls.as_str(),
+            }),
+            other => Err(crate::FormsError::Structure(format!(
+                "F6251 TY{year}: line_set {} parses into {other:?}, not Form6251ObbbaMap",
+                ls.as_str()
+            ))),
+        }
+    }
+
+    pub fn parse(s: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(s)
+    }
+
+    /// The year-varying printed cells of THIS map's revision — the Schedule 1-A line number line 1a
+    /// subtracts, the MFS threshold line 4 prints, and the Form 1040 line line 7 routes on.
+    ///
+    /// ★★★ This is the accessor that makes the hazard reachable rather than implicit. `None` is
+    /// impossible for a map that parsed (this struct only parses a revision on this schema, and
+    /// `tests/f6251_obbba.rs` holds every such revision to having cells), but it is returned rather
+    /// than panicked so a caller must confront it.
+    #[must_use]
+    pub fn revision(&self) -> Option<&'static crate::f6251_revision::ObbbaRevision> {
+        crate::f6251_revision::revision(crate::line_set::LineSet::parse(&self.line_set)?)
+    }
+
+    /// Every modelled money cell, in the form's own printed order.
+    ///
+    /// ★★★ EXHAUSTIVE destructure, no `..` — a cell added to this map is *pattern does not mention
+    /// field* here. That matters because the sweeps that read the FILLED page back (whole-dollar,
+    /// paren-magnitude) iterate this list: a cell missing from it is a cell no read-back ever checks,
+    /// which is the quietest way for a line to stop being verified while every test stays green.
+    #[must_use]
+    pub fn money_cells(&self) -> Vec<&MoneyCell> {
+        let Self {
+            form: _,
+            year: _,
+            // the ROW (design r2 §4) — provenance, never a money cell
+            irs_stem: _,
+            versioning: _,
+            template_sha256: _,
+            authority: _,
+            extract_override: _,
+            instructions: _,
+            instr_pages: _,
+            line_set: _,
+            attachment_sequence: _,
+            census: _,
+            direction: _, // R2.2 — provenance about the census, never a money cell
+            subtracts: _, // likewise
+            identity: _,  // not money
+            line1a: _,
+            line1b: _,
+            line2a: _,
+            line2b: _,
+            line3: _,
+            line4: _,
+            line5: _,
+            line6: _,
+            line7: _,
+            line8: _,
+            line9: _,
+            line10: _,
+            line11: _,
+            line12: _,
+            line13: _,
+            line14: _,
+            line15: _,
+            line16: _,
+            line17: _,
+            line18: _,
+            line19: _,
+            line20: _,
+            line21: _,
+            line22: _,
+            line23: _,
+            line24: _,
+            line25: _,
+            line26: _,
+            line27: _,
+            line28: _,
+            line29: _,
+            line30: _,
+            line31: _,
+            line32: _,
+            line33: _,
+            line34: _,
+            line35: _,
+            line36: _,
+            line37: _,
+            line38: _,
+            line39: _,
+            line40: _,
+        } = self;
+        vec![
+            &self.line1a,
+            &self.line1b,
             &self.line2a,
             &self.line2b,
             &self.line3,
@@ -4093,4 +4493,54 @@ impl ScheduleSeMap {
     pub fn field_names(&self) -> Vec<&str> {
         self.lines().iter().flat_map(|c| c.fields()).collect()
     }
+}
+
+/// ★★★ **Does the bundled map for a REVISION parse into the struct that revision's schema names?**
+///
+/// Exhaustive over [`crate::line_set::Schema`] with **no `_` arm**, so a new schema is a build error
+/// here rather than a revision nobody ever tried to parse.
+///
+/// `None` means the revision names no struct at all ([`crate::line_set::Schema::Unwired`]) or the
+/// build bundles no map for its (stem, year). `Some(Err)` is the parse refusal, first line only.
+///
+/// ## Why this exists rather than two hand-written dispatch tables
+///
+/// It replaced `tests/line_set_wiring.rs::parses_into_2024_struct` — a `match` on nine `Stem`s that
+/// hardcoded "the 2024 struct" as the thing a TY2025 map should parse into. That was correct on the
+/// day it was written and wrong the moment a revision got a struct of its OWN
+/// ([`Form6251ObbbaMap`]): the equivalence it asserted ("wired ⇔ parses") would have demanded that
+/// the 1a/1b map parse into the single-line-1 TY2024 struct. `CLAUDE.md`'s *"derive the list, or make
+/// the compiler hold it"* — the list here is derived from the revision's own row.
+#[must_use]
+pub fn parses_into_its_schema(ls: crate::line_set::LineSet) -> Option<Result<(), String>> {
+    use crate::line_set::Schema;
+    let (stem, year) = ls.as_str().split_once('/')?;
+    let year: i32 = year.parse().ok()?;
+    let text = crate::bundled::map_text(crate::bundled::Stem::from_file_stem(stem)?, year)?;
+    let first = |e: toml::de::Error| e.to_string().lines().next().unwrap_or("").to_string();
+    Some(match crate::line_set::schema(ls) {
+        Schema::Form1040Map => Form1040Map::parse(text).map(|_| ()).map_err(first),
+        Schema::Form1040VMap => Form1040VMap::parse(text).map(|_| ()).map_err(first),
+        Schema::Form4868Map => Form4868Map::parse(text).map(|_| ()).map_err(first),
+        Schema::Form6251Map => Form6251Map::parse(text).map(|_| ()).map_err(first),
+        Schema::Form6251ObbbaMap => Form6251ObbbaMap::parse(text).map(|_| ()).map_err(first),
+        Schema::Form8275Map => Form8275Map::parse(text).map(|_| ()).map_err(first),
+        Schema::Form8283Map => Form8283Map::parse(text).map(|_| ()).map_err(first),
+        Schema::Form8949Map => Form8949Map::parse(text).map(|_| ()).map_err(first),
+        Schema::Form8889Map => Form8889Map::parse(text).map(|_| ()).map_err(first),
+        Schema::Form8959Map => Form8959Map::parse(text).map(|_| ()).map_err(first),
+        Schema::Form8960Map => Form8960Map::parse(text).map(|_| ()).map_err(first),
+        Schema::Form8995AMap => Form8995AMap::parse(text).map(|_| ()).map_err(first),
+        Schema::Form8995Map => Form8995Map::parse(text).map(|_| ()).map_err(first),
+        Schema::Schedule1Map => Schedule1Map::parse(text).map(|_| ()).map_err(first),
+        Schema::Schedule2Map => Schedule2Map::parse(text).map(|_| ()).map_err(first),
+        Schema::Schedule3Map => Schedule3Map::parse(text).map(|_| ()).map_err(first),
+        Schema::ScheduleAMap => ScheduleAMap::parse(text).map(|_| ()).map_err(first),
+        Schema::ScheduleBMap => ScheduleBMap::parse(text).map(|_| ()).map_err(first),
+        Schema::ScheduleCMap => ScheduleCMap::parse(text).map(|_| ()).map_err(first),
+        Schema::ScheduleDMap => ScheduleDMap::parse(text).map(|_| ()).map_err(first),
+        Schema::ScheduleSeMap => ScheduleSeMap::parse(text).map(|_| ()).map_err(first),
+        // No struct is named, so there is nothing to try — a different fact from "it failed".
+        Schema::Unwired => return None,
+    })
 }

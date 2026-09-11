@@ -285,7 +285,8 @@ Added while working the phases, because a claim nobody executes is not a claim:
 - **The build** (`build.rs`): a non-year directory, an unpaired file, or a year without `YEAR.toml` is a
   build error (each observed red); `cargo package --list` must ship every globbed file and `build.rs`.
 - **The revision** (`LineSet`/`Schema`): an unknown `line_set` is a refusal; a revision without an arm does
-  not compile; `Unwired` is exactly the two step 5 could not wire; wired ⇔ parses over the ten TY2025 maps.
+  not compile; `Unwired` is exactly the ONE step 5 could not wire (`f1040s1a/2025` — `f6251/2025` was
+  wired 2026-09-11 into `Form6251ObbbaMap`); every revision parses into the struct its own row names.
 - **The year record** (`YEAR.toml`): expected ∪ absent == `Stem::ALL`; expected == the glob; per-year
   expected-count pins (5/17/15) not derived from the glob; a `filable` year's absences obey a structural
   rule; `YearReadiness`: filable ⇒ params + table + prices through 12-31; slice ⇒ table.

@@ -222,3 +222,203 @@ pub fn fill_form_6251_with_map(
     verify_flat(&check, &fields, &placements, F6251_CLUSTERS)?;
     Ok(bytes)
 }
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+//  The OBBBA-era revision — Part I line 1 split into 1a/1b (TY2025, TY2026).
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// The amount column, plus **a second cluster for line 1a alone**.
+///
+/// ★★★ 1a is the only money widget on this form outside the right-hand amount column: measured from
+/// the bundled PDF's own `/Rect`s (`design/forms/geometry/f6251--2025.json`), `f1_3` sits at
+/// x=[410.4, 481.6] while every other page-1 box is [504, 576] and the three parenthesised insets
+/// are [508, 572]. The form prints 1a in the INNER column because it is a sub-total feeding 1b. A
+/// single-cluster table would therefore reject a correct map — and, worse, a table widened to admit
+/// both would stop distinguishing them, so 1a gets its own column index and the read-back checks it
+/// against the narrower band.
+const F6251_OBBBA_CLUSTERS: &[(f32, f32)] = &[(504.0, 576.0), (410.4, 481.6)];
+/// Index into [`F6251_OBBBA_CLUSTERS`] — the right-hand amount column.
+const OBBBA_COL_AMOUNT: usize = 0;
+/// Index into [`F6251_OBBBA_CLUSTERS`] — line 1a's inner column.
+const OBBBA_COL_1A: usize = 1;
+
+/// Fill the **OBBBA-era** Form 6251 (line 1 split into 1a/1b) and read the result back geometrically.
+///
+/// ## ★★★ What this is for, and what it is NOT tested through
+///
+/// No packet reaches this function, and for TY2025 none ever will (owner ruling 2026-09-11: TY2025 is
+/// not filed with this software; `full_return_for(2025)` is a tested `None`). Its value is that the
+/// TY2025 → TY2026 field map is **identical** — `xtask form-delta`: 62 fields, 0 renamed, 0 moved —
+/// so this is TY2026's emitter, written against a FINAL document a season early and exercised today
+/// through the bundled TY2025 PDF by `tests/f6251_obbba.rs`. `packet.rs` is deliberately NOT wired to
+/// it: it still names [`Form6251Map`] and so REFUSES a non-TY2024 year, which is the honest state
+/// until a year with this revision is actually filable.
+///
+/// ## The two hazards, unchanged from the TY2024 emitter
+///
+/// * **Line 2b is PARENTHESISED** and takes a positive magnitude; core stores it negative.
+/// * **Part III is filed as a UNIT or not at all** — writing lines 12–40 unconditionally would file
+///   twenty-nine sworn zeros on a page the form told the filer to skip.
+///
+/// ## The hazard that is new here
+///
+/// ★★★ **Line 1a is not what line 4 combines — line 1b is** ("Combine lines **1b** through 3"). Line
+/// 1a is the Schedule 1-A deduction being subtracted OUT; reading it into AMTI would put the
+/// deduction where the income goes. Core's `Form6251Line1::amount_entering_line4` already encodes
+/// that; this function writes the two boxes and never derives one from the other.
+pub fn fill_form_6251_obbba_with_map(
+    f: &Form6251,
+    header: &ReturnHeader,
+    map: &crate::map::Form6251ObbbaMap,
+) -> Result<Vec<u8>, FormsError> {
+    // ★★★ WHOLE DOLLARS at the very top (SPEC §3.1), so nothing below can reach a cell unrounded.
+    let f = &f.printed();
+
+    let l2b = f.line2b.abs();
+    assert_paren_magnitudes(&[("2b", l2b)])?;
+
+    // ★★★ THE REVISION GATE. This map's field names are identical across TY2025 and TY2026, so the
+    //     only thing that says which document is being filled is the row's `line_set` — and the
+    //     cells that differ (Schedule 1-A line 37 vs 43 on line 1a; Form 1040 line 7 vs 7a on line
+    //     7) live in `f6251_revision`. Resolving it here means a map whose revision states no cells
+    //     cannot be filled at all, rather than being filled against another year's cross-references.
+    let revision = map.revision().ok_or_else(|| {
+        FormsError::Structure(format!(
+            "Form 6251 TY{}: line_set {:?} is on the OBBBA field map but states none of its own \
+             year-varying cells (crate::f6251_revision). Its line 1a would inherit another \
+             revision's Schedule 1-A line number, and nothing on the printed page would show it.",
+            map.year, map.line_set
+        ))
+    })?;
+    // ★ The same guard as `verify_flat`'s: a cell that cannot be resolved is a refusal, not a
+    //   default. `schedule_1a_line` parses the number OUT of the form's own sentence, so a sentence
+    //   that lost its cross-reference fails here instead of silently meaning line 0.
+    revision.schedule_1a_line().ok_or_else(|| {
+        FormsError::Structure(format!(
+            "Form 6251 TY{}: revision {:?} states a line-1a sentence with no Schedule 1-A line \
+             number in it — the AMT base's source line is unknown and the form must not be filed.",
+            map.year,
+            revision.line_set.as_str()
+        ))
+    })?;
+
+    // ★★★ LINE 1 IS YEAR-SHAPED. This map has TWO cells for it, so it requires the 1a/1b shape and
+    //     REFUSES the TY2024 single-line-1 shape rather than leaving a box blank on a filed form.
+    let (line1a, line1b) = match f.line1 {
+        btctax_core::tax::form6251::Form6251Line1::Y2025 { line1a, line1b } => (line1a, line1b),
+        // ★ `#[non_exhaustive]`, so the catch-all is required and is also the right behaviour: any
+        //   shape this map has no cells for must REFUSE, never silently drop or invent a sub-line.
+        _ => {
+            return Err(FormsError::Geometry(
+                "Form 6251 line 1 is not in its 1a/1b shape, but this is the OBBBA-era map, which \
+                 prints TWO line-1 boxes. The TY2024 revision prints a single line 1 (and a line 4 \
+                 that combines lines 1 through 3) — that needs `Form6251Map`, not this one, and \
+                 filling this one would leave a numbered box blank on a filed form."
+                    .into(),
+            ));
+        }
+    };
+
+    let mut doc = pdf::load(pdf::f6251_pdf(map.year)?)?;
+    let blank_fields = pdf::collect_fields(&doc)?;
+    let mut writes: Vec<(String, pdf::FieldValue)> = Vec::new();
+    let mut placements: Vec<FlatPlacement> = Vec::new();
+
+    // ── Parts I and II, top to bottom. ──────────────────────────────────────────────────────────
+    //
+    // ★ The descent ordinal is the field's POSITION IN THIS LIST, in the form's own printed order,
+    //   so `verify_flat` rejects any cell whose y does not descend with its neighbours — INCLUDING
+    //   across the 1a → 1b column change (measured: 1a's centre-y is 654.0, 1b's 630.0).
+    //   Lines 2c-2t are absent because core does not model them; their widgets stay blank and
+    //   censused.
+    let p1: [(&MoneyCell, Usd, usize); 13] = [
+        (&map.line1a, line1a, OBBBA_COL_1A),
+        (&map.line1b, line1b, OBBBA_COL_AMOUNT),
+        (&map.line2a, f.line2a, OBBBA_COL_AMOUNT),
+        (&map.line2b, l2b, OBBBA_COL_AMOUNT), // ★ PARENTHESISED — magnitude
+        (&map.line3, f.line3, OBBBA_COL_AMOUNT),
+        (&map.line4, f.line4, OBBBA_COL_AMOUNT),
+        (&map.line5, f.line5, OBBBA_COL_AMOUNT),
+        (&map.line6, f.line6, OBBBA_COL_AMOUNT),
+        (&map.line7, f.line7, OBBBA_COL_AMOUNT),
+        (&map.line8, f.line8, OBBBA_COL_AMOUNT),
+        (&map.line9, f.line9, OBBBA_COL_AMOUNT),
+        (&map.line10, f.line10, OBBBA_COL_AMOUNT),
+        (&map.line11, f.line11, OBBBA_COL_AMOUNT),
+    ];
+    for (ord, (cell, value, col)) in p1.iter().enumerate() {
+        push_money(
+            &mut writes,
+            &mut placements,
+            cell,
+            *value,
+            *col,
+            Some((GRP_P1, ord as u32)),
+        );
+    }
+
+    // ── Part III — as a UNIT, and only when the form's own gate says to complete it. ─────────────
+    if f.part_iii_completed {
+        let p3: [(&MoneyCell, Usd); 29] = [
+            (&map.line12, f.line12),
+            (&map.line13, f.line13),
+            (&map.line14, f.line14),
+            (&map.line15, f.line15),
+            (&map.line16, f.line16),
+            (&map.line17, f.line17),
+            (&map.line18, f.line18),
+            (&map.line19, f.line19),
+            (&map.line20, f.line20),
+            (&map.line21, f.line21),
+            (&map.line22, f.line22),
+            (&map.line23, f.line23),
+            (&map.line24, f.line24),
+            (&map.line25, f.line25),
+            (&map.line26, f.line26),
+            (&map.line27, f.line27),
+            (&map.line28, f.line28),
+            (&map.line29, f.line29),
+            (&map.line30, f.line30),
+            (&map.line31, f.line31),
+            (&map.line32, f.line32),
+            (&map.line33, f.line33),
+            (&map.line34, f.line34),
+            (&map.line35, f.line35),
+            (&map.line36, f.line36),
+            (&map.line37, f.line37),
+            (&map.line38, f.line38),
+            (&map.line39, f.line39),
+            (&map.line40, f.line40),
+        ];
+        for (ord, (cell, value)) in p3.iter().enumerate() {
+            push_money(
+                &mut writes,
+                &mut placements,
+                cell,
+                *value,
+                OBBBA_COL_AMOUNT,
+                Some((GRP_P2, ord as u32)),
+            );
+        }
+    }
+
+    push_identity(
+        &mut writes,
+        &mut placements,
+        &map.identity,
+        &header.name_line,
+        &header.taxpayer.ssn,
+        &blank_fields,
+    )?;
+    let index = pdf::index(&blank_fields);
+    pdf::drop_xfa_and_set_needappearances(&mut doc)?;
+    pdf::apply_writes(&mut doc, &index, &writes)?;
+    pdf::strip_nondeterminism(&mut doc);
+    let bytes = pdf::save(&mut doc)?;
+
+    // True read-back: re-parse the SERIALIZED output and verify geometry against the PDF's own rects.
+    let check = pdf::load(&bytes)?;
+    let fields = pdf::collect_fields(&check)?;
+    verify_flat(&check, &fields, &placements, F6251_OBBBA_CLUSTERS)?;
+    Ok(bytes)
+}

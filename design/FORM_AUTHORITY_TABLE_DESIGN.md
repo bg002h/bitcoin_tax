@@ -256,7 +256,20 @@ witness) · `forms_expected` == present ∪ absent-with-reason · every `Stem` h
    filable-without-params and prices-short kills), `default_year()` from the glob for both TUIs,
    `FORMS_ABSENT_FROM_YEAR` and `CENSUS_KEYS` retired into the record and `Stem::ALL`.
    **`YEAR.toml` for 2017/2024/2025** with `YearReadiness` and its kills; move the four literals in.
-5. ◐ **EIGHT OF TEN WIRED (2026-09-05)** — `f1040s2/s3/sa/sb/sc`, `f8959`, `f8960`, `f8995` for
+5. ✅ **NINE OF TEN WIRED — `f6251/2025` landed 2026-09-11.** `Form6251ObbbaMap` (42 money cells:
+   1a, 1b, 2a, 2b, 3, 4–40) + `f6251_revision`, the per-revision table of the cells whose printed text
+   differs between the TY2025 and TY2026 revisions, held by an `_`-free match over `LineSet` (`E0004`
+   observed on a planted stub 2026 revision). The trap it exists for: `xtask form-delta` measures the
+   2025→2026 field delta as **62 fields, 0 renamed, 0 moved**, so one struct fills both years — while
+   **eight numbered lines print different text, two of them cross-references** (Schedule 1-A line
+   **37**→**43** on line 1a; Form 1040 line **7**→**7a** on line 7). ★ The brief for this step said the
+   text delta was "exactly two cells"; measured against the text layers it is eight lines, and the
+   line-7 one was missed. `tests/f6251_obbba.rs` holds every stated cell verbatim against that
+   revision's own extract and derives the printed line set from it (60 labels = 42 mapped + 18
+   censused; `f6251--2024` 59 = 41 + 18). **ONE remains `Unwired`, permanently:** `f1040s1a/2025`,
+   with the reason written into `Schema::Unwired` — owner ruling 2026-09-11 (TY2025 is never filed)
+   plus TY2026's Schedule 1-A being a rebuild. Prior state, for the record:
+   **EIGHT OF TEN WIRED (2026-09-05)** — `f1040s2/s3/sa/sb/sc`, `f8959`, `f8960`, `f8995` for
    TY2025: each verified (map ⊆ PDF fields; the line→printed-label join, derived over every map;
    `[census]` present; 2024→2025 deltas were field renames with no line moved) and measured to parse
    into its 2024 struct — a constants-only revision of the same line set, so the arm is the 2024

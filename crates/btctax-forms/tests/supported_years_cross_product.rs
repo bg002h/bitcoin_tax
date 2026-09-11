@@ -54,10 +54,12 @@
 //! the gap in the open, or to remove the year's files entirely — which is what S9 did on
 //! 2026-09-06. Both are visible in the diff; neither is a quiet edit to a list.
 
+use btctax_forms::line_set::LineSet;
 use btctax_forms::testonly::{
-    Form1040Map, Form1040VMap, Form4868Map, Form6251Map, Form8275Map, Form8283Map, Form8889Map,
-    Form8949Map, Form8959Map, Form8960Map, Form8995AMap, Form8995Map, Schedule1Map, Schedule2Map,
-    Schedule3Map, ScheduleAMap, ScheduleBMap, ScheduleCMap, ScheduleDMap, ScheduleSeMap,
+    parses_into_its_schema, Form1040Map, Form1040VMap, Form4868Map, Form6251Map, Form6251ObbbaMap,
+    Form8275Map, Form8283Map, Form8889Map, Form8949Map, Form8959Map, Form8960Map, Form8995AMap,
+    Form8995Map, Schedule1Map, Schedule2Map, Schedule3Map, ScheduleAMap, ScheduleBMap,
+    ScheduleCMap, ScheduleDMap, ScheduleSeMap,
 };
 use btctax_forms::{FormsError, SUPPORTED_YEARS};
 use sha2::{Digest, Sha256};
@@ -101,12 +103,13 @@ const KNOWN_GAPS: &[(i32, &str, &[&str])] = &[
     // excused no longer exist. Counts MEASURED off this list at that commit, not derived.
     // ── TY2024 — the reference year; one asset stands outside the archive. ──────────────────────
     (2024, "f8283", &["note", "manifest", "extract", "geometry"]),
-    // ── TY2025 — step 5 (2026-09-05) wired eight of the ten; two remain bound but not DISPATCHED
-    //    (f6251/2025 is a rebuild, f1040s1a has no struct — design r2 §10 step 5), five dispatched but not censused. "wired" left this
-    //    record at step 3: the glob binds every file, so it can no longer be missing. ────────────────
+    // ── TY2025 — step 5 wired eight of the ten on 2026-09-05 and `f6251/2025` on 2026-09-11 (its
+    //    own struct, `Form6251ObbbaMap`, for the 1a/1b split). ONE remains bound but not DISPATCHED:
+    //    `f1040s1a`, which has no struct and under the owner's 2026-09-11 ruling will never need one
+    //    for TY2025. Five more are dispatched but carry no `[census]`. "wired" left this record at
+    //    step 3: the glob binds every file, so it can no longer be missing. ──────────────────────────
     (2025, "f1040", &["census"]),
     (2025, "f1040s1a", &["dispatch"]),
-    (2025, "f6251", &["dispatch"]),
     (2025, "f8283", &["census"]),
     (2025, "f8949", &["census"]),
     (2025, "schedule_d", &["census"]),
@@ -226,7 +229,14 @@ fn map_resolves(stem: &str, year: i32) -> Option<bool> {
         "f1040sc" => ScheduleCMap::for_year(year).is_ok(),
         "f1040v" => Form1040VMap::for_year(year).is_ok(),
         "f4868" => Form4868Map::for_year(year).is_ok(),
-        "f6251" => Form6251Map::for_year(year).is_ok(),
+        // ★★★ TWO STRUCTS SERVE THIS STEM, and asking only one is how this instrument went green
+        //     without traversing the revision it should have been reporting on. `f6251/2025` is a
+        //     DIFFERENT revision (Part I line 1 split into 1a/1b) with its own struct, so
+        //     `Form6251Map::for_year(2025)` is `Err` by design — and this arm therefore recorded a
+        //     `dispatch` gap for a map that dispatches perfectly well. The derived cross-check that
+        //     keeps this arm honest is `the_per_stem_dispatch_agrees_with_the_derived_dispatch`
+        //     below; a third revision-struct appearing without being added here reds there.
+        "f6251" => Form6251Map::for_year(year).is_ok() || Form6251ObbbaMap::for_year(year).is_ok(),
         "f8275" => Form8275Map::for_year(year).is_ok(),
         "f8283" => Form8283Map::for_year(year).is_ok(),
         "f8949" => Form8949Map::for_year(year).is_ok(),
@@ -837,5 +847,64 @@ fn the_gate_reds_on_every_planted_defect() {
     assert!(
         count_verdict(&two, &[(2024, 1)]).is_err(),
         "an unrecorded new bundled asset must fail"
+    );
+}
+
+/// ★★★ **The per-stem dispatch table agrees with the DERIVED one** — the guard on `map_resolves`.
+///
+/// `map_resolves` is a hand-written `match` from stem to *one* `Map::for_year`, and it is the reason
+/// this file recorded a `dispatch` gap for `f6251/2025` right up to the day that revision was wired:
+/// the stem had acquired a **second** struct and the arm still asked the first one. A recorded gap
+/// that is not a gap is the quietest kind of wrong instrument — it reports a defect that does not
+/// exist and, symmetrically, would hide one that does.
+///
+/// So the arm is cross-checked against `btctax_forms::testonly::parses_into_its_schema`, which is
+/// exhaustive over `Schema` and therefore cannot fall behind a new struct: **if a revision's own row
+/// names a struct and that struct accepts its bundled map, the stem must dispatch.** A third Form 6251
+/// revision-struct added without extending the arm reds here.
+///
+/// ★ Scoped to revisions whose name is `<stem>/<year>` for a stem this file probes — which is every
+/// committed row (`map_rows.rs` holds that convention). Form 8275's periodic ALIAS is deliberately not
+/// reached: it has no `f8275/2025` revision at all, which is why `KNOWN_ALIASES` exists.
+#[test]
+fn the_per_stem_dispatch_agrees_with_the_derived_dispatch() {
+    let mut checked = 0usize;
+    for ls in LineSet::ALL {
+        let (stem, year) = ls.as_str().split_once('/').expect("<stem>/<year>");
+        let year: i32 = year.parse().expect("a year");
+        let derived = parses_into_its_schema(*ls);
+        let per_stem = map_resolves(stem, year);
+        match derived {
+            Some(Ok(())) => {
+                assert_eq!(
+                    per_stem,
+                    Some(true),
+                    "{}: its own row names a struct that ACCEPTS its bundled map, but \
+                     `map_resolves` says {per_stem:?}. The stem's arm is asking a struct that is \
+                     not this revision's — which records a `dispatch` gap for a map that dispatches.",
+                    ls.as_str()
+                );
+                checked += 1;
+            }
+            Some(Err(e)) => panic!(
+                "{}: the struct its row names REFUSES its own bundled map: {e}",
+                ls.as_str()
+            ),
+            // No struct named (`Unwired`). It must NOT dispatch, or the record is fiction the other
+            // way round.
+            None => {
+                assert_ne!(
+                    per_stem,
+                    Some(true),
+                    "{}: no struct parses this revision, yet `map_resolves` reports it dispatching",
+                    ls.as_str()
+                );
+            }
+        }
+    }
+    assert!(
+        checked >= 37,
+        "only {checked} revisions were cross-checked — the reader has gone blind and this test is \
+         vacuously green"
     );
 }

@@ -20,6 +20,7 @@
 pub mod bundled;
 mod cells;
 mod error;
+pub mod f6251_revision;
 mod fill8949;
 mod fill8949_full;
 mod form1040;
@@ -546,6 +547,9 @@ pub mod testonly {
     pub use crate::form1040v::fill_form_1040v_with_map;
     pub use crate::form4868::fill_form_4868_with_map;
     pub use crate::form6251::fill_form_6251_with_map;
+    // ★ The OBBBA-era (1a/1b) emitter — TY2026's, exercised today through the bundled TY2025
+    //   PDF. `packet.rs` does not reach it: no year carrying this revision is filable yet.
+    pub use crate::form6251::fill_form_6251_obbba_with_map;
     pub use crate::form8275::fill_form_8275_with_map as fill_8275_with_map;
     pub use crate::form8283::fill_form_8283 as fill_8283_with_map;
     pub use crate::form8283::fill_form_8283_full as fill_8283_full_with_map;
@@ -561,10 +565,11 @@ pub mod testonly {
     // The committed map TOML, for the line-keyed inverse transcriber (`extract_lines`). Downstream
     // read-back tests need the map itself, not just its parsed struct.
     pub use crate::map::{
-        AmountCols, AmountColsNoAdjustment, Form1040Map, Form1040VMap, Form4868Map, Form6251Map,
-        Form8275Map, Form8275Row, Form8283Map, Form8889Map, Form8949Map, Form8959Map, Form8960Map,
-        Form8995AMap, Form8995Map, MoneyCell, MoneyPair, PartMap, Schedule1Map, Schedule2Map,
-        Schedule3Map, ScheduleAMap, ScheduleBMap, ScheduleCMap, ScheduleDMap, ScheduleSeMap,
+        parses_into_its_schema, AmountCols, AmountColsNoAdjustment, Form1040Map, Form1040VMap,
+        Form4868Map, Form6251Map, Form6251ObbbaMap, Form8275Map, Form8275Row, Form8283Map,
+        Form8889Map, Form8949Map, Form8959Map, Form8960Map, Form8995AMap, Form8995Map, MoneyCell,
+        MoneyPair, PartMap, Schedule1Map, Schedule2Map, Schedule3Map, ScheduleAMap, ScheduleBMap,
+        ScheduleCMap, ScheduleDMap, ScheduleSeMap,
     };
     pub use crate::pdf::{
         button_on_states, checkbox_on, collect_fields, f6251_pdf, f8995a_pdf, index, load,
