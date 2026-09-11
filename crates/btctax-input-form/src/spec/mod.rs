@@ -8,7 +8,7 @@ mod registries;
 mod coverage;
 mod sections; // Task 6 — the drift-proofing coverage KAT (spec §5.6).
 pub use registries::{
-    field_to_dependent_gate, field_to_question, field_to_skippable, gate_to_field,
+    field_label, field_to_dependent_gate, field_to_question, field_to_skippable, gate_to_field,
     question_to_field, skippable_to_field,
 };
 

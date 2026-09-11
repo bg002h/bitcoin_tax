@@ -1842,10 +1842,15 @@ mod tests {
         //     block arrives with the type unchosen, and `screen_direct_deposit` refuses it on both
         //     tiers, naming line 35c. Both halves are asserted here — the parse AND the refusal —
         //     because the first alone would read as a hole.
-        let no_kind = parse_return_inputs_toml(
+        let mut no_kind = parse_return_inputs_toml(
             "filing_status = \"Single\"\n[header.direct_deposit]\nrouting = \"123456780\"\naccount = \"A1\"\n",
         )
         .expect("a missing `kind` parses: serde reads an absent Option field as None");
+        // ★ B3 C-1 — FR-103's order, which is what `income import` actually does: STAMP the year
+        //   from `--year`, then screen. A TOML carries no `tax_year`, and a yearless return is now
+        //   refused before every year-scoped rule, so screening one un-stamped would test the wrong
+        //   refusal — and screening un-stamped is the FR-103 defect itself.
+        crate::return_inputs::stamp_year(&mut no_kind, 2024).expect("a fresh parse states no year");
         assert_eq!(
             no_kind.header.direct_deposit.as_ref().unwrap().kind,
             None,

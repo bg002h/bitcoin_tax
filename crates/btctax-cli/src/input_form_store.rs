@@ -47,11 +47,22 @@ pub(crate) fn get_draft_row(conn: &Connection, year: i32) -> Result<Option<Draft
         Ok((json, version, parked)) => {
             // ★ I-A: CliError has NO From<serde_json::Error> — map explicitly like return_inputs.rs:66-69
             // (a bad blob is a typed error, not a `?`-panic). Do NOT use `?` on serde here.
-            let ri: ReturnInputs =
+            let mut ri: ReturnInputs =
                 serde_json::from_str(&json).map_err(|e| CliError::BadConfigValue {
                     key: format!("return_inputs_draft[{year}]"),
                     value: format!("invalid JSON: {e}"),
                 })?;
+            // ★★★ **B3 C-1 / §G-15 — THE ROW KEY IS AUTHORITATIVE HERE TOO.** The committed row's
+            //     read boundary has stamped since §G-15 (`return_inputs::row_to_inputs`) and the
+            //     three doc comments that call `tax_year` *"true by construction"* name a "storage
+            //     boundary" — but the DRAFT read boundary did not stamp, and R11 makes the draft the
+            //     **primary** store for months on a params-less year (see `draft_is_disposable`
+            //     below, whose seed already assumes the draft carries the filer's `tax_year`). So a
+            //     draft loaded back handed year `0` to every year-scoped liveness predicate, rendered
+            //     prompt and completeness count in the editor. Stamping refuses a disagreement rather
+            //     than overwriting one, so a draft blob that names another year is an error, not a
+            //     silent re-labelling.
+            crate::return_inputs::stamp_year(&mut ri, year)?;
             Ok(Some(DraftRow {
                 ri,
                 version,
@@ -70,6 +81,12 @@ pub(crate) fn set_draft_row(
     parked: bool,
 ) -> Result<(), CliError> {
     init_draft_table(conn)?;
+    // ★★ B3 C-1 — stamp on WRITE as well as on read, exactly as `return_inputs::set` does: a draft
+    //    whose blob carries year `0` would be re-read as `year` anyway, so writing it unstamped only
+    //    leaves the two representations able to differ. A disagreement refuses.
+    let mut stamped = ri.clone();
+    crate::return_inputs::stamp_year(&mut stamped, year)?;
+    let ri = &stamped;
     // ★ I-A: map serde explicitly (no From<serde_json::Error> on CliError) — mirror return_inputs.rs:92-95.
     let j = serde_json::to_string(ri).map_err(|e| CliError::BadConfigValue {
         key: format!("return_inputs_draft[{year}]"),
@@ -663,6 +680,18 @@ pub fn commit(
     //    0 row — printed by `income answer` and on the TUI's tax-inputs entry screen — by calling
     //    the SAME `screen_digital_asset_answer` the export refuses on. The gate did not move; the
     //    silence did.
+    // ★★★ **B3 C-1 / FR-103, ON THE OTHER WRITER.** `return_inputs::stamp_year` exists as a named
+    //     function precisely because *"a caller sometimes needs the stamp to have happened BEFORE the
+    //     write"* — FR-103 fixed `income import`, the first of the two commands that create a
+    //     committed row, and this is the second. Below the screen the stamp is invisible to it: every
+    //     year-scoped rule in `screen_inputs` read `0`, so the gate could not fail on that whole
+    //     family and then reported success. It is a BELT here (the working return now arrives stamped
+    //     from `apply`, and a loaded draft from `get_draft_row`) and the brace is that `stamp_year`
+    //     REFUSES a disagreement, so a future surface that hands this gate another year's return is
+    //     an error rather than a silent re-label.
+    let mut stamped = ri.clone();
+    crate::return_inputs::stamp_year(&mut stamped, year)?;
+    let ri = &stamped;
     if let Some(refusal) = screen_inputs(ri, table, params) {
         return Ok(CommitOutcome::Refused(refusal)); // fail-closed: writes nothing
     }
@@ -1075,6 +1104,100 @@ mod tests {
         };
         btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
         ri
+    }
+
+    // ── ★★★ B3 C-1 — THE DRAFT BOUNDARY STATES THE YEAR, BOTH WAYS ──────────────────────────────
+
+    /// ★★★ **Every `ReturnInputs` this store hands out for a year STATES that year — and the match is
+    ///     `_`-FREE, so a new [`Loaded`] variant carrying a return is a compile error here.**
+    ///
+    /// The committed read boundary has stamped from the row key since §G-15
+    /// (`return_inputs::row_to_inputs`). The DRAFT read boundary did not — and R11 makes the draft the
+    /// primary store for months on a params-less year, so year 0 flowed out of here into every
+    /// year-scoped liveness predicate, rendered prompt and completeness count in the editor. That is
+    /// B3's C-1 from the storage side.
+    ///
+    /// ★ The fixture writes a year-0 blob through the RAW SQL rather than through
+    ///   [`set_draft_row`] — which now stamps — because the thing under test is the READ. A blob
+    ///   written before this fix, or by any future writer that forgets, must still come back stated.
+    #[test]
+    fn every_working_return_the_store_hands_out_states_the_year_it_was_loaded_for() {
+        let (_dir, path, pp) = tmp_vault();
+        let sess = Session::open(&path, &pp).unwrap();
+        let yearless = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        assert_eq!(yearless.tax_year, 0, "premise: the blob states no year");
+        // A raw year-0 draft blob for 2026, written past the stamping writer.
+        init_draft_table(sess.conn()).unwrap();
+        sess.conn()
+            .execute(
+                "INSERT INTO return_inputs_draft(year,inputs_json,schema_version,parked) \
+                 VALUES(?1,?2,?3,0)",
+                rusqlite::params![
+                    2026,
+                    serde_json::to_string(&yearless).unwrap(),
+                    SCHEMA_VERSION
+                ],
+            )
+            .unwrap();
+        // And a committed row for 2024 (its writer has stamped since §G-15).
+        crate::return_inputs::set(sess.conn(), 2024, &yearless).unwrap();
+
+        for year in [2024, 2026] {
+            // ★ `_`-free: a future `Loaded` variant carrying a `ReturnInputs` does not compile until
+            //   someone decides whether it states the year.
+            let ri = match load(sess.conn(), year).unwrap().0 {
+                Loaded::Draft { ri, .. } => Some(ri),
+                Loaded::Committed(ri) => Some(ri),
+                Loaded::Fresh => None,
+            }
+            .unwrap_or_else(|| panic!("{year} has a working return"));
+            assert_eq!(
+                ri.tax_year, year,
+                "the row key is authoritative: a working return loaded for {year} must SAY {year}"
+            );
+        }
+    }
+
+    /// ★★★ **And the draft WRITE states it too, refusing a disagreement — `return_inputs::set`'s rule,
+    ///     on the other table.**
+    #[test]
+    fn the_draft_write_states_the_year_and_refuses_another_years_return() {
+        let (_dir, path, pp) = tmp_vault();
+        let mut sess = Session::open(&path, &pp).unwrap();
+        let yearless = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        save_draft(&mut sess, 2024, &yearless).unwrap();
+        // Read the BLOB, not the accessor: a read-time stamp would make an unstamped blob look fine.
+        let json: String = sess
+            .conn()
+            .query_row(
+                "SELECT inputs_json FROM return_inputs_draft WHERE year=2024",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let stored: ReturnInputs = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            stored.tax_year, 2024,
+            "the bytes on disk state the year, so the two representations cannot differ"
+        );
+        // A 2025 return offered for the 2024 slot is a misattribution, not a re-label.
+        let other_year = ReturnInputs {
+            tax_year: 2025,
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        let err = set_draft_row(sess.conn(), 2024, &other_year, false)
+            .expect_err("storing one year's answers as another's must refuse");
+        assert!(
+            format!("{err:?}").contains("2025") && format!("{err:?}").contains("2024"),
+            "the refusal names both years: {err:?}"
+        );
     }
 
     #[test]

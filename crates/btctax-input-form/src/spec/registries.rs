@@ -17,11 +17,12 @@ use crate::seam::{
     Field, FieldId, FieldKind, FieldValue, LabelSource, Section, SectionId, SectionKind, SetError,
 };
 use btctax_core::tax::document_census::DocumentRow;
-use btctax_core::tax::provenance::DependentGate;
+use btctax_core::tax::provenance::{AnswerKey, DependentGate};
 use btctax_core::tax::questions::{
     QuestionId, SkippableId, FORM_QUESTIONS, HOH_MARITAL_BASIS_CHOICES, PARENT_ALIVE_CHOICES,
     SKIPPABLE_QUESTIONS,
 };
+use btctax_core::tax::return_inputs::ReturnInputs;
 
 // ── The delegating-Field generators ──────────────────────────────────────────────────────────────────────
 // Each expands to a `Field` whose accessors are NON-CAPTURING closures (a `const` registry path + a literal
@@ -679,6 +680,59 @@ pub(crate) const SKIPPABLES: Section = Section {
 };
 
 // ── The FieldId ↔ registry-id maps (the one hand-written match, both directions) ──────────────────────────
+
+/// ★★★ **THE WORDS A `Field` PUTS ON THE SCREEN FOR THIS RETURN — B3's I-1.**
+///
+/// A renderer must draw **this**, never `Field.label` directly, for one reason: `apply` records a hash
+/// of the sentence the filer was SHOWN, and it resolves that sentence through
+/// [`btctax_core::tax::provenance::current_prompt`] — *"the one place that knows which words a key is
+/// asked in"*. `Field.label` is a `&'static str` and cannot be that sentence for a question whose
+/// subject is a value ON the return, so the two disagreed for every member of
+/// [`btctax_core::tax::questions::RENDERED_PROMPTS`]:
+///
+/// | question | drawn (the static) | recorded (the rendered) |
+/// |---|---|---|
+/// | `DigitalAssetActivity` (live for every filer) | "At any time during **this tax year**…" | "At any time during **2024**…" |
+/// | `FilingStatusConfirmed` | "Is **the filing status carried from last year's return**…" | "Your **TY2024** return filed as **Head of household (HOH)**…" |
+/// | `StateRefundWithout1099g` | "…**this year**?" | "…**in 2024**?" |
+/// | `ItemizedPriorYear` | "…your **PRIOR-YEAR** federal return…" | "…your **2023** federal return…" |
+/// | `QssSpouseDiedInWindowAndNotRemarried` | "…**one of the two years before this tax year**…" | "…**2022 or 2023**…" |
+///
+/// Nothing refused over it — with the year stamped, the hash still matches the screen's comparand. The
+/// defect is that the **diligence record named a sentence the filer was never shown**, which is what
+/// the whole `prompt_hash` mechanism exists to prevent. `FilingStatusConfirmed` is the sharpest: the log
+/// claimed the filer confirmed a specifically NAMED status on a specifically NAMED prior-year return,
+/// neither of which appeared in the words on screen.
+///
+/// ★★★ **Why a resolver and not an edited literal.** The standard was already written down one registry
+///     over — `apply`'s `the_gate_fields_draw_the_words_they_hash_except_the_one_named_date_leaf`, which
+///     walks `DependentGate::ALL` and says *"a yes/no gate that draws one sentence and hashes another is
+///     C-1 again: the filer's answer would read as given under words they never saw"*. That is FR-99's
+///     shape with the set being *"registries whose `Field` label must equal the words it hashes"*: the
+///     pin was written when the set had one member and a second arrived beneath it. Editing five labels
+///     would leave the sixth free to diverge; routing the drawn words through the SAME resolver that
+///     decides the hashed words makes them the same string by construction.
+///
+/// ★★ **Scope, stated rather than implied** (FR-99 option 3). It resolves the **declaration** registry
+///    only — the `FieldId`s [`field_to_question`] maps. A skippable's `Field` label is
+///    `SKIPPABLE_QUESTIONS[i].prompt` and `current_prompt` returns that same static for it, so there is
+///    nothing to diverge; the twenty-one dependent gates are the sibling registry, already held by the
+///    pin quoted above with its one filed exception (FR-100, `DepDob`). If a skippable ever gains a
+///    rendered prompt, this must widen with it — `RENDERED_PROMPTS` is keyed by `QuestionId`, so today
+///    it cannot.
+///
+/// ★ `Field.label` itself is UNCHANGED and still a `&'static str`, which is what keeps two instruments
+///   honest: `xtask stop-list`'s FR-114 label scan still reads it (and separately renders every
+///   `RENDERED_PROMPTS` entry against a probe return, so the rendered sentence is in R15's input set
+///   too), and `xtask box-census`'s caption join still builds `format!("{} {}", f.label, f.help)`.
+#[must_use]
+pub fn field_label(f: &Field, ri: &ReturnInputs) -> std::borrow::Cow<'static, str> {
+    match field_to_question(f.id) {
+        Some(q) => btctax_core::tax::provenance::current_prompt(&AnswerKey::Question(q), ri)
+            .unwrap_or(std::borrow::Cow::Borrowed(f.label)),
+        None => std::borrow::Cow::Borrowed(f.label),
+    }
+}
 
 /// FieldId → its declaration [`QuestionId`], if it is a declaration leaf (else `None`). Reverse of
 /// [`question_to_field`]. Consumed by Task 9's attribution (`RefuseReason → QuestionId → FieldId → Anchor`).

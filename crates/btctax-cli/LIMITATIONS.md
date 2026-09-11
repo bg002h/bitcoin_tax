@@ -423,8 +423,8 @@ each one fits you:
   TY2024 filer, because digital-asset broker reporting had not yet begun. **Verify it fits you:** if an
   exchange did send you a 1099-B for bitcoin, those rows belong under **Box A or B** (short-term) /
   **Box D or E** (long-term) on a **separate** Form 8949, and you must reclassify them by hand. btctax will
-  tell you when this is live: `report` prints an advisory naming how many of your dispositions occurred on
-  an exchange and so *may* carry broker reporting.
+  tell you when this is live: `export-irs-pdf` — the command that prints the Form 8949 — names, as a `⚠ [I5]`
+  advisory, how many of your dispositions occurred on an exchange and so *may* carry broker reporting.
   - ★ **Your 1099-B never changes any of this.** A brokerage 1099-B goes to Schedule D lines 1a/8a as
     totals (above) and never produces a Form 8949 row at all, so it cannot affect which box is checked.
     Every Form 8949 row btctax prints is one of *your bitcoin dispositions*.

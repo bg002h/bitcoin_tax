@@ -554,7 +554,11 @@ fn apply_edit(form: &mut TaxInputsFormState, edit: Edit) -> bool {
     //    transition is the NI-2 materialization, and it is the one moment the open-time seed cannot
     //    reach (a `Loaded::Fresh` open has `working: None`, so `seed_broker_rows` was skipped).
     let was_unmaterialized = form.working.is_none();
-    match apply(&mut form.working, edit, form.now) {
+    // ★★★ B3 C-1 — the flow's own `year` reaches the return HERE, and it is the only way a working
+    //     return can come into being or be mutated. `TaxInputsFormState::year` is the year the filer
+    //     opened (`EditorApp::selected_year`); before C-1 it stayed in the renderer and the return
+    //     carried `tax_year == 0` through every screen, prompt, liveness predicate and the commit gate.
+    match apply(&mut form.working, edit, form.year, form.now) {
         Ok(()) => {
             form.error = None;
             // ★★ Re-seed the Form 1099-DA block the moment the return exists. Gated on the
@@ -953,6 +957,17 @@ fn apply_error_msg(e: ApplyError) -> String {
         ApplyError::SetError(SetError::ContradictsTranscribedRows { rows }) => format!(
             "this return carries {rows} transcribed row(s) of that document — remove them first, or \
              leave the answer as \"yes\""
+        ),
+        // ★★★ B3 C-1 — neither is reachable from this flow (`form.year` is `EditorApp::selected_year`,
+        //     and the return's year comes from that same field), and both are mapped rather than
+        //     `unreachable!()`d because the engine's refusal is the guard: a future renderer that gets
+        //     the year wrong must meet a sentence, not a panic in an alternate-screen TUI.
+        ApplyError::TaxYearNotStated => {
+            "this screen did not say which tax year it is editing".to_string()
+        }
+        ApplyError::WrongTaxYear { on_return, surface } => format!(
+            "these inputs are for tax year {on_return}, but this screen is editing {surface} — \
+             reopen the year you meant"
         ),
     }
 }

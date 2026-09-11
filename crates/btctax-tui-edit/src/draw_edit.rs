@@ -2943,10 +2943,16 @@ fn push_field_lines(
         } else {
             Style::default()
         };
+        // ★★★ **B3 I-1 — `field_label`, NOT `f.label`.** `apply` records a hash of the sentence the
+        //     filer was SHOWN, resolved through `current_prompt`; a `&'static str` cannot be that
+        //     sentence for a question that quotes a value off the return, so the five
+        //     `RENDERED_PROMPTS` declarations drew one sentence and recorded another. The seam
+        //     accessor resolves the drawn words through the same registry, so the two are one string
+        //     by construction rather than by two edits staying in step.
         lines.push(Line::from(Span::styled(
             format!(
                 "  {}  [{}]{}",
-                f.label,
+                btctax_input_form::field_label(f, ri),
                 value,
                 durable_hint(f.id, ri, prior_year)
             ),
@@ -7601,6 +7607,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Single".into()),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -7648,6 +7655,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Single".into()),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -7659,6 +7667,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::SecretEntry("123456789".into()),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -7702,6 +7711,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Single".into()),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -7758,6 +7768,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Single".into()),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -7851,6 +7862,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Single".into()),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -7887,6 +7899,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Single".into()),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -7898,6 +7911,7 @@ mod tests {
                     section: SectionId::W2s,
                     parent: RowAddr::default(),
                 },
+                2024,
                 time::macros::date!(2026 - 09 - 01),
             )
             .unwrap();
@@ -7945,6 +7959,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Single".into()),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -7954,6 +7969,7 @@ mod tests {
                 section: SectionId::W2s,
                 parent: RowAddr::default(),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -8007,6 +8023,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Single".into()),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -8016,6 +8033,7 @@ mod tests {
                 section: SectionId::W2s,
                 parent: RowAddr::default(),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -8068,6 +8086,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Mfj".into()),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -8078,6 +8097,7 @@ mod tests {
                     section: SectionId::W2s,
                     parent: RowAddr::default(),
                 },
+                2024,
                 time::macros::date!(2026 - 09 - 01),
             )
             .unwrap();
@@ -8089,6 +8109,7 @@ mod tests {
                 addr: RowAddr(vec![0]),
                 value: FieldValue::Money(dec!(60000)),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -8099,6 +8120,7 @@ mod tests {
                 addr: RowAddr(vec![1]),
                 value: FieldValue::Money(dec!(45000)),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -8176,6 +8198,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Single".into()),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -8186,6 +8209,7 @@ mod tests {
                     section: SectionId::W2s,
                     parent: RowAddr::default(),
                 },
+                2024,
                 time::macros::date!(2026 - 09 - 01),
             )
             .unwrap();
@@ -8243,6 +8267,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Single".into()),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -8810,6 +8835,209 @@ mod tests {
             rendered_me.contains("void those too"),
             "SHA-WARN: cascade note must be present for non-SafeHarbor too; \
              rendered:\n{rendered_me}"
+        );
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// ★★★ B3 I-1 — WHAT THE FIELD PANE DRAWS IS WHAT `apply` HASHES
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+#[cfg(test)]
+mod b3_i1_the_drawn_sentence_is_the_recorded_one {
+    use super::*;
+    use btctax_core::tax::provenance::{current_prompt, AnswerKey};
+    use btctax_core::tax::questions::QuestionId;
+    use btctax_core::tax::return_inputs::ReturnInputs;
+    use rust_decimal_macros::dec;
+
+    /// The probe returns the walk draws against. A declaration is only DRAWN where it is live, so one
+    /// probe reaches only part of the registry — and a walk that silently skipped the rest would be a
+    /// green report from an instrument that never saw the thing it exists to catch (three of I-1's own
+    /// five were invisible to the first draft of this test). So the set is chosen to make every
+    /// `QuestionId` live somewhere, and the walk ASSERTS that it managed it.
+    fn probes() -> Vec<(&'static str, ReturnInputs)> {
+        use btctax_core::tax::document_census::DocumentRow;
+        use btctax_core::FilingStatus;
+        let base = |fs: FilingStatus, year: i32| {
+            let mut ri = ReturnInputs {
+                tax_year: year,
+                opened_from: Some(year - 1),
+                filing_status: fs,
+                header: btctax_core::tax::testonly::not_a_dependent(),
+                ..Default::default()
+            };
+            // Every census row answered "none received" opens R3's document-less income door, which is
+            // what makes the two Schedule-1-line-1 declarations live.
+            for row in DocumentRow::ALL {
+                ri.documents.set(*row, Some(false));
+            }
+            ri
+        };
+        let mut out = Vec::new();
+        for (name, fs) in [
+            ("Single", FilingStatus::Single),
+            ("Mfj", FilingStatus::Mfj),
+            ("Mfs", FilingStatus::Mfs),
+            ("HoH", FilingStatus::HoH),
+            ("Qss", FilingStatus::Qss),
+        ] {
+            out.push((name, base(fs, 2024)));
+        }
+        // A TY2025 return: `HasIncomeExclusion` is live only from 2025.
+        out.push(("TY2025", base(FilingStatus::Single, 2025)));
+        // A state refund the filer says arrived without a Form 1099-G — which is what makes the
+        // §111(a) tax-benefit question (`ItemizedPriorYear`) live.
+        let mut refund = base(FilingStatus::Single, 2024);
+        refund.state_refund_without_1099g = Some(true);
+        out.push(("state refund", refund));
+        // An HSA return on a joint status, with no Form 1099-SA — the two Form 8889 declarations that
+        // need those exact conditions.
+        let mut hsa = base(FilingStatus::Mfj, 2024);
+        hsa.sch1.hsa_activity = Some(true);
+        out.push(("HSA/MFJ", hsa));
+        // A return carrying the STRUCTURES the remaining declarations hang off: a Schedule A with a
+        // Form 1098 (the three mortgage declarations + the Form 8396 gate), a capital-loss carryover
+        // brought in (the two worksheet header conditions + the AMT carryover), a Schedule C with
+        // expenses (the AMT depreciation declaration), a dependent row (the filer's own TIN question)
+        // and a spouse (the §6013(g) election).
+        let mut rich = base(FilingStatus::Single, 2024);
+        rich.schedule_a = Some(btctax_core::tax::return_inputs::ScheduleAInputs::default());
+        rich.home_sale.sold_main_home = Some(true);
+        rich.form_1098
+            .push(btctax_core::tax::return_inputs::Form1098 {
+                lender: "Big Bank".into(),
+                box1_interest: dec!(9000),
+                box2_outstanding_principal: dec!(300_000),
+                ..Default::default()
+            });
+        rich.capital_loss_carryforward_in = btctax_core::Carryforward {
+            short: dec!(2000),
+            long: btctax_core::Usd::ZERO,
+        };
+        rich.schedule_c = Some(btctax_core::tax::return_inputs::ScheduleCInputs {
+            business_description: "Bitcoin mining".into(),
+            expenses: dec!(500),
+            ..Default::default()
+        });
+        rich.header
+            .dependents
+            .push(btctax_core::tax::return_inputs::Dependent {
+                name: "Kit Roe".into(),
+                ssn: "000-00-0008".into(),
+                relationship: "Son".into(),
+                date_of_birth: Some(time::macros::date!(2015 - 03 - 01)),
+                ..Default::default()
+            });
+        rich.header.spouse = Some(btctax_core::tax::return_inputs::Person {
+            first_name: "Sam".into(),
+            last_name: "Roe".into(),
+            ssn: "000-00-0009".into(),
+            ..Default::default()
+        });
+        for row in [DocumentRow::W2, DocumentRow::T1098] {
+            rich.documents.set(row, Some(true));
+        }
+        out.push(("rich", rich));
+        out
+    }
+
+    /// ★★★ **The missing pin, DERIVED over `QuestionId::ALL` — the sibling of
+    ///     `apply.rs`'s `the_gate_fields_draw_the_words_they_hash_except_the_one_named_date_leaf`.**
+    ///
+    /// That test walks `DependentGate::ALL` and says why: *"a yes/no gate that draws one sentence and
+    /// hashes another is C-1 again: the filer's answer would read as given under words they never
+    /// saw."* Nothing walked `QuestionId::ALL` for the same property, and **five** declarations
+    /// violated it — every member of `RENDERED_PROMPTS`, on every year. That is FR-99's shape with the
+    /// set being *"registries whose `Field` label must equal the words it hashes"*: the pin was written
+    /// when the set had one member and a second arrived beneath it.
+    ///
+    /// ★★ **It asserts on the DRAWN LINE, not on a helper.** Comparing `field_label` to
+    ///    `current_prompt` would be a tautology — `field_label` is defined in terms of it. What must
+    ///    hold is that the **field pane** puts those words on the screen, so the assertion reads
+    ///    `push_field_lines`' own output. Revert the renderer to `f.label` and this reds on all five.
+    ///
+    /// ★★ **And it asserts its own COVERAGE.** A declaration is drawn only where it is live, so the
+    ///    walk over one probe reaches a fraction of the registry. Every `QuestionId` must be compared
+    ///    on at least one probe or the test fails naming the ones it could not reach — otherwise a
+    ///    question added tomorrow (or one whose liveness narrows) leaves this reporting success about
+    ///    a sentence it never looked at.
+    #[test]
+    fn every_declaration_field_draws_the_sentence_its_answer_is_recorded_under() {
+        let probes = probes();
+        let mut drawn_differs: Vec<String> = Vec::new();
+        let mut never_drawn: Vec<QuestionId> = Vec::new();
+        let mut comparisons = 0usize;
+        for q in QuestionId::ALL.iter().copied() {
+            let id = btctax_input_form::question_to_field(q);
+            let mut seen = false;
+            for (probe_name, probe) in &probes {
+                let Some((section, field)) = btctax_input_form::form_spec()
+                    .iter()
+                    .find_map(|s| s.fields.iter().find(|f| f.id == id).map(|f| (s, f)))
+                else {
+                    panic!("{q:?} maps to {id:?}, which must be a field of the form");
+                };
+                if !(field.live)(probe) {
+                    continue;
+                }
+                let Some(hashed) = current_prompt(&AnswerKey::Question(q), probe) else {
+                    continue; // no registry words for this key at all — nothing to compare
+                };
+                seen = true;
+                comparisons += 1;
+                // What the FIELD PANE draws for this field, with the cursor on it.
+                let focus = live_fields(section, probe)
+                    .iter()
+                    .position(|f| f.id == id)
+                    .unwrap_or(usize::MAX);
+                let mut lines: Vec<Line<'static>> = Vec::new();
+                let ctx = FieldContext {
+                    ri: probe,
+                    prior_year: None,
+                };
+                push_field_lines(
+                    &mut lines,
+                    section,
+                    &ctx,
+                    &btctax_input_form::RowAddr::default(),
+                    focus,
+                    false,
+                    "",
+                );
+                let pane: String = lines
+                    .iter()
+                    .flat_map(|l| l.spans.iter().map(|s| s.content.to_string()))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                if !pane.contains(hashed.as_ref()) {
+                    drawn_differs.push(format!(
+                        "{q:?} (probe {probe_name})\n    drawn:    {}\n    recorded: {hashed}",
+                        field.label
+                    ));
+                }
+            }
+            if !seen {
+                never_drawn.push(q);
+            }
+        }
+        assert!(
+            never_drawn.is_empty(),
+            "these declarations were never DRAWN on any probe, so this pin says nothing about them — \
+             extend `probes()` rather than letting the walk report success about words it never saw: \
+             {never_drawn:?}"
+        );
+        assert!(
+            comparisons > QuestionId::ALL.len(),
+            "the walk compared {comparisons} sentences over {} questions — a green report from a walk \
+             that did not run is the failure this pin is for",
+            QuestionId::ALL.len()
+        );
+        assert!(
+            drawn_differs.is_empty(),
+            "a declaration that draws one sentence and records another is B3's I-1: the filer's \
+             answer would read as given under words they never saw. {} such:\n{}",
+            drawn_differs.len(),
+            drawn_differs.join("\n")
         );
     }
 }

@@ -917,10 +917,16 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         // repeated: Schedule 1-A Part IV asks about a deduction that did not exist in TY2024, so a
         // "no" there answers a question with no TY2024 legal meaning — testimony about nothing.
         //
-        // ★ `ReturnInputs::tax_year` is stamped from the storage row key on read, so this predicate
-        // reads a year that is true by construction. A year-0 (never stored, never stated) fixture
-        // is NOT ≥ 2025, so it is not live — which is the fail-closed direction: an unstated year
-        // must not conjure a TY2025 question.
+        // ★★ **B3 C-1 — `ReturnInputs::tax_year` is stated by EVERY producer, which is what makes
+        // this predicate true by construction** (the list is on the field itself). This comment used
+        // to say "stamped from the storage row key on read" and call a year-0 return a *fixture*: the
+        // input form's working return was one, and this predicate was therefore silent on the whole
+        // editing surface — a TY2025 draft was never asked the §911/931/933 exclusion question and
+        // the entry screen called the interview complete.
+        //
+        // ★ The `>= 2025` DIRECTION is still the fail-closed one and is unchanged: an unstated year
+        // must not conjure a TY2025 question. What changed is that an unstated year no longer reaches
+        // here from any surface, and `screen_inputs` refuses one outright if a future surface tries.
         live: |ri| ri.tax_year >= 2025,
         get: |ri| ri.has_income_exclusion,
         set: |ri, v| ri.has_income_exclusion = Some(v),

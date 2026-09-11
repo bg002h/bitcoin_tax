@@ -305,6 +305,16 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
             note: "defensive only — a negative amount is unreachable from the form: tier-1 parse rejects it \
                    before it enters the working copy, and its label is display prose, not a field identity (§7)",
         }],
+        // ★★★ **B3 C-1 — the tax year is NOT a field of the form, and that is the exemption the
+        //     form-coverage census already records** (`spec::coverage`: *"it is set by the command
+        //     (`--year`) and stamped from the storage boundary"*, and, since C-1, stated by `apply`
+        //     from the editing surface's own year). So there is nothing to focus: the cure is to open
+        //     the year the return belongs to, which the note says.
+        R::ReturnInputsYearNotStated => vec![Anchor::NotInForm {
+            note: "the tax year is not a field of this form — it is the year you opened (`--year`), \
+                   stated onto the return by the surface you are editing in. Reopen the year this \
+                   return belongs to",
+        }],
 
         // ── Everything else (§7 line 521): a deferred section (Schedule C, QBI, 1099 boxes, carryforwards)
         //    or a compute/absolute screen — no v1 form field to point at. Entered via TOML import or computed
@@ -866,16 +876,20 @@ mod tests {
         // ★ FR-103 (journey walk finding #2) added the second — `Schedule1aNotOnThisYearsReturn`,
         //   whose cure is never a form field on any year, because the year has no Schedule 1-A.
         const ADDED_BY_FR103: usize = 1;
+        // ★ B3's C-1 added the third — `ReturnInputsYearNotStated`. The tax year is the one
+        //   `ReturnInputs` scalar with NO `Field` at all (the form-coverage census exempts it by
+        //   name), so its refusal cannot anchor on one: the cure is to open the right year.
+        const ADDED_BY_B3_C1: usize = 1;
         let now = src[start..end].matches("Anchor::NotInForm {").count();
         assert_eq!(
             now,
-            BEFORE_T5 - 5 + ADDED_BY_I4 + ADDED_BY_FR103,
+            BEFORE_T5 - 5 + ADDED_BY_I4 + ADDED_BY_FR103 + ADDED_BY_B3_C1,
             "T5 re-attributed exactly five anchors (PrivateActivityBondAmt, \
              UnrecapturedOrSpecialRateGain, InconsistentDividendSubset, ForeignTaxOverCeiling, \
              Form1099BNeedsForm8949), the I-4 fold added one (QualifiedTipsCautionNotMet) and \
-             FR-103 added one (Schedule1aNotOnThisYearsReturn); the source now has {now} \
-             `NotInForm` anchors, not {}",
-            BEFORE_T5 - 5 + ADDED_BY_I4 + ADDED_BY_FR103
+             FR-103 added one (Schedule1aNotOnThisYearsReturn) and B3's C-1 added one \
+             (ReturnInputsYearNotStated); the source now has {now} `NotInForm` anchors, not {}",
+            BEFORE_T5 - 5 + ADDED_BY_I4 + ADDED_BY_FR103 + ADDED_BY_B3_C1
         );
 
         // The five, and every anchor each yields must be a real Field or Section of `form_spec()`.

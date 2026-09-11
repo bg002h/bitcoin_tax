@@ -77,6 +77,25 @@ pub enum RefuseReason {
     /// are produced by the computation, never the input. A negative value is a corrupt import that could
     /// otherwise *offset* an accumulated refusal threshold (e.g. §402(g), §904(j)) into passing (R2-I1).
     NegativeAmount(String),
+    /// ★★★ **B3 C-1 — the return does not state which tax year it is for.**
+    ///
+    /// `ReturnInputs::tax_year == 0` is §G-15's *"NOT STATED"*, and it is the **premise** of this
+    /// screen rather than one of its rules: five prompts quote the year in the sentence whose hash is
+    /// the filer's provenance, one liveness predicate and three Form 8615 conjuncts are scoped by it,
+    /// Schedule 1-A's existence is decided by it, and the §152 age tests are computed from it. Judged
+    /// at `0` they do not refuse — they go **silent**, which is worse, and that is exactly what B3's
+    /// C-1 was: the input form's commit gate ran this whole screen at year `0`, reported the return
+    /// clean, and the identical screen on the stamped row then refused it.
+    ///
+    /// ★★ **This rule is why the earlier decision here was wrong.** Until B3 this screen deliberately
+    ///    SKIPPED `tax_year == 0`, reasoning that *"a yearless `ReturnInputs` is a test convenience,
+    ///    and refusing it would be an assertion about a year nobody named"*. The first half was false
+    ///    on the editing surface and the second is backwards: a rule going silent on a year nobody
+    ///    named is the assertion — it asserts that every year-scoped question is inapplicable. Every
+    ///    production producer of a `ReturnInputs` now states the year (the two storage read
+    ///    boundaries, the three writers, `apply`, and `open_next_year::seed`), so this is the guard
+    ///    that makes the NEXT one fail closed instead of silent.
+    ReturnInputsYearNotStated,
     /// ★★★ Form 8283 Section B lines 5a/5b/5c — the restriction questions — are unresolved: either
     /// unanswered, or answered **Yes**. A Yes means at least one donated property carried a restriction
     /// or a retained right, which REDUCES or DENIES the §170 deduction (Reg §1.170A-7). btctax deducts
@@ -286,7 +305,7 @@ pub enum RefuseReason {
     /// ★★ NO LONGER RAISED. i1040gi says *"you can't claim the excess on your return. The employer
     /// should adjust the tax for you"* — **not** "you can't file". The return is complete and correct
     /// without the credit, so this now yields $0 on Schedule 3 line 11 plus
-    /// [`crate::tax::advisories::Advisory::ExcessSsSingleEmployerNotCreditable`], which carries the
+    /// [`crate::tax::advisories::Advisory::ExcessSsNotCreditable`], which carries the
     /// amount and the Form 843 remedy. Kept as a variant so the exhaustive cross-crate matches stay
     /// honest and any persisted value still maps.
     ///
@@ -2427,6 +2446,24 @@ pub fn home_sale_decision(ri: &ReturnInputs) -> HomeSaleDecision {
 }
 
 pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<Refusal> {
+    // ★★★ **B3 C-1 — WHICH YEAR IS THIS? The premise, refused before any rule that depends on it.**
+    //     See [`RefuseReason::ReturnInputsYearNotStated`] for why this is first and why the earlier
+    //     decision to skip `tax_year == 0` was the wrong one. It is unreachable from every production
+    //     surface today — all nine boundaries state the year — and it is kept, and placed above the
+    //     data-integrity gate, because "no year" is prior to every other judgement here: a rule
+    //     silently inapplicable is the failure this screen cannot otherwise report.
+    if ri.tax_year == 0 {
+        return refuse(
+            RefuseReason::ReturnInputsYearNotStated,
+            "this return does not say which tax year it is for, so no rule that depends on the year \
+             can be applied to it — the year decides which questions you are asked, which schedules \
+             exist, and the words those questions are put in. The year is not something you type on \
+             the return: it comes from the year you are working in (`--year`, or the year you opened \
+             in the tax-inputs editor). Reopen the year this return belongs to, or re-import it under \
+             that year."
+                .to_string(),
+        );
+    }
     // Data integrity FIRST: any negative money is a corrupt import — refuse before any accumulation, so a
     // negative can never offset a §402(g) / §904(j) threshold into passing (R2-I1 / M4, now one gate).
     if let Some(field) = first_negative_amount(ri) {
@@ -2456,9 +2493,13 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
     //   package instead would have made this a commit-tier rule and left the import silent, which
     //   is the whole defect.
     //
-    // ★ `tax_year == 0` is §G-15's "not stated" and cannot be judged, so it is left alone: a
-    //   yearless `ReturnInputs` is a test convenience, and refusing it would be an assertion about
-    //   a year nobody named.
+    // ★★ **B3 C-1 — the `tax_year != 0` conjunct is now BELT, not the rule's premise.** It used to
+    //    carry the reasoning *"a yearless `ReturnInputs` is a test convenience, and refusing it would
+    //    be an assertion about a year nobody named"* — and the first half was false: year `0` was the
+    //    normal state of the input form's working return and of every draft derived from one, so this
+    //    rule was structurally silent on the editing surface. A yearless return is now refused at the
+    //    top of this screen, so this conjunct can no longer be reached with `0`; it stays because a
+    //    rule that reads `ri.tax_year` should say what it does with every value of it.
     if ri.tax_year != 0
         && ri.schedule_1a.carries_data()
         && crate::tax::tables::schedule_1a_params(ri.tax_year).is_none()
@@ -6609,6 +6650,9 @@ mod tests {
         // Part III answered so the Schedule-B trigger doesn't mask the subset check.
         let answered = || {
             let mut r = ReturnInputs {
+                // ★ B3 C-1 — a yearless return is refused before every rule that reads the year,
+                //   so a fixture testing one of those rules states a year.
+                tax_year: 2024,
                 filing_status: FilingStatus::Single,
                 foreign_accounts: Some(false),
                 foreign_trust: Some(false),
@@ -8626,6 +8670,15 @@ mod param_free_tier {
             out.push((name, r));
         };
 
+        // ★★★ **B3 C-1 — the premise, and the one fixture that UN-states something.** Every other
+        //     fixture here perturbs a value; this one removes the year, which is the state the input
+        //     form's working return was in for its whole life before C-1 (`apply` materialized
+        //     `ReturnInputs::default()` and nothing ever assigned `tax_year`). The refusal must fire on
+        //     BOTH paths, because the two commands that create a committed row screen on opposite
+        //     tiers: `income import` param-free, the editor's commit with the package.
+        add("ReturnInputsYearNotStated", &|r| {
+            r.tax_year = 0;
+        });
         add("NegativeAmount", &|r| {
             r.documents.set(DocumentRow::W2, Some(true));
             r.w2s.push(w2(|w| w.box1_wages = dec!(-1)));

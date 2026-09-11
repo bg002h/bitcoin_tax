@@ -117,19 +117,19 @@ pub fn get(conn: &Connection, year: i32) -> Result<Option<ReturnInputs>, CliErro
 /// the rule rather than re-typing it at the second site is the point: two copies of *"which year is
 /// this row"* is precisely how they come to disagree.
 pub fn stamp_year(ri: &mut ReturnInputs, year: i32) -> Result<(), CliError> {
-    if ri.tax_year != 0 && ri.tax_year != year {
-        return Err(CliError::BadConfigValue {
+    // ★★ B3 C-1 — the RULE is `ReturnInputs::stamp_year` in core, because the input form's editing
+    //    boundary needs the identical rule and `btctax-input-form` cannot see this crate. This
+    //    function is now only the CLI's error vocabulary over it: two copies of *"which year is this
+    //    row"* is precisely how they come to disagree, and C-1 was the disagreement.
+    ri.stamp_year(year)
+        .map_err(|found| CliError::BadConfigValue {
             key: format!("return_inputs[{year}].tax_year"),
             value: format!(
-                "these inputs are for tax year {} but are being stored under {year} — refusing, \
-                 because storing one year's answers as another's would misattribute the filer's \
-                 testimony",
-                ri.tax_year
-            ),
-        });
-    }
-    ri.tax_year = year;
-    Ok(())
+            "these inputs are for tax year {found} but are being stored under {year} — refusing, \
+             because storing one year's answers as another's would misattribute the filer's \
+             testimony"
+        ),
+        })
 }
 
 /// Persist `ri` as the [`ReturnInputs`] for `year` (upsert — replaces any prior value).

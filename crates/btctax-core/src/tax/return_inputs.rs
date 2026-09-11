@@ -2101,10 +2101,33 @@ pub struct ReturnInputs {
     /// becoming `live(year, &ri)` — a year passed alongside invites a caller to pass one that
     /// disagrees with the row's own origin, which is a second copy of the truth in flight.
     ///
-    /// ★★ **`0` means NOT STATED**, and it is not a usable year: the storage boundary stamps this
-    /// from the row key on read and refuses a disagreement on write, so an in-memory value and the
-    /// row it came from can never diverge. `Default` yields `0` because a defaulted `ReturnInputs` is
-    /// a test convenience that must not fabricate a year any more than it fabricates an answer.
+    /// ★★ **`0` means NOT STATED**, and it is not a usable year. `Default` yields `0` because a
+    /// defaulted `ReturnInputs` is a test convenience that must not fabricate a year any more than it
+    /// fabricates an answer.
+    ///
+    /// ★★★ **B3 C-1 — WHO STATES IT, exhaustively, because this comment used to name only one of
+    ///     them and was therefore false.** It read *"the storage boundary stamps this from the row key
+    ///     on read and refuses a disagreement on write, so an in-memory value and the row it came from
+    ///     can never diverge"* — true of the COMMITTED row and of nothing else. The input form's
+    ///     working return never touched storage at all, so it lived at `0` through every year-scoped
+    ///     rule, every rendered prompt and its own commit gate. The producers are:
+    ///
+    /// | producer | where |
+    /// |---|---|
+    /// | committed row, read | `btctax_cli::return_inputs::row_to_inputs` (from the row key) |
+    /// | committed row, write | `btctax_cli::return_inputs::set` → [`Self::stamp_year`] |
+    /// | draft row, read | `btctax_cli::input_form_store::get_draft_row` (from the row key) |
+    /// | draft row, write | `btctax_cli::input_form_store::set_draft_row` → [`Self::stamp_year`] |
+    /// | a fresh working return | `btctax_input_form::apply`, from the editing surface's year |
+    /// | any edit to one | the same, which also REFUSES a year that disagrees |
+    /// | the TUI commit gate | `input_form_store::commit`, stamped BEFORE it screens (FR-103's shape) |
+    /// | `income import` | `cmd::tax`, `stamp_year` then screen (FR-103) |
+    /// | `open_next_year` | `open_next_year::seed`, which sets the year it is opening |
+    ///
+    /// ★ And the backstop that makes the NEXT producer fail closed rather than silent:
+    ///   `screen_inputs` refuses a `tax_year == 0` return
+    ///   ([`crate::tax::return_refuse::RefuseReason::ReturnInputsYearNotStated`]).
+    ///   A rule that goes quiet on an unstated year is the failure mode, not the safe default.
     #[serde(default)]
     pub tax_year: i32,
     pub filing_status: FilingStatus,
@@ -2662,6 +2685,38 @@ pub struct ReturnInputs {
 }
 
 impl ReturnInputs {
+    /// ★★★ **§G-15 / B3 C-1 — STATE THE TAX YEAR, REFUSING A DISAGREEMENT. THE ONE COPY.**
+    ///
+    /// `0` is *"not stated"* and takes `year`; an equal year is a no-op; any other value means the
+    /// caller believes these inputs belong to a **different** year, and silently re-labelling them
+    /// would file one year's answers as another's — so it refuses, returning the year already on the
+    /// return.
+    ///
+    /// ★★ **Why it lives in core rather than at each boundary.** `btctax-cli`'s storage boundary
+    ///    (`return_inputs::stamp_year`, written for FR-103) and `btctax-input-form`'s editing
+    ///    boundary (`apply`) both need it, and the two crates cannot see each other. Before B3's C-1
+    ///    only the storage boundary had it, so the *editing* boundary materialized a working return
+    ///    at year `0` and every year-scoped rule, rendered prompt, liveness predicate and
+    ///    completeness count in the editor ran on a year nobody had stated — while four doc comments
+    ///    in three crates asserted that could not happen. The rule now has exactly one
+    ///    implementation, which is the only arrangement in which the boundaries cannot come to
+    ///    disagree.
+    ///
+    /// ★ It deliberately does NOT accept `year == 0`: "stamp this with no year" is not a
+    ///   well-formed request. Callers that can be handed one refuse it in their own vocabulary
+    ///   (`apply` returns `ApplyError::TaxYearNotStated`).
+    ///
+    /// # Errors
+    /// `Err(existing)` when `self.tax_year` is already a different, non-zero year — `existing` is
+    /// that year, so the caller can name both in its own message.
+    pub fn stamp_year(&mut self, year: i32) -> Result<(), i32> {
+        if self.tax_year != 0 && self.tax_year != year {
+            return Err(self.tax_year);
+        }
+        self.tax_year = year;
+        Ok(())
+    }
+
     /// ★★★ **THE ITEMIZE-ELECTION CONJUNCT, IN ONE PLACE — the Form 1098 rows that reach a
     /// SCHEDULE A LINE 8** (R8 / T9; the T9 seam review's C-1).
     ///

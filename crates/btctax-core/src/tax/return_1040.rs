@@ -2013,7 +2013,7 @@ pub struct AbsoluteReturn {
     /// the employer doesn't adjust the overcollection, you can file a claim for refund using Form
     /// 843."* btctax used to refuse outright here; it now files a correct $0 credit, and a conservative
     /// omission is permitted **only if the filer is told**. Drives
-    /// [`crate::tax::advisories::Advisory::ExcessSsSingleEmployerNotCreditable`].
+    /// [`crate::tax::advisories::Advisory::ExcessSsNotCreditable`].
     pub excess_ss_not_creditable: Vec<NonCreditableSs>,
     /// 1040 **L25a** — federal income tax withheld from Form(s) W-2 (Σ box 2).
     pub withholding_25a: Usd,
@@ -5645,6 +5645,9 @@ mod tests {
     /// UNANSWERED — each test below changes exactly what it is about.
     fn f8615() -> ReturnInputs {
         let mut ri = single();
+        // ★ B3 C-1 — a Form 8615 fixture is year-scoped twice over (the §1(g) package, and
+        //   `provably_24_or_older`, which is computed FROM the year), so it states one.
+        ri.tax_year = 2024;
         ri.int_1099 = vec![Form1099Int {
             box1_interest: dec!(9000),
             ..Default::default()
@@ -6864,6 +6867,10 @@ mod tests {
         let p = ty2024_params();
         let table = synthetic_table(2024);
         let mut ri = ReturnInputs {
+            // ★ B3 C-1 — a fixture screened against the TY2024 package STATES TY2024. A year-0
+            //   return is refused at the top of `screen_inputs_tiered` now, which is what made the
+            //   omission visible: the screen and the package disagreed about the year.
+            tax_year: 2024,
             filing_status: FilingStatus::Single,
             header: crate::tax::testonly::kitchen_sink_household().0.header,
             b_1099: vec![crate::tax::return_inputs::Form1099B {
@@ -7205,6 +7212,10 @@ mod tests {
         let p = ty2024_params();
         let table = synthetic_table(2024);
         let mut ri = ReturnInputs {
+            // ★ B3 C-1 — a fixture screened against the TY2024 package STATES TY2024. A year-0
+            //   return is refused at the top of `screen_inputs_tiered` now, which is what made the
+            //   omission visible: the screen and the package disagreed about the year.
+            tax_year: 2024,
             filing_status: FilingStatus::Single,
             header: crate::tax::testonly::kitchen_sink_household().0.header,
             b_1099: vec![crate::tax::return_inputs::Form1099B {
@@ -7304,6 +7315,7 @@ mod tests {
         let table = synthetic_table(2024);
         let mk = |gate: Option<bool>, amount: Usd| {
             let mut ri = ReturnInputs {
+                tax_year: 2024, // ★ B3 C-1 — state the year the package is for.
                 filing_status: FilingStatus::Single,
                 header: crate::tax::testonly::kitchen_sink_household().0.header,
                 b_1099: vec![crate::tax::return_inputs::Form1099B {
@@ -7358,6 +7370,10 @@ mod tests {
         let p = ty2024_params();
         let table = synthetic_table(2024);
         let mut ri = ReturnInputs {
+            // ★ B3 C-1 — a fixture screened against the TY2024 package STATES TY2024. A year-0
+            //   return is refused at the top of `screen_inputs_tiered` now, which is what made the
+            //   omission visible: the screen and the package disagreed about the year.
+            tax_year: 2024,
             filing_status: FilingStatus::Single,
             header: crate::tax::testonly::kitchen_sink_household().0.header,
             b_1099: vec![crate::tax::return_inputs::Form1099B {
@@ -7413,6 +7429,10 @@ mod tests {
         let p = ty2024_params();
         let table = synthetic_table(2024);
         let mut ri = ReturnInputs {
+            // ★ B3 C-1 — a fixture screened against the TY2024 package STATES TY2024. A year-0
+            //   return is refused at the top of `screen_inputs_tiered` now, which is what made the
+            //   omission visible: the screen and the package disagreed about the year.
+            tax_year: 2024,
             filing_status: FilingStatus::Single,
             header: crate::tax::testonly::kitchen_sink_household().0.header,
             b_1099: vec![crate::tax::return_inputs::Form1099B {
@@ -7958,6 +7978,7 @@ mod tests {
 
     fn h1_files_at_the_floor() -> ReturnInputs {
         let mut ri = ReturnInputs {
+            tax_year: 2024, // ★ B3 C-1 — every screened fixture states the year it is screened in.
             filing_status: FilingStatus::Single,
             w2s: vec![w2(Owner::Taxpayer, dec!(5000), dec!(5000), dec!(5000))],
             ..Default::default()
@@ -8139,6 +8160,7 @@ mod tests {
         let p = ty2024_params();
         let table = synthetic_table(2024);
         let mut ri = ReturnInputs {
+            tax_year: 2024, // ★ B3 C-1 — state the year the package is for.
             filing_status: FilingStatus::Single,
             schedule_c: Some(crate::tax::return_inputs::ScheduleCInputs {
                 owner: Owner::Taxpayer,

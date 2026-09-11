@@ -122,7 +122,56 @@ fn record_or_forget(ri: &mut ReturnInputs, key: AnswerKey, addr: &RowAddr, now: 
     }
 }
 
-pub fn apply(w: &mut Working, e: Edit, now: Date) -> Result<(), ApplyError> {
+/// ★★★ **THE ENGINE'S ONE ENTRY, AND IT TAKES THE TAX YEAR — B3 C-1.**
+///
+/// `year` is a session fact the editing surface holds, exactly as `now` is: the renderer already
+/// carries it (`TaxInputsFormState::year`), and before C-1 it never reached the return. `apply`
+/// materialized `ReturnInputs::default()`, whose `tax_year` is `0` = *"not stated"*, and **nothing in
+/// the whole editor chain ever assigned it** — so the year-scoped liveness predicates, the five
+/// [`btctax_core::tax::questions::RENDERED_PROMPTS`] whose hashed sentence quotes the year, the §152
+/// dependent walk, the §163(h)(3)(B) ceiling warning, the completeness count and the commit gate all
+/// ran at year `0`, while four doc comments in three crates asserted a storage boundary made that
+/// impossible.
+///
+/// ★★★ **Why the parameter, rather than a stamp at the call site.** A call site is a typed list of
+///     one, and the next surface is free to omit it — which is the failure this arc has recorded
+///     eight times (`CLAUDE.md`, *"derive the list, or make the compiler hold it"*). Here the
+///     compiler holds it: the engine is the only thing that can materialize or mutate a `Working`,
+///     so a renderer that does not state a year does not build, and `0` is refused at run time. A
+///     yearless working return is no longer reachable from any surface.
+///
+/// ★★ **It refuses a DISAGREEMENT rather than overwriting one** (`ReturnInputs::stamp_year`, the one
+///    copy of the rule, shared with `btctax-cli`'s storage boundary). `ReturnInputs::tax_year`'s own
+///    doc comment argues that `live` must not become `live(year, &ri)` because *"a year passed
+///    alongside invites a caller to pass one that disagrees with the row's own origin"* — that
+///    reasoning is about READERS. This is a writer, and it is the same shape as
+///    `return_inputs::set`, which has taken a `year` alongside the return and refused a disagreement
+///    since §G-15.
+///
+/// # Errors
+/// [`ApplyError::TaxYearNotStated`] when `year == 0`; [`ApplyError::WrongTaxYear`] when the return
+/// already states a different year; otherwise the edit's own error, with nothing mutated.
+pub fn apply(w: &mut Working, e: Edit, year: i32, now: Date) -> Result<(), ApplyError> {
+    if year == 0 {
+        return Err(ApplyError::TaxYearNotStated);
+    }
+    // ★ Stamp BEFORE the edit is dispatched, because `record_or_forget` hashes the words RENDERED
+    //   FROM THE RETURN: a stamp that landed after the set would still hash a year-0 sentence, which
+    //   is C-1's own mechanism. An already-stamped return is a no-op; a disagreement refuses and
+    //   mutates nothing.
+    //
+    // ★ It runs ahead of the per-edit guards on purpose, and that does NOT weaken *"a refused edit
+    //   changed nothing, so it is not an answer"* — which is about the FILER's testimony. Stating
+    //   which year a screen is editing is the SURFACE speaking, not the filer, it writes no
+    //   `AnswerRecord`, and it is idempotent. The alternative — stamp after the guards — would let a
+    //   failed edit leave a return whose next successful edit hashes a sentence rendered at year 0.
+    if let Some(ri) = w.as_mut() {
+        ri.stamp_year(year)
+            .map_err(|on_return| ApplyError::WrongTaxYear {
+                on_return,
+                surface: year,
+            })?;
+    }
     match w {
         // ★ NI-2: nothing exists yet — only the filing-status *choice* brings a return into being.
         None => match e {
@@ -138,7 +187,15 @@ pub fn apply(w: &mut Working, e: Edit, now: Date) -> Result<(), ApplyError> {
                 guard_arity(&addr, depth)?;
                 // Set the status on an otherwise-pure default; only assign `*w` on success, so a bad choice
                 // (e.g. an unknown status string) leaves `*w` as `None` — nothing laundered.
-                let mut ri = ReturnInputs::default();
+                //
+                // ★★★ B3 C-1 — the year is stated HERE, at the one moment a return comes into being.
+                //     `ReturnInputs::default()` is `tax_year: 0` on purpose (*"a test convenience must
+                //     not fabricate a year"*); the surface's year is not a fabrication, and the FR-97
+                //     fixture's hand-written `w.tax_year = 2024` existed only because this line did not.
+                let mut ri = ReturnInputs {
+                    tax_year: year,
+                    ..ReturnInputs::default()
+                };
                 (field.set)(&mut ri, &addr, value).map_err(ApplyError::SetError)?;
                 *w = Some(ri);
                 Ok(())
@@ -338,6 +395,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice(fs_name(fs).into()),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -367,6 +425,7 @@ mod tests {
                 addr: RowAddr(vec![0]),
                 value: FieldValue::Choice("Single".into()),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         );
         assert!(
@@ -391,6 +450,7 @@ mod tests {
                 addr: RowAddr(vec![0]),
                 value: FieldValue::Money(dec!(1)),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         );
         assert_eq!(bad, Err(ApplyError::WrongFirstEdit));
@@ -403,6 +463,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Mfj".into()),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -417,6 +478,7 @@ mod tests {
                     id: FieldId::FilingStatus,
                     addr: RowAddr::default()
                 },
+                2024,
                 time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::Immutable))
@@ -458,7 +520,7 @@ mod tests {
         for e in rejects {
             let mut w: Working = None;
             assert_eq!(
-                apply(&mut w, e.clone(), time::macros::date!(2026 - 09 - 01)),
+                apply(&mut w, e.clone(), 2024, time::macros::date!(2026 - 09 - 01)),
                 Err(ApplyError::WrongFirstEdit),
                 "must refuse on None: {e:?}"
             );
@@ -483,17 +545,23 @@ mod tests {
                     addr: RowAddr::default(),
                     value: FieldValue::Choice(name.into()),
                 },
+                2024,
                 time::macros::date!(2026 - 09 - 01),
             )
             .unwrap();
+            // ★★★ B3 C-1 — "pure default" now means *the default plus the two things the surface
+            //     actually stated*: the status the filer chose, and the year the screen is editing.
+            //     `tax_year: 0` here was the whole defect: it was the ONLY field of the working
+            //     return that no production code ever assigned, and every year-scoped rule read it.
             let expected = ReturnInputs {
                 filing_status: fs,
+                tax_year: 2024,
                 ..Default::default()
             };
             assert_eq!(
                 w.as_ref().unwrap(),
                 &expected,
-                "{name}: pure default + that status only"
+                "{name}: pure default + that status and the surface's year, and nothing else"
             );
             assert!(w.as_ref().unwrap().w2s.is_empty());
             assert!(w.as_ref().unwrap().schedule_a.is_none());
@@ -513,6 +581,7 @@ mod tests {
                     addr: RowAddr::default(),
                     value: FieldValue::Choice("Nope".into()),
                 },
+                2024,
                 time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::WrongKind)),
@@ -520,6 +589,81 @@ mod tests {
         assert!(
             w.is_none(),
             "no return may materialize from an unparseable filing-status choice"
+        );
+    }
+
+    // ── ★★★ B3 C-1 — THE ENGINE CANNOT BE DRIVEN WITHOUT A STATED TAX YEAR ──────────────────────
+    //
+    // These are the structural guard's own planted-defect tests (`design/HARNESS.md` B1). The guard
+    // is that `apply` — the ONLY thing that can materialize or mutate a `Working` — takes the year
+    // and refuses both *"not stated"* and *"a different year"*. Delete the `year == 0` arm and the
+    // first reds; delete the `stamp_year` call and the second reds; delete the `tax_year: year` in
+    // the materialization arm and `ni2_none_rejects_all_but_filing_status_then_materializes_pure_default`
+    // plus all five of the `b3_c1_*` kills in `btctax-tui-edit` red.
+
+    /// A surface that does not say which tax year it is editing gets a REFUSAL, not a year-0 return.
+    #[test]
+    fn a_yearless_surface_cannot_materialize_or_edit_anything() {
+        let first = Edit::SetField {
+            id: FieldId::FilingStatus,
+            addr: RowAddr::default(),
+            value: FieldValue::Choice("Single".into()),
+        };
+        let mut w: Working = None;
+        assert_eq!(
+            apply(&mut w, first.clone(), 0, NOW),
+            Err(ApplyError::TaxYearNotStated),
+            "year 0 is §G-15's \"NOT STATED\" — it is not a year, and materializing at it is C-1"
+        );
+        assert!(w.is_none(), "and nothing materialized");
+        // The same on an ALREADY materialized return: every edit re-states the year, because the
+        // record `apply` writes hashes a sentence RENDERED from it.
+        let mut live: Working = None;
+        materialize(&mut live, FilingStatus::Single);
+        assert_eq!(
+            apply(
+                &mut live,
+                Edit::SetField {
+                    id: FieldId::PayEstimated,
+                    addr: RowAddr::default(),
+                    value: FieldValue::Money(dec!(1)),
+                },
+                0,
+                NOW
+            ),
+            Err(ApplyError::TaxYearNotStated),
+        );
+    }
+
+    /// ★★★ A surface naming a DIFFERENT year than the return carries is refused, not re-labelled.
+    ///
+    /// `ReturnInputs::stamp_year` is the one copy of this rule; `btctax_cli::return_inputs::set` has
+    /// applied it to the committed row since §G-15 for the same reason — *"storing one year's answers
+    /// as another's would misattribute the filer's testimony"*.
+    #[test]
+    fn a_surface_editing_a_different_year_than_the_return_is_refused_and_nothing_changes() {
+        let mut w: Working = None;
+        materialize(&mut w, FilingStatus::Single); // states 2024
+        let before = w.clone();
+        assert_eq!(
+            apply(
+                &mut w,
+                Edit::SetField {
+                    id: FieldId::PayEstimated,
+                    addr: RowAddr::default(),
+                    value: FieldValue::Money(dec!(500)),
+                },
+                2025,
+                NOW
+            ),
+            Err(ApplyError::WrongTaxYear {
+                on_return: 2024,
+                surface: 2025
+            }),
+        );
+        assert_eq!(
+            w, before,
+            "a refused edit mutates nothing — not even the year"
         );
     }
 
@@ -545,6 +689,7 @@ mod tests {
                     addr: RowAddr::default(),
                     value: FieldValue::TriState(Some(true)),
                 },
+                2024,
                 now,
             );
             let cleared = apply(
@@ -553,6 +698,7 @@ mod tests {
                     id,
                     addr: RowAddr::default(),
                 },
+                2024,
                 now,
             );
             if live {
@@ -594,6 +740,7 @@ mod tests {
                 section: SectionId::W2s,
                 parent: RowAddr::default(),
             },
+            2024,
             now,
         )
         .unwrap();
@@ -607,6 +754,7 @@ mod tests {
                     addr: RowAddr::default(),
                     value: FieldValue::TriState(Some(v)),
                 },
+                2024,
                 now,
             )
         };
@@ -641,6 +789,7 @@ mod tests {
                 section: SectionId::W2s,
                 addr: RowAddr(vec![0]),
             },
+            2024,
             now,
         )
         .unwrap();
@@ -680,6 +829,7 @@ mod tests {
                         addr: RowAddr::default(),
                         value: FieldValue::TriState(Some(v)),
                     },
+                    2024,
                     now,
                 )
             };
@@ -711,6 +861,7 @@ mod tests {
             Edit::CreateSection {
                 section: SectionId::ScheduleA,
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -721,6 +872,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("ForceItemize".into()),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -735,6 +887,7 @@ mod tests {
             Edit::DeleteSection {
                 section: SectionId::ScheduleA,
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -760,6 +913,7 @@ mod tests {
                 section: SectionId::W2s,
                 parent: RowAddr::default(),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -771,6 +925,7 @@ mod tests {
                 addr: RowAddr(vec![0]),
                 value: FieldValue::Money(dec!(50000)),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -783,6 +938,7 @@ mod tests {
                 section: SectionId::W2Box12,
                 parent: RowAddr(vec![0]),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -794,6 +950,7 @@ mod tests {
                 addr: RowAddr(vec![0, 0]),
                 value: FieldValue::Money(dec!(23000)),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -806,6 +963,7 @@ mod tests {
                 section: SectionId::W2Box12,
                 addr: RowAddr(vec![0, 0]),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -816,6 +974,7 @@ mod tests {
                 section: SectionId::W2s,
                 addr: RowAddr(vec![0]),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -827,6 +986,7 @@ mod tests {
             Edit::CreateSection {
                 section: SectionId::Spouse,
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -838,6 +998,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Text("Pat".into()),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -856,6 +1017,7 @@ mod tests {
             Edit::DeleteSection {
                 section: SectionId::Spouse,
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -867,6 +1029,7 @@ mod tests {
             Edit::CreateSection {
                 section: SectionId::ScheduleA,
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -876,6 +1039,7 @@ mod tests {
             Edit::DeleteSection {
                 section: SectionId::ScheduleA,
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -898,6 +1062,7 @@ mod tests {
                     addr: RowAddr(vec![]),
                     value: FieldValue::Money(dec!(1)),
                 },
+                2024,
                 time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
@@ -909,6 +1074,7 @@ mod tests {
                 section: SectionId::W2s,
                 parent: RowAddr::default(),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -920,6 +1086,7 @@ mod tests {
                     addr: RowAddr(vec![0]),
                     value: FieldValue::Money(dec!(1)),
                 },
+                2024,
                 time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
@@ -932,6 +1099,7 @@ mod tests {
                     section: SectionId::W2Box12,
                     parent: RowAddr(vec![])
                 },
+                2024,
                 time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
@@ -944,6 +1112,7 @@ mod tests {
                     section: SectionId::W2Box12,
                     addr: RowAddr(vec![0])
                 },
+                2024,
                 time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
@@ -956,6 +1125,7 @@ mod tests {
                     id: FieldId::Box1Wages,
                     addr: RowAddr(vec![])
                 },
+                2024,
                 time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
@@ -997,6 +1167,7 @@ mod tests {
                     addr: RowAddr::default(),
                     value: FieldValue::Money(rust_decimal_macros::dec!(120000)),
                 },
+                2024,
                 time::macros::date!(2026 - 09 - 01),
             )
             .expect("set");
@@ -1013,6 +1184,7 @@ mod tests {
                     id,
                     addr: RowAddr::default(),
                 },
+                2024,
                 time::macros::date!(2026 - 09 - 01),
             )
             .expect("clear");
@@ -1048,6 +1220,7 @@ mod tests {
                     id: FieldId::FilingStatus,
                     addr: RowAddr::default()
                 },
+                2024,
                 time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::Immutable)),
@@ -1062,6 +1235,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::TriState(Some(true)),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -1072,6 +1246,7 @@ mod tests {
                 id: FieldId::DeclForeignAccounts,
                 addr: RowAddr::default(),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -1089,6 +1264,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Date(Some(date!(1980 - 03 - 04))),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -1102,6 +1278,7 @@ mod tests {
                 id: FieldId::DobTaxpayer,
                 addr: RowAddr::default(),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -1119,6 +1296,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::SecretEntry("112233".into()),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -1129,6 +1307,7 @@ mod tests {
                 id: FieldId::IpPin,
                 addr: RowAddr::default(),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -1145,6 +1324,7 @@ mod tests {
                 section: SectionId::Dependents,
                 parent: RowAddr::default(),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -1155,6 +1335,7 @@ mod tests {
                 addr: RowAddr(vec![0]),
                 value: FieldValue::Date(Some(date!(2015 - 06 - 01))),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -1168,6 +1349,7 @@ mod tests {
                 id: FieldId::DepDob,
                 addr: RowAddr(vec![0]),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -1180,6 +1362,7 @@ mod tests {
                 section: SectionId::W2s,
                 parent: RowAddr::default(),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -1190,6 +1373,7 @@ mod tests {
                 addr: RowAddr(vec![0]),
                 value: FieldValue::Money(dec!(500)),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -1199,6 +1383,7 @@ mod tests {
                 id: FieldId::Box1Wages,
                 addr: RowAddr(vec![0]),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -1212,6 +1397,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Text("Sam".into()),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -1221,6 +1407,7 @@ mod tests {
                 id: FieldId::TpFirstName,
                 addr: RowAddr::default(),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -1234,6 +1421,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Bool(true),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -1243,6 +1431,7 @@ mod tests {
                 id: FieldId::TpPresidentialFund,
                 addr: RowAddr::default(),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -1256,6 +1445,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::SecretEntry("123456789".into()),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -1265,6 +1455,7 @@ mod tests {
                 id: FieldId::TpSsn,
                 addr: RowAddr::default(),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -1285,6 +1476,7 @@ mod tests {
                     section: SectionId::Taxpayer,
                     parent: RowAddr::default()
                 },
+                2024,
                 time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::NoSuchSection),
@@ -1296,6 +1488,7 @@ mod tests {
                 Edit::CreateSection {
                     section: SectionId::Payments
                 },
+                2024,
                 time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::NoSuchSection),
@@ -1313,6 +1506,7 @@ mod tests {
             Edit::CreateSection {
                 section: SectionId::ScheduleA,
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -1330,6 +1524,7 @@ mod tests {
                     addr: RowAddr::default(),
                     value: FieldValue::TriState(Some(true)),
                 },
+                2024,
                 time::macros::date!(2026 - 09 - 01),
             )
             .unwrap();
@@ -1339,6 +1534,7 @@ mod tests {
                     id,
                     addr: RowAddr::default(),
                 },
+                2024,
                 time::macros::date!(2026 - 09 - 01),
             )
             .unwrap();
@@ -1361,6 +1557,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::TriState(Some(true)),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -1370,6 +1567,7 @@ mod tests {
                 id: FieldId::BlindTaxpayer,
                 addr: RowAddr::default(),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -1397,6 +1595,7 @@ mod tests {
                     addr: RowAddr::default(),
                     value: FieldValue::TriState(Some(true)),
                 },
+                2024,
                 time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
@@ -1410,6 +1609,7 @@ mod tests {
                     addr: RowAddr::default(),
                     value: FieldValue::TriState(Some(true)),
                 },
+                2024,
                 time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
@@ -1422,6 +1622,7 @@ mod tests {
                     id: FieldId::BlindSpouse,
                     addr: RowAddr::default()
                 },
+                2024,
                 time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
@@ -1433,6 +1634,7 @@ mod tests {
                     id: FieldId::SaSaltUseSalesTax,
                     addr: RowAddr::default()
                 },
+                2024,
                 time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
@@ -1444,6 +1646,7 @@ mod tests {
             Edit::CreateSection {
                 section: SectionId::Spouse,
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -1452,6 +1655,7 @@ mod tests {
             Edit::CreateSection {
                 section: SectionId::ScheduleA,
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -1462,6 +1666,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::TriState(Some(true)),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -1476,6 +1681,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::TriState(Some(false)),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -1504,6 +1710,7 @@ mod tests {
                     section: SectionId::W2Box12,
                     parent: RowAddr(vec![0])
                 },
+                2024,
                 time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
@@ -1516,6 +1723,7 @@ mod tests {
                     section: SectionId::ScheduleACharitable,
                     parent: RowAddr::default()
                 },
+                2024,
                 time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
@@ -1528,6 +1736,7 @@ mod tests {
                     section: SectionId::W2s,
                     addr: RowAddr(vec![3])
                 },
+                2024,
                 time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
@@ -1540,6 +1749,7 @@ mod tests {
                 section: SectionId::W2s,
                 parent: RowAddr::default(),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -1549,6 +1759,7 @@ mod tests {
                 section: SectionId::W2Box12,
                 parent: RowAddr(vec![0]),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -1560,6 +1771,7 @@ mod tests {
                     section: SectionId::W2Box12,
                     addr: RowAddr(vec![0, 5])
                 },
+                2024,
                 time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
@@ -1578,6 +1790,7 @@ mod tests {
                 section: SectionId::W2s,
                 parent: RowAddr::default(),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -1591,6 +1804,7 @@ mod tests {
                     addr: RowAddr(vec![0, 7, 9]),
                     value: FieldValue::Money(dec!(1)),
                 },
+                2024,
                 time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
@@ -1604,6 +1818,7 @@ mod tests {
                     addr: RowAddr(vec![0]),
                     value: FieldValue::Text("x".into()),
                 },
+                2024,
                 time::macros::date!(2026 - 09 - 01)
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
@@ -1620,18 +1835,21 @@ mod tests {
     /// A working return carrying ONE dependent row at `RowAddr(vec![0])`, built THROUGH the seam
     /// (materialize → `AddRow` → `SetField`) so nothing here reaches past the layer under test.
     ///
-    /// ★ The SSN is from the never-issued space (area 000), and the year is set directly because the
-    ///   tax year is not a form `Field` at all — the renderer carries it (`TaxInputsFormState::fresh`).
+    /// ★ The SSN is from the never-issued space (area 000). **B3 C-1**: the year is no longer set by
+    ///   hand here. It used to be — *"the year is set directly because the tax year is not a form
+    ///   `Field` at all — the renderer carries it"* — and that hand-stamp was the tell: the fixture
+    ///   compensated, in one line, for the thing production never did at all. `apply` now takes the
+    ///   year, so `materialize` states it and the fixture says nothing about it.
     fn with_one_dependent(ssn: &str) -> Working {
         let mut w: Working = None;
         materialize(&mut w, FilingStatus::Single);
-        w.as_mut().expect("materialized").tax_year = 2024;
         apply(
             &mut w,
             Edit::AddRow {
                 section: SectionId::Dependents,
                 parent: RowAddr::default(),
             },
+            2024,
             NOW,
         )
         .unwrap();
@@ -1642,6 +1860,7 @@ mod tests {
                 addr: RowAddr(vec![0]),
                 value: FieldValue::SecretEntry(ssn.to_string()),
             },
+            2024,
             NOW,
         )
         .unwrap();
@@ -1767,6 +1986,7 @@ mod tests {
                         addr: RowAddr(vec![0]),
                         value,
                     },
+                    2024,
                     NOW,
                 )
                 .unwrap_or_else(|e| {
@@ -1917,6 +2137,7 @@ mod tests {
                     addr: RowAddr(vec![0]),
                     value: FieldValue::Date(v),
                 },
+                2024,
                 NOW,
             )
             .unwrap();
@@ -2008,6 +2229,7 @@ mod tests {
                 id: FieldId::DepGateGrossIncomeUnderLimit,
                 addr: RowAddr(vec![0]),
             },
+            2024,
             NOW,
         )
         .unwrap();

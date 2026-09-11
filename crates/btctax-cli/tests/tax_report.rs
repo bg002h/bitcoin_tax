@@ -3335,6 +3335,7 @@ fn the_editor_and_income_answer_write_the_same_answer_record() {
             addr: RowAddr::default(),
             value: FieldValue::TriState(Some(false)),
         },
+        2024,
         NOW,
     )
     .unwrap();
@@ -3501,6 +3502,7 @@ fn the_editor_and_income_answer_write_the_same_dependent_gate_records() {
             addr: RowAddr::default(),
             value: FieldValue::Choice("Single".into()),
         },
+        2024,
         NOW,
     )
     .unwrap();
@@ -3512,6 +3514,7 @@ fn the_editor_and_income_answer_write_the_same_dependent_gate_records() {
             section: SectionId::Dependents,
             parent: RowAddr::default(),
         },
+        2024,
         NOW,
     )
     .unwrap();
@@ -3530,6 +3533,7 @@ fn the_editor_and_income_answer_write_the_same_dependent_gate_records() {
                 addr: RowAddr(vec![0]),
                 value: v,
             },
+            2024,
             NOW,
         )
         .unwrap();
@@ -3543,6 +3547,7 @@ fn the_editor_and_income_answer_write_the_same_dependent_gate_records() {
             addr: RowAddr::default(),
             value: FieldValue::TriState(from_cli.header.can_be_claimed_as_dependent_taxpayer),
         },
+        2024,
         NOW,
     )
     .unwrap();
@@ -3571,6 +3576,7 @@ fn the_editor_and_income_answer_write_the_same_dependent_gate_records() {
                     addr: RowAddr(vec![0]),
                     value,
                 },
+                2024,
                 NOW,
             )
             .unwrap_or_else(|e| panic!("{g:?} is demanded, so the editor must accept it: {e:?}"));

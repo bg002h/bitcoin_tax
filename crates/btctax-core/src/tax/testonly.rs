@@ -786,6 +786,11 @@ pub fn w2_only_household() -> (ReturnInputs, LedgerState) {
 /// household holding both, Form 6251 stapling after Form 8995 passes every ordering test (r1 Minor).
 pub fn amt_owing_household() -> (ReturnInputs, LedgerState) {
     let mut ri = ReturnInputs {
+        // ★ B3 C-1 — the vector IS a TY2024 return (the §55 exemption, the 26/28% split and both
+        //   oracles' witness are all TY2024's), and `screen_inputs` now refuses a return that does
+        //   not say so. Nothing computed moves: every figure here is derived from the package and the
+        //   `year` argument, never from `ri.tax_year` (`return_1040.rs` records why).
+        tax_year: 2024,
         filing_status: FilingStatus::Single,
         header: HouseholdHeader {
             // ★ An ALLOWED synthetic SSN (`scripts/pii-scan-generic.sh`'s list). A fresh fake number

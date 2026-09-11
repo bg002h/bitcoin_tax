@@ -821,6 +821,24 @@ pub enum ApplyError {
     WrongFirstEdit,
     SetError(SetError),
     NoSuchSection,
+    /// ★★★ **B3 C-1 — the surface did not say which tax year it is editing.**
+    ///
+    /// [`crate::apply::apply`] takes the year as a session fact, the way it takes `now`, and refuses
+    /// `0` (*"not stated"*, `ReturnInputs::tax_year`'s own vocabulary). It is not a message a filer
+    /// can act on and is not meant to be: it is the compile-and-run-time answer to *"could a future
+    /// renderer hand a year-scoped rule a return with no year?"*, which before C-1 was **yes** and
+    /// silent.
+    TaxYearNotStated,
+    /// ★★★ **B3 C-1 — the surface named a different year than the return carries.**
+    ///
+    /// `ReturnInputs::stamp_year` refuses rather than re-labelling: editing TY2023's answers in a
+    /// screen that believes it is TY2024 would attribute one year's testimony to another.
+    WrongTaxYear {
+        /// The year already stated on the return.
+        on_return: i32,
+        /// The year the editing surface passed.
+        surface: i32,
+    },
 }
 
 #[cfg(test)]

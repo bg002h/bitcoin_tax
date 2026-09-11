@@ -793,7 +793,7 @@ fn nothing_about_year_n_changes() {
     // Year N also holds a PARKED draft — the state with the most to lose.
     {
         let mut s = Session::open(&vault, &pp()).unwrap();
-        input_form_store::save_draft(&mut s, FROM, &draft_holding_an_interview()).unwrap();
+        input_form_store::save_draft(&mut s, FROM, &draft_holding_an_interview(FROM)).unwrap();
     }
     let before = {
         let s = Session::open(&vault, &pp()).unwrap();
@@ -921,11 +921,16 @@ fn a_parked_draft_on_the_year_being_opened_refuses_even_with_discard_draft() {
 
 /// A draft holding an interview: one answered census row, with the answer RECORDED — the part that
 /// cannot be re-created by re-typing.
-fn draft_holding_an_interview() -> ReturnInputs {
+/// ★ B3 C-1 — the year is a PARAMETER. It was hardcoded to `TO`, and
+/// `nothing_about_year_n_changes` stored the result under `FROM`: a TY2025 return saved as year N's
+/// draft. Nothing reded, because the draft store neither stamped nor checked the year. It does both
+/// now (`input_form_store::set_draft_row`), which reddened this fixture immediately — a draft
+/// mislabelled by a year is exactly what the stamp exists to refuse.
+fn draft_holding_an_interview(year: i32) -> ReturnInputs {
     use btctax_core::tax::provenance::{record_answer, AnswerKey, AnswerState};
     use btctax_core::tax::questions::FORM_QUESTIONS;
     let mut ri = ReturnInputs {
-        tax_year: TO,
+        tax_year: year,
         filing_status: FilingStatus::Single,
         ..Default::default()
     };
@@ -951,7 +956,7 @@ fn a_non_trivial_draft_on_the_year_being_opened_refuses_and_survives() {
     let (_dir, vault) = vault_with_year_n(a_year_with_money_in_it);
     {
         let mut s = Session::open(&vault, &pp()).unwrap();
-        input_form_store::save_draft(&mut s, TO, &draft_holding_an_interview()).unwrap();
+        input_form_store::save_draft(&mut s, TO, &draft_holding_an_interview(TO)).unwrap();
     }
     {
         let mut s = Session::open(&vault, &pp()).unwrap();
@@ -965,7 +970,7 @@ fn a_non_trivial_draft_on_the_year_being_opened_refuses_and_survives() {
     }
     assert_eq!(
         draft(&vault),
-        draft_holding_an_interview(),
+        draft_holding_an_interview(TO),
         "the draft survives untouched"
     );
 

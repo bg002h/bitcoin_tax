@@ -457,6 +457,15 @@ impl TaxInputsFormState {
         // ★ T9 / R8 — the §163(h)(3)(B) ceilings are a `FullReturnParams` figure, so on a
         //   params-less year the aggregate check waits exactly as the box-3 wage-base check does.
         //   `report` runs the same function WITH the package.
+        //
+        // ★★ **B3 C-1 — that sentence became true only when `apply` began stating the year.** The
+        //    lookup is keyed on `ri.tax_year`, which was `0` for every working return the editor ever
+        //    held, so `full_return_for` was `None` on EVERY year and this warning never rendered at
+        //    all — including TY2024, where the package exists. It waited on every year while the
+        //    comment said it waited on a params-less one. Reading `ri.tax_year` (rather than
+        //    `self.year`, which `interview_lines` uses) is now safe *and* is the better read: it is
+        //    the year the figures on this return belong to, and the two cannot differ — `apply`
+        //    refuses an edit whose surface names a year the return does not.
         let fr = btctax_adapters::tax_tables::BundledFullReturnTables::load();
         let ceiling = btctax_core::tax::tables::FullReturnTables::full_return_for(&fr, ri.tax_year)
             .map(|p| p.acquisition_debt_ceiling);
@@ -4680,5 +4689,272 @@ mod tests {
                 "{off:?} is system-assigned and must stay off the selectable ring"
             );
         }
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// ★★★ B3 C-1 — THE FOUR NON-BLOCKING CONSEQUENCES OF AN UNSTAMPED WORKING RETURN
+//
+// Consequence 1 (the blocking one — a committed return no printing surface will accept) is held end
+// to end in `main.rs`, `a_return_authored_and_committed_in_the_form_screens_clean_on_the_committed_row`.
+// The four below are the other readers of `ri.tax_year` the editor reaches BEFORE any commit, and
+// each is its own kill: they share C-1's root cause but not its mechanism, and three of them are
+// silent rather than refusing, so the first kill cannot stand in for them.
+//
+// Every one of them is driven through the seam — `apply`, with the year the screen is open on —
+// because the thing under test is precisely whether that year reaches the return.
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+#[cfg(test)]
+mod b3_c1_the_year_reaches_every_reader {
+    use super::*;
+    use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr};
+
+    const NOW: time::Date = time::macros::date!(2026 - 09 - 01);
+
+    /// A working return for `year`, materialized through the seam exactly as the filer's first
+    /// keystroke does (NI-2: the filing-status choice is the only first edit).
+    fn materialized(year: i32) -> TaxInputsFormState {
+        let mut form = TaxInputsFormState::fresh(year, NOW);
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+            year,
+            NOW,
+        )
+        .expect("the filing-status choice materializes the working return");
+        form
+    }
+
+    fn set(form: &mut TaxInputsFormState, id: FieldId, addr: RowAddr, value: FieldValue) {
+        apply(
+            &mut form.working,
+            Edit::SetField { id, addr, value },
+            form.year,
+            NOW,
+        )
+        .unwrap_or_else(|e| panic!("{id:?} must be settable: {e:?}"));
+    }
+
+    /// ★★★ **Consequence 2 — the completeness instrument reported a false `interview: complete`.**
+    ///
+    /// `QuestionId::HasIncomeExclusion` is `live: |ri| ri.tax_year >= 2025` and declares
+    /// `RefuseReason::IncomeExclusionUnanswered`, whose own detail says an unasked exclusion
+    /// *"UNDERSTATES modified AGI … and understates the tax"*. At `tax_year == 0` it was not live, so
+    /// `interview_state` did not count it, so the status line told a TY2025 filer their interview was
+    /// **complete** on a return holding an unanswered class-(A) declaration.
+    ///
+    /// ★ The assertion is on the RENDERED LINE, not on the predicate: the defect was that a filer
+    ///   read the word "complete", and `year_gate_lines` is what they read.
+    #[test]
+    fn the_entry_screens_completeness_line_counts_a_year_scoped_question() {
+        let mut form = materialized(2025);
+        {
+            let ri = form.working.as_mut().expect("materialized");
+            ri.header = btctax_core::tax::testonly::not_a_dependent();
+            btctax_core::tax::testonly::answer_all_live_declarations(ri);
+            // ★ Leave EXACTLY ONE question unanswered, and make it the year-scoped one: a TY2025
+            //   filer's §911/931/933 exclusion. Its `RefuseReason::IncomeExclusionUnanswered` detail
+            //   says an unasked exclusion *"UNDERSTATES modified AGI … and understates the tax"*.
+            //   (A test may name a `ReturnInputs` leaf; the flow never does.)
+            ri.has_income_exclusion = None;
+        }
+        let lines = form.year_gate_lines().join(" · ");
+        assert!(
+            !lines.contains("interview: complete"),
+            "a TY2025 return with the §911 exclusion question unanswered is NOT complete — at year 0 \
+             that question was not live, was not counted, and this line said `complete`: {lines}"
+        );
+        assert!(
+            lines.contains("1 question(s) still to answer"),
+            "and it says how many remain, which is exactly the one left blank: {lines}"
+        );
+    }
+
+    /// ★★★ **Consequence 4 — the §163(h)(3)(B) ceiling warning was silent on EVERY year.**
+    ///
+    /// `transcription_warning_lines` reads `full_return_for(&fr, ri.tax_year)` for the acquisition-debt
+    /// ceiling. At year 0 that is always `None`, so the warning R8 designed to be shown *beside*
+    /// `MortgageWithinDebtLimit` — the declaration it exists to inform — never rendered, including on
+    /// TY2024, where the package exists. The comment beside it said it *"waits exactly as the box-3
+    /// wage-base check does"* on a params-less year; it in fact waited on every year.
+    #[test]
+    fn the_acquisition_debt_ceiling_warning_renders_on_a_year_whose_package_exists() {
+        use btctax_core::tax::return_inputs::Form1098;
+        let mut form = materialized(2024);
+        {
+            let ri = form.working.as_mut().expect("materialized");
+            // A Schedule A, because the §163(h)(3)(B) consequence exists only where there is a line 8a.
+            ri.schedule_a = Some(btctax_core::tax::return_inputs::ScheduleAInputs::default());
+            // One acquisition-debt balance well over TY2024's $750,000 ceiling.
+            ri.form_1098.push(Form1098 {
+                lender: "Big Bank".into(),
+                box1_interest: rust_decimal_macros::dec!(40000),
+                box2_outstanding_principal: rust_decimal_macros::dec!(1_200_000),
+                box3_origination_date: Some(time::macros::date!(2021 - 06 - 01)),
+                ..Default::default()
+            });
+        }
+        // With the cursor NOT on a document section the warning renders as a count (R4), which is
+        // already proof it exists — at year 0 there was nothing to count.
+        let counted = form.transcription_warning_lines().join("\n");
+        assert!(
+            counted.contains("Form 1098"),
+            "a $1.2M 2021 acquisition-debt balance on a Schedule A return must warn on TY2024, \
+             whose package declares the $750,000 ceiling: {counted:?}"
+        );
+        // And on the Form 1098 screen itself the filer reads the WHOLE message, which is the moment
+        // R8 designed it for: beside the row, with both figures named.
+        form.section_idx = btctax_input_form::form_spec()
+            .iter()
+            .position(|sec| sec.id == btctax_input_form::SectionId::Form1098s)
+            .expect("the Form 1098 section exists");
+        form.addr = RowAddr(vec![0]); // the aggregate warning attaches to the first row
+
+        let whole = form.transcription_warning_lines().join("\n");
+        assert!(
+            whole.contains("$1200000.00") && whole.contains("$750000.00"),
+            "the whole message names the transcribed total and TY2024's own ceiling — the two \
+             figures `full_return_for(ri.tax_year)` could not supply at year 0: {whole:?}"
+        );
+    }
+
+    /// ★★★ **Consequence 5 — the interview asked a 60-year-old the kiddie-tax questions.**
+    ///
+    /// Three Form 8615 skippables are gated on `!provably_24_or_older(ri, ri.tax_year)`, whose comment
+    /// says the conjunct exists *"to keep the interview from asking a 60-year-old about full-time
+    /// student status."* `considered_age_at_year_end(dob, 0)` is negative for every real date of birth,
+    /// so the predicate was `false` for everyone and all three stayed live — the predicate failing at
+    /// exactly the job it was written for.
+    #[test]
+    fn a_sixty_year_old_is_not_asked_the_form_8615_questions() {
+        // ★ Conditions 3 and 4 are gated on the age predicate ALONE; the third
+        //   (`Form8615ParentIdentityUnobtainable`) additionally requires condition 4 to have been
+        //   answered `CannotKnow`, so an unanswered child sees two of the three. The set is the two
+        //   the predicate alone decides, which is what this kill is about.
+        let eight = [
+            FieldId::Form8615Condition3AgeSupport,
+            FieldId::Form8615Condition4ParentAlive,
+        ];
+        let live_set = |form: &TaxInputsFormState| {
+            let ri = form.working.as_ref().expect("materialized");
+            eight
+                .iter()
+                .filter(|id| {
+                    btctax_input_form::form_spec()
+                        .iter()
+                        .flat_map(|s| s.fields.iter())
+                        .find(|f| f.id == **id)
+                        .is_some_and(|f| (f.live)(ri))
+                })
+                .count()
+        };
+        // A filer born in 1965 — 59 at the end of TY2024, and 24 or older on any real year.
+        let mut form = materialized(2024);
+        set(
+            &mut form,
+            FieldId::DobTaxpayer,
+            RowAddr::default(),
+            FieldValue::Date(Some(time::macros::date!(1965 - 04 - 12))),
+        );
+        assert_eq!(
+            live_set(&form),
+            0,
+            "neither age-gated Form 8615 skippable may be live for a filer who is provably 24 or older"
+        );
+        // The predicate is genuinely doing the work: a filer born in 2010 IS asked.
+        let mut child = materialized(2024);
+        set(
+            &mut child,
+            FieldId::DobTaxpayer,
+            RowAddr::default(),
+            FieldValue::Date(Some(time::macros::date!(2010 - 04 - 12))),
+        );
+        assert_eq!(
+            live_set(&child),
+            2,
+            "a 14-year-old filer IS asked both — otherwise this test would pass on a predicate that \
+             is simply always false, which is exactly what year 0 made it"
+        );
+    }
+
+    /// ★★★ **Consequence 3 — the §152 walk ran at year 0, so the wrong branch of the flowchart was
+    ///     live.**
+    ///
+    /// `dependent_gates::age_test(d, ri.tax_year)` and `under_17_at_year_end` take the year off the
+    /// return. At year 0 every dependent passed §152(c)(3)'s age test by a NEGATIVE age and was walked
+    /// down the qualifying-**child** branch, so the qualifying-**relative** gates (the §152(d)(1)(B)
+    /// gross-income limit, support) were not live, not asked and not answered — and became live the
+    /// instant the row was stamped.
+    #[test]
+    fn a_thirty_year_old_dependent_is_walked_down_the_qualifying_relative_branch() {
+        use btctax_core::tax::dependent_gates::{age_test, under_17_at_year_end, walk_dependent};
+        let mut form = materialized(2024);
+        apply(
+            &mut form.working,
+            Edit::AddRow {
+                section: btctax_input_form::SectionId::Dependents,
+                parent: RowAddr::default(),
+            },
+            2024,
+            NOW,
+        )
+        .unwrap();
+        set(
+            &mut form,
+            FieldId::DepSsn,
+            RowAddr(vec![0]),
+            // The never-issued SSN space (area 000), as every dependent fixture here uses.
+            FieldValue::SecretEntry("000-00-0007".to_string()),
+        );
+        set(
+            &mut form,
+            FieldId::DepDob,
+            RowAddr(vec![0]),
+            FieldValue::Date(Some(time::macros::date!(1994 - 03 - 01))),
+        );
+        let ri = form.working.as_ref().expect("materialized");
+        let dep = &ri.header.dependents[0];
+        // ★ The two cited lines, read exactly as the walk reads them — off `ri.tax_year`.
+        assert!(
+            !age_test(dep, ri.tax_year),
+            "§152(c)(3)'s age test must FAIL for someone who turned 30 in the tax year; at year 0 it \
+             passed for every dependent, by a negative age"
+        );
+        assert!(
+            !under_17_at_year_end(dep, ri.tax_year),
+            "the §24(h) under-17 test must fail too — the CTC column is decided by the same year"
+        );
+        assert!(
+            !walk_dependent(ri, 0).is_qualifying_child(),
+            "a 30-year-old cannot be on the §152(c) qualifying-CHILD branch, which is the branch a \
+             year-0 walk put every dependent on"
+        );
+        // ★ Not vacuous: a nine-year-old on the same return passes both, so the predicates are
+        //   genuinely reading the year rather than being uniformly false. §152(c)(3)'s first limb
+        //   also needs the row's own *"younger than you"* gate, which is set through the seam too.
+        set(
+            &mut form,
+            FieldId::DepDob,
+            RowAddr(vec![0]),
+            FieldValue::Date(Some(time::macros::date!(2015 - 03 - 01))),
+        );
+        set(
+            &mut form,
+            btctax_input_form::gate_to_field(
+                btctax_core::tax::provenance::DependentGate::YoungerThanYouOrSpouse,
+            ),
+            RowAddr(vec![0]),
+            FieldValue::TriState(Some(true)),
+        );
+        let ri = form.working.as_ref().expect("materialized");
+        let dep = &ri.header.dependents[0];
+        assert!(
+            age_test(dep, ri.tax_year) && under_17_at_year_end(dep, ri.tax_year),
+            "a nine-year-old passes §152(c)(3) and the under-17 test on TY2024"
+        );
     }
 }

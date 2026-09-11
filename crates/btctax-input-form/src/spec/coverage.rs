@@ -694,9 +694,18 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
         //     confirmed) is asked as its own declaration, which DOES have a field.
         "opened_from",
         // ★★ §G-15 — `tax_year` is the SCOPE the form is filled in, not a value the filer types into
-        // it. It is set by the command (`--year`) and stamped from the storage row key, so an input
-        // field for it would invite the filer to contradict the year their return is filed under.
-        // Exempt DELIBERATELY, which is what this census exists to force someone to decide.
+        // it, so an input field for it would invite the filer to contradict the year their return is
+        // filed under. Exempt DELIBERATELY, which is what this census exists to force someone to
+        // decide.
+        //
+        // ★★★ **B3 C-1 — the exemption's REASON was about a different surface than this census
+        //     governs, and that gap was the Critical.** It said the year *"is set by the command
+        //     (`--year`) and stamped from the storage row key"* — both true of the CLI and of neither
+        //     the editor's working return nor its draft, which are exactly what this census is the
+        //     census of. So the census correctly recorded "no field needed" while nothing at all set
+        //     the value. `apply` now states it from the editing surface's own year (the renderer has
+        //     carried `TaxInputsFormState::year` since T1), which is what makes "not a field" the
+        //     whole truth rather than half of it.
         "tax_year",
         // ★ `schedule_c` is no longer a WHOLESALE exemption: lines I and J are in scope (class-(B)
         //   skippables), so the struct is exempted LEAF BY LEAF, exactly as `sch1` is for the same

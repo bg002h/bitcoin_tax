@@ -1882,6 +1882,10 @@ mod tests {
         };
 
         let mut ri = fresh_single();
+        // ★ B3 C-1 — the editor's working return now carries the year the screen is open on
+        //   (`apply` states it), and a yearless return is refused before any year-scoped rule. So a
+        //   fixture standing in for that working return states one too.
+        ri.tax_year = 2024;
         ri.header.taxpayer.first_name = "Pat".into();
         ri.header.taxpayer.last_name = "Roe".into();
         ri.header.taxpayer.ssn = "000-00-2222".into();

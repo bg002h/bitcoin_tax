@@ -7060,6 +7060,34 @@ build, each with an owning phase.
   caption substring `box-census` can match against the extract — not the whole label. Do not "fix" it by
   adding a seventh label to a list.
 
+### From the B3 whole-branch review fold (2026-09-11, `design/agent-reports/FOLD-b3-whole-branch-review.md`)
+
+- **FR-118 — the §163(h)(3)(B) ceiling warning prints both figures with no thousands separators. Nit.
+  Owning phase: ownerless residue — batch when convenient.**
+  `transcription_warnings.rs`'s `money()` is `format!("${v:.2}")`, so the warning a filer reads is *"the
+  outstanding mortgage principal … adds up to **$1200000.00**, which is more than the **$750000.00** the
+  §163(h)(3)(B) limit allows"*. Measured while writing B3 C-1's consequence-4 kill, which asserts on the
+  literal strings. The whole content of that warning is a comparison of two seven-figure numbers, which is
+  the one place digit grouping earns its keep — and the module's N-1 fold already moved these figures onto
+  `money()` *because* raw interpolation printed `$900000`, i.e. the same problem one step less far along.
+  The fix is `money()` itself (one function, every warning in the module), and it moves
+  `transcription_warnings.rs`'s own `the_ceiling_warning_formats_both_figures_as_money` plus the
+  `btctax-tui-edit` consequence-4 kill, both of which assert the current spelling. Not folded into the B3
+  round: it is a Nit in a surface the round was not scoped to, and changing a filer-facing number format
+  deserves its own decision about which formatter the product uses everywhere.
+
+- **FR-119 — bracketed review tags in doc comments read as broken intra-doc links. Nit. Owning phase:
+  ownerless residue — batch when convenient.**
+  `cargo doc --workspace --no-deps` emits `unresolved link to …` for `[I5]`, `[N6]`, `[N2r]`, `[r]` and
+  similar — review-round tags written in Markdown link brackets inside `///` comments (e.g.
+  `forms.rs:518` *"**[I5]/C1** How many of these rows …"*, `persistence.rs:354`, `vault.rs:238`,
+  `compliance.rs:197`). Same class as B3's N-1 (which was two genuinely broken variant links and IS fixed),
+  found by running `cargo doc` to verify that fix. Nothing is mis-linked — the tags are not meant to be
+  links — but the warnings are noise that would hide a real broken link, which is exactly how N-1 survived.
+  The fix is mechanical (`\[I5\]` or backticks) and wants one sweep plus `-D rustdoc::broken_intra_doc_links`
+  in CI so the class cannot come back. B3's brief scoped N-1 to *"Do not chase other doc links"*, so this is
+  recorded rather than folded.
+
 - **FR-99 — ★★ THE DOMINANT DEFECT CLASS OF THE WHOLE INTERVIEW ARC: a hand-written list standing beside
   a set that GROWS. Proposed `CLAUDE.md` rule — OWNER'S CALL, filed not actioned. Owning phase: the
   harness / doctrine (owner), before the interview branch ships.**

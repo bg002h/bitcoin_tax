@@ -10967,6 +10967,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Single".into()),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -11256,6 +11257,98 @@ mod tests {
         assert!(
             !btctax_cli::input_form_store::draft_exists(sess.conn(), 2024).unwrap(),
             "a clean commit deletes the draft"
+        );
+    }
+
+    /// ★★★ **B3 C-1 — WHAT THE FORM SEAM COMMITS, EVERY LATER SCREEN MUST ALSO PASS.**
+    ///
+    /// The blocking scenario, end to end and through the seam: author a TY2024 return in the
+    /// tax-inputs form (materialize by choosing a filing status, then answer the Digital Assets
+    /// declaration — one of the five `RENDERED_PROMPTS`, `live` for every filer in every year),
+    /// commit it, then screen the committed row exactly as `report` and `export-irs-pdf` do.
+    ///
+    /// Before the fix the working return carried `tax_year == 0`, so `record_answer` hashed *"At any
+    /// time during **0**, did you…"*, the commit gate rendered the same year-0 sentence and passed,
+    /// `return_inputs::set` then stamped 2024 — and the very next screen rendered *"during **2024**"*,
+    /// missed the hash, and refused `DigitalAssetActivityUnanswered` with
+    /// *"the wording of this question changed since you answered"*. No wording changed. The year was
+    /// stamped, and the filer could not print the return they had just been told was committed.
+    ///
+    /// ★ The assertion is on the SCREEN, not on `tax_year`: a stamp that happens but happens after
+    ///   the answer is recorded would still leave this red.
+    #[test]
+    fn a_return_authored_and_committed_in_the_form_screens_clean_on_the_committed_row() {
+        use btctax_core::tax::testonly::{answer_all_live_declarations, not_a_dependent};
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr};
+        const NOW: time::Date = time::macros::date!(2026 - 09 - 01);
+        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        let vault = dir.path().join("vault.pgp");
+        let pp = Passphrase::new("empty-vault-pass".into());
+
+        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024, NOW);
+        // (1) NI-2: the filing-status choice is the only first edit, and it materializes the return.
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+            2024,
+            NOW,
+        )
+        .unwrap();
+        // (2) Answer the Digital Assets declaration THROUGH the seam, so `apply` records the hash of
+        //     the words this surface rendered — the act under test.
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::DeclDigitalAssetActivity,
+                addr: RowAddr::default(),
+                value: FieldValue::TriState(Some(false)),
+            },
+            2024,
+            NOW,
+        )
+        .unwrap();
+        {
+            let ri = form.working.as_mut().expect("materialized");
+            ri.header = not_a_dependent();
+            answer_all_live_declarations(ri);
+        }
+        let ri = form.working.clone().expect("materialized");
+
+        // (3) Commit it, through the modal, exactly as the filer does with `s` then Enter.
+        btctax_cli::input_form_store::save_draft(app.session.as_mut().unwrap(), 2024, &ri).unwrap();
+        form.dirty = true;
+        app.tax_inputs_form = Some(form);
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.status
+                .as_deref()
+                .unwrap_or_default()
+                .contains("committed 2024 as Single"),
+            "the commit gate reported success: {:?}",
+            app.status
+        );
+
+        // (4) Screen the committed row — the read every printing surface performs first.
+        drop(app);
+        let sess = btctax_cli::Session::open(&vault, &pp).unwrap();
+        let committed = btctax_cli::return_inputs::get(sess.conn(), 2024)
+            .unwrap()
+            .expect("a committed row after a reported-successful commit");
+        let tables = btctax_adapters::BundledTaxTables::load();
+        let fr = btctax_adapters::BundledFullReturnTables::load();
+        let table = btctax_core::TaxTables::table_for(&tables, 2024).unwrap();
+        let params =
+            btctax_core::tax::tables::FullReturnTables::full_return_for(&fr, 2024).unwrap();
+        let refusal = btctax_core::tax::return_refuse::screen_inputs(&committed, table, params);
+        assert!(
+            refusal.is_none(),
+            "the commit gate said this return was clean and the committed row refuses: {:?}",
+            refusal.map(|r| (r.reason, r.detail)),
         );
     }
 
@@ -11826,6 +11919,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Single".into()),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -11889,6 +11983,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Single".into()),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -11957,6 +12052,7 @@ mod tests {
                 addr: RowAddr::default(),
                 value: FieldValue::Choice("Single".into()),
             },
+            2024,
             time::macros::date!(2026 - 09 - 01),
         )
         .unwrap();
@@ -12075,6 +12171,7 @@ mod tests {
                     addr: RowAddr::default(),
                     value: FieldValue::Choice("ForceItemize".into()),
                 },
+                2024,
                 time::macros::date!(2026 - 09 - 01),
             )
             .unwrap();
