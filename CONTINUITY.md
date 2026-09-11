@@ -15,13 +15,37 @@ _Last updated: **2026-09-09**. Written at a deliberate pause; safe to exit. **Re
 > `HEAD == origin/main`. **Both journey walks FILE a correct packet.** v1 task scope settled: T13
 > DEFERRED, T14 CLOSED (not needed), T15 DEFERRED.
 >
-> ## ★★★ RESUME 2026-09-09 (later) — **FR-110, FR-111 AND FR-114 ARE ALL CLOSED. THE NEXT THING IS B3.**
+> ## ★★★ RESUME 2026-09-11 — **THE NEXT ACTION IS B3, AND EVERYTHING IT NEEDS IS ON DISK.**
 >
-> All three were decisions before they were code, and all three decisions were taken. `make gate`
-> **3561 passed / 12 skipped** (+3 kills), `cargo fmt --all --check` clean, everything pushed,
-> `HEAD == origin/main`. Fire B3 from `design/agent-reports/PLAN-b3-whole-branch-review.md` (`bbbd6bc8`)
-> — range `121c8805..HEAD`, ONE opus reviewer in a worktree, four seams; **do not improvise the brief.**
-> ★ Tell it the range now ends *after* this session's six commits, and that FR-110/111/114 are settled.
+> **State: clean.** `HEAD == origin/main == 3ae930ab`, tree clean, no worktrees, nothing in flight.
+> `make gate` **3561 passed / 12 skipped**, `cargo fmt --all --check` clean. FR-110, FR-111 and FR-114
+> are CLOSED and re-verified 0C/0I. New follow-ups filed: FR-115, FR-116, FR-117.
+>
+> ### The single next action
+>
+> **Read `design/agent-reports/PLAN-b3-whole-branch-review.md` IN FULL — including the ADDENDUM at the
+> bottom (2026-09-11) — and fire B3 from it. Do not improvise the brief.** The plan gives the four
+> seams, the shape (ONE opus reviewer, `isolation: worktree`, not a fan-out), the tier reasoning, and
+> what would make the round a failure. The addendum gives what changed since it was written: the range
+> tip, which commits are thinnest, what NOT to re-spend budget on, and the four-refuted-briefs warning
+> that must go in the dispatch.
+>
+> Everything the coordinator held in context has been written into that addendum on purpose, because
+> this session was cleared immediately after writing it. **Nothing is lost; read the addendum.**
+>
+> ★ Two things the addendum flags that are easy to miss:
+> · **FR-110 is a DECISION, not a gap.** "btctax cannot file a 1099-B with adjustments" is the intended
+>   permanent ceiling, owner-ruled. A finding to that effect is out of scope — say so in the brief.
+> · **`LIMITATIONS.md` is `include_str!`'d into the binary** (`main.rs:582`). It is shipped filer-facing
+>   text, not a design doc. `52b348c2` edited it; treat it as product surface.
+>
+> ### After B3 returns
+>
+> The standard loop, unchanged: persist the agent's report VERBATIM in its own commit → controller
+> ledger machine-checking every measurable claim → fold brief → fold in a second commit with the gate
+> output in the message → `make gate` + `cargo fmt --all --check` → push → sonnet re-verification.
+> A worktree verifier's suite result is **not** comparable to the main tree's — corroborate any red in
+> `main` before believing it (one reported 7 failures on 2026-09-09; all were environmental).
 >
 > **What closed:** FR-110 (aggregate 1099-B is the permanent ceiling — owner) · FR-111 (the Form 8949 box
 > paragraph was **inverted**, not stale: it named TY2025's boxes in a TY2024-only document and denied the

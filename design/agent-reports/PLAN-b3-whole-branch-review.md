@@ -98,3 +98,87 @@ Per the harness: *"the measure is not that a final pass happened, but that it wa
 the earlier passes could not have seen."* A report full of per-commit correctness findings means the
 brief failed, not that the branch is clean. If it returns 0C/0I **and** its "seams checked clean"
 section shows it actually traversed the four chains above, that is the result worth having.
+
+---
+
+# ADDENDUM — 2026-09-11, written immediately before firing
+
+The plan above stands unchanged. This section updates it for the eight commits that landed after it was
+written, and is the part a dispatching coordinator must fold into the brief.
+
+## A1. The range moved — and the new commits are the LEAST reviewed in it
+
+Range is still `121c8805..HEAD`, but `HEAD` is now `3ae930ab`, eight commits later:
+
+```
+9961519f decision(owner): FR-110 ceiling; FR-114 label-only — FR-114's premise refuted
+1e6095d7 brief(FR-114)
+5a1a94be persist(FR-111 recon)      52b348c2 fold(FR-111)
+b9b3810f persist(FR-114 report)     52558813 fold(FR-114)
+fd6adda8 persist(re-verification)   3ae930ab ledger(FR-117)
+```
+
+★ **Point the reviewer at these first.** Everything before `4fa1e723` has had a seam review AND a sonnet
+re-verification per task. These eight have had **one** sonnet re-verification (`fd6adda8`, 0C/0I, scoped
+to the two folds) and no independent design review at all. They are the thinnest ice in the range.
+
+Two of them change surfaces that span the whole workspace:
+
+- **`52558813` added a field to a public struct** — `Field.label_source`, no `Default`, no `_` — touched
+  by every `Field` literal in the workspace. The re-verification confirmed every site compiles and
+  spot-checked 15+ classifications. It did **not** ask the seam question: does anything else read
+  `Field` in a way this widens or breaks (the TUI, the renderers, the census join)?
+- **`52b348c2` edited `LIMITATIONS.md`, which is `include_str!`'d into the binary** (`main.rs:582`). It is
+  **shipped filer-facing text**, not a design doc. Treat it as product surface.
+
+## A2. Added to §2 — also already covered, do not re-spend budget
+
+| already done | evidence |
+|---|---|
+| FR-110 scope decision (aggregate 1099-B is the permanent ceiling) | owner ruling, `9961519f` — **settled, not a gap** |
+| The Form 8949 box truth table, re-derived from source | `RECON-fr111-8949-box-truth.md` + controller verification (`5a1a94be`) |
+| Every filer-facing 1099-B / 1099-DA / box claim swept | same recon, Q3 — four findings, all closed or filed |
+| The R15 label extension, kill-tested and independently planted | `REPORT-build-fr114-label-scan.md` (`b9b3810f`) |
+| Both folds re-verified | `REVERIFY-fr111-fr114.md` (`fd6adda8`) — 0C/0I, 1 Minor (FR-117) |
+
+**FR-110 is a DECISION, not a defect.** A finding that btctax cannot file a 1099-B with adjustments is
+out of scope: that is the intended permanent ceiling and the owner ruled on it. Say so in the brief.
+
+## A3. §5's preconditions are now ALL MET
+
+1. ✅ Walk 2's findings folded or filed with owning phases (FR-110/111 closed; FR-112/113 filed).
+2. ✅ The pattern sweep's findings likewise (FR-114 closed; FR-115/116/117 filed).
+3. ✅ `make gate` **3561 passed / 12 skipped**, `cargo fmt --all --check` clean, everything pushed,
+   `HEAD == origin/main`, tree clean, no worktrees.
+4. ⚠️ **See A4 — this one got stronger and must be restated in the brief.**
+
+## A4. ★★★ §5.4 was understated: it is now FOUR refuted briefs, not two
+
+The plan says *"two controller briefs in this arc were refuted by measurement."* As of 2026-09-11 it is
+**four**, and **two of the four were written by the coordinator itself**:
+
+| premise | author | refuted by |
+|---|---|---|
+| widening R15 would red on the IRS's `"Covered lots"` vocabulary | FR-114's author | whole-word matching — `"lots" != "lot"` |
+| entering a 1099-B reopens the Form 8949 box choice | FR-111's author | `form_8949()` reads only `state.disposals`; a `[[b_1099]]` row never becomes an 8949 row |
+| the export's I5 advisory may misdescribe a routed return | **the coordinator** | it is `regime`-gated; the two branches are mutually exclusive |
+| *"zero labels red today"* | **the coordinator** | 209 of 279 labels are macro-generated and were invisible to the scan that produced it |
+
+**The generalisation, and the single most load-bearing sentence in this brief:**
+
+> A hand-written scan over one syntactic form is not a measurement of a set produced by another.
+
+Every one of the four was written by someone being careful. What kept all four out of the product was
+not care — it was that each implementer **stopped and reported rather than building on a premise it
+could disprove**. Instruct the B3 reviewer to do exactly that, about anything in its own brief,
+including everything in this addendum. That instruction has now paid four times.
+
+## A5. One seam the original §3 does not name
+
+The four seams stand. Consider a fifth if budget allows, and only as a *seam* question:
+
+5. **Instruments vs. the surfaces they claim to cover.** This arc shipped five instruments plus the R15
+   extension. FR-114 proved an instrument can be green because it never ran over the region that
+   mattered, and FR-117 shows the exemption's unit (a field) differing from the thing exempted (a span
+   of text). **For each instrument, what does it actually traverse, and what does it claim?** That is a
+   cross-task question no per-task review could hold, which is precisely B3's remit.
