@@ -8,7 +8,92 @@ _Last updated: **2026-09-09**. Written at a deliberate pause; safe to exit. **Re
 
 > ## ★★★ HANDOFF TO AN OPUS COORDINATOR (owner, 2026-09-07: "Let's find a time to switch to opus") — the loop from here is dispatch → machine-check → persist → ledger → fold → re-verify → push, and it needs no Fable: every remaining task (T8 in flight, T9–T12; T13/T14 on the owner's Q1; T15 post-v1) already has `BRIEF-build-interview-Tn.md`, `BRIEF-review-interview-Tn.md` and `BRIEF-reverify-interview-Tn.md` committed under `design/agent-reports/`. The rules that hold the loop: ONE opus builder or reviewer at a time (a sonnet verifier may run beside it, in a worktree); the builder edits the shared main tree and NOTHING is committed while it works (the pre-commit gate runs `make check` over the working tree); reviewers and verifiers run in `isolation: worktree` with `CARGO_TARGET_DIR=/scratch/code/bitcoin_tax/target-review` and their report is COPIED out, then `git worktree remove --force` + `git branch -D`; the report is persisted VERBATIM in its own commit before anything is folded; every measurable claim is machine-checked into `…-VERIFICATION.md` before acting; the fold is its own commit with the gate output in the message; push after each gate closes (`git push origin main`; the pre-push PII hook scans the range — synthetic identifiers only from the never-issued SSN space or `scripts/pii-scan-generic.sh`'s `ALLOWED_EIN`); commit messages via `git commit -q -F - <<'EOF'` with the two trailers. A stopped background agent is RESUMED by `SendMessage` with its id, never restarted while its edits are in the tree. The standing lessons every dispatch prompt repeats: no decision keys on a list typed beside derived data; a kill CALLS the instrument; a prompt hash keys on the registry's words, never display chrome; a new money leaf must reach the absolute chain (`every_money_leaf_household()`); a build's kills ask what the NEXT SURFACE does with what it wrote; a `Durable` fact is shown, never pre-filled; transcribe forms from the text layer. Owner-only items (never actioned autonomously): Q1/Q2/Q4, S1/S2/S7, T7's Notice 2026-20 order, the simulated real return (FR-64, the owner's TY2024 return is the reference and never enters the repo). The progress page is the artifact "Overnight Return" (scratchpad `overnight-return.html`; republish the same path to keep the URL).
 >
-> ## ★★★ RESUME 2026-09-09 — NEXT: **FR-110, FR-111, FR-114** (owner-chosen), then the B3 whole-branch review.
+> ## ★★★ RESUME 2026-09-11 (late) — **B3 IS CLOSED. The interview arc is REVIEWED END TO END.**
+>
+> **State: clean.** `HEAD == origin/main == 80aa7010`, tree clean, no worktrees, nothing in flight.
+> `make gate` **3571 passed / 12 skipped** (+10 from B3's kills), `cargo fmt --all --check` clean,
+> `make docs` no diff, five instruments OK. Everything pushed.
+>
+> ### What B3 found, and why it matters more than its count
+>
+> **1 Critical / 2 Important / 0 Minor / 1 Nit**, all folded and re-verified 0C/0I/0M/0N.
+>
+> **C-1 (Critical) — no production code in the editor chain ever stamped `ReturnInputs.tax_year`,** so the
+> tax-inputs form ran at **year 0**: `input_form_store.rs` screened at `:666` and stamped at `:670`, *below*
+> the gate. That is **FR-103 verbatim on the second row-creating writer** — `income import` was fixed exactly
+> this way at `cmd/tax.rs:280-281`, and nobody carried it across. A filer who authored any TY2024 return in
+> the form committed successfully and was then refused by `report` with *"the wording of this question
+> changed since you answered"*. **No wording changed; the year was stamped.** Four more consequences shared
+> the root: a false `interview: complete`, the §152 walk down the qualifying-**child** branch for every
+> dependent, the §163(h)(3)(B) ceiling warning silent on every year, and the Form 8615 questions live for a
+> 60-year-old.
+>
+> ★★★ **The fix is structural, not a stamp at a call site.** `apply(w, e, year, now)` now *requires* the
+> year, refuses `0` (`TaxYearNotStated`) and refuses a year that disagrees with the return (`WrongTaxYear`);
+> `apply` is the **only** production producer or mutator of a `Working`, so a renderer that does not state a
+> year **does not compile**. Plus stamps at both draft boundaries and the commit gate. And the **class** is
+> closed: `screen_inputs` now refuses a yearless return (`ReturnInputsYearNotStated`), which **reverses the
+> deliberate decision at `return_refuse.rs:2459`** — *"a yearless `ReturnInputs` is a test convenience"* was
+> false for this surface, and a year-scoped rule going **silent** on an unstated year is itself the
+> assertion. Cost measured before deciding: 9 fixtures, no tax figure moved.
+>
+> **I-1 (Important)** — the declaration registry drew `FORM_QUESTIONS[i].prompt` (static) and hashed
+> `current_prompt` (rendered), so the answer log named a sentence the filer never saw; sharpest on
+> `FilingStatusConfirmed`, where the log claimed a specifically-named status on a specifically-named
+> prior-year return. Fixed by routing the **drawn** words through the same resolver `apply` hashes through
+> (`field_label`), so the two are one string by construction. The pin for this property already existed one
+> registry over (walking `DependentGate::ALL`); **not one of the nine `QuestionId::ALL` walks asserted it.**
+> **I-2** — `LIMITATIONS.md:426`, shipped text `include_str!`'d into the binary, told the filer `report`
+> prints the broker advisory; its one production caller is inside `export-irs-pdf`. **N-1** — two dead
+> intra-doc links, pre-existing.
+>
+> ### The methodological result, worth more than the fixes
+>
+> ★★★ **The Critical was in the EARLY, fully per-task-reviewed region — not in the nine recent commits the
+> brief pointed at as "thinnest ice."** The reviewer traversed those, found both folds clean, and said so
+> under *Refuted premises* rather than scoring the point. Its own conclusion is the keeper:
+> **thin-ice-by-recency is the wrong proxy; the better one is *a fact that must hold across three tasks and
+> is asserted in each of them.*** Four such assertions were in the tree, all verbatim, all false on this
+> surface — two of them dismissing year 0 as "a test convenience". This is B3's documented precedent
+> reproduced exactly: *the fix already existed in the branch and nobody carried it back, because no reviewer
+> ever held both writers at once.*
+>
+> ★ **Both load-bearing kills were re-planted BY THE CONTROLLER**, not accepted on report: reverting
+> `draw_edit.rs:2955` to `f.label` reds the I-1 pin on 29 comparisons (exactly the five rendered prompts);
+> the pre-fix plant reds all five C-1 kills with the false "wording changed" refusal verbatim. ★★ A
+> **partial** plant (materialization only) reds just **2 of 5**, because `apply.rs:168-174` re-stamps on the
+> next edit — so a reviewer planting one half would have wrongly called three kills blind. Plants restored
+> from **copy backups, never `git checkout`**, and `diff <(git diff) <patch>` verified empty before committing.
+>
+> ★ The fold caught **two of its own kills being green-and-blind** before accepting them (one asserted
+> something true at either year; the I-1 pin never drew three of the five, and now asserts its own coverage
+> over 9 probes). And its new draft-write stamp immediately reddened a **latent fixture defect** nobody had
+> ever checked — `open_next_year_t4b.rs` stored a TY2025 return as year N's draft. Deriving finds more.
+>
+> ### The commit trail (one artifact per commit, all pushed)
+>
+> `ea8941ec` brief → `587d7a9c` report verbatim → `22ed5e2a` ledger → `900f3a62` fold brief →
+> `db056c57` **fold** (gate output in the message) → `95027636` reverify brief → `5c86ce48` reverify
+> verbatim → `80aa7010` reverify ledger.
+>
+> ### The next action is the OWNER'S
+>
+> **The interview arc is built, reviewed per-task, journey-walked twice, swept for cross-task patterns, and
+> now whole-branch reviewed to 0C/0I. There is no open blocking work and no assistant-owned next step.**
+> What remains is owner-gated, in `design/ROADMAP_STATUS.md` §0a: **S1** (un-pause a TY2025 *rehearsal*
+> slice — never mailed, diffed line-by-line against the return actually filed), **S2** (the real-2026
+> income/venue/deduction inventory), **S7** (pre-rule the oracle fallback). S6 and S9 are ruled; S3/S4/S5
+> are re-owned in `FOLLOWUPS.md` (S5 withdrawn 2026-09-09).
+>
+> Open follow-ups filed this session, none blocking: **FR-118** (the ceiling warning prints `$1200000.00`,
+> no digit grouping) and **FR-119** (bracketed review tags read as broken intra-doc links) — both Nits,
+> ownerless residue. FR-112/113/115/116/117 remain filed with owning phases.
+>
+> ★ Do **not** re-run B3. It is scoped to `121c8805..ea8941ec` and closed; a re-run would re-audit what the
+> per-task rounds already hold. The next review that earns its budget is the one scoped to something these
+> passes could not see — per the harness, that is the pre-mail pass on a *real* packet, which S1/S2 gate.
+
+> ## ★★★ (superseded) RESUME 2026-09-09 — NEXT: **FR-110, FR-111, FR-114** (owner-chosen), then the B3 whole-branch review.
 >
 > **State:** interview arc BUILT (T1–T12 + T16, all 0C/0I). `make gate` **3558 passed / 12 skipped**;
 > five instruments stable (375/18/31/0/17 · 274/13 · 8+4+6/91 · 90 · 268/19/9); everything pushed;
