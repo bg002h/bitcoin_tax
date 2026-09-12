@@ -7129,6 +7129,27 @@ build, each with an owning phase.
   the table as a whole". Fix: a test that calls `run()`, or a CI step; note the table must be green
   first (it is, measured `line-coverage OK: 377 money lines`).
 
+- **FR-123 — `ObbbaRevision::schedule_1a_line_agreeing_with` still takes a bare `u32`, so the JOIN's
+  own parameter is forgeable even though its one caller now hands it a vouched number. Minor. Owning
+  phase: the TY2026 port (with the second Schedule 1-A revision, which is what makes the fix free).**
+  The step-5 re-verification's F1 was *"the emitter compares a number the caller chose"*, and the fold
+  closed it at the carrier: `Form6251Line1::Y2025` carries `SeniorDeductionSubtotal` instead of a bare
+  `schedule_1a_line: u32`, so the figure reaching the emitter is vouched by the schedule that printed it
+  (measured: `E0451` on a forge attempt from `return_1040.rs`, i.e. from INSIDE core — see
+  `design/agent-reports/FOLD-step5-f6251-provenance.md` §3). The **consumer's** signature was left
+  alone: `schedule_1a_line_agreeing_with(read_by_the_computation: u32)` would accept a literal from a
+  second emitter that did not exist when it was written — the same shape one hop further on, which is
+  precisely how F1 arose.
+  ★ Why it was not folded: the method is a text-comparison primitive on a revision, and its kill
+  (`a_revision_citing_line_43_refuses_a_figure_read_off_line_37`) is a pure parsing unit test in
+  `btctax-forms/src`. Typing the parameter would make that unit test call core's test-only forge from a
+  `src/` file — which `xtask::forge_reach_check` treats as a *stated blind spot* (skipped, because
+  `production_source` skips `#[cfg(test)]` items) rather than as a counted call site, so the fix as
+  available today would weaken the guard the same fold installed. With TY2026's schedule transcribed the
+  kill can pair two REAL revisions, the forge goes away, and the parameter can be typed with no blind
+  spot bought. Not armed today: `fill_form_6251_obbba_with_map` is the only caller and it reads the
+  vouched accessor.
+
 - **FR-99 — ★★ THE DOMINANT DEFECT CLASS OF THE WHOLE INTERVIEW ARC: a hand-written list standing beside
   a set that GROWS. Proposed `CLAUDE.md` rule — OWNER'S CALL, filed not actioned. Owning phase: the
   harness / doctrine (owner), before the interview branch ships.**

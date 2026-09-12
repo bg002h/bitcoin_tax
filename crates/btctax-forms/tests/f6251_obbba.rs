@@ -747,6 +747,28 @@ fn header() -> btctax_core::tax::packet::ReturnHeader {
     btctax_core::tax::testonly::kitchen_sink_header()
 }
 
+/// A **legitimately vouched** enhanced-senior-deduction subtotal: `amount` really is what this
+/// schedule's line 37 prints, and the line number travels out of the schedule struct rather than out
+/// of this file.
+///
+/// ★★ This is the only lawful route to a `SeniorDeductionSubtotal` — its fields are private to
+/// `btctax_core::tax::schedule_1a`, so no fixture here can pair a figure with a Schedule 1-A line no
+/// revision printed. The mismatch a kill test needs has its own deliberately ugly route
+/// (`schedule_1a::testonly::forge_senior_deduction_subtotal_vouched_by_no_schedule`), used exactly
+/// once in this file and nowhere in production — see
+/// [`the_fill_refuses_a_figure_read_off_a_schedule_1a_line_this_revision_does_not_cite`].
+fn vouched_senior_subtotal(amount: Usd) -> btctax_core::tax::schedule_1a::SeniorDeductionSubtotal {
+    use btctax_core::tax::schedule_1a::{Schedule1A, Schedule1aPartV};
+    let sch = Schedule1A {
+        part5: Schedule1aPartV {
+            line37: Some(amount),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    Schedule1A::senior_deduction_subtotal(Some(&sch))
+}
+
 /// A filer who must attach the form and did NOT route to Part III: the "All others" flat 26/28 %
 /// branch, with a $500 state-tax refund on line 2b (stored NEGATIVE, per i6251) and a Schedule 1-A
 /// line-37 senior-deduction subtotal on line 1a.
@@ -759,12 +781,14 @@ fn part_i_only_2025() -> Form6251 {
     f.line1 = Form6251Line1::Y2025 {
         line1a: dec!(15000),
         line1b: dec!(300000),
-        // ★★ PROVENANCE, and the emitter compares it against the revision's own printed sentence.
-        //    Taken from the schedule struct that prints the subtotal, never typed here — so if a
-        //    SECOND revision joins `obbba_revisions()` whose 1a cites line 43, the fills below
+        // ★★ PROVENANCE, and the emitter compares its line against the revision's own printed
+        //    sentence. Taken from the schedule struct that prints the subtotal, never typed here — so
+        //    if a SECOND revision joins `obbba_revisions()` whose 1a cites line 43, the fills below
         //    REFUSE rather than printing this figure, and the fix is a per-revision fixture (core
         //    will by then have transcribed that revision's own Schedule 1-A), not a bumped literal.
-        schedule_1a_line: btctax_core::tax::schedule_1a::Schedule1A::SENIOR_DEDUCTION_SUBTOTAL_LINE,
+        //    ★ It is now the compiler holding that and not this comment: the line number is
+        //      unreachable except through the schedule accessor.
+        senior_deduction: vouched_senior_subtotal(dec!(6000)),
     };
     f.line2a = dec!(10000);
     f.line2b = dec!(-500); // ★ core stores it negative; the box is parenthesised
@@ -965,7 +989,7 @@ fn part_iii_routed_2025() -> Form6251 {
     f.line1 = Form6251Line1::Y2025 {
         line1a: dec!(15000.4913),
         line1b: dec!(300000.4913),
-        schedule_1a_line: btctax_core::tax::schedule_1a::Schedule1A::SENIOR_DEDUCTION_SUBTOTAL_LINE,
+        senior_deduction: vouched_senior_subtotal(dec!(6000)),
     };
     f.line2b = dec!(-500.5044); // magnitude 501 after HALF-UP rounding
                                 // Part III, lines 12-40. Distinct, ascending-by-line values with cents on several.
@@ -1129,7 +1153,20 @@ fn the_fill_refuses_a_figure_read_off_a_schedule_1a_line_this_revision_does_not_
         f.line1 = Form6251Line1::Y2025 {
             line1a: dec!(15000),
             line1b: dec!(300000),
-            schedule_1a_line: other,
+            // ★★★ **THE DELIBERATE FORGE, AND IT IS THE ONLY ONE IN THE WORKSPACE.** This kill's whole
+            //     job is to present the mismatch the join exists to refuse, so the mismatch has to be
+            //     constructible — sealing it away would make the guarantee unfalsifiable, which is the
+            //     failure mode harness B1 was written against. The route is named for what it does and
+            //     lives in a `testonly` module, so its appearance in a production seam reads as a
+            //     defect on sight; `xtask::forge_reach_check` reds if it ever appears in one.
+            //     ★ Honestly: this stands in for the accessor of a schedule revision that has not been
+            //       transcribed yet. When TY2026's Schedule 1-A lands, `other` has a lawful source
+            //       (that struct's own `SENIOR_DEDUCTION_SUBTOTAL_LINE = 43`) and this call goes away.
+            senior_deduction:
+                btctax_core::tax::schedule_1a::testonly::forge_senior_deduction_subtotal_vouched_by_no_schedule(
+                    dec!(6000),
+                    other,
+                ),
         };
         let e = fill_form_6251_obbba_with_map(&f, &header(), &map)
             .err()

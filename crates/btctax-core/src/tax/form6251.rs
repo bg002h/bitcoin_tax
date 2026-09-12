@@ -33,6 +33,7 @@
 //! cross-foots the rounded lines; that is the forms crate's job, not this module's.
 
 use crate::conventions::{round_dollar, Usd};
+use crate::tax::schedule_1a::SeniorDeductionSubtotal;
 use crate::tax::tables::{AmtParams, LtcgBreakpoints};
 use crate::tax::types::FilingStatus;
 use rust_decimal::Decimal;
@@ -58,16 +59,27 @@ pub enum Form6251Line1 {
     /// senior deduction is ADDED BACK for the AMT while the tips, overtime and car-loan deductions
     /// are allowed.
     ///
-    /// ★★★ `schedule_1a_line` IS NOT A PRINTED BOX — it is the PROVENANCE of `line1a`: which
-    /// Schedule 1-A line the subtracted figure was actually read off (37 on the TY2025 schedule, 43
-    /// on the TY2026 draft, where **37 still exists and means modified AGI**). The emitter compares
-    /// it against the line the document it is filling prints, and refuses on a disagreement — which
-    /// is the only thing standing between a revision reusing this shape and an AMT base overstated
-    /// by ≈MAGI. Nothing may print it.
+    /// ★★★ `senior_deduction` IS NOT A PRINTED BOX — it is the PROVENANCE of `line1a`: the figure
+    /// that was subtracted, carrying the Schedule 1-A line it was actually read off (37 on the TY2025
+    /// schedule, 43 on the TY2026 draft, where **37 still exists and means modified AGI**). The
+    /// emitter compares that line against the line the document it is filling prints, and refuses on
+    /// a disagreement — which is the only thing standing between a revision reusing this shape and an
+    /// AMT base overstated by ≈MAGI. Nothing may print either half of it.
+    ///
+    /// ★★★ **IT IS THE TYPE AND NOT THE ENUM THAT HOLDS THIS.** This field used to be a bare
+    /// `schedule_1a_line: u32`, so the provenance [`SeniorDeductionSubtotal`] establishes was lost at
+    /// the hop out of [`Form6251Line1Rule`]: any code that could write this struct literal could type
+    /// a line number of its own beside a figure from anywhere, and the emitter's join then compared a
+    /// number its caller chose against the form's own sentence. `#[non_exhaustive]` on the enum does
+    /// NOT close that (it only forces a wildcard arm in an external `match`), and on the *variant* it
+    /// would close it only outside this crate — while the failure scenario is an in-crate edit, a
+    /// later year's `return_1040` hand-assembling a `Form6251` instead of calling [`compute_6251`].
+    /// Carrying the vouched type makes the forge impossible from every module but
+    /// [`crate::tax::schedule_1a`]'s own (`E0451`), inside this crate included.
     Y2025 {
         line1a: Usd,
         line1b: Usd,
-        schedule_1a_line: u32,
+        senior_deduction: SeniorDeductionSubtotal,
     },
 }
 
@@ -326,13 +338,16 @@ impl Form6251 {
                 Form6251Line1::Y2025 {
                     line1a,
                     line1b,
-                    schedule_1a_line,
+                    senior_deduction,
                 } => Form6251Line1::Y2025 {
                     line1a: round_dollar(line1a),
                     line1b: round_dollar(line1b),
-                    // ★ Provenance, not money: it survives rounding unchanged, because the emitter
-                    //   compares it against the form and a rounded line number is nonsense.
-                    schedule_1a_line,
+                    // ★ Provenance, not a printed box: it survives rounding UNCHANGED, because the
+                    //   emitter compares its line number against the form and a rounded line number
+                    //   is nonsense. Its `amount()` is not printed either — line 1a is the printed
+                    //   box, and it is rounded above. Rounding this would also be unconstructible
+                    //   here: only `schedule_1a` can build one, which is the guarantee.
+                    senior_deduction,
                 },
             },
             line2a: round_dollar(*line2a),
@@ -495,8 +510,10 @@ pub fn compute_6251(i: Form6251Inputs, amt: &AmtParams, bp: &LtcgBreakpoints) ->
                 line1a,
                 line1b: form_1040_l11b - line1a, // may be negative; the form says so explicitly
                 // ★★ The cross-reference travels WITH the figure, all the way to the emitter, which
-                //    is the one place that also holds the line the printed form cites.
-                schedule_1a_line: senior_deduction.schedule_1a_line(),
+                //    is the one place that also holds the line the printed form cites — and it
+                //    travels as the VOUCHED TYPE, never unpacked into a `u32` a later reader could
+                //    re-type. Unpacking it here was the defect: the guarantee ended at this line.
+                senior_deduction,
             }
         }
     };
@@ -1091,13 +1108,14 @@ mod tests {
         let Form6251Line1::Y2025 {
             line1a,
             line1b,
-            schedule_1a_line,
+            senior_deduction,
         } = f.line1
         else {
             panic!("the Y2025 rule must produce the Y2025 shape")
         };
         assert_eq!(
-            schedule_1a_line, 37,
+            senior_deduction.schedule_1a_line(),
+            37,
             "the TY2025 schedule prints the senior subtotal on line 37, and the figure must carry \
              that provenance to the emitter — on the TY2026 draft the same subtotal is line 43 and \
              line 37 is modified AGI"

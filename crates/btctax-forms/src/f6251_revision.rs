@@ -54,7 +54,12 @@
 //! [`ObbbaRevision::schedule_1a_line_agreeing_with`] compares the line this revision PRINTS against
 //! the line the figure was actually read off — carried from core as
 //! `btctax_core::tax::schedule_1a::SeniorDeductionSubtotal`, which can only be obtained from the
-//! schedule revision that printed it. The emitter calls it, so a chain reusing TY2025's Schedule 1-A
+//! schedule revision that printed it. ★ **That sentence only became true on 2026-09-11** (the step-5
+//! re-verification's F1): the vouched type reached core's line-1 *rule* and was then unpacked into a
+//! bare `schedule_1a_line: u32` on `Form6251Line1::Y2025`, so the number arriving here was one its
+//! caller could have chosen. The variant carries the type now, and the forge is a named test-only
+//! route that `xtask::forge_reach_check` keeps out of shipped code.
+//! The emitter calls it, so a chain reusing TY2025's Schedule 1-A
 //! line while filling a revision that cites 43 **refuses instead of printing a figure**. Before that
 //! join existed the emitter resolved the right line number and dropped it on the floor, and the
 //! cross-reference on the core side was a FIELD NAME (`schedule_1a_l37`) — the one form of a cell no

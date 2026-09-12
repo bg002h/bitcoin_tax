@@ -27,6 +27,14 @@ mod dependents_grid;
 mod docs;
 mod dump_fields;
 mod examples;
+/// The Schedule 1-A **provenance forge** — the deliberate route to a `SeniorDeductionSubtotal` whose
+/// line number no revision printed — reaches no shipped seam, and is still exercised by a kill.
+///
+/// `#[cfg(test)]` because it has no operator-facing mode, like `capital_loss_carryover_check`: it
+/// answers a yes/no question, and the answer belongs in the suite where `make check` asks it on every
+/// commit rather than when someone remembers to.
+#[cfg(test)]
+mod forge_reach_check;
 mod form_delta;
 mod form_geometry;
 mod harness_check;

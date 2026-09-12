@@ -1531,11 +1531,16 @@ mod tests {
         use btctax_core::tax::form6251::Form6251Line1;
 
         // (1) The variant produces rows. Before this fold it produced none, silently.
+        // ★ The cited line is VOUCHED, not typed: the accessor is the only route to a
+        //   `SeniorDeductionSubtotal` outside `schedule_1a`, so this instrument cannot be pointed at a
+        //   Schedule 1-A line no revision printed. `None` is a schedule-less year — a real zero on
+        //   TY2025's own line number, and the LINE is what direction (3) below plants against.
         let obbba = line_coverage::cover_form6251line1(&Form6251Line1::Y2025 {
             line1a: btctax_core::conventions::Usd::ZERO,
             line1b: btctax_core::conventions::Usd::ZERO,
-            schedule_1a_line:
-                btctax_core::tax::schedule_1a::Schedule1A::SENIOR_DEDUCTION_SUBTOTAL_LINE,
+            senior_deduction: btctax_core::tax::schedule_1a::Schedule1A::senior_deduction_subtotal(
+                None,
+            ),
         });
         assert_eq!(
             obbba.0.len(),

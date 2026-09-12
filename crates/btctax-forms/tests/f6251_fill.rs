@@ -18,6 +18,26 @@ fn header() -> btctax_core::tax::packet::ReturnHeader {
     btctax_core::tax::testonly::kitchen_sink_header()
 }
 
+/// A **legitimately vouched** enhanced-senior-deduction subtotal: `amount` really is what this
+/// schedule's line 37 prints, and the line number comes from the schedule struct, not from here.
+///
+/// ★ There is no other lawful route — `SeniorDeductionSubtotal`'s fields are private to
+/// `btctax_core::tax::schedule_1a`, so a `Form6251Line1::Y2025` fixture cannot pair a figure with a
+/// line number no revision printed. The deliberate forge exists (a kill test needs the mismatch) and
+/// is named so it cannot be mistaken for this: see
+/// `schedule_1a::testonly::forge_senior_deduction_subtotal_vouched_by_no_schedule`.
+fn vouched_senior_subtotal(amount: Usd) -> btctax_core::tax::schedule_1a::SeniorDeductionSubtotal {
+    use btctax_core::tax::schedule_1a::{Schedule1A, Schedule1aPartV};
+    let sch = Schedule1A {
+        part5: Schedule1aPartV {
+            line37: Some(amount),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    Schedule1A::senior_deduction_subtotal(Some(&sch))
+}
+
 /// A filer who must attach the form and did NOT route to Part III: the "All others" flat 26/28%
 /// branch, with a $500 state-tax refund on line 2b (stored NEGATIVE, per i6251).
 fn part_i_only() -> Form6251 {
@@ -170,9 +190,11 @@ fn a_ty2025_shaped_line_1_refuses_against_the_ty2024_map() {
     f.line1 = Form6251Line1::Y2025 {
         line1a: dec!(5000),
         line1b: dec!(295000),
-        // ★ Provenance, not a printed box: which Schedule 1-A line 1a's figure was read off. Taken
-        //   from the schedule revision that prints it, never typed.
-        schedule_1a_line: btctax_core::tax::schedule_1a::Schedule1A::SENIOR_DEDUCTION_SUBTOTAL_LINE,
+        // ★ Provenance, not a printed box: the subtotal 1a subtracted, carrying the Schedule 1-A line
+        //   it was read off. Obtained from the transcription struct that prints it — which is the ONLY
+        //   way to obtain one outside `schedule_1a` (private fields, `E0451`), so this fixture cannot
+        //   cite a line no schedule vouched for even if someone edits it.
+        senior_deduction: vouched_senior_subtotal(dec!(6000)),
     };
     let err = btctax_forms::testonly::fill_form_6251_with_map(&f, &header(), &map)
         .expect_err("a TY2025 line 1 must not fill a TY2024 form");

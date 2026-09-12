@@ -11911,7 +11911,7 @@ mod tests {
             Form6251Line1::Y2025 {
                 line1a,
                 line1b,
-                schedule_1a_line,
+                senior_deduction,
             } => {
                 // 1a — "Subtract Schedule 1-A, line 37, from Form 1040 … line 14."
                 //      L14 = 12e + 13a + 13b = 14,600 + 0 + 4,000; L37 = 0 (no senior).
@@ -11920,7 +11920,8 @@ mod tests {
                 assert_eq!(line1b, dec!(71400), "Form 6251 line 1b");
                 // ★ …and the whole production path carries the cited line, not just the figure.
                 assert_eq!(
-                    schedule_1a_line, 37,
+                    senior_deduction.schedule_1a_line(),
+                    37,
                     "the TY2025 schedule's senior subtotal is line 37, and the emitter compares \
                      this against the sentence the document it fills prints"
                 );
@@ -12054,7 +12055,12 @@ mod tests {
             Form6251Line1::Y2025 {
                 line1a: dec!(14600), // 20,600 − 6,000
                 line1b: dec!(60400), // 75,000 − 14,600
-                schedule_1a_line: Schedule1A::SENIOR_DEDUCTION_SUBTOTAL_LINE,
+                // ★★ The SAME vouched subtotal the rule carried in (asserted above to be $6,000 off
+                //    `Schedule1A::SENIOR_DEDUCTION_SUBTOTAL_LINE`), so this also asserts that
+                //    `compute_6251` passes the provenance through unaltered. It could not be forged
+                //    here in any case: `SeniorDeductionSubtotal`'s fields are private to the
+                //    `schedule_1a` module, and this test is a sibling (`E0451`).
+                senior_deduction,
             }
         );
         assert_eq!(correct.line4 - wrong.line4, dec!(6000));

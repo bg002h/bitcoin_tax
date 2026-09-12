@@ -707,7 +707,7 @@ pub fn cover_form6251line1(p: &crate::tax::form6251::Form6251Line1) -> Coverage 
         crate::tax::form6251::Form6251Line1::Y2025 {
             line1a,
             line1b,
-            schedule_1a_line,
+            senior_deduction,
         } => {
             c.quoting_year("2025");
             // ★★★ THE QUOTE IS SELECTED BY THE CROSS-REFERENCE THE COMPUTATION ACTUALLY READ, not
@@ -717,7 +717,9 @@ pub fn cover_form6251line1(p: &crate::tax::form6251::Form6251Line1) -> Coverage 
             //     gets a sentence that is verbatim on NO form and `xtask line-coverage` reds. The
             //     alternative, a fixed literal, would re-assert TY2025's sentence over TY2026's
             //     figures, which is the collision this whole seam exists to prevent.
-            let l1a = match schedule_1a_line {
+            // ★ Read off the VOUCHED type, so the sentence below is selected by a line number the
+            //   schedule revision printed — not by one a caller of this function typed.
+            let l1a = match senior_deduction.schedule_1a_line() {
                 37 => "Subtract Schedule 1-A (Form 1040), line 37, from Form 1040, 1040-SR, or 1040-NR, line 14",
                 _ => "(no line-1a sentence is transcribed for the Schedule 1-A line this chain read)",
             };
@@ -4077,11 +4079,16 @@ pub fn all() -> Coverage {
     //     more than one shape, and only the shapes named here are checked.
     //     ★ The cited line is taken from the SCHEDULE that prints it, never typed: if TY2025's
     //       constant ever stops being 37 the row's quote stops resolving and `line-coverage` reds.
+    //       ★★ It is now taken by CONSTRUCTION rather than by care — the accessor is the only way
+    //          to obtain a `SeniorDeductionSubtotal`, so this instance cannot cite a line the
+    //          schedule does not print even if someone edits it. `None` is a schedule-less year,
+    //          which yields a zero amount on the TY2025 line number; the amount is irrelevant here
+    //          (`Usd::ZERO` rows are what every other registration passes) and the LINE is the point.
     rows.extend(dated(cover_form6251line1(
         &crate::tax::form6251::Form6251Line1::Y2025 {
             line1a: Usd::ZERO,
             line1b: Usd::ZERO,
-            schedule_1a_line: crate::tax::schedule_1a::Schedule1A::SENIOR_DEDUCTION_SUBTOTAL_LINE,
+            senior_deduction: crate::tax::schedule_1a::Schedule1A::senior_deduction_subtotal(None),
         },
     )));
     rows.extend(dated(cover_form8995apartii(

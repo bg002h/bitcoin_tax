@@ -292,12 +292,12 @@ pub fn fill_form_6251_obbba_with_map(
     })?;
     // ★★★ LINE 1 IS YEAR-SHAPED. This map has TWO cells for it, so it requires the 1a/1b shape and
     //     REFUSES the TY2024 single-line-1 shape rather than leaving a box blank on a filed form.
-    let (line1a, line1b, schedule_1a_line) = match f.line1 {
+    let (line1a, line1b, senior_deduction) = match f.line1 {
         btctax_core::tax::form6251::Form6251Line1::Y2025 {
             line1a,
             line1b,
-            schedule_1a_line,
-        } => (line1a, line1b, schedule_1a_line),
+            senior_deduction,
+        } => (line1a, line1b, senior_deduction),
         // ★ `#[non_exhaustive]`, so the catch-all is required and is also the right behaviour: any
         //   shape this map has no cells for must REFUSE, never silently drop or invent a sub-line.
         _ => {
@@ -318,7 +318,12 @@ pub fn fill_form_6251_obbba_with_map(
     //     dropped on the floor — so a revision whose cross-reference had moved printed the previous
     //     revision's figure with every instrument green. Both legs fail closed; see
     //     `ObbbaRevision::schedule_1a_line_agreeing_with` for what the disagreement costs.
-    revision.schedule_1a_line_agreeing_with(schedule_1a_line)?;
+    //     ★★★ The number handed over is read off the VOUCHED TYPE here, not out of a `u32` field the
+    //         caller of this function could have set: `SeniorDeductionSubtotal` can only be obtained
+    //         from the Schedule 1-A revision that printed the figure, so the join compares the form's
+    //         own sentence against a line number no caller chose. Until 2026-09-11 the variant
+    //         carried a bare `u32` and that was exactly the hole (re-verification F1).
+    revision.schedule_1a_line_agreeing_with(senior_deduction.schedule_1a_line())?;
 
     let mut doc = pdf::load(pdf::f6251_pdf(map.year)?)?;
     let blank_fields = pdf::collect_fields(&doc)?;

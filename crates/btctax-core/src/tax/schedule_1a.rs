@@ -1375,12 +1375,17 @@ impl Schedule1A {
     /// **The enhanced senior deduction subtotal Form 6251 line 1a subtracts — the figure AND the
     /// schedule line it was read off, inseparably.**
     ///
-    /// ★★★ This is the ONLY constructor of a [`SeniorDeductionSubtotal`] outside this module, and
-    /// that is the mechanism: the line number comes from the *transcription struct that printed the
-    /// figure* ([`Self::SENIOR_DEDUCTION_SUBTOTAL_LINE`]), so a reader cannot pair one revision's
-    /// figure with another revision's line number. When TY2026's schedule is transcribed it brings
-    /// its own struct and its own constant (43), and Form 6251's line-1 rule keeps calling *this*
-    /// accessor shape rather than re-typing a number.
+    /// ★★★ This is the only **lawful** way to obtain a [`SeniorDeductionSubtotal`] from outside this
+    /// module, and that is the mechanism: the line number comes from the *transcription struct that
+    /// printed the figure* ([`Self::SENIOR_DEDUCTION_SUBTOTAL_LINE`]), so a reader cannot pair one
+    /// revision's figure with another revision's line number. When TY2026's schedule is transcribed
+    /// it brings its own struct and its own constant (43), and Form 6251's line-1 rule keeps calling
+    /// *this* accessor shape rather than re-typing a number.
+    ///
+    /// ★ The one other route is [`testonly::forge_senior_deduction_subtotal_vouched_by_no_schedule`],
+    /// which exists so the emitter's join can be watched refusing a mismatch (harness B1) and is
+    /// named so it cannot be mistaken for this one. `xtask::forge_reach_check` reds if it is ever
+    /// called from shipped code.
     ///
     /// `Usd::ZERO` for a year with no such schedule — a REAL zero (the form has no line), which is
     /// unreachable from the TY2025 arm because TY2025 has one.
@@ -1412,9 +1417,18 @@ impl Schedule1A {
 /// consumes is named for what it is, and its cross-reference is carried, not spelled into an
 /// identifier.
 ///
-/// ★ **Fields are private and there is no public constructor**, so the only way to obtain one is
-/// [`Schedule1A::senior_deduction_subtotal`] — i.e. from the revision that printed the figure. A
-/// reader cannot type a line number of its own beside a figure it took from somewhere else.
+/// ★ **Fields are private and there is no public constructor**, so the only lawful way to obtain one
+/// is [`Schedule1A::senior_deduction_subtotal`] — i.e. from the revision that printed the figure. A
+/// reader cannot type a line number of its own beside a figure it took from somewhere else, **and
+/// that now holds inside this crate too**: `Form6251Line1::Y2025` carries this type rather than the
+/// bare `u32` it used to unpack into, so the provenance survives the hop from the line-1 rule to the
+/// computed form and the emitter's join compares a line no caller chose (re-verification F1,
+/// 2026-09-11). Every module but this one — `return_1040`, `form6251`, `line_coverage` included — gets
+/// `E0451` on a forge attempt.
+///
+/// ★ The single deliberate exception is [`testonly::forge_senior_deduction_subtotal_vouched_by_no_schedule`]:
+/// a guarantee whose violation cannot be constructed cannot be watched refusing one, which is the
+/// failure mode harness B1 exists for. See that module for what keeps it out of production.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SeniorDeductionSubtotal {
     amount: Usd,
@@ -1433,5 +1447,51 @@ impl SeniorDeductionSubtotal {
     #[must_use]
     pub fn schedule_1a_line(&self) -> u32 {
         self.schedule_1a_line
+    }
+}
+
+/// ★★★ **THE ONE ROUTE TO AN UNVOUCHED [`SeniorDeductionSubtotal`], AND IT IS A TEST FIXTURE.**
+///
+/// [`SeniorDeductionSubtotal`]'s fields are private to this module precisely so that a figure cannot
+/// be paired with a Schedule 1-A line number nobody printed. A kill test for the emitter's join
+/// (`btctax_forms::f6251_revision::ObbbaRevision::schedule_1a_line_agreeing_with`) has to construct
+/// exactly that mismatch — it is the defect the join exists to refuse — so **harness B1 requires a
+/// deliberate forge to exist**: seal the type so hard the mismatch is inexpressible and the
+/// guarantee becomes unfalsifiable, which is the failure mode B1 was written against.
+///
+/// ★★ **What this is, honestly:** the accessor of a schedule revision that has not been transcribed
+/// yet. Once TY2026's Schedule 1-A lands it brings its own struct and its own
+/// `SENIOR_DEDUCTION_SUBTOTAL_LINE = 43`, and the kill can pair two REAL revisions; until then a
+/// figure vouched for line 43 has no lawful source, and this stands in for one.
+///
+/// ★ **What stops it reaching production**, in ascending order of how much it is worth:
+/// 1. the path and the name — `testonly::forge_…_vouched_by_no_schedule` is a defect on sight in a
+///    production seam, and `#[doc(hidden)]` keeps it out of the rendered API;
+/// 2. **an executable stop**: `xtask::forge_reach_check` reads the PRODUCTION half of every `.rs`
+///    file in the workspace (comments stripped, `#[cfg(test)]` items skipped) and reds on any call
+///    outside a `tests/` directory. It has been watched red on a planted production call.
+#[doc(hidden)]
+pub mod testonly {
+    use super::SeniorDeductionSubtotal;
+    use crate::conventions::Usd;
+
+    /// Pair `amount` with `schedule_1a_line` **with no schedule vouching for that line**.
+    ///
+    /// ★★★ Calling this anywhere but a kill test is the defect
+    /// [`super::SeniorDeductionSubtotal`] was built to make impossible: the two revisions of
+    /// Schedule 1-A print a ≤$6,000 deduction and a six-figure modified AGI under line numbers that
+    /// collide (37 ⇄ 43), so a hand-typed line number beside a figure read off somewhere else
+    /// overstates the AMT base by ≈MAGI, taxpayer-adverse, with every other instrument green.
+    /// Production code obtains one from [`super::Schedule1A::senior_deduction_subtotal`] — i.e. from
+    /// the transcription struct that printed the figure — and never from here.
+    #[must_use]
+    pub fn forge_senior_deduction_subtotal_vouched_by_no_schedule(
+        amount: Usd,
+        schedule_1a_line: u32,
+    ) -> SeniorDeductionSubtotal {
+        SeniorDeductionSubtotal {
+            amount,
+            schedule_1a_line,
+        }
     }
 }
