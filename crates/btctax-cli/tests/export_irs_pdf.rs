@@ -3199,3 +3199,215 @@ fn the_manifest_names_a_document_row_transcribed_without_a_date_and_stays_silent
         "a dated row must raise nothing: {dated}"
     );
 }
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// ★★★ PHASE 4's EXIT GATE — *"a filer holding the packet can post it without consulting anything
+// outside it."*
+//
+// Measured 2026-09-11 before this landed: no where-to-file or service-center reference existed on any
+// surface a filer reads, so a finished, signed packet did not say where to post it. The plan's verdict
+// (§3 Phase 4, decision D-H) is a LINK PLUS THE TWO FACTS — the state, and whether a payment is
+// enclosed — and never a bundled address table, because the IRS is consolidating paper processing and
+// a stale address fails with no error message.
+//
+// ★ The kill is not "some string appears". `missing_where_to_file_facts` names WHICH of the three
+// required parts is absent, so deleting either fact from the manifest reds and says which one.
+
+/// ★★★ **The packet manifest carries the where-to-post guidance, complete** — both facts and the
+/// year's-table pointer — on a packet with NO payment enclosed.
+///
+/// Mutation: delete either fact from `where_to_post_block` and this reds naming that fact.
+#[test]
+fn the_manifest_tells_a_refund_filer_where_to_post_it_and_on_what_it_depends() {
+    let (_d, vault, out) = no_crypto_full_return_vault();
+    let rep = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        &[],
+        None,
+        Default::default(),
+    )
+    .expect("a plain wage earner's packet exports");
+    assert!(
+        rep.form_1040v_path.is_none(),
+        "premise: this packet encloses no payment"
+    );
+    let manifest = std::fs::read_to_string(out.path().join("manifest.txt")).unwrap();
+
+    assert!(
+        manifest.contains("WHERE TO POST IT"),
+        "the manifest must carry a where-to-post block: {manifest}"
+    );
+    assert_eq!(
+        btctax_cli::missing_where_to_file_facts(&manifest, btctax_cli::WHERE_TO_FILE_1040_SOURCE),
+        Vec::<&str>::new(),
+        "both facts and the RETURN's table pointer must be present: {manifest}"
+    );
+    // ★ The reason the table is a pointer and not a copy is part of the guidance: without it the
+    //   next reader "helpfully" pastes the addresses in.
+    let norm = btctax_cli::normalize_guidance(&manifest);
+    assert!(
+        norm.contains(&btctax_cli::normalize_guidance(
+            btctax_cli::WHY_NO_ADDRESS_TABLE
+        )),
+        "…and why btctax prints no address: {manifest}"
+    );
+    // ★★ The NO-PAYMENT half of the payment-dependence, said out loud. Form 1040-V's own second page
+    //    prints a "Mailing Address for Payments" table (measured on the bundled template), so a filer
+    //    who has seen a voucher anywhere is one glance from posting a refund return to a lockbox.
+    assert!(
+        norm.contains("no payment is enclosed"),
+        "…and which column THIS envelope needs: {manifest}"
+    );
+}
+
+/// The other half of the pair: a packet that DOES enclose a payment gets the with-payment column
+/// named, and is pointed at the voucher's own table rather than left to guess.
+///
+/// Without this half the block could say "no payment is enclosed" unconditionally and the test above
+/// would still pass — a line that always says the same thing signals nothing.
+#[test]
+fn the_manifest_tells_a_paying_filer_the_with_payment_column_is_theirs() {
+    let (_d, vault, out) = owing_vault();
+    let rep = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        &[],
+        None,
+        btctax_cli::cmd::admin::VoucherChoice {
+            pay_by_check: true,
+            pay: None,
+        },
+    )
+    .expect("a return that owes, paying by check, exports");
+    assert!(
+        rep.form_1040v_path.is_some(),
+        "premise: a voucher rides in this envelope"
+    );
+    let manifest = std::fs::read_to_string(out.path().join("manifest.txt")).unwrap();
+
+    assert_eq!(
+        btctax_cli::missing_where_to_file_facts(&manifest, btctax_cli::WHERE_TO_FILE_1040_SOURCE),
+        Vec::<&str>::new(),
+        "the facts and the pointer ride on the paying packet too: {manifest}"
+    );
+    let norm = btctax_cli::normalize_guidance(&manifest);
+    assert!(
+        norm.contains("a payment IS enclosed"),
+        "the paying packet must be told the with-payment column is its own: {manifest}"
+    );
+    assert!(
+        !norm.contains("no payment is enclosed"),
+        "…and must NOT also be told the opposite: {manifest}"
+    );
+    // ★ Measured on the bundled template: Form 1040-V page 2 prints a "Mailing Address for Payments"
+    //   table, so this filer already holds the right column in the envelope. Naming it is the
+    //   difference between a pointer they can act on tonight and one they must go and look up.
+    assert!(
+        norm.contains("\"Mailing Address for Payments\" table"),
+        "…and pointed at the voucher's own table: {manifest}"
+    );
+}
+
+/// ★★★ **RECORD RETENTION, filer-facing and prescribing nothing** (plan §3 Phase 4, *"record
+/// retention"*; the decision is `design/forms/FIELD_PROVENANCE.md:265,:464`).
+///
+/// The two sources pull against each other: the plan says the window that matters is holding period +
+/// 3 years, and FIELD_PROVENANCE says the product must not pick a window. The resolution is that the
+/// IRS instruction itself declines to name one for property records, so the guidance quotes it and
+/// names the mechanism. **This test holds the no-prescription half**: no date, no deadline, no
+/// default.
+#[test]
+fn the_manifest_informs_about_record_retention_without_prescribing_a_window() {
+    let (_d, vault, out) = no_crypto_full_return_vault();
+    cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        &[],
+        None,
+        Default::default(),
+    )
+    .expect("a plain wage earner's packet exports");
+    let manifest = std::fs::read_to_string(out.path().join("manifest.txt")).unwrap();
+
+    assert!(
+        manifest.contains("KEEPING YOUR RECORDS"),
+        "the manifest must carry a retention block: {manifest}"
+    );
+    let norm = btctax_cli::normalize_guidance(&manifest);
+    assert!(
+        norm.contains("as long as they are needed to figure the basis"),
+        "…quoting the instruction's property-records sentence, which is the one that governs a \
+         crypto ledger: {manifest}"
+    );
+    assert!(
+        norm.contains("It is the SECOND sentence that governs a crypto ledger"),
+        "…and saying WHY the generic three years is the wrong instinct here: {manifest}"
+    );
+    assert!(
+        norm.contains(
+            "btctax will not shred anything, sets no deletion date, and does not decide \
+                       how long you keep this. That is yours."
+        ),
+        "…and that btctax decides none of it: {manifest}"
+    );
+    // ★ The no-prescription half. A DATE here would be the product deciding for the filer, which is
+    //   exactly what FIELD_PROVENANCE:464 rules out — "retention should be the filer's decision".
+    let retention = norm
+        .split("KEEPING YOUR RECORDS")
+        .nth(1)
+        .expect("the block is present")
+        .to_string();
+    for prescription in [
+        "you must keep",
+        "keep until",
+        "delete after",
+        "shred after",
+        "retain for",
+        "we recommend keeping",
+    ] {
+        assert!(
+            !retention.to_lowercase().contains(prescription),
+            "the retention guidance must inform, not prescribe — found {prescription:?}: {retention}"
+        );
+    }
+    // ★ And no DATE of any shape: a year, an ISO date or a month name here is a deadline, i.e. a
+    //   window picked for the filer. Form numbers (1040, 1099, 8949) are deliberately NOT dates —
+    //   the guidance quotes the instruction that names them, and a checker that could not tell the
+    //   difference would force the quote out.
+    const MONTHS: [&str; 12] = [
+        "january",
+        "february",
+        "march",
+        "april",
+        "may",
+        "june",
+        "july",
+        "august",
+        "september",
+        "october",
+        "november",
+        "december",
+    ];
+    let dates: Vec<&str> = retention
+        .split_whitespace()
+        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
+        .filter(|w| {
+            let year_shaped = w.len() == 4
+                && w.chars().all(|c| c.is_ascii_digit())
+                && (w.starts_with("19") || w.starts_with("20"));
+            let iso_shaped = w.len() == 10 && w.as_bytes()[4] == b'-' && w.as_bytes()[7] == b'-';
+            year_shaped || iso_shaped || MONTHS.contains(&w.to_lowercase().as_str())
+        })
+        .collect();
+    assert!(
+        dates.is_empty(),
+        "the retention guidance must emit no year, date or month — found {dates:?}: {retention}"
+    );
+}

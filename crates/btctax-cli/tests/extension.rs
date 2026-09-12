@@ -687,3 +687,43 @@ fn the_report_renders_a_blank_line_as_blank_and_never_as_zero() {
         "and so must an unchecked line 8: {text}"
     );
 }
+
+/// ★★★ **THE EXTENSION HAS ITS OWN WHERE-TO-FILE, and it is NOT the return's.**
+///
+/// `btctax extension` writes Form 4868 alone and it is mailed weeks before the return, in its own
+/// envelope — so the packet manifest's where-to-post block cannot reach this filer. Verified against
+/// the archived form rather than assumed: Form 4868's own last page carries a *"Where To File a Paper
+/// Form 4868"* table whose service centers differ from the 1040's on every row (Charlotte NC
+/// 28201-**1302** against the return's **1214**; Austin TX 73301-**0045** against **0002** —
+/// `crates/btctax-core/src/tax/fixtures/f4868_2025_instructions.txt:427` beside
+/// `design/forms/extract/i1040gi--2025.txt:46610`).
+///
+/// The same two facts decide it, so the same two constants are used; only the pointer differs.
+///
+/// Mutation: delete either fact from `render_extension` and this reds naming that fact.
+#[test]
+fn the_extension_report_says_where_to_post_form_4868_and_that_it_differs_from_the_return() {
+    let (_d, vault, out) = full_return_vault(&real_events_2024(), |_ri| {});
+    let rep =
+        cmd::admin::extension(&vault, &pp(), out.path(), 2024, None, false, None, late()).unwrap();
+    let text = btctax_cli::render::render_extension(&rep);
+
+    assert_eq!(
+        btctax_cli::missing_where_to_file_facts(&text, btctax_cli::WHERE_TO_FILE_4868_SOURCE),
+        Vec::<&str>::new(),
+        "both facts and the 4868's OWN table pointer must be present: {text}"
+    );
+    // ★ The RETURN's pointer must NOT satisfy this surface — the two tables are different tables, and
+    //   a filer who reuses the return's address posts the extension to a lockbox not expecting it.
+    assert!(
+        !btctax_cli::missing_where_to_file_facts(&text, btctax_cli::WHERE_TO_FILE_1040_SOURCE)
+            .is_empty(),
+        "the extension surface must not be satisfied by the RETURN's table: {text}"
+    );
+    assert!(
+        btctax_cli::normalize_guidance(&text).contains(&btctax_cli::normalize_guidance(
+            btctax_cli::WHY_NO_ADDRESS_TABLE
+        )),
+        "…and why btctax prints no address here either: {text}"
+    );
+}

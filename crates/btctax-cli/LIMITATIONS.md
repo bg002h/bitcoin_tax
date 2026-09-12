@@ -474,6 +474,40 @@ each one fits you:
 
 ---
 
+## Two things btctax deliberately does not print
+
+Both of these would be easy to print and wrong to. They are here, rather than left out, because the
+packet is otherwise complete: you can assemble, sign and post a return from `manifest.txt` alone, and
+these are the last two questions it raises.
+
+### The mailing address — a pointer, never a table
+
+`btctax` prints **no mailing address**, in the packet or anywhere else. The paper 1040 has no single
+address, and **two** things decide which one is yours — a filer who knows only one of them posts to the
+wrong place:
+
+1. WHICH STATE YOU LIVE IN. There is no single IRS address: paper goes to one of several processing centers, and which one is yours is decided by the state on your address line.
+2. WHETHER A PAYMENT IS IN THE ENVELOPE. Each state has TWO addresses — one for an envelope containing a check or money order, a different one for an envelope with no payment in it (a refund, or tax you paid online). They are not interchangeable, so your state alone does not decide it.
+
+Both columns are in the "Where Do You File?" table on the LAST PAGE of the IRS Instructions for Form 1040 for the year you are filing. Form 1040 prints where to get them: "Go to www.irs.gov/Form1040 for instructions and the latest information." Form 4868 is separate again: `btctax extension` mails it weeks earlier in its own envelope,
+and its addresses are not the return's — the *"Where To File a Paper Form 4868"* table is printed on
+the **last page of the form itself**, so it travels in your hand.
+
+**Why a pointer and not the six addresses.** The IRS is consolidating paper processing and says so in
+those same instructions: *"Over the next several years, the IRS will be reducing the number of paper
+tax return processing sites. Because of this, you may need to mail your return to a different address
+than you have in the past."* It corrected the Form 1040-ES addresses mid-2026. An address compiled
+into this program would go stale between releases with nothing to announce it, and a return posted to
+a closed service center fails **silently** — no error, no bounce, no notice. A wrong pointer, by
+contrast, fails in front of you. The decision is held by a check in the build, not by good intentions:
+a postal address entering any text this program prints is a test failure.
+
+### How long to keep your records — your decision, made on purpose
+
+btctax will not shred anything, sets no deletion date, and does not decide how long you keep this. That is yours. The IRS instruction for Form 1040 is: "Keep a copy of your tax return, worksheets you used, and records of all items appearing on it (such as Forms W-2 and 1099) until the statute of limitations runs out for that return. Usually, this is 3 years from the date the return was due or filed or 2 years from the date the tax was paid, whichever is later." Then it adds: "You should keep some records longer. For example, keep property records (including those on your home) as long as they are needed to figure the basis of the original or replacement property." It is the SECOND sentence that governs a crypto ledger, and the generic three years is the wrong instinct here: every lot you still hold is a property record, and its acquisition date and cost basis are what Form 8949 will report in the year you finally dispose of it — which can be many years after the return you are posting now. So the clock on an acquisition record does not start when you file this return; it starts when the lot it documents is disposed of, and runs while THAT return can still be examined. btctax names no date, because the length depends on facts only you have: which lots you still hold, when you dispose of them, and what happens to those returns. `btctax export-snapshot` already writes the ledger and its inputs out for you — what you then keep, and for how long, is your decision to make on purpose.
+
+---
+
 ## Legal
 
 ### No authorisation to file

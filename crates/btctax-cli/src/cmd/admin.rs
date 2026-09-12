@@ -685,6 +685,115 @@ fn hand_marks_block(marks: &[String]) -> String {
     s
 }
 
+/// ★★★ **WHERE TO POST IT — the block that closes Phase 4's exit gate.**
+///
+/// The gate is *"a filer holding the packet can post it without consulting anything outside it."*
+/// Measured 2026-09-11, before this existed: no where-to-file or service-center reference appeared on
+/// any surface a filer reads, so a signed, assembled packet did not say where to send it. Every other
+/// omission on that phase's list costs a form; this one costs the filing.
+///
+/// **A LINK PLUS THE TWO FACTS, never a bundled address table** (plan §3 Phase 4, decision D-H). The
+/// reason is load-bearing and lives in [`crate::WHY_NO_ADDRESS_TABLE`]: the IRS is consolidating
+/// paper processing and says so in the instructions themselves, and it corrected the Form 1040-ES
+/// addresses mid-2026. A table compiled in here rots between releases with nothing to announce it, and
+/// a signed return posted to a closed service center fails silently. A pointer at the year's own
+/// instructions cannot fail in that direction. ★ The decision is held structurally by
+/// `crates/xtask/src/service_center_check.rs`, which reds if a postal address enters shipped text.
+///
+/// ★★ **`payment_enclosed` is why this is a function and not a constant.** Each state has two
+/// addresses and the columns are not interchangeable, so the block must say which column is THIS
+/// envelope's. And the concrete hazard is measured, not imagined: the bundled Form 1040-V template
+/// prints a *"Mailing Address for Payments"* table on its own second page (`pdftotext -layout
+/// crates/btctax-forms/forms/2025/f1040v.pdf`), which is the **with-payment** column only — so a filer
+/// who has ever seen a voucher is one glance away from posting a refund return to a payment lockbox.
+/// A paying filer is pointed AT that table; a non-paying filer is pointed away from it.
+fn where_to_post_block(payment_enclosed: bool) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::from("\n# ── WHERE TO POST IT ──\n#\n");
+    let push = |s: &mut String, text: &str| {
+        for line in crate::render::wrap_bulleted(text).lines() {
+            let _ = writeln!(s, "#{line}");
+        }
+    };
+    // ★ The ACTIONABLE half first and the rationale last. A filer at the kitchen table needs to know
+    //   what decides the address and where the table is; why btctax declines to print it matters to
+    //   the next person who edits this file, and putting that first buried the instruction.
+    let _ = writeln!(
+        s,
+        "# Two things decide which address is yours, and a filer who knows only one of them posts\n\
+         # to the wrong place:\n#"
+    );
+    push(&mut s, crate::WHERE_TO_FILE_STATE_FACT);
+    push(&mut s, crate::WHERE_TO_FILE_PAYMENT_FACT);
+    let _ = writeln!(s, "#");
+    push(&mut s, crate::WHERE_TO_FILE_1040_SOURCE);
+    let _ = writeln!(s, "#\n# THIS envelope:\n#");
+    // ★ The two arms name OPPOSITE columns, so the line cannot be a constant that always says the
+    //   same thing — a signal that never varies signals nothing, which is the rule every other
+    //   conditional block in this manifest is written to.
+    push(
+        &mut s,
+        if payment_enclosed {
+            "a payment IS enclosed — the Form 1040-V and your check ride in this envelope, so the \
+             WITH-PAYMENT column is yours. Form 1040-V's own second page prints a \"Mailing Address \
+             for Payments\" table covering every state; that is the column you want, and it is \
+             already in your hand. Check it against the year's instructions anyway — the voucher in \
+             this packet is the revision btctax shipped, not necessarily the current one."
+        } else {
+            "no payment is enclosed — use the column for a return with NO check or money order in \
+             the envelope (that includes a refund, and a balance you paid online or by phone). Do \
+             NOT use a table printed on a Form 1040-V: that one is the payments address, and posting \
+             a no-payment return to a payment lockbox is exactly the mistake knowing only your state \
+             produces."
+        },
+    );
+    let _ = writeln!(s, "#");
+    push(&mut s, crate::WHY_NO_ADDRESS_TABLE);
+    let _ = writeln!(s, "#");
+    // ★ Two cautions the same page prints, both of which bite THIS packet specifically: a full return
+    //   is always more than five pages, and the with-payment address is always a P.O. Box.
+    push(
+        &mut s,
+        "POSTAGE — the instructions warn: \"Envelopes without enough postage will be returned to you \
+         by the post office. Your envelope may need additional postage if it contains more than five \
+         pages or is oversized (for example, it is over 1/4\u{2033} thick). Also include your \
+         complete return address.\" A full return is always more than five pages; weigh it.",
+    );
+    push(
+        &mut s,
+        "COURIERS — \"Only the U.S. Postal Service can deliver to P.O. boxes. You can't use a \
+         private delivery service to make tax payments required to be sent to a P.O. box.\" Every \
+         with-payment address is a P.O. Box, so a paying envelope goes by USPS. A private delivery \
+         service can still meet the timely-filing rule for the return itself, at a different street \
+         address again (the instructions name IRS.gov/PDSStreetAddresses).",
+    );
+    s
+}
+
+/// ★★★ **KEEPING YOUR RECORDS — inform, and prescribe nothing.** (Plan §3 Phase 4, *"record
+/// retention"*; the decision is `design/forms/FIELD_PROVENANCE.md:265` *"Never auto-shred"* and
+/// `:464` *"the architecture should make retention the filer's decision, not pick a window"*.)
+///
+/// ★★ **The two sources pull against each other and both are right.** The plan says the window that
+/// matters here is holding period + 3 years, because a crypto lot's acquisition record substantiates a
+/// disposal that has not happened yet; FIELD_PROVENANCE says the product must not pick a window. The
+/// resolution is that the IRS instruction itself declines to name one for property records — *"as long
+/// as they are needed to figure the basis"* — so the text quotes the authority and names the
+/// mechanism. **No date, no deadline, no default, and no retention mechanism**: `export-snapshot`
+/// already writes the artifact, unprompted, so there is nothing to build.
+///
+/// Unconditional, unlike every mark above it: there is no packet for which "what you keep is yours to
+/// decide" is the wrong thing to say, and the point of the block is that the filer decides ON PURPOSE
+/// rather than by default.
+fn record_retention_block() -> String {
+    use std::fmt::Write as _;
+    let mut s = String::from("\n# ── KEEPING YOUR RECORDS ──\n#\n");
+    for line in crate::render::wrap_bulleted(crate::RECORD_RETENTION_GUIDANCE).lines() {
+        let _ = writeln!(s, "#{line}");
+    }
+    s
+}
+
 /// The **[I5]** broker-reporting advisory line, regime-aware — or `None` when no disposition may have
 /// been broker-reported (`broker_reported_rows == 0`).
 ///
@@ -2128,6 +2237,16 @@ fn export_full_return(
     //     entitled to leave and chose to. Without this the hand-marks block reads as a closed list
     //     of every deliberate blank in the packet, and it was not one.
     manifest.push_str(&forgoing_block(&ri, Some(params)));
+    // ★★★ PHASE 4's EXIT GATE — *"a filer holding the packet can post it without consulting anything
+    //     outside it."* The stapling order, the marks and the forgos are all about the PAPER; these
+    //     last two blocks are about the two things that happen to it next, and both were missing.
+    //
+    //     They come LAST, and in this order, because that is the order the filer acts in: assemble,
+    //     mark, address the envelope, post it — and then decide what to keep. `payment_enclosed` is
+    //     read from the voucher actually written above rather than from `voucher.pay_by_check`, so the
+    //     column named here and the page in the envelope cannot disagree.
+    manifest.push_str(&where_to_post_block(form_1040v_path.is_some()));
+    manifest.push_str(&record_retention_block());
     let manifest_path = out_dir.join("manifest.txt");
     write_bytes_owner_only(&manifest_path, manifest.as_bytes())?;
 

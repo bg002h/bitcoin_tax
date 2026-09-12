@@ -1005,7 +1005,15 @@ fn run() -> Result<ExitCode, CliError> {
                     );
                 }
                 if let Some(m) = &report.full_return_manifest {
-                    println!("  {}  ← your stapling order", m.display());
+                    // ★ The label used to read "← your stapling order", and after Phase 4's last
+                    //   two items that undersold the file: the same manifest now also carries WHERE
+                    //   TO POST IT (the two facts plus the year's table) and KEEPING YOUR RECORDS.
+                    //   The label is the filer's only signpost at this file, and a filer who has
+                    //   already stapled has no reason to reopen "your stapling order".
+                    println!(
+                        "  {}  ← stapling order, where to post it, what to keep",
+                        m.display()
+                    );
                     // ★ N4 — the packet leaves marks that are the FILER's to make (the Digital Asset
                     // question on a no-crypto return, the line-7 "if not required" box, the signature
                     // block). Each blank is correct — btctax must not answer for the filer — but until

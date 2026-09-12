@@ -7686,3 +7686,31 @@ build, each with an owning phase.
   `SALT_YEARS_NOT_REACHABLE` now MEASURE this from `households()` and red in both directions — a
   dormant year not declared dormant, and a declared-dormant year that has since been wired. Wiring the
   builder is a scope decision, and **bundling `FullReturnParams` is the owner's call, not this file's**.
+
+### From Phase 4's last two items — where to file, and record retention (2026-09-11, `design/agent-reports/REPORT-build-phase4-last-mile.md`)
+
+- **FR-131 — `service_center_check` scans only `crates/**/*.rs` plus `crates/btctax-cli/LIMITATIONS.md`,
+  so a postal address entering a shipped `docs/man/*` page, a README, or a shell script would not red.
+  Nit (no such surface exists today). Owning phase: ownerless residue — batch with the next
+  filer-facing-surface addition.**
+  The guard's scope is stated in its own header as blind spot 5, and `SHIPPED_DOC` is the only non-Rust
+  entry because it is the only non-Rust text a binary `include_str!`s and prints verbatim
+  (`main.rs:582`). Man pages are generated from clap doc comments, which *are* scanned as `.rs`, so the
+  live gap is narrower than the list suggests: it is a *new* committed filer-facing document that is
+  neither `.rs` nor `LIMITATIONS.md`. The honest fix when one appears is to add it to `scanned_text()`,
+  and the reason it is not derived today is that "shipped filer-facing text" has no machine-readable
+  definition in this tree — an `include_str!` walk would pull in the archived IRS extracts, which
+  legitimately carry the real tables.
+
+- **FR-132 — the where-to-file guidance names the year's instructions but btctax bundles no copy of
+  them, so a filer with no network has the two facts and no table. Minor. Owning phase: the TY2026
+  packet read (before FILED).**
+  Measured: the extension path is fine — the *"Where To File a Paper Form 4868"* table is printed on
+  page 4 of the bundled `f4868.pdf` and travels in the filer's hand, and a *paying* return's table is
+  on page 2 of the bundled `f1040v.pdf`. The uncovered case is a **refund or pay-online** return:
+  nothing in the packet carries the no-payment column, and the guidance points at
+  `www.irs.gov/Form1040`. Bundling the addresses is exactly what decision D-H forbids, so the remedy is
+  not a table — it is a decision at the packet read about whether the packet should also contain the
+  year's instructions PDF (or the single instructions page), which is an *authority artifact* with a
+  refresh story rather than a compiled-in constant. ★ Note the asymmetry is the right way round: the
+  filer who owes money, and therefore risks a lost payment, is the one already holding a table.

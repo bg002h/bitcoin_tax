@@ -50,6 +50,15 @@ mod r15_stop_list;
 /// it answers a yes/no question, and the answer belongs in the suite.
 #[cfg(test)]
 mod schedule_1a_membership;
+/// ★★★ Phase 4 / decision D-H — **no IRS service-center postal address in shipped text.** The plan
+/// decided the mailing-address help is a LINK plus the two facts, never a bundled table: a stale
+/// address fails with no error message, and the IRS itself warns it is reducing the number of paper
+/// processing sites.
+///
+/// `#[cfg(test)]` because it has no operator-facing mode, like `forge_reach_check`: it answers a
+/// yes/no question and the answer belongs in the suite, where `make check` asks it on every commit.
+#[cfg(test)]
+mod service_center_check;
 mod verdict_reach;
 /// FR-108 — a filer-facing sentence with the wrap indentation still inside its quotes.
 mod wrapped_literal_check;

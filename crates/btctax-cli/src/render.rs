@@ -5706,6 +5706,29 @@ pub fn render_extension(r: &crate::cmd::admin::ExtensionReport) -> String {
             }
         );
     }
+    // ★★★ PHASE 4's EXIT GATE, on the EXTENSION path. `btctax extension` writes Form 4868 alone and
+    //     it is posted weeks before the return exists, in its own envelope — so the packet manifest's
+    //     "WHERE TO POST IT" block cannot reach this filer, and until now nothing did.
+    //
+    //     ★★ Verified against the archived form rather than assumed: Form 4868's own last page carries
+    //     a *"Where To File a Paper Form 4868"* table (page 4 of 4 of the bundled
+    //     `forms/2025/f4868.pdf`), and its centers differ from the 1040's on every row — Charlotte NC
+    //     28201-1302 against the return's 1214, Austin TX 73301-0045 against 0002. A filer who reuses
+    //     the address they will later use for the return posts a payment to a lockbox not expecting it.
+    //
+    //     The two FACTS are the same two constants the manifest prints, so the filer who meets this in
+    //     April and the packet in October is told one thing; only the pointer differs.
+    let _ = writeln!(s, "\nWHERE TO POST IT");
+    // ★ Actionable first, rationale last — the same order the packet manifest uses, and for the same
+    //   reason: a filer needs what decides the address, not why btctax declines to print it.
+    for text in [
+        crate::WHERE_TO_FILE_STATE_FACT,
+        crate::WHERE_TO_FILE_PAYMENT_FACT,
+        crate::WHERE_TO_FILE_4868_SOURCE,
+        crate::WHY_NO_ADDRESS_TABLE,
+    ] {
+        let _ = writeln!(s, "{}", wrap_bulleted(text));
+    }
     let _ = writeln!(s, "\nDon't attach a copy of Form 4868 to your return.");
     s
 }

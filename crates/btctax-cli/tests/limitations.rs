@@ -230,3 +230,48 @@ fn limitations_carries_the_venue_account_granularity_note() {
         );
     }
 }
+
+/// ★★★ **PHASE 4's EXIT GATE, in the shipped doc** — `btctax limitations` is a surface a filer can
+/// read without ever exporting a packet, and it is the one that explains why this product prints no
+/// mailing address at all.
+///
+/// The two facts are carried VERBATIM from `btctax_cli`'s constants, so the doc cannot drift from the
+/// packet manifest and `btctax extension`. That drift is the whole reason this test exists: the
+/// manifest is generated from the constants and reds if either fact is dropped, but LIMITATIONS.md is
+/// a committed file that nothing would otherwise hold.
+///
+/// Mutation: soften either fact in LIMITATIONS.md and this reds naming that fact.
+#[test]
+fn limitations_carries_the_where_to_file_facts_and_the_retention_guidance() {
+    let doc = shipped_doc();
+
+    assert_eq!(
+        btctax_cli::missing_where_to_file_facts(&doc, btctax_cli::WHERE_TO_FILE_1040_SOURCE),
+        Vec::<&str>::new(),
+        "the shipped doc must carry BOTH facts and the RETURN's table pointer, verbatim"
+    );
+    let norm = btctax_cli::normalize_guidance(&doc);
+    assert!(
+        norm.contains(&btctax_cli::normalize_guidance(
+            btctax_cli::RECORD_RETENTION_GUIDANCE
+        )),
+        "…and the retention guidance, verbatim"
+    );
+    // ★ The extension's address is NOT the return's, and a filer reading only this doc must be told
+    //   so — Form 4868 is posted weeks earlier, in its own envelope, to a different center.
+    assert!(
+        norm.contains("Where To File a Paper Form 4868"),
+        "…and that Form 4868 has its own table"
+    );
+    // ★★ **The doc must not print an address itself — and that claim is NOT asserted here.** The
+    //    first draft of this test hand-typed two of the six addresses as a negative list, and
+    //    `xtask`'s `service_center_check` immediately reported this very file: a line asserting
+    //    `!contains("…, NC 28201-1214")` contains a service-center address, in a file the guard
+    //    scans. That is the guard working, not a false positive — and the right fix was to delete the
+    //    assertion rather than to excuse the file, because a two-entry negative list beside a
+    //    six-address table is exactly the shape `CLAUDE.md`'s *"derive the list, or make the compiler
+    //    hold it"* forbids: it would pass on the four it never named.
+    //
+    //    `crates/xtask/src/service_center_check.rs` holds that half, by SHAPE, over this document and
+    //    every `.rs` file in the workspace.
+}

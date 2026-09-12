@@ -867,7 +867,7 @@ Full-return packet — 15 form(s), in IRS Attachment Sequence order:
   irs/72_f8960.pdf
   irs/92_f8275.pdf
   irs/155_f8283.pdf
-  irs/manifest.txt  ← your stapling order
+  irs/manifest.txt  ← stapling order, where to post it, what to keep
 ```
 
 stderr:

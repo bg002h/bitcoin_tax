@@ -364,6 +364,162 @@ pub const NOT_AUTHORISED_FOR_FILING: &str = "NOT AUTHORISED FOR FILING. btctax i
      and instructions before you sign, and the authors accept no liability for the consequences. \
      This is not tax advice. See `btctax limitations`.";
 
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// ★★★ WHERE TO FILE — the two facts, the pointer, and why there is no address table here.
+//
+// Phase 4's exit gate is *"a filer holding the packet can post it without consulting anything
+// outside it."* Measured 2026-09-11 before this landed: `grep -rn "irs.gov" crates/` matched only
+// archived IRS form text — no where-to-file or service-center reference existed on any surface a
+// filer reads, so a signed, assembled packet did not say where to post it.
+//
+// **Two facts decide the address, and a filer who knows only one of them picks wrong.** Both are
+// `const` rather than a literal per surface, for the reason `cmd::admin`'s DIGITAL_ASSET_HAND_MARK
+// is: the packet manifest (October) and `btctax extension` (April) describe the SAME decision, and
+// the filer must not be told two different things about it.
+
+/// ★★★ **Fact 1 of 2 — the STATE.** See the block comment above.
+pub const WHERE_TO_FILE_STATE_FACT: &str = "WHICH STATE YOU LIVE IN. There is no single IRS \
+     address: paper goes to one of several processing centers, and which one is yours is decided by \
+     the state on your address line.";
+
+/// ★★★ **Fact 2 of 2 — whether a PAYMENT is enclosed.** See the block comment above.
+///
+/// ★ This is the half that is easiest to lose, and losing it is not harmless: every state has two
+/// addresses, and the with-payment one is a lockbox P.O. Box at a different center from the
+/// no-payment one. A filer who knows only their state has a 50% chance of the wrong envelope.
+pub const WHERE_TO_FILE_PAYMENT_FACT: &str =
+    "WHETHER A PAYMENT IS IN THE ENVELOPE. Each state has \
+     TWO addresses \u{2014} one for an envelope containing a check or money order, a different one \
+     for an envelope with no payment in it (a refund, or tax you paid online). They are not \
+     interchangeable, so your state alone does not decide it.";
+
+/// Where the RETURN's two columns actually live. A pointer, never a copy — see
+/// [`WHY_NO_ADDRESS_TABLE`].
+///
+/// The URL is transcribed from Form 1040 itself (`design/forms/extract/f1040--2025.txt:168`), which
+/// prints it as its own footer line. The table is on the last page of the year's instructions
+/// (`design/forms/extract/i1040gi--2025.txt:46610`, *"Where Do You File?"*, page 126 of 126).
+pub const WHERE_TO_FILE_1040_SOURCE: &str =
+    "Both columns are in the \"Where Do You File?\" table on \
+     the LAST PAGE of the IRS Instructions for Form 1040 for the year you are filing. Form 1040 \
+     prints where to get them: \"Go to www.irs.gov/Form1040 for instructions and the latest \
+     information.\"";
+
+/// Where FORM 4868's two columns live — and they are **not** the return's addresses.
+///
+/// ★ Measured, not assumed: Form 4868's own last page carries the table (*"Where To File a Paper
+/// Form 4868"*, `crates/btctax-core/src/tax/fixtures/f4868_2025_instructions.txt:427`, and page 4 of
+/// 4 of the bundled `crates/btctax-forms/forms/2025/f4868.pdf`). Its service centers differ from the
+/// 1040's on every row — Charlotte NC 28201-**1302** against the return's **1214**, Austin TX
+/// 73301-**0045** against **0002** — so a filer who reuses the return's address posts the extension
+/// to a lockbox that is not expecting it.
+///
+/// The URL is transcribed from Form 4868 itself
+/// (`crates/btctax-core/src/tax/fixtures/f4868_2025_form.txt:18`).
+pub const WHERE_TO_FILE_4868_SOURCE: &str = "Both columns are in the \"Where To File a Paper Form \
+     4868\" table printed on FORM 4868 ITSELF \u{2014} the last page of the f4868.pdf this command \
+     just wrote. It is not the address your RETURN goes to: the two tables print different centers \
+     and different P.O. boxes for the same state. The form also prints \"Go to www.irs.gov/Form4868 \
+     for the latest information.\"";
+
+/// ★★★ **Why this product prints a pointer and never an address table.**
+///
+/// Quoted from the instructions themselves (`design/forms/extract/i1040gi--2025.txt:40973-40978`),
+/// because the authority says the set is moving. A bundled table rots silently between releases and
+/// a signed return posted to a closed center fails with no error message; a pointer at the year's own
+/// instructions cannot fail in that direction. The IRS also corrected the Form 1040-ES addresses
+/// mid-2026 (recon-efile §5), which is the same failure one step earlier.
+pub const WHY_NO_ADDRESS_TABLE: &str = "btctax prints no mailing address, deliberately. The IRS is \
+     consolidating paper processing and says so in those same instructions: \"Over the next several \
+     years, the IRS will be reducing the number of paper tax return processing sites. Because of \
+     this, you may need to mail your return to a different address than you have in the past.\" An \
+     address compiled into this program would go stale between releases with nothing to announce it, \
+     and a signed return posted to a closed service center fails silently. Read the table for the \
+     year you are filing.";
+
+/// ★★★ **B1's instrument for the where-to-file guidance: which of the three required parts a
+/// filer-facing text is MISSING.** Empty means complete.
+///
+/// **Why a predicate and not three `assert!(contains)` calls at each site.** The guidance reaches a
+/// filer on two surfaces with different chrome — the packet manifest prefixes `#` and wraps under a
+/// `\u{2022}` bullet, `btctax extension` wraps without the `#` — so a raw `contains` would pass on
+/// one surface and fail on the other for reasons that have nothing to do with the facts being
+/// present. [`normalize_guidance`] removes the chrome; this names what is absent.
+///
+/// ★ The returned labels are what makes the kill readable: a test that reds says *which* fact went
+/// missing, which is the difference between "the text changed" and "the filer is now told only half
+/// of what decides the address."
+///
+/// `source` is the surface's own pointer ([`WHERE_TO_FILE_1040_SOURCE`] or
+/// [`WHERE_TO_FILE_4868_SOURCE`]) — the facts are shared, the address source is not.
+#[must_use]
+pub fn missing_where_to_file_facts(text: &str, source: &str) -> Vec<&'static str> {
+    let have = normalize_guidance(text);
+    let mut missing = Vec::new();
+    if !have.contains(&normalize_guidance(WHERE_TO_FILE_STATE_FACT)) {
+        missing.push("the STATE-dependence");
+    }
+    if !have.contains(&normalize_guidance(WHERE_TO_FILE_PAYMENT_FACT)) {
+        missing.push("the PAYMENT-dependence");
+    }
+    if !have.contains(&normalize_guidance(source)) {
+        missing.push("the address source (the year's own table)");
+    }
+    missing
+}
+
+/// Strip the surface's chrome so [`missing_where_to_file_facts`] compares sentences, not layout: a
+/// manifest comment marker, a bullet, a hanging indent and any run of whitespace all collapse.
+///
+/// ★ Deliberately NOT a general normalizer — it removes exactly the three markers the two surfaces
+/// add (`#`, `\u{2022}`, whitespace). Anything else a future surface prefixes will make the check
+/// red rather than pass, which is the direction to fail in.
+#[must_use]
+pub fn normalize_guidance(text: &str) -> String {
+    text.split_whitespace()
+        .filter(|w| *w != "#" && *w != "\u{2022}")
+        .map(|w| w.trim_start_matches('#'))
+        .filter(|w| !w.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// ★★★ RECORD RETENTION — inform, and prescribe nothing.
+//
+// The decision already existed (`design/forms/FIELD_PROVENANCE.md:265` *"Never auto-shred"*, `:464`
+// *"the architecture should make retention the filer's decision, not pick a window"*) but lived in a
+// design document: nothing a filer reads mentioned it.
+//
+// ★★ The two sources pull against each other and BOTH are right. The long-range plan says the window
+// that matters here is holding period + 3 years, because a crypto lot's acquisition record
+// substantiates a disposal that has not happened yet; FIELD_PROVENANCE says the product must not pick
+// a window. The resolution is that the IRS instruction itself declines to name one for property
+// records — *"as long as they are needed to figure the basis"* — so quoting the authority and naming
+// the mechanism informs without prescribing. No date, no deadline, no default, and no retention
+// mechanism: `export-snapshot` already writes the artifact, unprompted.
+
+/// ★★★ **What the IRS instruction actually says, and why the second sentence is the one that governs
+/// a crypto ledger.** Verbatim from `design/forms/extract/i1040gi--2025.txt:41182-41198`
+/// (*"How Long Should Records Be Kept?"*).
+pub const RECORD_RETENTION_GUIDANCE: &str = "btctax will not shred anything, sets no deletion date, \
+     and does not decide how long you keep this. That is yours. The IRS instruction for Form 1040 \
+     is: \"Keep a copy of your tax return, worksheets you used, and records of all items appearing \
+     on it (such as Forms W-2 and 1099) until the statute of limitations runs out for that return. \
+     Usually, this is 3 years from the date the return was due or filed or 2 years from the date the \
+     tax was paid, whichever is later.\" Then it adds: \"You should keep some records longer. For \
+     example, keep property records (including those on your home) as long as they are needed to \
+     figure the basis of the original or replacement property.\" It is the SECOND sentence that \
+     governs a crypto ledger, and the generic three years is the wrong instinct here: every lot you \
+     still hold is a property record, and its acquisition date and cost basis are what Form 8949 \
+     will report in the year you finally dispose of it \u{2014} which can be many years after the \
+     return you are posting now. So the clock on an acquisition record does not start when you file \
+     this return; it starts when the lot it documents is disposed of, and runs while THAT return can \
+     still be examined. btctax names no date, because the length depends on facts only you have: \
+     which lots you still hold, when you dispose of them, and what happens to those returns. \
+     `btctax export-snapshot` already writes the ledger and its inputs out for you \u{2014} what you \
+     then keep, and for how long, is your decision to make on purpose.";
+
 /// The exact phrase a user must affirm to export a form/data file while the ledger is pseudo-reconciled
 /// (sub-project 3). Compared TRIMMED, case-SENSITIVE, exact. The prompt + both error strings are BUILT
 /// from this constant [R0-M1] so there is no drift (a KAT asserts they contain it). `pub` so btctax-tui
@@ -384,5 +540,118 @@ pub fn require_attestation(attest: Option<&str>) -> Result<(), CliError> {
         Some(p) if p == ATTEST_PHRASE => Ok(()),
         Some(_) => Err(CliError::AttestationFailed),
         None => Err(CliError::AttestationRequired),
+    }
+}
+
+#[cfg(test)]
+mod where_to_file_tests {
+    use super::*;
+
+    /// The three parts, as a surface would carry them: the two facts and the pointer, wrapped and
+    /// `#`-prefixed exactly the way the packet manifest does it.
+    fn manifest_shaped(state: &str, payment: &str, source: &str) -> String {
+        let mut s = String::from("# \u{2500}\u{2500} WHERE TO POST IT \u{2500}\u{2500}\n#\n");
+        for part in [state, payment, source] {
+            for line in crate::render::wrap_bulleted(part).lines() {
+                s.push('#');
+                s.push_str(line);
+                s.push('\n');
+            }
+        }
+        s
+    }
+
+    /// ★★★ **B1 — the completeness checker, watched RED on each of the three deletions and GREEN on
+    /// the complete text.**
+    ///
+    /// The brief for this work states the bar explicitly: *"A test asserting only that some string
+    /// appears is not enough; it must fail when the payment-dependence or the state-dependence goes
+    /// missing, because a filer told only one of them mails to the wrong place."* So each fact is
+    /// planted absent, one at a time, and the checker must name that one and only that one.
+    #[test]
+    fn a_guidance_text_missing_either_fact_or_the_pointer_is_named_and_a_complete_one_is_not() {
+        let src = WHERE_TO_FILE_1040_SOURCE;
+        let whole = manifest_shaped(
+            WHERE_TO_FILE_STATE_FACT,
+            WHERE_TO_FILE_PAYMENT_FACT,
+            WHERE_TO_FILE_1040_SOURCE,
+        );
+        assert!(
+            missing_where_to_file_facts(&whole, src).is_empty(),
+            "the complete, manifest-shaped text must be accepted \u{2014} chrome and wrapping and \
+             all: {whole}"
+        );
+
+        // ── Plant 1: the STATE fact deleted. This is the shape where a filer reads "with a payment
+        //    or without" and posts to whichever center they remember.
+        let no_state = manifest_shaped("", WHERE_TO_FILE_PAYMENT_FACT, WHERE_TO_FILE_1040_SOURCE);
+        assert_eq!(
+            missing_where_to_file_facts(&no_state, src),
+            vec!["the STATE-dependence"],
+            "deleting the state fact must red, and must name only it: {no_state}"
+        );
+
+        // ── Plant 2: the PAYMENT fact deleted — the half that is easiest to lose, and a 50/50
+        //    chance of the wrong envelope.
+        let no_payment = manifest_shaped(WHERE_TO_FILE_STATE_FACT, "", WHERE_TO_FILE_1040_SOURCE);
+        assert_eq!(
+            missing_where_to_file_facts(&no_payment, src),
+            vec!["the PAYMENT-dependence"],
+            "deleting the payment fact must red, and must name only it: {no_payment}"
+        );
+
+        // ── Plant 3: the pointer deleted. Both facts, and nowhere to get the answer.
+        let no_source = manifest_shaped(WHERE_TO_FILE_STATE_FACT, WHERE_TO_FILE_PAYMENT_FACT, "");
+        assert_eq!(
+            missing_where_to_file_facts(&no_source, src),
+            vec!["the address source (the year's own table)"],
+            "deleting the pointer must red: {no_source}"
+        );
+
+        // ── Plant 4: everything gone. All three, in order — so a stripped surface cannot
+        //    satisfy the check by reporting one thing and hiding two.
+        assert_eq!(
+            missing_where_to_file_facts("nothing to see here", src),
+            vec![
+                "the STATE-dependence",
+                "the PAYMENT-dependence",
+                "the address source (the year's own table)",
+            ],
+        );
+
+        // ── Near miss: the EXTENSION's pointer is not the return's. A surface that carries the
+        //    4868's table reference where the 1040's belongs is a finding, because the two tables
+        //    print different service centers for the same state.
+        let wrong_table = manifest_shaped(
+            WHERE_TO_FILE_STATE_FACT,
+            WHERE_TO_FILE_PAYMENT_FACT,
+            WHERE_TO_FILE_4868_SOURCE,
+        );
+        assert_eq!(
+            missing_where_to_file_facts(&wrong_table, src),
+            vec!["the address source (the year's own table)"],
+            "the 4868's table must not satisfy the RETURN's pointer: {wrong_table}"
+        );
+        // …and symmetrically, it does satisfy the extension's own.
+        assert!(
+            missing_where_to_file_facts(&wrong_table, WHERE_TO_FILE_4868_SOURCE).is_empty(),
+            "the 4868 surface's own pointer is accepted: {wrong_table}"
+        );
+    }
+
+    /// [`normalize_guidance`] removes the two surfaces' chrome and nothing else — a sentence
+    /// that differs in WORDS still differs after normalizing, or the checker above is vacuous.
+    #[test]
+    fn normalizing_removes_chrome_but_not_words() {
+        assert_eq!(
+            normalize_guidance("#  \u{2022} alpha beta\n#    gamma"),
+            "alpha beta gamma"
+        );
+        assert_eq!(normalize_guidance("  alpha   beta  "), "alpha beta");
+        assert_ne!(
+            normalize_guidance("a check or money order"),
+            normalize_guidance("a check"),
+            "normalizing must not erase a missing clause"
+        );
     }
 }
