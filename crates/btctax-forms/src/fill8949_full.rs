@@ -76,7 +76,9 @@ fn printed_part_data(rows: &[Printed8949Row]) -> PartData {
 /// revision) are chunked into ⌈rows/grid⌉ page copies per part, each filled and geometry-verified on
 /// ORIGINAL field names, then merged with per-copy field renaming ([`crate::overflow::merge_copies`])
 /// so no two copies share a `/V`. Each copy carries the FILER's identity on **both** of its pages —
-/// every 8949 page is a filed page and the header is per-page (P6 r1 I3).
+/// every 8949 page is a filed page and the header is per-page (P6 r1 I3). ★ FR-113 — and the merged
+/// page order GROUPS the parts (every Part I page, then every Part II page), a permutation of the
+/// page tree that leaves every cell and value where it was.
 ///
 /// ★ **Per-copy totals; the grand total is Schedule D's, not this function's.** The form's line 2
 /// says "Enter each total here", so each copy totals only its own rows, and Σ per-copy totals ≡
@@ -131,5 +133,7 @@ pub fn fill_8949_full_with_map(
     if n_copies == 1 {
         return Ok(copies.remove(0));
     }
-    crate::overflow::merge_copies(&copies)
+    // ★ FR-113 — grouped by part, exactly as the slice path does: every Part I page, then every Part
+    //   II page. A permutation of the page tree; the rows, their cells and their totals are untouched.
+    crate::overflow::merge_copies_ordered(&copies, crate::overflow::PageOrder::ByPosition)
 }

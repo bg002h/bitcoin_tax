@@ -99,7 +99,7 @@ Tax profile for 2025 saved.
 $ btctax --vault v.pgp report --tax-year 2025
 TY2025 — preparing (18 forms; TaxTable yes; full-return params no; 1099-DA proceeds)
 Federal tax attributable to crypto — tax year 2025
-  net short-term: -350.00   net long-term: 0.00
+  net short-term (whole-return level): -350.00   net long-term (whole-return level): 0.00
   crypto ordinary income (level): 0.00
   ordinary-rate tax (attributable): -77.00
   LTCG tax (attributable): 0.00   NIIT (attributable): 0.00
@@ -296,7 +296,7 @@ Recorded decision decision|2
 $ btctax --vault v.pgp report --tax-year 2025
 TY2025 — preparing (18 forms; TaxTable yes; full-return params no; 1099-DA proceeds)
 Federal tax attributable to crypto — tax year 2025
-  net short-term: 0.00   net long-term: 0.00
+  net short-term (whole-return level): 0.00   net long-term (whole-return level): 0.00
   crypto ordinary income (level): 7450.67
   ordinary-rate tax (attributable): 1721.16
   LTCG tax (attributable): 0.00   NIIT (attributable): 0.00
@@ -1050,7 +1050,7 @@ Tax profile for 2024 saved.
 $ btctax --vault v.pgp report --tax-year 2024
 TY2024 — filable (20 forms; TaxTable yes; full-return params yes; 1099-DA none)
 Federal tax attributable to crypto — tax year 2024
-  net short-term: 0.00   net long-term: 0.00
+  net short-term (whole-return level): 0.00   net long-term (whole-return level): 0.00
   crypto ordinary income (level): 3300.00
   ordinary-rate tax (attributable): 726.00
   LTCG tax (attributable): 0.00   NIIT (attributable): 0.00
@@ -1224,7 +1224,7 @@ Imported full-return inputs for tax year 2024.
 $ btctax --vault v.pgp report --tax-year 2024
 TY2024 — filable (20 forms; TaxTable yes; full-return params yes; 1099-DA none)
 Federal tax attributable to crypto — tax year 2024
-  net short-term: 0.00   net long-term: 200000.00
+  net short-term (whole-return level): 0.00   net long-term (whole-return level): 200000.00
   crypto ordinary income (level): 0.00
   ordinary-rate tax (attributable): 0.00
   LTCG tax (attributable): 30000.00   NIIT (attributable): 7600.00

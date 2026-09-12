@@ -2628,9 +2628,10 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
                      which you have no adjustments\". Confirm BOTH by setting \
                      `basis_reported_and_no_adjustments = true` on that 1099-B and re-running \
                      `btctax income import`. If either is untrue, those transactions belong on Form \
-                     8949 with Box B, C, E or F checked and one row per sale — btctax fills Form 8949 \
-                     from its own crypto lot engine only, and will not report securities it cannot \
-                     itemize"
+                     8949 with Box B, C, E or F checked and one row per sale — btctax writes Form 8949 \
+                     rows from your own bitcoin records only, and holds no per-sale record of a \
+                     broker's transactions to itemize, so your broker's sales can reach this return \
+                     ONLY as those two Schedule D totals"
                 ),
             );
         }

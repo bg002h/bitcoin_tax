@@ -3000,8 +3000,10 @@ const B_1099_FIELDS: &[Field] = &[
                \u{201c}Basis reported to IRS\u{201d} is checked, AND you have no adjustments (no \
                wash sale in box 1g, no accrued market discount in box 1f, no disallowed loss in box \
                7, no noncovered security in box 5). Schedule D lines 1a and 8a accept totals only \
-               on those two conditions; anything else belongs on Form 8949 one row at a time, which \
-               btctax fills from its own crypto lot engine alone. Unanswered and NO both refuse.",
+               on those two conditions; anything else belongs on Form 8949 one row at a time, and \
+               btctax reports your broker's transactions ONLY on those two Schedule D lines \
+               \u{2014} it never writes one of them on a Form 8949 row. Unanswered and NO both \
+               refuse.",
         kind: FieldKind::TriState,
         live: |_| true,
         get: |ri, a| {

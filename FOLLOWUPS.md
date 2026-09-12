@@ -7689,7 +7689,21 @@ build, each with an owning phase.
   the other 3 are FR-126's Part IV/QSS. btctax is right and the engines are approximating; there is
   nothing to fix, and the point of the entry is that the agreement of two oracles is not available here.
 
-- **FR-129 — a subagent's harness REFUSED its report write, so the report reached disk as a controller
+- **FR-129 — ✅ CLOSED 2026-09-12 BY A HANDOFF CHANGE, after THREE recurrences.** Nit → fixed.
+  ★ **The fix:** every dispatch from here instructs the agent to write its report with a **Bash heredoc**
+  (`cat > design/agent-reports/<name>.md <<'EOF'`), **not** the `Write` tool. Measured cause: subagent
+  harnesses reject `Write` for report files (*"Subagents should return findings as text, not write report
+  files"*) while permitting Bash, which every one of them already uses to run the suite. So the
+  agent-as-scribe property the standing rule exists for is recoverable at the cost of one clause in the
+  brief — and all three agents were right not to route around the refusal unasked.
+  **Recurrences:** 2026-09-11 (Schedule 1-A step census), 2026-09-12 (FR-122/124), 2026-09-12 (Batch B).
+  Each report is on disk as a controller transcription with a provenance banner naming itself as such;
+  those three files stay flagged, because a transcription cannot be retroactively made agent-written.
+  ★★ Why it mattered enough to fix rather than absorb: the controller paid for ~900 lines of report text
+  twice over (reading it in, re-emitting it), which is the ~8k-per-report waste `/scratch/code/CLAUDE.md`
+  measures — and more importantly the responder became the scribe on three reports about work the
+  responder commissioned. Original entry text follows.
+  **a subagent's harness REFUSED its report write, so the report reached disk as a controller
   transcription.** Nit. Owning phase: ownerless residue — record only, unless it recurs.
   The Schedule 1-A step-arithmetic build agent's `Write` returned *"Subagents should return findings as text,
   not write report files"*, so it returned ~330 lines inline and asked the coordinator to persist them. Two
@@ -7763,3 +7777,23 @@ build, each with an owning phase.
   year's instructions PDF (or the single instructions page), which is an *authority artifact* with a
   refresh story rather than a compiled-in constant. ★ Note the asymmetry is the right way round: the
   filer who owes money, and therefore risks a lost payment, is the one already holding a table.
+
+### From Batch B, the five filer-facing items (2026-09-12, `design/agent-reports/REPORT-build-batch-b-filer-facing.md`)
+
+- **FR-133 — the Form 8949 paginator exists TWICE, and nothing holds the two copies together
+  (found while building FR-113). Owning phase: ownerless residue (structural), Minor.**
+  `fill_form_8949` (`btctax-forms/src/lib.rs:134`, its `pages()` at `:146` — the crypto slice) and
+  `fill_8949_full_with_map` (`btctax-forms/src/fill8949_full.rs:94`, its `pages()` at `:103` — the full
+  return) each carry their **own** `pages()`
+  closure implementing the same spec 1099-DA R3/T3 rule — group by box in letter order, chunk at
+  `map.rows_per_page`, concatenate, `copies = max(|ST|, |LT|)` — and their own copy loop. The comments
+  in both say they behave "exactly" alike, which is the `CLAUDE.md` FR-99 shape: a rule typed twice,
+  correct on the day, with a later edit to one silently diverging the other. It has already bitten
+  once — `fill8949_full.rs`'s own doc comment records that it claimed to paginate "exactly as the
+  slice does" while in fact REFUSING, so a filer with 15 legs got zero bytes.
+  **FR-113 had to be applied twice for exactly this reason.** Mitigated, not closed: both paths now
+  carry a page-order test AND a row-conservation assertion
+  (`tests/overflow.rs::every_part_i_page_precedes_every_part_ii_page`,
+  `::the_full_return_8949_groups_its_parts_and_conserves_every_row`), so a divergence reds. The real
+  fix is one paginator over a row trait (or a shared `fn pages<T: HasBox>`), which is a refactor of a
+  FILED form's page composition and therefore not something to bundle into a Nit-grade UX item.

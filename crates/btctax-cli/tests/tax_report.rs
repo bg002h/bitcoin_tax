@@ -3790,13 +3790,23 @@ fn the_acquisition_debt_ceiling_is_shown_beside_the_debt_limit_question() {
     let warn = screen
         .find("warning · the outstanding mortgage principal in box 2")
         .unwrap_or_else(|| panic!("no ceiling warning on the screen:\n{screen}"));
-    assert!(
-        screen.contains("$1000000") && screen.contains("$750000"),
-        "…and it names the AGGREGATE and the ceiling: {screen}"
-    );
     let prompt = screen
         .find("were you inside EVERY home-mortgage debt limit")
         .expect("the debt-limit question is asked");
+    // ★★ FR-118 — thousands-separated (`$1,000,000` / `$750,000`) on the ANSWER screen, where a filer
+    //    meets this warning. Asserted over the WARNING'S OWN SPAN, never over the whole screen: the
+    //    question's own text quotes both statutory figures comma-separated (`questions.rs:1070-1083`),
+    //    so a screen-wide `contains` passes on the prompt alone — measured, with `money()` reverted to
+    //    `format!("${v:.2}")` this test still PASSED. The span is the discriminator.
+    let warning = &screen[warn..prompt];
+    assert!(
+        warning.contains("$1,000,000") && warning.contains("$750,000"),
+        "…and it names the AGGREGATE and the ceiling: {warning}"
+    );
+    assert!(
+        !warning.contains("$1000000") && !warning.contains("$750000"),
+        "…neither of them ungrouped (FR-118): {warning}"
+    );
     assert!(
         warn < prompt,
         "the warning must be printed BESIDE the question it informs — before it, not after"
@@ -5082,12 +5092,18 @@ fn a_box_1_in_box_3_slip_prints_a_transcription_warning_on_the_report_and_change
         bad_dual.contains("TRANSCRIPTION WARNINGS"),
         "the slip must be surfaced on the report: {bad_dual}"
     );
+    // ★ The warning block is WRAPPED to the report's width, so a phrase can straddle a line break —
+    //   FR-118's thousands separators lengthened the figures and moved the wrap point onto *"btctax
+    //   has changed nothing"*. Assert against the paragraph with its whitespace collapsed: the same
+    //   sentence, checked independently of where the renderer happens to break it. (Weaker would be
+    //   dropping the phrase; this keeps it.)
+    let unwrapped = bad_dual.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
-        bad_dual.contains("wage base"),
+        unwrapped.contains("wage base"),
         "…naming the ceiling box 3 broke: {bad_dual}"
     );
     assert!(
-        bad_dual.contains("btctax has changed nothing"),
+        unwrapped.contains("btctax has changed nothing"),
         "…and saying plainly that nothing was written: {bad_dual}"
     );
 

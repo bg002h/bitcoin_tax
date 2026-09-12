@@ -1402,9 +1402,18 @@ pub fn render_tax_outcome(
             let _ = writeln!(s, "  NOT COMPUTABLE [{:?}]: {}{slice}", b.kind, b.detail);
         }
         Computed(r) => {
+            // ★ FR-112 — these two are LEVELS for the WHOLE RETURN, not crypto-attributable deltas:
+            //   `compute_tax_year`'s own contract says only `ltcg_tax`, `niit` and
+            //   `total_federal_tax_attributable` are deltas, while `st_net`/`lt_net` (and
+            //   `ordinary_from_crypto`, `loss_deduction`, `carryforward_out`, `marginal_rates`)
+            //   "describe the WITH-crypto filing position" — i.e. they include stock and capital-gain
+            //   distributions. Under a heading that reads "attributable to crypto", an unqualified
+            //   "net short-term" invites a filer to read a whole-return figure as the crypto slice.
+            //   The label carries the distinction the struct already makes; no figure changes, and the
+            //   `(level)` vocabulary is the section's own (the next line, and `(delta)` on the TOTAL).
             let _ = writeln!(
                 s,
-                "  net short-term: {}   net long-term: {}",
+                "  net short-term (whole-return level): {}   net long-term (whole-return level): {}",
                 fmt_money(r.st_net),
                 fmt_money(r.lt_net)
             );

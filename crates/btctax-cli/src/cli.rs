@@ -476,7 +476,9 @@ pub enum IncomeCmd {
     /// (an answer is one of `not_reported`, `proceeds_only`, `basis_matches`, `basis_differs`,
     /// `mixed`). `report --tax-year` lists the keys the ledger needs answered and the rows under each;
     /// an answer stored for a key no row carries is refused as unread, and a missing one refuses the
-    /// return until given. Earlier years neither ask nor accept them.
+    /// return until given. Earlier years never ask: an import still reads such a table in, but the
+    /// return then refuses it as unread and tells you to remove it, so no earlier-year answer ever
+    /// reaches a box.
     Import {
         /// The tax year (e.g. 2024).
         #[arg(long)]

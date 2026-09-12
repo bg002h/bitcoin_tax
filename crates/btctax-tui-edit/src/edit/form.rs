@@ -4815,8 +4815,12 @@ mod b3_c1_the_year_reaches_every_reader {
         form.addr = RowAddr(vec![0]); // the aggregate warning attaches to the first row
 
         let whole = form.transcription_warning_lines().join("\n");
+        // ★ FR-118 — thousands-separated (`$1,200,000`, not `$1200000.00`): the figures print through
+        //   `transcription_warnings::money`, and this assertion is what holds that format on the
+        //   surface a filer actually reads it on. It still discriminates exactly as before — a year-0
+        //   return supplies NO ceiling, so neither figure appears at all.
         assert!(
-            whole.contains("$1200000.00") && whole.contains("$750000.00"),
+            whole.contains("$1,200,000") && whole.contains("$750,000"),
             "the whole message names the transcribed total and TY2024's own ceiling — the two \
              figures `full_return_for(ri.tax_year)` could not supply at year 0: {whole:?}"
         );

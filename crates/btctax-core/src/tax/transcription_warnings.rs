@@ -308,9 +308,23 @@ fn all_zero(doc: WarnedDocument, i: usize, issuer: &str, threshold: &str) -> Str
     )
 }
 
-/// Dollars, for a message — two decimals, with a leading `$`.
+/// Dollars, for a message a FILER reads: thousands-separated, cents only when there are any —
+/// `$1,200,000`, `$6,200.35`. One line, because it delegates to the core-side house formatter
+/// `crate::tax::advisories::fmt_usd`, which every advisory already prints money through.
+///
+/// ★★ **FR-118 — and this is deliberately NOT "the product's money formatter".** The warning it feeds
+/// used to read *"adds up to $1200000.00, which is more than the $750000.00 the §163(h)(3)(B) limit
+/// allows"*: the entire content of that sentence is a comparison of two seven-figure numbers, and an
+/// ungrouped one has to be counted by eye. So prose gets grouped.
+///
+/// The OTHER formatter, `btctax_cli::render::fmt_money`, prints `1200000.00` ungrouped and **must stay
+/// that way** — its module is *"Text rendering of CLI outputs … + FR10 CSV export"* and it imports
+/// `csv::Writer`, so a thousands separator there would put a comma INSIDE an exported CSV field (or
+/// silently force quoting, changing a contract that module says is stable). Corrupting an export to
+/// tidy a warning is a poor trade. **The split is by AUDIENCE, not by oversight: prose a filer reads
+/// is grouped, machine-readable output is not. Do not unify them.**
 fn money(v: Usd) -> String {
-    format!("${v:.2}")
+    crate::tax::advisories::fmt_usd(v)
 }
 
 /// ★★★ **THE §163(h)(3)(B) ACQUISITION-DEBT CEILING CHECK — the ONE derivation** (R8 / T9).
@@ -446,7 +460,7 @@ mod tests {
         let d2019 = Some(date!(2019 - 06 - 01));
         assert!(
             warned(vec![m1098(dec!(900000), d2019)], FilingStatus::Single)
-                .is_some_and(|w| w.contains("900000") && w.contains("750000")),
+                .is_some_and(|w| w.contains("$900,000") && w.contains("$750,000")),
             "$900,000 of post-2017 debt is over the $750,000 ceiling and must name both figures"
         );
         assert_eq!(
@@ -483,7 +497,7 @@ mod tests {
                 vec![m1098(dec!(500000), d2019), m1098(dec!(500000), d2019)],
                 FilingStatus::Single
             )
-            .is_some_and(|w| w.contains("1000000")),
+            .is_some_and(|w| w.contains("$1,000,000")),
             "TWO of them are $1,000,000 of acquisition debt and must warn on the SUM"
         );
     }
@@ -631,7 +645,11 @@ mod tests {
     /// other warning in this file. The filer read `$900000` before; this is the one warning whose
     /// entire content is a comparison of two large numbers.
     ///
-    /// Mutation: interpolate `${total}` / `${limit}` raw again and both assertions red.
+    /// ★★ FR-118 — and they are THOUSANDS-SEPARATED, which is the whole reason the comparison is
+    /// readable at a glance. Both halves discriminate: the positive assertion reds if the figures stop
+    /// going through [`money`] (interpolate `${total}` / `${limit}` raw again → `900000`), and the
+    /// negative one reds if `money` reverts to `format!("${v:.2}")` (→ `$900000.00`), which is the
+    /// exact defect FR-118 closed. A grouped figure printed by some *other* path cannot satisfy both.
     #[test]
     fn the_ceiling_warning_formats_both_figures_as_money() {
         let w = warned(
@@ -640,8 +658,12 @@ mod tests {
         )
         .expect("the premise: $900,000 of post-2017 debt is over the $750,000 ceiling");
         assert!(
-            w.contains("$900000.00") && w.contains("$750000.00"),
-            "both figures print through `money()`: {w}"
+            w.contains("$900,000") && w.contains("$750,000"),
+            "both figures print through `money()`, thousands-separated: {w}"
+        );
+        assert!(
+            !w.contains("$900000") && !w.contains("$750000"),
+            "…and NEITHER prints ungrouped (FR-118): {w}"
         );
     }
 

@@ -125,6 +125,12 @@ pub(crate) fn fmt_money(d: Usd) -> String {
 /// per part on the 2025 form, 14 on 2024) paginate: ⌈rows/grid⌉ page copies per part, each with
 /// its own totals; the copies are merged with per-copy field renaming so no two share a value. Every
 /// copy is geometry-verified before merge.
+///
+/// ★ **Page order (FR-113):** the merged document groups the parts — every Part I page, then every
+/// Part II page — instead of concatenating each physical copy's two pages. A filer assembling the
+/// paper packet by hand was meeting short-term and long-term alternating. It is a permutation of the
+/// page tree and nothing more: same pages, same cells, same values (see
+/// [`overflow::PageOrder::ByPosition`]).
 pub fn fill_form_8949(rows: &[Form8949Row], year: i32) -> Result<Vec<u8>, FormsError> {
     let map = Form8949Map::for_year(year)?;
     let cap = map.rows_per_page;
@@ -135,6 +141,8 @@ pub fn fill_form_8949(rows: &[Form8949Row], year: i32) -> Result<Vec<u8>, FormsE
     //   carries ST page k on page 1 and LT page k on page 2, an exhausted side left blank. Each
     //   page's checkbox is its group's letter, resolved against the map by `place_part` (a letter the
     //   map does not name refuses). The 1040 filer never sees a mixed page.
+    //   ★ FR-113 — copy k is still filled as a whole two-page form (and verified as one); only the
+    //     MERGED page order groups Part I before Part II.
     fn pages<'a>(part: &[&'a Form8949Row], cap: usize) -> Vec<Vec<&'a Form8949Row>> {
         let mut by_box: std::collections::BTreeMap<String, Vec<&'a Form8949Row>> =
             std::collections::BTreeMap::new();
@@ -163,7 +171,10 @@ pub fn fill_form_8949(rows: &[Form8949Row], year: i32) -> Result<Vec<u8>, FormsE
     if n_copies == 1 {
         return Ok(copies.remove(0));
     }
-    overflow::merge_copies(&copies)
+    // ★ FR-113 — the copies' pages are GROUPED by part (every Part I page, then every Part II page)
+    //   rather than concatenated copy by copy, so a filer assembling the paper packet does not meet
+    //   short-term and long-term alternating. A page-order permutation and nothing else.
+    overflow::merge_copies_ordered(&copies, overflow::PageOrder::ByPosition)
 }
 
 /// Stamp a diagonal `DRAFT — ESTIMATE, NOT FOR FILING` watermark on every page of a filled form.
