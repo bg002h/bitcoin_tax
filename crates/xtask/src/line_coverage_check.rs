@@ -393,6 +393,39 @@ fn label_precedes(text: &str, label: &str, quote: &str) -> Option<bool> {
     }))
 }
 
+/// ★★★ **THE INVERSE RATCHET: the table's ROW COUNT, which may only go UP.**
+///
+/// Every ratchet above bounds a *residue* and only ever goes down. This one bounds the **census
+/// itself** and only ever goes up, and it exists because the rules above are all per-row: they check
+/// what a row says, and structurally cannot notice a row that is no longer there.
+///
+/// ★★ Measured, not argued (2026-09-12, FR-122). Deleting one `c.line(...)` from `cover_form8995` —
+/// Form 8995 line 3, the prior-year QBI-loss carryforward — took the table from 377 rows to 376 and
+/// left `make gate` at **3609 passed / 12 skipped**, byte-identical to the baseline summary. Nothing
+/// reds: `cover_fns_not_registered` holds whole coverage FUNCTIONS (it was written because deleting
+/// `cover_form8995apartiii` from `all()` printed OK at 218 money lines instead of 228), and
+/// `missing_cover_fns` demands a cover fn per money-bearing TYPE. Neither speaks about lines, so one
+/// printed line of a filed form could leave the instrument with the report still saying OK — the exact
+/// false-completeness shape the module header is about, one level finer than the check that caught it
+/// last time.
+///
+/// ★ **Pinned AT the measured count, and compared with `>=`.** That asymmetry is the whole design:
+/// growth is silent (378 rows clears a 377 floor, so the TY2026 port adds line-sets without touching
+/// this), and any shrink reds. A *loose* floor a few rows down was tried first and measured USELESS
+/// for the case that motivated it — at 370 the one-row deletion above still passed, because one row is
+/// exactly the size of the defect.
+///
+/// ★ Its one stated residual: an addition followed later by a deletion nets back to the floor and
+/// passes. Closing that needs an exact `==`, which would red on every honest addition — so the floor
+/// is raised opportunistically (in a diff, with the run's own printed number) rather than enforced
+/// as an equality.
+///
+/// ★ `#[cfg(test)]` because it belongs to the SUITE, not to [`check`]. [`check`] takes any table, and
+/// every planted-defect table in `mod tests` is one row long — a floor inside it would red on all of
+/// them. Same placement, and the same reason, as `forge_reach_check::FILE_FLOOR`.
+#[cfg(test)]
+const MIN_MONEY_LINES: usize = 377;
+
 /// Run the check. Returns `Err` with every failure, so one run reports the whole picture rather than
 /// the first problem.
 pub fn run() -> Result<String, String> {
@@ -1785,9 +1818,25 @@ mod tests {
         .is_empty());
     }
 
-    /// The checker passes on the committed table.
+    /// The checker passes on the committed table — **and the table is still the whole table.**
+    ///
+    /// ★★★ The floor is the second half, added 2026-09-12 (FR-122). `run()` is what binds the 377-row
+    /// census to `design/forms/extract/`, and a planted rotted sentence reds here naming the row
+    /// (measured: `f8995:2 (line2) quotes text NOT FOUND in f8995--2024.txt`). But every rule inside
+    /// [`check`] is per-row, so a DELETED row is invisible to all of them — measured: dropping Form
+    /// 8995 line 3 took the table 377 → 376 with `make gate` unchanged at 3609 passed / 12 skipped.
+    /// See [`MIN_MONEY_LINES`]. A checker that cannot notice its own subject shrinking is the
+    /// false-completeness shape this module exists against.
     #[test]
     fn the_committed_coverage_table_is_consistent_with_the_form_text() {
+        let rows = line_coverage::all().0.len();
+        assert!(
+            rows >= MIN_MONEY_LINES,
+            "the coverage table has {rows} money lines, below the {MIN_MONEY_LINES} floor. Every \
+             rule in `check` is per-row and none can see a row that is GONE, so a printed line of a \
+             filed form can leave the census with the report still saying OK. If the deletion is \
+             deliberate, say which lines and why, and lower the floor in the same diff."
+        );
         match run() {
             Ok(s) => println!("{s}"),
             Err(e) => panic!("{e}"),

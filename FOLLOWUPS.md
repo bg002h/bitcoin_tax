@@ -7117,17 +7117,31 @@ build, each with an owning phase.
   a duplicate cover fn. ★ The reword also removed guidance from a refusal a future porter will read, so
   the workaround has a cost.
 
-- **FR-122 — `xtask line-coverage` is run by no test and by no CI job. Minor. Owning phase: before the
-  TY2026 port's first form lands (it is the instrument that will catch a carried-forward sentence).**
-  `make gate` is `nextest` + `clippy`; `line_coverage_check::run()` — the only caller of
-  `check(&line_coverage::all())` — is reachable **only** from `cargo run -p xtask -- line-coverage`, and
-  `grep -rn 'line-coverage' .github Makefile` returns nothing. So the 377-row table's verbatim check
-  against `design/forms/extract/` runs when someone remembers. Its own `mod tests` (which `make gate`
-  does run) exercises the rules on synthetic tables and now on the OBBBA line-1 rows specifically
-  (step-5 fold, M-1), but the whole-table run is unheld. This is the module's own recorded failure shape
-  one level up — *"which test reds when this checker is removed?"* — with the answer being "none, for
-  the table as a whole". Fix: a test that calls `run()`, or a CI step; note the table must be green
-  first (it is, measured `line-coverage OK: 377 money lines`).
+- **FR-122 — ❌ PREMISE REFUTED, then ✅ CLOSED on the gap that was actually there (2026-09-12). Minor.
+  Owning phase was: before the TY2026 port's first form lands.**
+  ★★★ **The entry was wrong, and the correction is the useful part.** It claimed
+  `line_coverage_check::run()` is *"reachable **only** from `cargo run -p xtask -- line-coverage`"* and
+  that *"the whole-table run is unheld"*. It is not: `line_coverage_check::tests::`
+  `the_committed_coverage_table_is_consistent_with_the_form_text` (`line_coverage_check.rs:1813` at the
+  time of writing) calls `run()`, has done since **3313ecf4, 2026-07-31** — six weeks before this entry
+  was filed — and `make gate`'s `cargo nextest run --workspace` runs it (`cargo nextest list -p xtask`
+  names it). Measured: planting a rotted cross-reference in one row (`f8995` line 2, *"lines 1i through
+  1v"* → *"1x"*) reds that test naming the row — `f8995:2 (line2) quotes text NOT FOUND in
+  f8995--2024.txt`. ★ `design/ty2025/reviews/PLAN_schedule_1a-buildability-r4.md:75` already said so in
+  writing (*"enforced on every commit via …`the_committed_coverage_table_is_consistent_with_the_form_text`,
+  which runs inside `make check`"*), so the fact was on disk and the entry contradicted it. This is the
+  arc's own dominant shape turned on the follow-up writer: **a claim about what an instrument covers,
+  written without running the instrument.**
+  ★★ **The real gap, found by mutation while disproving the entry:** every rule inside `check` is
+  per-row, so a **deleted** row is invisible to all of them. Deleting one `c.line(...)` (Form 8995
+  line 3) took the table 377 → 376 and left `make gate` at **3609 passed / 12 skipped**, identical to
+  baseline. `cover_fns_not_registered` holds whole coverage *functions* and `missing_cover_fns` holds
+  money-bearing *types*; neither speaks about lines. Closed by `MIN_MONEY_LINES = 377`, an inverse
+  ratchet (`>=`, so growth is silent and any shrink reds) asserted in that same test. Watched red on
+  the one-row deletion, and on an unreadable extract directory (55 problems). Stated residual, in the
+  source: an addition followed later by a deletion nets back to the floor and passes. Cost measured:
+  the whole-table test is **~65 ms** and was already in the gate; the floor adds nothing measurable.
+  See `design/agent-reports/REPORT-build-fr122-fr124.md`.
 
 - **FR-123 — `ObbbaRevision::schedule_1a_line_agreeing_with` still takes a bare `u32`, so the JOIN's
   own parameter is forgeable even though its one caller now hands it a vouched number. Minor. Owning
@@ -7167,6 +7181,7 @@ build, each with an owning phase.
   | T12 | I-2 | five document families | the eight carrying `transcribed_on` |
   | FR-114 | — | the follow-up's own `"Covered lots"` reasoning | whole-word matching (`"lots" != "lot"`) |
   | FR-114 | — | ★ **the CONTROLLER's `label:` literal scan** | **209 of 279 labels are macro-generated** |
+  | FR-122 | — | ★ the follow-up's claim *"`run()` is reachable ONLY from the CLI"* | **a test had called it for six weeks** (3313ecf4) |
 
   **Every one was correct when written.** None was a mistake at the time; each became wrong when a later
   task widened the set beneath it — usually the very next task. That is what makes it a structural
@@ -7594,9 +7609,28 @@ build, each with an owning phase.
   (the TY2026 port).**
 ### From the Schedule 1-A step-arithmetic census (2026-09-11, `design/agent-reports/REPORT-build-schedule-1a-step-arithmetic-census.md`)
 
-- **FR-124 — `gen_goldens.py` sets Tax-Calculator's `exact` as a Records DataFrame column, which is
-  silently dropped, so `TAXCALC_EXACT_YEARS = frozenset({2025})` is inert. Minor (no live effect
-  today). Owning phase: before any TY2025+ household is driven through the sweep (the TY2026 port).**
+- **FR-124 — ✅ CLOSED 2026-09-12. `gen_goldens.py` set Tax-Calculator's `exact` as a Records DataFrame
+  column, which is silently dropped, so `TAXCALC_EXACT_YEARS = frozenset({2025})` was inert. Minor (no
+  live effect today). Owning phase was: before any TY2025+ household is driven through the sweep (the
+  TY2026 port).**
+  ★ **Fixed by removing the SECOND implementation, not by patching the broken one.**
+  `scripts/oracle/taxcalc_exact.py` is now the only construction path for a Tax-Calculator run in this
+  repo: it writes `exact` through the Calculator, asserts it stuck **after** `calc_all` (the value the
+  engine actually held), and **REFUSES a row dict carrying an `exact` key** — so the shipped defect is
+  inexpressible rather than merely deprecated. All five call sites are routed through it
+  (`gen_goldens.taxcalc_run` / `taxcalc_credits` / `_taxcalc_amt_credits`,
+  `verify_schedule_1a._taxcalc_applied` — which already had the correct implementation — and
+  `verify_f6251._taxcalc`). ★★ The year list is **gone, not extended**: the polarity is reversed to ON
+  for every year except the baked-corpus years in `EXACT_OFF_YEARS = {2024}`, which closes
+  `TY2026_PORT_REPORT.md` R25 at the same time (the old ON-list of `{2025}` was already three years
+  stale — taxcalc's own parameters put the OBBBA deductions in force 2025-2028). Kills:
+  `.venv/bin/python scripts/oracle/taxcalc_exact.py --selftest`, which includes the two-directional
+  BRANCH kill (44 fractional-step vectors must move off `verify_schedule_1a._smooth_fallback`, and a
+  local reconstruction of the broken path must land on it). Measured neutral: the TY2024 corpus's
+  `taxcalc_run`/`taxcalc_credits`/`_taxcalc_amt_credits` output over all 107 households is
+  byte-identical before and after (md5 `c474d1f7220f961f5de217335f2aa2de`), and
+  `verify_schedule_1a.py`'s full run output is diff-identical. See
+  `design/agent-reports/REPORT-build-fr122-fr124.md`.
   `_taxcalc_row` adds `**({"exact": 1} if year in TAXCALC_EXACT_YEARS else {})` to the row dict
   (`gen_goldens.py:251-257`). `exact` is a **calculated** variable in taxcalc's
   `records_variables.json`, not a read variable, so `tc.Records(data=DataFrame(...))` ignores the

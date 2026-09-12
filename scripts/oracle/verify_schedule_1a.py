@@ -33,6 +33,14 @@ import os
 import pathlib
 import sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+# ★★★ The ONE authority on building a Tax-Calculator run and on turning `exact` on (FR-124). This
+# file had the CORRECT implementation and `gen_goldens.py` had a broken one; the procedure now lives
+# in one module so the two cannot diverge again. Imports nothing heavy at module scope, so this stays
+# runnable with no taxcalc installed (`main` reports INCONCLUSIVE in that case).
+import taxcalc_exact  # noqa: E402 — after the sys.path insert above
+
 # btctax's own TY2025 table, transcribed from `crates/btctax-core/src/tax/tables.rs`. Kept here as
 # literals ON PURPOSE: an oracle check that imported our value would be comparing our input to
 # itself — an echo, not a witness.
@@ -702,10 +710,6 @@ def _ots_predicted(vec: dict, parsed: dict) -> tuple[decimal.Decimal, list[str],
 # ── The passes ────────────────────────────────────────────────────────────────────────────────────
 def _taxcalc_applied(pol, vectors, year: int):
     """Drive Tax-Calculator over every vector for `year`. Returns {index: value} or None if it cannot."""
-    import numpy as np
-    import pandas as pd
-    import taxcalc as tc
-
     rows = []
     for n, v in enumerate(vectors):
         row = {"RECID": n + 1, "FLPDYR": year, "MARS": v["mars"],
@@ -716,18 +720,14 @@ def _taxcalc_applied(pol, vectors, year: int):
         if v["part"] != "V":
             row[FORM_1A[v["part"]]["taxcalc"][0]] = float(FORM_1A[v["part"]]["claimed"])
         rows.append(row)
-    recs = tc.Records(data=pd.DataFrame(rows), start_year=year, gfactors=None, weights=None,
-                      adjust_ratios=None)
-    calc = tc.Calculator(policy=tc.Policy(), records=recs)
-    calc.advance_to_year(year)
     # ★★★ `exact` is a CALCULATED variable, so a column named `exact` in the Records DataFrame is
-    #     SILENTLY DROPPED — measured: it comes back all zeros and the engine stays on its smooth
-    #     marginal-rate fallback, which is not the arithmetic any tax form performs. It has to be
-    #     written through the Calculator. `_smooth_fallback` is the check that this actually took.
-    calc.array("exact", np.ones(len(rows), dtype=np.int32))
-    calc.calc_all()
-    if int(calc.array("exact").sum()) != len(rows):
-        raise RuntimeError("taxcalc's `exact` did not stick; every vector would use the SMOOTH branch")
+    #     SILENTLY DROPPED — it comes back all zeros and the engine stays on its smooth marginal-rate
+    #     fallback, which is not the arithmetic any tax form performs. It has to be written through
+    #     the Calculator, and asserted. Both of those now live in `taxcalc_exact.build_calculator`,
+    #     which is the only construction path in the repo (FR-124) — this file's correct version used
+    #     to sit beside `gen_goldens.py`'s broken one. `_smooth_fallback` below is still the check
+    #     that the stepped branch actually RAN, which is a different claim from "the flag is set".
+    calc = taxcalc_exact.build_calculator(rows, year)
     agi = calc.array("c00100")
     out = {}
     for n, v in enumerate(vectors):

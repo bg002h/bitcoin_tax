@@ -40,7 +40,14 @@ the §55(d)(3) MFS line-4 add-back, sized from the vector itself.
 import json, os, shutil, sys, tempfile, warnings, pathlib
 
 warnings.filterwarnings("ignore")
-import pandas as pd, taxcalc as tc  # noqa: E402
+import pandas as pd, taxcalc as tc  # noqa: E402, F401 — `pd` is used by `taxcalc_exact` lazily
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+# ★ The ONE authority on building a Tax-Calculator run and on `exact` (FR-124). TY2024 is a
+#   `taxcalc_exact.EXACT_OFF_YEARS` year, so `exact` stays 0 here exactly as it always has — this call
+#   site is routed so a fourth hand-rolled Records/Calculator block cannot re-introduce the defect
+#   when someone ports these vectors to TY2025+.
+import taxcalc_exact  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 # A vector without an explicit `year` is TY2024, which is what every committed vector is today.
@@ -236,11 +243,7 @@ def main() -> int:
             "e07300": float(i["sch3_line1_ftc"]),
             "s006": 1.0,
         })
-    recs = tc.Records(data=pd.DataFrame(rows), start_year=2024, gfactors=None,
-                      weights=None, adjust_ratios=None)
-    calc = tc.Calculator(policy=tc.Policy(), records=recs)
-    calc.advance_to_year(2024)
-    calc.calc_all()
+    calc = taxcalc_exact.build_calculator(rows, 2024)
     amt, amti = calc.array("c09600"), calc.array("c62100")
 
     print(f"{'vec':5}{'st':7}{'btctax AMT':>13}{'taxcalc':>12}  verdict")

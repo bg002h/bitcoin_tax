@@ -81,10 +81,20 @@ except ImportError:  # pragma: no cover
     sys.exit("scripts/oracle/corpus.py must sit beside this script")
 
 try:
-    import pandas as pd
+    # pandas is used only inside `taxcalc_exact`, which imports it LAZILY. Imported here anyway so a
+    # venv missing it fails at start-up with the message below rather than mid-generation.
+    import pandas as pd  # noqa: F401
     import taxcalc as tc
 except ImportError:  # pragma: no cover
     sys.exit("run inside a venv with `pip install taxcalc pandas`")
+
+# ★★★ The ONE authority on building a Tax-Calculator run and on turning `exact` on (FR-124). The
+# broken implementation this replaces lived in `_taxcalc_row` below; the correct one already existed
+# in `verify_schedule_1a.py`, and two implementations of one procedure is what produced the defect.
+try:
+    import taxcalc_exact
+except ImportError:  # pragma: no cover
+    sys.exit("scripts/oracle/taxcalc_exact.py must sit beside this script")
 
 # ── The §9 test-only harness binary — the D-2 refusal-free admission gate (SPEC §4/§5.1, plan T10) ──
 # Generation is Python and btctax's assembly is Rust, so the D-2 check (does btctax assemble this
@@ -186,18 +196,19 @@ def _mars(filing_status: str) -> int:
         ) from None
 
 
-# ★ `exact` is TY2025-ONLY, and deliberately not a shared default.
+# ★★★ `exact` USED TO BE DECIDED HERE, BY A HAND-WRITTEN YEAR LIST, AND THE LIST WAS INERT (FR-124).
 #
-# Tax-Calculator applies a STEPPED phase-out only when `exact == 1`; otherwise it smooths the step
-# linearly. TY2025's Schedule 1-A reduces by a flat amount per whole $1,000 of MAGI ($100 in Parts
-# II/III, $200 in Part IV), so without `exact` we diverge by up to $100/$200 at every MAGI that is not
-# a $1,000 multiple — and the cheap fix would be a hand-written excuse that then also masks a genuine
-# btctax rounding error.
+# `TAXCALC_EXACT_YEARS = frozenset({2025})` lived here and `_taxcalc_row` put `"exact": 1` in the
+# Records **input** row for a year in it. `exact` is a CALCULATED taxcalc variable, so the column was
+# silently dropped and every stepped phase-out took the SMOOTH marginal-rate fallback — a flag that
+# read as set with the engine on the other branch. Two separate defects in four lines: the write did
+# not take, and the ON-list was already three years stale (taxcalc's own parameters put the OBBBA
+# deductions in force 2025-2028).
 #
-# It must NOT be set for TY2024: `exact` co-governs `ChildDepTaxCredit`, `EducationTaxCredit`, `F2441`
-# and `CTC_new`, so switching it on retroactively could move already-baked TY2024 goldens. This is the
-# one genuine TY2024-contamination path in the year seam — a shared Records column, not a constant.
-TAXCALC_EXACT_YEARS = frozenset({2025})
+# Both now live in `taxcalc_exact`, once: `build_calculator` writes `exact` through the Calculator and
+# asserts it stuck, and the polarity is reversed — ON for every year except the baked-corpus years in
+# `taxcalc_exact.EXACT_OFF_YEARS`, so a year bump gets the form-faithful branch by doing nothing.
+# `python3 scripts/oracle/taxcalc_exact.py --selftest` is the kill.
 
 
 def dependent_block(i: dict) -> dict:
@@ -254,7 +265,8 @@ def _taxcalc_row(n, i, year: int = 2024):
     return {
         "RECID": n + 1,
         "FLPDYR": year,
-        **({"exact": 1} if year in TAXCALC_EXACT_YEARS else {}),
+        # ★ No `exact` key here, and `taxcalc_exact.build_calculator` REFUSES one: it is a calculated
+        #   variable, so a Records input column of that name is silently dropped (FR-124).
         "MARS": _mars(i.get("filing_status", "Single")),
         "e00200": i.get("w2_income", 0),
         "e00200p": i.get("w2_income", 0),
@@ -310,12 +322,7 @@ def taxcalc_credits(households, year: int = 2024) -> list[dict]:
       dependents makes taxcalc's line 24 smaller than btctax's by exactly this much.
     """
     rows = [_taxcalc_row(n, i, year) for n, i in enumerate(households)]
-    recs = tc.Records(
-        data=pd.DataFrame(rows), start_year=year, gfactors=None, weights=None, adjust_ratios=None
-    )
-    calc = tc.Calculator(policy=tc.Policy(), records=recs)
-    calc.advance_to_year(year)
-    calc.calc_all()
+    calc = taxcalc_exact.build_calculator(rows, year)
     return [
         {
             "ctc_odc": float(calc.array("c07220")[n]) + float(calc.array("odc")[n]),
@@ -347,12 +354,7 @@ def taxcalc_run(households, year: int = 2024):
     here; those lines are OTS-single-witness (SPEC §6.4 `Option` rule).
     """
     rows = [_taxcalc_row(n, i, year) for n, i in enumerate(households)]
-    recs = tc.Records(
-        data=pd.DataFrame(rows), start_year=year, gfactors=None, weights=None, adjust_ratios=None
-    )
-    calc = tc.Calculator(policy=tc.Policy(), records=recs)
-    calc.advance_to_year(year)
-    calc.calc_all()
+    calc = taxcalc_exact.build_calculator(rows, year)
     return [
         {
             "adjusted_gross_income": float(calc.array("c00100")[n]),
@@ -421,11 +423,9 @@ def _harness_default(inputs):
 def _taxcalc_amt_credits(inputs_list, year: int = 2024):
     """One vectorized Tax-Calculator pass over ALL candidates → [(AMT c09600, credits c07100), …].
     The D-2 admission predicate reads these as oracle-2's 1040 L17 (AMT) and L21 (credits)."""
-    df = pd.DataFrame([_taxcalc_row(n, i, year) for n, i in enumerate(inputs_list)])
-    recs = tc.Records(data=df, start_year=year, gfactors=None, weights=None, adjust_ratios=None)
-    calc = tc.Calculator(policy=tc.Policy(), records=recs)
-    calc.advance_to_year(year)
-    calc.calc_all()
+    calc = taxcalc_exact.build_calculator(
+        [_taxcalc_row(n, i, year) for n, i in enumerate(inputs_list)], year
+    )
     return [
         (float(calc.array("c09600")[n]), float(calc.array("c07100")[n]))
         for n in range(len(inputs_list))
