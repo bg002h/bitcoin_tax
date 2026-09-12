@@ -7707,7 +7707,17 @@ build, each with an owning phase.
   definition in this tree — an `include_str!` walk would pull in the archived IRS extracts, which
   legitimately carry the real tables.
 
-- **FR-132 — the where-to-file guidance names the year's instructions but btctax bundles no copy of
+- **FR-132 — ✅ CLOSED 2026-09-12 BY OWNER RULING: the filer can be told to look it up.** Verbatim:
+  *"User can be told to google where to file."* So btctax bundles **no** copy of the instructions and no
+  address table, and a pointer is sufficient by decision — this is no longer an open question about the
+  packet's contents. ★ The shipped text is left AS IS rather than reworded to say *"search the web"*,
+  and that is deliberate: it already points at a **named IRS document** (the year's *"Where Do You File?"*
+  table) and at the form's own printed URL, which is strictly better guidance than a search box — a search
+  can surface a stale third-party mirror, whereas the form's own footer cannot. The ruling removes the
+  obligation to bundle; it does not ask for weaker wording. If the owner wants the literal *"google it"*
+  phrasing, that is a one-constant change to `WHERE_TO_FILE_1040_SOURCE`.
+  Original finding, preserved:
+  **the where-to-file guidance names the year's instructions but btctax bundles no copy of
   them, so a filer with no network has the two facts and no table. Minor. Owning phase: the TY2026
   packet read (before FILED).**
   Measured: the extension path is fine — the *"Where To File a Paper Form 4868"* table is printed on
