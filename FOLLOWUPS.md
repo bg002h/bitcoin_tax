@@ -7088,6 +7088,47 @@ build, each with an owning phase.
   in CI so the class cannot come back. B3's brief scoped N-1 to *"Do not chase other doc links"*, so this is
   recorded rather than folded.
 
+- **FR-120 — `ObbbaRevision::mfs_threshold_printed()` has nothing to be compared against, and for
+  TY2025 there is no first authority for the figure at all. Minor. Owning phase: the TY2026 port
+  (before a year on this schema becomes filable).**
+  The accessor parses the MFS line-4 kicker's start out of the form's own sentence so it can be checked
+  against `AmtParams::mfs_kicker_start` — and nothing performs that comparison, because `btctax-forms`
+  does not depend on `btctax-adapters` where the per-year params live (build report F4,
+  `design/agent-reports/REPORT-build-step5-f6251-obbba.md:443`). The step-5 seam review then measured
+  the sharper half (M-2): every `AmtParams::mfs_kicker_start` literal in the workspace is `dec!(875950)`
+  (TY2024) or `dec!(640200)` (TY2026) — **none is TY2025's printed $900,350** — so for `f6251/2025` the
+  printed threshold has no first authority either. `f6251_revision.rs`'s module doc stated the opposite as its
+  justification for not transcribing the figure; the fold corrected the sentence and left the gap. A
+  natural home for the join is `xtask`, which already reads both the extracts and the crates. This is
+  the §55(d)(3) collision class the repo has been bitten by (`CLAUDE.md`: two disqualified oracles can
+  align).
+
+- **FR-121 — `line_coverage_check`'s "is this type printed?" predicate counts a type named inside a
+  STRING LITERAL in the emitter crate. Nit (fails closed). Owning phase: ownerless residue — batch when
+  convenient.**
+  `missing_cover_fns` derives scope as *"a type is IN SCOPE iff `btctax-forms` names it in real code"*,
+  excluding `//`/`//!` lines. Measured during the step-5 fold: naming
+  `btctax_core::tax::schedule_1a::SeniorDeductionSubtotal` inside a **refusal message** (a `format!`
+  string, not a comment) made `xtask line-coverage` demand a `cover_seniordeductionsubtotal()` for a
+  type that prints nothing — its money is Schedule 1-A line 37, already covered by `cover_schedule1a`,
+  so adding one would have double-covered that line (rule 5). The fold sidestepped it by rewording the
+  message. It is a **false RED**, not a false green, so nothing was ever passed unchecked — but the
+  predicate should skip string literals as it skips comments, or the next author will "satisfy" it with
+  a duplicate cover fn. ★ The reword also removed guidance from a refusal a future porter will read, so
+  the workaround has a cost.
+
+- **FR-122 — `xtask line-coverage` is run by no test and by no CI job. Minor. Owning phase: before the
+  TY2026 port's first form lands (it is the instrument that will catch a carried-forward sentence).**
+  `make gate` is `nextest` + `clippy`; `line_coverage_check::run()` — the only caller of
+  `check(&line_coverage::all())` — is reachable **only** from `cargo run -p xtask -- line-coverage`, and
+  `grep -rn 'line-coverage' .github Makefile` returns nothing. So the 377-row table's verbatim check
+  against `design/forms/extract/` runs when someone remembers. Its own `mod tests` (which `make gate`
+  does run) exercises the rules on synthetic tables and now on the OBBBA line-1 rows specifically
+  (step-5 fold, M-1), but the whole-table run is unheld. This is the module's own recorded failure shape
+  one level up — *"which test reds when this checker is removed?"* — with the answer being "none, for
+  the table as a whole". Fix: a test that calls `run()`, or a CI step; note the table must be green
+  first (it is, measured `line-coverage OK: 377 money lines`).
+
 - **FR-99 — ★★ THE DOMINANT DEFECT CLASS OF THE WHOLE INTERVIEW ARC: a hand-written list standing beside
   a set that GROWS. Proposed `CLAUDE.md` rule — OWNER'S CALL, filed not actioned. Owning phase: the
   harness / doctrine (owner), before the interview branch ships.**

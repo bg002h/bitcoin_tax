@@ -679,22 +679,58 @@ pub fn cover_form6251(p: &crate::tax::form6251::Form6251) -> Coverage {
 
 /// §G-6 — Form 6251 **line 1**, which is year-shaped: TY2024 prints one box, TY2025 splits it into
 /// 1a/1b. Its own `cover_*` because the enum is a money-bearing type in its own right.
+///
+/// ★★★ **AN `_`-FREE `match`, and the `if let` it replaced is why.** This body used to be
+/// `if let Form6251Line1::Y2024 { line1 } = p`, under a comment promising the 1a/1b rows *"when that
+/// year's map lands"*. That map landed in `d8d023af` and no rows were added — **an `if let` that
+/// matches nothing is silent**, so a TY2025 chain produced an EMPTY `Coverage` and the only thing
+/// verifying `Form6251Line1::Y2025`'s transcription was nothing at all (`cite-check` also excuses
+/// this form: `AUTHORITY_NOT_YET_ARCHIVED` carries `("f6251", &[2024, 2025])`). A `match` inside the
+/// defining crate is exhaustiveness-checked despite `#[non_exhaustive]`, so the next revision is
+/// `E0004` here rather than another silent skip.
 pub fn cover_form6251line1(p: &crate::tax::form6251::Form6251Line1) -> Coverage {
     let mut c = Coverage::quoting("2024");
     let f = "f6251";
-    // ★ TY2025's 1a/1b are a DIFFERENT form revision with 60 boxes; they get their own rows when that
-    //   year's map lands, and the emitter refuses them against the TY2024 map today. `if let` rather
-    //   than `match`, because the enum is `#[non_exhaustive]` and clippy is right that one arm plus a
-    //   catch-all is a destructure.
-    if let crate::tax::form6251::Form6251Line1::Y2024 { line1 } = p {
-        c.line(
-            *line1,
-            f,
-            "1",
-            "line1",
-            Production::Carry,
-            "Enter the amount from Form 1040 or 1040-SR, line 15, if more than zero. If Form 1040 or 1040-SR, line 15, is zero, subtract line 14 of Form 1040 or 1040-SR from line 11 of Form 1040 or 1040-SR and enter the result here. (If less than zero, enter as a negative amount.)",
-        );
+    match p {
+        crate::tax::form6251::Form6251Line1::Y2024 { line1 } => {
+            c.line(
+                *line1,
+                f,
+                "1",
+                "line1",
+                Production::Carry,
+                "Enter the amount from Form 1040 or 1040-SR, line 15, if more than zero. If Form 1040 or 1040-SR, line 15, is zero, subtract line 14 of Form 1040 or 1040-SR from line 11 of Form 1040 or 1040-SR and enter the result here. (If less than zero, enter as a negative amount.)",
+            );
+        }
+        // ★★★ A DIFFERENT REVISION, so a different extract — `f6251--2025.txt`, named here rather
+        //     than inherited, because these two sentences do not occur in the TY2024 booklet at all.
+        crate::tax::form6251::Form6251Line1::Y2025 {
+            line1a,
+            line1b,
+            schedule_1a_line,
+        } => {
+            c.quoting_year("2025");
+            // ★★★ THE QUOTE IS SELECTED BY THE CROSS-REFERENCE THE COMPUTATION ACTUALLY READ, not
+            //     typed beside it. 1a's sentence is the one cell that differs between the two
+            //     revisions of this form — TY2025 cites Schedule 1-A line 37, the TY2026 draft cites
+            //     line 43 — so a chain whose provenance says anything this table has not transcribed
+            //     gets a sentence that is verbatim on NO form and `xtask line-coverage` reds. The
+            //     alternative, a fixed literal, would re-assert TY2025's sentence over TY2026's
+            //     figures, which is the collision this whole seam exists to prevent.
+            let l1a = match schedule_1a_line {
+                37 => "Subtract Schedule 1-A (Form 1040), line 37, from Form 1040, 1040-SR, or 1040-NR, line 14",
+                _ => "(no line-1a sentence is transcribed for the Schedule 1-A line this chain read)",
+            };
+            c.line(*line1a, f, "1a", "line1a", Production::Combine, l1a);
+            c.line(
+                *line1b,
+                f,
+                "1b",
+                "line1b",
+                Production::Combine,
+                "Subtract line 1a from Form 1040, 1040-SR, or 1040-NR, line 11b (if less than zero, enter as a negative amount)",
+            );
+        }
     }
     c
 }
@@ -4033,6 +4069,20 @@ pub fn all() -> Coverage {
     // lines and no instruction-text check at all. They shipped missing once.
     rows.extend(dated(cover_form6251(
         &crate::tax::form6251::Form6251::default(),
+    )));
+    // ★★★ THE OBBBA LINE-1 REGION NEEDS ITS OWN INSTANCE, and that is not a stylistic choice.
+    //     `Form6251::default()` is the TY2024 shape (`Form6251Line1::default()`), so the line above
+    //     reaches only the `Y2024` arm — the 1a/1b rows would be written, compiled, and never
+    //     extracted. Same class as `cover_scheduledrouting` below and the two 8949 parts: one type,
+    //     more than one shape, and only the shapes named here are checked.
+    //     ★ The cited line is taken from the SCHEDULE that prints it, never typed: if TY2025's
+    //       constant ever stops being 37 the row's quote stops resolving and `line-coverage` reds.
+    rows.extend(dated(cover_form6251line1(
+        &crate::tax::form6251::Form6251Line1::Y2025 {
+            line1a: Usd::ZERO,
+            line1b: Usd::ZERO,
+            schedule_1a_line: crate::tax::schedule_1a::Schedule1A::SENIOR_DEDUCTION_SUBTOTAL_LINE,
+        },
     )));
     rows.extend(dated(cover_form8995apartii(
         &crate::tax::qbi_a::Form8995APartIi::default(),

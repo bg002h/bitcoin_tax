@@ -20,12 +20,26 @@
 //! | 4 | MFS threshold **$900,350** | **$640,200** | printed constant |
 //! | 5, 7, 18, 19, 25, 39 | exemption table, 26/28% breakpoints, 0 %/15 % brackets | all moved | printed constants |
 //!
-//! Schedule 1-A line 37 is the *senior* deduction subtotal and line 43 is its TY2026 renumber. Read
-//! the wrong one and the AMT base is wrong while every instrument stays green: the field map cannot
-//! see it (same FQNs), the geometry fixture cannot see it (same rects), read-back cannot see it (the
-//! value lands in the box it was sent to), and both oracles take the figure as INPUT. It is the
-//! Form 6251 line-33 defect one line up — a cross-reference transcribed one line off, which on that
-//! occasion inflated the tentative minimum tax by **$200,000** on one vector.
+//! ★★★ **37 → 43 IS A COLLISION, NOT A RENUMBER — and this paragraph used to say "renumber".** Read
+//! off the two extracts' own label columns:
+//!
+//! | Schedule 1-A | line 37 | line 43 |
+//! |---|---|---|
+//! | **TY2025 final** (`f1040s1a--2025.txt:108`) | "Enhanced deduction for seniors. Add lines 36a and 36b" | *(the schedule ends at 38)* |
+//! | **TY2026 draft** (`f1040s1a--2026-DRAFT.txt:213,222`) | **"Enter the amount from line 3"** — modified AGI | "Enhanced deduction for seniors. Add lines 42a and 42b" |
+//!
+//! The senior subtotal moved 37 → 43 **and the vacated number was refilled**, so one revision prints
+//! a ≤$6,000 deduction where the next prints a six-figure income. Line 1a subtracts it from 1040 line
+//! 14 and line 1b subtracts 1a from line 11b, so substituting MAGI for the deduction drives 1a
+//! sharply negative and **overstates the AMT base by ≈MAGI** — taxpayer-adverse, six figures, and the
+//! OPPOSITE direction from the TY2025 understatement the core-side kills pin. A renumber would have
+//! been an off-by-one between two neighbouring deduction subtotals; this is not that.
+//!
+//! Read the wrong one and the AMT base is wrong while every instrument stays green: the field map
+//! cannot see it (same FQNs), the geometry fixture cannot see it (same rects), read-back cannot see
+//! it (the value lands in the box it was sent to), and both oracles take the figure as INPUT. It is
+//! the Form 6251 line-33 defect one line up — a cross-reference transcribed one line off, which on
+//! that occasion inflated the tentative minimum tax by **$200,000** on one vector.
 //!
 //! ## How it is closed
 //!
@@ -36,18 +50,34 @@
 //! is **verbatim in that revision's own archived extract**, so TY2025's "line 37" reds against
 //! `f6251--2026.txt`.
 //!
+//! ★★★ **And the third leg, which closes the COMPUTATION side:**
+//! [`ObbbaRevision::schedule_1a_line_agreeing_with`] compares the line this revision PRINTS against
+//! the line the figure was actually read off — carried from core as
+//! `btctax_core::tax::schedule_1a::SeniorDeductionSubtotal`, which can only be obtained from the
+//! schedule revision that printed it. The emitter calls it, so a chain reusing TY2025's Schedule 1-A
+//! line while filling a revision that cites 43 **refuses instead of printing a figure**. Before that
+//! join existed the emitter resolved the right line number and dropped it on the floor, and the
+//! cross-reference on the core side was a FIELD NAME (`schedule_1a_l37`) — the one form of a cell no
+//! test, no `_`-free match and no extract comparison can read.
+//!
 //! ## What is deliberately NOT here — the printed CONSTANTS
 //!
 //! The six constant-only lines (5, 7's third bullet, 18, 19, 25, 39) and line 4's dollar figure are
-//! **not transcribed per revision**, and that is the rule rather than an omission: those figures are
-//! already per-year in `btctax_core::tax::tables::AmtParams` and the year's `TaxTable`
-//! (line 4's is `AmtParams::mfs_kicker_start` — `dec!(875950)` for TY2024, `dec!(640200)` for
-//! TY2026). Re-typing one here would create a **second authority** for a number that already has
-//! one, which is how two lists come to disagree. What IS held per revision is the line-4 sentence
-//! whose parenthetical *names* the threshold, so [`ObbbaRevision::mfs_threshold_printed`] can be
-//! compared against the params by whoever owns both — and `btctax-forms` does not: it does not
-//! depend on `btctax-adapters`, where the per-year params live. **That join is the honest boundary
-//! of this module**, stated rather than papered over (`CLAUDE.md`, rule 3).
+//! **not transcribed as a number here.** What IS held per revision is the line-4 SENTENCE whose
+//! parenthetical names the threshold, so [`ObbbaRevision::mfs_threshold_printed`] parses out what the
+//! paper prints and it can be compared against the params by whoever owns both — and `btctax-forms`
+//! does not: it does not depend on `btctax-adapters`, where the per-year params live. **That join is
+//! the honest boundary of this module**, stated rather than papered over (`CLAUDE.md`, rule 3).
+//!
+//! ★★ **The reason is the SINGLE-AUTHORITY rule, and the "it is already per-year in `AmtParams`"
+//! sentence that used to stand here was measurably false for the one revision this module holds.**
+//! Measured over the workspace: **every** `AmtParams::mfs_kicker_start` literal is `dec!(875950)`
+//! (TY2024) or `dec!(640200)` (TY2026) — `crates/btctax-adapters/src/tax_tables.rs:185,315` and the
+//! fixtures — and **none is TY2025's printed $900,350**. The rule is still the right one: a figure
+//! typed twice is two lists that can disagree, and the sentence-plus-parser keeps one authority (the
+//! form) with a derived reading. But the claim that a first authority already exists for *this*
+//! revision's threshold does not hold, and the gap it hides is real: `mfs_threshold_printed()` has
+//! nothing to be compared against for TY2025 today (`FOLLOWUPS.md` FR-120).
 
 use crate::line_set::LineSet;
 use btctax_core::Usd;
@@ -112,9 +142,57 @@ impl ObbbaRevision {
     /// default.
     #[must_use]
     pub fn schedule_1a_line(&self) -> Option<u32> {
-        let tail = self.line1a.split_once("Schedule 1-A (Form 1040), line ")?.1;
+        let tail = after_the_only(self.line1a, "Schedule 1-A (Form 1040), line ")?;
         let digits: String = tail.chars().take_while(char::is_ascii_digit).collect();
         digits.parse().ok()
+    }
+
+    /// ★★★ **THE JOIN — the line THIS revision prints, checked against the line the FIGURE was read
+    /// off.** Returns the agreed line number, or a refusal naming both.
+    ///
+    /// **Why this exists at all.** The two halves of the most dangerous cell on this form live in
+    /// different crates: the form's own sentence here, and the money in
+    /// `btctax_core::tax::form6251::Form6251Line1::Y2025`. Until this method existed the emitter
+    /// resolved [`Self::schedule_1a_line`] and **discarded the value** — an existence check on the
+    /// sentence, never a comparison — while the cross-reference on the core side was spelled into a
+    /// FIELD NAME (`schedule_1a_l37`), the one form of a cell that no test, no `_`-free match and no
+    /// extract comparison can read. Both sides were individually pinned and nothing joined them.
+    ///
+    /// ★★ **What it stops.** `f6251/2026` reuses this schema (62 fields, 0 renamed), so a TY2026 arm
+    /// that reuses core's `Y2025` shape compiles — the TY2026 Schedule 1-A really does print a line
+    /// 37, it just means *"Enter the amount from line 3"*, i.e. modified AGI. The figure would be a
+    /// six-figure income where a ≤$6,000 deduction belongs, the AMT base overstated by ≈MAGI, and
+    /// every other instrument green: same FQNs, same rects, the value lands in the box it was sent
+    /// to, and both oracles take it as INPUT. This is the one check that can see it, because it is
+    /// the one place holding the printed sentence and the figure's provenance at once.
+    ///
+    /// ★ It fails closed on BOTH legs: a sentence with no parsable cross-reference refuses too,
+    /// rather than defaulting to a line nobody printed.
+    pub fn schedule_1a_line_agreeing_with(
+        &self,
+        read_by_the_computation: u32,
+    ) -> Result<u32, crate::FormsError> {
+        let printed = self.schedule_1a_line().ok_or_else(|| {
+            crate::FormsError::Structure(format!(
+                "Form 6251 {}: the revision's line-1a sentence carries no Schedule 1-A line number \
+                 — the AMT base's source line is unknown and the form must not be filed.",
+                self.line_set.as_str()
+            ))
+        })?;
+        if printed != read_by_the_computation {
+            return Err(crate::FormsError::Structure(format!(
+                "Form 6251 {}: line 1a on this revision subtracts Schedule 1-A line {printed}, but \
+                 the figure was read off line {read_by_the_computation}. These are DIFFERENT \
+                 QUANTITIES, not a renumber: the senior-deduction subtotal moved 37 -> 43 for \
+                 TY2026 and line 37 was REFILLED with \"Enter the amount from line 3\" (modified \
+                 AGI), so substituting one for the other overstates the AMT base by approximately \
+                 MAGI. Transcribe this revision's Schedule 1-A and read the subtotal off ITS own \
+                 line, through that schedule's own accessor — never re-point the previous \
+                 revision's.",
+                self.line_set.as_str()
+            )));
+        }
+        Ok(printed)
     }
 
     /// The MFS line-4 kicker threshold **printed on the page**, parsed out of [`Self::line4`].
@@ -123,7 +201,7 @@ impl ObbbaRevision {
     /// not a source of truth for any computation in this crate — nothing here computes AMT.
     #[must_use]
     pub fn mfs_threshold_printed(&self) -> Option<Usd> {
-        let tail = self.line4.split_once("is more than $")?.1;
+        let tail = after_the_only(self.line4, "is more than $")?;
         let figure: String = tail
             .chars()
             .take_while(|c| c.is_ascii_digit() || *c == ',')
@@ -136,12 +214,26 @@ impl ObbbaRevision {
     /// [`Self::line7_capital_gain_clause`]** — `"7"` in TY2025, `"7a"` in TY2026's draft.
     #[must_use]
     pub fn form_1040_capital_gain_line(&self) -> Option<&'static str> {
-        let tail = self
-            .line7_capital_gain_clause
-            .split_once("Form 1040 or 1040-SR, line ")?
-            .1;
+        let tail = after_the_only(
+            self.line7_capital_gain_clause,
+            "Form 1040 or 1040-SR, line ",
+        )?;
         tail.split_once(';').map(|(n, _)| n)
     }
+}
+
+/// The text after `anchor` in `sentence`, **and `None` unless the anchor occurs EXACTLY ONCE**.
+///
+/// ★★ `split_once` silently takes the FIRST occurrence, so a future revision whose clause repeated
+/// its anchor before the delimiter would have a second reading available and nothing would say which
+/// one was taken. The ambiguity was not expressible: only the zero-occurrence case failed closed
+/// (seam review N-1). Two occurrences now refuse exactly as zero does — a cross-reference that can be
+/// read two ways is not a cross-reference, and on this cell the difference is the AMT base.
+fn after_the_only<'a>(sentence: &'a str, anchor: &str) -> Option<&'a str> {
+    let mut it = sentence.split(anchor);
+    let _before = it.next()?;
+    let tail = it.next()?;
+    it.next().is_none().then_some(tail)
 }
 
 /// **TY2025 — the final document** (`design/forms/2025/f6251--2025.pdf`, sha256 `6995bfd2…`,
@@ -248,6 +340,100 @@ mod tests {
         assert_eq!(bogus.schedule_1a_line(), None);
         assert_eq!(bogus.mfs_threshold_printed(), None);
         assert_eq!(bogus.form_1040_capital_gain_line(), None);
+    }
+
+    /// ★★★ **THE CENTRAL KILL — the TY2026 arm the source used to advertise as "a one-line edit",
+    /// refused.**
+    ///
+    /// The scenario, exactly as a future porter would reach it: TY2026's finals land, the field map is
+    /// reused (62 fields, 0 renamed, 0 moved), a revision is stated whose line-1a sentence is TY2026's
+    /// own — **verbatim from `design/forms/extract/f6251--2026-DRAFT.txt:51-52`, citing Schedule 1-A
+    /// line 43** — and the `2026 =>` arm in core reuses the `Y2025` shape while still reading the
+    /// TY2025 schedule's senior subtotal, i.e. line **37**. That compiles: the TY2026 schedule really
+    /// does print a line 37. It means *"Enter the amount from line 3"* — modified AGI — so the AMT base
+    /// would be overstated by ≈MAGI with every other instrument green.
+    ///
+    /// This is the check that stops it, and it is watched in BOTH directions: agreement is silent,
+    /// disagreement refuses, and the message names both numbers so the next reader is not sent hunting.
+    #[test]
+    fn a_revision_citing_line_43_refuses_a_figure_read_off_line_37() {
+        // The one wired revision agrees with itself — the rule must not refuse the real case.
+        let ty2025 = revision(LineSet::F6251_2025).expect("TY2025 is on this schema");
+        assert_eq!(
+            ty2025.schedule_1a_line_agreeing_with(37).ok(),
+            Some(37),
+            "TY2025 prints line 37 and the TY2025 chain reads line 37; this must be SILENT"
+        );
+
+        // ★ A TY2026-shaped revision. `line_set` only names the row in the message; what makes this
+        //   the real scenario is the SENTENCE, which is the TY2026 draft's own.
+        let ty2026 = ObbbaRevision {
+            line_set: LineSet::F6251_2025,
+            extract: "f6251--2026",
+            line1a: "Subtract Schedule 1-A (Form 1040), line 43, from Form 1040, 1040-SR, or \
+                     1040-NR, line 14",
+            line4: F6251_2025.line4,
+            line7_capital_gain_clause: F6251_2025.line7_capital_gain_clause,
+        };
+        assert_eq!(
+            ty2026.schedule_1a_line(),
+            Some(43),
+            "the plant must really cite 43, or the kill proves nothing"
+        );
+        let err = ty2026
+            .schedule_1a_line_agreeing_with(37)
+            .expect_err(
+                "a revision printing \"Schedule 1-A line 43\" ACCEPTED a figure read off line 37 — \
+                 that is modified AGI in the senior deduction's slot and the AMT base is overstated \
+                 by roughly the whole AGI",
+            )
+            .to_string();
+        assert!(
+            err.contains("line 43") && err.contains("line 37"),
+            "the refusal must name BOTH lines, because the whole defect is that they look \
+             interchangeable: {err}"
+        );
+        assert!(
+            err.contains("not a renumber"),
+            "…and must say why substituting one for the other is not an off-by-one: {err}"
+        );
+
+        // …and the OTHER direction: a TY2025 revision handed a figure read off line 43.
+        assert!(
+            ty2025.schedule_1a_line_agreeing_with(43).is_err(),
+            "the comparison must be symmetric — a chain that read line 43 must not fill a form \
+             citing 37 either"
+        );
+    }
+
+    /// ★ Seam review N-1 — an anchor that occurs TWICE is ambiguous, and ambiguity now fails closed.
+    ///
+    /// `split_once` takes the FIRST occurrence silently, so a future revision whose clause repeated
+    /// its anchor had a second reading available and nothing said which was taken. Only the
+    /// zero-occurrence case failed closed; this is the case that was not expressible.
+    #[test]
+    fn a_repeated_anchor_is_ambiguous_and_yields_none_rather_than_the_first_reading() {
+        let doubled = ObbbaRevision {
+            line_set: LineSet::F6251_2025,
+            extract: "f6251--2025",
+            // Both readings are present: 43 first, 37 second. Taking "the first" would be a silent
+            // choice between a deduction and an income.
+            line1a: "Subtract Schedule 1-A (Form 1040), line 43, from Form 1040, 1040-SR, or \
+                     1040-NR, line 14, or Schedule 1-A (Form 1040), line 37, if applicable",
+            line4: "Alternative minimum taxable income. Combine lines 1b through 3. (If married \
+                    filing separately and line 4 is more than $900,350, see instructions, and if \
+                    line 4 is more than $1,000,000 see the worksheet.)",
+            line7_capital_gain_clause:
+                "If you reported capital gain distributions directly on Form 1040 or 1040-SR, line \
+                 7, or on Form 1040 or 1040-SR, line 7a;",
+        };
+        assert_eq!(doubled.schedule_1a_line(), None);
+        assert_eq!(doubled.mfs_threshold_printed(), None);
+        assert_eq!(doubled.form_1040_capital_gain_line(), None);
+        // ★ …and the refusal is the JOIN's too, not only the accessor's: an unreadable sentence must
+        //   not become "agrees with whatever was asked".
+        assert!(doubled.schedule_1a_line_agreeing_with(37).is_err());
+        assert!(doubled.schedule_1a_line_agreeing_with(43).is_err());
     }
 
     /// ★★ Every revision this build wires onto the OBBBA field map has cells here. Derived from

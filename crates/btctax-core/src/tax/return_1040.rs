@@ -2968,9 +2968,29 @@ pub(crate) fn first_digital_asset_event(
 /// `FullReturnParams` the way `SaltLimitation` already is, so the compiler — not this `match` —
 /// forces the decision when a year is added. That edit is in `tables.rs`; this one is not.
 ///
-/// TY2026 is expected to REUSE the `Y2025` shape rather than gain a variant (§7 D3: Form 6251 does
-/// not renumber for TY2026; only the cited Schedule 1-A line moves, 37 → 43). Adding the `2026 =>`
-/// arm is therefore a one-line edit **once the final form has been read**, and not before.
+/// ★★★ **TY2026 IS NOT A ONE-LINE EDIT, and this comment used to say it was.** It read: *"TY2026 is
+/// expected to REUSE the `Y2025` shape rather than gain a variant … only the cited Schedule 1-A line
+/// moves, 37 → 43. Adding the `2026 =>` arm is therefore a one-line edit."* Both halves of that were
+/// wrong in the dangerous direction, and an implementer who followed it shipped a six-figure
+/// overstatement:
+///
+/// **37 → 43 is a COLLISION, not a renumber.** Read off the two extracts, not off a design doc:
+/// TY2025's Schedule 1-A line 37 is *"Enhanced deduction for seniors. Add lines 36a and 36b"*
+/// (`design/forms/extract/f1040s1a--2025.txt:108`), and on the TY2026 draft the senior subtotal has
+/// moved to line **43** (`f1040s1a--2026-DRAFT.txt:222`) while line **37 is refilled** with *"Enter
+/// the amount from line 3"* (`:213`) — modified AGI. So the same number names a ≤$6,000 deduction on
+/// one revision and a six-figure income on the next. Feeding the TY2026 schedule's line 37 into line
+/// 1a drives 1a sharply negative and **overstates the AMT base by ≈MAGI**, taxpayer-adverse, in the
+/// opposite direction from the understatement the `_` arm above guards.
+///
+/// **What makes the arm safe is not care, it is the join.** The subtotal now travels as a
+/// [`crate::tax::schedule_1a::SeniorDeductionSubtotal`] — the figure plus *the schedule line it was
+/// read off* — obtainable only from the transcription struct that printed it, and
+/// `btctax_forms::f6251_revision` compares that line against the sentence the document being filled
+/// actually prints. A TY2026 arm that reuses this shape while reading the TY2025 schedule's line 37
+/// therefore REFUSES at the emitter instead of printing a figure. Transcribe TY2026's schedule (its
+/// own struct, its own `SENIOR_DEDUCTION_SUBTOTAL_LINE = 43`), call that struct's accessor, and let
+/// the refusal be the proof — never re-type a line number here.
 fn form6251_line1_rule(
     year: i32,
     form_1040_l11b: Usd,
@@ -2983,11 +3003,12 @@ fn form6251_line1_rule(
         2025 => Some(Form6251Line1Rule::Y2025 {
             form_1040_l11b,
             form_1040_l14,
-            // Line 1a subtracts Schedule 1-A line **37**, not line 38's total. A year with no
-            // Schedule 1-A has no line 37 — but no such year reaches this arm, because 2025 has one.
-            schedule_1a_l37: schedule_1a
-                .and_then(|s| s.part5.line37)
-                .unwrap_or(Usd::ZERO),
+            // ★★ Line 1a subtracts the SENIOR subtotal, not line 38's total — and the accessor is
+            //    what says which line that is on this revision of the schedule. Reading
+            //    `s.part5.line37` directly here would drop the provenance and re-open the collision.
+            senior_deduction: crate::tax::schedule_1a::Schedule1A::senior_deduction_subtotal(
+                schedule_1a,
+            ),
         }),
         _ => None,
     }
@@ -11887,12 +11908,22 @@ mod tests {
         assert_eq!(ty2025.schedule_1a_additional, dec!(4000), "1040 L13b");
 
         match ty2025.amt.line1 {
-            Form6251Line1::Y2025 { line1a, line1b } => {
+            Form6251Line1::Y2025 {
+                line1a,
+                line1b,
+                schedule_1a_line,
+            } => {
                 // 1a — "Subtract Schedule 1-A, line 37, from Form 1040 … line 14."
                 //      L14 = 12e + 13a + 13b = 14,600 + 0 + 4,000; L37 = 0 (no senior).
                 assert_eq!(line1a, dec!(18600), "Form 6251 line 1a");
                 // 1b — "Subtract line 1a from Form 1040 … line 11b." 90,000 − 18,600.
                 assert_eq!(line1b, dec!(71400), "Form 6251 line 1b");
+                // ★ …and the whole production path carries the cited line, not just the figure.
+                assert_eq!(
+                    schedule_1a_line, 37,
+                    "the TY2025 schedule's senior subtotal is line 37, and the emitter compares \
+                     this against the sentence the document it fills prints"
+                );
             }
             other => panic!(
                 "a TY2025 return must fill the TY2025 Part I (lines 1a/1b); got {other:?} — this is \
@@ -11987,14 +12018,24 @@ mod tests {
         let Form6251Line1Rule::Y2025 {
             form_1040_l11b,
             form_1040_l14,
-            schedule_1a_l37,
+            senior_deduction,
         } = inputs.line1_rule
         else {
             panic!("TY2025 must select the TY2025 line-1 rule");
         };
         assert_eq!(form_1040_l11b, agi, "1040 line 11b is AGI");
         assert_eq!(form_1040_l14, l14, "1040 line 14 = 12e + 13a + 13b");
-        assert_eq!(schedule_1a_l37, dec!(6000), "Schedule 1-A line 37");
+        assert_eq!(
+            senior_deduction.amount(),
+            dec!(6000),
+            "the enhanced senior deduction subtotal"
+        );
+        assert_eq!(
+            senior_deduction.schedule_1a_line(),
+            Schedule1A::SENIOR_DEDUCTION_SUBTOTAL_LINE,
+            "…and it is read off THIS revision's line for it, which is what the emitter compares \
+             against the printed form"
+        );
         // 1040 L14 must be the THREE-term sum here too — the old signature took `qbi_deduction`
         // and built `deduction + qbi_deduction`, which drops 13b.
         assert_eq!(
@@ -12013,6 +12054,7 @@ mod tests {
             Form6251Line1::Y2025 {
                 line1a: dec!(14600), // 20,600 − 6,000
                 line1b: dec!(60400), // 75,000 − 14,600
+                schedule_1a_line: Schedule1A::SENIOR_DEDUCTION_SUBTOTAL_LINE,
             }
         );
         assert_eq!(correct.line4 - wrong.line4, dec!(6000));

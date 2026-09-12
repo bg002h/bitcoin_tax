@@ -290,22 +290,14 @@ pub fn fill_form_6251_obbba_with_map(
             map.year, map.line_set
         ))
     })?;
-    // ★ The same guard as `verify_flat`'s: a cell that cannot be resolved is a refusal, not a
-    //   default. `schedule_1a_line` parses the number OUT of the form's own sentence, so a sentence
-    //   that lost its cross-reference fails here instead of silently meaning line 0.
-    revision.schedule_1a_line().ok_or_else(|| {
-        FormsError::Structure(format!(
-            "Form 6251 TY{}: revision {:?} states a line-1a sentence with no Schedule 1-A line \
-             number in it — the AMT base's source line is unknown and the form must not be filed.",
-            map.year,
-            revision.line_set.as_str()
-        ))
-    })?;
-
     // ★★★ LINE 1 IS YEAR-SHAPED. This map has TWO cells for it, so it requires the 1a/1b shape and
     //     REFUSES the TY2024 single-line-1 shape rather than leaving a box blank on a filed form.
-    let (line1a, line1b) = match f.line1 {
-        btctax_core::tax::form6251::Form6251Line1::Y2025 { line1a, line1b } => (line1a, line1b),
+    let (line1a, line1b, schedule_1a_line) = match f.line1 {
+        btctax_core::tax::form6251::Form6251Line1::Y2025 {
+            line1a,
+            line1b,
+            schedule_1a_line,
+        } => (line1a, line1b, schedule_1a_line),
         // ★ `#[non_exhaustive]`, so the catch-all is required and is also the right behaviour: any
         //   shape this map has no cells for must REFUSE, never silently drop or invent a sub-line.
         _ => {
@@ -318,6 +310,15 @@ pub fn fill_form_6251_obbba_with_map(
             ));
         }
     };
+
+    // ★★★ THE JOIN, and it is the reason this function resolves the revision at all: the line the
+    //     PRINTED page cites for line 1a, checked against the line the FIGURE was actually read off
+    //     (`SeniorDeductionSubtotal`, carried from core through `Form6251Line1::Y2025`). This used to
+    //     be a bare `revision.schedule_1a_line().ok_or_else(…)?;` — the right number resolved and
+    //     dropped on the floor — so a revision whose cross-reference had moved printed the previous
+    //     revision's figure with every instrument green. Both legs fail closed; see
+    //     `ObbbaRevision::schedule_1a_line_agreeing_with` for what the disagreement costs.
+    revision.schedule_1a_line_agreeing_with(schedule_1a_line)?;
 
     let mut doc = pdf::load(pdf::f6251_pdf(map.year)?)?;
     let blank_fields = pdf::collect_fields(&doc)?;

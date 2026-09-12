@@ -54,10 +54,21 @@ pub enum Form6251Line1 {
     /// 1040-SR, or 1040-NR, line 14." · "**b** Subtract line 1a from Form 1040, 1040-SR, or 1040-NR,
     /// line 11b (if less than zero, enter as a negative amount)."
     ///
-    /// ★ Line 1a subtracts Schedule 1-A line **37** — the *senior* deduction subtotal, not line 38's
-    /// total — so the enhanced senior deduction is ADDED BACK for the AMT while the tips, overtime and
-    /// car-loan deductions are allowed.
-    Y2025 { line1a: Usd, line1b: Usd },
+    /// ★ Line 1a subtracts the *senior* deduction subtotal, not line 38's total — so the enhanced
+    /// senior deduction is ADDED BACK for the AMT while the tips, overtime and car-loan deductions
+    /// are allowed.
+    ///
+    /// ★★★ `schedule_1a_line` IS NOT A PRINTED BOX — it is the PROVENANCE of `line1a`: which
+    /// Schedule 1-A line the subtracted figure was actually read off (37 on the TY2025 schedule, 43
+    /// on the TY2026 draft, where **37 still exists and means modified AGI**). The emitter compares
+    /// it against the line the document it is filling prints, and refuses on a disagreement — which
+    /// is the only thing standing between a revision reusing this shape and an AMT base overstated
+    /// by ≈MAGI. Nothing may print it.
+    Y2025 {
+        line1a: Usd,
+        line1b: Usd,
+        schedule_1a_line: u32,
+    },
 }
 
 impl Default for Form6251Line1 {
@@ -312,9 +323,16 @@ impl Form6251 {
                 Form6251Line1::Y2024 { line1 } => Form6251Line1::Y2024 {
                     line1: round_dollar(line1),
                 },
-                Form6251Line1::Y2025 { line1a, line1b } => Form6251Line1::Y2025 {
+                Form6251Line1::Y2025 {
+                    line1a,
+                    line1b,
+                    schedule_1a_line,
+                } => Form6251Line1::Y2025 {
                     line1a: round_dollar(line1a),
                     line1b: round_dollar(line1b),
+                    // ★ Provenance, not money: it survives rounding unchanged, because the emitter
+                    //   compares it against the form and a rounded line number is nonsense.
+                    schedule_1a_line,
                 },
             },
             line2a: round_dollar(*line2a),
@@ -389,14 +407,18 @@ impl Form6251 {
 pub enum Form6251Line1Rule {
     /// TY2024 — line 1 reads 1040 line 15, falling back to line 11 − line 14 when line 15 is zero.
     Y2024,
-    /// TY2025 — 1a = 1040 line 14 − Schedule 1-A line 37; 1b = 1040 line 11b − 1a.
+    /// TY2025 — 1a = 1040 line 14 − the Schedule 1-A senior deduction subtotal; 1b = 1040 line 11b
+    /// − 1a.
     Y2025 {
         /// 1040 line 11b ("Amount from line 11a (adjusted gross income)").
         form_1040_l11b: Usd,
         /// 1040 line 14 ("Add lines 12e, 13a, and 13b").
         form_1040_l14: Usd,
-        /// Schedule 1-A line 37 — the enhanced senior deduction subtotal.
-        schedule_1a_l37: Usd,
+        /// **The enhanced senior deduction subtotal, carrying the Schedule 1-A line it was read
+        /// off.** See [`crate::tax::schedule_1a::SeniorDeductionSubtotal`] for why the line number
+        /// travels with the figure instead of being spelled into this field's name: 37 and 43 are a
+        /// COLLISION between the two revisions, not a renumber, and the difference is ≈MAGI.
+        senior_deduction: crate::tax::schedule_1a::SeniorDeductionSubtotal,
     },
 }
 
@@ -466,12 +488,15 @@ pub fn compute_6251(i: Form6251Inputs, amt: &AmtParams, bp: &LtcgBreakpoints) ->
         Form6251Line1Rule::Y2025 {
             form_1040_l11b,
             form_1040_l14,
-            schedule_1a_l37,
+            senior_deduction,
         } => {
-            let line1a = form_1040_l14 - schedule_1a_l37;
+            let line1a = form_1040_l14 - senior_deduction.amount();
             Form6251Line1::Y2025 {
                 line1a,
                 line1b: form_1040_l11b - line1a, // may be negative; the form says so explicitly
+                // ★★ The cross-reference travels WITH the figure, all the way to the emitter, which
+                //    is the one place that also holds the line the printed form cites.
+                schedule_1a_line: senior_deduction.schedule_1a_line(),
             }
         }
     };
@@ -1033,12 +1058,17 @@ mod tests {
     /// income (460,000) with the senior deduction added back, which is what the AMT wants.
     #[test]
     fn ty2025_part_i_combines_line_1b_and_adds_the_senior_deduction_back() {
+        // ★ The subtotal is taken THROUGH the schedule that prints it, not typed beside a line
+        //   number — so this fixture exercises the same pairing production uses.
+        let mut s = crate::tax::schedule_1a::Schedule1A::default();
+        s.part5.line37 = Some(dec!(6000));
         let f = compute_6251(
             Form6251Inputs {
                 line1_rule: Form6251Line1Rule::Y2025 {
                     form_1040_l11b: dec!(500000),
                     form_1040_l14: dec!(40000),
-                    schedule_1a_l37: dec!(6000),
+                    senior_deduction:
+                        crate::tax::schedule_1a::Schedule1A::senior_deduction_subtotal(Some(&s)),
                 },
                 status: FilingStatus::Single,
                 taxable_income_l15: dec!(460000),
@@ -1058,10 +1088,21 @@ mod tests {
             &params(),
             &bps(FilingStatus::Single),
         );
-        let Form6251Line1::Y2025 { line1a, line1b } = f.line1 else {
+        let Form6251Line1::Y2025 {
+            line1a,
+            line1b,
+            schedule_1a_line,
+        } = f.line1
+        else {
             panic!("the Y2025 rule must produce the Y2025 shape")
         };
-        assert_eq!(line1a, dec!(34000), "1a = 1040 L14 − Sch 1-A L37");
+        assert_eq!(
+            schedule_1a_line, 37,
+            "the TY2025 schedule prints the senior subtotal on line 37, and the figure must carry \
+             that provenance to the emitter — on the TY2026 draft the same subtotal is line 43 and \
+             line 37 is modified AGI"
+        );
+        assert_eq!(line1a, dec!(34000), "1a = 1040 L14 − the senior subtotal");
         assert_eq!(line1b, dec!(466000), "1b = 1040 L11b − 1a");
         assert_eq!(
             f.line4,

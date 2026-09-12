@@ -170,6 +170,9 @@ fn a_ty2025_shaped_line_1_refuses_against_the_ty2024_map() {
     f.line1 = Form6251Line1::Y2025 {
         line1a: dec!(5000),
         line1b: dec!(295000),
+        // ★ Provenance, not a printed box: which Schedule 1-A line 1a's figure was read off. Taken
+        //   from the schedule revision that prints it, never typed.
+        schedule_1a_line: btctax_core::tax::schedule_1a::Schedule1A::SENIOR_DEDUCTION_SUBTOTAL_LINE,
     };
     let err = btctax_forms::testonly::fill_form_6251_with_map(&f, &header(), &map)
         .expect_err("a TY2025 line 1 must not fill a TY2024 form");

@@ -1511,6 +1511,87 @@ mod tests {
         );
     }
 
+    /// ★★★ **THE KILL TEST for the OBBBA line-1 rows (harness B1, seam review M-1).**
+    ///
+    /// The defect: `cover_form6251line1` was `if let Form6251Line1::Y2024 { line1 } = p`, so a TY2025
+    /// chain produced an **empty** `Coverage` — an `if let` that matches nothing is silent — and the
+    /// comment above it promised the 1a/1b rows *"when that year's map lands"*. That map landed in
+    /// `d8d023af` and no rows were added, so `Form6251Line1::Y2025`'s transcription (the doc comment
+    /// that hardcodes "line 37") was verified verbatim by NOTHING: `cite-check` also excuses this form
+    /// (`AUTHORITY_NOT_YET_ARCHIVED` carries `("f6251", &[2024, 2025])`).
+    ///
+    /// Three directions, because a rule seen only on a clean table has not been seen discriminating:
+    ///
+    /// 1. the OBBBA variant yields rows AT ALL (this is what the `if let` did not do);
+    /// 2. the committed rows are verbatim on `f6251--2025.txt` and bound to their own labels;
+    /// 3. ★ the ROT that matters — 1a's cross-reference moved to the TY2026 draft's *"line 43"* — reds,
+    ///    naming the row. That is the collision, and it is the sentence a port would paste.
+    #[test]
+    fn the_obbba_line_1_rows_are_verbatim_and_a_moved_cross_reference_reds() {
+        use btctax_core::tax::form6251::Form6251Line1;
+
+        // (1) The variant produces rows. Before this fold it produced none, silently.
+        let obbba = line_coverage::cover_form6251line1(&Form6251Line1::Y2025 {
+            line1a: btctax_core::conventions::Usd::ZERO,
+            line1b: btctax_core::conventions::Usd::ZERO,
+            schedule_1a_line:
+                btctax_core::tax::schedule_1a::Schedule1A::SENIOR_DEDUCTION_SUBTOTAL_LINE,
+        });
+        assert_eq!(
+            obbba.0.len(),
+            2,
+            "the OBBBA line-1 region prints TWO boxes (1a and 1b); an empty Coverage here is the \
+             `if let` that matched nothing"
+        );
+
+        // (2) …and they reach the real table, quoted from the 2025 extract, and pass every rule.
+        let rows: Vec<line_coverage::LineCoverage> = line_coverage::all()
+            .0
+            .into_iter()
+            .filter(|e| e.form == "f6251" && (e.line == "1a" || e.line == "1b"))
+            .collect();
+        assert_eq!(
+            rows.len(),
+            2,
+            "both OBBBA rows must be registered in `all()` — `Form6251::default()` is the TY2024 \
+             shape, so they reach the checker only through their own instance"
+        );
+        assert!(
+            rows.iter().all(|e| e.year == "2025"),
+            "the rows must be quoted from f6251--2025.txt, not from the default year: {:?}",
+            rows.iter().map(|e| e.year).collect::<Vec<_>>()
+        );
+        let only = |rows: Vec<line_coverage::LineCoverage>| {
+            let mut c = line_coverage::Coverage::default();
+            c.0 = rows;
+            c
+        };
+        check(&only(rows.clone())).expect("the committed OBBBA line-1 rows must be clean");
+
+        // (3) The rot: line 1a's cross-reference as the TY2026 draft prints it.
+        let mut planted = rows.clone();
+        for e in &mut planted {
+            if e.line == "1a" {
+                e.instruction = "Subtract Schedule 1-A (Form 1040), line 43, from Form 1040, 1040-SR, or 1040-NR, line 14";
+            }
+        }
+        assert!(
+            planted
+                .iter()
+                .zip(rows.iter())
+                .any(|(a, b)| a.instruction != b.instruction),
+            "the plant must differ from the real rows, or the kill proves nothing"
+        );
+        let err = check(&only(planted)).expect_err(
+            "the TY2026 cross-reference was accepted as TY2025's own text — the AMT base's source \
+             line could then move by a whole revision with this instrument green",
+        );
+        assert!(
+            err.contains("f6251:1a") && err.contains("NOT FOUND in f6251--2025.txt"),
+            "the failure must name the row and the extract it is not in: {err}"
+        );
+    }
+
     /// ★★★ THE KILL TEST for `second_edition_problems` (harness B1, seam review M-2).
     ///
     /// The defect it exists to catch is *"one struct serves two revisions, and only ONE of them was

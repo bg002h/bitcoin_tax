@@ -1363,4 +1363,75 @@ impl Schedule1A {
     pub fn line_13b(this: Option<&Self>) -> Usd {
         this.and_then(|s| s.part6.line38).unwrap_or(Usd::ZERO)
     }
+
+    /// The line THIS revision of the schedule prints the enhanced senior deduction subtotal on.
+    ///
+    /// ★★★ **37 IS A PROPERTY OF THE REVISION, not of the quantity** — and that is the whole reason
+    /// this constant exists rather than a `37` typed at each reader. On the TY2026 draft the senior
+    /// subtotal is line **43**, and line 37 is *"Enter the amount from line 3"* — modified AGI. See
+    /// [`SeniorDeductionSubtotal`].
+    pub const SENIOR_DEDUCTION_SUBTOTAL_LINE: u32 = 37;
+
+    /// **The enhanced senior deduction subtotal Form 6251 line 1a subtracts — the figure AND the
+    /// schedule line it was read off, inseparably.**
+    ///
+    /// ★★★ This is the ONLY constructor of a [`SeniorDeductionSubtotal`] outside this module, and
+    /// that is the mechanism: the line number comes from the *transcription struct that printed the
+    /// figure* ([`Self::SENIOR_DEDUCTION_SUBTOTAL_LINE`]), so a reader cannot pair one revision's
+    /// figure with another revision's line number. When TY2026's schedule is transcribed it brings
+    /// its own struct and its own constant (43), and Form 6251's line-1 rule keeps calling *this*
+    /// accessor shape rather than re-typing a number.
+    ///
+    /// `Usd::ZERO` for a year with no such schedule — a REAL zero (the form has no line), which is
+    /// unreachable from the TY2025 arm because TY2025 has one.
+    #[must_use]
+    pub fn senior_deduction_subtotal(this: Option<&Self>) -> SeniorDeductionSubtotal {
+        SeniorDeductionSubtotal {
+            amount: this.and_then(|s| s.part5.line37).unwrap_or(Usd::ZERO),
+            schedule_1a_line: Self::SENIOR_DEDUCTION_SUBTOTAL_LINE,
+        }
+    }
+}
+
+/// ★★★ **The enhanced senior deduction subtotal, carrying the Schedule 1-A line it came off.**
+///
+/// **Why this is a struct and not a `Usd`.** Form 6251 line 1a subtracts *"Schedule 1-A (Form 1040),
+/// line 37"* in TY2025 and *"line 43"* in TY2026's draft — and **37 is not vacated by that move: on
+/// the TY2026 schedule line 37 is *"Enter the amount from line 3"*, i.e. modified AGI.** So the two
+/// revisions print a ≤$6,000 deduction and a six-figure income under the same line number. A figure
+/// travelling as a bare `Usd` (or, worse, in a field *named* `schedule_1a_l37`) carries no statement
+/// of which line it was read off, so nothing downstream — no test, no `_`-free match, no comparison
+/// against the form's own extract — can tell the two apart. Substituting one for the other drives
+/// line 1a sharply negative and **overstates the AMT base by approximately MAGI**: six figures, in
+/// the taxpayer-adverse direction.
+///
+/// ★★ So the cross-reference travels as **DATA beside the money**, and `btctax_forms`'s
+/// `f6251_revision` — which holds the form's own printed sentence — compares the two at the one
+/// place that has both. `CLAUDE.md`'s transcription scope note draws exactly this line: a
+/// field inside a *transcription struct* is named for its line; a *cross-year quantity* the return
+/// consumes is named for what it is, and its cross-reference is carried, not spelled into an
+/// identifier.
+///
+/// ★ **Fields are private and there is no public constructor**, so the only way to obtain one is
+/// [`Schedule1A::senior_deduction_subtotal`] — i.e. from the revision that printed the figure. A
+/// reader cannot type a line number of its own beside a figure it took from somewhere else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SeniorDeductionSubtotal {
+    amount: Usd,
+    schedule_1a_line: u32,
+}
+
+impl SeniorDeductionSubtotal {
+    /// The subtotal itself — what Form 6251 line 1a subtracts from 1040 line 14.
+    #[must_use]
+    pub fn amount(&self) -> Usd {
+        self.amount
+    }
+
+    /// **The Schedule 1-A line this figure was read off**, for comparison against the line the form
+    /// being filled actually prints. Provenance, never a printed box.
+    #[must_use]
+    pub fn schedule_1a_line(&self) -> u32 {
+        self.schedule_1a_line
+    }
 }

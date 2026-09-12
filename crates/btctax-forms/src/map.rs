@@ -626,14 +626,24 @@ pub struct Form6251ObbbaMap {
     pub line2b: MoneyCell,
     /// **L3** — "Other adjustments, including income-based related adjustments".
     pub line3: MoneyCell,
-    /// **L4** — "Alternative minimum taxable income. Combine lines 1b through 3. (If married filing
-    /// separately and line 4 is more than $900,350, see instructions.)"
+    /// **L4** — "Alternative minimum taxable income. Combine lines 1b through 3." The parenthetical
+    /// that follows it names the MFS kicker's start, and **that figure is per revision**, so the
+    /// sentence is not quoted here: TY2025 prints $900,350 and the TY2026 draft $640,200, and this one
+    /// struct serves both.
     ///
-    /// ★★★ The dollar figure is per revision AND per year: TY2025 prints $900,350, the TY2026 draft
-    /// $640,200. It is never a literal in this crate — the value btctax computes with is
-    /// `AmtParams::mfs_kicker_start`, and the sentence the paper prints is
-    /// [`crate::f6251_revision::ObbbaRevision::line4`]. There is no widget for the kicker itself: it
-    /// is folded into line 4's own box, which is why no field map can catch it being dropped.
+    /// ★★★ **THIS DOC COMMENT USED TO CARRY THE WHOLE SENTENCE INCLUDING `$900,350`, and no
+    /// instrument read it.** `every_quoted_instruction_is_verbatim_on_its_own_revisions_form` parses
+    /// the map TOML's `# <label> "…"` comment lines, not Rust doc comments, and `cite-check` excuses
+    /// this form entirely (`AUTHORITY_NOT_YET_ARCHIVED` carries `("f6251", &[2024, 2025])`) — so a
+    /// year-specific figure sat unchecked inside a shared struct, where it would silently become a
+    /// claim about TY2026. A quoted figure no instrument reads is the same class as the rows
+    /// `cover_form6251line1` was not emitting (seam review M-1/M-3).
+    ///
+    /// ★★ The CHECKED copy of the per-revision sentence is
+    /// [`crate::f6251_revision::ObbbaRevision::line4`], asserted verbatim against that revision's own
+    /// archived extract; the value btctax computes with is `AmtParams::mfs_kicker_start`. There is no
+    /// widget for the kicker itself — it is folded into line 4's own box, which is why no field map can
+    /// catch it being dropped.
     pub line4: MoneyCell,
     /// **L5** — "Exemption." The status table printed on the face; its six figures moved between the
     /// two revisions and are `AmtParams`', not this struct's.

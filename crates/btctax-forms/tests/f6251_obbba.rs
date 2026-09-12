@@ -759,6 +759,12 @@ fn part_i_only_2025() -> Form6251 {
     f.line1 = Form6251Line1::Y2025 {
         line1a: dec!(15000),
         line1b: dec!(300000),
+        // ★★ PROVENANCE, and the emitter compares it against the revision's own printed sentence.
+        //    Taken from the schedule struct that prints the subtotal, never typed here — so if a
+        //    SECOND revision joins `obbba_revisions()` whose 1a cites line 43, the fills below
+        //    REFUSE rather than printing this figure, and the fix is a per-revision fixture (core
+        //    will by then have transcribed that revision's own Schedule 1-A), not a bumped literal.
+        schedule_1a_line: btctax_core::tax::schedule_1a::Schedule1A::SENIOR_DEDUCTION_SUBTOTAL_LINE,
     };
     f.line2a = dec!(10000);
     f.line2b = dec!(-500); // ★ core stores it negative; the box is parenthesised
@@ -941,6 +947,212 @@ fn a_map_with_two_lines_transposed_is_caught_by_the_read_back() {
         assert!(
             e.contains("descent"),
             "{}: the transposition must be caught by the y-descent read-back; got {e:?}",
+            ls.as_str()
+        );
+    }
+}
+
+/// A filer whose line 7 DOES route to Part III, with cents on every reachable shape.
+///
+/// ★ Part III is filed as a UNIT or not at all, so `part_iii_completed` is what the form's own
+/// routing instruction says — not a convenience flag. Values are distinct per line so a cell pointing
+/// at its neighbour's widget is a value mismatch and not merely a count that still adds up.
+fn part_iii_routed_2025() -> Form6251 {
+    let mut f = part_i_only_2025();
+    f.part_iii_completed = true;
+    // Cents on the shapes that reach the page through different paths: Part I's inner column, the
+    // parenthesised box, and Part III.
+    f.line1 = Form6251Line1::Y2025 {
+        line1a: dec!(15000.4913),
+        line1b: dec!(300000.4913),
+        schedule_1a_line: btctax_core::tax::schedule_1a::Schedule1A::SENIOR_DEDUCTION_SUBTOTAL_LINE,
+    };
+    f.line2b = dec!(-500.5044); // magnitude 501 after HALF-UP rounding
+                                // Part III, lines 12-40. Distinct, ascending-by-line values with cents on several.
+    let p3: [(&mut Usd, Usd); 29] = [
+        (&mut f.line12, dec!(223800.1234)),
+        (&mut f.line13, dec!(40000)),
+        (&mut f.line14, dec!(1000)),
+        (&mut f.line15, dec!(41000)),
+        (&mut f.line16, dec!(41000)),
+        (&mut f.line17, dec!(41000)),
+        (&mut f.line18, dec!(232600)),
+        (&mut f.line19, dec!(47025)),
+        (&mut f.line20, dec!(30000)),
+        (&mut f.line21, dec!(17025)),
+        (&mut f.line22, dec!(182800)),
+        (&mut f.line23, dec!(17025)),
+        (&mut f.line24, dec!(17025)),
+        (&mut f.line25, dec!(518900)),
+        (&mut f.line26, dec!(47025)),
+        (&mut f.line27, dec!(30000)),
+        (&mut f.line28, dec!(77025)),
+        (&mut f.line29, dec!(518900)),
+        (&mut f.line30, dec!(77025)),
+        (&mut f.line31, dec!(0)),
+        (&mut f.line32, dec!(0)),
+        (&mut f.line33, dec!(0)),
+        (&mut f.line34, dec!(0)),
+        (&mut f.line35, dec!(19050)),
+        (&mut f.line36, dec!(163750)),
+        (&mut f.line37, dec!(40937.5)),
+        (&mut f.line38, dec!(60000)),
+        (&mut f.line39, dec!(57564.2840)),
+        (&mut f.line40, dec!(57564)),
+    ];
+    for (slot, v) in p3 {
+        *slot = v;
+    }
+    f
+}
+
+/// ★★★ **PART III, ROUTED — and EVERY modelled money cell read back off the SERIALIZED PDF.**
+///
+/// **This is B3's "the fix already existed in the branch", carried across.** The identical guarantee
+/// is nine files away for the sibling revision (`f6251_fill.rs`'s
+/// `every_printed_figure_is_a_whole_dollar`, which routes Part III, iterates `map.money_cells()` and
+/// asserts `checked == 41`). It was not carried to the revision that is TY2026's actual emitter.
+/// Measured before this test existed: `grep -c "money_cells\|part_iii_completed = true"` over this
+/// file returned **0** — so 29 of the 42 money cells, INCLUDING the line-33/36 pair that produced this
+/// repo's standing transcription rule, were written by no test and read back by no test, and
+/// `Form6251ObbbaMap::money_cells()` had no reader at all although its own doc comment says *"the
+/// sweeps that read the FILLED page back … iterate this list"*.
+///
+/// **Why the counter is load-bearing, and not decoration.** The sweep skips a cell whose widget reads
+/// back empty (`continue`), so without the count a cell that stopped being written would drop out
+/// silently and the assertion would pass over 41 cells, then 40, reporting nothing. The count is the
+/// difference between "every cell I found is a whole dollar" and "every modelled cell was found".
+#[test]
+fn part_iii_routed_writes_every_money_cell_as_a_whole_dollar_and_the_sweep_sees_all_of_them() {
+    for (ls, year) in obbba_revisions() {
+        let map = Form6251ObbbaMap::for_year(year).unwrap();
+        let f = part_iii_routed_2025();
+        let pdf = fill_form_6251_obbba_with_map(&f, &header(), &map)
+            .unwrap_or_else(|e| panic!("{}: the routed Part III must fill: {e}", ls.as_str()));
+
+        let doc = load(&pdf).unwrap();
+        let fields = collect_fields(&doc).unwrap();
+        let idx = index(&fields);
+        // ★ Pinned separately from `checked` so the count's MEANING is unambiguous: 42 cells, one
+        //   widget each, all 42 read back. Without this, "checked == 42" could also be 41 cells with
+        //   one carrying two widgets — the same number standing for a different fact.
+        assert_eq!(
+            map.money_cells().len(),
+            42,
+            "{}: the map's own cell list",
+            ls.as_str()
+        );
+        let mut checked = 0;
+        for cell in map.money_cells() {
+            for fqn in cell.fields() {
+                let Some(v) = idx.get(fqn).and_then(|fl| text_value(&doc, fl.id)) else {
+                    continue;
+                };
+                assert!(
+                    !v.contains('.'),
+                    "{}: {fqn} prints {v:?} — every line on a filed form is a whole dollar",
+                    ls.as_str()
+                );
+                checked += 1;
+            }
+        }
+        assert_eq!(
+            checked,
+            42,
+            "{}: all forty-two modelled lines must be read back; a count that drifts means the \
+             sweep stopped seeing cells and started passing vacuously",
+            ls.as_str()
+        );
+
+        // ★★★ THE LINE-33/36 PAIR, on the page rather than in a doc comment. 33 subtracts from line
+        //     **22** and 36 from line **12** — four rows apart, same verb — and the whole reason this
+        //     form carries the repo's transcription rule is that they were once both "from line 12".
+        //     Reaching them at all requires the routed path, which is why they were untested.
+        assert_eq!(
+            tv(&pdf, map.line33.fields()[0]).as_deref(),
+            Some("0"),
+            "{}: line 33",
+            ls.as_str()
+        );
+        assert_eq!(
+            tv(&pdf, map.line36.fields()[0]).as_deref(),
+            Some("163750"),
+            "{}: line 36 — a DIFFERENT box from line 33's, and a different figure",
+            ls.as_str()
+        );
+        assert_eq!(
+            tv(&pdf, map.line40.fields()[0]).as_deref(),
+            Some("57564"),
+            "{}: line 40 is what line 7 carries back to Part II",
+            ls.as_str()
+        );
+        // …and the rounding is HALF-UP, not truncation: 500.5044 -> 501, 15000.4913 -> 15000.
+        assert_eq!(tv(&pdf, map.line2b.fields()[0]).as_deref(), Some("501"));
+        assert_eq!(tv(&pdf, map.line1a.fields()[0]).as_deref(), Some("15000"));
+        assert_eq!(tv(&pdf, map.line37.fields()[0]).as_deref(), Some("40938"));
+    }
+}
+
+/// ★★★ **THE JOIN, THROUGH THE REAL EMITTER — a figure read off a Schedule 1-A line this revision
+/// does not cite REFUSES, rather than printing into line 1a's box.**
+///
+/// This is the computation-side twin of
+/// [`the_year_varying_cells_are_verbatim_in_that_revisions_own_extract`], and until 2026-09-11 nothing
+/// held it. The emitter resolved `revision.schedule_1a_line()` and **discarded the value** — an
+/// existence check on the sentence, never a comparison — while on the core side the cross-reference
+/// was spelled into a FIELD NAME (`schedule_1a_l37`), which no test, no `_`-free match and no extract
+/// comparison can read. So the two halves of the most dangerous cell on this form were each pinned and
+/// nothing joined them.
+///
+/// **What the plant is.** `37 → 43` is a COLLISION, not a renumber: the senior-deduction subtotal moved
+/// to TY2026's line 43, and TY2026's line **37 was refilled** with *"Enter the amount from line 3"* —
+/// modified AGI (`design/forms/extract/f1040s1a--2026-DRAFT.txt:213,222`). So a TY2026 arm reusing
+/// core's `Y2025` shape against the TY2025 schedule compiles, fills, reads back and prints a page that
+/// looks right, with a six-figure income where a ≤$6,000 deduction belongs and the AMT base overstated
+/// by ≈MAGI — taxpayer-adverse, and invisible to the field map (same FQNs), the geometry (same rects),
+/// the read-back (the value lands in the box it was sent to) and both oracles (they take it as INPUT).
+///
+/// ★ The planted line number is DERIVED from the revision's own printed one, never typed, so this kill
+/// keeps meaning the same thing when a second revision joins `obbba_revisions()`.
+#[test]
+fn the_fill_refuses_a_figure_read_off_a_schedule_1a_line_this_revision_does_not_cite() {
+    for (ls, year) in obbba_revisions() {
+        let map = Form6251ObbbaMap::for_year(year).unwrap();
+        let printed = map
+            .revision()
+            .and_then(|r| r.schedule_1a_line())
+            .unwrap_or_else(|| panic!("{}: the revision must cite a line", ls.as_str()));
+        // The other revision's line, whichever side of the collision this one is on.
+        let other = if printed == 37 { 43 } else { 37 };
+
+        let mut f = part_i_only_2025();
+        f.line1 = Form6251Line1::Y2025 {
+            line1a: dec!(15000),
+            line1b: dec!(300000),
+            schedule_1a_line: other,
+        };
+        let e = fill_form_6251_obbba_with_map(&f, &header(), &map)
+            .err()
+            .unwrap_or_else(|| {
+                panic!(
+                    "{}: this form cites Schedule 1-A line {printed} and the figure was read off \
+                     line {other} — the fill SUCCEEDED, so the AMT base is taken from the wrong \
+                     line of another revision's schedule and nothing on the printed page shows it",
+                    ls.as_str()
+                )
+            })
+            .to_string();
+        assert!(
+            e.contains(&format!("line {printed}")) && e.contains(&format!("line {other}")),
+            "{}: the refusal must name BOTH lines — the whole defect is that they look \
+             interchangeable; got {e:?}",
+            ls.as_str()
+        );
+
+        // …and the agreeing figure still fills, so the guard is a comparison and not a blanket refusal.
+        assert!(
+            fill_form_6251_obbba_with_map(&part_i_only_2025(), &header(), &map).is_ok(),
+            "{}: the real chain must still fill",
             ls.as_str()
         );
     }
