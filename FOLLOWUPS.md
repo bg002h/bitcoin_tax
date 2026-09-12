@@ -7689,6 +7689,11 @@ build, each with an owning phase.
 
 ### From Phase 4's last two items — where to file, and record retention (2026-09-11, `design/agent-reports/REPORT-build-phase4-last-mile.md`)
 
+- **FR-130 — NUMBER NEVER USED.** Not a lost item: the Phase 4 last-mile agent numbered its two
+  follow-ups 131/132 on 2026-09-11, skipping 130. Verified before writing this line — `grep -rn FR-130
+  design/` and `git log --all --grep=FR-130` both return nothing, so no report or commit ever claimed it.
+  Recorded so the gap between FR-129 and FR-131 does not send a future reader hunting.
+
 - **FR-131 — `service_center_check` scans only `crates/**/*.rs` plus `crates/btctax-cli/LIMITATIONS.md`,
   so a postal address entering a shipped `docs/man/*` page, a README, or a shell script would not red.
   Nit (no such surface exists today). Owning phase: ownerless residue — batch with the next
