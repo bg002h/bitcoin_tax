@@ -8,7 +8,75 @@ _Last updated: **2026-09-09**. Written at a deliberate pause; safe to exit. **Re
 
 > ## ★★★ HANDOFF TO AN OPUS COORDINATOR (owner, 2026-09-07: "Let's find a time to switch to opus") — the loop from here is dispatch → machine-check → persist → ledger → fold → re-verify → push, and it needs no Fable: every remaining task (T8 in flight, T9–T12; T13/T14 on the owner's Q1; T15 post-v1) already has `BRIEF-build-interview-Tn.md`, `BRIEF-review-interview-Tn.md` and `BRIEF-reverify-interview-Tn.md` committed under `design/agent-reports/`. The rules that hold the loop: ONE opus builder or reviewer at a time (a sonnet verifier may run beside it, in a worktree); the builder edits the shared main tree and NOTHING is committed while it works (the pre-commit gate runs `make check` over the working tree); reviewers and verifiers run in `isolation: worktree` with `CARGO_TARGET_DIR=/scratch/code/bitcoin_tax/target-review` and their report is COPIED out, then `git worktree remove --force` + `git branch -D`; the report is persisted VERBATIM in its own commit before anything is folded; every measurable claim is machine-checked into `…-VERIFICATION.md` before acting; the fold is its own commit with the gate output in the message; push after each gate closes (`git push origin main`; the pre-push PII hook scans the range — synthetic identifiers only from the never-issued SSN space or `scripts/pii-scan-generic.sh`'s `ALLOWED_EIN`); commit messages via `git commit -q -F - <<'EOF'` with the two trailers. A stopped background agent is RESUMED by `SendMessage` with its id, never restarted while its edits are in the tree. The standing lessons every dispatch prompt repeats: no decision keys on a list typed beside derived data; a kill CALLS the instrument; a prompt hash keys on the registry's words, never display chrome; a new money leaf must reach the absolute chain (`every_money_leaf_household()`); a build's kills ask what the NEXT SURFACE does with what it wrote; a `Durable` fact is shown, never pre-filled; transcribe forms from the text layer. Owner-only items (never actioned autonomously): Q1/Q2/Q4, S1/S2/S7, T7's Notice 2026-20 order, the simulated real return (FR-64, the owner's TY2024 return is the reference and never enters the repo). The progress page is the artifact "Overnight Return" (scratchpad `overnight-return.html`; republish the same path to keep the URL).
 >
-> ## ★★★ RESUME 2026-09-11 (late) — **B3 IS CLOSED. The interview arc is REVIEWED END TO END.**
+> ## ★★★ RESUME 2026-09-11 (latest) — **B3 CLOSED, and year-package table STEP 5 CLOSED. Both green.**
+>
+> **State: clean.** `HEAD == origin/main`, tree clean, no worktrees, nothing in flight.
+> `make gate` **3596 passed / 12 skipped**, `cargo fmt --all --check` clean, `xtask line-coverage` 377 money
+> lines / f6251:43 with all three ratchets unmoved (31/0/17). Everything pushed.
+>
+> ### Two owner rulings landed today, and the second reshaped the work
+>
+> 1. **TY2025 is NEVER filed with this software** — *"We only care about 2025 to the extent that it helps us
+>    with 2026 and beyond."* Recorded in the gate that enforces it
+>    (`ty2025_full_return_must_stay_fail_closed_until_complete`'s doc comment), `ROADMAP_STATUS.md` §0a, and
+>    the memory `ty2025-is-the-blocker` (framing retired). ★ S1 SURVIVES it — S1 was always a *never-mailed*
+>    rehearsal ending in a line-by-line diff against the return filed elsewhere, which is "2025 helping 2026"
+>    in its purest form. Still the owner's open decision.
+> 2. **Proceed on year-package table step 5** — which the ruling then INVERTED. The test for any TY2025 work
+>    is now **transfer to TY2026**: `f6251/2025` transfers its whole field map (62 fields, 0 renamed, 0 moved
+>    between the 2025 final and the 2026 draft) and pre-pays a January-critical-path transcription;
+>    `f1040s1a/2025` transfers ~5% (TY2026's Schedule 1-A is a rebuild, 10 of 219 fields survive). A
+>    Schedule 1-A builder had already been dispatched and was **stopped before it wrote a line**, and
+>    `f6251/2025` was built instead.
+>
+> ### ★★★ STEP 5 IS CLOSED — and its finding is the one to carry into the TY2026 port
+>
+> **Schedule 1-A 37 → 43 is a COLLISION, not a renumber.** TY2025 line 37 is *"Enhanced deduction for
+> seniors"*; TY2026 **refilled** line 37 with *"Enter the amount from line 3"* — the MAGI — and moved the
+> senior subtotal to 43. Reusing the TY2025 cross-reference therefore substitutes a six-figure income for a
+> ≤$6,000 deduction and **overstates the AMT base by ≈MAGI**, taxpayer-adverse. Two source comments called it
+> a renumber and one **prescribed** the reuse as *"a one-line edit"*. Both corrected; the guarantee now lives
+> in a type (`SeniorDeductionSubtotal` — private fields, obtainable only from the schedule revision that
+> printed it) that travels all the way to the emitter's join, with a forge-reach guard that reds both when a
+> production call appears and when no kill calls the forge.
+>
+> ★ **A second changed cross-reference was found only because the reviewer distrusted the brief**: Form 6251
+> line 7 cites 1040 *line 7* in 2025 and *line 7a* in 2026. The coordinator's brief had said the text delta
+> was "exactly two cells"; it is **eight numbered lines**. And the TY2025 Form 6251 cites a 1040 line its own
+> TY2025 Form 1040 does not print (it prints 7a) — transcribed as printed, discrepancy recorded, because the
+> form is the authority.
+>
+> **The commit trail** (one artifact per commit, all pushed): brief `6f2b1934`/`0b6bb46d` → build `d8d023af`
+> → review `fbe9d788` → ledger `c91eb5e5` → fold brief `c846ab52` → fold `6356043e` → reverify `78d77754`
+> → ledger+brief `27d3351a` → fold `99468b5d` → reverify `bb2cb7ab` (**0C/0I/0M/2N**).
+>
+> **New follow-ups, none blocking:** FR-118..FR-123. FR-123 is the one with reasoning worth keeping — the
+> join's `u32` *parameter* is deliberately left untyped until the TY2026 port, because typing it today would
+> require a forge call in a `src/` file and weaken the guard just installed.
+>
+> ### ★★ THE PROCESS LESSON OF THIS SESSION — four coordinator measurement errors, ONE shape
+>
+> Every one was a number or list quoted from a **truncated or lossy read** instead of from the tool's
+> complete output: `tail -12` on a diffstat (reported 11 files/+919 for a 12-file/+2588 commit — `git diff
+> --stat` over a working tree also **omits untracked files**), a hand-written parser that read 37 of 57
+> numbered cells and so missed line 4, and `head -5` on the enumerating grep that hid the fifth construction
+> site — **the one site that mattered**, whose absence then made the brief name the wrong test as needing the
+> forge. Agents caught all four. **`git show --stat <commit>`, and never pipe an enumeration through `head`.**
+>
+> ★ And a plant discipline learned twice: **a plant that does not red must be diagnosed before the instrument
+> is called blind.** A partial stamp plant reddened 2 of 5 kills (the reconcile stamp repaired the other
+> three); two forge plants failed to red because they were too weak (a comment, and one of two call sites
+> against a floor of ≥1). In all three cases the instrument was fine.
+>
+> ### The next action is the OWNER'S
+>
+> No assistant-owned next step. `ROADMAP_STATUS.md` §0a: **S1** (the never-mailed TY2025 rehearsal — survives
+> the ruling), **S2** (the real-2026 document inventory), **S7** (the oracle fallback). The NOW bucket's
+> remaining items: Form 8995 line-16/17 + Schedule A instrument variants, FR-49 + the S8 print rehearsal, the
+> Form 1095-A row, and FR-53's price dataset (a January task). ★ The TY2026 critical path is unchanged and
+> unreachable from here: the January finals (`i1040gi`/`i6251` last) and OTS 2026 (~2027-01-27).
+
+> ## ★★★ (superseded) RESUME 2026-09-11 (late) — **B3 IS CLOSED. The interview arc is REVIEWED END TO END.**
 >
 > **State: clean.** `HEAD == origin/main == 80aa7010`, tree clean, no worktrees, nothing in flight.
 > `make gate` **3571 passed / 12 skipped** (+10 from B3's kills), `cargo fmt --all --check` clean,

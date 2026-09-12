@@ -55,7 +55,15 @@ pub fn forge_symbol() -> String {
 }
 
 /// The walk must see at least this many files. **A check that scans nothing passes by finding
-/// nothing** — `crates/**/*.rs` measured 358 on 2026-09-11.
+/// nothing** — `crates/**/*.rs` measured **355** on 2026-09-11
+/// (`find crates -name "*.rs" -not -path "*/target*" | wc -l`). The floor is deliberately loose, not a
+/// pinned count: it exists so a scan that reads nothing cannot pass by finding nothing.
+///
+/// ★ A SECOND blind spot, narrower than the one below and provably inert (re-verification Nit 2): a forge
+/// call typed inside a ```rust fence in a doc comment is invisible here, because [`production_source`]
+/// strips every `//`-leading line before the `#[cfg(test)]` skip runs. It cannot smuggle an executing
+/// production call — doc-test code never compiles into the shipped library — and a doc-test cannot satisfy
+/// the anti-vacuity floor either, which still reds. Named so the boundary is stated rather than discovered.
 const FILE_FLOOR: usize = 300;
 
 fn repo_root() -> PathBuf {

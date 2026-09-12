@@ -269,6 +269,16 @@ witness) · `forms_expected` == present ∪ absent-with-reason · every `Stem` h
    censused; `f6251--2024` 59 = 41 + 18). **ONE remains `Unwired`, permanently:** `f1040s1a/2025`,
    with the reason written into `Schema::Unwired` — owner ruling 2026-09-11 (TY2025 is never filed)
    plus TY2026's Schedule 1-A being a rebuild. Prior state, for the record:
+
+   ★★ **What the two review rounds added, and why the step is worth reading before the TY2026 port.** The
+   seam review (`fbe9d788`, 0C/2I) found that **37 → 43 is a COLLISION, not a renumber**: TY2026 *refilled*
+   line 37 with *"Enter the amount from line 3"* (the MAGI), so reusing the TY2025 cross-reference overstates
+   the AMT base by ≈MAGI — and two source comments called it a renumber while one **prescribed** the reuse as
+   "a one-line edit". Both corrected. The fold (`6356043e`) moved the guarantee off prose and onto a type; its
+   re-verification (`78d77754`, 0C/1I) then found the vouched type stopped **one hop short** of the join, and
+   the second fold (`99468b5d`) carried it all the way, with a forge-reach guard that reds in both directions.
+   Closed at **0C/0I/0M/2N** (`bb2cb7ab`), `make gate` 3596 passed / 12 skipped.
+
    **EIGHT OF TEN WIRED (2026-09-05)** — `f1040s2/s3/sa/sb/sc`, `f8959`, `f8960`, `f8995` for
    TY2025: each verified (map ⊆ PDF fields; the line→printed-label join, derived over every map;
    `[census]` present; 2024→2025 deltas were field renames with no line moved) and measured to parse
