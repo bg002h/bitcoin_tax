@@ -496,3 +496,280 @@ fn form_6251_takes_the_senior_subtotal_line_37_not_the_total_line_38() {
          line 38 would inflate AMTI by the other three parts"
     );
 }
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// THE STEP-ARITHMETIC KAT — the same boundary vectors `scripts/oracle/verify_schedule_1a.py` drives
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// ★★★ WHY A SECOND FILE-LEVEL SECTION, WHEN THE CONSTANTS ARE ALREADY PINNED. Every constant on this
+// form agrees with Tax-Calculator's, and has always agreed. The arithmetic that APPLIES them does not
+// follow from them, because the rounding direction is not a constant: lines 11 and 19 print *"decrease
+// the result to the next lower whole number"* and line 28 prints *"increase the result to the next
+// higher whole number"*. Flip one and the deduction moves by a FULL STEP — $100 on Parts II/III, $200
+// on Part IV — for every filer in the phase-out band, with every constant still matching and the
+// constants census still printing 0 divergences. `StepRounding`'s own doc comment calls it "the field
+// that must never be shared"; this is the test that makes that true rather than hoped.
+//
+// ★★ THE NUMBERS BELOW ARE INDEPENDENT OF BTCTAX. They are the form's own arithmetic, computed in
+// Python from the sentences quoted above (`verify_schedule_1a.py::_form_expected`) and confirmed
+// against BOTH reference engines at the same MAGIs — so this is a KAT, not a snapshot of our own
+// output. Where an engine cannot witness a vector the census says so per vector and per filing
+// status; the two standing gaps are Part IV for QSS (taxcalc hands a qualifying surviving spouse the
+// MFJ threshold, and OpenTaxSolver 2025 both floors line 28 and multiplies it by $300) and Part V's
+// half-dollar cases (neither engine rounds the printed line 34). Those rest on the FORM.
+//
+// ★ The OFFSETS are derived from the parameters, never typed: two of them are the form's own worked
+// examples (0.05 of a step and 1.5 steps), which are the two that tell the directions apart at all.
+
+use btctax_core::tax::tables::{StairStepPhaseOut, StepRounding};
+
+/// The other direction. `_`-free on purpose: a third rounding mode would be a compile error here
+/// rather than a silently unflipped mutant, which would make the discriminating-power assertion below
+/// pass while testing nothing.
+fn opposite(r: StepRounding) -> StepRounding {
+    match r {
+        StepRounding::Floor => StepRounding::Ceil,
+        StepRounding::Ceil => StepRounding::Floor,
+    }
+}
+
+/// The six excesses that straddle one stepped phase-out — DERIVED from the phase-out itself.
+///
+/// `at the threshold` exercises the form's JUMP; `+$1` and `+0.05 step` are where floor and ceil first
+/// disagree (the form's own example: *"decrease 0.05 to 0"* against *"increase 0.05 to 1"*); `+1.5
+/// steps` is its other example; and the last two bracket exhaustion, which is itself per-direction —
+/// a ceiling part exhausts one dollar past the last full step, so Part IV's last live vector is an
+/// excess of $49,000 carrying $200, not $49,999.
+fn stepped_offsets(po: &StairStepPhaseOut, cap: Usd) -> [Usd; 6] {
+    let exhaust = po.exhaustion_excess(cap);
+    [
+        Usd::ZERO,
+        dec!(1),
+        po.step / dec!(20),
+        po.step + po.step / dec!(2),
+        exhaust - dec!(1),
+        exhaust,
+    ]
+}
+
+/// Walk one part's six boundary vectors for one filing status.
+///
+/// `want` is `None` for a part this status is barred from, and the assertion is then that the line is
+/// **blank** — not zero. A blank and a `0` are identical on the printed page and are not the same
+/// thing: `0` on a line the filer never claimed is sworn testimony that the amount IS zero.
+fn assert_boundaries(
+    label: &str,
+    po: &StairStepPhaseOut,
+    cap: Usd,
+    status: FilingStatus,
+    want: Option<[Usd; 6]>,
+    deduction: impl Fn(Usd) -> Option<Usd>,
+) {
+    let offsets = stepped_offsets(po, cap);
+    // ★★ THE KAT'S OWN DISCRIMINATING POWER, asserted rather than assumed. A vector set that happened
+    //    to sit on whole steps would agree under either direction, and this whole section would be an
+    //    instrument that cannot fail — the exact shape (B1) this repo keeps catching. So: at least one
+    //    offset must give a different reduction under the opposite rounding.
+    let flipped = StairStepPhaseOut {
+        rounding: opposite(po.rounding),
+        ..po.clone()
+    };
+    assert!(
+        offsets
+            .iter()
+            .any(|&e| e > Usd::ZERO && flipped.reduction(e) != po.reduction(e)),
+        "{label}: not one of these offsets distinguishes {:?} from {:?}, so nothing here holds the \
+         rounding direction",
+        po.rounding,
+        flipped.rounding,
+    );
+    let threshold = po.threshold_for(status);
+    for (i, off) in offsets.iter().enumerate() {
+        let magi = threshold + off;
+        let got = deduction(magi);
+        match want {
+            None => assert!(
+                got.is_none(),
+                "{label}/{status:?} @ MAGI {magi} — a barred part stays BLANK, not zero; got {got:?}"
+            ),
+            Some(w) => assert_eq!(
+                got,
+                Some(w[i]),
+                "{label}/{status:?} @ MAGI {magi} (excess {off}, threshold {threshold})"
+            ),
+        }
+    }
+}
+
+/// ★★★ **Parts II, III and IV: every printed boundary, every filing status, against the census.**
+#[test]
+fn the_step_arithmetic_matches_the_oracle_census() {
+    let p = p();
+    let (tips_claimed, overtime_claimed, qpvli_claimed) = (dec!(40000), dec!(30000), dec!(12000));
+    for status in FilingStatus::ALL {
+        // ── Part II, tips (§224). Cap $25,000 for EVERY status — line 7 prints no MFJ figure — so
+        //    the six values are the same for every status that may claim it, and the MAGIs differ.
+        let want = match status {
+            // "If married, you must file jointly to claim this deduction." (Part II Caution)
+            FilingStatus::Mfs => None,
+            FilingStatus::Single | FilingStatus::Mfj | FilingStatus::HoH | FilingStatus::Qss => {
+                Some([
+                    dec!(25000),
+                    dec!(25000), // floor(0.001) = 0 steps — "decrease 0.05 to 0"
+                    dec!(25000), // floor(0.05)  = 0 steps
+                    dec!(24900), // floor(1.5)   = 1 step  × $100
+                    dec!(100),   // 249 steps of the 250 the cap allows
+                    dec!(0),     // "If zero or less, enter -0-"
+                ])
+            }
+        };
+        assert_boundaries(
+            "Part II line 13",
+            &p.tips_phase_out,
+            p.tips_cap,
+            status,
+            want,
+            |magi| {
+                Schedule1aPartII::compute(&p, &facts(magi, status), Some(tips_claimed), None).line13
+            },
+        );
+
+        // ── Part III, overtime (§225). Line 15's cap DOES double for MFJ, so MFJ's six values are
+        //    the tips shape and every other status's are half of it.
+        let want = match status {
+            FilingStatus::Mfs => None,
+            FilingStatus::Mfj => Some([
+                dec!(25000),
+                dec!(25000),
+                dec!(25000),
+                dec!(24900),
+                dec!(100),
+                dec!(0),
+            ]),
+            FilingStatus::Single | FilingStatus::HoH | FilingStatus::Qss => Some([
+                dec!(12500),
+                dec!(12500),
+                dec!(12500),
+                dec!(12400),
+                dec!(100), // 124 of the 125 steps the $12,500 cap allows
+                dec!(0),
+            ]),
+        };
+        assert_boundaries(
+            "Part III line 21",
+            &p.overtime_phase_out,
+            p.overtime_cap_for(status),
+            status,
+            want,
+            |magi| {
+                Schedule1aPartIII::compute(&p, &facts(magi, status), Some(overtime_claimed)).line21
+            },
+        );
+
+        // ── Part IV, car loan interest (§163(h)(4)). **The one CEILING on the form**, and the one
+        //    part with no "must file jointly" caution — so MFS claims it, and every status shares the
+        //    same six values because the $10,000 cap prints no status variant.
+        let want = match status {
+            FilingStatus::Single
+            | FilingStatus::Mfj
+            | FilingStatus::Mfs
+            | FilingStatus::HoH
+            | FilingStatus::Qss => Some([
+                dec!(10000),
+                dec!(9800), // ceil(0.001) = 1 step — "increase 0.05 to 1"
+                dec!(9800), // ceil(0.05)  = 1 step  × $200
+                dec!(9600), // ceil(1.5)   = 2 steps
+                dec!(200),  // excess $49,000 — 49 whole steps, NOT exhausted
+                dec!(0),    // excess $49,001 — the 50th part-step finishes it
+            ]),
+        };
+        assert_boundaries(
+            "Part IV line 30",
+            &p.qpvli_phase_out,
+            p.qpvli_cap,
+            status,
+            want,
+            |magi| Schedule1aPartIV::compute(&p, &facts(magi, status), Some(qpvli_claimed)).line30,
+        );
+    }
+}
+
+/// ★★★ **Part V is SMOOTH, and these vectors red if it ever acquires a stair.**
+///
+/// §151(d)(5)(C) / line 34 is a flat 6% with no rounding instruction of its own, so there is no step
+/// anywhere in this part — and `StairStepPhaseOut`'s own comment names the trap: *"giving it a fake
+/// step is how a smooth phase-out acquires a stair."* A planted stair with the same average slope
+/// (one $1,000 step worth $60) agrees with the true line at every multiple of $1,000, so the vectors
+/// that matter are the ones INSIDE a step — which is why `+$500` and `+$1,500` are here, derived from
+/// the $1,000 the stepped parts use, and why `+$25` is (0.06 × 25 = $1.50, the only place line 34's
+/// whole-dollar rounding is visible at all).
+#[test]
+fn part_v_is_smooth_and_a_planted_stair_would_show_here() {
+    let p = p();
+    let step = p.tips_phase_out.step; // the $1,000 a fake stair would plausibly use
+    let exhaust = p.senior_per_person / p.senior_rate; // $6,000 / 0.06 = $100,000 of excess
+    let offsets = [
+        Usd::ZERO,
+        dec!(1),
+        dec!(25),
+        dec!(50),
+        step / dec!(2),
+        step + step / dec!(2),
+        exhaust - dec!(1),
+        exhaust,
+    ];
+    // Line 35, per qualifying individual. Independently computed from "Multiply line 33 by 6% (0.06)"
+    // and "Subtract line 34 from $6,000", with line 34 rounded to whole dollars as a printed dollar
+    // line — and confirmed against both engines except at the half-dollar, where NEITHER rounds it.
+    let want_line35 = [
+        dec!(6000), // L33 "If zero or less, enter $6,000 on line 35" — a nonzero constant
+        dec!(6000), // 0.06 × 1 = $0.06 ⇒ line 34 prints $0
+        dec!(5998), // 0.06 × 25 = $1.50 ⇒ line 34 prints $2 (IRS half-up), not $1
+        dec!(5997), // 0.06 × 50 = $3 exactly
+        dec!(5970), // 0.06 × 500 = $30 — a $60-per-$1,000 stair would read $0 here
+        dec!(5910), // 0.06 × 1,500 = $90 — that stair would read $60
+        dec!(0),    // 0.06 × 99,999 = $5,999.94 ⇒ line 34 prints $6,000
+        dec!(0),
+    ];
+    for status in FilingStatus::ALL {
+        // L36b — "If you are married filing jointly, your spouse … enter the amount from line 35",
+        // so the second senior is reachable for MFJ only, and the loss is 12¢ per $1 of MAGI for the
+        // couple while it is 6¢ for each of them.
+        let counts: &[u32] = match status {
+            FilingStatus::Mfj => &[1, 2],
+            FilingStatus::Single | FilingStatus::Mfs | FilingStatus::HoH | FilingStatus::Qss => {
+                &[1]
+            }
+        };
+        for &seniors in counts {
+            for (i, off) in offsets.iter().enumerate() {
+                let magi = p.senior_threshold_for(status) + off;
+                let f = Schedule1aFacts {
+                    magi,
+                    status,
+                    taxpayer_qualifies_as_senior: true,
+                    spouse_qualifies_as_senior: seniors == 2,
+                };
+                let got = Schedule1aPartV::compute(&p, &f);
+                // "If married, you must file jointly to claim this deduction." (Part V Caution)
+                if matches!(status, FilingStatus::Mfs) {
+                    assert!(
+                        got.line35.is_none() && got.line37.is_none(),
+                        "Part V/{status:?} @ MAGI {magi} — barred, so BLANK rather than zero"
+                    );
+                    continue;
+                }
+                assert_eq!(
+                    got.line35,
+                    Some(want_line35[i]),
+                    "Part V line 35/{status:?} @ MAGI {magi} (excess {off})"
+                );
+                assert_eq!(
+                    got.line37,
+                    Some(want_line35[i] * Usd::from(seniors)),
+                    "Part V line 37/{status:?} @ MAGI {magi} with {seniors} senior(s)"
+                );
+            }
+        }
+    }
+}

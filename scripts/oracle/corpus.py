@@ -134,10 +134,76 @@ def salt_for(year: int) -> dict:
     return axis
 
 
+# ★★★ WHICH SALT AXES CAN ACTUALLY RUN — measured 2026-09-11, because "it straddles the cap" and "it
+# reaches a household" are two different claims and only the first was ever checked.
+#
+# `_build` below reads the module-level `SALT` — the TY2024 axis — and NOT `salt_for(year)`. Nothing
+# passes a year to it: `households()` takes no year parameter at all. So `SALT_BY_YEAR[2025]` is
+# consumed by `salt_for`/`selftest_salt_axis` and by nothing else. Three measurements, in the order
+# that matters:
+#
+#   1. builder — of the 107 households `households()` assembles, **0** carry the TY2025 `over` cell
+#      (25,000 + 20,000). The distinct (state_income_tax, real_estate_tax) pairs actually built are
+#      (1,068 · 10,509), (3,000 · 4,000) and (8,000 · 9,000) — the last being TY2024's `over`. The
+#      TY2025 `under` cell IS built, but only because it is byte-identical to TY2024's, which is
+#      coincidence rather than reachability and is exactly why the check below requires EVERY cell.
+#   2. driver — `gen_goldens.taxcalc_run` / `taxcalc_credits` / `_taxcalc_amt_credits` all default to
+#      `year=2024` and no call site passes anything else; the emitted golden stamps `"tax_year": 2024`;
+#      `sweep.py` is pinned to TY2024 constants (`OASDI_BASE = 168_600`, `STD_DEDUCTION_2024`).
+#   3. btctax — `full_return_for(2025)` is a tested `None`
+#      (`crates/btctax-adapters/src/tax_tables.rs`, `ty2025_full_return_must_stay_fail_closed_until_complete`),
+#      so a TY2025 household could not be driven through the full return even if one were built.
+#
+# ★ The TY2025 entry is therefore correct and DORMANT, not wrong: it is the cap figure the day a TY2025
+# corpus exists. What was missing is the boundary being stated, because a dormant axis reads exactly
+# like a live one. Bundling `FullReturnParams` to make it run is NOT this file's call.
+SALT_YEARS_NOT_REACHABLE = {
+    2025: "the corpus builder is TY2024-only (`_build` reads the module-level `SALT`, `households()` "
+          "takes no year), and `full_return_for(2025)` is a tested `None`",
+}
+
+
+def salt_axis_reachability() -> dict[int, list[str]]:
+    """Per bundled year, the axis cells that reach NO household — MEASURED from `households()`.
+
+    ★ Derived, not declared: a cell is reachable iff some assembled household actually carries it.
+    Typing "TY2025 is covered" beside a builder that never sees TY2025 is the failure this answers.
+    """
+    built = [h["inputs"] for h in households()]
+    out: dict[int, list[str]] = {}
+    for year, axis in SALT_BY_YEAR.items():
+        out[year] = [
+            label
+            for label, cell in axis.items()
+            if not any(all(inp.get(k, 0) == amt for k, amt in cell.items()) for inp in built)
+        ]
+    return out
+
+
 def selftest_salt_axis() -> None:
-    """Every bundled year's SALT axis straddles its own cap. Offline; no oracles."""
+    """Every bundled year's axis straddles its own cap AND is either reachable or declared dormant.
+
+    ★★ The second half reds in BOTH directions, which is the point: a year whose axis reaches nothing
+    without saying so is a silent no-op reporting coverage it does not provide, and a year declared
+    dormant that has since been wired is a stale excuse. Offline; no oracles.
+    """
     for y in SALT_BY_YEAR:
         salt_for(y)
+    for year, unreachable in salt_axis_reachability().items():
+        declared = year in SALT_YEARS_NOT_REACHABLE
+        if unreachable and not declared:
+            raise AssertionError(
+                f"TY{year}'s SALT axis cell(s) {unreachable} reach NO household in `households()`, and "
+                f"TY{year} is not listed in SALT_YEARS_NOT_REACHABLE. Either wire the builder to "
+                f"`salt_for({year})` or state the boundary there with its measurement — an axis that "
+                f"runs nowhere still reports coverage."
+            )
+        if declared and not unreachable:
+            raise AssertionError(
+                f"TY{year}'s SALT axis is now fully reachable, so its SALT_YEARS_NOT_REACHABLE entry "
+                f"({SALT_YEARS_NOT_REACHABLE[year]}) is stale — delete it. A dormancy note kept past "
+                f"its dormancy is an excuse nobody re-measures."
+            )
 
 
 def _build(status, w2, interest, div, cap, se, dedsalt):

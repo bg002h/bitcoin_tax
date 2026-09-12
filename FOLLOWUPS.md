@@ -7592,3 +7592,97 @@ build, each with an owning phase.
   changing a figure). Extend the document list to every spec that cites `design/forms/extract/`, with
   the kill (a planted paraphrase reds). **Owning phase: before the next spec that transcribes a form
   (the TY2026 port).**
+### From the Schedule 1-A step-arithmetic census (2026-09-11, `design/agent-reports/REPORT-build-schedule-1a-step-arithmetic-census.md`)
+
+- **FR-124 — `gen_goldens.py` sets Tax-Calculator's `exact` as a Records DataFrame column, which is
+  silently dropped, so `TAXCALC_EXACT_YEARS = frozenset({2025})` is inert. Minor (no live effect
+  today). Owning phase: before any TY2025+ household is driven through the sweep (the TY2026 port).**
+  `_taxcalc_row` adds `**({"exact": 1} if year in TAXCALC_EXACT_YEARS else {})` to the row dict
+  (`gen_goldens.py:251-257`). `exact` is a **calculated** variable in taxcalc's
+  `records_variables.json`, not a read variable, so `tc.Records(data=DataFrame(...))` ignores the
+  column — measured directly: the array comes back all zeros and every stepped phase-out silently
+  takes taxcalc's *smooth* marginal-rate fallback instead of the stepped branch a tax form performs.
+  It has to be written through the Calculator after `advance_to_year`: `calc.array("exact",
+  np.ones(n, dtype=np.int32))`, which does stick (measured, and `verify_schedule_1a.py` now does it
+  and asserts it stuck). No live effect because the corpus is TY2024-only (FR-128), and TY2024 does
+  not reach a stepped provision — which is exactly why it would have gone on being wrong. ★ The
+  shape is this repo's dominant one: a flag that reads as set, an engine quietly on a different
+  branch, and everything green.
+
+- **FR-125 — OpenTaxSolver 2025 gets Schedule 1-A Part IV wrong three ways, all visible in its own
+  printed output. Minor for us (OTS is a witness, never an authority). Owning phase: ownerless
+  residue — batch with the next upstream report.**
+  `~/OpenTaxSolver2025_23.06_linux64/src/taxsolve_US_1040_2025.c`, `sched_1A()` at `:1783`:
+  (a) `:1888` `j = sched1A_L[27] / 1000.0;` with `int j` — C truncation, i.e. **floor** — where line 28
+  prints *"increase the result to the next higher whole number"*; (b) `:1895`
+  `sched1A_L[29] = 300.0 * sched1A_L[28];` where line 29 prints *"Multiply line 28 by **$200**"*;
+  (c) `:1823` `if (status != MARRIED_FILING_SEPARAT)` wraps Parts II **through V**, so Part IV is
+  barred for MFS although only Parts II/III/V print the *"you must file jointly"* caution. Plus a
+  reporting bug at `:1894`: it prints `S1A_20` a second time in place of `S1A_29`, so line 29 is never
+  emitted. Net effect measured at MAGI 101,500 Single: OTS prints a $9,700 deduction where the form
+  gives **$9,600** (two defects partially cancelling). Two independent authorities contradict it — the
+  form's own text layer and Tax-Calculator — so this clears the repo's "never file on one oracle" bar.
+  `verify_schedule_1a.py` computes all three disqualifications from OTS's own printed lines and
+  re-verifies them every run, so the day OTS fixes one the census reds instead of excusing it.
+
+- **FR-126 — Tax-Calculator gives a qualifying surviving spouse the MFJ car-loan threshold.
+  Minor for us (computed disqualification). Owning phase: ownerless residue — batch with the next
+  upstream report.**
+  `AutoLoanInterestDed_ps[widow]` is **200,000** where every other non-MFJ status is 100,000
+  (measured from `policy_current_law.json`; the parameter's only rows are at 2013, so this value is in
+  force for every year). Schedule 1-A line 26 prints *"Enter $100,000 ($200,000 if married filing
+  jointly)"* and a QSS is not married filing jointly — the sibling parameters `TipIncomeDed_ps` and
+  `SeniorDed_ps` both give `widow` the base figure, so one parameter in the family was filled in
+  differently. OTS 2025 agrees with the form (`:1887` gives Widow(er) 100,000), so again two
+  authorities against taxcalc. ★ **Consequence for us, and it is the real entry:** combined with
+  FR-125, **4 of 6 Part IV/QSS boundary vectors have NO independent witness at all** (3 of them
+  phase-out-exercising — the run prints `unwitnessed, by part: IV=3, V=10`) — one engine has
+  the wrong threshold and the other the wrong direction and rate. That figure rests on the form alone,
+  which is the "two disqualified oracles can align" class `CLAUDE.md` names, now surfaced by a
+  per-part × per-status witness count instead of hidden behind a schedule-level OK.
+
+- **FR-127 — neither oracle rounds Schedule 1-A line 34, so btctax's printed-dollar line 34 has no
+  witness at the half-dollar. Minor (recorded blind spot, not a defect). Owning phase: ownerless
+  residue — record only unless a third engine appears.**
+  Line 34 is *"Multiply line 33 by 6% (0.06)"* — its own printed dollar line, so the general IRS
+  whole-dollar convention governs it and line 35 subtracts the **printed** figure. taxcalc
+  (`calcfunctions.py`: `po_amount = excess_agi * SeniorDed_prt`) and OTS (`:1909`
+  `sched1A_L[34] = 0.06 * sched1A_L[33];`) both carry the unrounded product. Where `0.06 × excess` is
+  not a whole dollar — excess not a multiple of $50 — btctax's figure differs from both engines by up
+  to 50¢ per qualifying individual, doubled on a two-senior MFJ return, and the census sizes that gap
+  from the mechanism rather than excusing the vector. Measured, printed by the run itself: of the 13
+  phase-out-exercising vectors with no witness, **10 are this** (`unwitnessed, by part: IV=3, V=10`);
+  the other 3 are FR-126's Part IV/QSS. btctax is right and the engines are approximating; there is
+  nothing to fix, and the point of the entry is that the agreement of two oracles is not available here.
+
+- **FR-129 — a subagent's harness REFUSED its report write, so the report reached disk as a controller
+  transcription.** Nit. Owning phase: ownerless residue — record only, unless it recurs.
+  The Schedule 1-A step-arithmetic build agent's `Write` returned *"Subagents should return findings as text,
+  not write report files"*, so it returned ~330 lines inline and asked the coordinator to persist them. Two
+  costs, both of which the standing rule exists to prevent: the controller paid for the text **twice**
+  (reading it in, re-emitting it to disk — the ~8k-per-report waste `/scratch/code/CLAUDE.md` measures), and
+  **`design/agent-reports/REPORT-build-schedule-1a-step-arithmetic-census.md` is no longer an agent-written
+  artifact**, so "the responder must not be the scribe" is unsatisfied for it and
+  `git diff <report>..<fold>` means less than it does elsewhere. The provenance is stated in a banner at the
+  top of that file, including the two deliberate edits (HTML entities `&lt;`/`&gt;` restored to `<`/`>`).
+  ★ Not the agent's deviation — it complied as far as its harness allowed and flagged the refusal first,
+  which is the right behaviour. If this recurs, the dispatch should carry the report path as a file the
+  agent appends to rather than writes, or the coordinator should accept the inline path knowingly.
+
+- **FR-128 — the TY2025 SALT axis reaches no household, and the corpus builder is TY2024-only.
+  Minor (boundary now stated in source and held by a checker). Owning phase: whenever a
+  year-parameterised corpus is built — the TY2026 port.**
+  `corpus.py`'s `SALT_BY_YEAR[2025]` / `SALT_CAP_BY_YEAR[2025] = 40_000` are correct and **dormant**:
+  `_build` reads the year-blind module constant `SALT` (the TY2024 axis) and nothing passes a year to
+  it, because `households()` takes no year parameter. Measured 2026-09-11: of the 107 households
+  `households()` assembles, **0** carry the TY2025 `over` cell (25,000 + 20,000); the distinct
+  (state_income_tax, real_estate_tax) pairs actually built are (1,068 · 10,509), (3,000 · 4,000) and
+  (8,000 · 9,000) — the last being TY2024's `over`. The TY2025 `under` cell *is* built, but only
+  because it is byte-identical to TY2024's. Downstream is TY2024 too: `gen_goldens`'s
+  `taxcalc_run`/`taxcalc_credits`/`_taxcalc_amt_credits` all default to `year=2024` with no call site
+  passing anything else, the emitted golden stamps `"tax_year": 2024`, and `sweep.py` is pinned to
+  TY2024 constants; and `full_return_for(2025)` is a tested `None`
+  (`ty2025_full_return_must_stay_fail_closed_until_complete`). `salt_axis_reachability()` +
+  `SALT_YEARS_NOT_REACHABLE` now MEASURE this from `households()` and red in both directions — a
+  dormant year not declared dormant, and a declared-dormant year that has since been wired. Wiring the
+  builder is a scope decision, and **bundling `FullReturnParams` is the owner's call, not this file's**.
