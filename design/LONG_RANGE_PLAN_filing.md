@@ -167,6 +167,46 @@ doctrine turns on.
 
 ## 3. THE CRITICAL PATH TO THE FIRST FILED RETURN
 
+> # ★★★ SUPERSEDED 2026-09-11 — THIS SECTION DESCRIBES THE TY2025 ROUTE, WHICH IS NOT BEING TAKEN
+>
+> This section is **r1, written 2026-09-04**, when the first filed return was TY2025. **Two owner rulings
+> have moved the target since, and only §6.4 was amended for them** — so §3 was the last place in the repo
+> still sequencing a TY2025 filing. The original text is preserved below unchanged; this banner is the
+> disposition. The current authority is **`design/ROADMAP_STATUS.md` §0a and §3**.
+>
+> | ruling | effect on this section |
+> |---|---|
+> | **2026-09-05 — TY2026 is the first filed year** | Phases 1–3's "critical path to a TY2025 filing" framing is void. The *work* in Phases 1–2 largely transferred; Phase 3's exit does not exist. |
+> | **2026-09-11 — TY2025 is NEVER filed with this software** (*"We only care about 2025 to the extent that it helps us with 2026 and beyond"*) | Phase 3 is **voided outright**: it existed to delete `ty2025_full_return_must_stay_fail_closed_until_complete`, and that gate is now permanent by decision. Every TY2025 item must now justify itself by **transfer to TY2026**. |
+>
+> ## Per-phase disposition, measured 2026-09-11
+>
+> | phase | original framing | disposition |
+> |---|---|---|
+> | **0** — two owner answers | blocking | ✅ **DONE** — D-A/D-B in `design/OWNER_DECISIONS_2026-09-04.md` |
+> | **1** — Schedule 1-A end to end | TY2025 critical path | ✅ **CONTENT DONE, framing void.** `Schedule1A` computes all 48 printed lines and is wired to the 1040 (`return_1040.rs:2435`); as of 2026-09-11 it also has a **two-oracle applied-result census** over 138 derived boundary vectors across TY2025–2028 (`scripts/oracle/verify_schedule_1a.py`) |
+> | **2** — B4, the filing assets | TY2025 critical path | ◐ **LARGELY LANDED, framing void.** TY2025 carries 18 map artifacts; year-package step 5 wired **9 of 10** line sets. The exception is `f1040s1a`'s emitter, **deliberately** unbuilt — TY2026's Schedule 1-A is a rebuild (10 of 219 fields survive), so it does not transfer |
+> | **3** — delete the gate, drive P0 end to end | TY2025 critical path | ❌ **VOIDED.** Its entry gate (`tax_tables.rs`'s four clauses) and its exit (an emitted TY2025 packet) both presuppose a TY2025 filing. ★ Its ★★★ lesson survives the phase and belongs to the TY2026 packet read instead: **the exit gate is a PACKET read, not a per-form one** — two Criticals once sat in the composition of Forms 1040 and 8995-A with 2601 tests green |
+> | **4** — the last mile | must precede FILED | ◐ **OPEN, and the smallest open phase.** FR-49 (Form 4868 + 1040-V) and strategy-review **S8**'s physical print rehearsal are what remain. ★ Its ★ item is **CLOSED**: `broker_reported_rows` is no longer hardcoded to `0` — it is a real field (`cmd/admin.rs:345`) fed from `main.rs:1092` |
+> | **5** — the year-port machine | *"off the critical path for the first return, ON it for the second"* | ◐ **STEPS 1–5 DONE 2026-09-11**; step 6 (TY2026 rows) waits on the January finals. ★★ **The framing itself is now false**: under TY2026-first the January port *is* the first return's path, which is why step 5 carried a 2026-10-31 hard stop and closed through a full review loop |
+> | **6** — P2-profile completeness | off the critical path entirely | ⏸ **PARKED**, unchanged (§7.5, ★ D-C) |
+> | **7** — THE INTERVIEW | on the critical path for TY2026 | ✅ **DONE.** T1–T12 + T4b + T16 all closed 0C/0I, and the **B3 whole-branch review** closed 2026-09-11 at 0C/0I after finding one Critical (`ReturnInputs.tax_year` never stamped on the form surface) |
+>
+> ## The critical path as it actually stands
+>
+> **None of Phases 0–4.** From `ROADMAP_STATUS.md` §3: **the January 2027 finals (`i1040gi`/`i6251` land
+> last) → worksheet transcriptions → review to 0C/0I → the OTS-2026 census (~2027-01-27) → a packet read →
+> FILED**, on the extension by default (Form 4868 with payment by 2027-04-15, file by 2027-10-15). Only the
+> last two buckets are on it, and **NOW work must not leak into them.**
+>
+> ★ Two internal inconsistencies in the original text, left in place and named here rather than silently
+> edited: it says *"Six phases"* where there are **eight** (`### Phase 0` … `### Phase 7`, counted), and its
+> ASCII diagram ends at `FILED` via P3, the voided phase.
+>
+> ★★ What survives this supersession is not the sequence but the **definitions**: §1's three axes of done,
+> §2's facts-that-bind, §5's second-year economics, §7's *"what should not be built"*, and §6.3's reasoning.
+> Those were never year-scoped. It is only §3's ORDER that the rulings moved.
+
 Six phases. **Phases 1, 2 and 3 are the critical path and nothing else is.** Each phase's exit gate is
 this repo's `green` — the five gates pass **and** an independent review returns 0 Critical / 0 Important
 (`STANDARD_WORKFLOW.md` §2).
@@ -180,14 +220,14 @@ this repo's `green` — the five gates pass **and** an independent review return
   P6 P2-profile completeness (retirement, CTC, EIC) ── off the critical path entirely
 ```
 
-### Phase 0 — two owner answers (blocking, ~one pass)
+### Phase 0 — two owner answers (blocking, ~one pass) — DONE
 
 **Entry:** this document. **Exit:** ★ D-A and ★ D-B (§8) recorded in `CONTINUITY.md`.
 
 Everything below assumes P0 is the filer and TY2025 is the year. If either is wrong the sequence is
 wrong, and it is wrong cheaply now and expensively in six weeks.
 
-### Phase 1 — B3, Schedule 1-A end to end (CRITICAL PATH)
+### Phase 1 — B3, Schedule 1-A end to end (CRITICAL PATH) — CONTENT DONE; the critical-path framing is SUPERSEDED (see the banner above)
 
 **Entry gate:** `design/ty2025/IMPLEMENTATION_PLAN_schedule_1a.md` at **0C/0I** — the r4 fold's review
 is in flight (F-7) and this plan does not front-run it. **Exit gate:** the plan's own §1 exit criteria
@@ -208,7 +248,7 @@ illegal-service exclusion (C-I4). See §4, R3.
 **Not in this phase:** the PDF and the AcroForm map (B4), `FullReturnParams` for TY2025 (last), and
 Schedule 8812 (§7).
 
-### Phase 2 — B4, the filing assets (CRITICAL PATH)
+### Phase 2 — B4, the filing assets (CRITICAL PATH) — LARGELY LANDED; framing SUPERSEDED (see the banner above)
 
 **Entry gate:** Phase 1 green. **Exit gate:** 18 map artifacts committed, each with (a) a `dump-fields`
 field inventory that matches, (b) a per-line printed-text check, (c) a `[census]` disposition with a
@@ -239,7 +279,7 @@ letter swap is the trap it exists to catch, firing in this phase.
 repo's own B1 rule an instrument that has never been watched going red on a *restructured* form is not
 a checker. The in-flight fix (F-7) must land with a planted-defect test on a restructured form.
 
-### Phase 3 — delete the gate, and drive P0 end to end (CRITICAL PATH)
+### Phase 3 — delete the gate, and drive P0 end to end (CRITICAL PATH) — VOIDED by the 2026-09-11 ruling; read for its PACKET-read lesson only
 
 **Entry gate:** Phases 1 and 2 green, and all four clauses of `tax_tables.rs:799-810` true. **Exit
 gate:** an emitted TY2025 packet for P0, read line-by-line against the forms, plus the two-oracle sweep
@@ -266,7 +306,7 @@ lesson: `FOLLOWUPS.md:1617-1642` records two Criticals sitting in the compositio
 emitted `55A_f8995a.pdf` beside the emitted `00_f1040.pdf` — the only place the two forms are side by
 side."* Phase 3 is that read, for TY2025, on P0.
 
-### Phase 4 — the last mile (small; must precede FILED; NOT on the arithmetic critical path)
+### Phase 4 — the last mile (small; must precede FILED; NOT on the arithmetic critical path) — OPEN: FR-49 + S8 remain; its broker_reported_rows item is CLOSED
 
 **Entry gate:** none — this can start any time and should start during Phase 2's slack. **Exit gate:**
 a filer holding the packet can post it without consulting anything outside it.
