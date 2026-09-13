@@ -8489,6 +8489,46 @@ build, each with an owning phase.
   first because it needs nothing built: the TY2024 packet already prints, and **printer-and-paper defects are
   invisible to every test this project owns**, all of which check bytes.
 
+- **FR-205 — code H should FILE with an advisory, not refuse. Important. Owning phase: NOW, next round. Controller recommendation attached.**
+  FR-197 correctly discovered that W-2 box 12 **code H** (§501(c)(18)(D) elective deferrals) was wrongly on
+  the inert list: the amount is *"include[d] … in box 1 as wages"* and *"the employee will deduct the amount
+  on their Form 1040"* — Schedule 1 line 24f, censused `unmodeled`. btctax filed the wages and never took
+  the deduction back out, **silently overstating the filer's own tax by the whole entry.** As built, such a
+  return now **refuses**.
+  ★ **Integrated as-is deliberately**: refusing is strictly better than silently overcharging, and it is the
+  right fail-closed posture for a defect found the same hour.
+  ★★ **But it is not where this should land, and the repo's own doctrine says so.** For a forgone
+  TAXPAYER-FAVOURABLE amount v1 cannot compute, the established treatment is **file + advise**:
+  `Advisory::EicOmitted` — *"EIC NOT COMPUTED … Your tax may be OVERSTATED. Check Pub. 596"* — and
+  `Advisory::MixedUseMortgageNotAllocated`, which *"names the whole forgone amount as a CEILING"*. Code H is
+  the same class: the wages are truthfully reported, only the deduction is forgone, so the return is
+  correct-but-conservative rather than wrong. Refusing denies the filer a filable return over a deduction
+  they may not even claim. ★ The owner's 2026-09-13 *"support all the tax scenarios"* points the same way.
+  *Fix:* a new advisory naming Schedule 1 line 24f and the box-12 amount as a ceiling, with its own kill.
+  **Not a one-line verdict flip** — that is why it was filed rather than improvised.
+
+- **FR-206 — ⚠️ `ELECTIVE_DEFERRAL_CODES` UNDER-DETECTS a §402(g) excess, which is the UNDERSTATEMENT direction. Important. Owning phase: NOW, with FR-205.**
+  Reported by the FR-197 agent and left untouched as a cap-rule adjudication, with the boundary recorded in
+  the source. The §402(g) limit covers **designated Roth** deferrals too — per the instructions' own worked
+  example — and `ELECTIVE_DEFERRAL_CODES` (`return_refuse.rs:42`) lists only `["D","E","F","G","S"]`.
+  ★★ **This is the worse direction**: an excess deferral that goes undetected is income that should have been
+  added back and was not. Unlike FR-205 (which overcharges the filer), this one **understates tax**. Adjudicate
+  the cap rule against §402(g) and the instructions, then derive the code set from the same table FR-197 built
+  rather than typing a second list beside it.
+
+- **FR-207 — Form 8880 is justified `unmodeled` by a reason FR-197 just invalidated. Minor. Owning phase: with FR-205.**
+  `f1040s3.map.toml:96` and `:156` justify Form 8880 (the retirement savings contributions credit) as
+  unmodeled because *"no retirement contributions collected"*. ★ **Box 12 code D collects exactly that**, and
+  FR-197 admits D. So the stated reason is now false even though the conclusion may still be right — Form
+  8880 has its own AGI limits and an entirely separate eligibility test. **Restate the reason or change the
+  verdict; do not leave a justification that the tree contradicts.**
+
+- **FR-208 — `packet.rs:307-308` quotes a message that no longer exists. Nit. Owning phase: opportunistic.**
+  It quotes verbatim the paper-check sentence that FR-197 and the sweep both rewrote, so it is now a quotation
+  of retired text. Harmless to behaviour, but it is the third stale-copy-of-a-retracted-sentence in this one
+  area today — which is the argument for the source-scanning guard that now exists, not for another manual
+  sweep.
+
 - **FR-152 — `census_join` anchors captions to ABSOLUTE line indices in a generated file. Minor. Owning phase: the port machine.**
   A4's 110 `# Regenerate:` header additions shifted every extract by a line, and `forms/2024/f1040s1.map.toml`'s
   `extract_line` anchors (11/15/58) had to move to 15/19/62 — an edit outside A4's ownership, reported rather
