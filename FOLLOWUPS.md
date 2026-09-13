@@ -6920,7 +6920,9 @@ build, each with an owning phase.
 
   **Residue → FR-116** (`cli.rs:479`, minor/ambiguous).
 
-- **FR-112 — the "Federal tax attributable to crypto" section prints two WHOLE-RETURN levels under a
+- ✅ **CLOSED 2026-09-12** (`9c495223`) — `render.rs:1416` now reads *"net short-term (whole-return level)"* / *"net long-term (whole-return level)"*, using the section's own vocabulary beside the existing *"(level)"* and *"(delta)"*. No figure changed; `docs/examples/examples.md` regenerated, 4 lines, all this label.
+  Original entry:
+  **FR-112 — the "Federal tax attributable to crypto" section prints two WHOLE-RETURN levels under a
   crypto heading (journey walk 2; mechanism confirmed by the controller in the source). Owning phase:
   ownerless residue (UX / filer-facing text).** `render.rs:1404-1410` prints `r.st_net` and `r.lt_net`
   as *"net short-term / net long-term"*. `compute.rs:210-212` says in terms that only `ltcg_tax`,
@@ -6931,7 +6933,9 @@ build, each with an owning phase.
   income (level)"*, so the section already distinguishes elsewhere. No wrong figure — a money line
   under a heading that does not describe it. Fix is a label, not arithmetic.
 
-- **FR-113 — Form 8949's pages interleave Part I and Part II rather than grouping them (journey walk 2).
+- ✅ **CLOSED 2026-09-12** (`9c495223`) — Part I pages now precede Part II on both paginator paths, as a `/Kids` **array permutation** (`overflow.rs:48` `merge_copies_ordered`, `PageOrder::ByPosition`); the root `/Pages` was measured flat (4 direct `/Page` kids) first, so nothing in chunking, `rows_per_page`, overflow handling, box grouping or the attachment sequence moved, and Form 8283's shared merge is byte-identical. ★ Guarded by a row-conservation kill written BEFORE the change and re-planted by the controller: dropping one row reds with *"39 entered, 35 emitted"*. Residue: FR-133 (two paginators).
+  Original entry:
+  **FR-113 — Form 8949's pages interleave Part I and Part II rather than grouping them (journey walk 2).
   Owning phase: ownerless residue (UX).** With 39 rows over 4 pages all rows paginated correctly and
   none was dropped — verified by counting emitted rows against those entered — but a reader flipping the
   packet meets short-term and long-term sections alternating. Cosmetic; the IRS does not require
@@ -7021,7 +7025,9 @@ build, each with an owning phase.
   (`box_census.rs:1572`), so it proves the caption is *present*, never that nothing else is — a ledger
   question appended to a `doc_*!` label is caught by neither check. **Stated residue, not a silent one.**
 
-- **FR-115 — btctax's INTERNAL architecture shows through to a filer in `B1099…NoAdjustments.help`
+- ✅ **CLOSED 2026-09-12** (`9c495223`) — swept to all three filer-facing sites, not just the interview help: `spec/sections.rs:3004`, the `Form1099BNeedsForm8949` **refusal detail** at `return_refuse.rs:2631-2634` (the sentence a filer actually hits), and `LIMITATIONS.md:382`. FR-110's truth is preserved and stated more explicitly in the refusal. The two developer-facing doc comments keep the phrase deliberately.
+  Original entry:
+  **FR-115 — btctax's INTERNAL architecture shows through to a filer in `B1099…NoAdjustments.help`
   (split out of FR-114, 2026-09-09). Owning phase: ownerless residue (UX / filer-facing text).**
   `spec/sections.rs:2937` ends *"…anything else belongs on Form 8949 one row at a time, which btctax
   fills from **its own crypto lot engine** alone."* A filer has no idea what a "lot engine" is; the
@@ -7031,7 +7037,9 @@ build, each with an owning phase.
   and it must keep saying the true thing FR-110 decided: btctax reports securities only as Schedule D
   line 1a/8a totals, never per transaction.
 
-- **FR-116 — `cli.rs:479`'s *"Earlier years neither ask nor accept them"* is false on one reading of
+- ✅ **CLOSED 2026-09-12** (`9c495223`) — `cli.rs:479-481` now describes the mechanism verified at `return_refuse.rs:1753`: *"Earlier years never ask: an import still reads such a table in, but the return then refuses it as unread and tells you to remove it, so no earlier-year answer ever reaches a box."* `make docs` re-run; `docs/man/btctax-income-import.1:11` carries it and no other man page moved.
+  Original entry:
+  **FR-116 — `cli.rs:479`'s *"Earlier years neither ask nor accept them"* is false on one reading of
   "accept" (recon Q3-3, 2026-09-09). Owning phase: ownerless residue (doc wording), minor.**
   The `income import` doc comment — which also generates `docs/man/btctax-income-import.1` — says earlier
   years *"neither ask nor accept"* `[broker_reporting.*]` tables. Read as *ingest*, that is false:
@@ -7062,7 +7070,9 @@ build, each with an owning phase.
 
 ### From the B3 whole-branch review fold (2026-09-11, `design/agent-reports/FOLD-b3-whole-branch-review.md`)
 
-- **FR-118 — the §163(h)(3)(B) ceiling warning prints both figures with no thousands separators. Nit.
+- ✅ **CLOSED 2026-09-12** (`9c495223`) — `transcription_warnings.rs:326`'s `money()` delegates to the core house formatter `advisories::fmt_usd`, so the warning reads `$1,200,000` vs `$750,000`. ★ The entry's open question is answered in a boundary comment at `:311-325`: **do not unify with `render::fmt_money`**, which must stay ungrouped because its module is *"Text rendering of CLI outputs … + FR10 CSV export"* and imports `csv::Writer` — a separator there would put a comma inside an exported CSV field. The split is by AUDIENCE. ★★ FIVE tests moved, not the two the brief predicted, and the third hid a **FALSE GREEN**: a screen-wide `contains` was satisfied by the debt-limit question's own comma-separated `$1,000,000`, never by the warning; it is now scoped to the warning's span with a negative half.
+  Original entry:
+  **FR-118 — the §163(h)(3)(B) ceiling warning prints both figures with no thousands separators. Nit.
   Owning phase: ownerless residue — batch when convenient.**
   `transcription_warnings.rs`'s `money()` is `format!("${v:.2}")`, so the warning a filer reads is *"the
   outstanding mortgage principal … adds up to **$1200000.00**, which is more than the **$750000.00** the
