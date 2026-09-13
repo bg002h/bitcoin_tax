@@ -8741,7 +8741,7 @@ build, each with an owning phase.
   to Schedule D line 8b. Both hold here.
 
 
-- **★★★ FR-218 — the 8949 emits a blank Part I page for EVERY continuation copy, contrary to the instruction's own words. Important. Owning phase: NOW. ★ FOUND BY THE OWNER'S PRINT REHEARSAL (S8), and by nothing else.**
+- **★★★ FR-218 — ✅ CLOSED 2026-09-13. the 8949 emits a blank Part I page for EVERY continuation copy, contrary to the instruction's own words. Important. Owning phase: NOW. ★ FOUND BY THE OWNER'S PRINT REHEARSAL (S8), and by nothing else.**
   **Owner, 2026-09-13, printing the S8b packet:** *"the first page of 8949 is printed twice."* Confirmed by
   the controller — pages 1 and 2 of `12A_f8949.pdf` have **identical text layers** (same md5); pages 3 and 4
   differ, as they should.
@@ -8768,6 +8768,40 @@ build, each with an owning phase.
   verified). Every instrument this project owns says the packet is correct. **It is a defect only when
   someone holds the paper**, which is precisely the class S8 exists to reach — and S8 found it on its second
   run, having been scheduled last for 14 months.
+
+  **CLOSED.** The two parts now paginate independently: `pages_to_file` derives the filed page set from
+  `map.parts[].{term,page}`, `retain_pages` reduces the copy, and `independent_part_plan` replaces the
+  `ByPosition` rectangle transpose with a plan that must be a **bijection onto every page of every copy** —
+  strictly stronger than the check it retired.
+  ★ **Verified on the owner's OWN packet by the controller**: the 8949 went **4 pages → 2**, and the two
+  survivors carry md5s `8f4d7035c21b` and `f9e20377fc75` — **exactly the old pages 3 and 4**. So the fix
+  removed precisely the two blank pages and changed nothing else. The Schedule D roll-up is unchanged:
+  352655+468635 = 821290, 86361+102520 = 188881, 266294+366115 = 632409.
+  ★★★ **FIVE COMMITTED TESTS WERE ASSERTING THE DEFECT**, the sharpest positively requiring the filer's
+  identity on both blank Part I pages — the removed assertions read *"both copies' page 1 is named"*, *"both
+  copies' page 2 is named"*, *"…and carries the SSN"*. **A test demanding the bug, which would have blocked
+  the fix.** It survived because it reads as obviously right: a filer's name DOES belong on every page — the
+  defect was which pages existed. ★ Every edit was re-derived from `ceil(rows/grid)` and the i8949 sentence,
+  never from the new output.
+  ★★ **A second emitter had the identical defect** — `lib.rs:134 fill_form_8949`, the crypto-slice path —
+  fixed in the same pass and flagged as outside the parcel's ownership, with the reason it could not be left
+  alone. **Blast radius measured:** the both-parts single-copy case is **byte-identical** pre/post on both
+  paths; only single-part and unequal-page shapes change; `qpdf --check` clean on all eight PDFs.
+
+- **FR-224 — `pdfunite` corrupts an AcroForm `/Fields` table; use `qpdf`. Minor, and it is MY tooling, not btctax's. Owning phase: whenever a packet is assembled for a human.**
+  **Measured 2026-09-13.** Merging the eight emitted PDFs with `pdfunite` produces
+  *"Internal Error: xref num 547 not found but needed"* and *"Syntax Warning: Reference in Fields array to an
+  invalid or non existent object"*. Merging the **same** eight with `qpdf --empty --pages … --` is clean, and
+  every emitted PDF is individually clean under both `qpdf --check` and `pdfinfo`. ★ Confirmed **not** caused
+  by FR-218's fix: the pre-fix packet produces the identical warning.
+  ★★ **Two lessons, and the second is the one that generalises.** (1) Assemble packets with `qpdf`, never
+  `pdfunite`. (2) **The convenience wrapper corrupted the artifact under test.** btctax emits eight separate
+  PDFs — that is what a filer prints and staples — and my merge existed only to make one file easy to send.
+  It introduced a defect the product does not have, and I then **filtered the warning out of my own output**
+  with a `grep -iE "^Pages|^Page size"`, which is why the first packet went to the owner uninspected. The
+  print rehearsal was sound; the courier was not.
+
+
 
 - **★★★ FR-219 — Schedule A line 5e's SALT cap and phase-out BOTH move for TY2026, on a line number that did not. Important. Owning phase: the TY2026 port. ★ This is the owner's own form.**
   **Controller-verified against both extracts 2026-09-13**, surfaced by FR-210's witness fix:
