@@ -7883,7 +7883,7 @@ build, each with an owning phase.
   S9 — a deletion, one ruling, suite green. The action is one line in the port runbook: *on closing a port,
   ask which prior years are still read by anything, and rule.*
 
-- **FR-164 — make the tax year a REQUIRED argument through the oracle harness and the golden corpus. Important. Owning phase: NOW (Sep–Dec), BEFORE the January census.**
+- **FR-164 — ✅ CLOSED 2026-09-13 (folded 0ecd88244 — nine omitted-year sites closed, B1 kill re-planted by the controller, and verified against a REAL OTS solver in 4e3fa578c). make the tax year a REQUIRED argument through the oracle harness and the golden corpus. Important. Owning phase: NOW (Sep–Dec), BEFORE the January census.**
   Measured 2026-09-13, all confirmed independently: `gen_goldens.py` has four `year: int = 2024` defaults
   (`:262`, `:308`, `:337`, `:423`) plus a hardcoded `"tax_year": 2024` (`:618`); `ots_direct.py:79`
   `OTS_YEAR` defaults to 2024; `verify_f6251.py:54` `DEFAULT_FIXTURE_YEAR = 2024` and **0 of 31 committed
@@ -7907,7 +7907,7 @@ build, each with an owning phase.
   default is the one that matters least; `gen_goldens.py` and `sweep.py` are where the year is genuinely
   unstated.
 
-- **FR-165 — ⛔ BLOCKING. CI's `test` job has been RED on all three OSes for 8 days: 6 `xtask::form_delta` tests require PDF bytes that `.gitignore` deliberately never commits. Owning phase: NOW, ahead of everything else.**
+- **FR-165 — ✅ CLOSED 2026-09-13 (folded b71e8f1f0 — form_delta reads the committed geometry; a PDF-less tree passes 217/217 and CI went green on all three platforms). ⛔ BLOCKING. CI's `test` job has been RED on all three OSes for 8 days: 6 `xtask::form_delta` tests require PDF bytes that `.gitignore` deliberately never commits. Owning phase: NOW, ahead of everything else.**
   **Measured 2026-09-13, independently, after the FR-156 agent flagged "6 pre-existing failures" as unrelated
   to its work — the flag was right and much larger than it treated it.**
   - **Last green CI run: `2bd04d458`, 2026-09-05 21:15.** Zero successes in the 60 runs since. The
@@ -8027,7 +8027,7 @@ build, each with an owning phase.
   two predicates are what the FR-136 declared-archive plants are built around and retargeting them belongs
   with that work.
 
-- **FR-174 — ⛔ BLOCKING. CI's residue after FR-165: 4 Windows + 1 macOS failures, both platform ASSUMPTIONS, both diagnosed. Owning phase: NOW.**
+- **FR-174 — ✅ CLOSED 2026-09-13 (folded 325474d03 — the portable excuse key and the TMPDIR platform assumption; CI green on ubuntu, macos AND windows for the first time since 2026-09-05). ⛔ BLOCKING. CI's residue after FR-165: 4 Windows + 1 macOS failures, both platform ASSUMPTIONS, both diagnosed. Owning phase: NOW.**
   **Measured 2026-09-13** on run `34762577861` (`08fde5d26`). FR-165 took the platform-independent failures
   to zero — **`test (ubuntu-latest)` is GREEN** — and Windows went **10 → 4**. What remains was never about
   the PDFs and has been red the whole 8 days, invisible behind the louder failure.
@@ -8111,7 +8111,7 @@ build, each with an owning phase.
   shared `~/.cargo` package-cache lock under six concurrent builds; or wall-clock sensitivity in a test with
   a timeout. **Do not guess — the hook's own output will name it.**
 
-- **FR-177 — ⚠️ OWNER DECISION. `Advisory::RefundByPaperCheck` asserts an IRS behaviour the IRS retracted, and §7.4's DO-NOT-BUILD rests on the same retracted premise. Important. Owning phase: NOW, before TY2026.**
+- **FR-177 — ✅ CLOSED 2026-09-13 (folded 303724f7 by OWNER RULING ("I see no decision requiring me. Just tell user what to do") — the retracted IRS fact swept from four surfaces; §7.4 corrected; direct deposit was ALREADY BUILT, only Form 8888 stays out). ⚠️ OWNER DECISION. `Advisory::RefundByPaperCheck` asserts an IRS behaviour the IRS retracted, and §7.4's DO-NOT-BUILD rests on the same retracted premise. Important. Owning phase: NOW, before TY2026.**
   **Both sides verified verbatim by the controller 2026-09-13.**
   The advisory (`advisories.rs:619-626`) tells the filer: *"REFUND BY PAPER CHECK — your return is due a
   refund of {}, and no direct-deposit instruction was given, so the 1040's lines 35b–35d are blank.
@@ -8293,7 +8293,7 @@ build, each with an owning phase.
   cannot reach the two documents TY2026 Schedule A most needs. ★ Same family as FR-181 — the archive's
   coverage is derived from the wrong set.
 
-- **FR-190 — ★★ `form-delta`'s label axis is keyed to the FULL AcroForm FQN, so a container rename silently empties it — and the blindness is CONCENTRATED where the axis matters most. Important. Owning phase: NOW, before the TY2026 port uses it in anger.**
+- **FR-190 — ✅ CLOSED 2026-09-13 (folded 2d2c3ff7c — the suffix ladder; f1040s3--2021→2022 went 0 common/40 added/41 removed to 40 paired/0 added/1 removed; 3373→4177 boxes paired over 58 pairs). ★★ `form-delta`'s label axis is keyed to the FULL AcroForm FQN, so a container rename silently empties it — and the blindness is CONCENTRATED where the axis matters most. Important. Owning phase: NOW, before the TY2026 port uses it in anger.**
   **Controller-reproduced independently 2026-09-13**, not taken from the report:
   `f1040s3--2021`'s root subform is `form1[0]`; `f1040s3--2022`'s is `topmostSubform[0]`. Nothing else
   differs. Measured on the committed geometry fixtures: **full-FQN intersection = 0; root-stripped
@@ -8312,14 +8312,14 @@ build, each with an owning phase.
   *Fix direction:* compare on a root-stripped (or container-insensitive) key, and keep the full FQN only for
   reporting. B1: plant a root-subform rename on an otherwise identical pair and watch the axis still compare.
 
-- **FR-191 — `form-delta` has no line-SET axis: 62 retired line numbers reported as zero. Important. Owning phase: with FR-190.**
+- **FR-191 — ✅ CLOSED 2026-09-13 (folded 2d2c3ff7c — Schedule 8812 TY2021→TY2022 now NAMES all 34 retired lines). `form-delta` has no line-SET axis: 62 retired line numbers reported as zero. Important. Owning phase: with FR-190.**
   Schedule 8812 TY2021→TY2022 **killed 34 printed lines**; the output is *"54 removed"* field names, 8 shown,
   none labelled. Across the corpus, 62 retired line numbers were invisible. ★ `label-census` can already
   answer this question — `form-delta` neither runs it nor names it, which is the gap: two instruments exist
   and nothing joins them. A retired line matters because code that still reads it reads a **blank**, and a
   blank and a zero are indistinguishable on the page.
 
-- **FR-192 — ★★ `form-delta` has no line-MEANING axis, and that is the THIRD form today showing the collision shape. Important. Owning phase: with FR-190; it is runbook step 17's real question.**
+- **FR-192 — ✅ CLOSED 2026-09-13 (folded 2d2c3ff7c — the line-MEANING axis; catches all three known collisions, stays clean on a pure renumber, and found FR-209 on its first real run). ★★ `form-delta` has no line-MEANING axis, and that is the THIRD form today showing the collision shape. Important. Owning phase: with FR-190; it is runbook step 17's real question.**
   Schedule 3 TY2020→TY2021: **13 line numbers survive and NINE name a different quantity.** Line 7 moves
   from *the Part I total* to an *"other credits" subtotal* — which **double-counts lines 1–5** if the old
   cross-reference is carried forward; line 8 moves from *net premium tax credit* to *the Part I total*.
@@ -8367,7 +8367,7 @@ build, each with an owning phase.
   *What is actually open:* whether the worksheet gets built, or the owner files this year with a preparer if
   a state refund arrives. That is a scope decision, not a defect fix.
 
-- **FR-197 — W-2 box 12 codes C and V refuse the whole return while changing no figure. Important. Owning phase: NOW. FR-102's shape, reproduced exactly.**
+- **FR-197 — ✅ CLOSED 2026-09-13 (folded 3524bbfc — 11 hand-typed codes became a 33-row transcription derived from two agreeing regions of every archived revision; six codes that blocked the whole packet now file). W-2 box 12 codes C and V refuse the whole return while changing no figure. Important. Owning phase: NOW. FR-102's shape, reproduced exactly.**
   **Controller-verified:** `INERT_BOX12_CODES` (`return_refuse.rs:39`) carries **11** codes —
   `["D","E","F","G","H","S","AA","BB","EE","DD","W"]` — of roughly 26 the IRS defines. Anything else hits
   `RefuseReason::UnsupportedBox12Code` and the packet prints **zero pages**.
@@ -8378,7 +8378,7 @@ build, each with an owning phase.
   different trigger. ★ The list is also the *"derive the list, or make the compiler hold it"* shape: 11
   hand-typed codes beside a set of 26 that the IRS revises.
 
-- **FR-198 — a filer-facing advisory names a command that does not exist. Minor. Owning phase: NOW (one line).**
+- **FR-198 — ✅ CLOSED 2026-09-13 (folded 303724f7 — `btctax tui-edit` did not exist; the advisory now names `btctax-tui-edit`). a filer-facing advisory names a command that does not exist. Minor. Owning phase: NOW (one line).**
   **Controller-verified:** `advisories.rs:623` tells the filer to use *"the tax-inputs editor (`btctax
   tui-edit`, then T on the year)"*. There is no `tui-edit` subcommand on the `btctax` binary — the separate
   binaries are **`btctax-tui`** and **`btctax-tui-edit`**. So the one instruction offered for fixing a
@@ -8619,7 +8619,7 @@ build, each with an owning phase.
   labels respectively. Fixing them would mean injecting `compute` itself, decoupling the plants from the
   artefact they measure — worse than the disease. Recorded with a loud premise instead of silently mitigated.
 
-- **FR-156 — two files carrying per-port hardcoded counts are owned by NO agent in the partition. Minor. Owning phase: the port machine.**
+- **FR-156 — ✅ CLOSED 2026-09-13 (answered — CHANGE NOTHING at both sites; three independent mechanisms already catch the joint deletion (ledger 7583106e4)). two files carrying per-port hardcoded counts are owned by NO agent in the partition. Minor. Owning phase: the port machine.**
   Surfaced by A2: `tests/supported_years_cross_product.rs::BUNDLED_FORMS_PER_YEAR` and
   `tests/map_pdf_conformance.rs`'s 8995-A refusal loop. Both are the shape FR-141 just removed from
   `line_set.rs`, so the per-port cost is not yet 1 everywhere — only in the three files A2 owned.
