@@ -7815,8 +7815,12 @@ build, each with an owning phase.
   `extract_line` anchors (11/15/58) had to move to 15/19/62 — an edit outside A4's ownership, reported rather
   than hidden, and the only collision in the corpus (validated by `census_join` passing, which would red on a
   second). **An absolute index into a generated file is the hand-typed-number shape**: it is correct on the day
-  it is written and silently wrong the next time the generator's preamble changes. 41 such anchors exist across
-  ten maps. *Fix:* anchor on the caption text, or on a stable marker, not on a line number.
+  it is written and silently wrong the next time the generator's preamble changes. **30** such anchors exist across **11** files — measured as `extract_line\s*=\s*[0-9]+` assignments.
+  ★ This entry originally said *"41 … across ten maps"*, and both numbers were wrong in instructive ways:
+  41 counted every string occurrence of `extract_line` including non-anchor mentions, and **"ten" was an
+  artifact of piping the file list through `head`, whose default is 10 lines.** Corrected 2026-09-13 after
+  the integration re-verification (S5) measured it — in an entry that exists to warn against hand-counted
+  numbers, which is the joke writing itself. *Fix:* anchor on the caption text, or on a stable marker, not on a line number.
 
 - **FR-153 — two real transcription defects, PINNED not fixed, in maps no agent owned. Minor. Owning phase: ownerless residue.**
   Found by A1 while building the year-generic caption gate: `f1040sa/2024` line 5e abbreviates the form's
