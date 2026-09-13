@@ -1,0 +1,23 @@
+https://www.irs.gov/pub/irs-prior/f8949--2021.pdf
+
+# f8949--2021.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  7d265f830ff83b5a07e275df2f4a59868a1f62e3f6aa0ee73c931ed517def44d
+# bytes   119346
+#
+# Fetch:    curl -sL -o f8949--2021.pdf https://www.irs.gov/pub/irs-prior/f8949--2021.pdf
+# Verify:   sha256sum f8949--2021.pdf   # must equal the sha256 above
+#
+# ★ A DIFFERENT hash does not mean a corrupt download — it means the IRS REVISED this
+# document. That is a change to the authority: review it, never silently absorb it.
+#
+# The committed text layer is design/forms/extract/f8949--2021.txt — that is what the
+# conformance tests read, so they run with no PDF and no network.
+#
+# Archived 2026-09-13 for the PRIOR-YEAR DELTA PROBE
+# (design/agent-reports/RECON-prior-year-delta-probe.md), which exercises port-runbook
+# steps 16 and 17 — adjudicating a witness disagreement, and deciding whether a moved line
+# is the same line — on year pairs where the answer is already known from history.
+# ANNUAL cadence: one revision per tax year, so 2021 governs TY2021 and nothing later.
+# ★★ NOT BUNDLED. No `crates/btctax-forms/forms/2021/` package exists or is intended
+# (FR-163: every bundled year becomes a row in every glob-walking gate forever). This is an
+# ARCHIVE-only rehearsal: notes, text layer and geometry fixture, no year package.

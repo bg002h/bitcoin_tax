@@ -1,0 +1,39 @@
+# GENERATED — do not hand-edit. Text layer of design/forms/2020/f1040s3--2020.pdf
+# sha256:6480ab0dab066e09…  |  pdftotext -layout  |  form feeds -> LF
+# Regenerate: cargo run -p xtask -- forms extract f1040s3--2020
+#
+SCHEDULE 3                                                                                                                OMB No. 1545-0074
+                                           Additional Credits and Payments
+(Form 1040)
+Department of the Treasury
+                                               ▶ Attach to Form 1040, 1040-SR, or 1040-NR.                                 2020
+                                                                                                                          Attachment
+                                 ▶ Go to www.irs.gov/Form1040 for instructions and the latest information.
+Internal Revenue Service                                                                                                  Sequence No. 03
+Name(s) shown on Form 1040, 1040-SR, or 1040-NR                                                              Your social security number
+
+
+ Part I        Nonrefundable Credits
+  1      Foreign tax credit. Attach Form 1116 if required               . . . . . . . . . . . . . .                  1
+  2      Credit for child and dependent care expenses. Attach Form 2441                      . . . . . . .           2
+  3      Education credits from Form 8863, line 19 . . . . . . . . . . . . . . . . .                                 3
+  4      Retirement savings contributions credit. Attach Form 8880 . . . . . . . . . .                               4
+  5      Residential energy credits. Attach Form 5695               . . . . . . . . . . . . . . .                    5
+  6      Other credits from Form:         a      3800      b     8801      c                                         6
+  7      Add lines 1 through 6. Enter here and on Form 1040, 1040-SR, or 1040-NR, line 20                            7
+ Part II Other Payments and Refundable Credits
+  8      Net premium tax credit. Attach Form 8962 . . . . . . . . . . . . . . . . .                                  8
+  9      Amount paid with request for extension to file (see instructions) . . . . . . . .                           9
+10       Excess social security and tier 1 RRTA tax withheld . . . . . . . . . . . . .                               10
+11       Credit for federal tax on fuels. Attach Form 4136 . . . . . . . . . . . . . .                               11
+12       Other payments or refundable credits:
+    a Form 2439 . . . . . . . . . . . . . . . . . . . . . 12a
+    b Qualified sick and family leave credits from Schedule(s) H and
+      Form(s) 7202 . . . . . . . . . . . . . . . . . . . . 12b
+    c Health coverage tax credit from Form 8885                  . . . . . . . .           12c
+    d Other:                                                                               12d
+    e Deferral for certain Schedule H or SE filers (see instructions)                 .    12e
+    f Add lines 12a through 12e . . . . . . . . . . . . . . . . . . . . . . .                                       12f
+13       Add lines 8 through 12f. Enter here and on Form 1040, 1040-SR, or 1040-NR, line 31                          13
+For Paperwork Reduction Act Notice, see your tax return instructions.               Cat. No. 71480G                Schedule 3 (Form 1040) 2020
+

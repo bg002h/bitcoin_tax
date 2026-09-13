@@ -1,0 +1,167 @@
+# GENERATED — do not hand-edit. Text layer of design/forms/2021/f1040s8--2021.pdf
+# sha256:eb303384d6333f40…  |  pdftotext -layout  |  form feeds -> LF
+# Regenerate: cargo run -p xtask -- forms extract f1040s8--2021
+#
+SCHEDULE 8812                                 Credits for Qualifying Children                             1040            ◀
+                                                                                                                                               OMB No. 1545-0074
+(Form 1040)                                      and Other Dependents                                    ..... ....
+
+
+                                                ▶ Attach to Form 1040, 1040-SR, or 1040-NR.
+                                                                                                        1040-SR
+                                                                                                         .... .....
+                                                                                                        1040-NR                                 2021
+Department of the Treasury                                                                                                8812                 Attachment
+Internal Revenue Service (99)   ▶ Go to www.irs.gov/Schedule8812 for instructions and the latest information.                                  Sequence No. 47
+
+Name(s) shown on return                                                                                                            Your social security number
+
+
+ Part I-A          Child Tax Credit and Credit for Other Dependents
+   1     Enter the amount from line 11 of your Form 1040, 1040-SR, or 1040-NR . . . . . . . . . . . .                                     1
+   2a    Enter income from Puerto Rico that you excluded . . . . . . . . . . .                         2a
+     b   Enter the amounts from lines 45 and 50 of your Form 2555 . . . . . . . .                      2b
+     c   Enter the amount from line 15 of your Form 4563 . . . . . . . . . . .                         2c
+     d   Add lines 2a through 2c . . . . . . . . . . . . . . . . . . . . . . . . . . .                                                   2d
+   3     Add lines 1 and 2d . . . . . . . . . . . . . . . . . . . . . . . . . . . .                                                       3
+   4a    Number of qualifying children under age 18 with the required social security number           4a
+     b   Number of children included on line 4a who were under age 6 at the end of 2021 . .            4b
+     c   Subtract line 4b from line 4a . . . . . . . . . . . . . . . . .                               4c
+   5     If line 4a is more than zero, enter the amount from the Line 5 Worksheet; otherwise, enter -0- . . . . . .                       5
+   6     Number of other dependents, including any qualifying children who are not under age
+         18 or who do not have the required social security number . . . . . . . .                      6
+         Caution: Do not include yourself, your spouse, or anyone who is not a U.S. citizen, U.S. national, or U.S. resident
+         alien. Also, do not include anyone you included on line 4a.
+   7     Multiply line 6 by $500 . . . . . . . . . . . . . . . . . . . . . . . . . . .                                                    7
+   8     Add lines 5 and 7 . . . . . . . . . . . . . . . . . . . . . . . . . . . . .                                                      8
+   9     Enter the amount shown below for your filing status.
+         • Married filing jointly—$400,000
+         • All other filing statuses—$200,000      } . . . . . . . . . . . . . . . . . . . . . .                                          9
+ 10      Subtract line 9 from line 3.
+
+
+                                                                                                 }
+         • If zero or less, enter -0-.
+         • If more than zero and not a multiple of $1,000, enter the next multiple of $1,000. For
+         example, if the result is $425, enter $1,000; if the result is $1,025, enter $2,000, etc.     . . . . . . .                     10
+ 11      Multiply line 10 by 5% (0.05) . . . . . . . . . . . . . . . . . . . . . . . . .                                                 11
+ 12      Subtract line 11 from line 8. If zero or less, enter -0- . . . . . . . . . . . . . . . . . .                                    12
+ 13      Check all the boxes that apply to you (or your spouse if married filing jointly).
+         A Check here if you (or your spouse if married filing jointly) had a principal place of abode in the United States
+              for more than half of 2021 . . . . . . . . . . . . . . . . . . . . . . . .
+         B Check here if you (or your spouse if married filing jointly) were a bona fide resident of Puerto Rico for 2021
+ Part I-B          Filers Who Check a Box on Line 13
+Caution: If you did not check a box on line 13, do not complete Part I-B; instead, skip to Part I-C.
+ 14a Enter the smaller of line 7 or line 12 . . . . . . . . . . . . . . . . . .                               .       .    .   .   .     14a
+   b Subtract line 14a from line 12 . . . . . . . . . . . . . . . . . . . .                                   .       .    .   .   .     14b
+   c If line 14a is zero, enter -0-; otherwise, enter the amount from the Credit Limit Worksheet A .          .       .    .   .   .     14c
+   d Enter the smaller of line 14a or line 14c . . . . . . . . . . . . . . . . .                              .       .    .   .   .     14d
+   e Add lines 14b and 14d . . . . . . . . . . . . . . . . . . . . . .                                        .       .    .   .   .     14e
+    f    Enter the aggregate amount of advance child tax credit payments you (and your spouse if filing jointly) received
+         for 2021. See your Letter(s) 6419 for the amounts to include on this line. If you are missing Letter 6419, see the
+         instructions before entering an amount on this line. If you didn’t receive any advance child tax credit payments
+         for 2021, enter -0- . . . . . . . . . . . . . . . . . . . . . . . . . . . .                                                     14f
+         Caution: If the amount on this line doesn’t match the aggregate amounts reported to you (and your spouse if
+         filing jointly) on your Letter(s) 6419, the processing of your return will be delayed.
+    g    Subtract line 14f from line 14e. If zero or less, enter -0- on lines 14g through 14i and go to Part III . . . .                 14g
+    h    Enter the smaller of line 14d or line 14g. This is your credit for other dependents. Enter this amount on line
+         19 of your Form 1040, 1040-SR, or 1040-NR . . . . . . . . . . . . . . . . . . . .                                               14h
+    i    Subtract line 14h from line 14g. This is your refundable child tax credit. Enter this amount on line 28 of
+         your Form 1040, 1040-SR, or 1040-NR . . . . . . . . . . . . . . . . . . . . . .                                                 14i
+For Paperwork Reduction Act Notice, see your tax return instructions.                     Cat. No. 59761M                           Schedule 8812 (Form 1040) 2021
+
+Schedule 8812 (Form 1040) 2021                                                                                                                                     Page 2
+Part I-C        Filers Who Do Not Check a Box on Line 13
+Caution: If you checked a box on line 13, do not complete Part I-C.
+ 15a Enter the amount from the Credit Limit Worksheet A . . . . . . . . . . . . . .                                                 .   .   .   15a
+   b Enter the smaller of line 12 or line 15a . . . . . . . . . . . . . . . . . . .                                                 .   .   .   15b
+       Additional child tax credit. Complete Parts II-A through II-C if you meet each of the following items.
+       1. You are not filing Form 2555.
+       2. Line 4a is more than zero.
+       3. Line 12 is more than line 15a.
+   c If you completed Parts II-A through II-C, enter the amount from line 27; otherwise, enter -0- . . .                            .   .   .   15c
+   d Add lines 15b and 15c . . . . . . . . . . . . . . . . . . . . . . . .                                                          .   .   .   15d
+    e   Enter the aggregate amount of advance child tax credit payments you (and your spouse if filing jointly) received
+        for 2021. See your Letter(s) 6419 for the amounts to include on this line. If you are missing Letter 6419, see the
+        instructions before entering an amount on this line. If you didn’t receive any advance child tax credit payments
+        for 2021, enter -0- . . . . . . . . . . . . . . . . . . . . . . . . . . . .                                                             15e
+        Caution: If the amount on this line doesn’t match the aggregate amounts reported to you (and your spouse if
+        filing jointly) on your Letter(s) 6419, the processing of your return will be delayed.
+    f   Subtract line 15e from line 15d. If zero or less, enter -0- on lines 15f through 15h and go to Part III . . . .                          15f
+    g   Enter the smaller of line 15b or line 15f. This is your nonrefundable child tax credit and credit for other
+        dependents. Enter this amount on line 19 of your Form 1040, 1040-SR, or 1040-NR . . . . . . . .                                         15g
+    h   Subtract line 15g from line 15f. This is your additional child tax credit. Enter this amount on line 28 of your
+        Form 1040, 1040-SR, or 1040-NR . . . . . . . . . . . . . . . . . . . . . . .                                                            15h
+Part II-A       Additional Child Tax Credit (use only if completing Part I-C)
+Caution: If you file Form 2555, do not complete Parts II-A through II-C; you cannot claim the additional child tax credit.
+Caution: If you checked a box on line 13, do not complete Parts II-A through II-C; you cannot claim the additional child tax credit.
+ 16a Subtract line 15b from line 12. If zero, skip Parts II-A and II-B and enter -0- on line 27 . . . . . . . .               16a
+    b Number of qualifying children under 18 with the required social security number:                             x $1,400.
+       Enter the result. If zero, skip Parts II-A and II-B and enter -0- on line 27 . . . . . . . . . . . .                   16b
+       TIP: The number of children you use for this line is the same as the number of children you used for line 4a.
+ 17    Enter the smaller of line 16a or line 16b . . . . . . . . . . . . . . . . . . . . . .                                   17
+ 18a Earned income (see instructions) . . . . . . . . . . . . . . . .                                18a
+    b Nontaxable combat pay (see instructions) . . . . . .                  18b
+ 19    Is the amount on line 18a more than $2,500?
+            No. Leave line 19 blank and enter -0- on line 20.
+            Yes. Subtract $2,500 from the amount on line 18a. Enter the result       . . . .          19
+ 20    Multiply the amount on line 19 by 15% (0.15) and enter the result . . . . . . . . . . . . . .                           20
+       Next. On line 16b, is the amount $4,200 or more?
+            No. If line 20 is zero, enter -0- on line 15c. Otherwise, skip Part II-B and enter the smaller of line 17 or line
+                  20 on line 27.
+            Yes. If line 20 is equal to or more than line 17, skip Part II-B and enter the amount from line 17 on line 27.
+                  Otherwise, go to line 21.
+Part II-B       Certain Filers Who Have Three or More Qualifying Children
+ 21     Withheld social security, Medicare, and Additional Medicare taxes from Form(s) W-2,
+        boxes 4 and 6. If married filing jointly, include your spouse’s amounts with yours. If
+        your employer withheld or you paid Additional Medicare Tax or tier 1 RRTA taxes, see
+        instructions . . . . . . . . . . . . . . . . . . . . . .                                                   21
+ 22     Enter the total of the amounts from Schedule 1 (Form 1040), line 15; Schedule 2 (Form
+        1040), line 5; Schedule 2 (Form 1040), line 6; and Schedule 2 (Form 1040), line 13 .                       22
+ 23     Add lines 21 and 22 . . . . . . . . . . . . . . . . . . . .                                                23
+ 24     1040 and
+
+
+                                                                                                           }
+        1040-SR filers: Enter the total of the amounts from Form 1040 or 1040-SR, line 27a,
+                            and Schedule 3 (Form 1040), line 11.
+        1040-NR filers: Enter the amount from Schedule 3 (Form 1040), line 11.                                     24
+ 25     Subtract line 24 from line 23. If zero or less, enter -0- . . . . . . . . . . .                            . .      .   .   .   .   .    25
+ 26     Enter the larger of line 20 or line 25 . . . . . . . . . . . . . . . .                                     . .      .   .   .   .   .    26
+        Next, enter the smaller of line 17 or line 26 on line 27.
+Part II-C       Additional Child Tax Credit
+ 27     Enter this amount on line 15c .    .   .   .   .   .   .   .   .   .   .   .   .   .   .   .   .       .   .    .   .   .   .   .   .    27
+                                                                                                                                            Schedule 8812 (Form 1040) 2021
+
+Schedule 8812 (Form 1040) 2021                                                                                                                     Page 3
+ Part III       Additional Tax (use only if line 14g or line 15f, whichever applies, is zero)
+ 28a    Enter the amount from line 14f or line 15e, whichever applies . . . . . . . . . . . . . . .                              28a
+    b   Enter the amount from line 14e or line 15d, whichever applies . . . . . . . . . . . . . . .                              28b
+ 29     Excess advance child tax credit payments. Subtract line 28b from line 28a. If zero, stop; you do not owe the
+        additional tax . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .                                               29
+ 30     Enter the number of qualifying children taken into account in determining the annual advance amount you
+        received for 2021. See your Letter 6419 for this number. If you are missing your Letter 6419, you are filing a joint
+        return, or you received more than one Letter 6419, see the instructions before entering a number on this line . .        30
+        Caution: If the amount on this line doesn’t match the number of qualifying children reported to you (and your
+        spouse if filing jointly) on your Letter(s) 6419, the processing of your return will be delayed.
+ 31     Enter the smaller of line 4a or line 30 . . . . . . . . . . . . . . . . . . . . . . .                                    31
+ 32     Subtract line 31 from line 30. If zero, skip to line 40 and enter the amount from line 29; otherwise, continue to
+        line 33 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .                                                  32
+ 33     Enter the amount shown below for your filing status.
+
+
+                                                                      }
+        • Married filing jointly or Qualifying widow(er)—$60,000
+        • Head of household—$50,000
+        • All other filing statuses—$40,000                                 . . . . . . . . . . . . . . .                        33
+ 34     Subtract line 33 from line 3. If zero or less, enter -0- . . . . . . . . . . . . . . . . . .                             34
+ 35     Enter the amount from line 33 . . . . . . . . . . . . . . . . . . . . . . . . .                                          35
+ 36     Divide line 34 by line 35. Enter the result as a decimal (rounded to at least three places). If the result is 1.000 or
+        more, enter 1.000 . . . . . . . . . . . . . . . . . . . . . . . . . . . . .                                              36
+ 37     Multiply line 32 by $2,000 . . . . . . . . . . . . . . . . . . . . . . . . . .                                           37
+ 38     Multiply line 37 by line 36 . . . . . . . . . . . . . . . . . . . . . . . . . .                                          38
+ 39     Subtract line 38 from line 37 . . . . . . . . . . . . . . . . . . . . . . . . .                                          39
+ 40     Subtract line 39 from line 29. If zero or less, enter -0-. This is your additional tax. If more than zero, enter
+        this amount on Schedule 2 (Form 1040), line 19 . . . . . . . . . . . . . . . . . . .                                     40
+                                                                                                                            Schedule 8812 (Form 1040) 2021
+

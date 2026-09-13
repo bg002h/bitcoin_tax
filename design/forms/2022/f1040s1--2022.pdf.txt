@@ -1,0 +1,23 @@
+https://www.irs.gov/pub/irs-prior/f1040s1--2022.pdf
+
+# f1040s1--2022.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  82887534af818328b48c10569402ba177b87729edda2cd59151bc854c7e40001
+# bytes   83027
+#
+# Fetch:    curl -sL -o f1040s1--2022.pdf https://www.irs.gov/pub/irs-prior/f1040s1--2022.pdf
+# Verify:   sha256sum f1040s1--2022.pdf   # must equal the sha256 above
+#
+# ★ A DIFFERENT hash does not mean a corrupt download — it means the IRS REVISED this
+# document. That is a change to the authority: review it, never silently absorb it.
+#
+# The committed text layer is design/forms/extract/f1040s1--2022.txt — that is what the
+# conformance tests read, so they run with no PDF and no network.
+#
+# Archived 2026-09-13 for the PRIOR-YEAR DELTA PROBE
+# (design/agent-reports/RECON-prior-year-delta-probe.md), which exercises port-runbook
+# steps 16 and 17 — adjudicating a witness disagreement, and deciding whether a moved line
+# is the same line — on year pairs where the answer is already known from history.
+# ANNUAL cadence: one revision per tax year, so 2022 governs TY2022 and nothing later.
+# ★★ NOT BUNDLED. No `crates/btctax-forms/forms/2022/` package exists or is intended
+# (FR-163: every bundled year becomes a row in every glob-walking gate forever). This is an
+# ARCHIVE-only rehearsal: notes, text layer and geometry fixture, no year package.

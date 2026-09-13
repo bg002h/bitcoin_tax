@@ -138,8 +138,13 @@ pub fn pdf_rel_for_stem(stem: &str) -> Result<String, String> {
 
 pub fn load(root: &Path, stem: &str) -> Result<Geometry, String> {
     let p = geometry_path(root, stem);
-    let text = std::fs::read_to_string(&p)
-        .map_err(|e| format!("geometry fixture missing: {} ({e})", p.display()))?;
+    let text = std::fs::read_to_string(&p).map_err(|e| {
+        format!(
+            "geometry fixture missing: {} ({e})\n  make it with: cargo run -p xtask -- \
+                 extract-geometry {stem}",
+            p.display()
+        )
+    })?;
     serde_json::from_str(&text).map_err(|e| format!("{} is not valid geometry: {e}", p.display()))
 }
 

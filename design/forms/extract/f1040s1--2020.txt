@@ -1,0 +1,48 @@
+# GENERATED — do not hand-edit. Text layer of design/forms/2020/f1040s1--2020.pdf
+# sha256:4a516f8c1cf06838…  |  pdftotext -layout  |  form feeds -> LF
+# Regenerate: cargo run -p xtask -- forms extract f1040s1--2020
+#
+SCHEDULE 1                                                                                                                OMB No. 1545-0074
+                                Additional Income and Adjustments to Income
+(Form 1040)
+Department of the Treasury
+                                               ▶ Attach to Form 1040, 1040-SR, or 1040-NR.                                 2020
+                                                                                                                          Attachment
+                                 ▶ Go to www.irs.gov/Form1040 for instructions and the latest information.
+Internal Revenue Service                                                                                                  Sequence No. 01
+Name(s) shown on Form 1040, 1040-SR, or 1040-NR                                                              Your social security number
+
+
+ Part I        Additional Income
+  1      Taxable refunds, credits, or offsets of state and local income taxes . . . . . . .                          1
+  2a Alimony received . . . . . . . . . . . . . . . . . . . . . . . . . . .                                          2a
+    b Date of original divorce or separation agreement (see instructions) ▶
+  3      Business income or (loss). Attach Schedule C               . . . . . . . . . . . . . . .                    3
+  4      Other gains or (losses). Attach Form 4797 . . . . . . . . . . . . . . . . .                                 4
+  5      Rental real estate, royalties, partnerships, S corporations, trusts, etc. Attach Schedule E                 5
+  6      Farm income or (loss). Attach Schedule F . . . . . . . . . . . . . . . . .                                  6
+  7      Unemployment compensation . . . . . . . . . . . . . . . . . . . . . .                                       7
+  8      Other income. List type and amount ▶
+                                                                                                                     8
+  9      Combine lines 1 through 8. Enter here and on Form 1040, 1040-SR, or 1040-NR,
+         line 8 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .                                      9
+ Part II Adjustments to Income
+10       Educator expenses . . . . . . . . . . . . . . . . . . . . . . . . . .                                       10
+11       Certain business expenses of reservists, performing artists, and fee-basis government
+         officials. Attach Form 2106 . . . . . . . . . . . . . . . . . . . . . . .                                   11
+12       Health savings account deduction. Attach Form 8889 . . . . . . . . . . . .                                  12
+13       Moving expenses for members of the Armed Forces. Attach Form 3903 . . . . .                                 13
+14       Deductible part of self-employment tax. Attach Schedule SE                   . . . . . . . . .              14
+15       Self-employed SEP, SIMPLE, and qualified plans . . . . . . . . . . . . . .                                  15
+16       Self-employed health insurance deduction . . . . . . . . . . . . . . . . .                                  16
+17       Penalty on early withdrawal of savings            . . . . . . . . . . . . . . . . . .                       17
+18a Alimony paid . . . . . . . . . . . . . . . . . . . . . . . . . . . . .                                          18a
+    b Recipient’s SSN          . . . . . . . . . . . . . . . . . . . . ▶
+    c Date of original divorce or separation agreement (see instructions) ▶
+19       IRA deduction . . . . . . . . . . . . . . . . . . . . . . . . . . . .                                       19
+20       Student loan interest deduction . . . . . . . . . . . . . . . . . . . . .                                   20
+21       Tuition and fees deduction. Attach Form 8917 . . . . . . . . . . . . . . .                                  21
+22       Add lines 10 through 21. These are your adjustments to income. Enter here and
+         on Form 1040, 1040-SR, or 1040-NR, line 10a . . . . . . . . . . . . . . .                                   22
+For Paperwork Reduction Act Notice, see your tax return instructions.               Cat. No. 71479F                Schedule 1 (Form 1040) 2020
+

@@ -1,0 +1,75 @@
+# GENERATED — do not hand-edit. Text layer of design/forms/2020/f1040s8--2020.pdf
+# sha256:d6e7e5cdfaf6ca20…  |  pdftotext -layout  |  form feeds -> LF
+# Regenerate: cargo run -p xtask -- forms extract f1040s8--2020
+#
+SCHEDULE 8812                                                                                                                                                   OMB No. 1545-0074
+(Form 1040)
+                                            Additional Child Tax Credit                                                     1040
+                                                                                                                           ..... ....
+                                                                                                                                            ◀
+                                            ▶ Attach to Form 1040, 1040-SR, or 1040-NR.
+                                                                                                                           1040-SR
+                                                                                                                            .... .....
+                                                                                                                           1040-NR                               2020
+Department of the Treasury      ▶ Go to www.irs.gov/Schedule8812 for instructions and the latest information.
+                                                                                                                                            8812                Attachment
+Internal Revenue Service (99)                                                                                                                                   Sequence No. 47
+
+Name(s) shown on return                                                                                                                              Your social security number
+
+
+ Part I          All Filers
+Caution: If you file Form 2555, stop here; you cannot claim the additional child tax credit.
+   1     If you are required to use the worksheet in Pub. 972, enter the amount from line 10 of the Child Tax Credit
+         and Credit for Other Dependents Worksheet in the publication. Otherwise, enter the amount from line 8 of your
+         Child Tax Credit and Credit for Other Dependents Worksheet. (See the instructions for Forms 1040 and 1040-
+         SR, line 19, or the instructions for Form 1040-NR, line 19.) . . . . . . . . . . . . . . . .                                                       1
+   2     Enter the amount from line 19 of your Form 1040, Form 1040-SR, or Form 1040-NR . . . . . . . .                                                     2
+   3     Subtract line 2 from line 1. If zero, stop here; you cannot claim this credit . . . . . . . . . . . .                                              3
+   4     Number of qualifying children under 17 with the required social security number:                          x $1,400.
+         Enter the result. If zero, stop here; you cannot claim this credit . . . . . . . . . . . . . . .                                                   4
+         TIP: The number of children you use for this line is the same as the number of children you used for line 1 of the
+         Child Tax Credit and Credit for Other Dependents Worksheet.
+   5     Enter the smaller of line 3 or line 4 . . . . . . . . . . . . . . . . . . . . . . .                                                                5
+   6a    Earned income (see instructions) . . . . . . . . . . . . . . . .                             6a
+     b   Nontaxable combat pay (see instructions) . . . . . .                6b
+   7     Is the amount on line 6a more than $2,500?
+              No. Leave line 7 blank and enter -0- on line 8.
+              Yes. Subtract $2,500 from the amount on line 6a. Enter the result . . . . .              7
+   8     Multiply the amount on line 7 by 15% (0.15) and enter the result . . . . . . . . . . . . . . .                                                     8
+         Next. On line 4, is the amount $4,200 or more?
+              No. If line 8 is zero, stop here; you cannot claim this credit. Otherwise, skip Part II and enter the smaller
+                   of line 5 or line 8 on line 15.
+              Yes. If line 8 is equal to or more than line 5, skip Part II and enter the amount from line 5 on line 15.
+                   Otherwise, go to line 9.
+ Part II         Certain Filers Who Have Three or More Qualifying Children
+   9     Withheld social security, Medicare, and Additional Medicare taxes from Form(s) W-2,
+         boxes 4 and 6. If married filing jointly, include your spouse’s amounts with yours. If
+         your employer withheld or you paid Additional Medicare Tax or tier 1 RRTA taxes, see
+         instructions . . . . . . . . . . . . . . . . . . . . . . .                                                   9
+ 10      Enter the total of the amounts from Schedule 1 (Form 1040), line 14, and Schedule 2
+         (Form 1040), line 5, plus any taxes that you identified using code “UT” and entered on
+         Schedule 2 (Form 1040), line 8 . . . . . . . . . . . . . . . . .                                             10
+ 11      Add lines 9 and 10 . . . . . . . . . . . . . . . . . . . .                                                   11
+
+
+                                                                                                              }
+ 12      1040 and           Enter the total of the amounts from Form 1040 or 1040-SR, line 27,
+         1040-SR filers: and Schedule 3 (Form 1040), line 10.
+         1040-NR filers: Enter the amount from Schedule 3 (Form 1040), line 10.                                       12
+ 13      Subtract line 12 from line 11. If zero or less, enter -0- . . . . . . . . . .                            .   . .       .       .    .   .   .     13
+ 14      Enter the larger of line 8 or line 13 . . . . . . . . . . . . . . .                                      .   . .       .       .    .   .   .     14
+         Next, enter the smaller of line 5 or line 14 on line 15.
+Part III         Additional Child Tax Credit
+ 15      This is your additional child tax credit .      .   .   .   .   .   .   .   .   .   .   .    .   .       .   .    .    .       .    .   .   .     15
+                                                                                                                                                            Enter this amount on
+                                                                                                                                                            Form 1040, line 28;
+                                                                                                                                             . .1040
+                                                                                                                                                .......     Form 1040-SR, line 28; or
+                                                                                                                                            1040-SR
+                                                                                                                                             .........
+                                                                                                                                                            Form 1040-NR, line 28.
+                                                                                                                                            1040-NR ◀
+
+For Paperwork Reduction Act Notice, see your tax return instructions.                                Cat. No. 59761M                                  Schedule 8812 (Form 1040) 2020
+
