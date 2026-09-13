@@ -35,17 +35,127 @@ struct Box12Code {
     /// against the extract by [`tests::the_box12_table_is_the_irs_table`]; it is not decoration —
     /// the refusal message quotes it so a filer can match the row on their paper.
     label: &'static str,
+    /// Whether this code's amount counts toward the one annual dollar limit the Form 1040 puts on
+    /// what an individual may defer — and which side of it the amount sits on. See
+    /// [`DeferralLimit`].
+    deferral_limit: DeferralLimit,
     /// Admit or refuse, and why. See [`Box12Verdict`].
     verdict: Box12Verdict,
 }
 
+/// **Does this code's amount count against the annual limit on elective deferrals, and on which
+/// side of that limit does it sit?**
+///
+/// ★★★ **FR-206 — this field exists so the capped set is THE TABLE and not a list beside it.** It
+/// replaced `const ELECTIVE_DEFERRAL_CODES: &[&str] = &["D","E","F","G","S"]`, a five-code list
+/// typed next to a thirty-three-row table and **wrong by three codes**, in the understating
+/// direction: the limit covers designated Roth contributions too, so a filer whose total went over
+/// only once `AA`/`BB`/`EE` were counted was never screened at all. That is `CLAUDE.md`'s
+/// *"derive the list, or make the compiler hold it"* in its second form — a new row in
+/// [`BOX12_CODES`] is now an `E0063` until someone decides this question, rather than a silent
+/// omission from a sum.
+///
+/// ★★ **THE AUTHORITY IS THE FORM 1040's OWN LINE-1h PARAGRAPH**, because line 1h is the line
+/// btctax cannot compute and therefore the only thing the screen is protecting:
+///
+/// > • **Excess elective deferrals.** The amount deferred should be shown in box 12 of your Form
+/// > W-2, and the "Retirement plan" box in box 13 should be checked. If the total amount you (or
+/// > your spouse if filing jointly) deferred for 2025 **under all plans** was more than $23,500
+/// > (excluding catch-up contributions, as explained later), include the excess on line 1h. …
+/// > **Although designated Roth contributions are subject to this limit, don't include the excess
+/// > attributable to such contributions on line 1h. They are already included as income in box 1 of
+/// > your Form W-2.**
+///
+/// (`design/forms/extract/i1040gi--2025.txt:2346-2363`; the TY2024 revision says the same at
+/// `i1040gi--2024.txt:2308-2325` with its own dollar figures.) The W-2 instructions' worked
+/// example agrees and is the shorter quotation: *"Even though the 2026 limit for elective deferrals
+/// and designated Roth contributions is $24,500, Alex's total elective deferral amount of $26,500 is
+/// reported in box 12 with code D"* (`iw2w3--2026.txt:2504-2507`).
+///
+/// ★ **Three honest boundaries, stated rather than implied — all three OVER-refuse, which is the
+///   safe direction.**
+/// 1. **Catch-up contributions are not separable from the box 12 figure.** *"report the elective
+///    deferrals and the elective deferral 'catch-up' contributions as a single sum in box 12 using
+///    the appropriate code"* (`iw2w3--2026.txt:2449-2456`), while the 1040's test is *"excluding
+///    catch-up contributions"*. So a lawful 50-or-over filer can trip this screen. It refuses; it
+///    does not file a wrong number.
+/// 2. **Code `G` carries employer money too** — *"when using code G for section 457(b) plans,
+///    include both elective and nonelective deferrals"* (`iw2w3--2026.txt:2447-2448`) — and a
+///    nonelective contribution is not an elective deferral. Same direction.
+/// 3. **`F` and `S` are mixed codes.** Their own labels say they include *"elective deferrals made
+///    to a Roth SEP IRA"* and *"salary reduction contributions made to a Roth SIMPLE IRA"*, so one
+///    box 12 figure can hold both sides of the limit. They are recorded as
+///    [`Self::PretaxDeferral`] because that is the majority of what they report and because the
+///    figure cannot be split; the consequence is only that the refusal message may describe the
+///    excess as determinate when part of it is not, and the refusal itself is unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeferralLimit {
+    /// **Outside the limit.** Not an elective deferral and not a designated Roth contribution, so
+    /// the 1040's line-1h test never adds it in.
+    ///
+    /// ★ Code **`H`** is here deliberately, and it is the one row where that is a judgment rather
+    ///   than an obvious fact: a §501(c)(18)(D) contribution *is* called an elective deferral by
+    ///   its own label, but §402(g)(3) enumerates only §401(k), §408(k)(6) SEP, §403(b) and
+    ///   §408(p) SIMPLE, the 1040's line-1h paragraph never names §501(c)(18), and the deduction
+    ///   for it has a limit of its own on Schedule 1 line 24f (*"see Pub. 525"*). Adding it to this
+    ///   sum would mix two limits into one comparison.
+    Outside,
+    /// **Inside the limit, pre-tax.** The salary was never received, so the amount is outside box 1
+    /// — and an excess attributable to it is exactly what Form 1040 line 1h adds back to income.
+    PretaxDeferral,
+    /// **Inside the limit, after-tax.** *"Although designated Roth contributions are subject to this
+    /// limit, don't include the excess attributable to such contributions on line 1h. They are
+    /// already included as income in box 1 of your Form W-2."* So it counts toward the CAP and never
+    /// toward the ADD-BACK, which is why the two sides are separate variants rather than one flag.
+    DesignatedRoth,
+}
+
+/// **Per-person running totals for the Form 1040's deferral limit, split by side.**
+///
+/// The split has a reader: it decides which of two materially different things the refusal tells the
+/// filer. All pre-tax, and the excess is determinate — it is `total − limit`, and it belongs on line
+/// 1h. With any designated Roth in the mix it is **not** determinate from the W-2 at all, because
+/// which contributions the plan returns is designated rather than computed, and only the pre-tax
+/// part of the excess is added back.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct DeferralTotals {
+    pretax: Usd,
+    designated_roth: Usd,
+}
+
+impl DeferralTotals {
+    /// Everything the limit is compared against — both sides, per the 1040's *"under all plans"*.
+    fn total(self) -> Usd {
+        self.pretax + self.designated_roth
+    }
+
+    /// Add one box 12 entry. ★ The `match` is `_`-free: a fourth [`DeferralLimit`] is a compile
+    ///   error here rather than an amount that silently stops being counted.
+    fn add(&mut self, limit: DeferralLimit, amount: Usd) {
+        match limit {
+            DeferralLimit::Outside => {}
+            DeferralLimit::PretaxDeferral => self.pretax += amount,
+            DeferralLimit::DesignatedRoth => self.designated_roth += amount,
+        }
+    }
+}
+
 /// **Why a box 12 code does or does not stop a return.**
 ///
-/// ★★★ **Three ways to be admitted, two to be refused, and the split is the whole rule.** A code is
-/// admitted only where it is *provably* unable to change a figure — because the amount is already
-/// inside box 1, because nothing reads it, or because something btctax files DOES read it and has
-/// been made to. Everything else refuses, so a code nobody has adjudicated fails **closed**
-/// (*widening an exemption is never the safe edit*).
+/// ★★★ **Four ways to be admitted, two to be refused, and the split is the whole rule.** Three of
+/// the four are *provably* unable to change a figure — because the amount is already inside box 1,
+/// because nothing reads it, or because something btctax files DOES read it and has been made to.
+/// Everything else refuses, so a code nobody has adjudicated fails **closed** (*widening an
+/// exemption is never the safe edit*).
+///
+/// ★★ **The fourth (FR-205) is the exception, and it is a NARROW one: a code whose only consequence
+/// is a benefit the filer FORGOES.** [`Self::ForgoneDeductionAdvised`] admits a return that is
+/// truthful and merely conservative — every figure on it is right, and one that would have made the
+/// tax *smaller* is missing. §3.4 permits exactly that, and only that, provided the filer is told;
+/// it is the same call `Advisory::EicOmitted` and `Advisory::MixedUseMortgageNotAllocated` already
+/// make. It is **not** available to a code that would make a figure WRONG in either direction: an
+/// uncollected tax (`A`, `B`, `M`, `N`), an excise tax (`K`, `Z`), or income the return would omit
+/// (`T`) understates, and understating is never conservative.
 ///
 /// ★★ **Every refusal carries its own exit, because the type will not let it not.** `exit` is a
 /// field rather than a convention: *"a refusal with no exit is just a brick with better prose"*, and
@@ -67,6 +177,26 @@ enum Box12Verdict {
     NoLineReadsIt(&'static str),
     /// **ADMITTED, and read.** Something btctax actually files consumes it; the payload names what.
     ReadByBtctax(&'static str),
+    /// ★★★ **ADMITTED, WITH AN ADVISORY (FR-205).** The amount is inside box 1 — so the wages btctax
+    /// files are the employer's own figure and are truthful — and a line btctax does not compute
+    /// would take it back out. Nothing on the return is wrong; a deduction is simply forgone, so the
+    /// tax can only be OVERSTATED. `line` names the line the filer must reach for, and `advisory`
+    /// names the [`crate::tax::advisories::Advisory`] that tells them so with the amount as a
+    /// **ceiling**.
+    ///
+    /// ★★ **Refusing this class was the wrong resting place, and this repo's own doctrine said so
+    /// before FR-205 existed.** A refusal denies a filable return over a deduction the filer may not
+    /// even be entitled to claim; the established treatment for a taxpayer-favourable amount v1
+    /// cannot compute is *file + advise*. What makes the difference reviewable rather than a matter
+    /// of taste is the direction: this variant is only available where forgoing the amount moves the
+    /// tax UP.
+    ///
+    /// ★ The payload is not decoration — it is what stops an advisory and a code table drifting
+    ///   apart, the way a `covered_by` census entry does for a form line.
+    ForgoneDeductionAdvised {
+        line: &'static str,
+        advisory: &'static str,
+    },
     /// **REFUSED.** It drives a line btctax does not compute. `drives` names the line and says which
     /// way the error would run; `exit` says what the filer can do instead.
     DrivesAnUncomputedLine {
@@ -85,14 +215,35 @@ impl Box12Verdict {
     /// The two halves of the sentence a refused code prints — what it drives, and the way out.
     /// `None` means the return prints.
     ///
-    /// ★ The `match` is `_`-free on purpose: a sixth verdict is a **compile error** here rather than
-    ///   a code that silently starts admitting, which is `CLAUDE.md`'s second form of *"derive the
-    ///   list, or make the compiler hold it"*.
+    /// ★ The `match` is `_`-free on purpose: a seventh verdict is a **compile error** here rather
+    ///   than a code that silently starts admitting, which is `CLAUDE.md`'s second form of *"derive
+    ///   the list, or make the compiler hold it"*.
     fn refusal(self) -> Option<(&'static str, &'static str)> {
         match self {
-            Self::AlreadyInBox1(_) | Self::NoLineReadsIt(_) | Self::ReadByBtctax(_) => None,
+            Self::AlreadyInBox1(_)
+            | Self::NoLineReadsIt(_)
+            | Self::ReadByBtctax(_)
+            | Self::ForgoneDeductionAdvised { .. } => None,
             Self::DrivesAnUncomputedLine { drives, exit }
             | Self::NotAdjudicated { why: drives, exit } => Some((drives, exit)),
+        }
+    }
+
+    /// The [`crate::tax::advisories::Advisory`] this verdict promises, if any.
+    ///
+    /// ★ `#[cfg(test)]`: the screen itself never reads it, because the advisory is emitted from the
+    ///   `ReturnInputs` in `advisories.rs` and not from this table. It exists so
+    ///   [`tests::a_verdict_that_promises_an_advisory_names_one_that_exists`] can hold the promise to
+    ///   something — a payload nothing ever checks is how a `covered_by` goes stale.
+    #[cfg(test)]
+    fn promised_advisory(self) -> Option<(&'static str, &'static str)> {
+        match self {
+            Self::AlreadyInBox1(_)
+            | Self::NoLineReadsIt(_)
+            | Self::ReadByBtctax(_)
+            | Self::DrivesAnUncomputedLine { .. }
+            | Self::NotAdjudicated { .. } => None,
+            Self::ForgoneDeductionAdvised { line, advisory } => Some((line, advisory)),
         }
     }
 
@@ -146,6 +297,7 @@ const BOX12_CODES: &[Box12Code] = &[
     //    every case, so admitting one UNDERSTATES what is owed.
     Box12Code {
         code: "A",
+        deferral_limit: DeferralLimit::Outside,
         label: "Uncollected social security or RRTA tax on tips",
         verdict: Box12Verdict::DrivesAnUncomputedLine {
             drives: "is social security tax your employer could not collect out of your pay, and \
@@ -156,6 +308,7 @@ const BOX12_CODES: &[Box12Code] = &[
     },
     Box12Code {
         code: "B",
+        deferral_limit: DeferralLimit::Outside,
         label: "Uncollected Medicare tax on tips (but not Additional Medicare Tax)",
         verdict: Box12Verdict::DrivesAnUncomputedLine {
             drives: "is Medicare tax your employer could not collect out of your pay, and Schedule \
@@ -169,6 +322,7 @@ const BOX12_CODES: &[Box12Code] = &[
     //    and 5."* (`iw2w3--2026.txt:2428-2434`.) It is already inside the figure btctax files.
     Box12Code {
         code: "C",
+        deferral_limit: DeferralLimit::Outside,
         label: "Taxable cost of group-term life insurance over $50,000",
         verdict: Box12Verdict::AlreadyInBox1(
             "\"Also include this amount in boxes 1, 3 (up to the social security wage base), and \
@@ -177,37 +331,43 @@ const BOX12_CODES: &[Box12Code] = &[
         ),
     },
     // ── Elective deferrals: the part of the salary the employee did NOT receive, so outside box 1
-    //    and changing no line btctax files. The one figure they drive is the §402(g) cross-employer
-    //    cap, which [`ELECTIVE_DEFERRAL_CODES`] sums and `screen_inputs_tiered` refuses over.
+    //    and changing no line btctax files. The one figure they drive is the cross-employer deferral
+    //    limit, which each row's own `deferral_limit` puts them inside and `screen_inputs_tiered`
+    //    refuses over. ★ FR-206: that used to be a five-code list typed beside this table, and the
+    //    designated Roth codes it left out are inside the same limit — see [`DeferralLimit`].
     Box12Code {
         code: "D",
+        deferral_limit: DeferralLimit::PretaxDeferral,
         label: "Elective deferrals under a section 401(k) cash or deferred arrangement plan \
                 (including a SIMPLE 401(k) arrangement)",
         verdict: Box12Verdict::ReadByBtctax(
-            "outside box 1, and summed against the §402(g) limit by ELECTIVE_DEFERRAL_CODES",
+            "outside box 1, and summed against the Form 1040's deferral limit — see DeferralLimit",
         ),
     },
     Box12Code {
         code: "E",
+        deferral_limit: DeferralLimit::PretaxDeferral,
         label: "Elective deferrals under a section 403(b) salary reduction agreement",
         verdict: Box12Verdict::ReadByBtctax(
-            "outside box 1, and summed against the §402(g) limit by ELECTIVE_DEFERRAL_CODES",
+            "outside box 1, and summed against the Form 1040's deferral limit — see DeferralLimit",
         ),
     },
     Box12Code {
         code: "F",
+        deferral_limit: DeferralLimit::PretaxDeferral,
         label: "Elective deferrals under a section 408(k)(6) salary reduction SEP (this includes \
                 elective deferrals made to a Roth SEP IRA)",
         verdict: Box12Verdict::ReadByBtctax(
-            "outside box 1, and summed against the §402(g) limit by ELECTIVE_DEFERRAL_CODES",
+            "outside box 1, and summed against the Form 1040's deferral limit — see DeferralLimit",
         ),
     },
     Box12Code {
         code: "G",
+        deferral_limit: DeferralLimit::PretaxDeferral,
         label: "Elective deferrals and employer contributions (including nonelective deferrals) to \
                 a section 457(b) deferred compensation plan",
         verdict: Box12Verdict::ReadByBtctax(
-            "outside box 1, and summed against the §402(g) limit by ELECTIVE_DEFERRAL_CODES",
+            "outside box 1, and summed against the Form 1040's deferral limit — see DeferralLimit",
         ),
     },
     // ── ★★★ **H IS THE ONE ROW THAT NARROWS THE OLD LIST, and the instruction says why in its own
@@ -217,22 +377,35 @@ const BOX12_CODES: &[Box12Code] = &[
     //    contributions to section 501(c)(18)(D) pension plans"* (`i1040gi--2025.txt:43215-43217`),
     //    which btctax censuses `unmodeled` (`btctax-forms/forms/2024/f1040s1.map.toml:173`). So the
     //    amount is in box 1, btctax files it as wages, and the deduction that is supposed to come
-    //    back out never does: the return OVERSTATES the filer's tax by the whole entry, silently.
-    //    Refusing over a forgone deduction is what this screen already does one rule up, where the
-    //    statutory-employee W-2 refuses because filing it would *"forgo the Schedule C deductions"*.
+    //    back out never does.
+    //
+    //    ★★★ **FR-205 — and the answer to that is an ADVISORY, not a refusal.** FR-197 found the
+    //    silence and closed it the way the rest of this table closes things, by refusing; that was
+    //    one step too far. The direction is what decides: the wages on the return are the employer's
+    //    own box 1 figure and are TRUE, and the only thing missing is a deduction, so the return is
+    //    correct-but-conservative and the tax can only be OVERSTATED. §3.4 permits that, and only
+    //    that, provided the filer is told — which is the identical call behind `Advisory::EicOmitted`
+    //    and `Advisory::MixedUseMortgageNotAllocated`. Refusing instead denied a filable return over
+    //    a deduction whose SIZE the filer may not even be able to claim in full: Schedule 1 line 24f
+    //    sends them to Pub. 525 for a limit btctax does not model, which is exactly why the advisory
+    //    names the box 12 figure as a CEILING and never as "the amount lost".
+    //
+    //    ★ The contrast with the statutory-employee W-2 one rule up is not a contradiction. That one
+    //    refuses because the wages land on the WRONG LINE — box 1 goes to Schedule C line 1, not to
+    //    Form 1040 line 1a — so the return would be wrong on its face, with a forgone deduction only
+    //    as a second consequence. Here nothing is on the wrong line.
     Box12Code {
         code: "H",
+        deferral_limit: DeferralLimit::Outside,
         label: "Elective deferrals to a section 501(c)(18)(D) tax-exempt organization plan",
-        verdict: Box12Verdict::DrivesAnUncomputedLine {
-            drives: "is in your box 1 wages AND deductible back out on Schedule 1 line 24f \
-                     (\"contributions to section 501(c)(18)(D) pension plans\") — btctax files the \
-                     wages and does not compute line 24f, so this return would overstate your tax \
-                     by the whole entry",
-            exit: "File this return with a preparer",
+        verdict: Box12Verdict::ForgoneDeductionAdvised {
+            line: "Schedule 1 line 24f",
+            advisory: "Advisory::Section501c18DeductionForgone",
         },
     },
     Box12Code {
         code: "J",
+        deferral_limit: DeferralLimit::Outside,
         label: "Nontaxable sick pay",
         verdict: Box12Verdict::NoLineReadsIt(
             "\"… any sick pay that was paid by a third party and was not includible in income \
@@ -244,6 +417,7 @@ const BOX12_CODES: &[Box12Code] = &[
     },
     Box12Code {
         code: "K",
+        deferral_limit: DeferralLimit::Outside,
         label: "20% excise tax on excess golden parachute payments",
         verdict: Box12Verdict::DrivesAnUncomputedLine {
             drives: "is a 20% excise tax that belongs on Schedule 2 line 17k (\"This tax should be \
@@ -254,6 +428,7 @@ const BOX12_CODES: &[Box12Code] = &[
     },
     Box12Code {
         code: "L",
+        deferral_limit: DeferralLimit::Outside,
         label: "Substantiated employee business expense reimbursements",
         verdict: Box12Verdict::DrivesAnUncomputedLine {
             drives: "is the substantiated (nontaxable) part of an expense reimbursement, which \
@@ -264,6 +439,7 @@ const BOX12_CODES: &[Box12Code] = &[
     },
     Box12Code {
         code: "M",
+        deferral_limit: DeferralLimit::Outside,
         label: "Uncollected social security or RRTA tax on taxable cost of group-term life \
                 insurance over $50,000 (former employees only)",
         verdict: Box12Verdict::DrivesAnUncomputedLine {
@@ -275,6 +451,7 @@ const BOX12_CODES: &[Box12Code] = &[
     },
     Box12Code {
         code: "N",
+        deferral_limit: DeferralLimit::Outside,
         label: "Uncollected Medicare tax on taxable cost of group-term life insurance over \
                 $50,000 (but not Additional Medicare Tax) (former employees only)",
         verdict: Box12Verdict::DrivesAnUncomputedLine {
@@ -286,6 +463,7 @@ const BOX12_CODES: &[Box12Code] = &[
     },
     Box12Code {
         code: "P",
+        deferral_limit: DeferralLimit::Outside,
         label: "Excludable moving expense reimbursements paid directly to a member of the U.S. \
                 Armed Forces or intelligence community",
         verdict: Box12Verdict::DrivesAnUncomputedLine {
@@ -297,6 +475,7 @@ const BOX12_CODES: &[Box12Code] = &[
     },
     Box12Code {
         code: "Q",
+        deferral_limit: DeferralLimit::Outside,
         label: "Nontaxable combat pay",
         verdict: Box12Verdict::DrivesAnUncomputedLine {
             drives: "is combat pay you may ELECT into earned income for the earned income credit \
@@ -308,6 +487,7 @@ const BOX12_CODES: &[Box12Code] = &[
     },
     Box12Code {
         code: "R",
+        deferral_limit: DeferralLimit::Outside,
         label: "Employer contributions to an Archer MSA",
         verdict: Box12Verdict::DrivesAnUncomputedLine {
             drives: "is an employer contribution to an Archer MSA, which Form 8853 takes against \
@@ -318,14 +498,16 @@ const BOX12_CODES: &[Box12Code] = &[
     },
     Box12Code {
         code: "S",
+        deferral_limit: DeferralLimit::PretaxDeferral,
         label: "Employee salary reduction contributions under a section 408(p) SIMPLE plan (this \
                 includes salary reduction contributions made to a Roth SIMPLE IRA)",
         verdict: Box12Verdict::ReadByBtctax(
-            "outside box 1, and summed against the §402(g) limit by ELECTIVE_DEFERRAL_CODES",
+            "outside box 1, and summed against the Form 1040's deferral limit — see DeferralLimit",
         ),
     },
     Box12Code {
         code: "T",
+        deferral_limit: DeferralLimit::Outside,
         label: "Adoption benefits",
         verdict: Box12Verdict::DrivesAnUncomputedLine {
             drives: "is an adoption benefit, excluded from box 1 only up to the annual limit — \
@@ -340,6 +522,7 @@ const BOX12_CODES: &[Box12Code] = &[
     //    wage base), and 5."* (`iw2w3--2026.txt:2623-2633`.)
     Box12Code {
         code: "V",
+        deferral_limit: DeferralLimit::Outside,
         label: "Income from exercise of nonstatutory stock option(s)",
         verdict: Box12Verdict::AlreadyInBox1(
             "\"Include this amount in boxes 1, 3 (up to the social security wage base), and 5.\" — \
@@ -357,6 +540,7 @@ const BOX12_CODES: &[Box12Code] = &[
     //    happened is a CONTRADICTION, and refuses on its own rule in the W-2 loop below.
     Box12Code {
         code: "W",
+        deferral_limit: DeferralLimit::Outside,
         label: "Employer contributions (including employee contributions through a cafeteria plan) \
                 to an employee’s health savings account (HSA)",
         verdict: Box12Verdict::ReadByBtctax(
@@ -366,6 +550,7 @@ const BOX12_CODES: &[Box12Code] = &[
     },
     Box12Code {
         code: "Y",
+        deferral_limit: DeferralLimit::Outside,
         label: "Deferrals under a section 409A nonqualified deferred compensation plan",
         verdict: Box12Verdict::NoLineReadsIt(
             "a deferral, not income: outside box 1, and the IRS does not even require it — \"It is \
@@ -375,6 +560,7 @@ const BOX12_CODES: &[Box12Code] = &[
     },
     Box12Code {
         code: "Z",
+        deferral_limit: DeferralLimit::Outside,
         label: "Income under a nonqualified deferred compensation plan that fails to satisfy \
                 section 409A",
         verdict: Box12Verdict::DrivesAnUncomputedLine {
@@ -388,13 +574,24 @@ const BOX12_CODES: &[Box12Code] = &[
     },
     // ── Designated Roth contributions are made out of pay the employee DID receive, so they are
     //    inside box 1 already and nothing takes them back out.
+    //    ★★★ FR-206 — but they ARE inside the deferral limit, and this is where that was missed. The
+    //      Form 1040 is explicit: *"Although designated Roth contributions are subject to this
+    //      limit, don't include the excess attributable to such contributions on line 1h."* Subject
+    //      to the limit, excluded from the add-back: two facts, and reading only the second is what
+    //      left `AA`/`BB`/`EE` out of the sum. `DeferralLimit::DesignatedRoth` carries both.
     //    ★ Boundary, stated: they are also a Form 8880 (saver's credit) input, and btctax censuses
     //      that form `unmodeled` for every filer — `btctax-forms/forms/2025/f1040s3.map.toml:156`,
     //      covered by `Advisory::OtherCreditsOmitted`. That boundary is the missing FORM, not this
     //      code: an IRA contribution reaches Form 8880 without passing through box 12 at all, so
     //      refusing here would close nothing and would stop every 401(k) household from filing.
+    //      ★★ FR-207 — and the census reason had to be RESTATED, not just re-read: it said *"no
+    //      retirement contributions collected"*, which these three codes and `D`/`E`/`F`/`G`/`S`
+    //      falsify. The verdict is unchanged and the reason is now the eligibility test the credit
+    //      turns on (Schedule 3 line 4's disqualifier 2(c), the filer's own student status, which
+    //      btctax collects for a DEPENDENT and never for a `Person`).
     Box12Code {
         code: "AA",
+        deferral_limit: DeferralLimit::DesignatedRoth,
         label: "Designated Roth contributions under a section 401(k) plan",
         verdict: Box12Verdict::AlreadyInBox1(
             "a designated Roth contribution is made out of pay that WAS received and taxed, so it \
@@ -403,6 +600,7 @@ const BOX12_CODES: &[Box12Code] = &[
     },
     Box12Code {
         code: "BB",
+        deferral_limit: DeferralLimit::DesignatedRoth,
         label: "Designated Roth contributions under a section 403(b) plan",
         verdict: Box12Verdict::AlreadyInBox1(
             "a designated Roth contribution is made out of pay that WAS received and taxed, so it \
@@ -411,6 +609,7 @@ const BOX12_CODES: &[Box12Code] = &[
     },
     Box12Code {
         code: "DD",
+        deferral_limit: DeferralLimit::Outside,
         label: "Cost of employer-sponsored health coverage",
         verdict: Box12Verdict::NoLineReadsIt(
             "\"The amount reported with code DD is not taxable.\" It is an Affordable Care Act \
@@ -419,6 +618,7 @@ const BOX12_CODES: &[Box12Code] = &[
     },
     Box12Code {
         code: "EE",
+        deferral_limit: DeferralLimit::DesignatedRoth,
         label: "Designated Roth contributions under a governmental section 457(b) plan",
         verdict: Box12Verdict::AlreadyInBox1(
             "a designated Roth contribution is made out of pay that WAS received and taxed, so it \
@@ -427,6 +627,7 @@ const BOX12_CODES: &[Box12Code] = &[
     },
     Box12Code {
         code: "FF",
+        deferral_limit: DeferralLimit::Outside,
         label: "Permitted benefits under a qualified small employer health reimbursement \
                 arrangement",
         verdict: Box12Verdict::DrivesAnUncomputedLine {
@@ -440,6 +641,7 @@ const BOX12_CODES: &[Box12Code] = &[
     },
     Box12Code {
         code: "GG",
+        deferral_limit: DeferralLimit::Outside,
         label: "Income from qualified equity grants under section 83(i)",
         verdict: Box12Verdict::AlreadyInBox1(
             "\"This amount is wages for box 1 and you must withhold income tax under section \
@@ -449,6 +651,7 @@ const BOX12_CODES: &[Box12Code] = &[
     },
     Box12Code {
         code: "HH",
+        deferral_limit: DeferralLimit::Outside,
         label: "Aggregate deferrals under section 83(i) elections as of the close of the calendar \
                 year",
         verdict: Box12Verdict::NoLineReadsIt(
@@ -459,6 +662,7 @@ const BOX12_CODES: &[Box12Code] = &[
     },
     Box12Code {
         code: "II",
+        deferral_limit: DeferralLimit::Outside,
         label: "Medicaid waiver payments excluded from gross income under Notice 2014-7",
         verdict: Box12Verdict::DrivesAnUncomputedLine {
             drives: "is a Medicaid waiver payment the 1040 instructions send to Schedule 1 line 8s \
@@ -471,6 +675,7 @@ const BOX12_CODES: &[Box12Code] = &[
     // ── The three codes the 2026 revision added. All refuse, so this table needs no year axis yet.
     Box12Code {
         code: "TA",
+        deferral_limit: DeferralLimit::Outside,
         label: "Employer contributions under a section 128 Trump account contribution program paid \
                 to a Trump account of an employee or a dependent of an employee",
         verdict: Box12Verdict::NotAdjudicated {
@@ -483,6 +688,7 @@ const BOX12_CODES: &[Box12Code] = &[
     },
     Box12Code {
         code: "TP",
+        deferral_limit: DeferralLimit::Outside,
         label: "Total amount of cash tips reported to the employer",
         verdict: Box12Verdict::DrivesAnUncomputedLine {
             drives: "is the total cash tips you reported to your employer, and the §224 deduction \
@@ -496,6 +702,7 @@ const BOX12_CODES: &[Box12Code] = &[
     },
     Box12Code {
         code: "TT",
+        deferral_limit: DeferralLimit::Outside,
         label: "Total amount of qualified overtime compensation",
         verdict: Box12Verdict::DrivesAnUncomputedLine {
             drives: "is the qualified overtime the §225 deduction on Schedule 1-A Part III is \
@@ -514,19 +721,21 @@ fn box12_row(code: &str) -> Option<&'static Box12Code> {
     BOX12_CODES.iter().find(|r| r.code == code)
 }
 
-/// The §402(g) elective-deferral codes whose cross-employer sum is capped (SPEC F3).
+/// **The codes whose cross-employer sum the deferral limit is compared against — DERIVED from
+/// [`BOX12_CODES`], never typed beside it (FR-206).**
 ///
-/// ★ Every member must be an ADMITTED [`BOX12_CODES`] row, or the cap silently stops summing it —
-///   pinned by [`tests::every_elective_deferral_code_is_an_admitted_box12_code`].
-///
-/// ★★ **Boundary, stated rather than implied (FR-197).** The §402(g) limit is a limit on elective
-///    deferrals *and designated Roth contributions* — the W-2 instructions' own worked example says
-///    so: *"Even though the 2026 limit for elective deferrals and designated Roth contributions is
-///    $24,500, Alex’s total elective deferral amount of $26,500 is reported in box 12 with code
-///    D"*. This list sums only the pre-tax codes, so an excess made up of `AA`/`BB`/`EE` is not
-///    detected. Widening it is a change to the CAP rule rather than to the code table, with its own
-///    §402A adjudication to do, and it is FILED rather than done here.
-const ELECTIVE_DEFERRAL_CODES: &[&str] = &["D", "E", "F", "G", "S"];
+/// ★ Nothing in the screen calls this: the loop reads `row.deferral_limit` off the row it already
+///   looked up, so there is no set to fall out of step in the first place. It exists for the two
+///   tests that need the membership as a value —
+///   [`tests::every_capped_deferral_code_is_an_admitted_box12_code`] (the cap can only see a code the
+///   table ADMITS) and [`tests::the_capped_set_is_both_sides_of_the_limit`] (the set is the one the
+///   Form 1040 describes, both sides, and no longer the five pre-tax codes FR-197 found it stuck on).
+#[cfg(test)]
+fn capped_deferral_codes() -> impl Iterator<Item = &'static Box12Code> {
+    BOX12_CODES
+        .iter()
+        .filter(|r| r.deferral_limit != DeferralLimit::Outside)
+}
 
 /// ★★★ **T10 / §5.4 — which cell of the direct-deposit block a refusal is about.**
 ///
@@ -770,7 +979,15 @@ pub enum RefuseReason {
     DependentSpouseUnsupported,
     /// W-2 box-12 code outside the inert allowlist (audit I1).
     UnsupportedBox12Code(String),
-    /// Σ box-12 D/E/F/G/S elective deferrals over the §402(g) limit → taxable excess on 1040 1h (F3).
+    /// One person's box-12 elective deferrals **and designated Roth contributions** total more than
+    /// the year's limit → a taxable excess on 1040 line 1h, which v1 does not compute (F3).
+    ///
+    /// ★★★ **FR-206 — the summed set is now [`DeferralLimit`] on each [`BOX12_CODES`] row, and the
+    /// widening is a tax fix rather than a tidy-up.** This said *"Σ box-12 D/E/F/G/S"*, and the five
+    /// pre-tax codes are not the limit: the Form 1040 applies it *"under all plans"* and states
+    /// outright that *"designated Roth contributions are subject to this limit"*. An excess reached
+    /// only once `AA`/`BB`/`EE` were counted therefore passed this screen unseen, and the pre-tax
+    /// share of it is income line 1h adds back — the understating direction.
     ExcessElectiveDeferral,
     /// W-2 box 8 allocated tips (→ Form 4137).
     AllocatedTips,
@@ -3769,8 +3986,8 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
         }
     }
 
-    let mut deferral_tp = Usd::ZERO; // taxpayer
-    let mut deferral_sp = Usd::ZERO; // spouse
+    let mut deferral_tp = DeferralTotals::default(); // taxpayer
+    let mut deferral_sp = DeferralTotals::default(); // spouse
     for w2 in &ri.w2s {
         // ★★★ R4 — box 13 *Statutory employee*, CHECKED. First in the loop because it is the one
         //     box that decides WHICH LINE the whole W-2 reaches: box 1 goes to Schedule C line 1,
@@ -3890,21 +4107,77 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
                     ),
                 );
             }
-            if ELECTIVE_DEFERRAL_CODES.contains(&code.as_str()) {
+            // ★★★ FR-206 — the capped set comes OFF THE ROW, not out of a list beside the table.
+            //     `box12_row` has already been consulted above and every refused code has already
+            //     returned, so the row reached here is an ADMITTED one. `DeferralLimit::Outside`
+            //     contributes nothing, and the two sides of the limit accumulate separately because
+            //     the Form 1040 adds only one of them back (see [`DeferralLimit`]).
+            if let Some(row) = box12_row(&code) {
                 match w2.owner {
-                    Owner::Taxpayer => deferral_tp += entry.amount,
-                    Owner::Spouse => deferral_sp += entry.amount,
+                    Owner::Taxpayer => deferral_tp.add(row.deferral_limit, entry.amount),
+                    Owner::Spouse => deferral_sp.add(row.deferral_limit, entry.amount),
                 }
             }
         }
     }
-    // ★ T4/R11 — the §402(g) limit is a FullReturnParams figure: it waits for the year's package.
+    // ★ T4/R11 — the deferral limit is a FullReturnParams figure: it waits for the year's package.
+    // ★★★ FR-206 — the comparison is against BOTH SIDES of the limit ([`DeferralTotals::total`]).
+    //     While this summed the five pre-tax codes alone, a filer whose deferrals went over only once
+    //     the designated Roth codes were counted was never screened at all — and the pre-tax part of
+    //     that excess is income Form 1040 line 1h adds back. That is the one direction §3.4 never
+    //     permits silently, and it was the only rule in this screen that UNDERSTATED tax.
     if let Some((_, p)) = tier.package {
-        if deferral_tp > p.elective_deferral_limit || deferral_sp > p.elective_deferral_limit {
-            return refuse(
-                RefuseReason::ExcessElectiveDeferral,
-                "one person's elective deferrals exceed the §402(g) limit — the taxable excess (1040 line 1h) is unmodeled in v1",
-            );
+        for totals in [deferral_tp, deferral_sp] {
+            if totals.total() > p.elective_deferral_limit {
+                let excess = totals.total() - p.elective_deferral_limit;
+                // ★★ THREE cases, and they say materially different things — which is the whole
+                //    reason [`DeferralTotals`] keeps the sides apart rather than carrying one sum.
+                //    The 1040 adds back the excess *attributable to pre-tax deferrals* and excludes
+                //    the part attributable to designated Roth contributions, so what belongs on line
+                //    1h is determinate at one end (all pre-tax: the whole excess), determinate at the
+                //    other (no pre-tax at all: nothing), and genuinely UNKNOWABLE in between, because
+                //    which contributions the plan returns is designated rather than computed.
+                //    ★ The middle case is why the whole rule refuses instead of adding back.
+                let which = match (
+                    totals.pretax > Usd::ZERO,
+                    totals.designated_roth > Usd::ZERO,
+                ) {
+                    (true, true) => format!(
+                        "${} of that is designated Roth, which is already inside box 1, and the Form \
+                         1040 instructions say \"Although designated Roth contributions are subject \
+                         to this limit, don't include the excess attributable to such contributions \
+                         on line 1h\" — so how much of the ${excess} excess is taxable depends on \
+                         which contributions the plan returns to you, which is designated rather \
+                         than computed and is not on your W-2",
+                        totals.designated_roth
+                    ),
+                    (false, true) => format!(
+                        "all of that is designated Roth, which is already inside box 1 — and the \
+                         Form 1040 instructions say \"don't include the excess attributable to such \
+                         contributions on line 1h\", so NOTHING of the ${excess} excess goes back \
+                         into income on this return"
+                    ),
+                    // A total over the limit with neither side positive is unreachable: the sum is
+                    // exactly these two fields and every box 12 amount is already guaranteed ≥ 0.
+                    (true, false) | (false, false) => format!(
+                        "all of that is pre-tax, so the whole ${excess} excess belongs on Form 1040 \
+                         line 1h"
+                    ),
+                };
+                return refuse(
+                    RefuseReason::ExcessElectiveDeferral,
+                    format!(
+                        "one person's Form W-2 box 12 elective deferrals and designated Roth \
+                         contributions total ${}, more than the ${} the Form 1040 instructions allow \
+                         \"under all plans\" before the excess goes back into income on line 1h. \
+                         {which}. btctax does not compute line 1h. The plan also has to return the \
+                         excess to you, and that distribution arrives on a Form 1099-R. File this \
+                         return with a preparer",
+                        totals.total(),
+                        p.elective_deferral_limit
+                    ),
+                );
+            }
         }
     }
 
@@ -7274,6 +7547,7 @@ mod tests {
         let mut invented: Vec<Box12Code> = BOX12_CODES.to_vec();
         invented.push(Box12Code {
             code: "QQ",
+            deferral_limit: DeferralLimit::Outside,
             label: "Not a code the IRS has ever printed",
             verdict: Box12Verdict::NoLineReadsIt("invented by this test"),
         });
@@ -7299,19 +7573,111 @@ mod tests {
         );
     }
 
-    /// ★ [`ELECTIVE_DEFERRAL_CODES`] only ever sums a code the table ADMITS: a code that starts
-    ///   refusing never reaches the §402(g) sum, so the cap would go on being computed over a
-    ///   smaller set than its own doc comment claims. One hand-typed list checked against the
-    ///   derived one.
+    /// ★ The cap only ever sums a code the table ADMITS: a code that starts refusing never reaches
+    ///   the sum, so the limit would go on being compared against a smaller total than its own doc
+    ///   comment claims.
     #[test]
-    fn every_elective_deferral_code_is_an_admitted_box12_code() {
-        for code in ELECTIVE_DEFERRAL_CODES {
-            let row = box12_row(code)
-                .unwrap_or_else(|| panic!("§402(g) code {code} is not in BOX12_CODES at all"));
+    fn every_capped_deferral_code_is_an_admitted_box12_code() {
+        let mut seen = 0;
+        for row in capped_deferral_codes() {
+            seen += 1;
             assert!(
                 row.verdict.admits(),
-                "§402(g) code {code} is REFUSED by the box 12 table, so the cap can never see it — \
-                 the sum and the table disagree about which codes exist"
+                "box 12 code {} counts against the deferral limit and is REFUSED by the table, so \
+                 the cap can never see it — the sum and the table disagree about which codes exist",
+                row.code
+            );
+        }
+        assert!(seen > 0, "the derivation found no capped codes at all");
+    }
+
+    /// ★★★ **FR-206's STRUCTURAL kill — the capped set is BOTH SIDES of the Form 1040's limit.**
+    ///
+    /// The defect this replaces was a five-code list, `["D","E","F","G","S"]`, typed beside a
+    /// thirty-three-row table. It was not merely short: the Form 1040 applies the limit *"under all
+    /// plans"* and says *"Although designated Roth contributions are subject to this limit"*, so the
+    /// three designated-Roth codes belong in the sum and the sum was **understating**.
+    ///
+    /// ★ The two halves are asserted in OPPOSITE directions on purpose. Membership alone would pass
+    ///   on a table that had gone back to counting only pre-tax codes if someone merely re-labelled
+    ///   them, so the sides are asserted too — and the pre-tax/Roth split is what the refusal message
+    ///   branches on.
+    #[test]
+    fn the_capped_set_is_both_sides_of_the_limit() {
+        use std::collections::BTreeSet;
+        let pretax: BTreeSet<&str> = BOX12_CODES
+            .iter()
+            .filter(|r| r.deferral_limit == DeferralLimit::PretaxDeferral)
+            .map(|r| r.code)
+            .collect();
+        let roth: BTreeSet<&str> = BOX12_CODES
+            .iter()
+            .filter(|r| r.deferral_limit == DeferralLimit::DesignatedRoth)
+            .map(|r| r.code)
+            .collect();
+        assert_eq!(
+            pretax,
+            BTreeSet::from(["D", "E", "F", "G", "S"]),
+            "the pre-tax side of the deferral limit"
+        );
+        assert_eq!(
+            roth,
+            BTreeSet::from(["AA", "BB", "EE"]),
+            "★ THE FR-206 KILL: the designated Roth codes are subject to the SAME limit — dropping \
+             them is what let an excess deferral through unscreened"
+        );
+        // …and `H` is deliberately NOT in either: §402(g)(3) does not list §501(c)(18), and the
+        // deduction for it has a limit of its own on Schedule 1 line 24f.
+        assert_eq!(
+            box12_row("H").map(|r| r.deferral_limit),
+            Some(DeferralLimit::Outside)
+        );
+    }
+
+    /// ★★★ **FR-205 — the payload of [`Box12Verdict::ForgoneDeductionAdvised`] is held to the real
+    /// advisory rather than left as prose.** A `covered_by`-shaped string nothing checks is exactly
+    /// how a census entry goes stale, and this table now carries one.
+    #[test]
+    fn a_verdict_that_promises_an_advisory_names_one_that_exists() {
+        use crate::tax::advisories::Advisory;
+
+        let promised: Vec<(&str, &str, &str)> = BOX12_CODES
+            .iter()
+            .filter_map(|r| r.verdict.promised_advisory().map(|(l, a)| (r.code, l, a)))
+            .collect();
+        // Exactly one row promises an advisory today. A second one is a deliberate decision, and it
+        // reds here so it cannot arrive without the pairing below being extended to cover it.
+        assert_eq!(
+            promised,
+            vec![(
+                "H",
+                "Schedule 1 line 24f",
+                "Advisory::Section501c18DeductionForgone"
+            )]
+        );
+
+        // The named variant EXISTS — this line would not compile otherwise — and the name written in
+        // the table is its real name, since `Debug` is derived and a rename therefore reds here.
+        let advisory = Advisory::Section501c18DeductionForgone {
+            ceiling: dec!(2400),
+        };
+        assert!(
+            format!("{advisory:?}").starts_with("Section501c18DeductionForgone"),
+            "the name in the table is not this variant's name: {advisory:?}"
+        );
+
+        // …and the advisory really does send the filer to the line the table promised, with the
+        // amount as a ceiling. Two modules make one statement; the pairing is what keeps them equal.
+        let msg = advisory.message();
+        for expected in [
+            "Schedule 1 line 24f",
+            "box 12 with code H",
+            "up to $2,400",
+            "OVERSTATED",
+        ] {
+            assert!(
+                msg.contains(expected),
+                "the promised advisory must name {expected:?}: {msg}"
             );
         }
     }
@@ -7339,13 +7705,21 @@ mod tests {
         };
 
         // (1) ADMITTED — nothing refuses, so the return computes and the packet prints.
+        //
+        // ★★★ FR-205 — `H` is in this list and is the ONE member that is not inert. Its amount is in
+        //     box 1 and a line btctax does not compute (Schedule 1 line 24f) would take it back out,
+        //     so the return is truthful and merely CONSERVATIVE: the tax can only be overstated. It
+        //     files with `Advisory::Section501c18DeductionForgone`, which
+        //     `advisories::tests::the_501c18_advisory_fires_on_a_code_h_entry_and_names_it_as_a_ceiling`
+        //     holds to the amount. FR-197 refused it, which denied a filable return over a deduction
+        //     the filer may not be able to claim in full.
         for inert in [
-            "C", "V", "GG", "J", "Y", "HH", "DD", "D", "AA", "BB", "EE", "E", "F", "G", "S",
+            "C", "V", "GG", "J", "Y", "HH", "DD", "D", "AA", "BB", "EE", "E", "F", "G", "S", "H",
         ] {
             assert_eq!(
                 reason(&with(inert)),
                 None,
-                "★ box 12 code {inert} changes no figure on the return and must file"
+                "★ box 12 code {inert} makes no figure on this return WRONG and must file"
             );
         }
 
@@ -7353,7 +7727,6 @@ mod tests {
         for (code, line) in [
             ("A", "Schedule 2 line 13"),
             ("K", "Schedule 2 line 17k"),
-            ("H", "Schedule 1 line 24f"),
             ("Z", "Schedule 2 line 17h"),
             ("TP", "Schedule 1-A Part II"),
             ("TA", "Trump account"),
@@ -7467,6 +7840,113 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(reason(&ok), None);
+    }
+
+    /// ★★★ **FR-206's BEHAVIOURAL kill (B1) — the household that only goes over the limit once the
+    /// designated Roth contributions are counted.**
+    ///
+    /// $20,000 of code `D` plus $5,000 of code `AA` is $25,000 against a $23,000 limit. The pre-tax
+    /// side alone is $20,000, **under** the limit — so this is exactly the return the five-code list
+    /// admitted, in silence, with the pre-tax share of a $2,000 excess left off Form 1040 line 1h.
+    /// Revert `AA`'s `deferral_limit` to `Outside` and this test is the one that reds.
+    ///
+    /// ★ The control is the same shape under the limit, because a screen that refuses everything is
+    ///   not a screen: $20,000 `D` + $2,000 `AA` = $22,000 still files.
+    ///
+    /// ★★ The message is asserted too, and on the part that could not be written without the split:
+    ///    it has to say the Roth share is already in box 1 and that the taxable part of the excess is
+    ///    therefore not determinable from the W-2 — because the 1040 excludes the Roth-attributable
+    ///    excess from line 1h, so "the excess is $2,000, write it on line 1h" would be a WRONG
+    ///    instruction here and the right one on the pure pre-tax vector below.
+    #[test]
+    fn an_excess_reached_only_by_the_designated_roth_codes_still_refuses() {
+        let household = |pretax: Usd, roth: Usd| {
+            let mut r = ri();
+            r.w2s.push(W2 {
+                employer: "ACME".into(),
+                box1_wages: dec!(120000),
+                box12: vec![
+                    Box12Entry {
+                        code: "D".into(),
+                        amount: pretax,
+                    },
+                    Box12Entry {
+                        code: "AA".into(),
+                        amount: roth,
+                    },
+                ],
+                ..Default::default()
+            });
+            r
+        };
+
+        // (1) THE PLANT: over the limit ONLY because the Roth code counts.
+        let over = household(dec!(20000), dec!(5000));
+        let got = refusal(&over).expect(
+            "★ THE KILL: $20,000 code D + $5,000 code AA is $25,000 against a $23,000 limit — the \
+             Form 1040 applies the limit to designated Roth contributions too, so this return must \
+             not file",
+        );
+        assert_eq!(got.reason, RefuseReason::ExcessElectiveDeferral);
+        for expected in [
+            "$25000", // the total the limit is actually compared against
+            "$23000", // the limit itself
+            "$5000",  // the Roth share, named
+            "designated Roth contributions are subject to this limit",
+            "line 1h",
+            "preparer",
+        ] {
+            assert!(
+                got.detail.contains(expected),
+                "the refusal must name {expected:?} — got: {}",
+                got.detail
+            );
+        }
+        assert!(
+            !got.detail.contains("all of that is pre-tax"),
+            "the pure-pre-tax branch must not describe a mixed household: {}",
+            got.detail
+        );
+
+        // (2) THE CONTROL: the same shape, $1,000 under the limit, files.
+        assert_eq!(
+            reason(&household(dec!(20000), dec!(2000))),
+            None,
+            "★ $20,000 code D + $2,000 code AA is $22,000, inside the $23,000 limit — a screen that \
+             refuses this is refusing every 401(k)-with-Roth household"
+        );
+
+        // (3) The pure pre-tax excess takes a DIFFERENT branch, which names the line-1h figure —
+        //     one of the two ends at which the excess IS determinate from the W-2.
+        let pure = refusal(&household(dec!(25000), Usd::ZERO)).expect("$25,000 pre-tax is over");
+        assert!(
+            pure.detail.contains("all of that is pre-tax")
+                && pure
+                    .detail
+                    .contains("$2000 excess belongs on Form 1040 line 1h"),
+            "a pure pre-tax excess is determinate and must be named as such: {}",
+            pure.detail
+        );
+
+        // (4) …and the OTHER end. An excess made up ENTIRELY of designated Roth contributions puts
+        //     NOTHING on line 1h, because the 1040 excludes the Roth-attributable excess from it. The
+        //     return is still refused — the limit is still breached and the plan still owes a
+        //     corrective distribution — but the message must not tell this filer the taxable amount
+        //     is unknowable when the instruction makes it exactly zero.
+        let roth_only = refusal(&household(Usd::ZERO, dec!(25000))).expect("$25,000 Roth is over");
+        assert_eq!(roth_only.reason, RefuseReason::ExcessElectiveDeferral);
+        assert!(
+            roth_only
+                .detail
+                .contains("NOTHING of the $2000 excess goes back into income"),
+            "a wholly Roth excess is determinate at zero and must be named as such: {}",
+            roth_only.detail
+        );
+        assert!(
+            !roth_only.detail.contains("depends on"),
+            "…and must not claim it depends on anything: {}",
+            roth_only.detail
+        );
     }
 
     #[test]

@@ -81,6 +81,29 @@ pub enum Advisory {
     ///   figure it could demand and no answer a refusal could clear. `codes` is what the employer
     ///   printed, quoted back so the filer can look it up.
     TipsDeductionForgoneWithTtoc { codes: Vec<String> },
+    /// ★★★ **FR-205 / §501(c)(18)(D) (§3.4) — a Form W-2 reports box 12 code H, and the Schedule 1
+    /// line 24f deduction that takes it back out of income is not computed.**
+    ///
+    /// Code H's own instruction is the whole case: *"Be sure to include this amount in box 1 as
+    /// wages. The employee will deduct the amount on their Form 1040 or 1040-SR."*
+    /// (`design/forms/extract/iw2w3--2026.txt:2535-2538`.) btctax files those box 1 wages on Form
+    /// 1040 line 1a and censuses Schedule 1 line 24f — *"Enter contributions to section 501(c)(18)(D)
+    /// pension plans (see Pub. 525)"* (`i1040gi--2025.txt:43215-43217`) — as `unmodeled`. So the
+    /// wages go on and the deduction never comes off.
+    ///
+    /// ★★ **An advisory and not a refusal, and the direction is the reason.** Nothing on the return
+    /// is wrong: the wages are the employer's own box 1 figure. Only a deduction is missing, so the
+    /// tax can be OVERSTATED and never understated — the one asymmetry §3.4's conservative-omission
+    /// carve-out is built on. The sibling calls are [`Self::EicOmitted`] and
+    /// [`Self::MixedUseMortgageNotAllocated`]. Before FR-205 the box 12 screen REFUSED this return,
+    /// which denied a filable, truthful return over a benefit the filer might not claim at all.
+    ///
+    /// ★ `ceiling` is the box 12 total, and it is a **CEILING** rather than "the amount lost" — the
+    ///   same discipline [`Self::MixedUseMortgageNotAllocated`] keeps. Line 24f's own instruction
+    ///   sends the filer to Pub. 525 for a limit btctax does not model, so the deduction they can
+    ///   actually take may be smaller than what the employer printed, and an advisory that promised
+    ///   the whole figure would be telling them a number no line of the form supports.
+    Section501c18DeductionForgone { ceiling: Usd },
     /// ★★★ **R9 / T6 — the filer answered the Form 1040 Digital Assets question `Yes`, and this
     /// vault's ledger witnesses no qualifying event in the year.**
     ///
@@ -502,6 +525,22 @@ impl Advisory {
                  and only you can say how much of box 7 is left. Enter the qualified amount under \
                  Schedule 1-A Part II if you have one.",
                 codes.join(", ")
+            ),
+            // ★ FR-205 — the amount is named as a CEILING ("up to"), never as the deduction, because
+            //   line 24f's own instruction sends the filer to Pub. 525 for a limit v1 does not model.
+            //   The same discipline as `MixedUseMortgageNotAllocated`.
+            Advisory::Section501c18DeductionForgone { ceiling } => format!(
+                "§501(c)(18)(D) DEDUCTION NOT COMPUTED — your Form W-2 reports {} in box 12 with \
+                 code H. Your employer had to \"include this amount in box 1 as wages\", and box 1 \
+                 is what this return files on Form 1040 line 1a — but the instruction for that code \
+                 goes on: \"The employee will deduct the amount on their Form 1040 or 1040-SR.\" \
+                 That deduction is Schedule 1 line 24f (\"Enter contributions to section \
+                 501(c)(18)(D) pension plans\"), which v1 does not compute, so the wages went on and \
+                 the deduction did not come off: your tax is OVERSTATED by up to {}. The figure is a \
+                 CEILING, not the deduction — line 24f sends you to Pub. 525 for the limit. Enter \
+                 the deductible amount on Schedule 1 line 24f by hand, or file with a preparer.",
+                fmt_usd(*ceiling),
+                fmt_usd(*ceiling)
             ),
             Advisory::DigitalAssetYesNotOnLedger { year } => format!(
                 "DIGITAL ASSETS ANSWERED \"YES\", AND NOTHING ON THIS LEDGER SHOWS IT — you \
@@ -1355,6 +1394,26 @@ pub fn advisories(
         out.push(Advisory::TipsDeductionForgoneWithTtoc { codes: ttoc_codes });
     }
 
+    // ★★★ FR-205 / §501(c)(18)(D) — a box 12 code H entry. The same shape as the TTOC note above:
+    //     the employer's paper evidences a deduction v1 does not compute, so the return is truthful
+    //     and conservative and the filer has to be told. Fires ONLY on a code-H entry with money on
+    //     it, and the total is the CEILING (see the variant's doc). ★ The box 12 code is read the way
+    //     `return_refuse`'s screen reads it — trimmed and upper-cased — so a W-2 transcribed with a
+    //     lower-case "h" or a stray space is not silently skipped by the advisory while the screen
+    //     admits it.
+    let box12_code_h: Usd = ri
+        .w2s
+        .iter()
+        .flat_map(|w| w.box12.iter())
+        .filter(|e| e.code.trim().to_uppercase() == "H")
+        .map(|e| e.amount)
+        .sum();
+    if box12_code_h > Usd::ZERO {
+        out.push(Advisory::Section501c18DeductionForgone {
+            ceiling: box12_code_h,
+        });
+    }
+
     // [★ P5-I2] §3.4 / SPEC §1.2 — the other favorable credits v1 never computes. UNCONDITIONAL: v1
     // captures no input that could establish eligibility, so it cannot know whether this filer
     // qualifies, only that it did not try. LIMITATIONS.md promises every omission row fires an
@@ -1715,6 +1774,118 @@ mod tests {
              wage earner and box 14b is not its reader at all"
         );
     }
+
+    /// ★★★ **FR-205's kill — box 12 code H FILES, and it is advised with the amount as a CEILING.**
+    ///
+    /// Code H's own instruction is *"Be sure to include this amount in box 1 as wages. The employee
+    /// will deduct the amount on their Form 1040 or 1040-SR."* btctax files the wages and does not
+    /// compute Schedule 1 line 24f, so the only thing wrong with the return is that a deduction is
+    /// forgone — the OVERSTATEMENT direction, which §3.4 permits *if the filer is told*. Until FR-205
+    /// the box 12 screen refused instead, which denied a truthful, filable return.
+    ///
+    /// Three halves, and the third is the one that makes the note honest:
+    /// (a) a code-H entry fires it, with the amount and both line references;
+    /// (b) the same return with NO code H is silent, so the box 12 entry really is its reader;
+    /// (c) the amount is named as a ceiling ("up to") and never as the deduction, because line 24f
+    ///     sends the filer to Pub. 525 for a limit v1 does not model.
+    #[test]
+    fn the_501c18_advisory_fires_on_a_code_h_entry_and_names_it_as_a_ceiling() {
+        use crate::tax::return_inputs::{Box12Entry, Owner, W2};
+        let with_box12 = |code: &str| ReturnInputs {
+            tax_year: 2024,
+            filing_status: crate::tax::types::FilingStatus::Single,
+            w2s: vec![W2 {
+                owner: Owner::Taxpayer,
+                employer: "Tax-Exempt Org".into(),
+                box1_wages: dec!(90000),
+                box12: vec![Box12Entry {
+                    code: code.into(),
+                    amount: dec!(2400),
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let fire = |ri: &ReturnInputs| {
+            advisories(
+                ri,
+                &LedgerState::default(),
+                dec!(90000),
+                dec!(90000),
+                Usd::ZERO,
+                &crate::tax::testonly::ty2024_params(),
+                2024,
+                false,
+            )
+        };
+
+        // (a) A code-H entry ⇒ advised, once, with the amount and both lines named.
+        let got = fire(&with_box12("H"));
+        let notes: Vec<&Advisory> = got
+            .iter()
+            .filter(|a| matches!(a, Advisory::Section501c18DeductionForgone { .. }))
+            .collect();
+        assert_eq!(notes.len(), 1, "{got:#?}");
+        assert_eq!(
+            notes[0],
+            &Advisory::Section501c18DeductionForgone {
+                ceiling: dec!(2400)
+            },
+            "the ceiling is the box 12 total"
+        );
+        let msg = notes[0].message();
+        for expected in [
+            "box 12 with code H",
+            "Form 1040 line 1a",   // where the wages actually went
+            "Schedule 1 line 24f", // where the deduction should come off
+            "up to $2,400",
+            "OVERSTATED",
+            "Pub. 525",
+        ] {
+            assert!(
+                msg.contains(expected),
+                "the advisory must name {expected:?}: {msg}"
+            );
+        }
+
+        // (c) …and it must NOT claim the figure is the deduction. Line 24f's own limit is in Pub. 525
+        //     and v1 does not model it, so promising the whole box 12 amount would be a number no
+        //     line of the form supports — the `MixedUseMortgageNotAllocated` discipline.
+        assert!(
+            !msg.contains("your deduction is $2,400") && !msg.contains("the amount lost"),
+            "the amount is a CEILING, never the deduction: {msg}"
+        );
+
+        // (b) THE KILL: the same W-2 with a different box 12 code is silent, so the code-H entry — and
+        //     not merely "a W-2 exists" — is this advisory's reader.
+        for other in ["D", "AA", "W", "DD"] {
+            assert!(
+                !fire(&with_box12(other))
+                    .iter()
+                    .any(|a| matches!(a, Advisory::Section501c18DeductionForgone { .. })),
+                "★ THE KILL: box 12 code {other} is not §501(c)(18)(D) and must not fire this note"
+            );
+        }
+        // …and a code-H row with no money on it is no testimony about anything.
+        let mut zero = with_box12("H");
+        zero.w2s[0].box12[0].amount = Usd::ZERO;
+        assert!(
+            !fire(&zero)
+                .iter()
+                .any(|a| matches!(a, Advisory::Section501c18DeductionForgone { .. })),
+            "a $0 code-H row forgoes nothing"
+        );
+        // ★ …while a lower-case `h` DOES fire it: the box 12 screen in `return_refuse` trims and
+        //   upper-cases before it decides, so an advisory that did not would go silent on exactly the
+        //   transcription the screen admits.
+        assert!(
+            fire(&with_box12(" h "))
+                .iter()
+                .any(|a| matches!(a, Advisory::Section501c18DeductionForgone { .. })),
+            "the advisory must read the code the way the screen reads it"
+        );
+    }
+
     use super::*;
     use crate::tax::return_inputs::{Dependent, ScheduleAInputs};
     use crate::tax::tables::SaltLimitation;
