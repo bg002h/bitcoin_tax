@@ -1032,6 +1032,533 @@ fn second_edition_problems(
     errs
 }
 
+/// ★★★ **FR-134 / port-rehearsal F2 — the MAP-CAPTION gate, and the whole point is that it is
+/// YEAR-GENERIC.**
+///
+/// **The defect, measured before this existed.** The rehearsal put the TY2024 thresholds into a
+/// TY2025 map's line-21 caption and ran the whole workspace: **3,614 tests run, 3,614 passed.** The
+/// gate that should have caught it does exist — `btctax-forms/tests/f8995a_map.rs::every_quoted_
+/// instruction_is_verbatim_on_the_form` — but it is pinned to ONE form and ONE year by two
+/// `include_str!`s, and `include_str!` cannot glob. So a port copies a map, the captions come with
+/// it, and nothing asks the new year's extract a question. That is the Form 6251 line-33 class (a
+/// carried-forward sentence) arriving at the exact moment a port introduces it.
+///
+/// ★ **Why it lives here and not beside the map.** For the same reason the rest of this module does:
+/// `design/forms/extract/` is outside every published crate, so an `include_str!` reaching there from
+/// `btctax-forms` ships a tarball that builds in the workspace and is broken for everyone else, with
+/// exit 0. The path has to be computed at run time from the map's own header, which is exactly what
+/// makes it year-generic.
+///
+/// **The mechanism.** Walk `crates/btctax-forms/forms/*/*.map.toml` — the glob, never a list — read
+/// each map's own `irs_stem` and `year`, open `design/forms/extract/<irs_stem>--<year>.txt`, and
+/// require every caption the map quotes to occur in THAT file. A new year is covered because it has
+/// a map on disk, not because someone edited a checker.
+///
+/// ★★ **What the scan measured on the committed tree, and what that found.** 429 captions across all
+/// 38 maps. The single-form parser's `NN "…"` shape sees only 134 of them: the repo actually writes
+/// captions four ways — `# 27 "…"` above the key, `# L21 — "…"` above the key, `lineNN = "fqn" # "…"`
+/// trailing it, and `lineNN = "fqn" # L1 — "…"` trailing it. Reading only the first shape would have
+/// reported "134 captions, 0 problems" while 17 maps went unread, which is `cite-check`'s own
+/// blindness reproduced. The four shapes are unified into one rule — *a comment chunk whose text
+/// before the opening quote is nothing but markers and at most one line label* — so a fifth
+/// punctuation variant is covered too, and [`MIN_MAP_CAPTIONS`] is what notices captions leaving.
+const MIN_MAP_CAPTIONS: usize = 429;
+
+/// ★★★ **The captions that are NOT verbatim on their own form, pinned to their exact text.**
+///
+/// These are findings, not exemptions granted on a judgment. Both were discovered BY this gate on
+/// its first run over the committed tree, and both are one-phrase edits in a `.map.toml` — a file
+/// this change does not own, so they are recorded here rather than quietly fixed elsewhere.
+///
+/// ★★ **Pinned to the wrong sentence, which makes the list self-retiring.** The key is the caption's
+/// own normalised text, so fixing the map makes the entry STALE and [`stale_paraphrase_claims`] reds
+/// on it — *"this is fixed; delete the row"*. Editing the caption to a *different* wrong sentence
+/// reds twice: once as an ordinary failure, once as a stale claim. There is no way to widen this list
+/// by accident, and no way to leave it behind once the defect is gone.
+const CAPTION_PARAPHRASES: &[(&str, &str, &str, &str)] = &[
+    (
+        "crates/btctax-forms/forms/2024/f1040sa.map.toml",
+        "line5e",
+        "Enter the smaller of line 5d or $10,000 ($5,000 MFS)",
+        "the form prints '($5,000 if married filing separately)'; the map abbreviates it to 'MFS'",
+    ),
+    (
+        "crates/btctax-forms/forms/2024/f8959.map.toml",
+        "line8",
+        "Self-employment income from Schedule SE, Part I, line 6",
+        "the form prints 'from Schedule SE (Form 1040), Part I, line 6'; the map drops the \
+         '(Form 1040)' parenthetical",
+    ),
+];
+
+/// ★★ Layout normalisation for a caption — [`normalize`] plus two glyph families that a caption
+/// written inside a TOML comment **cannot** express, and one that no form prints as language.
+///
+/// * **Quote glyphs** all collapse to `'`. A caption is delimited by `"`, so a form sentence that
+///   itself contains a double quote is unwritable verbatim: Schedule B line 8 prints
+///   *“Yes,”* and the map has to write `'Yes,'`. Collapsing the family is the only way the format
+///   can carry such a sentence at all, and a quote glyph carries no tax meaning.
+/// * **A lone `.` is a LEADER DOT.** `pdftotext -layout` renders the form's dot leaders as
+///   whitespace-delimited periods — *"Married filing jointly . . . . . . . $250,000"* — and a
+///   caption transcribes the sentence, not the leaders. Sentence punctuation is never a standalone
+///   token (it attaches to the preceding word), so this cannot swallow language.
+///
+/// ★ Deliberately NOT folded into [`normalize`]: that function is held byte-identical with
+/// `f6251_map.rs::norm` on purpose (the module header records what happened when the two authorities
+/// on "is this verbatim?" disagreed), and this file does not own that test.
+fn caption_normalize(s: &str) -> String {
+    let flat: String = s
+        .chars()
+        .map(|c| match c {
+            '\u{201C}' | '\u{201D}' | '\u{2018}' | '\u{2019}' | '"' => '\'',
+            other => other,
+        })
+        .collect();
+    flat.split_whitespace()
+        .filter(|t| !matches!(*t, "{" | "}" | "."))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// `27`, `5b`, `L21`, `1(a)` — a printed line label, at most two digits.
+///
+/// ★★ The two-digit cap is load-bearing and was found by measurement: with any digit run allowed,
+/// `2024` reads as a label, and Schedule A's TY2025 header — which quotes the TY2024 sentence
+/// verbatim as `2024: "…$10,000 ($5,000 …)"` to document the SALT change — is parsed as a caption
+/// for the TY2025 map and reds. No form these maps cover prints a line above 40.
+fn is_caption_label(tok: &str) -> bool {
+    let t = tok.strip_prefix('L').unwrap_or(tok);
+    let digits = t.chars().take_while(char::is_ascii_digit).count();
+    if digits == 0 || digits > 2 {
+        return false;
+    }
+    let tail = &t[digits..];
+    tail.is_empty()
+        || (tail.len() == 1 && tail.chars().all(|c| c.is_ascii_lowercase()))
+        || (tail.len() == 3
+            && tail.starts_with('(')
+            && tail.ends_with(')')
+            && tail[1..2].chars().all(|c| c.is_ascii_lowercase()))
+}
+
+/// Index of the first `#` **outside** a double-quoted string, or `None`.
+///
+/// ★ Not `find('#')`: six FQNs in `f8275.map.toml` contain `.#subform[0].`, so the naive scan slices
+/// a field name in half and invents a comment where there is none.
+fn comment_start(line: &str) -> Option<usize> {
+    let mut in_str = false;
+    for (i, c) in line.char_indices() {
+        match c {
+            '"' => in_str = !in_str,
+            '#' if !in_str => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// A caption's lead — everything before the opening quote — as `Some(label)` when it is nothing but
+/// markers and at most one line label, else `None`. `Some("")` means no label was written.
+fn caption_lead(lead: &str) -> Option<String> {
+    let t = lead
+        .trim_matches(|c: char| c.is_whitespace() || "★•-—:".contains(c))
+        .trim();
+    if t.is_empty() {
+        return Some(String::new());
+    }
+    is_caption_label(t).then(|| t.to_string())
+}
+
+/// The quote opened by `chunk`, closed across `following` comment lines if it wraps.
+///
+/// `allow_unlabelled` is true only on a key line, where the KEY supplies the label; a comment-only
+/// line must write its own, which is what keeps header prose that happens to open with a quote from
+/// being read as a claim about a line.
+fn take_caption(
+    chunk: &str,
+    following: &[&str],
+    allow_unlabelled: bool,
+) -> Option<(String, String)> {
+    let mut buf = chunk.to_string();
+    for cont in following {
+        let t = cont.trim_start();
+        if !t.starts_with('#') || buf.matches('"').count() >= 2 {
+            break;
+        }
+        buf.push(' ');
+        buf.push_str(t.trim_start_matches('#').trim());
+    }
+    let mut parts = buf.splitn(3, '"');
+    let lead = parts.next()?;
+    let body = parts.next()?;
+    parts.next()?; // the closing quote must exist
+    let label = caption_lead(lead)?;
+    if label.is_empty() && !allow_unlabelled {
+        return None;
+    }
+    let q = caption_normalize(body);
+    (!q.is_empty()).then_some((label, q))
+}
+
+/// Every quoted caption in one map's source, as (label, caption). Derived from the file, one rule
+/// over all four committed shapes.
+fn map_captions(src: &str) -> Vec<(String, String)> {
+    let lines: Vec<&str> = src.lines().collect();
+    let mut out = Vec::new();
+    for (i, l) in lines.iter().enumerate() {
+        let lt = l.trim_start();
+        if lt.starts_with('#') {
+            if let Some((label, q)) =
+                take_caption(lt.trim_start_matches('#'), &lines[i + 1..], false)
+            {
+                out.push((label, q));
+            }
+            continue;
+        }
+        // A key line: `lineNN = …   # "caption"`.
+        let Some((key, _)) = l.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        if key.is_empty()
+            || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            || !key.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+        {
+            continue;
+        }
+        let Some(cs) = comment_start(l) else { continue };
+        if let Some((label, q)) = take_caption(&l[cs + 1..], &lines[i + 1..], true) {
+            out.push((
+                if label.is_empty() {
+                    key.to_string()
+                } else {
+                    label
+                },
+                q,
+            ));
+        }
+    }
+    out
+}
+
+/// Each line with its leading left-margin cell removed.
+///
+/// ★★★ **A mechanism, not an exemption.** Schedule A prints a left stub column (*Medical / and /
+/// Dental / Expenses*), and `pdftotext -layout` interleaves that cell INTO a sentence that wraps:
+/// line 2's instruction comes out as *"Enter amount from Form 1040 or 1040-SR, / Expenses line
+/// 11b"*. A `contains` over the raw extract therefore rejects four FAITHFUL TY2025 Schedule A
+/// captions. Measured: without this, the scan reports 8 problems instead of 2 — six of them false.
+///
+/// ★ It only ever ADDS a haystack, so no caption stops being checkable; and it cannot manufacture a
+/// digit, which is the class that matters (a `line 12` never becomes a `line 22`).
+fn destub(text: &str) -> String {
+    let mut out = String::new();
+    for l in text.lines() {
+        out.push_str(strip_left_cell(l));
+        out.push('\n');
+    }
+    out
+}
+
+/// `Expenses                    line 11b …` → `line 11b …`, when the line opens with a non-space cell
+/// of two or more characters followed by three or more spaces. Everything else is returned unchanged.
+fn strip_left_cell(l: &str) -> &str {
+    if l.starts_with(char::is_whitespace) {
+        return l;
+    }
+    let b = l.as_bytes();
+    let mut i = 0;
+    while i + 2 < b.len() {
+        if b[i] == b' ' && b[i + 1] == b' ' && b[i + 2] == b' ' {
+            let cell = &l[..i];
+            if cell.trim().chars().count() < 2 {
+                return l;
+            }
+            return l[i..].trim_start();
+        }
+        i += 1;
+    }
+    l
+}
+
+/// The form's two-row column header, rejoined BY COLUMN.
+///
+/// ★★ Form 8995-A prints Part I's column captions over two rows — `(b) Check if   (c) Check if …`
+/// then `specified service   aggregation …` — so *"Check if specified service"*, the form's actual
+/// caption, is nowhere contiguous in the text layer. Split both rows on the column separator (runs of
+/// 2+ spaces) and zip by position: the same thing the eye does, derived from the layout rather than
+/// from a hand-list of the captions we expect. Measured: without this the scan reports 6 problems
+/// instead of 2. Same mechanism as `f8995a_map.rs`'s own rejoin, which is where it was first written.
+fn rejoin_column_header(text: &str) -> String {
+    let cells = |l: &str| -> Vec<String> {
+        l.split("  ")
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+            .map(str::to_string)
+            .collect()
+    };
+    let lines: Vec<&str> = text.lines().collect();
+    let mut out = String::new();
+    for (i, l) in lines.iter().enumerate() {
+        if !l.contains("(b) ") {
+            continue;
+        }
+        for cont in lines.iter().skip(i + 1).take(3) {
+            let (top, bot) = (cells(l), cells(cont));
+            if top.len() == bot.len() && top.len() > 1 {
+                for (t, b) in top.iter().zip(bot.iter()) {
+                    out.push_str(&format!("{t} {b}\n"));
+                }
+                break;
+            }
+        }
+    }
+    out
+}
+
+/// The haystacks one extract offers a caption. A caption must be found in ONE of them.
+fn caption_haystacks(extract: &str) -> Vec<String> {
+    vec![
+        format!(
+            "{} {}",
+            caption_normalize(extract),
+            caption_normalize(&rejoin_column_header(extract))
+        ),
+        caption_normalize(&destub(extract)),
+    ]
+}
+
+/// Is `q` present, allowing its own written elisions?
+///
+/// ★ A caption that writes `…` or `...` has declared a gap, so each fragment must occur IN ORDER.
+/// That is weaker than a contiguous match and it is the author's own claim: *"Total … Add lines 22
+/// and 23"* is what `f8959.map.toml` says about a line whose printed text is *"Total Additional
+/// Medicare Tax withholding. Add lines 22 and 23."* A caption with no ellipsis gets no such licence.
+fn caption_present(hay: &str, q: &str) -> bool {
+    if !q.contains('…') && !q.contains("...") {
+        return hay.contains(q);
+    }
+    let mut rest = hay;
+    for frag in q
+        .split('…')
+        .flat_map(|p| p.split("..."))
+        .map(str::trim)
+        .filter(|f| !f.is_empty())
+    {
+        match rest.find(frag) {
+            Some(j) => rest = &rest[j + frag.len()..],
+            None => return false,
+        }
+    }
+    true
+}
+
+/// One bundled map: where it is, what it says it is, and its raw source.
+#[derive(Debug)]
+struct BundledMap {
+    rel: String,
+    year: String,
+    irs_stem: String,
+    src: String,
+}
+
+/// Every `*.map.toml` under `crates/btctax-forms/forms/<year>/`, read off the disk.
+///
+/// ★★★ **Derived from the tree, and it REFUSES to walk nothing.** The whole finding this closes is a
+/// checker aimed at a year by a literal; a replacement that silently found zero maps would be the
+/// same defect wearing a glob. `CLAUDE.md`: an instrument that cannot say what it did not cover is
+/// not a check.
+fn bundled_maps(root: &Path) -> Result<Vec<BundledMap>, String> {
+    let forms = root.join("crates/btctax-forms/forms");
+    let mut years: Vec<String> = std::fs::read_dir(&forms)
+        .map_err(|e| format!("cannot read {}: {e}", forms.display()))?
+        .filter_map(Result::ok)
+        .filter(|e| e.path().is_dir())
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .filter(|n| n.chars().all(|c| c.is_ascii_digit()) && !n.is_empty())
+        .collect();
+    years.sort();
+    let mut out = Vec::new();
+    for year in years {
+        let dir = forms.join(&year);
+        let mut maps: Vec<PathBuf> = std::fs::read_dir(&dir)
+            .map_err(|e| format!("cannot read {}: {e}", dir.display()))?
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.to_string_lossy().ends_with(".map.toml"))
+            .collect();
+        maps.sort();
+        for path in maps {
+            let rel = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .display()
+                .to_string();
+            let src =
+                std::fs::read_to_string(&path).map_err(|e| format!("cannot read {rel}: {e}"))?;
+            // ★ The header is read as TOML, not by a line scan: `irs_stem` and `year` are the two
+            //   fields that decide WHICH extract is the authority, so they are resolved the same way
+            //   `build.rs` and `map_rows.rs` resolve them.
+            let parsed: toml::Value =
+                toml::from_str(&src).map_err(|e| format!("{rel} is not valid TOML: {e}"))?;
+            let declared_year = parsed
+                .get("year")
+                .and_then(|v| v.as_integer())
+                .ok_or_else(|| format!("{rel} declares no integer `year`"))?
+                .to_string();
+            if declared_year != year {
+                return Err(format!(
+                    "{rel} declares year = {declared_year} but is bundled under forms/{year}/ — the \
+                     extract path is built from the DECLARED year, so the two must agree"
+                ));
+            }
+            let irs_stem = parsed
+                .get("irs_stem")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| format!("{rel} declares no `irs_stem`"))?
+                .to_string();
+            out.push(BundledMap {
+                rel,
+                year: declared_year,
+                irs_stem,
+                src,
+            });
+        }
+    }
+    if out.is_empty() {
+        return Err(format!(
+            "no *.map.toml found under {} — the caption gate would pass by walking nothing",
+            forms.display()
+        ));
+    }
+    Ok(out)
+}
+
+/// The rule, as a pure function of one map's source and its own year's extract, so a planted
+/// carried-forward caption can be watched going red (harness B1).
+///
+/// Returns (captions checked, problems, the paraphrase rows this map used).
+fn map_caption_problems(
+    rel: &str,
+    src: &str,
+    extract_name: &str,
+    extract: &str,
+) -> (usize, Vec<String>, Vec<usize>) {
+    let hays = caption_haystacks(extract);
+    let mut errs = Vec::new();
+    let mut used = Vec::new();
+    let caps = map_captions(src);
+    for (label, q) in &caps {
+        if hays.iter().any(|h| caption_present(h, q)) {
+            continue;
+        }
+        match CAPTION_PARAPHRASES
+            .iter()
+            .position(|(m, l, text, _)| *m == rel && l == label && text == q)
+        {
+            Some(i) => used.push(i),
+            None => errs.push(format!(
+                "{rel}: the caption on {label} is NOT printed on {extract_name}:\n      {q:?}\n    \
+                 This is the Form 6251 line-33 class — a sentence carried forward from a document \
+                 nobody re-read. Either the caption is wrong, or it was transcribed from another \
+                 year's form."
+            )),
+        }
+    }
+    (caps.len(), errs, used)
+}
+
+/// ★★ An entry in [`CAPTION_PARAPHRASES`] that no longer matches anything is a claim about a defect
+/// that is gone. Reporting it is what stops the list outliving its subject.
+fn stale_paraphrase_claims(used: &[usize]) -> Vec<String> {
+    CAPTION_PARAPHRASES
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !used.contains(i))
+        .map(|(_, (m, l, text, _))| {
+            format!(
+                "CAPTION_PARAPHRASES still claims {m} line {l} paraphrases the form ({text:?}), but \
+                 the scan did not find that caption failing. If it was fixed, DELETE the row; if the \
+                 caption was renamed or re-worded, the row is describing something that no longer \
+                 exists."
+            )
+        })
+        .collect()
+}
+
+/// ★★★ **FR-135 / rehearsal F3 — every BUNDLED year of a covered form must be QUOTED by the table.**
+///
+/// `Coverage::quoting("2024")` is a literal in each collector: **26 blocks say 2024 against 2 that
+/// say 2025.** The instrument is not blind — re-pointing three of them at 2025 named exactly the two
+/// lines whose text changed — it is simply aimed at the old year, and bundling a new year moves
+/// none of them. So the pairs the table does not quote are COUNTED here and pinned, derived from the
+/// maps on disk: bundling `f6251/2026` cannot silently leave 42 captions pointed at TY2024.
+///
+/// ★ **Scoped to forms the table already covers, and that boundary is stated rather than implied.**
+/// A bundled form with NO rows at any year is silent here, and for most of them that is correct —
+/// `f1040v`, `f4868` and `f8283` print no money line this census describes. It does mean this rule
+/// is not the one that would notice a money-bearing form entering the tree uncovered; `(4b)`'s type
+/// scan is, and it keys on the TYPE rather than on the map, so the two do not overlap. Reporting a
+/// coverage-less form here would red on the three legitimate ones and teach the next author to widen
+/// an exemption.
+fn unquoted_bundled_years(
+    maps: &[BundledMap],
+    rows: &[line_coverage::LineCoverage],
+) -> Vec<String> {
+    let mut out = Vec::new();
+    for m in maps {
+        if rows
+            .iter()
+            .any(|e| e.form == m.irs_stem && e.year == m.year)
+        {
+            continue;
+        }
+        let mut covered: Vec<&str> = rows
+            .iter()
+            .filter(|e| e.form == m.irs_stem)
+            .map(|e| e.year)
+            .collect();
+        covered.sort_unstable();
+        covered.dedup();
+        if covered.is_empty() {
+            continue;
+        }
+        out.push(format!(
+            "{}--{} (quoted: {})",
+            m.irs_stem,
+            m.year,
+            covered.join(" ")
+        ));
+    }
+    out
+}
+
+/// The ratchet on [`unquoted_bundled_years`]. **Only ever goes DOWN.**
+///
+/// Each unit is a bundled `(form, year)` whose printed money lines are verified against a DIFFERENT
+/// year's booklet, because its collector's `Coverage::quoting` literal still names the old year. The
+/// number is a measurement of FR-135's live surface, not a licence.
+///
+/// **THE RESIDUE, ENUMERATED — printed by the run itself, never hand-counted.** All twelve are
+/// TY2025 maps whose collector says `Coverage::quoting("2024")`:
+///
+/// ```text
+/// f1040--2025  f1040s2--2025  f1040s3--2025  f1040sa--2025  f1040sb--2025  f1040sc--2025
+/// f8889--2025  f8949--2025    f8959--2025    f8960--2025    f8995--2025    f1040sse--2025
+/// ```
+///
+/// ★★ **The two absences are the rule working.** `f6251--2025` and `f1040sd--2025` are bundled and
+/// are NOT here, because those two collectors do name 2025 — `cover_form6251line1` for the OBBBA
+/// line-1 region and `cover_scheduledlines` for the twelve per-box rows, each via
+/// [`line_coverage::Coverage::quoting_year`]. A rule that reported all fourteen would be counting
+/// maps, not measuring quotation.
+///
+/// ★★★ **What this closes and what it does not.** It does NOT re-point the twelve; that needs a
+/// per-year transcription for each form, which is the revision-aware refactor FR-135 names as its
+/// full fix. It closes the part that was silent: bundling `f6251/2026` now raises this number and
+/// REDS, where before it moved nothing and 377 money lines went on being checked against TY2024.
+const MAX_UNQUOTED_BUNDLED_YEARS: usize = 12;
+
 pub fn check(cov: &line_coverage::Coverage) -> Result<String, String> {
     let root = repo_root();
     let mut extracts: BTreeMap<String, String> = BTreeMap::new();
@@ -1315,6 +1842,56 @@ pub fn check(cov: &line_coverage::Coverage) -> Result<String, String> {
         }
     }
 
+    // ★★★ (4d) FR-134 — MAP CAPTIONS, every map on disk against ITS OWN year's extract, and
+    //     (4e) FR-135 — every bundled year of a covered form must be quoted by the table.
+    //
+    //     Both walk `crates/btctax-forms/forms/*/` rather than naming a year, which is the entire
+    //     finding: the pre-existing caption gate was pinned to TY2024 by `include_str!`, so a TY2025
+    //     map quoting TY2024 thresholds passed 3,614 of 3,614 tests.
+    let maps = bundled_maps(&root)?;
+    let mut captions_checked = 0usize;
+    let mut paraphrases_used: Vec<usize> = Vec::new();
+    for m in &maps {
+        let name = format!("{}--{}.txt", m.irs_stem, m.year);
+        let path = root.join("design/forms/extract").join(&name);
+        let Ok(extract) = std::fs::read_to_string(&path) else {
+            // ★ Not a skip. A bundled map whose own year's text layer is missing is a map whose
+            //   captions CANNOT be checked, and silence there is how the pinned gate looked green.
+            errs.push(format!(
+                "{}: bundled for {} but {} cannot be read — its captions are unverifiable, and a \
+                 caption nobody can check is exactly what a port carries forward",
+                m.rel,
+                m.year,
+                path.display()
+            ));
+            continue;
+        };
+        let (n, problems, used) = map_caption_problems(&m.rel, &m.src, &name, &extract);
+        captions_checked += n;
+        errs.extend(problems);
+        paraphrases_used.extend(used);
+    }
+    errs.extend(stale_paraphrase_claims(&paraphrases_used));
+    if captions_checked < MIN_MAP_CAPTIONS {
+        errs.push(format!(
+            "{captions_checked} map captions were checked, below the {MIN_MAP_CAPTIONS} floor. Every \
+             rule above is per-caption and none can see a caption that is GONE, so deleting the quote \
+             is the cheapest way to silence this gate. If the removal is deliberate, say which \
+             captions and why, and lower the floor in the same diff."
+        ));
+    }
+    let unquoted = unquoted_bundled_years(&maps, &cov.0);
+    if unquoted.len() > MAX_UNQUOTED_BUNDLED_YEARS {
+        errs.push(format!(
+            "{} bundled (form, year) pair(s) are covered by this table at a DIFFERENT year only, so \
+             their quotes are verified against another booklet (ratchet {MAX_UNQUOTED_BUNDLED_YEARS}): \
+             {}. `Coverage::quoting(\"…\")` is a literal in each collector; bundling a year does not \
+             move it.",
+            unquoted.len(),
+            unquoted.join(", ")
+        ));
+    }
+
     // (5) Duplicate coverage of one LINE would let two rows disagree.
     //
     // ★ Keyed on (form, LINE, field), not (form, field) — the population pass proved why: a nested
@@ -1391,7 +1968,10 @@ pub fn check(cov: &line_coverage::Coverage) -> Result<String, String> {
         Ok(format!(
             "line-coverage OK: {} money lines across {} form(s) [{}], {exceptions} exception(s) \
              (ratchet {MAX_EXCEPTIONS}), {} unverifiable (ratchet {MAX_UNVERIFIABLE}), {} not \
-             line-bound (ratchet {MAX_UNLOCATABLE})",
+             line-bound (ratchet {MAX_UNLOCATABLE}); {captions_checked} map caption(s) across {} \
+             bundled map(s) checked against their OWN year's extract (floor {MIN_MAP_CAPTIONS}), all \
+             printed there but {} pinned as known paraphrases; {} bundled year(s) quoted from another \
+             (ratchet {MAX_UNQUOTED_BUNDLED_YEARS})",
             cov.0.len(),
             by_form.len(),
             by_form
@@ -1400,7 +1980,10 @@ pub fn check(cov: &line_coverage::Coverage) -> Result<String, String> {
                 .collect::<Vec<_>>()
                 .join(" "),
             unverifiable.len(),
-            unlocatable.len()
+            unlocatable.len(),
+            maps.len(),
+            paraphrases_used.len(),
+            unquoted.len()
         ))
     } else {
         Err(format!(
@@ -1816,6 +2399,413 @@ mod tests {
             "",
         )
         .is_empty());
+    }
+
+    /// ★★★ **B1 FOR THE MAP-CAPTION GATE (FR-134) — the rehearsal's own plant, committed.**
+    ///
+    /// The rehearsal put the TY2024 thresholds into a TY2025 map's caption and ran everything:
+    /// **3,614 tests, 3,614 passed.** This is that plant, on a real map, against the real extract,
+    /// with the whole scan behind it — so the answer to *"which test reds when this checker is
+    /// removed?"* is this one, by name.
+    ///
+    /// Four directions, because a rule seen only on a clean tree has not been seen discriminating:
+    ///
+    /// 1. the committed TY2025 Schedule A map is clean against `f1040sa--2025.txt`;
+    /// 2. ★ the SALT figures reverted to TY2024's `$10,000 / $5,000` — the §164(b) change this very
+    ///    map's header documents — reds, naming the line;
+    /// 3. ★★ the SAME clean map checked against the TY2024 extract reds too, which is what proves the
+    ///    EXTRACT is deciding. Without this direction a checker that ignored its extract argument
+    ///    would pass both (1) and (2)'s inverse and look identical;
+    /// 4. an empty extract reds rather than finding nothing to complain about.
+    #[test]
+    fn a_caption_quoting_another_years_figures_reds_and_the_committed_map_passes() {
+        let root = repo_root();
+        let rel = "crates/btctax-forms/forms/2025/f1040sa.map.toml";
+        let src = std::fs::read_to_string(root.join(rel)).expect("the TY2025 Schedule A map");
+        let read = |name: &str| {
+            std::fs::read_to_string(root.join("design/forms/extract").join(name))
+                .unwrap_or_else(|e| panic!("{name}: {e}"))
+        };
+        let ty2025 = read("f1040sa--2025.txt");
+        let ty2024 = read("f1040sa--2024.txt");
+
+        // (1) The committed map, against its OWN year.
+        let (n, errs, used) = map_caption_problems(rel, &src, "f1040sa--2025.txt", &ty2025);
+        assert!(
+            errs.is_empty(),
+            "the committed TY2025 Schedule A captions must all be printed on TY2025: {errs:?}"
+        );
+        assert!(
+            used.is_empty(),
+            "no CAPTION_PARAPHRASES row belongs to this map: {used:?}"
+        );
+        assert!(
+            n >= 21,
+            "the scan must actually read this map's captions, not 0 of them: {n}"
+        );
+
+        // (2) ★ THE PLANT: TY2024's SALT cap in the TY2025 map.
+        let planted = src.replace(
+            "line 5d or $40,000 ($20,000 if married filing",
+            "line 5d or $10,000 ($5,000 if married filing",
+        );
+        assert_ne!(planted, src, "the plant must apply — the caption moved");
+        let (_, errs, _) = map_caption_problems(rel, &planted, "f1040sa--2025.txt", &ty2025);
+        assert_eq!(errs.len(), 1, "exactly the planted caption reds: {errs:?}");
+        assert!(
+            errs[0].contains("line5e")
+                && errs[0].contains("NOT printed on f1040sa--2025.txt")
+                && errs[0].contains("$10,000"),
+            "the message must name the line, the extract it is absent from, and the wrong figure: {}",
+            errs[0]
+        );
+
+        // (3) ★★ The clean map against the WRONG year — the extract is what decides.
+        let (_, errs, _) = map_caption_problems(rel, &src, "f1040sa--2024.txt", &ty2024);
+        assert!(
+            errs.iter().any(|e| e.contains("line5e")),
+            "TY2025's line 5e sentence is not on the TY2024 form, so aiming the gate at the TY2024 \
+             extract must red — this is the direction that proves the extract is read at all: {errs:?}"
+        );
+
+        // (4) An empty text layer must not pass by having nothing to match against.
+        let (n_empty, errs, _) = map_caption_problems(rel, &src, "f1040sa--2025.txt", "");
+        assert_eq!(n_empty, n, "the same captions are read either way");
+        assert!(
+            errs.len() >= n - CAPTION_PARAPHRASES.len(),
+            "against an EMPTY extract every caption must red, not silently pass: {} of {n}",
+            errs.len()
+        );
+    }
+
+    /// ★★★ **THE BLINDNESS KILL — the four committed caption shapes, and the cap that keeps a YEAR
+    /// from reading as a line label.**
+    ///
+    /// A parser that read only `# NN "…"` — the shape the two pre-existing per-form tests use — sees
+    /// **134** of the tree's **429** captions and reports zero problems over 17 maps it never opened.
+    /// That is `cite-check`'s own failure: an instrument green because it never ran. So each shape is
+    /// pinned here by construction, on a synthetic map, together with the two things that must NOT be
+    /// read as a caption.
+    #[test]
+    fn every_committed_caption_shape_is_read_and_prose_is_not() {
+        let src = "\
+# 27 \"caption above, bare number\"
+line27 = \"a\"
+# L21 — \"caption above, L-prefixed\"
+line21 = \"b\"
+line12 = \"c\"   # \"caption trailing, unlabelled\"
+line13 = \"d\"   # L13 — \"caption trailing, L-prefixed\"
+line14 = \"e\"   # \u{2605}\u{2605}\u{2605} \"caption trailing, after markers\"
+#      2024: \"a sentence quoted from ANOTHER YEAR to document a change\"
+line15 = \"f\"
+#   Form text: \"prose that names what it is quoting\"
+line16 = \"g\"
+";
+        let caps = map_captions(src);
+        let got: Vec<&str> = caps.iter().map(|(_, q)| q.as_str()).collect();
+        assert_eq!(
+            got,
+            vec![
+                "caption above, bare number",
+                "caption above, L-prefixed",
+                "caption trailing, unlabelled",
+                "caption trailing, L-prefixed",
+                "caption trailing, after markers",
+            ],
+            "all five committed shapes, and NEITHER of the two non-claims"
+        );
+        let labels: Vec<&str> = caps.iter().map(|(l, _)| l.as_str()).collect();
+        assert_eq!(labels, vec!["27", "L21", "line12", "L13", "line14"]);
+
+        // ★★ The two-digit cap, stated as its own assertion because it was found by measurement:
+        //    `2024:` reading as a line label turned Schedule A's TY2025 header — which quotes the
+        //    TY2024 sentence verbatim to document the SALT change — into a TY2025 caption, and red.
+        assert!(is_caption_label("27") && is_caption_label("5b") && is_caption_label("L21"));
+        assert!(is_caption_label("1(a)"));
+        assert!(
+            !is_caption_label("2024") && !is_caption_label("2025"),
+            "a four-digit year is not a line label"
+        );
+
+        // ★ The measured shape mix on the committed tree: reading only `# NN \"…\"` is a MINORITY of
+        //   the captions, which is why the shortfall is a defect and not a rounding error.
+        let root = repo_root();
+        let maps = bundled_maps(&root).expect("the bundled maps");
+        let total: usize = maps.iter().map(|m| map_captions(&m.src).len()).sum();
+        assert!(
+            total >= MIN_MAP_CAPTIONS,
+            "the parser reads {total} captions, below the {MIN_MAP_CAPTIONS} floor"
+        );
+        let bare_number_only: usize = maps
+            .iter()
+            .map(|m| {
+                m.src
+                    .lines()
+                    .filter(|l| {
+                        let t = l.trim_start();
+                        t.starts_with("# ")
+                            && t[2..].split_once(' ').is_some_and(|(n, tail)| {
+                                n.chars().next().is_some_and(|c| c.is_ascii_digit())
+                                    && is_caption_label(n)
+                                    && tail.starts_with('"')
+                            })
+                    })
+                    .count()
+            })
+            .sum();
+        assert!(
+            bare_number_only * 2 < total,
+            "if the `# NN \\\"…\\\"` shape were a majority the other three would not be worth \
+             parsing; measured {bare_number_only} of {total}"
+        );
+    }
+
+    /// ★★★ **THE VACUITY KILL for the walk itself.** The finding being closed is a checker aimed at a
+    /// year by a literal, and the cheapest way to reintroduce it is a glob that matches nothing while
+    /// the report still says OK. Three refusals, all observed:
+    ///
+    /// 1. a tree with no `forms/` directory at all;
+    /// 2. a `forms/` directory with year folders and no maps in them;
+    /// 3. ★ a map whose declared `year` disagrees with the folder it sits in — the extract path is
+    ///    built from the DECLARED year, so a disagreement silently checks the wrong booklet.
+    #[test]
+    fn the_map_walk_refuses_to_walk_nothing_and_refuses_a_misfiled_year() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+
+        let e = bundled_maps(root).expect_err("no forms/ directory at all must refuse");
+        assert!(e.contains("cannot read"), "{e}");
+
+        let dir = root.join("crates/btctax-forms/forms/2031");
+        std::fs::create_dir_all(&dir).unwrap();
+        let e = bundled_maps(root).expect_err("a forms/ tree with no maps must refuse");
+        assert!(
+            e.contains("no *.map.toml found") && e.contains("walking nothing"),
+            "the message must say the gate would pass by finding nothing: {e}"
+        );
+
+        std::fs::write(
+            dir.join("f0000.map.toml"),
+            "form = \"f0000\"\nyear = 2030\nirs_stem = \"f0000\"\n",
+        )
+        .unwrap();
+        let e = bundled_maps(root).expect_err("a misfiled year must refuse");
+        assert!(
+            e.contains("declares year = 2030") && e.contains("forms/2031/"),
+            "the message must name both years: {e}"
+        );
+
+        // …and with the year corrected the same tree is accepted, so the refusal is about the
+        // disagreement and not about the fixture.
+        std::fs::write(
+            dir.join("f0000.map.toml"),
+            "form = \"f0000\"\nyear = 2031\nirs_stem = \"f0000\"\n",
+        )
+        .unwrap();
+        let ok = bundled_maps(root).expect("a consistent map is accepted");
+        assert_eq!(ok.len(), 1);
+        assert_eq!(
+            (ok[0].year.as_str(), ok[0].irs_stem.as_str()),
+            ("2031", "f0000")
+        );
+    }
+
+    /// ★★★ **B1 FOR FR-135 — a bundled year the table quotes from a DIFFERENT booklet is reported,
+    /// and one it actually quotes is not.**
+    ///
+    /// `Coverage::quoting("2024")` is a literal in 26 collectors against 2 saying 2025, and bundling
+    /// a year moves none of them. The rule has to discriminate three cases, or it is either noise or
+    /// blind: covered-at-this-year (silent), covered-only-elsewhere (reported), covered-nowhere
+    /// (silent — that is `cover_fns_not_registered`'s job, and duplicating it here would red for the
+    /// wrong reason).
+    #[test]
+    fn a_bundled_year_quoted_from_another_booklet_is_reported_and_a_quoted_one_is_not() {
+        let map = |irs_stem: &str, year: &str| BundledMap {
+            rel: format!("forms/{year}/{irs_stem}.map.toml"),
+            year: year.to_string(),
+            irs_stem: irs_stem.to_string(),
+            src: String::new(),
+        };
+        let row = |form: &'static str, year: &'static str| line_coverage::LineCoverage {
+            form,
+            year,
+            line: "1".to_string(),
+            field: "line1",
+            production: Production::Carry,
+            instruction: "Enter the amount from line 1",
+            reason: None,
+        };
+        let maps = vec![
+            map("f6251", "2025"),   // covered AT 2025
+            map("f1040sa", "2025"), // covered only at 2024
+            map("f0000", "2025"),   // not covered at all
+        ];
+        let rows = vec![
+            row("f6251", "2024"),
+            row("f6251", "2025"),
+            row("f1040sa", "2024"),
+        ];
+        let out = unquoted_bundled_years(&maps, &rows);
+        assert_eq!(out.len(), 1, "exactly the carried-forward pair: {out:?}");
+        assert!(
+            out[0].contains("f1040sa--2025") && out[0].contains("quoted: 2024"),
+            "the message must name the bundled year AND the year actually quoted: {}",
+            out[0]
+        );
+
+        // ★ …and dropping the 2025 rows — which is what a re-pointed collector looks like in reverse
+        //   — brings f6251 into the report, so the rule is reading the rows rather than a list.
+        let rows: Vec<_> = rows.into_iter().filter(|r| r.year == "2024").collect();
+        let out = unquoted_bundled_years(&maps, &rows);
+        assert_eq!(out.len(), 2, "{out:?}");
+        assert!(out.iter().any(|s| s.contains("f6251--2025")), "{out:?}");
+    }
+
+    /// ★★ **THE FLOOR'S OWN KILL.** Every caption rule is per-caption, so a caption that is DELETED
+    /// is invisible to all of them — deleting the quote is the cheapest way to silence this gate.
+    /// [`MIN_MAP_CAPTIONS`] is what notices, and this is the mutation it notices.
+    #[test]
+    fn stripping_a_maps_captions_takes_the_scan_below_its_floor() {
+        let root = repo_root();
+        let maps = bundled_maps(&root).expect("the bundled maps");
+        let total: usize = maps.iter().map(|m| map_captions(&m.src).len()).sum();
+        assert!(total >= MIN_MAP_CAPTIONS, "{total} < {MIN_MAP_CAPTIONS}");
+
+        // Strip the quotes from the ONE map with the most captions and the total must fall under.
+        let fattest = maps
+            .iter()
+            .max_by_key(|m| map_captions(&m.src).len())
+            .expect("at least one map");
+        let n = map_captions(&fattest.src).len();
+        assert!(n > 0, "the fattest map must actually carry captions");
+        let gutted: String = fattest
+            .src
+            .lines()
+            .map(|l| {
+                if l.contains('#') {
+                    l.replace('"', "'")
+                } else {
+                    l.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(
+            map_captions(&gutted).len(),
+            0,
+            "the fixture must actually remove the captions, or the assertion below proves nothing"
+        );
+        assert!(
+            total - n < MIN_MAP_CAPTIONS,
+            "gutting {} ({n} captions) leaves {}, which must be below the {MIN_MAP_CAPTIONS} floor \
+             — if it is not, the floor is too low to notice a whole map going quiet",
+            fattest.rel,
+            total - n
+        );
+    }
+
+    /// ★★ **CAPTION_PARAPHRASES cannot outlive its subject.** Each row is pinned to the exact wrong
+    /// sentence, so the day the map is fixed the row becomes a claim about nothing — and that reds.
+    #[test]
+    fn a_paraphrase_row_that_no_longer_matches_anything_is_reported_stale() {
+        assert!(
+            stale_paraphrase_claims(&(0..CAPTION_PARAPHRASES.len()).collect::<Vec<_>>()).is_empty(),
+            "every row used => nothing stale"
+        );
+        let stale = stale_paraphrase_claims(&[]);
+        assert_eq!(stale.len(), CAPTION_PARAPHRASES.len(), "{stale:?}");
+        assert!(
+            stale[0].contains("DELETE the row"),
+            "the message must say what to do: {}",
+            stale[0]
+        );
+
+        // ★ And the rows are still EARNING their place: each one's map still fails on that caption.
+        let root = repo_root();
+        for (rel, label, text, _) in CAPTION_PARAPHRASES {
+            let src =
+                std::fs::read_to_string(root.join(rel)).unwrap_or_else(|e| panic!("{rel}: {e}"));
+            assert!(
+                map_captions(&src)
+                    .iter()
+                    .any(|(l, q)| l == label && q == text),
+                "{rel} no longer carries the caption {text:?} on {label} — the row is describing \
+                 something that has changed"
+            );
+        }
+    }
+
+    /// ★ The layout normalisations are each load-bearing, measured rather than asserted: removing any
+    /// one of them turns FAITHFUL committed captions into failures.
+    ///
+    /// | mechanism | false failures if removed |
+    /// |---|---|
+    /// | [`destub`] — the left marginal column `pdftotext -layout` interleaves into a wrapped sentence | 6 |
+    /// | [`rejoin_column_header`] — Form 8995-A's two-row Part I header | 4 |
+    /// | leader dots (a lone `.`) | Form 8959's three filing-status rows |
+    /// | quote glyphs | Schedule B line 8's `“Yes,”`, unwritable inside a `"`-delimited caption |
+    #[test]
+    fn each_layout_normalisation_is_load_bearing() {
+        let root = repo_root();
+        let read = |name: &str| {
+            std::fs::read_to_string(root.join("design/forms/extract").join(name))
+                .unwrap_or_else(|e| panic!("{name}: {e}"))
+        };
+
+        // destub: TY2025 Schedule A line 2's sentence wraps across the left stub column.
+        let a2025 = read("f1040sa--2025.txt");
+        let q = "Enter amount from Form 1040 or 1040-SR, line 11b";
+        assert!(
+            !caption_normalize(&a2025).contains(q),
+            "if the raw extract carried this contiguously, destub would be dead code"
+        );
+        assert!(
+            caption_normalize(&destub(&a2025)).contains(q),
+            "destub must recover it"
+        );
+
+        // the two-row column header: Form 8995-A's Part I captions.
+        let a = read("f8995a--2024.txt");
+        let q = "Check if specified service";
+        assert!(!caption_normalize(&a).contains(q));
+        assert!(caption_normalize(&rejoin_column_header(&a)).contains(q));
+
+        // leader dots: Form 8959's filing-status block.
+        let f8959 = read("f8959--2025.txt");
+        let q = "Married filing jointly $250,000";
+        assert!(
+            !f8959.contains(q),
+            "the form prints dot leaders between them"
+        );
+        assert!(caption_normalize(&f8959).contains(q));
+
+        // quote glyphs: the form's curly double quotes vs the caption's straight singles.
+        let b = read("f1040sb--2025.txt");
+        assert!(b.contains('\u{201C}'), "the extract carries curly quotes");
+        assert!(
+            caption_normalize(&b).contains("If 'Yes,' you may have to file Form 3520"),
+            "a caption cannot contain a `\"`, so the family must collapse"
+        );
+
+        // …and an ELISION is the author's own declared gap, in order — not a free pass.
+        assert!(caption_present(
+            "Total Additional Medicare Tax withholding. Add lines 22 and 23",
+            "Total ... Add lines 22 and 23"
+        ));
+        assert!(
+            !caption_present(
+                "Add lines 22 and 23. Total something else",
+                "Total ... Add lines 22 and 23"
+            ),
+            "the fragments must occur IN ORDER"
+        );
+        assert!(
+            !caption_present(
+                "Subtract line 32 from line 22",
+                "Subtract line 32 from line 12"
+            ),
+            "no normalisation may turn one line number into another — the Form 6251 line-33 class"
+        );
     }
 
     /// The checker passes on the committed table — **and the table is still the whole table.**

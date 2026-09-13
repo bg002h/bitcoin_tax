@@ -310,6 +310,19 @@ impl Coverage {
     /// ★ This is also the port lever: transcribing a form for a new year and naming that year sends
     /// every one of its quotes at the new extract, so a sentence carried forward unchanged from the
     /// old booklet REDS instead of passing. With the year defaulted, the same paste passed silently.
+    ///
+    /// ★★★ **BUT THE LEVER IS AIMED BY A LITERAL, AND FOR A WHILE NOTHING NOTICED (FR-135).** The
+    /// port rehearsal measured **26 collectors saying `quoting("2024")` against 2 saying 2025**: the
+    /// mechanism works — re-pointing three of them at 2025 named exactly the two lines whose text had
+    /// changed — but bundling a new year's map moves none of them, so a year can be emitted while
+    /// every one of its money lines is still checked against the previous booklet.
+    ///
+    /// So `xtask line-coverage` now derives the bundled years from
+    /// `crates/btctax-forms/forms/*/*.map.toml` and **ratchets the `(form, year)` pairs this table
+    /// covers only at some OTHER year** (`line_coverage_check::MAX_UNQUOTED_BUNDLED_YEARS`, 12 today,
+    /// each pair printed by the run). Bundling a form for a new year therefore reds until this
+    /// collector names it. Editing the literal below is still the fix; what changed is that forgetting
+    /// to is no longer silent.
     pub fn quoting(year: &'static str) -> Self {
         Coverage(Vec::new(), RowYear::Decided(year), false)
     }
