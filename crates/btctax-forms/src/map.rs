@@ -634,7 +634,7 @@ pub struct Form6251ObbbaMap {
     /// ★★★ **THIS DOC COMMENT USED TO CARRY THE WHOLE SENTENCE INCLUDING `$900,350`, and no
     /// instrument read it.** `every_quoted_instruction_is_verbatim_on_its_own_revisions_form` parses
     /// the map TOML's `# <label> "…"` comment lines, not Rust doc comments, and `cite-check` excuses
-    /// this form entirely (`AUTHORITY_NOT_YET_ARCHIVED` carries `("f6251", &[2024, 2025])`) — so a
+    /// this form entirely (`cite-check` now ARCHIVES f6251 for both years — the const that excused it (`AUTHORITY_NOT_YET_ARCHIVED`) was deleted 2026-09-12 (A3/FR-138) after 30 of its 31 claims measured FALSE) — so a
     /// year-specific figure sat unchecked inside a shared struct, where it would silently become a
     /// claim about TY2026. A quoted figure no instrument reads is the same class as the rows
     /// `cover_form6251line1` was not emitting (seam review M-1/M-3).

@@ -2134,7 +2134,7 @@ mod tests {
     /// comment above it promised the 1a/1b rows *"when that year's map lands"*. That map landed in
     /// `d8d023af` and no rows were added, so `Form6251Line1::Y2025`'s transcription (the doc comment
     /// that hardcodes "line 37") was verified verbatim by NOTHING: `cite-check` also excuses this form
-    /// (`AUTHORITY_NOT_YET_ARCHIVED` carries `("f6251", &[2024, 2025])`).
+    /// (`cite-check` now ARCHIVES f6251 for both years — the const that excused it (`AUTHORITY_NOT_YET_ARCHIVED`) was deleted 2026-09-12 (A3/FR-138) after 30 of its 31 claims measured FALSE).
     ///
     /// Three directions, because a rule seen only on a clean table has not been seen discriminating:
     ///

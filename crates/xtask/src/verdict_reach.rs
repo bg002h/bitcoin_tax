@@ -66,7 +66,7 @@ pub const FILING_PATH: &[(&str, &str)] = &[
 
 /// Verdict types that legitimately never reach a filed number, each with the reason.
 ///
-/// ★★ **SHRINK-ONLY, and every entry is an admission.** This is the `AUTHORITY_NOT_YET_ARCHIVED`
+/// ★★ **SHRINK-ONLY, and every entry is an admission.** This is the same shape as the deleted `AUTHORITY_NOT_YET_ARCHIVED` (A3/FR-138, 2026-09-12)
 /// pattern: a recorded gap is not an excuse, it is a thing a future reader can grep for. An entry
 /// here says "this verdict is advisory by design" — and [`no_exemption_is_stale`] reds if the named
 /// type stops existing, so a closed gap cannot silently reopen.

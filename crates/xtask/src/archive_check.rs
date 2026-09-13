@@ -244,7 +244,18 @@ pub fn classify(name: &str) -> Option<&'static str> {
 /// ★★ Why a ratchet rather than a red suite: `design/HARNESS.md` r1 said this check should simply red
 /// today. With A2 wired that would block **every commit** until the reconciliation landed, and a gate
 /// that stands permanently red is not a gate — it is noise that gets muted, which is the failure mode
-/// the whole document is written against. The in-repo model is `AUTHORITY_NOT_YET_ARCHIVED`.
+/// the whole document is written against. The in-repo model is the authority ratchet's excuse set —
+/// `cite_check::excused_form_years`, read off each map row's `authority = "not-yet-archived: <reason>"`
+/// header and pinned shrink-only by `btctax-forms/tests/map_rows.rs::EXCUSED`.
+///
+/// ★★ **FR-138 (2026-09-12) is the cautionary half of that model, and it belongs beside this list.**
+/// That ratchet's excuse set was a hand-typed const of 31 `(form, years)` pairs, and **30 were false**:
+/// its notion of "archived" required a second, duplicate extract root, so a document with a URL, a
+/// sha256, a manifest entry and both text layers still read as unarchived — and the cheapest way to keep
+/// the gate green was to write *"not-yet-archived"* about a document that was archived. A ratchet is the
+/// right shape, but only while each entry is an admission **someone can still be wrong about in the
+/// direction of more work**. An entry that is cheaper to write than the fix is how a gate turns into the
+/// noise it was built to replace.
 /// ★★★ **MEASURED 2026-07-30 BY THIS CHECK, ON ITS FIRST RUN — and the count was FOUR, not two.**
 /// `CONTINUITY.md` §4 recorded "two archives". That number was written from memory rather than from a
 /// walk of the tree, which is **F2 (enumerating from a hand-list instead of the source) inside the

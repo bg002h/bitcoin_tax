@@ -50,7 +50,7 @@
 //! `cargo run -p xtask -- extract-schedule-1a`, so this runs with no `pdftotext` at test time and the
 //! PDF hash in each fixture header pins provenance.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -515,16 +515,16 @@ pub fn run() -> Result<(), String> {
     // ★ Report AUTHORITY COVERAGE every run, not only in a test — and report it as `(form, YEAR)`
     // pairs, because a prior-year archive is not coverage for a current-year revision.
     let emitted = emitted_form_years()?;
-    let (archived, broken) = archived_form_years();
+    let (archived, broken) = archived_form_years()?;
     if !broken.is_empty() {
         return Err(format!(
-            "{} registry row(s) claim an extracted authority that is NOT on disk — coverage they \
-             cannot back:\n  {}",
+            "{} map row(s) carry no `authority` header — so they assert their primary source is \
+             archived — and the manifest join does not back that claim:\n  {}",
             broken.len(),
             broken.join("\n  ")
         ));
     }
-    let excused = excused_form_years();
+    let excused = excused_form_years()?;
     let verdict = adjudicate_coverage(&emitted, &archived, &excused);
     println!(
         "cite-check: authority archived + extracted for {}/{} emitted (form, year) pairs [{}]; \
@@ -735,10 +735,13 @@ pub struct FormAuthority {
     pub extract_stem: &'static str,
 }
 
-/// ★ Registry state as of **2026-09-06** (residue sweep 1, item 3). Deliberately honest: five of the
-/// emitted form-years are wired, every other one is an explicit admission in
-/// [`AUTHORITY_NOT_YET_ARCHIVED`], and `authority_coverage_may_only_improve` makes the split visible
-/// instead of implicit.
+/// ★★ **THIS IS NO LONGER THE AUTHORITY RATCHET'S INPUT (FR-138, 2026-09-12).** It is now only the
+/// driver for `extract-schedule-1a`, which regenerates the SECOND extract root
+/// (`crates/btctax-core/src/tax/fixtures/`) that design r2 §9 plans to retire. The ratchet reads the
+/// year-package table's rows and `design/forms/MANIFEST.json` instead — see [`archived_form_years`] —
+/// because keying coverage on *this* const meant a form-year could be archived, extracted, hashed and
+/// manifested and still be counted as uncovered. Rows are held to their map rows by
+/// `the_forms_const_row_agrees_with_its_map_row` until the root retires and the const goes with it.
 ///
 /// ★ **Form 4868 and Form 1040-V are their own instructions documents** — the IRS publishes no
 /// `i4868` and no `i1040v`, so `instructions` names the form itself and `instr_pages` is the range
@@ -930,87 +933,279 @@ pub fn emitted_form_years() -> Result<BTreeSet<FormYear>, String> {
     Ok(out)
 }
 
-/// ★★ **THE RATCHET'S EXCUSE LIST, keyed on `(form, YEAR)`.** Every pair here is a form-year btctax can
-/// print while holding no archived, extracted primary source, so its transcription is unverifiable by
-/// `cite-check` and by the derive-the-decision-from-the-line tests. **The list may only SHRINK.**
+/// **Every bundled map's ROW — design r2 §4's year-package table, read off the glob.**
 ///
-/// ★ There is deliberately **no wildcard and no "all supported years" sentinel.** A sentinel would
-/// re-open the exact hole this file just closed: adding TY2026 templates would be silently pre-excused
-/// instead of reddening the ratchet. Every year is typed out, so a new tax year is a conscious edit.
+/// ★ The row SET *is* the glob: a `.map.toml` file IS a row, so there is no central list to forget one
+/// from. This is the non-`cfg(test)` reader because the authority ratchet also runs as a command, and a
+/// coverage line that only reports is an instrument that cannot fail.
 ///
-/// ★ Years are the ones with a template on disk, not a range — e.g. `f8275` and `f8995a` are TY2024
-/// only, `f1040s1a` is TY2025 only (and is the one pair that IS archived, so it does not appear here).
-pub const AUTHORITY_NOT_YET_ARCHIVED: &[(&str, &[i32])] = &[
-    ("f1040", &[2024, 2025]),
-    ("f1040s1", &[2024]),
-    ("f1040s2", &[2024, 2025]),
-    ("f1040s3", &[2024, 2025]),
-    ("f1040sa", &[2024, 2025]),
-    ("f1040sb", &[2024, 2025]),
-    ("f1040sc", &[2024, 2025]),
-    ("f1040sd", &[2024, 2025]),
-    ("f1040sse", &[2024, 2025]),
-    // ★ CLOSED 2026-09-06 (residue sweep 1, item 3): `f1040v` and `f4868`, both years, left this
-    //   list. They were excused here for exactly one reason — the
-    //   `crates/btctax-core/src/tax/fixtures/<stem>_{form,instructions}.txt` pairs this ratchet
-    //   counts as coverage were not on disk — and closing them was, as the note said, "a `FORMS` row
-    //   plus an extract, not an archive hunt". Four `FORMS` rows and four fixture pairs now exist,
-    //   so the excuse would be a STALE one and `authority_coverage_may_only_improve` reds on it.
-    ("f6251", &[2024, 2025]),
-    ("f8275", &[2024]),
-    ("f8283", &[2024, 2025]),
-    ("f8949", &[2024, 2025]),
-    ("f8959", &[2024, 2025]),
-    ("f8960", &[2024, 2025]),
-    ("f8995", &[2024, 2025]),
-    ("f8995a", &[2024]),
-];
+/// ★ A row whose `year` key disagrees with the directory it lives in is a **refusal**, not a skip: every
+/// path this module builds (`design/forms/<year>/<stem>--<year>.pdf`) is keyed on the year, so a
+/// disagreement would silently look up the wrong revision's archive.
+pub fn map_rows() -> Result<Vec<(String, i32, btctax_forms::MapRow)>, String> {
+    let root = repo_root().join(TEMPLATE_ROOT);
+    let mut year_dirs: Vec<PathBuf> = fs::read_dir(&root)
+        .map_err(|e| format!("cannot read {}: {e}", root.display()))?
+        .map(|e| {
+            e.map(|e| e.path())
+                .map_err(|e| format!("{}: {e}", root.display()))
+        })
+        .collect::<Result<_, _>>()?;
+    year_dirs.sort();
 
-/// The excuse list as `(form, year)` pairs.
-pub fn excused_form_years() -> BTreeSet<FormYear> {
-    AUTHORITY_NOT_YET_ARCHIVED
-        .iter()
-        .flat_map(|(form, years)| years.iter().map(move |y| ((*form).to_string(), *y)))
-        .collect()
-}
-
-/// The `(form, year)` pairs [`FORMS`] actually holds an extracted authority for, and the rows whose
-/// claim does not survive contact with the disk.
-///
-/// ★ **Skipping is not passing.** A registry row is coverage only if the committed extract it names is
-/// really there; a row pointing at a fixture that has been renamed or deleted is returned in the second
-/// element so it can FAIL by name, never quietly stop counting.
-pub fn archived_form_years() -> (BTreeSet<FormYear>, Vec<String>) {
-    let root = repo_root();
-    let fixture = |stem: &str, suffix: &str| {
-        root.join(format!(
-            "crates/btctax-core/src/tax/fixtures/{stem}_{suffix}.txt"
-        ))
-    };
-    let mut ok = BTreeSet::new();
-    let mut broken = Vec::new();
-    for f in FORMS {
-        if f.extract_stem.is_empty() {
+    let mut out = Vec::new();
+    for dir in year_dirs {
+        if !dir.is_dir() {
             continue;
         }
-        let mut missing: Vec<String> = Vec::new();
-        let form_txt = fixture(f.extract_stem, "form");
-        if !form_txt.exists() {
-            missing.push(form_txt.display().to_string());
-        }
-        if !f.instructions.is_empty() {
-            let instr_txt = fixture(f.extract_stem, "instructions");
-            if !instr_txt.exists() {
-                missing.push(instr_txt.display().to_string());
+        let Some(year) = dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .and_then(|n| n.parse::<i32>().ok())
+        else {
+            continue;
+        };
+        let mut files: Vec<PathBuf> = fs::read_dir(&dir)
+            .map_err(|e| format!("cannot read {}: {e}", dir.display()))?
+            .map(|e| {
+                e.map(|e| e.path())
+                    .map_err(|e| format!("{}: {e}", dir.display()))
+            })
+            .collect::<Result<_, _>>()?;
+        files.sort();
+        for path in files {
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
+            let Some(stem) = name.strip_suffix(".map.toml") else {
+                continue;
+            };
+            let stem = stem.to_string();
+            let text = fs::read_to_string(&path)
+                .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+            let row = btctax_forms::MapRow::read(&text)
+                .map_err(|e| format!("{}: {e}", path.display()))?;
+            if row.year != year {
+                return Err(format!(
+                    "{}: the row says year = {} but it lives in forms/{year}/ — every archive path \
+                     this module builds is keyed on the year, so the two may not disagree",
+                    path.display(),
+                    row.year
+                ));
             }
-        }
-        if missing.is_empty() {
-            ok.insert((f.form.to_string(), f.year));
-        } else {
-            broken.push(format!("{}--{}: {}", f.form, f.year, missing.join(", ")));
+            out.push((stem, year, row));
         }
     }
-    (ok, broken)
+
+    // ★★ Guard the guard. A walk that found nothing would make every check built on it pass by
+    //    finding nothing — the dominant defect shape in this repo. The 1040 is bundled for every
+    //    supported year, so its absence means the walk broke, not that the product changed.
+    if out.is_empty() || !out.iter().any(|(_, _, r)| r.irs_stem == "f1040") {
+        return Err(format!(
+            "the year-package table came back as {} row(s) under {} and does not contain f1040 — the \
+             walk is broken, and a broken walk makes the authority ratchet pass vacuously",
+            out.len(),
+            root.display()
+        ));
+    }
+    Ok(out)
+}
+
+/// The ONE excuse a map row may carry, and the prefix it must be spelled with
+/// (`btctax_forms::MapRow::authority`, design r2 §9; `btctax-forms/tests/map_rows.rs` holds the same
+/// spelling from the other side).
+const EXCUSE_PREFIX: &str = "not-yet-archived: ";
+
+/// The REASON a row's `authority` value gives, or `None` when the value is not an excuse at all.
+///
+/// ★ One function, so the thing that decides is the thing the kill plants against. An `authority` slot
+/// that accepted any string would accept an admission nobody has to justify — and the 31 hand-typed
+/// pairs this replaced carried no reason whatever.
+fn excuse_reason(authority: &str) -> Option<&str> {
+    authority
+        .strip_prefix(EXCUSE_PREFIX)
+        .map(str::trim)
+        .filter(|r| !r.is_empty())
+}
+
+/// ★★ **THE RATCHET'S EXCUSE SET, keyed on `(form, YEAR)` and READ OFF THE ROWS THAT CARRY THE REASON.**
+/// Every pair here is a form-year btctax can print while holding no archived, extracted primary source,
+/// so its transcription is unverifiable by `cite-check` and by the derive-the-decision-from-the-line
+/// tests. **The set may only SHRINK**, and its shrink-only human declaration is
+/// `btctax-forms/tests/map_rows.rs::EXCUSED`, which pins it *exactly* — both directions — and refuses
+/// any `authority` value not spelled [`EXCUSE_PREFIX`].
+///
+/// ★★★ **FR-138 (rehearsal F5, 2026-09-12) — this used to be a hand-typed `AUTHORITY_NOT_YET_ARCHIVED`
+/// const of 31 bare `(form, years)` pairs, and 30 of the 31 were FALSE.** The ratchet's notion of
+/// "archived" was *"[`FORMS`] has a row **and** a duplicate extract pair exists under
+/// `crates/btctax-core/src/tax/fixtures/`"*, so a form-year whose PDF was archived with a URL, a
+/// sha256, a `MANIFEST.json` entry and both committed text layers was still reported `unaccounted` —
+/// and the cheapest way to make the ratchet green was to write *"not-yet-archived"* about a document
+/// that was archived. **A gate whose cheapest discharge is a false statement does not merely fail to
+/// catch things; it rewards writing something untrue into a committed file.** Re-pointing the join at
+/// `design/forms/MANIFEST.json` plus the `design/forms/extract/` convention took the excuse set from
+/// **31 pairs to 1** and created **no** archive to do it: 37 of the 38 emitted pairs were *already*
+/// archived and extracted, and the ratchet could not see a single one of them.
+///
+/// ★ There is deliberately **no wildcard and no "all supported years" sentinel**, and none is now
+/// expressible: an excuse is a key on one map file, so a new tax year cannot be pre-excused in bulk —
+/// adding TY2026 templates reddens the ratchet per form until each is archived or its own row says why
+/// not, *with a reason*. The 31 pairs this replaced carried no reason at all.
+///
+/// ★ `phantom_excuses` (excused but not emitted) is **unreachable from real data by construction** now,
+/// because an excuse comes from a `.map.toml` and [`emitted_form_years`] refuses a map without its
+/// blank. That is a strengthening, not a blind spot — the arm is still exercised on planted sets by
+/// `a_prior_year_archive_does_not_discharge_a_new_year_obligation`.
+pub fn excused_form_years() -> Result<BTreeSet<FormYear>, String> {
+    let mut out = BTreeSet::new();
+    for (stem, year, row) in map_rows()? {
+        let Some(excuse) = row.authority.as_deref() else {
+            continue;
+        };
+        // ★ An arbitrary string may not excuse. `authority` is the excuse SLOT, and a slot that
+        //   accepts anything is a slot that accepts a sentence nobody has to justify.
+        if excuse_reason(excuse).is_none() {
+            return Err(format!(
+                "forms/{year}/{stem}.map.toml: `authority = {excuse:?}` — the only excuse this \
+                 ratchet accepts is `\"{EXCUSE_PREFIX}<reason>\"` with a non-empty reason, because an \
+                 admission with no reason is indistinguishable from a shrug"
+            ));
+        }
+        out.insert((row.irs_stem.clone(), year));
+    }
+    Ok(out)
+}
+
+/// **What it takes for a `(form, year)` to hold an archived, extracted primary source.**
+///
+/// One notion, built from the two conventions the rest of the repo already uses, so there is no second
+/// registry to keep in step:
+///
+/// 1. the row's own PDF **and** its instructions' PDF *for that year* are entries in
+///    `design/forms/MANIFEST.json` — which is what carries the URL, sha256 and byte count, i.e. the
+///    provenance that makes a file an *archive* rather than a text file someone typed;
+/// 2. each entry is IRS-final, never a draft (`authority_manifest::Entry::is_authority`);
+/// 3. each entry records its text layer at the conventional path
+///    `design/forms/extract/<stem>--<year>.txt` — the path [`btctax_forms::MapRow`]'s own doc comment
+///    calls *"derived by convention, never stored"*; and
+/// 4. that file is on disk.
+///
+/// ★ Every input is COMMITTED, so the ratchet runs in an isolated worktree. The archived PDFs
+/// themselves are gitignored and absent there (the port rehearsal measured **0 of 125**), which is why
+/// the join is to the manifest's recorded hash and extract rather than to the bytes.
+///
+/// ★★ **WHAT THIS DOES NOT CLAIM, stated so nobody reads it as more.** "Archived and extracted" means
+/// *the authority exists to check a transcription against* — it does **not** mean any instrument has
+/// checked one. That distinction is the whole difference between this ratchet and the coverage
+/// instruments that consume the same extracts (`xtask line-coverage`, `census_join`,
+/// `btctax-forms/tests/map_rows.rs`), and conflating the two would turn a precondition into a false
+/// completeness claim. `design/forms/extract/` is the surface all of them read, which is why it — and
+/// not the legacy `crates/btctax-core/src/tax/fixtures/` root design r2 §9 retires — is what this joins
+/// to.
+struct Archive {
+    root: PathBuf,
+    by_path: BTreeMap<String, crate::authority_manifest::Entry>,
+}
+
+impl Archive {
+    fn load(root: &Path) -> Result<Self, String> {
+        let by_path = crate::authority_manifest::load(root)?
+            .into_iter()
+            .map(|e| (e.path.clone(), e))
+            .collect();
+        Ok(Self {
+            root: root.to_path_buf(),
+            by_path,
+        })
+    }
+
+    /// The authority documents one row names, each as `(PDF path, conventional extract path)`.
+    ///
+    /// ★ ONE document when the form **is** its own instructions — the IRS publishes no `i4868` and no
+    /// `i1040v`, and both map rows say so by naming themselves in `instructions`. Emitting the same
+    /// path twice would double every problem message for those two forms.
+    fn documents(row: &btctax_forms::MapRow) -> Vec<(String, String)> {
+        let doc = |stem: &str| {
+            (
+                format!("design/forms/{}/{stem}--{}.pdf", row.year, row.year),
+                format!("design/forms/extract/{stem}--{}.txt", row.year),
+            )
+        };
+        let form = doc(&row.irs_stem);
+        let instructions = doc(&row.instructions);
+        if instructions.0 == form.0 {
+            vec![form]
+        } else {
+            vec![form, instructions]
+        }
+    }
+
+    /// Why this row does **not** hold an archived, extracted primary source. Empty = archived.
+    ///
+    /// ★ Every arm names the document and says what is wrong with it, because the message a January
+    /// operator reads decides whether they go and archive something or go and re-check an archive that
+    /// is already complete. The message this replaced said *"btctax can print [f8995a--2025] with no
+    /// archived primary source for THAT YEAR"* about a form whose PDF, note, URL, sha256, manifest
+    /// entry and text layer were all committed — the real gap was `i8995a--2025`, which it never named.
+    fn problems_for(&self, row: &btctax_forms::MapRow) -> Vec<String> {
+        let mut out = Vec::new();
+        for (pdf, extract) in Self::documents(row) {
+            let Some(entry) = self.by_path.get(&pdf) else {
+                out.push(format!(
+                    "{pdf} is not in design/forms/MANIFEST.json — archive the document with its URL \
+                     and sha256, then `xtask authority-manifest --regen`"
+                ));
+                continue;
+            };
+            if !entry.is_authority() {
+                out.push(format!(
+                    "{pdf} is a DRAFT in the manifest ({}) — a draft is evidence, never authority to \
+                     transcribe a figure or a line number from",
+                    entry.url
+                ));
+                continue;
+            }
+            if entry.extract != extract {
+                out.push(format!(
+                    "{pdf} records extract {:?}, not the conventional {extract} — every consumer of \
+                     the text layer resolves that path by convention, so a manifest entry pointing \
+                     elsewhere is coverage nothing reads",
+                    entry.extract
+                ));
+                continue;
+            }
+            if !self.root.join(&extract).exists() {
+                out.push(format!(
+                    "{pdf} records extract {extract}, which is NOT on disk"
+                ));
+            }
+        }
+        out
+    }
+}
+
+/// The `(form, year)` pairs that hold an archived, extracted primary source, and the rows whose claim
+/// does not survive contact with the disk.
+///
+/// ★ **Skipping is not passing.** A row that carries no `authority` header is *asserting* its primary
+/// source is archived, so a failed join is returned in the second element and FAILS by name — never
+/// quietly stops counting. A row that carries `authority = "not-yet-archived: …"` is neither archived
+/// nor broken: it is the excuse, and [`excused_form_years`] returns it.
+pub fn archived_form_years() -> Result<(BTreeSet<FormYear>, Vec<String>), String> {
+    let root = repo_root();
+    let archive = Archive::load(&root)?;
+    let mut ok = BTreeSet::new();
+    let mut broken = Vec::new();
+    for (stem, year, row) in map_rows()? {
+        if row.authority.is_some() {
+            continue;
+        }
+        let problems = archive.problems_for(&row);
+        if problems.is_empty() {
+            ok.insert((row.irs_stem.clone(), year));
+        } else {
+            broken.push(format!("forms/{year}/{stem}: {}", problems.join("; ")));
+        }
+    }
+    Ok((ok, broken))
 }
 
 /// The three ways authority coverage can be wrong.
@@ -1100,8 +1295,9 @@ mod tests {
     }
 
     /// ★★ **THE AUTHORITY RATCHET, keyed on `(form, YEAR)`.** Every form-year btctax can print either
-    /// has an archived, extracted primary source in [`FORMS`] or is explicitly listed in
-    /// [`AUTHORITY_NOT_YET_ARCHIVED`]. The list may only shrink.
+    /// holds an archived, extracted primary source — its PDF and its instructions' PDF are
+    /// `design/forms/MANIFEST.json` entries naming committed text layers — or its own map row says why
+    /// not, with a reason. The excuse set may only shrink.
     ///
     /// Without this, adding a form emitter — or a new tax year's templates — is a silent regression:
     /// nothing compels anyone to archive the PDF that defines it, so the transcription becomes
@@ -1109,29 +1305,31 @@ mod tests {
     /// derive-the-direction-from-the-line assertions, the label census) has nothing to check against
     /// and passes by finding nothing.
     ///
-    /// ★ Both sides are DERIVED: the obligation set is read off the template directories, and the
-    /// archived set off the registry plus the fixtures on disk. Nothing here is a hand-list except the
-    /// excuses, and an excuse is an admission that is supposed to be typed by a human.
+    /// ★ **All three sides are now DERIVED** (FR-138): the obligation set off the template
+    /// directories, the archived set off the manifest join, and the excuse set off the `authority`
+    /// header of the row it excuses. Nothing here is a hand-list. Its shrink-only human declaration is
+    /// `btctax-forms/tests/map_rows.rs::EXCUSED`, which pins the header set exactly.
     #[test]
     fn authority_coverage_may_only_improve() {
         let emitted = emitted_form_years().expect("the emitting surface must be derivable");
-        let (archived, broken) = archived_form_years();
+        let (archived, broken) =
+            archived_form_years().expect("the authority join must be derivable");
         assert!(
             broken.is_empty(),
-            "{} registry row(s) claim an extracted authority that is NOT on disk, so they are \
-             counted as coverage they cannot back:\n  {}",
+            "{} map row(s) carry no `authority` header — so they assert their primary source is \
+             archived — and the manifest join does not back that claim:\n  {}",
             broken.len(),
             broken.join("\n  ")
         );
-        let excused = excused_form_years();
+        let excused = excused_form_years().expect("the excuse set must be derivable");
         let verdict = adjudicate_coverage(&emitted, &archived, &excused);
 
         // 1. Nothing may be BOTH archived and excused — a stale excuse is how a closed gap silently
         //    reopens for the next form.
         assert!(
             verdict.stale_excuses.is_empty(),
-            "[{}] now HAS an archived authority for that YEAR — remove the year from \
-             AUTHORITY_NOT_YET_ARCHIVED so the ratchet actually tightens",
+            "[{}] now HAS an archived authority for that YEAR — delete the `authority` header from \
+             that map row (and from map_rows.rs::EXCUSED) so the ratchet actually tightens",
             render(&verdict.stale_excuses)
         );
 
@@ -1140,14 +1338,19 @@ mod tests {
             verdict.unaccounted.is_empty(),
             "btctax can print [{}] with no archived primary source for THAT YEAR and no explicit \
              excuse. Every form follows one pattern and every one has an identically-numbered IRS \
-             instructions document — archive the pair and extract it (`xtask extract-schedule-1a` is \
-             the model), or add the year to AUTHORITY_NOT_YET_ARCHIVED with intent. Silence here \
-             means a form-year whose transcription NOTHING can check.",
+             instructions document — archive the PAIR (the form and its instructions), extract both \
+             text layers to design/forms/extract/, and regen the manifest; or write \
+             `authority = \"{EXCUSE_PREFIX}<reason>\"` into that map row. Silence here means a \
+             form-year whose transcription NOTHING can check.",
             render(&verdict.unaccounted)
         );
 
         // 3. Every excuse names a form-year we can actually print — otherwise the list rots into a
         //    wishlist, and a year that has been retired keeps pretending to be an open admission.
+        //    ★ Since FR-138 this is unreachable from real data BY CONSTRUCTION (an excuse is a key on
+        //    a `.map.toml`, and `emitted_form_years` refuses a map with no blank beside it), which is
+        //    why the arm's kill lives on planted sets in
+        //    `a_prior_year_archive_does_not_discharge_a_new_year_obligation`.
         assert!(
             verdict.phantom_excuses.is_empty(),
             "[{}] are excused but have no template on disk for that year",
@@ -1158,9 +1361,9 @@ mod tests {
     /// ★★ **THE RATCHET MAY ONLY SHRINK — planted on the REAL sets, one pair at a time.**
     ///
     /// `authority_coverage_may_only_improve`'s first assertion is that nothing is both archived and
-    /// excused. That assertion is what stops a closed gap from silently reopening: re-adding a
-    /// `(form, year)` to [`AUTHORITY_NOT_YET_ARCHIVED`] after its fixtures land would otherwise be a
-    /// green edit that quietly withdraws the coverage.
+    /// excused. That assertion is what stops a closed gap from silently reopening: writing
+    /// `authority = "not-yet-archived: …"` back into a map row whose archive exists would otherwise be
+    /// a green edit that quietly withdraws the coverage.
     ///
     /// It had **no kill**. The sibling below plants on synthetic sets and exercises `unaccounted`
     /// and `phantom_excuses`; the `stale_excuses` arm was asserted by the ratchet and observed by
@@ -1168,18 +1371,21 @@ mod tests {
     /// four Form 4868 / Form 1040-V pairs that just left the list, which is exactly the class of
     /// edit it has to catch.
     ///
-    /// ★ Both directions, and the plant is enumerated FROM [`FORMS`] rather than hand-listed, so it
-    /// covers whatever is archived at the time and cannot rot into naming a row that no longer
-    /// exists.
+    /// ★ Both directions, and the plant is enumerated FROM the archived set itself rather than
+    /// hand-listed, so it covers whatever is archived at the time and cannot rot into naming a row
+    /// that no longer exists. FR-138 moved it off [`FORMS`] — which held 7 of the 38 pairs — and onto
+    /// the join, so the plant count is now the coverage count and is asserted against it rather than
+    /// against a literal.
     #[test]
     fn re_excusing_an_archived_pair_reds_the_ratchet() {
         let emitted = emitted_form_years().expect("the emitting surface must be derivable");
-        let (archived, broken) = archived_form_years();
+        let (archived, broken) =
+            archived_form_years().expect("the authority join must be derivable");
         assert!(
             broken.is_empty(),
-            "premise: every registry row is on disk: {broken:?}"
+            "premise: every row that claims an archive has one: {broken:?}"
         );
-        let excused = excused_form_years();
+        let excused = excused_form_years().expect("the excuse set must be derivable");
 
         // CONTROL: today's real sets have no stale excuse. Without this half a checker that
         // reported everything as stale would pass the plants below.
@@ -1199,21 +1405,18 @@ mod tests {
         ] {
             assert!(
                 archived.contains(&pair),
-                "premise: {pair:?} has a FORMS row and both fixtures on disk"
+                "premise: {pair:?} joins to a manifest entry with its extract on disk"
             );
             assert!(
                 !excused.contains(&pair),
-                "premise: {pair:?} left AUTHORITY_NOT_YET_ARCHIVED"
+                "premise: {pair:?}'s map row carries no `authority` header"
             );
         }
 
         // PLANT, one archived pair at a time: re-excuse it and the ratchet must NAME it.
         let mut planted = 0usize;
-        for f in FORMS {
-            if f.extract_stem.is_empty() {
-                continue;
-            }
-            let pair = (f.form.to_string(), f.year);
+        for pair in &archived {
+            let pair = pair.clone();
             let mut widened = excused.clone();
             widened.insert(pair.clone());
             let verdict = adjudicate_coverage(&emitted, &archived, &widened);
@@ -1230,11 +1433,150 @@ mod tests {
             );
             planted += 1;
         }
+        // ★ Guard the guard, DERIVED: every archived pair must have been planted, and there must be
+        //   some. A loop that ran zero times would pass every assertion inside it, and a literal here
+        //   would be the FR-150 shape — a number that moves on every port, pinned by hand.
+        assert_eq!(planted, archived.len());
+        // ★ And the partition is exact, which is what makes the count above non-vacuous without a
+        //   literal: `broken` is empty (asserted at the top), so every emitted pair is either archived
+        //   or excused and nothing is both. Written as addition, never subtraction — a `usize`
+        //   subtraction here would turn a set-relation defect into an overflow panic.
         assert_eq!(
-            planted, 7,
-            "guard the guard: every archived FORMS row must have been planted — a loop that ran \
-             zero times would pass every assertion inside it. 5 → 7 on 2026-09-07 (T16): the two \
-             Form 8889 rows reached step 2 the day the form was transcribed"
+            planted + excused.len(),
+            emitted.len(),
+            "{planted} archived + {} excused ≠ {} emitted — the join has stopped seeing coverage that \
+             exists, or an excuse has escaped the emitting surface",
+            excused.len(),
+            emitted.len()
+        );
+    }
+
+    /// ★★★ **FR-138's KILL — an ARCHIVED form-year is accepted with nobody writing "not-yet-archived"
+    /// about it, and an UNARCHIVED one still reds.**
+    ///
+    /// The defect this closes (rehearsal F5, 2026-09-12): `archived_form_years()` counted a
+    /// `(form, year)` as archived only if the hand-written [`FORMS`] const had a row for it **and** a
+    /// duplicate extract pair existed under `crates/btctax-core/src/tax/fixtures/`. A form-year with a
+    /// committed PDF, a provenance note carrying its URL and sha256, a `MANIFEST.json` entry and both
+    /// text layers was therefore `unaccounted`, and the cheapest way to make the ratchet green was to
+    /// write *"not-yet-archived"* about a document that was archived.
+    ///
+    /// ★★ Both halves are required, and the second is the one that makes this a kill rather than a
+    /// relaxation: **a gate that stops complaining is not a gate.** So the plant is run in both
+    /// directions on REAL archives, with nothing synthetic on the manifest side:
+    ///
+    /// | plant | the row | what the tree really holds | verdict |
+    /// |---|---|---|---|
+    /// | (a) | Schedule 1 (`f1040s1`) ported to TY2025 | `f1040s1--2025` + `i1040gi--2025`, both manifested with their extracts | **archived** |
+    /// | (b) | Form 8995-A (`f8995a`) ported to TY2025 — the rehearsal's own case | `f8995a--2025` yes; **`i8995a--2025` no entry, no extract** | **reds, naming the instructions** |
+    ///
+    /// ★ (b) is also the sharpest correction to the old message. It said *"btctax can print
+    /// [f8995a--2025] with no archived primary source for THAT YEAR"* — of a form whose own PDF, note,
+    /// URL, sha256, manifest entry and text layer are all committed. The real gap is the instructions
+    /// booklet, which the old ratchet could not name because it never looked at one.
+    #[test]
+    fn an_archived_form_year_is_accepted_and_an_unarchived_one_still_reds() {
+        let root = repo_root();
+        let archive = Archive::load(&root).expect("MANIFEST.json loads");
+        let rows = map_rows().expect("the year-package table derives");
+        // A real committed row, re-pointed at another year — exactly the edit runbook step 21 makes.
+        let ported = |stem: &str, year: i32| {
+            let (_, _, mut row) = rows
+                .iter()
+                .find(|(s, _, _)| s == stem)
+                .cloned()
+                .unwrap_or_else(|| panic!("premise: a {stem} row exists to port"));
+            row.year = year;
+            row.line_set = format!("{stem}/{year}");
+            // ★ NOBODY WRITES AN EXCUSE. That is the entire point of the plant.
+            row.authority = None;
+            row
+        };
+
+        // PLANT (a) — genuinely archived. The ratchet must accept it with no excuse anywhere.
+        let schedule_1 = ported("f1040s1", 2025);
+        assert_eq!(
+            archive.problems_for(&schedule_1),
+            Vec::<String>::new(),
+            "f1040s1--2025 and i1040gi--2025 are both manifested with their text layers committed, so \
+             a TY2025 Schedule 1 row is ARCHIVED — the old join could not say so for any form without \
+             a FORMS row and a second extract pair, and the only cheap discharge was a false sentence"
+        );
+        assert!(
+            schedule_1.authority.is_none(),
+            "the plant must not have smuggled in an excuse"
+        );
+
+        // PLANT (b) — genuinely NOT archived, and it must still red, by name, on the right document.
+        let form_8995a = ported("f8995a", 2025);
+        let problems = archive.problems_for(&form_8995a);
+        assert_eq!(
+            problems.len(),
+            1,
+            "exactly one of the two documents is missing; got {problems:?}"
+        );
+        assert!(
+            problems[0].contains("design/forms/2025/i8995a--2025.pdf")
+                && problems[0].contains("not in design/forms/MANIFEST.json"),
+            "the INSTRUCTIONS are the gap and the message must say so: {problems:?}"
+        );
+        assert!(
+            !problems[0].contains("f8995a--2025.pdf"),
+            "the form's own archive IS complete and must not be blamed: {problems:?}"
+        );
+
+        // ★ CONTROL, so a `problems_for` that always returned empty could not pass (a): the same row
+        //   pointed at a year the archive does not reach at all reds on BOTH documents.
+        let nowhere = ported("f1040s1", 2099);
+        assert_eq!(
+            archive.problems_for(&nowhere).len(),
+            2,
+            "a year with no archive at all must red on the form AND its instructions"
+        );
+    }
+
+    /// ★★ **FR-138 — the excuse SLOT may not accept an arbitrary sentence.**
+    ///
+    /// `authority` is the one excuse the join takes, and `btctax_forms::MapRow` spells it
+    /// `"not-yet-archived: <reason>"`. A slot that accepts anything is a slot that accepts an admission
+    /// nobody has to justify — and the 31 pairs this replaced carried no reason at all.
+    #[test]
+    fn an_excuse_must_be_spelled_as_an_excuse_with_a_reason() {
+        let real = excused_form_years().expect("the excuse set derives");
+        assert!(
+            !real.is_empty(),
+            "premise: at least one row carries an excuse today, else the plants below prove nothing"
+        );
+        // Every committed excuse really does read `not-yet-archived: <reason>`, through the same
+        // function `excused_form_years` decides with.
+        let carried: Vec<String> = map_rows()
+            .expect("rows")
+            .into_iter()
+            .filter_map(|(_, _, r)| r.authority)
+            .collect();
+        for a in &carried {
+            assert!(
+                excuse_reason(a).is_some(),
+                "every committed excuse must read `{EXCUSE_PREFIX}<reason>`: {a:?}"
+            );
+        }
+        // PLANT: four ways a sentence is not an excuse, adjudicated by the live decider.
+        for bad in [
+            "archived",                    // the opposite claim
+            "not-yet-archived: ",          // the prefix with no reason
+            "not-yet-archived",            // no reason and not even the separator
+            "  not-yet-archived: pending", // the prefix is not where it must be
+        ] {
+            assert!(
+                excuse_reason(bad).is_none(),
+                "{bad:?} must NOT satisfy the excuse spelling `excused_form_years` enforces"
+            );
+        }
+        // CONTROL: the real spelling IS accepted, so a decider that rejected everything could not
+        // pass the plants above.
+        assert_eq!(
+            excuse_reason("not-yet-archived: no manifest entry"),
+            Some("no manifest entry")
         );
     }
 
@@ -1433,29 +1775,11 @@ mod map_row_tests {
     use super::*;
     use std::collections::BTreeSet;
 
+    /// ★ ONE reader, shared with the authority ratchet (FR-138). This used to be a second walk of the
+    /// same glob with its own `unwrap`s; two readers of one file format is how a checker ends up
+    /// reading something the live path does not.
     fn rows() -> Vec<(String, i32, btctax_forms::MapRow)> {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .join("btctax-forms/forms");
-        let mut out = Vec::new();
-        for y in std::fs::read_dir(&root).unwrap().flatten() {
-            if !y.path().is_dir() {
-                continue;
-            }
-            let year: i32 = y.file_name().to_string_lossy().parse().unwrap();
-            for m in std::fs::read_dir(y.path()).unwrap().flatten() {
-                let p = m.path();
-                let name = p.file_name().unwrap().to_string_lossy().to_string();
-                let Some(stem) = name.strip_suffix(".map.toml") else {
-                    continue;
-                };
-                let row = btctax_forms::MapRow::read(&std::fs::read_to_string(&p).unwrap())
-                    .unwrap_or_else(|e| panic!("{year}/{stem}: {e}"));
-                out.push((stem.to_string(), year, row));
-            }
-        }
-        out
+        map_rows().expect("the year-package table must be derivable")
     }
 
     fn row_set() -> BTreeSet<FormYear> {
@@ -1477,6 +1801,32 @@ mod map_row_tests {
         )
     }
 
+    /// ★★ **The DECLARED row set, derived from each year's `YEAR.toml` — FR-150's replacement for a
+    /// hardcoded `38`.**
+    ///
+    /// `forms_expected` is design r2 §6's year record: *"the forms this year INTENDS to bundle —
+    /// runbook step 1's output, committed"*, written by a human as the first step of a port and bound
+    /// to the glob in **both** directions by `btctax-forms/tests/year_record.rs`
+    /// (`YearRecord::glob_problems` reports "expected but not bundled" and "bundled but not
+    /// expected"). So it is an independently-authored declaration of the same set, and the row count
+    /// derives from it instead of from a literal that a new year moves.
+    fn declared_set(years: &BTreeSet<i32>) -> BTreeSet<FormYear> {
+        let mut out = BTreeSet::new();
+        for year in years {
+            let record = btctax_forms::year_record::YearRecord::for_year(*year)
+                .unwrap_or_else(|| panic!("forms/{year}/YEAR.toml is bundled"));
+            for stem in &record.forms_expected {
+                out.insert((
+                    irs_basename(stem)
+                        .unwrap_or_else(|e| panic!("{year}: forms_expected has {stem:?}: {e}"))
+                        .to_string(),
+                    *year,
+                ));
+            }
+        }
+        out
+    }
+
     #[test]
     fn the_row_set_equals_the_emitting_surface_both_ways_through_irs_stem() {
         let from_rows = row_set();
@@ -1487,13 +1837,76 @@ mod map_row_tests {
             "row set ≠ emitting surface — rows without a template: {only_rows:?}; templates \
              without a row: {only_emitted:?}"
         );
+
+        // ★★ FR-150 — the count DERIVES from the year records, not from a hand-typed number. The
+        //    literal this replaced was `38`, and its own failure message explained why the number
+        //    would move ("a new year adds files, not a list") and then pinned it anyway. A third
+        //    independently-authored view of the same set is what makes the equality mean something:
+        //    templates on disk (`emitted`), map rows on disk (`from_rows`), and what each year
+        //    DECLARES it intends to bundle (`YEAR.toml`).
+        let declared = declared_set(&emitted.iter().map(|(_, y)| *y).collect());
+        let (only_declared, only_rows) = two_way_diff(&declared, &from_rows);
+        assert!(
+            only_declared.is_empty() && only_rows.is_empty(),
+            "the year records and the map rows disagree — declared in YEAR.toml with no map row: \
+             {only_declared:?}; map row no YEAR.toml declares: {only_rows:?}. `forms_expected` is \
+             runbook step 1's committed output; if a form is genuinely gone from a year, that \
+             declaration is where it leaves."
+        );
+        // ★ Guard the guard, STRUCTURALLY rather than with a floor: a `declared` that came back empty
+        //   cannot pass, because `from_rows` cannot be empty — `map_rows()` refuses a walk that finds
+        //   no rows or no f1040 — so the difference would name every row. That is why this test needs
+        //   no count at all, which was the whole of FR-150.
+    }
+
+    /// ★★★ **FR-150's KILL — what the hand-typed `38` caught, the derivation must still catch.**
+    ///
+    /// The literal it replaced was `assert_eq!(from_rows.len(), 38, "38 rows on disk today … a new year
+    /// adds files, not a list")` — a failure message that explains why the number will move and then
+    /// pins it anyway. Deriving the expectation is only an improvement if it still reds on the one case
+    /// the count could see and the symmetric row/template diff could not: **a template and its map
+    /// deleted together**, which leaves both derived sets smaller and their difference empty.
+    ///
+    /// ★ The plant is on the derived sets, one pair at a time, the same way
+    /// `a_row_pointing_at_no_template_is_caught_in_both_directions` plants — because the *inputs* are
+    /// files this test may not write, and a planted input is the only honest alternative to a planted
+    /// file. Both directions, so a comparison that rejected everything could not satisfy it.
+    #[test]
+    fn a_silently_deleted_form_and_an_undeclared_one_are_both_caught() {
+        let emitted = emitted_form_years().expect("the emitting surface derives");
+        let declared = declared_set(&emitted.iter().map(|(_, y)| *y).collect());
+        let rows = row_set();
+
+        // CONTROL: today's real sets agree. Without this the plants below prove nothing.
+        let (only_declared, only_rows) = two_way_diff(&declared, &rows);
+        assert!(only_declared.is_empty() && only_rows.is_empty());
+
+        // PLANT (a) — THE CASE THE LITERAL `38` EXISTED FOR. A form's template and its map vanish
+        // together; `row_set` and `emitted` shrink in step, so their diff stays empty. The year record
+        // still declares it, and the derived expectation names it.
+        let victim = ("f6251".to_string(), 2025);
+        assert!(rows.contains(&victim), "premise: {victim:?} has a map row");
+        let mut deleted = rows.clone();
+        deleted.remove(&victim);
+        let (only_declared, only_rows) = two_way_diff(&declared, &deleted);
         assert_eq!(
-            from_rows.len(),
-            38,
-            "38 rows on disk today (37 → 41 on 2026-09-06 for the four Form 4868 / Form 1040-V \
-             rows, spec 4868/1040-V T1, then 41 → 36 the same day when S9 dropped the five TY2017 \
-             rows, then 36 → 38 on 2026-09-07 for T16's two Form 8889 rows); a new year adds files, \
-             not a list"
+            only_declared,
+            vec![victim.clone()],
+            "a form deleted from the tree while YEAR.toml still declares it must be NAMED — this is \
+             exactly what the hardcoded count caught, and it must survive the derivation"
+        );
+        assert!(only_rows.is_empty());
+
+        // PLANT (b) — the other direction: a map row nothing declares. A porter who copies a template
+        // and writes a map but never touches runbook step 1's `YEAR.toml`.
+        let mut undeclared = rows.clone();
+        undeclared.insert(("f8615".to_string(), 2025));
+        let (only_declared, only_rows) = two_way_diff(&declared, &undeclared);
+        assert!(only_declared.is_empty());
+        assert_eq!(
+            only_rows,
+            vec![("f8615".to_string(), 2025)],
+            "a bundled map no year record declares must be NAMED"
         );
     }
 

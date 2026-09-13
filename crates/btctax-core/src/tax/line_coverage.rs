@@ -698,7 +698,7 @@ pub fn cover_form6251(p: &crate::tax::form6251::Form6251) -> Coverage {
 /// year's map lands"*. That map landed in `d8d023af` and no rows were added — **an `if let` that
 /// matches nothing is silent**, so a TY2025 chain produced an EMPTY `Coverage` and the only thing
 /// verifying `Form6251Line1::Y2025`'s transcription was nothing at all (`cite-check` also excuses
-/// this form: `AUTHORITY_NOT_YET_ARCHIVED` carries `("f6251", &[2024, 2025])`). A `match` inside the
+/// this form: `cite-check` now ARCHIVES f6251 for both years — the const that excused it (`AUTHORITY_NOT_YET_ARCHIVED`) was deleted 2026-09-12 (A3/FR-138) after 30 of its 31 claims measured FALSE). A `match` inside the
 /// defining crate is exhaustiveness-checked despite `#[non_exhaustive]`, so the next revision is
 /// `E0004` here rather than another silent skip.
 pub fn cover_form6251line1(p: &crate::tax::form6251::Form6251Line1) -> Coverage {
