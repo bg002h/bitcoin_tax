@@ -8436,6 +8436,25 @@ build, each with an owning phase.
   "use `income import` instead" remedy in every refusal message unactionable. Cheap to fix from
   `btctax-input-form`'s own spec, which already enumerates the fields.
 
+  ★★ **CONTROLLER EVIDENCE, 2026-09-13 — the guard is EXCELLENT and the gap is purely documentation.**
+  I drove `income import` by hand to build the S8 print packet, and every stop was a good stop:
+  - a bare key appended after a `[[form_1098]]` table (so TOML made it a field of that table) was caught
+    **by name**: *"unknown key(s) in the ReturnInputs TOML: `form_1098.0.claiming_mortgage_interest_credit` …
+    a silently-ignored key would drop data you meant to enter"* — it even names two historical renames;
+  - adding a 1099-INT row while `documents.int_1099` said `false` was refused as
+    `DocumentCensusContradicted`: *"btctax cannot know which of the two is wrong, so it refuses rather than
+    choose"*;
+  - reporting mortgage interest with `claiming_mortgage_interest_credit` unanswered was refused with
+    Schedule A's own Line 8a Caution **quoted and cited** (`i1040sca--2025.txt:1091-1096`).
+  ★ So the import surface does not silently accept anything, and its refusals are among the best text in the
+  product. **The only thing missing is the published schema** — I had to reconstruct the TOML from
+  `crates/btctax-cli/src/testonly.rs`'s `J10_FULLRETURN_TOML` fixture. That is the fix: publish it, from the
+  fixture and `btctax-input-form`'s spec, which already enumerate every field.
+  ★ One more datum for FR-201: the fixture answers **every** document-census row explicitly, including a
+  written note saying a "none" is *"the honest record"* — so the TOML surface is complete where the
+  46-prompt interview is not.
+
+
 - **FR-204 — ★ how to read the drive report: behavioural findings solid, diagnostic claims overstated. No owning phase — a reading instruction.**
   Recorded because it will matter to whoever folds `RECON-drive-to-filable-return.md`. Its **behavioural**
   findings — which profiles print, which walls exist, reproduced in isolated vaults through the real
