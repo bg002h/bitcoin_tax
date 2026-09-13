@@ -7810,6 +7810,17 @@ build, each with an owning phase.
 
 ## From integrating the FR-134..151 burndown (2026-09-12) — items agents surfaced outside their ownership
 
+- **FR-158 — `scripts/hooks/deny-bypass.sh` false-positives on `-n` anywhere in a command containing `git push`. Minor. Owning phase: the harness.**
+  Measured 2026-09-13: `git push origin main > log 2>&1; ...; echo -n "origin/main = "` was BLOCKED with
+  *"`git push` with `-n` skips this repo's gates"*. The `-n` belonged to `echo`, not to `git push`. The hook
+  is right to be a fact-gate and right to bind only the assistant, but a pattern that matches a flag
+  anywhere in the command line will keep firing on innocent ones — and this project's own rule is that **a
+  guard which reds on a near-miss is worse than no guard**, because the habit it trains is working around
+  it. `forge_reach_check` and `service_center_check` both pin their near-misses deliberately; this one
+  should too. *Fix:* match the flag only where it could bind to the `git push` invocation, and pin the
+  `echo -n` case as a near-miss test. ★ The workaround used in the meantime was to drop the `-n`, NOT to
+  bypass the hook.
+
 - **FR-152 — `census_join` anchors captions to ABSOLUTE line indices in a generated file. Minor. Owning phase: the port machine.**
   A4's 110 `# Regenerate:` header additions shifted every extract by a line, and `forms/2024/f1040s1.map.toml`'s
   `extract_line` anchors (11/15/58) had to move to 15/19/62 — an edit outside A4's ownership, reported rather
