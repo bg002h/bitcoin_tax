@@ -82,11 +82,14 @@ def _policy():
     return taxcalc.__version__, json.loads(path.read_text())
 
 
-def _rows(pol, name, year=2025):
+def _rows(pol, name, year):
     """The latest rows at or before `year`, or None if the parameter does not exist at all.
 
     ★ `None` is the DISQUALIFICATION, and it is computed: an engine that has no parameter for a
     provision cannot witness it. That is the whole mechanism for Part IV.
+
+    ★ FR-167: `year` used to default to 2025, so a call could silently omit the very thing this
+    function claims to key on. Every caller in this file now states its year explicitly.
     """
     if name not in pol:
         return None
@@ -102,6 +105,9 @@ def _by_mars(rows):
 
 
 def _parameter_census(version: str, pol: dict) -> int:
+    # ★ This census is TY2025-only by its own name and banner (Schedule 1-A did not exist before
+    # TY2025); FR-167 is only that `_rows` no longer supplies this year silently.
+    year = 2025
     print(f"── Schedule 1-A (TY2025) per-part witness census · taxcalc {version} ──\n")
 
     # (part, our-key-prefix, taxcalc parameter names). Absence of a name ⇒ computed disqualification.
@@ -132,21 +138,21 @@ def _parameter_census(version: str, pol: dict) -> int:
     disqualified: list[str] = []
     for title, params in PARTS:
         print(title)
-        missing = [n for n in params if _rows(pol, n) is None]
+        missing = [n for n in params if _rows(pol, n, year) is None]
         if len(missing) == len(params):
             zero_oracle_parts.append(title)
             print(f"    witnesses: 0  — taxcalc models NONE of {sorted(params)}")
             print("    ⇒ ZERO-ORACLE. Adjudicated against the FORM, and the citation is in the code.\n")
             continue
         for name, (base_key, mfj_key) in params.items():
-            rows = _rows(pol, name)
+            rows = _rows(pol, name, year)
             if rows is None:
                 print(f"    {name:36} ABSENT — cannot witness")
                 continue
             vals = _by_mars(rows)
             # rate-vs-dollars: taxcalc stores a RATE per step, btctax stores DOLLARS per step.
             if name.endswith("po_rate_per_step"):
-                step = _by_mars(_rows(pol, name.replace("rate_per_step", "step_size")))["*"]
+                step = _by_mars(_rows(pol, name.replace("rate_per_step", "step_size"), year))["*"]
                 ours = BTCTAX[base_key.replace("_rate", "_per_step")]
                 theirs = vals["*"] * step
                 ok = abs(theirs - ours) < 1e-9

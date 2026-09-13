@@ -223,6 +223,37 @@ def credit_line_verdict(printed: str | None, oracle_value: float) -> tuple[bool,
     return asserted == expected_gap, actual_gap, expected_gap
 
 
+def _resolve_year(cli_year: int | None, wrapper_year: int | None) -> int:
+    """M-2 + FR-166: the year is the PROJECTION's, `--year` may not silently contradict it, and
+    NEITHER MAY SUPPLY ONE FROM NOWHERE when both are silent.
+
+    ★ FR-166: `year = wrapper_year if wrapper_year is not None else 2024` used to score a
+      projection carrying no `tax_year`, run without `--year`, as TY2024 by all three engines at
+      once — exactly the class FR-164 deleted everywhere else, surviving in this one file. The
+      file's own `--year` help text already argues why: a wrong year "fabricated a divergence on
+      1040 line 15." Refuse instead of guessing.
+    """
+    if cli_year is None:
+        if wrapper_year is None:
+            cannot_run(
+                "the projection carries no tax_year and --year was not given, so there is no year "
+                "to drive OpenTaxSolver, Tax-Calculator or btctax's own harness on — silently "
+                "assuming one used to fabricate a divergence (FR-166). Re-run `btctax income "
+                "project --year <N>` to stamp the year on the projection, or pass --year "
+                "explicitly."
+            )
+        return wrapper_year
+    if wrapper_year is not None and cli_year != wrapper_year:
+        cannot_run(
+            f"--year {cli_year} contradicts the projection's own tax_year {wrapper_year}. The "
+            "engines would be driven on different law from btctax and each other — Tax-Calculator "
+            "would use --year while OpenTaxSolver 2024 and btctax's harness stay on 2024 — and the "
+            f"divergence would be fabricated. Re-run `btctax income project --year {cli_year}`, "
+            "or drop --year."
+        )
+    return cli_year
+
+
 def selftest() -> None:
     """Offline B1 kill — the credit-line verdict must tell a BLANK from an asserted figure.
 
@@ -272,6 +303,24 @@ def selftest() -> None:
         "1040.line27",
         "8995.line12",
     }, SINGLE_WITNESS_REASON.keys()
+    # 10. ★ FR-166 — no `tax_year` on the row AND no `--year` given must REFUSE (exit 2), never
+    #     silently fall back to a bare 2024 that would drive all three engines on a year nobody
+    #     chose. A year from either side must still resolve normally.
+    try:
+        _resolve_year(None, None)
+    except SystemExit as e:
+        assert e.code == 2, e.code
+    else:
+        raise AssertionError("a yearless projection with no --year was not refused (FR-166)")
+    assert _resolve_year(None, 2025) == 2025
+    assert _resolve_year(2025, None) == 2025
+    assert _resolve_year(2025, 2025) == 2025
+    try:
+        _resolve_year(2025, 2024)
+    except SystemExit as e:
+        assert e.code == 2, e.code
+    else:
+        raise AssertionError("--year contradicting the projection's own tax_year was not refused")
     print("check_return: blank-vs-sworn, refusal, year and witness checks discriminate (B1 kill OK)")
 
 
@@ -301,20 +350,10 @@ def main() -> None:
     not_carried = doc["not_carried"]
     not_carried_ledger = doc["not_carried_from_the_ledger"]
 
-    # ── M-2: the year is the PROJECTION's, and `--year` may not silently contradict it ────────────
+    # ── M-2/FR-166: the year is the PROJECTION's, `--year` may not silently contradict it, and ────
+    #    neither may silently supply one from nowhere (`_resolve_year`).
     wrapper_year = doc["tax_year"]
-    if args.year is None:
-        year = wrapper_year if wrapper_year is not None else 2024
-    elif wrapper_year is not None and args.year != wrapper_year:
-        cannot_run(
-            f"--year {args.year} contradicts the projection's own tax_year {wrapper_year}. The "
-            "engines would be driven on different law from btctax and each other — Tax-Calculator "
-            "would use --year while OpenTaxSolver 2024 and btctax's harness stay on 2024 — and the "
-            f"divergence would be fabricated. Re-run `btctax income project --year {args.year}`, "
-            "or drop --year."
-        )
-    else:
-        year = args.year
+    year = _resolve_year(args.year, wrapper_year)
 
     # ── C-1: a return btctax will not COMPUTE has nothing to reconcile ───────────────────────────
     # `income project` runs the same screens `btctax report` runs, on the filer's OWN inputs. It has

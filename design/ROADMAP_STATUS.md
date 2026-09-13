@@ -60,7 +60,7 @@ filing need. Every item of TY2025 work must now justify itself as TY2026 prepara
 
 | TY2025 work | transfers to TY2026 | verdict |
 |---|---|---|
-| `f6251/2025` — the OBBBA Part I 1a/1b transcription | **the whole field map**: 62 fields, 0 renamed, 0 moved (`xtask form-delta <2025-final> <2026-draft>`, `TY2026_WORK_LIST.md:41`). Only two text cells differ — line 1a's Schedule 1-A cross-reference (37 → 43) and line 4's MFS threshold ($900,350 → $640,200) | **DO IT** — and it pre-pays a worksheet transcription that is otherwise on the January critical path |
+| `f6251/2025` — the OBBBA Part I 1a/1b transcription | **the whole field map**: 62 fields, 0 renamed, 0 moved (`xtask form-delta <2025-final> <2026-draft>`; the `f6251` row of `TY2026_WORK_LIST.md`). ★ **CORRECTED 2026-09-13 (FR-212): 8 text cells differ, not two** — the caption axis, not a hand count, found six more this row missed: lines 1a, 4, **5**, 7, 18, 19, 25, 39. Line 1a is the Schedule 1-A cross-reference (37 → 43) and line 4 is the MFS kicker threshold ($900,350 → $640,200); **line 5 is the AMT exemption phase-out threshold**, taxpayer-adverse — Single/HoH/MFS $626,350 → $500,000, MFJ/QSS $1,252,700 → $1,000,000 (a lower phase-out start loses the exemption sooner, so more filers owe AMT; shaped like an OBBBA §55(d) de-indexed reset). ★ **No figure is wrong today**: `tax_tables.rs:311` already carries `phaseout_start_single_hoh_mfs: dec!(500000)` (and `:312` the matching `dec!(1000000)`), transcribed correctly from the statute independently of this row — so this was a wrong **price** on the transcription decision below, not a wrong number; the decision happened to be lucky rather than careful | **DO IT** — and it pre-pays a worksheet transcription that is otherwise on the January critical path |
 | `f1040s1a/2025` — the Schedule 1-A emitter | **almost nothing**: TY2026's Schedule 1-A is a REBUILD, 10 of 219 fields survive, 175 added | **SKIP** — may stay `Schema::Unwired` permanently with a stated reason, which is what `Unwired` is for |
 
 **What it does NOT settle.** **S1 is still open.** S1 was always a *never-mailed* rehearsal — encode
@@ -343,6 +343,16 @@ The owner's direction is to do as much on drafts as possible so draft→final is
   (`NO PRIOR SIDE` / `NO DRAFT`) and the instrument is filed as `forms port-status` (FR-50).
 - **The line→label conformance check** grew from 68 to 151 joins as the fixtures landed, with the
   floor stated as a ratchet.
+- ★ **FR-214 (2026-09-13): the 1040 ITSELF carries `NO DRAFT`** — neither `f1040--2026` nor
+  `i1040gi--2026` is archived (confirmed: no such file exists under `design/forms/extract/`) — so
+  every TY2026 claim about 1040 LINE NUMBERING currently rests on exactly one INDIRECT witness.
+  Form 6251's own TY2026 text cites *"Form 1040 or 1040-SR, line 7a"* where its TY2025 text cites
+  *"Form 1040 or 1040-SR, line 7"* (`f6251--2025.txt` vs `f6251--2026-DRAFT.txt`, and independently
+  the `line 7` row of `form-delta`'s output) — the only sighting anywhere in the tree that the 1040
+  renumbers line 7. **A referencing form is not authority for what the referenced form does — do
+  not resolve this from the citing form.** The action is to archive the 1040 draft (or wait for the
+  final) and read it directly; until then, treat every TY2026 claim about 1040 line numbering as
+  unconfirmed.
 
 **Nothing is transcribed from a draft.** `Entry::is_draft` and the AUTHORITY/DRAFT split in
 `xtask authority-manifest` are what make that enforceable rather than a promise.

@@ -355,8 +355,16 @@ any byte; the readiness surfaces (`sentence()`, the unlock screen, `year_record`
 a new problem.
 
 **What R6 does not change.** TY2026 prints nothing until its Form 8949 and Schedule D FINAL revisions
-are bundled (both forms are "unchanged" in shape on the 2026 drafts per `TY2026_WORK_LIST.md`, so
-the port is two rows), Nov 2026 – Jan 2027 — earlier than and independent of `FullReturnParams`
+are bundled (so the port is two rows) — ★ **CORRECTED 2026-09-13 (FR-213): the two forms are NOT
+both "unchanged" in shape on the 2026 drafts, and that word is false for Form 8949.**
+`TY2026_WORK_LIST.md`'s `f1040sd` row is genuinely `unchanged` (0 boxes added/removed/respelled, 0
+lines moved, 0 line numbers whose caption changed, 0 line numbers unread — its 4 unread BOXES sit
+beside no printed line on either revision, so they carry no caption to compare) — that half held.
+But the `f8949` row prints `UNWITNESSED`: its caption axis compared **0 of 2** line numbers (both
+unread, none witnessed), so nothing ever confirmed 8949 unchanged — the honest word for a claim
+resting on an axis that read nothing is **unwitnessed**, not "unchanged." The row count (two) is
+unaffected —
+Nov 2026 – Jan 2027 — earlier than and independent of `FullReturnParams`
 TY2026, the i1040gi worksheets and the OTS-2026 census. A year with inputs AND parameters is the
 full return, always. TY2025 + stored inputs now PRINTS on arm (2) under the proceeds-only regime
 with the I/L boxes — that inherits R1's recorded I/L gap (H/K belongs to the S1 rehearsal decision)
