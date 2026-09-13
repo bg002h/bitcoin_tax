@@ -8634,6 +8634,17 @@ build, each with an owning phase.
   **itemized total**) is currently reported as a gap rather than a hit. Same family as FR-58. The agent left
   it alone deliberately because fixing it re-bases three other checkers; that judgement is endorsed.
 
+  ★★ **CLOSED 2026-09-13, and TWO OF MY CLAIMS IN THIS ENTRY WERE WRONG — corrected here rather than left
+  standing.** (1) I wrote that *"the most consequential Schedule A collision (line-18 checkbox vs itemized
+  total) prints as a GAP."* **Line 18 was never a gap — it already printed as a hit.** The hidden collisions
+  were line **17** (TY2025's itemized total vs TY2026's *"Other itemized deductions"*) and line **5e**
+  (FR-219). (2) Only **7 of the 9** unread line numbers were this defect; `f8949`'s two are a genuine
+  cross-page duplication that must stay refused, and still do. ★ What I got right: Schedule A's `8` was a
+  floor — it is **10**.
+  **Fixed in `2d2c…`'s successor by `numeral_right_edge`** — the mode of the column's unsuffixed numerals —
+  with the axis untouched. Unread line numbers 13 → 6, unread boxes 137 → 67.
+
+
 - **FR-211 — the work list's caption cell carries no gap count. Minor. Owning phase: with FR-209.**
   Reported in the build's §5: the numeric table gained caption columns but a row cannot distinguish *"0
   collisions because nothing changed"* from *"0 collisions because N lines could not be compared"* — which is
@@ -8757,6 +8768,31 @@ build, each with an owning phase.
   verified). Every instrument this project owns says the packet is correct. **It is a defect only when
   someone holds the paper**, which is precisely the class S8 exists to reach — and S8 found it on its second
   run, having been scheduled last for 14 months.
+
+- **★★★ FR-219 — Schedule A line 5e's SALT cap and phase-out BOTH move for TY2026, on a line number that did not. Important. Owning phase: the TY2026 port. ★ This is the owner's own form.**
+  **Controller-verified against both extracts 2026-09-13**, surfaced by FR-210's witness fix:
+
+  | | TY2025 | TY2026 draft |
+  |---|---|---|
+  | §164(b) SALT cap (line 5e) | **$40,000** | **$40,400** |
+  | its phase-out threshold | **$500,000** | **$505,000** |
+
+  ★ **The line number did not change**, so this is invisible to a field-name diff and to a label-position
+  diff. Only the caption axis sees it — which is the clearest justification the axis has earned yet.
+  ★★ **The owner itemizes and pays SALT**, so this is a live figure on their own return, not breadth. Check
+  whether `FullReturnParams` carries these for TY2026 the way it already (correctly) carries the Form 6251
+  phase-out — FR-212's lesson was that the params can be right while the prose is wrong, so **measure rather
+  than assume in either direction.**
+
+- **FR-220 — Schedule 1 line 14's eligibility WIDENED: "Armed Forces" → "Armed Forces and the intelligence community". Minor-to-Important. Owning phase: the TY2026 port.**
+  **Controller-verified verbatim.** Found only because FR-210's fix took `f1040s1--2026-DRAFT` from a **hard
+  error** to 64 labels, so Schedule 1's work-list row stopped reading `UNWITNESSED`.
+  ★★ **Worth recording as a chain, not a finding:** a label reader was fixed → a form that had been erroring
+  became readable → an axis that had been silent spoke → a statutory eligibility widening appeared. Nobody
+  asked for the last step, and no instrument between the first and the last could have produced it. That is
+  the argument for fixing witnesses before adding checks.
+  ★ Same shape as FR-187 (*"federally declared"* → *"federally or state-declared"*): a **widening carried in a
+  caption**, which a renumber-focused review skates past. Two independent instances now, so it is a class.
 
 - **FR-152 — `census_join` anchors captions to ABSOLUTE line indices in a generated file. Minor. Owning phase: the port machine.**
   A4's 110 `# Regenerate:` header additions shifted every extract by a line, and `forms/2024/f1040s1.map.toml`'s
