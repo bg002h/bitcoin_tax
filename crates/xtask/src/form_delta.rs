@@ -689,32 +689,36 @@ mod tests {
         // ★ isolates the `claims_no_new` conjunct (r3 R2): the pair does not compute (no prior
         //   PDF), the prior claim is true, and ONLY the draft-on-disk conjunct can red it.
         //
-        // ★ 2026-09-06 (residue sweep 1, item 6) — the PRIOR TAG here is `2017`, not the document's
-        //   `2025`. This plant needs a stem whose prior side is absent while its DRAFT is archived,
-        //   and `f8995a` was the last one: archiving `f8995a--2025` as an authority gave it a prior
-        //   side, so under the committed tags the row now computes a pair and reds for the WRONG
-        //   reason ("excused as having no pair, but form-delta computes one"), which would have kept
-        //   `wrong.len() == 1` green while testing nothing. TY2017 was dropped whole (S9), so
-        //   `f8995a--2017` is absent by construction rather than by which years happen to be
-        //   archived — asserted below, not assumed.
+        // ★★ 2026-09-12 (FR-136) — the stem AND its archive are now synthetic. This plant needs a
+        //   stem whose prior side is absent while its DRAFT is present, and it used to borrow that
+        //   from a real form: `f8995a` under the prior tag `2017`, because TY2017 was dropped whole
+        //   (S9) and no TY2026 final was archived yet. Measured 2026-09-12: dropping a TY2026 final
+        //   for `f8995a` into `design/forms/2026/` — which is exactly what January does — turned the
+        //   companion plant below from *excused* into
+        //   `"excused as prior=… / TY2026=…, but on disk prior=false draft=true"`, and the same copy
+        //   for `f6251` turned its plant into `"excused as having no pair, but form-delta computes
+        //   one"`. An archive the plant DECLARES cannot be overtaken by a port, and — the case that
+        //   has no repair — a COMPLETE archive leaves no real stem to re-point these to at all.
+        let drafted = |s: &str| s == "zzz-drafted--2026-DRAFT";
         assert!(
-            super::pdf_for("f8995a--2017").is_none()
-                && super::pdf_for("f8995a--2026-DRAFT").is_some(),
-            "the plant assumes f8995a has NO 2017 prior side and a 2026 draft"
+            !real_archive("zzz-drafted--2025") && !real_archive("zzz-drafted--2026-DRAFT"),
+            "`zzz-drafted` must be a stem no form has and no archive can hold — the declared archive \
+             is the only thing the plants below may read"
         );
         assert!(
-            super::compute("f8995a--2017", "f8995a--2026-DRAFT").is_err(),
+            super::compute("zzz-drafted--2025", "zzz-drafted--2026-DRAFT").is_err(),
             "…so the pair cannot compute, which is what puts the row in the excused arm"
         );
-        let (_, _, wrong) = check_work_list_with(
-            "| `f8995a` | yes | **NO PRIOR SIDE** | **NO DRAFT** — planted | — |\n",
-            "2017",
+        let (_, _, wrong) = check_work_list_against(
+            "| `zzz-drafted` | yes | **NO PRIOR SIDE** | **NO DRAFT** — planted | — |\n",
+            "2025",
             "2026-DRAFT",
+            &drafted,
         );
         assert_eq!(
             wrong.len(),
             1,
-            "a NO DRAFT claim with the draft archived on disk: {wrong:?}"
+            "a NO DRAFT claim with the draft in the archive: {wrong:?}"
         );
         let (_, _, wrong) =
             dflt("| `f1040` | yes | **NO PRIOR SIDE** — planted | no draft either | — |\n");
@@ -741,55 +745,58 @@ mod tests {
             wrong.is_empty() && excused == ["zzz-not-a-form"],
             "a true NO FINAL excuse: {wrong:?}"
         );
-        assert!(
-            super::pdf_for("f8995a--2026-DRAFT").is_some()
-                && super::pdf_for("f8995a--2026").is_none(),
-            "the plant below assumes f8995a has a draft and no final"
-        );
-        // ★ prior tag `2017` for the same reason as the plant above: `f8995a--2025` is archived now,
-        //   so under the document's own tags this row would compute a pair and leave the excused arm.
-        let (_, excused, wrong) = check_work_list_with(
-            "| `f8995a` | yes | **NO PRIOR SIDE** | **NO FINAL** — planted | — |\n",
-            "2017",
+        // ★ …and the same distinction on a stem whose archive holds a DRAFT and no final, which is
+        //   the pair of verdicts a real form could only supply while its TY2026 final was missing
+        //   (FR-136). `drafted` declares exactly one file, so "a draft is not a final" is the only
+        //   thing that can decide either row.
+        let (_, excused, wrong) = check_work_list_against(
+            "| `zzz-drafted` | yes | **NO PRIOR SIDE** | **NO FINAL** — planted | — |\n",
+            "2025",
             "2026",
+            &drafted,
         );
         assert!(
-            wrong.is_empty() && excused == ["f8995a"],
-            "NO FINAL is TRUE for f8995a today (a draft is not a final): {wrong:?}"
+            wrong.is_empty() && excused == ["zzz-drafted"],
+            "NO FINAL is TRUE when only the draft is archived (a draft is not a final): {wrong:?}"
         );
-        // and the false direction, on the archive itself: a NO DRAFT claim while the draft exists.
-        // The ONLY difference from the excused row just above is the new-side tag — DRAFT against
-        // final — so the opposite verdict isolates exactly the draft/final distinction.
-        let (_, _, wrong) = check_work_list_with(
-            "| `f8995a` | yes | **NO PRIOR SIDE** | **NO DRAFT** — planted | — |\n",
-            "2017",
+        // and the false direction: a NO DRAFT claim while the draft is in the archive. The only
+        // difference from the excused row just above is the new side — DRAFT against final, in both
+        // the tag and the word the cell uses for it — so the opposite verdict isolates exactly the
+        // draft/final distinction.
+        let (_, _, wrong) = check_work_list_against(
+            "| `zzz-drafted` | yes | **NO PRIOR SIDE** | **NO DRAFT** — planted | — |\n",
+            "2025",
             "2026-DRAFT",
+            &drafted,
         );
         assert_eq!(
             wrong.len(),
             1,
-            "NO DRAFT is FALSE for f8995a (the draft is archived): {wrong:?}"
+            "NO DRAFT is FALSE when the draft IS archived: {wrong:?}"
         );
         // ★ NO FINAL load-bearing (r3 N4): the prior side is PRESENT (no NO PRIOR SIDE claim), the new
-        //   side claims NO FINAL under a final tag, and no `f6251--2026` PDF exists — only the NO FINAL
-        //   recognition can excuse this row; the same row under the DRAFT tag names the wrong word
-        assert!(
-            super::pdf_for("f6251--2026").is_none(),
-            "the plant assumes no TY2026 final for f6251"
-        );
-        let (_, excused, wrong) = check_work_list_with(
-            "| `f6251` | yes | `f6251--2025` | **NO FINAL** — planted | — |\n",
+        //   side claims NO FINAL under a final tag, and no final is in the archive — only the NO FINAL
+        //   recognition can excuse this row; the same row under the DRAFT tag names the wrong word.
+        // ★★ FR-136: this plant named `f6251` and asserted `pdf_for("f6251--2026").is_none()`, so
+        //   January's finals both falsify the premise and invert the row (measured: "excused as having
+        //   no pair, but form-delta computes one"). The declared archive states the prior side and
+        //   withholds the final, which is the shape the plant was always describing.
+        let with_prior = |s: &str| s == "zzz-with-prior--2025";
+        let (_, excused, wrong) = check_work_list_against(
+            "| `zzz-with-prior` | yes | `zzz-with-prior--2025` | **NO FINAL** — planted | — |\n",
             "2025",
             "2026",
+            &with_prior,
         );
         assert!(
-            wrong.is_empty() && excused == ["f6251"],
+            wrong.is_empty() && excused == ["zzz-with-prior"],
             "NO FINAL alone must excuse this row: {wrong:?}"
         );
-        let (_, _, wrong) = check_work_list_with(
-            "| `f6251` | yes | `f6251--2025` | **NO FINAL** — planted | — |\n",
+        let (_, _, wrong) = check_work_list_against(
+            "| `zzz-with-prior` | yes | `zzz-with-prior--2025` | **NO FINAL** — planted | — |\n",
             "2025",
             "2026-DRAFT",
+            &with_prior,
         );
         assert_eq!(
             wrong.len(),
@@ -799,22 +806,22 @@ mod tests {
         // and the tags line is read from the document itself
         // ★ the tags line is LOAD-BEARING end to end (r4 N6): the same row is excused under a document
         //   declaring the final tag and wrong under one declaring the draft tag, through
-        //   check_work_list itself; a document with no tags line is wrong
-        // ★ prior tag `2017` (residue sweep 1, item 6): `f8995a--2025` is archived, so `2025` here
-        //   would compute a pair and the row would leave the excused arm the tags line is testing.
-        let row = "| `f8995a` | yes | **NO PRIOR SIDE** | **NO FINAL** — planted | — |\n";
-        let (_, excused, wrong) = check_work_list(&format!("<!-- tags: 2017 2026 -->\n{row}"));
+        //   check_work_list's own tag parsing; a document with no tags line is wrong
+        let row = "| `zzz-drafted` | yes | **NO PRIOR SIDE** | **NO FINAL** — planted | — |\n";
+        let (_, excused, wrong) =
+            check_work_list_tagged(&format!("<!-- tags: 2025 2026 -->\n{row}"), &drafted);
         assert!(
-            wrong.is_empty() && excused == ["f8995a"],
+            wrong.is_empty() && excused == ["zzz-drafted"],
             "declared final tag: {wrong:?}"
         );
-        let (_, _, wrong) = check_work_list(&format!("<!-- tags: 2017 2026-DRAFT -->\n{row}"));
+        let (_, _, wrong) =
+            check_work_list_tagged(&format!("<!-- tags: 2025 2026-DRAFT -->\n{row}"), &drafted);
         assert_eq!(
             wrong.len(),
             1,
             "declared draft tag: NO FINAL is the wrong word: {wrong:?}"
         );
-        let (_, _, wrong) = check_work_list(row);
+        let (_, _, wrong) = check_work_list_tagged(row, &drafted);
         assert_eq!(wrong.len(), 1, "no tags line: {wrong:?}");
         assert!(wrong[0].contains("tags"));
         // the control tests the PREDICATE on a stem that can never be archived (r3 R5) — the
@@ -824,6 +831,24 @@ mod tests {
         assert!(
             wrong.is_empty() && excused == ["zzz-not-a-form"],
             "a true excuse: {wrong:?}"
+        );
+        // ★★ FR-136 — the plants above DECLARE their archive, so the REAL oracle owes its own kill:
+        //   a `real_archive` stuck at `false` would make every excused row above vacuous and every
+        //   committed-document check silent. Both directions are structural rather than accidental:
+        //   every `(stem, year)` the crate BUNDLES has a committed template under
+        //   `crates/btctax-forms/forms/<year>/`, which `pdf_for` resolves before the archive; and
+        //   `zzz-not-a-form` is a stem no IRS form has and no archive can hold. Derived from
+        //   `BUNDLED`, never a typed pair, so a year package that gains or loses a form is covered.
+        assert!(
+            btctax_forms::bundled::BUNDLED
+                .iter()
+                .all(|(stem, year)| real_archive(&format!("{}--{year}", stem.file_stem()))),
+            "the real archive oracle must see every bundled template"
+        );
+        assert!(
+            !real_archive("zzz-not-a-form--2025"),
+            "…and must NOT see a stem no archive can hold — an oracle that answers the same for both \
+             makes every excused row above vacuous"
         );
     }
 
@@ -844,9 +869,31 @@ mod tests {
         Some((it.next()?.to_string(), it.next()?.to_string()))
     }
 
+    /// The ARCHIVE oracle: is `<stem>.pdf` on disk?
+    ///
+    /// ★ The claim is about the ARCHIVE (the PDF), and `compute` enters the excused arm on a missing
+    /// PDF — so the check reads the PDF too (r3 R3), never the geometry fixture, a different
+    /// artifact.
+    ///
+    /// ★★ FR-136 — this is a PARAMETER of the checker rather than a call inside it, because a plant
+    /// that borrows the real archive's accidental gaps is disarmed by the very ports it exists to
+    /// watch. The committed-document checks pass this; the plants DECLARE their archive. See
+    /// [`the_work_list_checker_reds_on_every_planted_row`].
+    fn real_archive(stem: &str) -> bool {
+        super::pdf_for(stem).is_some()
+    }
+
     /// A document WITHOUT its tags line is wrong, never checked against a guessed pair (port-status
     /// r4 N6: a silent fallback equal to today's tags meant the parsed tags were never load-bearing).
     fn check_work_list(doc: &str) -> (Vec<String>, Vec<String>, Vec<String>) {
+        check_work_list_tagged(doc, &real_archive)
+    }
+
+    /// As [`check_work_list`], against a DECLARED archive (FR-136).
+    fn check_work_list_tagged(
+        doc: &str,
+        archived: &dyn Fn(&str) -> bool,
+    ) -> (Vec<String>, Vec<String>, Vec<String>) {
         let Some((prior_tag, new_tag)) = work_list_tags(doc) else {
             return (
                 Vec::new(),
@@ -854,7 +901,7 @@ mod tests {
                 vec!["the work list declares no `<!-- tags: <prior> <new> -->` line — nothing can be checked against it".to_string()],
             );
         };
-        check_work_list_with(doc, &prior_tag, &new_tag)
+        check_work_list_against(doc, &prior_tag, &new_tag, archived)
     }
 
     fn check_work_list_with(
@@ -862,11 +909,16 @@ mod tests {
         prior_tag: &str,
         new_tag: &str,
     ) -> (Vec<String>, Vec<String>, Vec<String>) {
-        let root = crate::form_geometry::repo_root();
-        // ★ The claim is about the ARCHIVE (the PDF), and `compute` enters this arm on a missing PDF —
-        //   so the check reads the PDF too (r3 R3), never the geometry fixture, a different artifact.
-        let _ = &root;
-        let archived = |stem: &str| super::pdf_for(stem).is_some();
+        check_work_list_against(doc, prior_tag, new_tag, &real_archive)
+    }
+
+    /// As [`check_work_list_with`], against a DECLARED archive (FR-136).
+    fn check_work_list_against(
+        doc: &str,
+        prior_tag: &str,
+        new_tag: &str,
+        archived: &dyn Fn(&str) -> bool,
+    ) -> (Vec<String>, Vec<String>, Vec<String>) {
         let mut compared = Vec::new();
         let mut excused = Vec::new();
         let mut wrong = Vec::new();

@@ -7808,6 +7808,46 @@ build, each with an owning phase.
   fix is one paginator over a row trait (or a shared `fn pages<T: HasBox>`), which is a refactor of a
   FILED form's page composition and therefore not something to bundle into a Nit-grade UX item.
 
+## From integrating the FR-134..151 burndown (2026-09-12) — items agents surfaced outside their ownership
+
+- **FR-152 — `census_join` anchors captions to ABSOLUTE line indices in a generated file. Minor. Owning phase: the port machine.**
+  A4's 110 `# Regenerate:` header additions shifted every extract by a line, and `forms/2024/f1040s1.map.toml`'s
+  `extract_line` anchors (11/15/58) had to move to 15/19/62 — an edit outside A4's ownership, reported rather
+  than hidden, and the only collision in the corpus (validated by `census_join` passing, which would red on a
+  second). **An absolute index into a generated file is the hand-typed-number shape**: it is correct on the day
+  it is written and silently wrong the next time the generator's preamble changes. 41 such anchors exist across
+  ten maps. *Fix:* anchor on the caption text, or on a stable marker, not on a line number.
+
+- **FR-153 — two real transcription defects, PINNED not fixed, in maps no agent owned. Minor. Owning phase: ownerless residue.**
+  Found by A1 while building the year-generic caption gate: `f1040sa/2024` line 5e abbreviates the form's
+  *"if married filing separately"* to *"MFS"*, and `f8959/2024` line 8 drops the form's *"(Form 1040)"*. Both are
+  paraphrases of a printed sentence, which is the class `CLAUDE.md`'s transcription rule exists to forbid. A1
+  **pinned** them (correct under exclusive file ownership) keyed to the exact wrong sentence, so each pin goes
+  **stale-and-red the day the map is fixed** — the fix is two map edits plus deleting two pins.
+
+- **FR-154 — `design/HARNESS.md` does not name the shape A5 found: the PLANT is the other half of the kill. Nit → doctrine. Owning phase: the OWNER.**
+  A5 recommends adding **B1b**: a planted defect that borrows a real artefact's *accidental* absence dies when
+  that absence is filled, and on a complete year there is no absent thing left to plant with at all. Proposed
+  wording is in `design/agent-reports/REPORT-a5-fr136.md` §5. ★ The strongest evidence for promoting it is that
+  the `f8995a` plants **had already been rescued once for this exact reason nine days earlier** — a shape that
+  recurs after being fixed is doctrine, not a bug. Filed rather than actioned: `HARNESS.md` is the owner's.
+
+- **FR-155 — two residual same-class plants remain in `form_delta`, deliberately. Minor. Owning phase: the port machine.**
+  A5 left the `f1040` and `f1040s1` numeric rows, which borrow an unarchived draft and FR-58's unreadable
+  labels respectively. Fixing them would mean injecting `compute` itself, decoupling the plants from the
+  artefact they measure — worse than the disease. Recorded with a loud premise instead of silently mitigated.
+
+- **FR-156 — two files carrying per-port hardcoded counts are owned by NO agent in the partition. Minor. Owning phase: the port machine.**
+  Surfaced by A2: `tests/supported_years_cross_product.rs::BUNDLED_FORMS_PER_YEAR` and
+  `tests/map_pdf_conformance.rs`'s 8995-A refusal loop. Both are the shape FR-141 just removed from
+  `line_set.rs`, so the per-port cost is not yet 1 everywhere — only in the three files A2 owned.
+
+- **FR-157 — `forms/2025/YEAR.toml` names a blocker that is already done. Nit. Owning phase: ownerless residue.**
+  Surfaced by A3: it says the `f1040s1` blocker is *"archive `f1040s1--2025`, then port"*, but the archive
+  exists — manifest entry, URL, sha256 `8dafec71…`, extract on disk, plus `i1040gi--2025`. A3's kill 1a is
+  built on that fact.
+
+
 ## From the f8995a/2025 PORT REHEARSAL (2026-09-12) — 18 findings, none of them shipped code
 
 The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test design r2 §10's 24-step runbook, then discarded the port. Full measurements, the per-step verdict table and step 22's arithmetic are in `design/agent-reports/REPORT-rehearse-port-f8995a-2025.md` (persisted `9b60f3ef`). **No product code changed**; these are findings about the MACHINERY and the RUNBOOK.
@@ -7822,7 +7862,9 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   **FR-135 — `LineCoverage`'s quoting year is a literal per block, so a new year re-verifies nothing. Important. Owning phase: the port machine / step-24 widening.** (rehearsal F3)
   Controller-verified: **26 blocks are `Coverage::quoting("2024")` against 2 quoting `"2025"`**. The instrument is not blind — re-pointing f8995a's three at 2025 named exactly the two lines that changed — but nothing forces the re-point. *Fix:* derive the quoting year from the revision being described, or at minimum assert every bundled year has rows quoting it.
 
-- **FR-136 — a B1 kill-test's planted defect is keyed to a form that HAPPENS to be absent, so porting that form destroys the kill. Important. Owning phase: NOW — it bites on every port.** (rehearsal F4)
+- ✅ **CLOSED 2026-09-12** (A5) — `year_record`'s plant now draws its victim from the **measured glob** and plants by *removal*: every bundled stem, three ways (phantom / undeclared / contradiction), plus a **synthetic COMPLETE year** that no bundled year can supply. `form_delta`'s archive oracle became a **parameter** (`check_work_list_against(.., archived)`), five plants now use synthetic stems with a *declared* archive, and a new derived guard requires the real oracle to see every `(stem, year)` in `BUNDLED` and to *not* see a stem no archive can hold. Controller-verified structurally: `year_record.rs` names `f8995a` once and no longer as the plant's victim; the victim comes from `present_for(year)`/`bundled_years()`. ★★ **A5 refuted this entry's prescribed fix as INCOMPLETE**: removing a stem from `present` can only produce *"expected but not bundled"*, so the other direction must be planted on the **declaration** side — both halves of the original plant were borrowed absences, not one. It also found that copying a TY2026 **final** into place (what January does) falsifies two premise assertions and **inverts three more plants**. ★ Kills: three `glob_problems` mutations red 177/177, 118/177 and 59/177 plants — the last being a mutation **the old test passed**, because it only checked a substring; and `form_delta` M4 reds **only** the new derived guard, 11 of 12 otherwise green — coverage that did not exist before.
+  Original entry:
+  **FR-136 — a B1 kill-test's planted defect is keyed to a form that HAPPENS to be absent, so porting that form destroys the kill. Important. Owning phase: NOW — it bites on every port.** (rehearsal F4)
   ★★ `year_record::a_phantom_expected_form_and_an_undeclared_bundled_form_are_both_reported` plants `"f8995a"` into TY2025's `forms_expected`; controller-verified that `form_delta.rs:698-710` likewise asserts *"the plant assumes f8995a has NO 2017 prior side and a 2026 draft"*. Supply the form and the kill evaporates — and **when a year is complete there is no absent stem left to plant with.** *Fix:* plant by REMOVING a stem from the measured `present` list, never by naming a form that is absent today. This is `CLAUDE.md`'s *"typed list beside a set that grows"* applied to an instrument's own PLANT, which is a shape the harness does not yet name.
 
 - **FR-137 — runbook step 12 cannot follow step 11 — the dependency order deadlocks. Important. Owning phase: the port machine (`forms port`).** (rehearsal F1)

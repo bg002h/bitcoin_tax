@@ -139,28 +139,143 @@ fn a_form_dropped_from_the_absent_list_is_the_third_state_and_is_reported() {
 
 /// B1 — the glob kill observed red in both directions: an expected form with no file, and a bundled
 /// file no declaration covers.
+///
+/// ★★ **The plant is DERIVED from the measured glob, and never names a form that happens to be
+/// absent today** (FR-136, port-rehearsal F4). Until 2026-09-12 this test planted the literal
+/// `"f8995a"` into TY2025's `forms_expected` — a defect only because no `forms/2025/f8995a.*`
+/// existed — and pushed the literal `"f1040s1"` onto the present list for the same reason. Both
+/// halves were measured to EVAPORATE when those two forms were supplied: `glob_problems` returned
+/// `[]` for each, i.e. porting a form disarmed the instrument that watches ports. Worse, a year
+/// whose form set is COMPLETE has no absent stem left to name at all, so at that point the plant
+/// cannot be re-pointed — only deleted, which is how a B1 instrument dies quietly.
+///
+/// So every plant below takes its victim from `present_for(year)` — the list the build measured —
+/// and plants by REMOVING it from one side of the comparison:
+///
+/// | plant | the edit | the message it must produce |
+/// |---|---|---|
+/// | **phantom** | drop the victim from the measured `present` | *expected but not bundled* |
+/// | **undeclared** | drop the victim from `forms_expected` | *bundled but not expected … not declared absent either* |
+/// | **contradiction** | MOVE the victim from `forms_expected` into `forms_absent` | *bundled but not expected … declared ABSENT — a contradiction* |
+///
+/// Every stem the year bundles is planted in all three ways, so the plant is not merely derived but
+/// exhaustive over the measured set — and a year that gains a form gains three more plants rather
+/// than losing one. The old test reached only the contradiction arm (`f1040s1` is declared absent
+/// for TY2025); the "not declared absent either" arm was never exercised.
+///
+/// ★ The case no bundled year can supply — **every form expected AND present**, which is what a
+/// January port sequence converges on — is exercised synthetically, because TY2024 still declares
+/// `f1040s1a` absent, TY2025 cannot bundle the periodic `f8275`, and TY2026 bundles nothing.
+///
+/// ★ Blind spot, stated rather than left to be found: these plants mutate a **parsed** `YearRecord`
+/// rather than its TOML text, so they say nothing about the text-to-record path. That path is
+/// planted by `a_form_dropped_from_the_absent_list_is_the_third_state_and_is_reported` (a text edit
+/// that must still parse) and refused by `a_mistyped_record_is_refused`.
 #[test]
 fn a_phantom_expected_form_and_an_undeclared_bundled_form_are_both_reported() {
-    let r = plant(2025, |t| {
-        t.replace(
-            "forms_expected = [\n",
-            "forms_expected = [\n    \"f8995a\",\n",
-        )
-    });
-    let mut present = present_for(2025);
-    let p = r.glob_problems(&present);
+    // (what to call it in a failure, the record, the list the build measured)
+    let mut cases: Vec<(String, YearRecord, Vec<&'static str>)> = Vec::new();
+    for &year in bundled_years() {
+        let present = present_for(year);
+        if present.is_empty() {
+            continue; // a `preparing` year with only a YEAR.toml bundles no stem to plant with
+        }
+        cases.push((
+            format!("TY{year}"),
+            YearRecord::for_year(year).unwrap_or_else(|| panic!("TY{year}: no record")),
+            present,
+        ));
+    }
+    let real_years = cases.len();
+
+    // The complete year, synthesised: `Stem::ALL` expected and `Stem::ALL` present, nothing absent.
+    let mut complete = YearRecord::for_year(2024).expect("TY2024 has a committed record");
+    complete.forms_expected = Stem::ALL
+        .iter()
+        .map(|s| s.file_stem().to_string())
+        .collect();
+    complete.forms_absent.clear();
     assert!(
-        p.iter()
-            .any(|m| m.contains("f8995a is expected but not bundled")),
-        "{p:?}"
+        complete.partition_problems().is_empty(),
+        "the synthetic complete year must itself be a legitimate declaration: {:#?}",
+        complete.partition_problems()
     );
-    present.push("f1040s1"); // a file the build found that the record does not expect
-    let p = r.glob_problems(&present);
+    cases.push((
+        "a synthetic COMPLETE year (every form expected AND bundled)".to_string(),
+        complete,
+        Stem::ALL.iter().map(|s| s.file_stem()).collect(),
+    ));
+
+    // A plant the checker failed to report, per case and per victim — collected rather than
+    // panicked on, so one run names every case that stopped discriminating instead of the first.
+    let mut misses: Vec<String> = Vec::new();
+    let mut plants = 0usize;
+    let mut want = |label: &str, plant: &str, got: &[String], must_say: &str| {
+        plants += 1;
+        if got.len() != 1 || !got[0].contains(must_say) {
+            misses.push(format!(
+                "{label} / {plant}: glob_problems must report exactly {must_say:?}, said {got:#?}"
+            ));
+        }
+    };
+
+    for (label, record, present) in &cases {
+        // Unplanted, the pair must be silent — otherwise a reported "problem" below proves nothing.
+        let clean = record.glob_problems(present);
+        assert!(
+            clean.is_empty(),
+            "{label}: unplanted, glob_problems must say nothing: {clean:#?}"
+        );
+        for victim in present {
+            // 1. PHANTOM — the file is gone from the glob; the declaration still expects it.
+            let shrunk: Vec<&str> = present.iter().copied().filter(|s| s != victim).collect();
+            want(
+                label,
+                "phantom",
+                &record.glob_problems(&shrunk),
+                &format!("{victim} is expected but not bundled"),
+            );
+
+            // 2. UNDECLARED — the file is bundled and the declaration covers it nowhere.
+            let mut undeclared = record.clone();
+            undeclared.forms_expected.retain(|e| e != victim);
+            want(
+                label,
+                "undeclared",
+                &undeclared.glob_problems(present),
+                &format!("{victim} is bundled but not expected (and not declared absent either)"),
+            );
+
+            // 3. CONTRADICTION — the file is bundled and the declaration says it is ABSENT.
+            let mut contradiction = undeclared.clone();
+            contradiction
+                .forms_absent
+                .insert((*victim).to_string(), "planted".to_string());
+            want(
+                label,
+                "contradiction",
+                &contradiction.glob_problems(present),
+                &format!(
+                    "{victim} is bundled but not expected (and declared ABSENT — a contradiction)"
+                ),
+            );
+        }
+    }
     assert!(
-        p.iter()
-            .any(|m| m.contains("f1040s1 is bundled but not expected")),
-        "{p:?}"
+        misses.is_empty(),
+        "{} of {plants} planted defects went unreported:\n{}",
+        misses.len(),
+        misses.join("\n")
     );
+    // Guard the guard: a loop that planted nothing satisfies every assertion inside it. At least one
+    // REAL bundled year must have been planted (the synthetic complete year alone would make this
+    // test independent of the build), and three plants are owed per bundled stem.
+    assert!(
+        real_years >= 1,
+        "no bundled year supplied a plant — `present_for` found no stems at all"
+    );
+    let victims: usize = cases.iter().map(|(_, _, present)| present.len()).sum();
+    assert_eq!(plants, 3 * victims, "three plants per bundled stem");
 }
 
 /// A mistyped status or an unknown key is a parse REFUSAL (deny_unknown_fields), never a default.
