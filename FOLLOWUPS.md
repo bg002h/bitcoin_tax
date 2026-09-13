@@ -7821,6 +7821,17 @@ build, each with an owning phase.
   `echo -n` case as a near-miss test. ★ The workaround used in the meantime was to drop the `-n`, NOT to
   bypass the hook.
 
+  ★★ **SECOND REPRODUCTION, 2026-09-13, and it is a different flag on a different command.** A compound
+  command containing `git push -q origin main` and, later on the same line, `grep -rn "coinbase.csv"` was
+  BLOCKED with *"`git push` with `-rn` skips this repo's gates."* The `-rn` belonged to **grep**. So the
+  first sighting (`echo -n`) was not a one-off spelling accident: **the pattern matches any `-n`-shaped flag
+  anywhere on the command line**, which means it will keep firing on innocent compounds, and the natural
+  workaround is to split the command — i.e. to stop composing, not to stop bypassing.
+  ★ The hook is still right to exist and right to be a fact-gate. Two independent false positives in one day
+  is simply the evidence that the pattern needs to bind to the `git push` invocation, and that `echo -n` and
+  `grep -rn` both belong in its near-miss test.
+
+
 - **FR-159 — `design/TY2026_PORT_REPORT.md`'s `printed.rs` count is stale, and it has now drifted TWICE. Minor. Owning phase: the January rebuild briefs.**
   The report says (`:455`, `:136`) **129 line-numbered fields across 10 structs**, "measured 2026-09-05; the
   first edition said 107 across 7". Measured 2026-09-13: **149 fields across 10 structs** (`grep -cE
@@ -8688,6 +8699,24 @@ build, each with an owning phase.
   paragraph is defensible for deciding *what btctax must refuse*, but it is not authority for *what the
   limit is*. Adjudicate against the statute and record which limb each code belongs to. The current
   behaviour fails closed, so this is a correctness question, not a live wrong figure.
+
+- **★★ S8 — ✅ PASSED 2026-09-13, on real paper, with a NAMED GAP. Owner-reported.**
+  The owner printed the packet and reported: *"The pdf you sent me printed well. No errors identified."*
+  **What that establishes**, and it is the first time this product has ever been checked on paper: on the
+  owner's own printer, the TY2024 packet's figures land inside their boxes, nothing is clipped at a margin,
+  the small print is legible, and the staple order matches the manifest. ★ Recorded as a POSITIVE because
+  absence of a defect is also a measurement (the FR-195 precedent), and because **printer-and-paper defects
+  are invisible to every other instrument this project owns** — all of which check bytes.
+  ★★ **THE GAP, and it is mine: the packet contained no Form 8949 and no Schedule D.** I built it from
+  `J10_FULLRETURN_TOML`, a wage-only fixture with no crypto ledger, so the six pages printed were
+  `f1040`, `f1040s2`, `f1040sa`, `f1040sb`, `f8959`, `f8960`. **The two pages btctax exists to produce were
+  not in the test** — and they are the highest box-fit risk in the packet: `fill8949_full.rs:75` puts
+  `rows_per_page` at **14 on the 2024/2017 grid and 11 on the 2025 digital-asset revision**, eight columns of
+  figures packed tight, with overflow onto continuation pages. A print check that skips them skips the
+  crowded pages.
+  **So S8 is passed for six forms and OPEN for two.** Next: a second packet driven from an imported ledger,
+  with an 8949 **at capacity** (14 rows) and one **over** capacity so the continuation page and its ordering
+  are on paper too.
 
 - **FR-152 — `census_join` anchors captions to ABSOLUTE line indices in a generated file. Minor. Owning phase: the port machine.**
   A4's 110 `# Regenerate:` header additions shifted every extract by a line, and `forms/2024/f1040s1.map.toml`'s
