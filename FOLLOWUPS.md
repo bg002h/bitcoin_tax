@@ -8718,6 +8718,46 @@ build, each with an owning phase.
   with an 8949 **at capacity** (14 rows) and one **over** capacity so the continuation page and its ordering
   are on paper too.
 
+  ★★★ **ROUND 2, 2026-09-13 — the gap was filled and it IMMEDIATELY FOUND A DEFECT.** The second packet
+  (14 pages, ledger-driven, 28 lot-level 8949 rows across two FULL grids) went to the owner, who reported
+  *"the first page of 8949 is printed twice."* That is **FR-218**, a real defect in the emitted packet,
+  contrary to `i8949`'s own *"complete and file either Part I or II"* — and it is invisible to the golden,
+  the read-back verifier and both oracles, all of which pass. ★ So S8's record is now: **six forms clean on
+  round 1, and one defect on round 2 the moment the crowded pages were included.** The gap I left in round 1
+  was exactly where the defect was. **S8 belongs in the runbook as a standing step, not a one-off.**
+  ★ The owner also asked the right question about the two Part II pages — *"probably correct but I'm not sure
+  how to check"* — and the answer is now written down: the two line-2 totals rows must DIFFER, and must SUM
+  to Schedule D line 8b. Both hold here.
+
+
+- **★★★ FR-218 — the 8949 emits a blank Part I page for EVERY continuation copy, contrary to the instruction's own words. Important. Owning phase: NOW. ★ FOUND BY THE OWNER'S PRINT REHEARSAL (S8), and by nothing else.**
+  **Owner, 2026-09-13, printing the S8b packet:** *"the first page of 8949 is printed twice."* Confirmed by
+  the controller — pages 1 and 2 of `12A_f8949.pdf` have **identical text layers** (same md5); pages 3 and 4
+  differ, as they should.
+  **The authority is explicit** (`design/forms/extract/i8949--2024.txt:422-424`): *"You don't need to complete
+  and file an entire copy of Form 8949 (Parts I and II) if you can check a single box to describe all your
+  transactions. In that case, complete and file **either Part I or II** and check the box that describes the
+  transactions."*
+  **The mechanism** (`crates/btctax-forms/src/fill8949_full.rs:122`):
+  `let n_copies = st_pages.len().max(lt_pages.len()).max(1);` — the copy count is the **max** of the two
+  parts' page counts, and each copy then fills **both** parts via `st_pages.get(k).unwrap_or(&empty)`. So a
+  part with **zero rows still emits a page**, once per copy. A long-term-only filer needing 2 Part II pages
+  gets **2 blank Part I pages**; 28 rows produced a 4-page form where 2 pages were correct.
+  ★ The blank pages are not anonymous — `:78` puts the filer's identity on **both** pages of every copy — so
+  this is a name-and-SSN page that asserts nothing, filed twice.
+  *Fix:* paginate the two parts **independently** — emit `lt_pages.len()` Part II pages and
+  `st_pages.len()` Part I pages, not `max()` copies of both. The output already groups by part (`:139`,
+  FR-113), so only the page manufacture is wrong. **B1:** a long-term-only filer's 8949 must contain **zero**
+  Part I pages; a short-term-only filer zero Part II pages; a mixed filer both. Plant a zero-row part and
+  watch a page still appear.
+  ★★ **Why nothing else could have caught it, which is the argument for S8 as a standing step:** the PDF is
+  byte-stable so the golden passes; every filled field reads back so the read-back verifier passes; both
+  oracles agree on every figure so the census passes; and the two Part II pages' subtotals **do** roll up to
+  Schedule D exactly (352655+468635 = 821290; 86361+102520 = 188881; 266294+366115 = 632409 — controller-
+  verified). Every instrument this project owns says the packet is correct. **It is a defect only when
+  someone holds the paper**, which is precisely the class S8 exists to reach — and S8 found it on its second
+  run, having been scheduled last for 14 months.
+
 - **FR-152 — `census_join` anchors captions to ABSOLUTE line indices in a generated file. Minor. Owning phase: the port machine.**
   A4's 110 `# Regenerate:` header additions shifted every extract by a line, and `forms/2024/f1040s1.map.toml`'s
   `extract_line` anchors (11/15/58) had to move to 15/19/62 — an edit outside A4's ownership, reported rather
