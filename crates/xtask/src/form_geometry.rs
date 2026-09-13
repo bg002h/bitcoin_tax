@@ -4,6 +4,15 @@
 //! so CI has none. Tests must therefore read a *committed* observation — the same reason the text
 //! layer lives in `design/forms/extract/`.
 //!
+//! ★★★ **And FR-165 is what happens when one reader forgets that.** `form_delta::field_set` read
+//! AcroForm field SPELLINGS straight out of the PDF until 2026-09-13, so six tests passed on the one
+//! machine that had the PDFs and could not pass on any fresh checkout — CI's `test` job was red on
+//! ubuntu, macOS and Windows for eight days. No new fixture was needed to fix it: `boxes[].name`
+//! here already IS that field set, measured identical to the PDF's on all 70 committed fixtures. So
+//! this file is now the single committed observation behind BOTH of `form_delta`'s axes, and
+//! [`run`]'s `--all --check` is what holds it to the document — a command a developer runs, because
+//! it needs the PDF and therefore must never be a test.
+//!
 //! ★★★ **What it may and may not contain, and this is load-bearing.** This fixture holds the RAW
 //! OBSERVATION — every word with its coordinates, every AcroForm box with its coordinates — and
 //! **never the reader's conclusions.** `design/forms/LABEL_READER.md` names the trap directly:
@@ -207,11 +216,208 @@ fn html_unescape(s: &str) -> String {
         .replace("&#39;", "'")
 }
 
-/// `cargo run -p xtask -- extract-geometry <stem>` — e.g. `f1040s1a--2025`.
+/// What one PDF proves about a stem: the observation, plus the two counts that say whether the
+/// observation is answerable for the WHOLE form.
+///
+/// ★★ `acroform_fields` is every field the PDF declares; `geometry.boxes` holds only those with a
+/// widget rect. The difference is the one thing a geometry fixture structurally cannot carry, so it
+/// is MEASURED and carried out of the reader rather than left in a `println!` nobody reads.
+pub struct Observation {
+    pub geometry: Geometry,
+    /// Every AcroForm field the PDF declares, with or without a widget rect.
+    pub acroform_fields: usize,
+    /// …of which this many have no widget rect and are therefore ABSENT from `geometry.boxes`.
+    pub dropped_without_rect: usize,
+}
+
+/// The exact bytes a fixture is committed as: one line of JSON, one trailing newline.
+///
+/// ★ Written by [`extract`] and re-derived by [`verify`], so the writer and the checker cannot
+/// disagree about formatting and report a whitespace difference as a changed form.
+pub fn serialise(g: &Geometry) -> Result<String, String> {
+    Ok(format!(
+        "{}\n",
+        serde_json::to_string(g).map_err(|e| format!("serialising: {e}"))?
+    ))
+}
+
+/// Hold ONE committed fixture against a fresh observation of the PDF it claims to observe.
+/// `Ok(())` is the only clean answer; every other outcome names what differs.
+///
+/// ★★★ **This is the A4 pattern, and it is what makes the committed fixture checkable at all
+/// (FR-165).** `form_delta` now reads field spellings out of the fixture instead of the PDF, so
+/// something has to hold the fixture to the document — and it must be a command a developer runs,
+/// never a test, because the PDF is gitignored and CI has none. Two distinct findings, because they
+/// have different repairs:
+///
+/// * the bytes differ → the FORM changed (or the reader did): review it, then `extract-geometry
+///   <stem>` and re-verify every claim drawn from the old observation;
+/// * the PDF declares a field with no widget rect → the fixture cannot represent it, so
+///   `form_delta`'s name axis would silently not know the field exists. There are 0 of these across
+///   all 70 fixtures today. It is a finding rather than a tolerated drop precisely because it is the
+///   only way the fixture and the PDF can disagree about the field SET.
+///
+/// Pure — the observation is a parameter — so the planted-defect kill needs no PDF.
+pub fn verify(stem: &str, committed: &str, obs: &Observation) -> Result<(), String> {
+    if let Some(f) = unrepresentable_fields(stem, obs) {
+        return Err(f);
+    }
+    reproduces(stem, committed, obs)
+}
+
+/// The finding that REGENERATING CANNOT REPAIR: the PDF declares a field the fixture format has no
+/// way to hold. Kept separate from [`reproduces`] for exactly that reason — a `--all` run without
+/// `--check` rewrites a fixture whose bytes drifted, and must NOT quietly rewrite its way past this.
+pub fn unrepresentable_fields(stem: &str, obs: &Observation) -> Option<String> {
+    (obs.dropped_without_rect > 0).then(|| {
+        format!(
+            "{stem}: the PDF declares {} AcroForm field(s), {} of which have NO widget rect and so \
+             cannot be in the fixture — the field SET this fixture reports is therefore not the \
+             form's. `form_delta` reads these names; a dropped one is a field it cannot know about. \
+             Regenerating does not fix this.",
+            obs.acroform_fields, obs.dropped_without_rect
+        )
+    })
+}
+
+/// Whether the committed bytes are exactly what this observation serialises to.
+pub fn reproduces(stem: &str, committed: &str, obs: &Observation) -> Result<(), String> {
+    let regenerated = serialise(&obs.geometry)?;
+    if regenerated != committed {
+        return Err(format!(
+            "{stem}: the committed geometry fixture is NOT what its PDF produces ({} bytes \
+             committed, {} regenerated; {} words, {} boxes, sha256:{}… observed). Review the change \
+             before regenerating — a changed observation means the DOCUMENT changed.",
+            committed.len(),
+            regenerated.len(),
+            obs.geometry.words.len(),
+            obs.geometry.boxes.len(),
+            &obs.geometry.pdf_sha256[..8.min(obs.geometry.pdf_sha256.len())]
+        ));
+    }
+    Ok(())
+}
+
+/// Every stem with a committed geometry fixture — the denominator `--all` walks.
+///
+/// ★ Enumerated from the directory, never a list beside it: a fixture added or removed changes what
+/// is checked with no edit here.
+pub fn committed_stems(root: &Path) -> Result<Vec<String>, String> {
+    let dir = root.join("design/forms/geometry");
+    let mut stems: Vec<String> = std::fs::read_dir(&dir)
+        .map_err(|e| format!("{}: {e}", dir.display()))?
+        .filter_map(|e| e.ok())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter_map(|n| n.strip_suffix(".json").map(str::to_string))
+        .collect();
+    stems.sort();
+    Ok(stems)
+}
+
+/// `cargo run -p xtask -- extract-geometry <stem> | --all [--check]`.
+///
+/// ★★ **`--all --check` is the fixture's verification half and it needs the PDFs.** An absent PDF is
+/// an UNRESOLVED fixture, never a skip — the same posture as `forms extract --all --check`, whose
+/// summary line this mirrors. Run it after `xtask forms fetch --restore`. It is deliberately not a
+/// test: the PDFs are gitignored, so a test that ran it would be exactly the FR-165 defect again.
+pub fn run(args: &[String]) -> Result<(), String> {
+    let root = repo_root();
+    let check_only = args.iter().any(|a| a == "--check");
+    let all = args.iter().any(|a| a == "--all");
+
+    if !all {
+        let Some(stem) = args.iter().find(|a| !a.starts_with('-')) else {
+            return Err(
+                "usage: cargo run -p xtask -- extract-geometry <stem> | --all [--check]   e.g. \
+                 f1040s1a--2025"
+                    .to_string(),
+            );
+        };
+        if check_only {
+            let path = geometry_path(&root, stem);
+            let committed =
+                std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+            verify(stem, &committed, &observe(stem)?)?;
+            println!("extract-geometry: {stem} reproduces byte-for-byte from its PDF.");
+            return Ok(());
+        }
+        return extract(stem);
+    }
+
+    let stems = committed_stems(&root)?;
+    // ★ A checker with nothing to check must not report success — the vacuous-pass trap this file's
+    //   other walks each guard in their own way.
+    if stems.is_empty() {
+        return Err(format!(
+            "no committed geometry fixtures under {} — refusing to report success over nothing",
+            root.join("design/forms/geometry").display()
+        ));
+    }
+    let (mut reproduce, mut written) = (0usize, 0usize);
+    let mut problems: Vec<String> = Vec::new();
+    for stem in &stems {
+        let path = geometry_path(&root, stem);
+        let committed = match std::fs::read_to_string(&path) {
+            Ok(t) => t,
+            Err(e) => {
+                problems.push(format!("{}: {e}", path.display()));
+                continue;
+            }
+        };
+        let obs = match observe(stem) {
+            Ok(o) => o,
+            Err(e) => {
+                problems.push(e);
+                continue;
+            }
+        };
+        if let Some(f) = unrepresentable_fields(stem, &obs) {
+            problems.push(f);
+            continue;
+        }
+        match reproduces(stem, &committed, &obs) {
+            Ok(()) => reproduce += 1,
+            Err(e) if check_only => problems.push(e),
+            // Not --check: adopt the observation just made, rather than observing a second time —
+            // two reads of one PDF are two chances to disagree about what it says.
+            Err(e) => match write_fixture(&root, stem, &obs.geometry) {
+                Ok(()) => {
+                    println!("  ★ REWROTE {stem}.json — {e}");
+                    written += 1;
+                }
+                Err(w) => problems.push(w),
+            },
+        }
+    }
+    println!(
+        "extract-geometry: {} committed fixture(s) — {reproduce} reproduce byte-for-byte, \
+         {written} rewritten, {} unresolved",
+        stems.len(),
+        problems.len()
+    );
+    for p in &problems {
+        println!("  ★ {p}");
+    }
+    if problems.is_empty() {
+        println!(
+            "extract-geometry: OK — every committed observation is exactly what its own PDF \
+             produces, and every AcroForm field the PDFs declare is in one."
+        );
+        Ok(())
+    } else {
+        Err(format!(
+            "{} of {} geometry fixture(s) could not be verified.",
+            problems.len(),
+            stems.len()
+        ))
+    }
+}
+
+/// Read one stem's PDF and produce the observation it proves. **Needs the PDF and `pdftotext`.**
 ///
 /// ★ Requires the PDF locally (gitignored, re-fetchable from the URL in its `.pdf.txt` note). The
 /// committed JSON is what tests read, so neither CI nor a fresh clone needs `pdftotext` or network.
-pub fn extract(stem: &str) -> Result<(), String> {
+pub fn observe(stem: &str) -> Result<Observation, String> {
     let root = repo_root();
     let pdf = root.join(pdf_rel_for_stem(stem)?);
     if !pdf.is_file() {
@@ -322,40 +528,189 @@ pub fn extract(stem: &str) -> Result<(), String> {
     let (sha256, _) = crate::authority_manifest::sha256_of(&pdf)
         .map_err(|e| format!("hashing {}: {e}", pdf.display()))?;
 
-    let g = Geometry {
-        form: stem.to_string(),
-        pdf_sha256: sha256,
-        pages,
-        words,
-        boxes,
-    };
-    let path = geometry_path(&root, stem);
+    Ok(Observation {
+        geometry: Geometry {
+            form: stem.to_string(),
+            pdf_sha256: sha256,
+            pages,
+            words,
+            boxes,
+        },
+        acroform_fields: fields.len(),
+        dropped_without_rect: no_rect,
+    })
+}
+
+/// Commit one observation to disk, in the bytes [`serialise`] defines.
+fn write_fixture(root: &Path, stem: &str, g: &Geometry) -> Result<(), String> {
+    let path = geometry_path(root, stem);
     if let Some(d) = path.parent() {
         std::fs::create_dir_all(d).map_err(|e| format!("mkdir {}: {e}", d.display()))?;
     }
-    std::fs::write(
-        &path,
-        format!(
-            "{}\n",
-            serde_json::to_string(&g).map_err(|e| format!("serialising: {e}"))?
-        ),
-    )
-    .map_err(|e| format!("writing {}: {e}", path.display()))?;
-
+    std::fs::write(&path, serialise(g)?).map_err(|e| format!("writing {}: {e}", path.display()))?;
     println!(
         "extract-geometry: {} — {} words, {} boxes, {} pages (sha256:{}…)",
         path.display(),
         g.words.len(),
         g.boxes.len(),
         g.pages.len(),
-        &g.pdf_sha256[..8]
+        &g.pdf_sha256[..8.min(g.pdf_sha256.len())]
     );
     Ok(())
+}
+
+/// `cargo run -p xtask -- extract-geometry <stem>` — observe the PDF and WRITE the fixture.
+pub fn extract(stem: &str) -> Result<(), String> {
+    write_fixture(&repo_root(), stem, &observe(stem)?.geometry)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One synthetic observation, small enough that its serialised bytes can be edited by hand.
+    fn planted_observation() -> Observation {
+        Observation {
+            geometry: Geometry {
+                form: "zzz-planted--2025".into(),
+                pdf_sha256: "0".repeat(64),
+                pages: vec![Page {
+                    n: 1,
+                    width: 612.0,
+                    height: 792.0,
+                }],
+                words: vec![Word {
+                    page: 1,
+                    x: 45.396,
+                    y: 120.649,
+                    x2: 50.4,
+                    y2: 131.386,
+                    text: "1".into(),
+                }],
+                boxes: vec![Box_ {
+                    page: 1,
+                    x: 36.0,
+                    y: 684.0,
+                    x2: 445.65,
+                    y2: 698.0,
+                    name: "topmostSubform[0].Page1[0].f1_1[0]".into(),
+                }],
+            },
+            acroform_fields: 1,
+            dropped_without_rect: 0,
+        }
+    }
+
+    /// ★★★ **B1 for FR-165's verification half — the fixture-vs-PDF checker, watched RED on each
+    /// defect it exists to catch and green on none of them.**
+    ///
+    /// The checker cannot be pointed at a real PDF from a test: `design/forms/**/*.pdf` is
+    /// gitignored, which is the entire reason `form_delta::field_set` now reads the fixture instead.
+    /// So the observation is synthesised and the part that can actually be wrong — the comparison —
+    /// is exercised directly. `xtask extract-geometry --all --check` is the same two functions over
+    /// real PDFs, and a developer runs it.
+    ///
+    /// ★ The renamed-box plant is the one that matters most: a box NAME is exactly what
+    /// `form_delta`'s name axis diffs, so a fixture whose spellings drifted from the document would
+    /// make every "0 added, 0 removed" verdict a statement about the fixture rather than the form.
+    #[test]
+    fn the_fixture_checker_reds_on_every_planted_fixture_defect() {
+        let obs = planted_observation();
+        let committed = serialise(&obs.geometry).expect("serialises");
+        let stem = &obs.geometry.form.clone();
+
+        // The control: the bytes the observation itself produces are accepted. Without this the
+        // plants below could all be passing for the wrong reason.
+        assert_eq!(
+            verify(stem, &committed, &obs),
+            Ok(()),
+            "an unmodified fixture must verify, or every plant below proves nothing"
+        );
+
+        for (what, edited) in [
+            // a box RENAMED — the field-spelling defect `form_delta` would otherwise inherit
+            ("a renamed box", committed.replace("f1_1[0]", "f1_99[0]")),
+            // a coordinate moved by a hundredth of a point — the label join reads these
+            ("a moved coordinate", committed.replace("684.0", "684.01")),
+            // a word's text changed — the printed-label witness reads these
+            (
+                "an edited word",
+                committed.replace("\"t\":\"1\"", "\"t\":\"7\""),
+            ),
+            // the pinned PDF hash changed — the fixture would claim to observe another document
+            ("a rewritten pdf_sha256", committed.replace("0000", "0001")),
+            // a whole box DELETED
+            (
+                "a deleted box",
+                committed.replace(",\"boxes\":[{", ",\"boxes\":[],\"unused\":[{"),
+            ),
+            // the trailing newline dropped — byte-identical means byte-identical
+            (
+                "a dropped trailing newline",
+                committed.trim_end().to_string(),
+            ),
+        ] {
+            assert_ne!(
+                edited, committed,
+                "{what}: the plant must actually change the committed bytes"
+            );
+            let e = verify(stem, &edited, &obs)
+                .expect_err(&format!("{what} must be rejected, not tolerated"));
+            assert!(
+                e.contains("is NOT what its PDF produces"),
+                "{what}: wrong finding: {e}"
+            );
+        }
+
+        // ★★ The second, separate finding: the PDF declares a field the fixture CANNOT hold. It is
+        //    not a byte difference — the bytes are perfect — so a checker that only diffed bytes
+        //    would report OK over a fixture that is missing a field of the form.
+        let blind = Observation {
+            acroform_fields: 2,
+            dropped_without_rect: 1,
+            ..planted_observation()
+        };
+        let e =
+            verify(stem, &committed, &blind).expect_err("a field with no widget rect is a finding");
+        assert!(e.contains("NO widget rect"), "wrong finding: {e}");
+        assert!(
+            unrepresentable_fields(stem, &blind).is_some(),
+            "…and it must be reported through the channel `--all` cannot rewrite past"
+        );
+        assert!(
+            unrepresentable_fields(stem, &obs).is_none(),
+            "…while an observation with no dropped field must NOT raise it — an oracle that \
+             answers the same for both makes the plant above vacuous"
+        );
+    }
+
+    /// ★ `--all` enumerates FROM the directory, so the set that is checked widens when a fixture is
+    /// added and nothing has to be edited here. This holds the enumeration to the committed reality
+    /// rather than to a number typed beside it.
+    #[test]
+    fn the_all_walk_enumerates_every_committed_fixture() {
+        let root = repo_root();
+        let stems = committed_stems(&root).expect("the geometry directory is committed");
+        assert!(
+            stems.len() >= 60,
+            "only {} fixtures enumerated — the walk is not reaching design/forms/geometry",
+            stems.len()
+        );
+        for s in &stems {
+            assert!(
+                geometry_path(&root, s).is_file(),
+                "{s} was enumerated but its fixture is not a file"
+            );
+            assert!(
+                load(&root, s).is_ok(),
+                "{s} was enumerated but does not parse as geometry"
+            );
+        }
+        assert!(
+            !stems.iter().any(|s| s.ends_with(".json")),
+            "the stem, not the filename: {stems:?}"
+        );
+    }
 
     /// ★ The bbox parser on a hand-built sample of the real grammar. Without this, a parser that
     /// silently returned nothing would make every downstream witness "find no labels" and the census

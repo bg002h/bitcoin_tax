@@ -100,7 +100,11 @@ const SUBCOMMANDS: &[(&str, &[&str], &str)] = &[
     ("docs", &["--pdf"], "[--pdf]"),
     ("dump-fields", &[], "<pdf>"),
     ("examples", &[], ""),
-    ("extract-geometry", &[], "<stem>"),
+    (
+        "extract-geometry",
+        &["--all", "--check"],
+        "<stem> | --all [--check]",
+    ),
     ("extract-schedule-1a", &[], ""),
     ("form-delta", &[], "<old-stem> <new-stem>"),
     // ★ FR-139 / FR-140 — the port machine's namespace (`design/TY2026_PORT_REPORT.md` §4).
@@ -349,13 +353,14 @@ fn main() {
             }
         }
         Some("extract-geometry") => {
-            let Some(stem) = args.get(1) else {
+            if args.len() < 2 {
                 eprintln!(
-                    "usage: cargo run -p xtask -- extract-geometry <stem>   e.g. f1040s1a--2025"
+                    "usage: cargo run -p xtask -- extract-geometry <stem> | --all [--check]   \
+                     e.g. f1040s1a--2025"
                 );
                 std::process::exit(2);
-            };
-            if let Err(e) = form_geometry::extract(stem) {
+            }
+            if let Err(e) = form_geometry::run(&args[1..]) {
                 eprintln!("xtask extract-geometry: {e}");
                 std::process::exit(1);
             }

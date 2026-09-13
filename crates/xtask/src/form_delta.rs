@@ -48,6 +48,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Where a form's PDF lives: the bundled template if there is one, else the archived authority copy.
+///
+/// ★★ **This is the ARCHIVE oracle's reader, and NOT how field spellings are obtained (FR-165).**
+/// It answers *"is this side of a diff in the archive at all"* for the excused rows `port-status`
+/// prints, and for nothing else. The bundled templates under `crates/btctax-forms/forms/` are
+/// COMMITTED, so that question has the same answer in CI as on a developer machine for every stem
+/// the emitting surface asks about; the archived copies under `design/forms/` are gitignored, and a
+/// stem that has only one of those answers `false` in both places. See
+/// [`tests::real_archive`] for the oracle and its two kills.
 fn pdf_for(stem: &str) -> Option<std::path::PathBuf> {
     let root = crate::form_geometry::repo_root();
     let (form, year) = stem.split_once("--")?;
@@ -60,15 +68,33 @@ fn pdf_for(stem: &str) -> Option<std::path::PathBuf> {
     archived.is_file().then_some(archived)
 }
 
+/// One revision's AcroForm field spellings, read from the **committed** geometry observation.
+///
+/// ★★★ **This read the PDF until 2026-09-13, and that was FR-165.** `design/forms/**/*.pdf` is
+/// gitignored on purpose, so six tests in this file passed on the machine that had the PDFs and could
+/// not pass on any fresh checkout: CI's `test` job was red on ubuntu, macOS and Windows for eight
+/// days (`209 passed; 6 failed`, last green `2bd04d458`). The dependency was the defect, not the
+/// tests.
+///
+/// ★★ **No new fixture was needed.** `design/forms/geometry/<stem>.json` already carries every
+/// AcroForm box with its name — the same committed observation the line→label axis below reads, so
+/// both axes of this tool now rest on one artifact rather than two. Measured 2026-09-13 over all 70
+/// committed fixtures: `boxes[].name` is IDENTICAL to the PDF's AcroForm field set on every one — 0
+/// names only in the PDF, 0 only in the fixture, and `boxes.len()` equal to the PDF's whole field
+/// count on all 70.
+///
+/// ★ **The one thing a fixture cannot carry, stated rather than hidden.** `extract-geometry` DROPS a
+/// field with no widget rect — it has no position, so it cannot join to a printed label — and that
+/// drop is the only way this set can differ from the PDF's. There are 0 such fields today, and
+/// `xtask extract-geometry --all --check` is what keeps it that way: it regenerates every fixture
+/// from the PDF, refuses any whose bytes differ, and refuses any whose box count is not the PDF's
+/// full AcroForm field count. **That checker is where the PDF belongs.** A fallback to the PDF here
+/// when one happened to be present would be worse than no check at all, because the committed
+/// fixture would then be the thing under test only where the PDF is absent — i.e. never on a
+/// developer machine.
 fn field_set(stem: &str) -> Result<BTreeSet<String>, String> {
-    let pdf = pdf_for(stem).ok_or_else(|| format!("no PDF found for {stem}"))?;
-    let bytes = std::fs::read(&pdf).map_err(|e| format!("{}: {e}", pdf.display()))?;
-    let doc = btctax_forms::testonly::load(&bytes).map_err(|e| format!("{stem}: {e:?}"))?;
-    Ok(btctax_forms::testonly::collect_fields(&doc)
-        .map_err(|e| format!("{stem}: {e:?}"))?
-        .into_iter()
-        .map(|f| f.fqn)
-        .collect())
+    let g = crate::form_geometry::load(&crate::form_geometry::repo_root(), stem)?;
+    Ok(g.boxes.into_iter().map(|b| b.name).collect())
 }
 
 /// The label `label_reader` gives a box that **no printed line label claims** — its
@@ -86,7 +112,13 @@ const NO_LABEL: &str = "?";
 /// tell "this box encodes no printed line" from "we never looked at this box" is not a check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Unwitnessed {
-    /// One side has no geometry fixture at all, so the axis never ran for any field.
+    /// One side's label set could not be read at all, so the axis never ran for any field.
+    ///
+    /// ★★ **The NAME is historical and FR-165 narrowed what reaches it.** Before 2026-09-13 the
+    /// commonest way in was a side with a PDF and no geometry fixture. `field_set` now reads the
+    /// fixture, so that state is a hard `Err` out of [`compute`] — naming the missing file and the
+    /// command that makes it — and what reaches this variant is the *other* way `label_join` fails:
+    /// a fixture that exists and whose words yield no printed label column at all.
     GeometryFixtureMissing,
     /// Both sides have geometry, and neither records a box by this name.
     BoxAbsentBothSides,
@@ -108,7 +140,9 @@ impl Unwitnessed {
     pub fn why(self) -> &'static str {
         match self {
             Unwitnessed::GeometryFixtureMissing => {
-                "one side has NO geometry fixture — run `xtask extract-geometry <stem>`"
+                "one side's label set could not be read from its geometry fixture — a missing \
+                 fixture is a hard error before this point, so this means the fixture is there and \
+                 yields no printed label column"
             }
             Unwitnessed::BoxAbsentBothSides => "neither side's geometry records a box by this name",
             Unwitnessed::BoxAbsentOld => "the OLD side's geometry records no box by this name",
@@ -364,9 +398,10 @@ pub fn run(old: &str, new: &str) -> Result<(), String> {
     let v = d.label_verdict();
     match v {
         LabelVerdict::NoFixture { .. } => println!(
-            "  ★ LINE->LABEL DRIFT NOT CHECKED — one side has no geometry fixture. Generate with \
-             `xtask extract-geometry <stem>`. This is the axis a name check cannot see, so an \
-             unchecked run is NOT a clean one."
+            "  ★ LINE->LABEL DRIFT NOT CHECKED — one side's geometry fixture yielded no printed \
+             label column, so the axis never ran for any field. (A fixture that is MISSING is a hard \
+             error before this point, naming the file and `xtask extract-geometry <stem>`.) This is \
+             the axis a name check cannot see, so an unchecked run is NOT a clean one."
         ),
         LabelVerdict::Unwitnessed { .. } => println!(
             "  ★★ LINE->LABEL DRIFT UNWITNESSED — 0 of {} common field(s) yielded a printed label \
@@ -660,7 +695,20 @@ mod tests {
         // the older plants are bare rows: check them under the committed document's own tags
         let dflt = |doc: &str| check_work_list_with(doc, "2025", "2026-DRAFT");
         let (_, _, wrong) = dflt("| `f6251` | 62 | 0 | 0 | 1 | port |\n");
-        assert_eq!(wrong.len(), 1, "a cell off by one: {wrong:?}");
+        assert_eq!(wrong.len(), 1, "the MOVED cell off by one: {wrong:?}");
+        // ★★ FR-165 — the common/added/removed comparison had NO plant, and the assertion above
+        //    calls itself "a cell off by one" while planting the MOVED cell, so nothing had ever
+        //    watched the counts branch red. Measured 2026-09-13: neutralising `counts != (common,
+        //    added, removed)` to `if false` left this whole test GREEN. It matters now because
+        //    FR-165 replaced the SOURCE of those three numbers — they come from the committed
+        //    geometry fixture's box names rather than from the PDF — so the one comparison that
+        //    would notice the new source disagreeing with the document was the unwatched one.
+        let (_, _, wrong) = dflt("| `f6251` | 61 | 0 | 0 | 0 | unchanged |\n");
+        assert_eq!(wrong.len(), 1, "the COMMON cell off by one: {wrong:?}");
+        let (_, _, wrong) = dflt("| `f6251` | 62 | 1 | 0 | 0 | unchanged |\n");
+        assert_eq!(wrong.len(), 1, "the ADDED cell off by one: {wrong:?}");
+        let (_, _, wrong) = dflt("| `f6251` | 62 | 0 | 1 | 0 | unchanged |\n");
+        assert_eq!(wrong.len(), 1, "the REMOVED cell off by one: {wrong:?}");
         let (_, _, wrong) = dflt("| `f1040` | 199 | 0 | 0 | 0 | unchanged |\n");
         assert_eq!(
             wrong.len(),
@@ -871,9 +919,20 @@ mod tests {
 
     /// The ARCHIVE oracle: is `<stem>.pdf` on disk?
     ///
-    /// ★ The claim is about the ARCHIVE (the PDF), and `compute` enters the excused arm on a missing
-    /// PDF — so the check reads the PDF too (r3 R3), never the geometry fixture, a different
-    /// artifact.
+    /// ★ The claim is about the ARCHIVE (the PDF), so the check reads the PDF (r3 R3), never the
+    /// geometry fixture, a different artifact.
+    ///
+    /// ★★ **FR-165 opened a seam here, and it is stated rather than papered over.** `compute` now
+    /// enters the excused arm on a missing GEOMETRY FIXTURE, not on a missing PDF, so the predicate
+    /// that puts a row in the excused arm and the predicate that checks the row's claim are no longer
+    /// the same one. Measured 2026-09-13 with and without `design/forms/**/*.pdf` present: every stem
+    /// on the emitting surface answers identically either way, because every prior side in the
+    /// excused table has a COMMITTED bundled template (`crates/btctax-forms/forms/<year>/`) and every
+    /// absent side has neither artifact. The one state that would diverge is a stem whose PDF has
+    /// been archived but whose fixture has not yet been extracted — a transient, and the fix for it
+    /// is `xtask extract-geometry <stem>`, which is what the row would then be telling you to do.
+    /// Filed as a follow-up rather than restructured here, because collapsing the two predicates
+    /// would retarget the FR-136 plants at the same time as FR-165's fix.
     ///
     /// ★★ FR-136 — this is a PARAMETER of the checker rather than a call inside it, because a plant
     /// that borrows the real archive's accidental gaps is disarmed by the very ports it exists to
@@ -1269,10 +1328,17 @@ mod tests {
     /// derives its non-zero exit from `is_witnessed()` — so the banner that already said *"an
     /// unchecked run is NOT a clean one"* now also EXITS like it means it.
     ///
-    /// Reproduced end to end on a real artifact the day this was written: `f8275r--2025` has a PDF
-    /// and no geometry, and `form-delta f8275r--2025 f8275r--2025` reports 102 of 102 common fields
-    /// unwitnessed and exits 1 (it exited **0** before). That stem is not asserted here — extracting
+    /// Reproduced end to end on a real artifact the day this was written: `f8275r--2025` had a PDF
+    /// and no geometry, and `form-delta f8275r--2025 f8275r--2025` reported 102 of 102 common fields
+    /// unwitnessed and exited 1 (it exited **0** before). That stem is not asserted here — extracting
     /// its geometry is legitimate work that must not red this test.
+    ///
+    /// ★ **FR-165 moved where that particular input lands, and NOT what this arm guarantees.** A
+    /// stem with no fixture is now an `Err` out of `compute` (also non-zero, also naming the repair),
+    /// because `field_set` reads the fixture; what still reaches this arm is a fixture whose words
+    /// yield no printed label column. The arm is built directly here for exactly that reason — a
+    /// verdict this file is responsible for must be testable without waiting for an artifact to
+    /// develop the shape that produces it.
     ///
     /// Plant: make `compute`'s fixture-missing arm return an empty `unwitnessed` map, or make
     /// `is_witnessed` true for `NoFixture`, and this reds.
@@ -1402,7 +1468,7 @@ mod tests {
     /// * every pair whose axis ran is **self-accounting** (compared + unwitnessed == common), and
     /// * **no pair anywhere yields a clean verdict backed by zero comparisons.**
     ///
-    /// Pairs whose PDF or geometry is missing are named in the failure text of the vacuity guard
+    /// Pairs whose geometry fixture is missing are named in the failure text of the vacuity guard
     /// rather than gated here — fixture coverage is `label_reader`'s gate, not this one — but they
     /// can never come back as `Unchanged`, which is the thing this file is responsible for.
     #[test]
@@ -1429,7 +1495,8 @@ mod tests {
             let prior = format!("{form}--2025");
             let d = match compute(&prior, draft) {
                 Ok(d) => d,
-                // No PDF on one side: the pair cannot be diffed at all. Named, not silently dropped.
+                // No committed observation on one side: the pair cannot be diffed at all. Named,
+                // not silently dropped.
                 Err(e) => {
                     blind.push(format!("{prior} -> {draft}: {e}"));
                     continue;

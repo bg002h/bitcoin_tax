@@ -7940,6 +7940,18 @@ build, each with an owning phase.
     than red; (b) fetching from irs.gov in CI — a network dependency on every run, against an archive whose
     whole purpose is reproducibility from committed bytes. ★ A *fallback* to the PDF is also wrong: a
     fallback is how the fixture silently stops being checked.
+  - ✅ **FIXED 2026-09-13, and the direction above was WRONG about the size of it: no new fixture was
+    needed.** The brief's own §5 said to measure first, and the measurement refuted it — `design/forms/
+    geometry/<stem>.json` already carries every AcroForm box **with its name**, and over all **70**
+    committed fixtures the `boxes[].name` set is IDENTICAL to the PDF's AcroForm field set: 0 names only in
+    the PDF, 0 only in the fixture, `boxes.len()` equal to the PDF's whole field count on all 70. So
+    `field_set` reads the fixture the label axis was already reading, both axes now rest on ONE committed
+    observation instead of two artifacts, and a 71st..141st fixture was never created. Suite in a pristine
+    tracked-files-only checkout with `CI=1` and **0** `design/forms` PDFs: `217 passed; 0 failed; 1 ignored`
+    (was `209 passed; 6 failed`), and 89.6s → 19.9s because a JSON parse replaced 42 PDF parses.
+    The verification half is `xtask extract-geometry --all --check` (the A4 shape): *"70 committed
+    fixture(s) — 70 reproduce byte-for-byte, 0 rewritten, 0 unresolved"*, red on a planted box rename and
+    green on revert. **No fallback**: there is no PDF read anywhere on the test path.
 
 - **FR-166 — `check_return.py:307` scores a yearless projection as TY2024 in silence. Important. Owning phase: NOW (Sep–Dec 2026).**
   `year = wrapper_year if wrapper_year is not None else 2024`. A projection carrying no `tax_year`, run
@@ -7980,6 +7992,29 @@ build, each with an owning phase.
   first TY2026 vector lands, that pass must be grouped by year. ★ Recorded because it is the honest third
   option from *"Derive the list, or make the compiler hold it"*: state in the source exactly what is covered
   and what is not.
+
+- **FR-172 — a 187 KB IRS PDF is COMMITTED at the repo root under the filename `--out`. Minor. Owning phase: NOW, with any commit touching `.gitignore`.**
+  Found 2026-09-13 by the FR-165 build agent, and found only because `tar -T` refused the filename: `git
+  ls-files` lists a tracked file literally named `--out` (`file` says *PDF document, version 1.7, 2 page(s)*),
+  187,143 bytes, added in `a1c6fc849` (2026-09-05) — the same day FR-165's trigger landed. It is plainly the
+  output of an `xtask label-proof <stem> --out …` invocation whose flag was consumed as a path, swept in by a
+  `git add -A`. **It is a committed IRS PDF, which is the one thing `.gitignore:68-87` exists to prevent** —
+  the glob is `design/forms/**/*.pdf` (`.gitignore:87`), so nothing guarded the repo root. *Fix:* `git rm -- ./--out`, and
+  consider whether the ignore rule should be `*.pdf` with `!` exceptions for the bundled templates rather than
+  a path-scoped glob, so a stray PDF anywhere is refused by default. ★ A leading-`--` filename is also a small
+  hazard for every tool that takes options.
+
+- **FR-173 — `form_delta`'s excused-arm predicate and its ARCHIVE oracle now read different artifacts. Minor. Owning phase: with the FR-136 borrowed-absence work in `map_pdf_conformance.rs`.**
+  FR-165 made `compute` fail on a missing GEOMETRY FIXTURE rather than on a missing PDF, while
+  `port_status_over`'s excused arm and `tests::real_archive` still answer *"is this side present"* from
+  `pdf_for`. Measured 2026-09-13 with and without `design/forms/**/*.pdf`: every stem on the emitting surface
+  answers identically either way, because each prior side in the excused table has a **committed** bundled
+  template and each absent side has neither artifact — so this is a latent seam, not a live defect, and it is
+  stated in `real_archive`'s doc comment rather than hidden. The state that would diverge is a stem whose PDF
+  has been archived but whose fixture has not yet been extracted; the row would then print a claim about the
+  PDF while the arm was entered because of the fixture. Deliberately not collapsed inside FR-165, because the
+  two predicates are what the FR-136 declared-archive plants are built around and retargeting them belongs
+  with that work.
 
 - **FR-152 — `census_join` anchors captions to ABSOLUTE line indices in a generated file. Minor. Owning phase: the port machine.**
   A4's 110 `# Regenerate:` header additions shifted every extract by a line, and `forms/2024/f1040s1.map.toml`'s

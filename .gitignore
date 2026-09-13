@@ -66,8 +66,24 @@ __pycache__/
 .venv/
 
 # IRS primary-source PDFs — publicly available, fetched on demand, never committed.
-# Each has a "<name>.pdf.txt" note beside it with its irs.gov URL and sha256, and its
-# committed TEXT LAYER lives in design/forms/extract/ (which IS what the tests read).
+# Each has a "<name>.pdf.txt" note beside it with its irs.gov URL and sha256.
+#
+# ★★ What the tests read is a COMMITTED DERIVED OBSERVATION of the PDF, and there are TWO of them,
+#    because one document answers two different questions:
+#      * design/forms/extract/<stem>.txt   — the TEXT LAYER (pdftotext), for every quotation and
+#        line-set check. Held to its own PDF by `xtask forms extract --all --check`.
+#      * design/forms/geometry/<stem>.json — the GEOMETRY: every word with its coordinates AND every
+#        AcroForm box with its coordinates and its NAME. Held to its own PDF by
+#        `xtask extract-geometry --all --check`.
+#    Both checkers need the PDFs and are therefore commands a developer runs, never tests.
+#
+# ★★★ This comment used to say the text layer "IS what the tests read", full stop. That was FALSE for
+#     six `xtask::form_delta` tests, which read AcroForm field SPELLINGS — something the text layer
+#     does not carry — straight out of the PDF. They passed on the machine that had the PDFs and
+#     could not pass on any fresh checkout, so CI's `test` job was red on ubuntu, macOS and Windows
+#     for eight days (FR-165, fixed 2026-09-13: they read design/forms/geometry/ now). A stale
+#     comment of exactly this shape misled an agent the same week (FR-160) — so if you add a third
+#     derived artifact, add it here.
 design/forms/**/*.pdf
 
 # Compiler ICE dumps — rustc writes these to CWD on an internal error. One was committed on

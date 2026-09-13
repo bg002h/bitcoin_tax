@@ -30,10 +30,23 @@ standalone booklet (Schedule 1-A, Schedules 2 and 3).
 
 IRS forms are public documents, so committing 18 MB of them buys nothing and roughly doubled the repo.
 Instead, beside where each PDF belongs sits a **`<name>.pdf.txt` note** carrying its irs.gov URL, sha256
-and size, and the **committed text layer** lives in `design/forms/extract/`.
+and size, and **two committed derived observations** stand in for the document itself:
 
-That is what makes it work: **the conformance tests read the extract, so they need no PDF and no
-network.** The PDF is only needed to *re-extract*, and the note is sufficient to reproduce it —
+| artifact | what it carries | held to its PDF by |
+|---|---|---|
+| `design/forms/extract/<stem>.txt` | the **text layer** (`pdftotext`) — every printed sentence | `xtask forms extract --all --check` |
+| `design/forms/geometry/<stem>.json` | the **geometry** — every word with coordinates, and every AcroForm box with coordinates **and its NAME** | `xtask extract-geometry --all --check` |
+
+That is what makes it work: **the tests read those two, so they need no PDF and no network.** Both
+checkers need the PDF and are therefore commands a developer runs, never tests.
+
+★★ **Say "the tests read the extract" and you will get FR-165.** That sentence stood alone here and in
+`.gitignore` while six `xtask::form_delta` tests read AcroForm field *spellings* — which the text layer
+does not carry — straight out of the PDF. They passed on the one machine that had the PDFs and could
+not pass on any fresh checkout, so CI was red on all three OSes for eight days. If a third derived
+artifact appears, it belongs in the table above and in `.gitignore`'s comment.
+
+The PDF is only needed to *re-derive*, and the note is sufficient to reproduce it —
 verified by round-trip (fetch `f8995--2025.pdf`, hash it, compare to the note: match; and on
 2026-09-04 `f8275--2024`, `i8275--2024`, `f8283--2025`, all three HTTP 200 and hash-exact,
 when `periodic/` was retired into the year directories).
