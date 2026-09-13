@@ -7821,6 +7821,92 @@ build, each with an owning phase.
   `echo -n` case as a near-miss test. ★ The workaround used in the meantime was to drop the `-n`, NOT to
   bypass the hook.
 
+- **FR-159 — `design/TY2026_PORT_REPORT.md`'s `printed.rs` count is stale, and it has now drifted TWICE. Minor. Owning phase: the January rebuild briefs.**
+  The report says (`:455`, `:136`) **129 line-numbered fields across 10 structs**, "measured 2026-09-05; the
+  first edition said 107 across 7". Measured 2026-09-13: **149 fields across 10 structs** (`grep -cE
+  '^\s*pub line[0-9][A-Za-z0-9_]*\s*:'`, per-struct tally: Form1040Lines 34, ScheduleDLines 30,
+  ScheduleALines 25, ScheduleSeLines 12, Schedule1Lines 12, Form1040Income 11, Schedule2Lines 9,
+  ScheduleCLines 7, Schedule3Lines 5, ScheduleBLines 4; 6 further structs carry none). 107 → 129 → 149.
+  ★ **This is FR-156's class in PROSE, and it has already cost something**: the Fable organization consult
+  (2026-09-13) quoted 129 from this document rather than measuring, and sized a "do not build" recommendation
+  on it. A typed count beside a set that grows — in the one document whose job is to price the next port.
+  *Fix:* the count comes from a command in the January brief's required measurements (§6 item 3 already asks
+  the right question), or the sentence states the date and that it is a snapshot. Do NOT start a sweep for
+  every count in the tree — FR-152/FR-155/FR-156 are the same class and correctly parked.
+  ★ The other half of the same claim VERIFIED clean: **zero `year` references in non-test code** — all 17
+  hits before `#[cfg(test)]` (`:1785`) are doc comments, none is code.
+
+- **FR-160 — `shipped_tables_are_the_validated_tables.rs` §2's header comment asserts a boundary that is no longer true, with two wrong line cites. Minor. Owning phase: the TY2026 params port.**
+  The comment (`:216-217`) reads: *"Measured 2026-09-05: `btctax_core::tax::testonly` defines exactly
+  `ty2024_params` (`testonly.rs:53`) and `ty2024_table` (`testonly.rs:111`) — no other year."* Measured
+  2026-09-13: `testonly.rs` defines **five** — `ty2024_params:281`, `ty2024_table:365`, `ty2025_table:2678`,
+  `ty2026_table:2846`, `ty2017_table:3042`. Both cited line numbers are wrong and "no other year" is false
+  by three. `validated_table_for` (`:221`) correspondingly has **four** arms, not one.
+  **The instrument itself is sound** — all four tables come from `testonly.rs` (the validated side), so it is
+  not a self-comparison; `validated_params_for` is genuinely 2024-only, and that is *fail-closed*, gated by
+  `every_shipped_year_has_a_validated_counterpart` (`:784`) via `years_without_validated_params` (`:250`),
+  which reds the day TY2026 params are bundled. So this is a comment defect, not a coverage gap.
+  ★ Its cost is measured: the Fable consult read this comment and reported the assurance surface as
+  single-year for *tables*. Describing code from its doc comment is the one thing `CLAUDE.md` forbids by
+  name, and a stale comment is how a careful reader gets talked into it.
+
+- **FR-161 — a carry rule for compute-side year-relative TEXT (~345 sentences). Important. Owning phase: AFTER the first TY2026 port — sized by a number the port produces.**
+  `line_coverage.rs:70 DEFAULT_ROW_YEAR = "2024"` (323 rows), `prompt_check.rs`'s 18 extract literals pinned
+  `--2025`, and `capital_loss_carryover.rs`'s *"your 2024 Form 1040"* ×4 each quote one year's booklet. The
+  `forms port` design's **P3** already has the mechanism — carry only if the sentence is byte-identical in the
+  new extract, else drop the quote and mark needs-transcription. **Do not build it before January:** the
+  sizing number (how many of the 323 change 2025→2026) does not exist until a booklet has been diffed; the
+  f8995a rehearsal saw 2 of 44. ★ **The NOW obligation is one sentence in the January brief, not code:** the
+  FR-135 ratchet may not be widened — a bundled year gets rows quoting its own booklet, or the form stays
+  `Unwired`. The ratchet's value is that the cheap discharge is loud. Same sentence for `prompt_check`'s 18:
+  those strings are shown immediately before an answer becomes sworn testimony, so a TY2026 filer shown
+  *"your 2024 Form 1040"* is FR-134's class on the input side.
+
+- **FR-162 — a revision axis for the compute-side transcription structs. Important. Owning phase: AFTER the first TY2026 port — DO NOT build it before.**
+  `printed.rs` (149 lineNN fields / 10 structs, FR-159), `Schedule1A`, `qbi.rs::Form8995Lines`,
+  `ScheduleALines.line17` are line-named and shared across 2017/2024/2025 with no `line_set`, while the forms
+  crate got `line_set` + `Schema`. The symmetric refactor is the obvious move and is the one this repo's
+  evidence says not to make on theory: the decision procedure exists on paper (`TY2026_PORT_REPORT.md` §3 —
+  arithmetic changed ⇒ params variant; printed number only ⇒ label row; collection surface ⇒ per-PART struct)
+  and has been exercised **once**, on `f6251/2025`, where it produced the 37→43 collision and took two review
+  rounds to hold by a type. S2 may turn two of the four TY2026 rebuilds into refusals. And it competes with
+  the January critical path. ★ **NOW obligation, free:** each rebuild brief states the rule and one
+  prohibition — a rebuilt PART gets a new per-revision struct, the shared struct is never edited in place,
+  and the selection lives on the year's params bundle (`SaltLimitation` is the exemplar, `tables.rs:323`).
+
+- **FR-163 — old years accumulate as a row in every glob-walking gate, forever. Minor. Owning phase: the week the TY2026 port CLOSES — a ruling, not a mechanism.**
+  By port 3 the bundle is 2024/2025/2026/2027/2028; every gate walks all of them and every tightening must
+  pass on every year's maps, while FR-153 shows old maps carry pinned transcription defects each tightening
+  steps around. TY2025 is load-bearing until the TY2026 port closes — it is the *prior* side of every
+  `form-delta` — and the prior side of nothing after it. ★ **Do NOT build a "frozen year" mechanism:**
+  `HARNESS.md`'s scope bound requires a mechanism be earned by an observed failure, and the observed cure is
+  S9 — a deletion, one ruling, suite green. The action is one line in the port runbook: *on closing a port,
+  ask which prior years are still read by anything, and rule.*
+
+- **FR-164 — make the tax year a REQUIRED argument through the oracle harness and the golden corpus. Important. Owning phase: NOW (Sep–Dec), BEFORE the January census.**
+  Measured 2026-09-13, all confirmed independently: `gen_goldens.py` has four `year: int = 2024` defaults
+  (`:262`, `:308`, `:337`, `:423`) plus a hardcoded `"tax_year": 2024` (`:618`); `ots_direct.py:79`
+  `OTS_YEAR` defaults to 2024; `verify_f6251.py:54` `DEFAULT_FIXTURE_YEAR = 2024` and **0 of 31 committed
+  vectors carry an explicit `year`** (`form6251_vectors.json`, all 31 ride the default); `sweep.py` pins
+  `OASDI_BASE = 168_600` and `STD_DEDUCTION_2024` at module level; `golden_returns.rs` takes
+  `ty2024_params`/`ty2024_table` at `:39`, `:87`, `:522`, `:596` and **never reads** the
+  `_provenance.tax_year` its one 227,699-byte goldens file already carries; `ty2024_params`/`ty2024_table`
+  have **354** references across `crates/` + `scripts/` against **4** for their TY2026 counterparts.
+  **Not a new instrument and not a refactor — a deletion of defaults**, plus one existing test reading one
+  field it already stores. The model is two files away: `corpus.py::salt_for(year)`, which refuses an unknown
+  year. B1's kill is a one-liner: feed the TY2024 corpus to TY2026 params ⇒ red.
+  **Why it cannot wait for the port to teach us:** the TY2026 census sits *after* the port on the calendar,
+  so "learn from the port" means "learn after the moment it mattered"; and it is the **evidence** layer, not
+  the form layer — the port teaches which lines moved, never whether the oracle ran on the year you think.
+  Under April pressure the fix that gets made is `= 2026`, which silently stops TY2024's validation and reds
+  nothing. §G-9 is the sharp form: an oracle fed the wrong year agrees with nothing, and two of them agreeing
+  is then diagnostic of nothing. ★ Fable's own falsifier was tested and **decided against itself**: it would
+  be a doc fix only if a committed driver named the year on every path with every vector carrying one —
+  0 of 31 do. `verify_f6251.py` is the *best* of the four (it threads `_year_of(v)` to both oracles at `:400`
+  and `:411`, prints the fixture years present, and year-keys each oracle's defect set), which is why its
+  default is the one that matters least; `gen_goldens.py` and `sweep.py` are where the year is genuinely
+  unstated.
+
 - **FR-152 — `census_join` anchors captions to ABSOLUTE line indices in a generated file. Minor. Owning phase: the port machine.**
   A4's 110 `# Regenerate:` header additions shifted every extract by a line, and `forms/2024/f1040s1.map.toml`'s
   `extract_line` anchors (11/15/58) had to move to 15/19/62 — an edit outside A4's ownership, reported rather
