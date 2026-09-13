@@ -8184,6 +8184,15 @@ build, each with an owning phase.
   them (drafts if that is what exists), and until then mark every TY2026 claim that cites them as
   unverified rather than carrying it forward as if read.
 
+  ★★ **AMENDED same day by the Schedule A recon, correcting ME:** I wrote above that TY2026 Schedule A's
+  §68 gate is *"unresolvable without the TY2026 1040."* **It is not.** The gate reads verbatim (`f1040sa--2026-DRAFT.txt:158`):
+  *"Is the amount on Form 1040 or 1040-SR, line 11b, minus the amounts on lines **13a and 13b** …"* — it
+  subtracts **both**, so it is **indifferent** to which of 13a/13b holds QBI and which holds Schedule 1-A.
+  The port report's D5, which says one draft is stale and that re-archiving `f1040--2026` unblocks this, is
+  wrong for the same reason. **Schedule A is not blocked on `f1040--2026`.** What IS still blocked: the two
+  worksheets, which live in `i1040gi--2026` / `i1040sca--2026` and land ~Jan 2027.
+
+
 - **FR-182 — ⚠️ OWNER RECONCILIATION. Retirement (T14) was CLOSED by owner ruling 2026-09-07; the owner asked for it again 2026-09-13. The REASON changed, not the facts. Owning phase: record before building.**
   `FOLLOWUPS.md:6542`: *"**T14 is CLOSED — not needed.** It was gated on 1099-R *or* SSA-1099 and the owner
   has ruled out both. No retirement screens, no Simplified Method worksheet, no Social Security Benefits
@@ -8225,6 +8234,64 @@ build, each with an owning phase.
   because it never ran over the region that mattered). **This blocks the retirement build rather than
   following it:** the new rows are otherwise unverifiable. Not yet independently reproduced by the
   controller — do that before acting.
+
+- **FR-185 — ★★ SIX line-number collisions on TY2026 Schedule A, on the form the owner's own return uses. Important (DORMANT until TY2026 is wired). Owning phase: the TY2026 port, and it is now the highest-value item in it.**
+  **Every line below verified by the controller against the text layer, both years, 2026-09-13.**
+  A shift-by-one cascade from line 13 onward. Each of these numbers carries a **different quantity** in
+  TY2026 — the Schedule 1-A 37→43 shape, six times in one form:
+
+  | line | TY2025 | TY2026 |
+  |---|---|---|
+  | 13 | *"Carryover from prior year"* | *"Enter the amount from line 6 of the **Charitable Contribution Limitation Worksheet**"* |
+  | 14 | *"Add lines 11 through 13"* | *"**Carryover from prior year**"* |
+  | 15 | Casualty and theft loss(es) | *"Add lines 13 and 14"* |
+  | 16 | *"Other—from list in instructions"* | Casualty and theft loss(es) |
+  | 17 | **the TOTAL** → *"enter this amount on Form 1040 … line 12e"* | *"Other itemized deductions"*, enumerated **17a–17h+** |
+  | 18 | ★ **a CHECKBOX** — *"If you elect to itemize … check this box"* | ★ **the TOTAL** |
+
+  ★★ **Line 18 is the worst shape available:** a boolean becomes a six-figure dollar amount. Any site
+  reading "Schedule A line 18" as a flag now names money.
+  ★ **The adverse one, in the UNDERSTATING direction:** `charitable.rs:32` and `:258` and
+  `return_1040.rs:3918` all document the prior-year carryover as **"Schedule A line 13"**. In TY2026 line 13
+  is the worksheet-limited **current-year gift total**, systematically larger, and the carryover moved to 14.
+  Reading 13 as the carryover therefore takes a bigger number as the carryover — a larger deduction, less
+  tax. **Understatement is the worse direction under this project's severity rule.**
+  Also reported and not yet controller-verified: a seventh reuse at **8d**, a silent formula change at **8e**,
+  the money-box count **25 → 37** (+12) with the full label set **28 → 41**, and **243** grep-matched prose
+  lines in `crates/` bucketed by cited number (1–12 safe; 13 and 17 are not).
+
+- **FR-186 — ★ the §68 gate's $384,350 is ALREADY in the codebase, as a different quantity. Important. Owning phase: with FR-185, before the gate is implemented.**
+  **Controller-verified.** `$384,350` appears at `tax_tables.rs:753` and `:812` and in `SPEC_tax_tables_2026.md`
+  as the **TY2026 MFS 37% bracket start** (= ½ of MFJ $768,700, §1(j)(2)(D)). The new Schedule A §68-style
+  gate uses the same numeral as a threshold **for every filing status**.
+  ★★ **So the trap is that the constant is already present and already correct — for something else.**
+  Implementing the gate by reading the bracket table gives a **Single** filer their own 37% start,
+  **$640,600**, and screens them **out** of a limitation the form screens them **into** — an understatement.
+  *Fix:* the gate needs its own `FullReturnParams` field (it has none today, and no §68 or charitable-floor
+  modelling exists anywhere in `crates/`). **It must never be read from the bracket table**, however
+  tempting the coincidence. `CLAUDE.md`: *compression always looks like good engineering; it is where the
+  bugs live.*
+
+- **FR-187 — the casualty line's ELIGIBILITY widened, not just its number. Minor, but a renumber-focused review skates past it. Owning phase: the TY2026 port.**
+  **Found by the controller while verifying FR-185**, and not in the source report. The casualty and theft
+  line moved 15 → 16 **and changed its text**: TY2025 reads *"from a **federally declared** disaster"*;
+  TY2026 reads *"from a **federally or state-declared** disaster"*. That is a **widening of who qualifies**,
+  carried inside a line that also moved — so a move table that records "15 → 16, same quantity" would be
+  right about the number and wrong about the rule. ★ The lesson generalises: when a line moves, diff its
+  TEXT too. The port machine compares field spellings and label positions; a changed *eligibility clause*
+  with an unchanged caption shape is invisible to both.
+
+- **FR-188 — `census_join.rs` grades Schedule A's direction against a corpus concatenating ALL years, keyed on caption alone. Important. Owning phase: before TY2026 Schedule A is wired.**
+  Reported at `census_join.rs:197-199` and not yet controller-reproduced. The consequence is precise and it
+  is the FR-114 shape: **once TY2026 is wired, the check validates against TY2025's retired sentence and
+  stays green.** An instrument that cannot tell one year's caption from another's is not checking the year
+  it claims to check. Reproduce, then plant a TY2025 sentence under a TY2026 row and watch it red (B1).
+
+- **FR-189 — `archive_drafts.py` structurally CANNOT fetch the two new worksheets. Minor. Owning phase: with FR-181.**
+  Reported: its `STEMS` derives from bundled **forms** only, and both new worksheets live in the
+  **instructions** (`i1040gi--2026`, `i1040sca--2026`). So the tool that exists to keep the archive current
+  cannot reach the two documents TY2026 Schedule A most needs. ★ Same family as FR-181 — the archive's
+  coverage is derived from the wrong set.
 
 - **FR-152 — `census_join` anchors captions to ABSOLUTE line indices in a generated file. Minor. Owning phase: the port machine.**
   A4's 110 `# Regenerate:` header additions shifted every extract by a line, and `forms/2024/f1040s1.map.toml`'s
