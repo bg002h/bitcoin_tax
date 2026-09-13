@@ -236,7 +236,7 @@ nature, manual today (no committed command does it). **H** = someone must read t
 
 | # | step | tag | today |
 |---|---|---|---|
-| 1 | Decide the year's form list: does this stem exist for this year, under this name? | **H** | `f1040s1a--2024` correctly does not exist (Pub. L. 119-21); `f8275` → `f8275r` for 2025. Only the IRS page distinguishes a gap from a rename |
+| 1 | Decide the year's form list: does this stem exist for this year, under this name? | **H** | `f1040s1a--2024` correctly does not exist (Pub. L. 119-21); `f8275` → `f8275r` for 2025. Only the IRS page distinguishes a gap from a rename. **★ See the correction after this table (FR-149).** |
 | 2 | Fetch the authority PDF — `irs-prior/{stem}--{year}.pdf` | **M\*** | no committed script; `archive_drafts.py` covers drafts only |
 | 3 | Write the `.pdf.txt` provenance note (URL, sha256, bytes) | **M\*** | hand-written; format fixed by `design/forms/README.md` |
 | 4 | Add/refresh the `MANIFEST.json` entry | **M** | `xtask authority-manifest --regenerate` |
@@ -246,8 +246,8 @@ nature, manual today (no committed command does it). **H** = someone must read t
 | 8 | Hash the extract **into** the manifest | **M\*** | absent — §2.2 |
 | 9 | Generate the geometry fixture | **M** | `xtask extract-geometry` — **broken on drafts**, §2.1 #1 |
 | 10 | Assert `geometry.pdf_sha256 == MANIFEST.sha256` | **M\*** | 48/48 hold; no test says so |
-| 11 | Copy the PDF byte-for-byte to `crates/btctax-forms/forms/{year}/{crate_stem}.pdf` | **M** | needs a 2-row alias table (`f1040sd`→`schedule_d`, `f1040sse`→`schedule_se`) |
-| 12 | Dump the AcroForm field inventory | **M** | `xtask dump-fields` |
+| 11 | Copy the PDF byte-for-byte to `crates/btctax-forms/forms/{year}/{crate_stem}.pdf` | **M** | needs a 2-row alias table (`f1040sd`→`schedule_d`, `f1040sse`→`schedule_se`). **★ See the correction after this table (FR-145): steps 11 through 21/22 are one atomic commit.** |
+| 12 | Dump the AcroForm field inventory | **M** | `xtask dump-fields`. **★ See the correction after this table (FR-137): step 12 cannot run right after step 11.** |
 | 13 | Prior-year delta on **both** axes (names, line bindings) | **M** | `xtask form-delta` — label axis blind on drafts, §2.1 #2 |
 | 14 | Enumerate the printed line set **from the extract** | **M** | `xtask label-census` |
 | 15 | Join line → field with both witnesses, flag every disagreement | **M** | `label_reader.rs`; agreement is machine-checkable |
@@ -260,6 +260,42 @@ nature, manual today (no committed command does it). **H** = someone must read t
 | 22 | Emit the five code bindings | **M\*** | `include_bytes!`, `*_pdf` arm, `include_str!`, `tyYYYY()`, `for_year` arm — **85 hand-edits for a 17-form year** |
 | 23 | Run the gates: map ⊆ PDF, census union, doc ⊆ extract, geometry-sha = manifest-sha, `*_pdf`/`for_year` year-sets identical | **M** | **1 of 5 is year-generic today** (`map_pdf_conformance.rs`) |
 | 24 | **Decide whether a line's MEANING changed while its number did not**, and whether that puts the year out of scope | **M** for form text (pass P3's `diff -b` of each line's printed text) and for every quoted instruction sentence (`Coverage::quoting(year)` re-verifies each `LineCoverage.instruction` against the new extract and REDS on a carried-forward sentence); **H** only for the residual — instruction-booklet predicates no row quotes yet (who-must-file tests, worksheet definitions, thresholds that live only in the booklet) | the residual is narrower than "a meaning axis" and the build-order item is to widen `LineCoverage` rows to those predicates, not to build a separate meaning tool (Fable plan review I6) |
+
+**★ Corrections from the port rehearsal (2026-09-12) — FR-137, FR-145, FR-149.** The table above is
+left as originally written; these are additions, found by rehearsing a real port end to end
+(`design/agent-reports/REPORT-rehearse-port-f8995a-2025.md`, persisted `9b60f3ef`, §3 steps 1/11/12 and
+§4 findings F1/F11/F15) and filed in `FOLLOWUPS.md`.
+
+- **FR-149 (rehearsal F15) — step 1's real output is `forms/<year>/YEAR.toml`, and it is not named
+  above.** Verified directly in this tree: `crates/btctax-forms/forms/2025/YEAR.toml` carries
+  `forms_expected` and `[forms_absent]` (design r2 §6), and `f8995a` is listed under `[forms_absent]`
+  for TY2025 today, with the reason *"not ported to TY2025 (Form 8995-A Rev. 2025 map not yet
+  transcribed)"*. Porting a form the year currently declares absent needs the stem moved out of
+  `forms_absent` and into `forms_expected` — no step above says so — or two tests red:
+  `tests/year_record.rs` names the exact contradiction (`year_record.rs:170-173`, verified read in
+  full: *"{year}: {stem} is bundled but not expected (and declared ABSENT — a contradiction)"*), and
+  `field_census.rs::every_emittable_form_is_reached_by_the_gate_or_named_absent` reds separately with
+  *"{year}: recorded absent {...}, measured absent {...}"* because the stem is now on disk but still
+  keyed in `[forms_absent]`.
+
+- **FR-137 (rehearsal F1) — step 12 cannot run immediately after step 11; the dependency order
+  deadlocks.** Verified directly in this tree: `crates/btctax-forms/build.rs` panics when a year
+  directory holds a `.pdf` with no matching `.map.toml` — *"a template without a map (or a map without
+  a template) is a form the crate would list and could not fill. Location is status: both files, or
+  neither"* (`build.rs:104-109`, read in full) — and `crates/xtask/Cargo.toml:19` depends on
+  `btctax-forms`, so that panic fails `xtask`'s own build. `dump-fields` cannot run at all in the
+  window between step 11's copy and step 21's finished map. *Fix:* dump fields from the authority PDF
+  at `design/forms/<year>/<stem>--<year>.pdf` instead — before step 11's copy — or reorder step 12
+  ahead of step 11.
+
+- **FR-145 (rehearsal F11) — steps 11 through 21 (through 22 for a genuinely new `line_set`/`schema()`
+  arm) are one atomic commit, and the table does not say so.** From the moment step 11 copies the
+  template PDF into `crates/btctax-forms/forms/<year>/` until step 21's `.map.toml` lands beside it,
+  the workspace does not build — the same `build.rs` panic as FR-137, the mirror case (`.pdf` present,
+  `.map.toml` absent). A porter who commits partway through (for instance, to checkpoint after step
+  15's line-to-field join) leaves that commit unbuildable. `forms port` (§4 below) is meant to write
+  the template and the map together for exactly this reason; until it exists, treat steps 11–21 as a
+  single unit of work landing in one commit.
 
 **The honest ceiling: 8 of 24 steps require someone to read a form** (1, 5, 16, 17, 19, 20, 21, 24),
 and they are load-bearing — steps 16, 17 and 24 are precisely where this repo's year-port defects

@@ -63,12 +63,57 @@ from collections import Counter
 UA = "btctax-archiver/0.19 (US federal tax form archival; +https://github.com/bg002h/bitcoin_tax)"
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-# The stems btctax emits or reads, in IRS draft-URL spelling.
-STEMS = [
-    "f1040", "f1040s1", "f1040s1a", "f1040s2", "f1040s3",
-    "f1040sa", "f1040sb", "f1040sc", "f1040sd", "f1040sse",
-    "f6251", "f8275", "f8283", "f8949", "f8959", "f8960", "f8995", "f8995a",
-]
+# ★★★ FR-144 / rehearsal F9 — this used to be a hand-typed list of 18. `Stem::ALL`
+# (`crates/btctax-forms/src/bundled.rs`) had grown to 21 forms and the list never noticed, so
+# Form 1040-V, Form 4868 and Form 8889 were silently NEVER fetched by the draft archiver — a
+# list that is too short does not error, it just does less (CLAUDE.md, "derive the list, or
+# make the compiler hold it").
+#
+# Rather than parse the Rust enum — fragile, since it is hand-formatted source rather than a
+# generated artifact — this reads the SAME glob `crates/btctax-forms/build.rs` reads to build
+# `Stem` in the first place. A `.map.toml` with no matching `Stem` variant fails the Rust build
+# (`build.rs`'s own doc comment: "a stem with no variant makes the generated code fail to
+# compile"), so this glob and `Stem::ALL` cannot silently diverge — the glob is a safe PROXY for
+# the enum's set, not a second independent guess at it, and it needs no Rust parser.
+FORMS_GLOB_ROOT = ROOT / "crates" / "btctax-forms" / "forms"
+
+# Two crate stems are spelled for readability rather than matching the bare IRS number
+# (`Stem::file_stem` vs. the IRS's own `f1040sd--dft.pdf` / `f1040sse--dft.pdf`); every OTHER
+# stem already IS its own IRS draft-URL spelling. This table is exhaustive BY CONSTRUCTION:
+# `draft_stems` refuses (rather than silently building a URL that cannot exist) if a stem is
+# left with an underscore after translation — see the guard below.
+IRS_SPELLING = {"schedule_d": "f1040sd", "schedule_se": "f1040sse"}
+
+
+def draft_stems(forms_root: pathlib.Path | None = None) -> list[str]:
+    """The stems this product bundles, in IRS draft-URL spelling — DERIVED from disk.
+
+    Enumerates `<forms_root>/*/*.map.toml` (default `crates/btctax-forms/forms/`), the same
+    glob that authors `Stem` (see the comment above `FORMS_GLOB_ROOT`), and translates each
+    crate stem to its IRS draft-URL spelling via `IRS_SPELLING`. A stem present under ANY
+    bundled year counts once, sorted, so the fetch order is stable and reviewable.
+    """
+    seen = {p.name[: -len(".map.toml")] for p in (forms_root or FORMS_GLOB_ROOT).glob("*/*.map.toml")}
+    if not seen:
+        raise AssertionError(
+            f"no *.map.toml under {forms_root or FORMS_GLOB_ROOT} — the glob that is supposed "
+            f"to derive STEMS is not finding the bundled forms at all"
+        )
+    stems = []
+    for stem in sorted(seen):
+        irs = IRS_SPELLING.get(stem, stem)
+        if "_" in irs:
+            raise AssertionError(
+                f"crate stem {stem!r} has no entry in IRS_SPELLING and still contains '_' after "
+                f"translation — a real IRS draft URL never does; add its translation instead of "
+                f"silently fetching a URL that cannot exist"
+            )
+        stems.append(irs)
+    return stems
+
+
+# The stems btctax emits or reads, in IRS draft-URL spelling. DERIVED — see `draft_stems` above.
+STEMS = draft_stems()
 
 # A BARE year token — no comma, no period, no closing paren. That is what the masthead year box
 # contains and what nothing else on an IRS form does; see the module docstring.
@@ -663,6 +708,119 @@ def _end_to_end_kill() -> list[str]:
     return fails
 
 
+def _stems_derivation_kill() -> list[str]:
+    """★★★ THE B1 KILL for FR-144 (F9) — `STEMS` used to be a hand-typed list that fell behind.
+
+    Four rows, each the actual mechanism of the defect this replaced, never a synthetic stand-in:
+
+      0. HISTORICAL REPRODUCTION. The hand-typed list this script shipped with (frozen here
+         verbatim from the commit that filed FR-144) is checked against `draft_stems()` run over
+         the REAL, current `crates/btctax-forms/forms/`. It must be a proper subset missing
+         EXACTLY `f1040v`, `f4868`, `f8889` — the three forms the rehearsal found silently never
+         fetched. If this row ever finds the hand-typed list already caught up, or missing a
+         DIFFERENT set, that itself is news (`Stem::ALL` moved again); it must never silently
+         pass either way.
+      1. WIDENING. A stem added to a scratch copy of the forms tree appears in `draft_stems()` —
+         proving the list actually reads the disk and is not a snapshot wearing a function's
+         clothes.
+      2. NARROWING. A stem removed likewise disappears.
+      3. THE TRANSLATION GUARD. A stem needing IRS-spelling translation that is NOT in
+         `IRS_SPELLING` must refuse rather than silently emit a URL with an underscore in it
+         (`f1040sd--dft.pdf` exists; `some_new_form--dft.pdf` cannot).
+
+    Nothing here touches `crates/btctax-forms/forms/` — rows 1-3 build a scratch copy in a temp
+    directory (same shape: `<root>/<year>/<stem>.map.toml`), because manufacturing a phantom form
+    inside the real bundled-forms tree is the very thing a derived-from-disk list must never do to
+    itself.
+    """
+    import tempfile
+
+    fails = []
+
+    # 0. Historical reproduction — the exact list this file shipped with before the fix.
+    old_hand_typed = [
+        "f1040", "f1040s1", "f1040s1a", "f1040s2", "f1040s3",
+        "f1040sa", "f1040sb", "f1040sc", "f1040sd", "f1040sse",
+        "f6251", "f8275", "f8283", "f8949", "f8959", "f8960", "f8995", "f8995a",
+    ]
+    current = draft_stems()
+    missing_from_old = sorted(set(current) - set(old_hand_typed))
+    extra_in_old = sorted(set(old_hand_typed) - set(current))
+    if extra_in_old:
+        fails.append(
+            f"stems derivation kill: the old hand-typed list names stems `draft_stems()` no "
+            f"longer produces — {extra_in_old} — a bundled form was REMOVED and the derivation "
+            f"did not notice; investigate before trusting this row"
+        )
+    if missing_from_old != ["f1040v", "f4868", "f8889"]:
+        fails.append(
+            f"stems derivation kill: expected the hand-typed list to be missing exactly "
+            f"['f1040v', 'f4868', 'f8889'] against today's bundled forms, got {missing_from_old} "
+            f"— `Stem::ALL` has moved again since FR-144 was filed; re-baseline this row rather "
+            f"than trust it silently"
+        )
+    for stem in ("f1040v", "f4868", "f8889"):
+        if stem not in current:
+            fails.append(
+                f"stems derivation kill FAILED: {stem!r} is STILL not fetched — the FR-144 fix "
+                f"did not close the gap it exists to close"
+            )
+
+    # 1-3. Synthetic plants over a scratch forms tree — never the real one.
+    with tempfile.TemporaryDirectory() as d:
+        root = pathlib.Path(d)
+        year_dir = root / "2025"
+        year_dir.mkdir()
+        for stem in ("f1040", "f8889"):
+            (year_dir / f"{stem}.map.toml").write_text("# scratch fixture\n")
+
+        base = set(draft_stems(root))
+        if base != {"f1040", "f8889"}:
+            fails.append(
+                f"stems derivation kill: a scratch tree with exactly f1040 and f8889 map.toml "
+                f"files produced {sorted(base)} — the glob is not reading what was planted"
+            )
+
+        # 1. WIDENING — add a new stem, it must appear.
+        (year_dir / "f9999.map.toml").write_text("# scratch fixture — a form added tomorrow\n")
+        widened = set(draft_stems(root))
+        if "f9999" not in widened:
+            fails.append(
+                "stems derivation kill FAILED (widening): adding f9999.map.toml to the scratch "
+                "tree did not add f9999 to draft_stems() — the list is not actually reading the "
+                "disk, which is the exact shape of the FR-144 defect reintroduced"
+            )
+
+        # 2. NARROWING — remove a stem, it must disappear.
+        (year_dir / "f1040.map.toml").unlink()
+        narrowed = set(draft_stems(root))
+        if "f1040" in narrowed:
+            fails.append(
+                "stems derivation kill FAILED (narrowing): deleting f1040.map.toml from the "
+                "scratch tree left f1040 in draft_stems() — a stale cache or hardcoded fallback "
+                "is in play"
+            )
+
+        # 3. THE TRANSLATION GUARD — an untranslated underscored stem must refuse, not fetch a
+        #    URL that cannot exist.
+        (year_dir / "some_new_schedule.map.toml").write_text("# scratch fixture — untranslated\n")
+        try:
+            draft_stems(root)
+            fails.append(
+                "stems derivation kill FAILED (translation guard): a stem with '_' and no "
+                "IRS_SPELLING entry ('some_new_schedule') was accepted rather than refused — "
+                "the archiver would fetch a URL that cannot exist and call it ABSENT, never "
+                "naming the real cause"
+            )
+        except AssertionError as e:
+            if "some_new_schedule" not in str(e):
+                fails.append(
+                    f"stems derivation kill: refused for the wrong reason — {e}"
+                )
+
+    return fails
+
+
 def self_test() -> int:
     print("  reader kills ...")
     fails = _reader_kills()
@@ -671,6 +829,10 @@ def self_test() -> int:
     d = _decision_kills()
     print(f"    {'FAIL' if d else 'ok'} — 8 rows")
     fails += d
+    print("  stems derivation kill (FR-144 / F9) ...")
+    sd = _stems_derivation_kill()
+    print(f"    {'FAIL' if sd else 'ok'} — 4 rows (history / widen / narrow / translation guard)")
+    fails += sd
     print("  end-to-end kill on a real document ...")
     e2e = _end_to_end_kill()
     print(f"    {'FAIL' if e2e else 'ok'} — 2 rows")

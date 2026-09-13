@@ -88,6 +88,29 @@ the header records what the document IS (its revision); the match records what p
 Deciding the other way — one `line_set` per struct — would erase the renumber the field exists to
 name.
 
+**★ CORRECTED (FR-151, rehearsal F18, 2026-09-12).** The header comment three paragraphs above reads
+*"constants-only year ⇒ same `line_set`; renumber ⇒ new one"* — read literally, a constants-only year
+should REUSE the prior year's `line_set` string. That contradicts the paragraph directly above (every
+one of the 15 maps gets its OWN per-year `line_set`, including the ones sharing a struct) and the
+built system, measured directly rather than trusted from the rehearsal's account of it:
+`grep '^line_set' crates/btctax-forms/forms/*/*.map.toml` returns **38** rows today, and not one of
+them repeats a prior year's string — `f8959/2025`, `f8995/2025` and 14 more of the 18 TY2025 rows
+resolve through §5's `schema()` match to the **identical** struct their TY2024 counterpart does
+(constants-only, by this document's own definition) and still mint their own `<stem>/2025` string
+rather than carrying `.../2024` forward (`crates/btctax-forms/src/line_set.rs::schema()`, read in
+full: of 18 `_2025` arms, 16 resolve to the same `Schema` variant as their `_2024` counterpart,
+`F1040s1a_2025` is `Unwired`, and `F6251_2025` alone resolves to a *different* struct,
+`Form6251ObbbaMap`, for the genuine renumber). **The comment's premise — that a constants-only year
+ever reuses a `line_set` string — has zero instances**, so this is resolved from the section's own
+text and the tree, not left as an open question: `line_set` is minted per year, always, exactly as
+every map on disk already does; what "constants-only" versus "renumber" actually decides is which
+`schema()` arm the newly-minted `line_set` resolves to — the SAME struct (constants-only, or a
+renumber the existing struct absorbs via `Option`/`#[serde(default)]`, e.g. `Form1040Map`'s three
+revisions above) or a NEW struct (a renumber the existing struct's shape cannot express, e.g.
+`F6251_2025` → `Form6251ObbbaMap`). The header comment's *"same line_set"* clause should read *"same
+`schema()` arm"* — a one-line edit, owned wherever the rest of §4's header text is (the port machine,
+§10, when it exists).
+
 **Derived by convention, never stored:** the form extract `design/forms/extract/<irs_stem>--<year>.txt`,
 the instructions extract `<instructions>--<year>.txt`, the geometry `design/forms/geometry/<irs_stem>--<year>.json`,
 the census (the `[census]` table in the same file). A stored path is a second copy of the truth.
@@ -209,8 +232,38 @@ witness) · `forms_expected` == present ∪ absent-with-reason · every `Stem` h
 | `selected_year: 2025` × 2 | derived from `YearReadiness` |
 | 16 attachment-sequence literals | the header field, checked against the extract (the 1040 has none). Step 1 collapsed the literals into one `packet::attachment_sequence(stem, year)` held to every row by test; it retires into the row at step 3 |
 | `cite_check.rs::FORMS` (`FormAuthority { form, year, instructions, instr_pages, extract_stem }`, **five rows** as of 2026-09-06; one when this was written) | `instructions` / `instr_pages` header fields. ★ Its `extract_stem` points at a SECOND extract root, `crates/btctax-core/src/tax/fixtures/` (`schedule_1a_2025_form.txt`, `schedule_1a_2025_instructions.txt`), which §4's derive-by-convention rule cannot express. Decision (corrected, fold review r2 G3): the two fixtures are a SECOND EXTRACTION of files already under the convention — `f1040s1a--2025.txt` (11,153 B vs the fixture's 11,443 B) and pages 101–110 of `i1040gi--2025.txt` (the fixture is a 52,672 B slice; the booklet extract is 616,274 B). **Nothing moves**: a `mv` would clobber the booklet extract every other i1040gi-hosted schedule's gate reads, and pointing `tables.rs:1351,1365` at `design/` would make two escaping `include_str!`s — §5's publishing trap. The instructions fixture is regenerated at test time from the booklet extract using the header's `instr_pages`; the form fixture is replaced by `f1040s1a--2025.txt` **once a test asserts every `FORMS` quotation still resolves against it** (the two extractions differ by 290 B). Both are then deleted; until then the header carries `extract_override = "…"` and the ratchet below keeps its row (fold review F2) |
-| `cite_check.rs::AUTHORITY_NOT_YET_ARCHIVED` (shrink-only, `(form, years)`, **31 of 36** pairs excused as of 2026-09-06 — was 36 of 37 when this was written; S9 dropped the five TY2017 pairs and residue sweep 1 archived + extracted the four Form 4868 / Form 1040-V pairs) | This is a DIFFERENT "archived" from the manifest join: it means "no `FormAuthority` row + extract for cite-check", and it retires as map headers gain `instructions`/extract coverage. The MANIFEST join (`template_sha256`) is the other notion and reds today on exactly **6 of 37** templates — all five TY2017 and `forms/2024/f8283.pdf` (measured by sha256 join, fold review F7) — so the header gets `authority = "not-yet-archived: <reason>"` for those six, and the join kill treats that field as the excuse. Two of the six ride on the open TY2017 decision |
+| `cite_check.rs::AUTHORITY_NOT_YET_ARCHIVED` (shrink-only, `(form, years)`, **31 of 36** pairs excused as of 2026-09-06 — was 36 of 37 when this was written; S9 dropped the five TY2017 pairs and residue sweep 1 archived + extracted the four Form 4868 / Form 1040-V pairs) | This is a DIFFERENT "archived" from the manifest join: it means "no `FormAuthority` row + extract for cite-check", and it retires as map headers gain `instructions`/extract coverage. The MANIFEST join (`template_sha256`) is the other notion and reds today on exactly **6 of 37** templates — all five TY2017 and `forms/2024/f8283.pdf` (measured by sha256 join, fold review F7) — so the header gets `authority = "not-yet-archived: <reason>"` for those six, and the join kill treats that field as the excuse. Two of the six ride on the open TY2017 decision. **★ FORWARD-LOOKING NOTE pending agent A3's integration — see below.** |
 | `BundledFullReturnTables` 2024-only | **untouched** — it is the compute gate; `YEAR.toml` `status` declares, it decides |
+
+**★ FORWARD-LOOKING (pending integration — not yet in this tree as of 2026-09-12).** Agent A3, working
+in its own isolated worktree on FR-138/FR-150 (`crates/xtask/src/cite_check.rs`,
+`crates/xtask/src/archive_check.rs`), reports that its rewrite collapses the two notions of "archived"
+the row above still describes — the cite-check `FORMS`-row notion, and the MANIFEST `template_sha256`
+join two sentences later — into one. **I could not verify this against A3's diff**: it is not present
+in this isolated worktree, and no `design/agent-reports/REPORT-A3-*.md` exists here to read. I have not
+guessed at what the unified wording is or which sentence survives — that would be inventing the fold
+A3 is responsible for. **Coordinator, at integration:** re-read the row above against A3's merged
+`cite_check.rs`/`archive_check.rs`; if the two notions have genuinely become one (e.g. both keyed off
+the same predicate, field, or function), replace *"This is a DIFFERENT 'archived' … is the other
+notion"* with a single description and remove this note; if A3's collapse is partial, or scoped
+differently than described here, leave this note in place and record why in the fold commit.
+
+**★ FORWARD-LOOKING (pending integration — not yet in this tree as of 2026-09-12).** Agent A2, working
+on FR-141/FR-146 (`crates/btctax-forms/build.rs`, `src/line_set.rs`, `src/f6251_revision.rs` — the
+rehearsal's F10: 4 of `line_set.rs`'s 5 per-port edits — the `LineSet` variant, `parse` arm, `as_str`
+arm and `ALL` entry — are pure transcription of the map header's own `line_set` string and can be
+generated by `build.rs`, the way `bundled.rs`'s `Stem` enum already is per §5; only `schema()` encodes
+a decision), reports **one** sentence in §9 or §10 of this file goes stale as a result, without naming
+which. **I could not identify it with certainty without A2's diff** — not present here, and no
+`design/agent-reports/REPORT-A2-*.md` exists in this tree yet. The most likely candidate, by my own
+reading: §10 step 3's *"`LineSet` (37) / `Schema` (17 + `Unwired`) / the exhaustive `schema()` match"*
+describes `LineSet`'s variants as a hand-maintained enum, parallel to `SUPPORTED_YEARS` (named two
+sentences later as a deleted hand-list) — once `LineSet`'s boilerplate is `build.rs`-generated, that
+framing is stale. A second candidate: the hand-lists table above has no row naming `LineSet` itself,
+which would need one once it moves from hand to generated. **I am not asserting either is the one A2
+means** — describing the ambiguity rather than guessing, per this dispatch's own instruction.
+**Coordinator, at integration:** read A2's diff and this file together, confirm which (if either)
+matches, correct the actual sentence, and remove this note.
 
 ## 10. Sequencing — proof before switch
 

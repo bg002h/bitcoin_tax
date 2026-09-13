@@ -647,6 +647,16 @@ mod tests {
     /// Build `xtask` if no binary is where `on-write.sh` looks for it, so the hook's authoritative
     /// branch can actually run. Establishing the precondition is the test's job — the alternative is
     /// what shipped: a silent dependence on whatever happens to be in `target/`.
+    ///
+    /// ★ **Must not inherit an ambient `CARGO_TARGET_DIR`.** `on-write.sh` hardcodes
+    /// `$ROOT/target/{debug,release}/xtask` — it has no override, by design (a hook script reading an
+    /// env var an attacker's shell could also set is a weaker check, and it is not this test's file to
+    /// change). The review workflow mandates a `CARGO_TARGET_DIR` override per worktree so builds don't
+    /// collide; left inherited, the `cargo build` below would compile into the override directory while
+    /// this function keeps asserting the default one, and the assert below would fail even though the
+    /// build genuinely succeeded (observed: FR-147 / rehearsal F13). Clearing it for just this child
+    /// process is what makes "the test's precondition" and "the hook's lookup" name the same path again,
+    /// with no change to what the hook itself does.
     #[cfg(unix)]
     fn ensure_xtask_binary() {
         let root = repo_root();
@@ -656,6 +666,7 @@ mod tests {
         let st = Command::new(env!("CARGO"))
             .args(["build", "-p", "xtask"])
             .current_dir(&root)
+            .env_remove("CARGO_TARGET_DIR")
             .status()
             .expect("spawn cargo build -p xtask");
         assert!(
