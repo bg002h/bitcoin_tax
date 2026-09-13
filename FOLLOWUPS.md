@@ -8446,6 +8446,49 @@ build, each with an owning phase.
   reliably and diagnoses causes unreliably**, since the walker sees the outside. Fold the walls; re-derive
   every cause.
 
+- **★★★ OWNER RULINGS 2026-09-13 — S1/S2/S7/S8, and one that VOIDS S2's premise. Recorded verbatim; nothing below is re-litigated.**
+
+  **S2 — RULED, and it inverts the item.** Asked which scenarios apply to them, the owner answered:
+  > *"The correct question isn't whether it applies to me but whether we want to support the tax scenarios
+  > or not. The answer is yes, **support all**."*
+  ★★ **S2 was written to SHRINK the build list** — *"forms outside it become refusals with kills instead of
+  transcriptions … a W-2 filer's critical path is ~6 forms after finals, not 17."* **That premise is now
+  void.** The target is breadth, not the owner's own profile. This retroactively justifies the same day's
+  Phase 6 choice (retirement before EITC) and FR-182's reconciliation: work is wanted for **future filers**,
+  not only for the first filed return. ★ Every future scoping decision must stop citing "not on the owner's
+  return" as a reason to skip.
+
+  **The owner's profile, as far as it was stated** (shape only, no figures, nothing sensitive recorded):
+  W-2 wages + Bitcoin dispositions + **itemized** Schedule A; **interest/dividends over $1,500** (Schedule B
+  required — already built); a **community-property state that DOES tax income**; **no** Schedule C or
+  self-employment; **no** retirement distributions; and **all three** OBBBA categories are to be supported.
+
+  ★★★ **The one item with an EXTERNAL clock, and it is the owner's action, not the software's:**
+  a **Bitcoin charitable gift over $5,000** requires **Form 8283 SECTION B**, which requires a **QUALIFIED
+  APPRAISAL obtained BEFORE the return is filed.** No code change substitutes for a missing appraisal. Raised
+  with the owner 2026-09-13.
+
+  ★ **FR-196 IS LIVE FOR THE OWNER.** Their state taxes income and they itemize, so in any year a state
+  income-tax refund arrives, btctax refuses the whole return (`StateAndLocalRefundWorksheetNotComputed`).
+  That moves the §111(a) tax-benefit-rule worksheet from a someday item onto the January candidate list.
+  ★ And community property (FR-178) bites **only on MFS** — it is not live for a joint or single filer, so it
+  stays breadth work rather than a personal blocker.
+
+  **S1 — DEFERRED** ("Defer for now"). The never-mailed TY2025 rehearsal is not cancelled, only deferred; it
+  remains the only answer key that is the owner's own profile, signed, and available before January.
+
+  **S7 — RULED AS PROPOSED.** If OTS-2026 is absent or disqualified on a line by **2027-03-15** → file the
+  extension. By **2027-09-15**, the evidence sufficient to SIGN without it is **taxcalc 6.8.2 + the S1
+  rehearsal diff + the owner's hand-worked Form 6251 and Schedule 1-A on the official worksheets.**
+  ★ **Stated at the time of ruling and recorded so it is not forgotten:** that evidence has three legs and
+  one of them is **S1, which is deferred.** If S1 has not happened by 2027-09-15 the fallback stands on two
+  legs, not three. Either S1 gets un-deferred before then, or the ruling is knowingly narrower than written.
+
+  **S8 — ACCEPTED, owner prints.** btctax generates a packet with synthetic figures; the owner prints it on
+  real paper and reports what is wrong — box fit, margins, clipping, legibility, page order. ★ Worth doing
+  first because it needs nothing built: the TY2024 packet already prints, and **printer-and-paper defects are
+  invisible to every test this project owns**, all of which check bytes.
+
 - **FR-152 — `census_join` anchors captions to ABSOLUTE line indices in a generated file. Minor. Owning phase: the port machine.**
   A4's 110 `# Regenerate:` header additions shifted every extract by a line, and `forms/2024/f1040s1.map.toml`'s
   `extract_line` anchors (11/15/58) had to move to 15/19/62 — an edit outside A4's ownership, reported rather
