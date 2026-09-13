@@ -7807,3 +7807,62 @@ build, each with an owning phase.
   `::the_full_return_8949_groups_its_parts_and_conserves_every_row`), so a divergence reds. The real
   fix is one paginator over a row trait (or a shared `fn pages<T: HasBox>`), which is a refactor of a
   FILED form's page composition and therefore not something to bundle into a Nit-grade UX item.
+
+## From the f8995a/2025 PORT REHEARSAL (2026-09-12) — 18 findings, none of them shipped code
+
+The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test design r2 §10's 24-step runbook, then discarded the port. Full measurements, the per-step verdict table and step 22's arithmetic are in `design/agent-reports/REPORT-rehearse-port-f8995a-2025.md` (persisted `9b60f3ef`). **No product code changed**; these are findings about the MACHINERY and the RUNBOOK.
+
+- **FR-134 — the doc-comment-against-extract gate is NOT year-generic, so a stale instruction quote in a new year's map is invisible. Important. Owning phase: NOW — before any TY2026 map is written.** (rehearsal F2)
+  ★★★ The rehearsal's worst finding, and controller-verified. A TY2025 map whose line-21 doc comment quotes the **TY2024** thresholds (*"Enter $191,950 ($383,900 if married filing jointly)"*) passes **3,614 of 3,614 tests** — planted, measured, restored. Mechanism: `line_coverage_check.rs:1067` builds the extract path from the coverage entry's **own declared year** (`format!("{}--{}", e.form, e.year)`), and porting a form means copying its block, which still says 2024. This is the **Form 6251 line-33 class** — a carried-forward sentence — introduced at the exact moment of a port with nothing looking. *Fix:* one glob-walking test that, for every `.map.toml` on disk, re-runs caption extraction against `design/forms/extract/<irs_stem>--<year>.txt`.
+
+- **FR-135 — `LineCoverage`'s quoting year is a literal per block, so a new year re-verifies nothing. Important. Owning phase: the port machine / step-24 widening.** (rehearsal F3)
+  Controller-verified: **26 blocks are `Coverage::quoting("2024")` against 2 quoting `"2025"`**. The instrument is not blind — re-pointing f8995a's three at 2025 named exactly the two lines that changed — but nothing forces the re-point. *Fix:* derive the quoting year from the revision being described, or at minimum assert every bundled year has rows quoting it.
+
+- **FR-136 — a B1 kill-test's planted defect is keyed to a form that HAPPENS to be absent, so porting that form destroys the kill. Important. Owning phase: NOW — it bites on every port.** (rehearsal F4)
+  ★★ `year_record::a_phantom_expected_form_and_an_undeclared_bundled_form_are_both_reported` plants `"f8995a"` into TY2025's `forms_expected`; controller-verified that `form_delta.rs:698-710` likewise asserts *"the plant assumes f8995a has NO 2017 prior side and a 2026 draft"*. Supply the form and the kill evaporates — and **when a year is complete there is no absent stem left to plant with.** *Fix:* plant by REMOVING a stem from the measured `present` list, never by naming a form that is absent today. This is `CLAUDE.md`'s *"typed list beside a set that grows"* applied to an instrument's own PLANT, which is a shape the harness does not yet name.
+
+- **FR-137 — runbook step 12 cannot follow step 11 — the dependency order deadlocks. Important. Owning phase: the port machine (`forms port`).** (rehearsal F1)
+  `build.rs` panics on a bundled template with no map, which breaks `btctax-forms`, which `xtask` depends on — so `cargo run -p xtask -- dump-fields` exits **101** after step 11's copy. *Fix:* dump fields from `design/forms/<year>/<stem>--<year>.pdf` instead (what the rehearsal did), and say so in the step; or have `forms port` dump before the copy.
+
+- **FR-138 — a fully archived form-year still cannot satisfy `authority_coverage_may_only_improve`, and the only cheap discharge is a FALSE statement. Important. Owning phase: design r2 §9 / the port machine.** (rehearsal F5)
+  `archived_form_years()` counts a `(form, year)` as archived only if `cite_check::FORMS` has a row AND a duplicate extract pair exists under a second root. So a genuinely archived document must be described as `"not-yet-archived: …"` to keep the ratchet green — a gate whose cheapest discharge is writing something untrue about a document that exists. *Fix:* have the ratchet read the `design/forms/extract/` convention the manifest join already reads, and retire the second root.
+
+- **FR-139 — runbook step 4 is tagged M and is not executable in the repo's own isolated-worktree workflow. Important. Owning phase: the port machine (`forms fetch`).** (rehearsal F6)
+  `xtask authority-manifest --regen` refuses — correctly and loudly, naming 124 documents — in any tree lacking every gitignored authority PDF, which is every isolated worktree. *Fix:* `forms fetch --restore`, reading each note's URL and sha256; the notes already carry exactly that data.
+
+- **FR-140 — 58 committed extracts name a regeneration command that does not exist; 52 record none at all. Important. Owning phase: the port machine (`forms extract`), build-order item 6.** (rehearsal F8)
+  Measured over `design/forms/extract/`: **126** extracts, **74** carry a `# Regenerate:` line, **58** of those name `xtask forms extract` — a subcommand that does not exist. *Fix:* build `forms extract` (design §4 already specifies reading each file's own recorded flags) and backfill the 52 headers.
+
+- **FR-141 — the per-(stem, year) cost moved into two files, one of them Form-6251-specific. Important. Owning phase: year-package table step 6 / the port machine.** (rehearsal F10)
+  `f6251_revision::revision()` is an `_`-free match over **every** `LineSet`, so porting f8995a produced an `E0004` in a module about Form 6251 — correct fail-closed behaviour, wrong blast radius. And of the 5 `line_set.rs` edits, **4 are pure transcription of the row string** (variant, `parse`, `as_str`, `ALL`) and could be generated by `build.rs` from the map headers; only `schema()` encodes a decision.
+
+- **FR-142 — nothing fills the new year's template. Important. Owning phase: the TY2026 build.** (rehearsal F17)
+  All 10 fill cases in `tests/f8995a_fill.rs` use `Form8995AMap::ty2024()`. `packet.rs` is year-generic (controller-verified: `Form8995AMap::for_year` reads the glob at `map.rs:3269`), so a ported year is *wired* but never *filled* — "right number in the right box" is unproven for it. *Fix:* parameterise the fill tests over `bundled_years()` where the map schema is shared.
+
+- **FR-143 — runbook step 4's documented flag is wrong, and unknown flags are ignored rather than refused. Minor. Owning phase: ownerless residue.** (rehearsal F7)
+  The runbook says `--regenerate`; the code accepts only `--regen` (`main.rs:136`), and `--regenerate` falls through to the read-only check rather than refusing.
+
+- **FR-144 — `archive_drafts.py::STEMS` is a hand-typed 18 against `Stem::ALL`'s 21. Minor. Owning phase: ownerless residue.** (rehearsal F9)
+  `f1040v`, `f4868` and `f8889` are silently never fetched by the draft archiver. The `CLAUDE.md` derive-the-list shape.
+
+- **FR-145 — the port of one form is one ATOMIC commit, and the runbook does not say so. Minor. Owning phase: the port machine.** (rehearsal F11)
+  Between step 11 (copy the template) and step 21 (write the map), `build.rs` cannot build. A porter who commits mid-sequence leaves the tree unbuildable.
+
+- **FR-146 — two `LineSet` doc comments are attached to the wrong variant. Minor. Owning phase: ownerless residue.** (rehearsal F12)
+  The doc line for `"f8959/2024"` sits above `F8889_2024`, leaving `F8959_2024` undocumented.
+
+- **FR-147 — one suite test cannot pass under the `CARGO_TARGET_DIR` override the review workflow mandates. Minor. Owning phase: the harness.** (rehearsal F13)
+  `harness_check::the_write_hook_denies_new_archives_and_asks_once_per_new_directory` requires a binary at `<repo>/target/debug/xtask`. This is one of the environmental worktree failures the standing caveat describes; naming it makes the caveat checkable.
+
+- **FR-148 — `xtask label-proof` writes to a hardcoded `/tmp/<stem>-label-proof.pdf`. Minor. Owning phase: ownerless residue.** (rehearsal F14)
+  On this box `/tmp` is a 32 GB tmpfs shared with builds — the constellation directive warns about exactly that. *Fix:* honour `TMPDIR`.
+
+- **FR-149 — runbook step 1's real output, `YEAR.toml`, is not in the runbook. Minor. Owning phase: the port machine.** (rehearsal F15)
+  Porting a form the year declares ABSENT needs a `forms_expected` addition and an `forms_absent` deletion, and the runbook's step 1 does not mention the file.
+
+- **FR-150 — a hardcoded count whose own failure message argues against hardcoded counts. Minor. Owning phase: ownerless residue.** (rehearsal F16)
+  `cite_check.rs:1490` — *"38 rows on disk today … a new year adds five"*. The message explains why the number will move and then pins it anyway.
+
+- **FR-151 — the design contradicts itself on `line_set` for a constants-only year. Minor. Owning phase: design r2 §4 (owner/author).** (rehearsal F18)
+  §4 says *"constants-only year ⇒ same line_set; renumber ⇒ new one"*, which the rehearsal found underdetermined for a year whose only changes are two printed sentences and an OMB number.
+
