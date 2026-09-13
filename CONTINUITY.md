@@ -8,7 +8,90 @@ _Last updated: **2026-09-13**. Written at a deliberate pause; safe to exit. **Re
 
 > ## ★★★ HANDOFF TO AN OPUS COORDINATOR (owner, 2026-09-07: "Let's find a time to switch to opus") — the loop from here is dispatch → machine-check → persist → ledger → fold → re-verify → push, and it needs no Fable: every remaining task (T8 in flight, T9–T12; T13/T14 on the owner's Q1; T15 post-v1) already has `BRIEF-build-interview-Tn.md`, `BRIEF-review-interview-Tn.md` and `BRIEF-reverify-interview-Tn.md` committed under `design/agent-reports/`. The rules that hold the loop: ONE opus builder or reviewer at a time (a sonnet verifier may run beside it, in a worktree); the builder edits the shared main tree and NOTHING is committed while it works (the pre-commit gate runs `make check` over the working tree); reviewers and verifiers run in `isolation: worktree` with `CARGO_TARGET_DIR=/scratch/code/bitcoin_tax/target-review` and their report is COPIED out, then `git worktree remove --force` + `git branch -D`; the report is persisted VERBATIM in its own commit before anything is folded; every measurable claim is machine-checked into `…-VERIFICATION.md` before acting; the fold is its own commit with the gate output in the message; push after each gate closes (`git push origin main`; the pre-push PII hook scans the range — synthetic identifiers only from the never-issued SSN space or `scripts/pii-scan-generic.sh`'s `ALLOWED_EIN`); commit messages via `git commit -q -F - <<'EOF'` with the two trailers. A stopped background agent is RESUMED by `SendMessage` with its id, never restarted while its edits are in the tree. The standing lessons every dispatch prompt repeats: no decision keys on a list typed beside derived data; a kill CALLS the instrument; a prompt hash keys on the registry's words, never display chrome; a new money leaf must reach the absolute chain (`every_money_leaf_household()`); a build's kills ask what the NEXT SURFACE does with what it wrote; a `Durable` fact is shown, never pre-filled; transcribe forms from the text layer. Owner-only items (never actioned autonomously): Q1/Q2/Q4, S1/S2/S7, T7's Notice 2026-20 order, the simulated real return (FR-64, the owner's TY2024 return is the reference and never enters the repo). The progress page is the artifact "Overnight Return" (scratchpad `overnight-return.html`; republish the same path to keep the URL).
 >
-> ## ★★★ RESUME 2026-09-13 (LATEST) — the port rehearsal burned down, Fable's shape consult taken, TWO before-January items IN FLIGHT
+> ## ★★★ RESUME 2026-09-13b (LATEST) — ✅ **CI IS GREEN ON ALL THREE PLATFORMS, first time since 2026-09-05.**
+
+> **State: clean and settled.** `HEAD == origin/main == 325474d03`, tree clean, **no worktrees**, nothing in
+> flight. `make check` **3650 passed / 12 skipped**, `cargo fmt --all --check` clean.
+> **CI run `34764597979`: all 9 jobs success** — `test` on ubuntu AND macos AND windows, plus fmt, clippy,
+> msrv, net-isolation, pii-scan, examples. Confirmed from the API, not from a local gate.
+>
+> ### ★★★ THE FINDING OF THE DAY: CI had been RED FOR 8 DAYS and nothing said so
+>
+> Last green before today: **`2bd04d458`, 2026-09-05 21:15**. Zero successes in the 60 runs between. It was
+> found only because the FR-156 agent mentioned *"6 pre-existing failures, unrelated to my work"* in passing,
+> and that flag was traced instead of accepted as noise.
+>
+> **Two distinct causes, both now closed:**
+> 1. **FR-165** — 6 `xtask::form_delta` tests read field spellings from IRS PDFs that `.gitignore:71`
+>    deliberately never commits (125 on disk here, **0 tracked**). Root cause one line, `form_delta.rs:64`.
+>    ★ The fix was **three lines, not the 70 new fixtures the brief asked for**: the 70 committed
+>    `geometry/*.json` fixtures ALREADY carry the full AcroForm field-name set, because `extract-geometry`
+>    builds them from the same `collect_fields()` call. Both of form_delta's axes now rest on ONE committed
+>    observation. New `xtask extract-geometry --all --check` holds the fixtures to their PDFs (the A4 shape).
+> 2. **FR-174** — 4 Windows + 1 macOS failures that were red the whole time *behind* those six.
+>    `CAPTION_PARAPHRASES` keyed by forward-slash literals vs a `Path::display()` `rel` (`\` on Windows),
+>    and a test pinning the literal `/tmp` when `std::env::temp_dir()` is `/var/folders/…/T/` on macOS and
+>    `%TMP%` on Windows.
+>
+> **★★ The process lesson, filed in FR-174 and worth more than either fix:** a red CI does not merely fail to
+> catch the next defect — **it HIDES the ones that arrive while it is red.** And `make check` cannot see any
+> of them: it runs one platform, and it is nextest + clippy only (NOT `cargo fmt --check`, which the
+> pre-commit hook caught separately today). The `fast-validation-gate` caveat, realised a second time.
+> ★ `main` is not branch-protected, so ~60 pushes produced no signal.
+>
+> ### The rest of 2026-09-13, in order
+>
+> | what | outcome |
+> |---|---|
+> | Port rehearsal's 18 findings (FR-134..151) | burned down by 10 agents, integrated in 6 commits, S5 re-verified 0C/1I/1M |
+> | **Fable organization consult** | *"change nothing, EXCEPT delete the defaults"* — 11 of 14 claims confirmed, 3 corrected |
+> | **FR-164** oracle year required | **9** omitted-year sites closed, not the 6 briefed |
+> | **FR-156** typed counts | **change nothing** — 3 independent mechanisms already catch the joint deletion |
+> | **FR-172** | a tracked 187,143-byte IRS PDF at the repo ROOT named `--out` — removed, root guarded |
+> | FR-165, FR-174 | above |
+>
+> ### ★★★ SIX briefs in this arc were refuted by their implementer — THREE of them mine, all today
+>
+> 1. `verify_f6251.py` is *"the BEST of the four surfaces"* → it threads the year to the **OTS leg only**; the
+>    **taxcalc** leg carried two hardcoded literals (`"FLPDYR": 2024`, `build_calculator(rows, 2024)`) that no
+>    caller could override. A TY2026 vector would be scored by oracle 2 under TY2024 law while oracle 1 scored
+>    it right — **and the two-oracle design reads that split as BTCTAX being wrong.** An instrument that
+>    manufactures a false accusation against the thing it validates.
+> 2. *"Commit a derived field-list fixture per archived form"* → already committed, as geometry. 3 lines.
+> 3. *"Writing a label proof to /tmp on Windows is the TOOL being wrong — fix the function"* → the function
+>    was always right; `default_proof_path` has called `std::env::temp_dir()` since it was written. Both
+>    failures were the TEST asserting a Linux fact on three platforms.
+>
+> **The instruction that produced all three: *stop and report rather than build on a premise in your brief
+> you can disprove.* Keep it in every dispatch. It is the highest-yield sentence in this process.**
+>
+> ### ⚠️ FR-175 — the agent-stall failure mode, and a rule for the controller
+>
+> The FR-174 agent stalled **twice** with one shape: it backgrounded `make check`, ended its turn waiting,
+> and never wrote its report. Resumed once by `SendMessage` (never restarted — its edits were live); same
+> stall. So *"the agent persists its own report"* produced **no copy at all**, and the controller
+> reconstructed from the diff — precisely the independence the rule exists to protect.
+> ★★ **And the controller then snapshotted that worktree while the agent was still live, capturing it
+> MID-KILL** — the applied diff was the agent's *planted* state, `make check` went red 3650/1, and a cycle
+> went into debugging a deliberate plant. **Two rules, both cheap, both in FR-175:** dispatch briefs must say
+> **run the gate in the FOREGROUND**; and **never diff or integrate a worktree whose agent has not delivered
+> its report** — an agent mid-B1 has a deliberately broken tree, by design.
+>
+> ### Open, and NOT the assistant's to start
+>
+> **S1** (never-mailed TY2025 rehearsal — survives the TY2025 ruling; it is "2025 helping 2026" in its purest
+> form), **S2** (real-2026 document inventory), **S7** (oracle fallback), **S8** (physical print rehearsal).
+> The January critical path is unchanged: finals → worksheet transcriptions → review to 0C/0I → OTS-2026
+> census → packet read → filed.
+>
+> **Highest-value open follow-ups**, all filed with owning phases: **FR-168** (`build_calculator` never
+> compares a row's `FLPDYR` to the year it was asked for — one check binds all four callers) and **FR-169**
+> (`assert_baked_provenance_is_current()` has **no caller anywhere**, and ships with its own
+> `PLANT TO RE-RUN THE KILL` note — an instrument written with its kill documented and never wired), both
+> NOW; **FR-161/162** (text carry rule, compute revision axis) parked AFTER the first port, each with a free
+> now-obligation of one sentence in the January brief; **FR-163** a ruling the week the port closes.
+
+> ## ★★★ RESUME 2026-09-13a (superseded — see the 13b block above) — the port rehearsal burned down, Fable's shape consult taken
 
 > **State when this was written:** `HEAD == origin/main == 422ab1fe2`, tree clean.
 > `make check` **3646 passed / 12 skipped** (the pre-commit gate ran it on every commit below).
