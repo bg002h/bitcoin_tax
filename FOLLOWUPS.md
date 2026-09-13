@@ -8349,6 +8349,103 @@ build, each with an owning phase.
   *"a different hash means the IRS REVISED this document — review it, never silently absorb it"*, and a clean
   sweep is the evidence that the premise has teeth and nothing has been silently absorbed.
 
+- **FR-196 — ⛔ THE TOP WALL: an itemizer who received a state income-tax refund cannot file at all. Important. Owning phase: NOW — it is the owner's own profile.**
+  `RefuseReason::StateAndLocalRefundWorksheetNotComputed`, refused at `income import` before anything is
+  stored. ★ **This is the definition of a second year of itemizing in a state with income tax**, and the
+  owner confirmed 2026-09-13 that they itemize. The refusal is correct to exist — §111(a)'s tax-benefit rule
+  makes some or all of the refund income on Schedule 1 line 1, and the STATE AND LOCAL INCOME TAX REFUND
+  WORKSHEET needs last year's Schedule A, its SALT cap, the standard deduction that could have been taken,
+  and the §164(b)(6) limitation. btctax *"refuses rather than guess a figure in the understatement
+  direction"*, which is the right call.
+  ★★ **CONTROLLER CORRECTION to the source report, and it matters because folding it would have REMOVED
+  accurate guidance.** The report says the refusal *"offers 'or answer no' as an out, which is an invitation
+  to misstate Schedule 1 line 1."* Read in full (`return_refuse.rs:2878-2886`) it says: *"Work the worksheet
+  by hand and file with a preparer, **or answer "no" if you did not itemize in the year you paid the tax** —
+  then none of the refund is taxable and Schedule 1 line 1 is correctly blank."* The "no" is **conditioned on
+  a true fact** and the message explains why it is then correct. That is lawful guidance, not an invitation.
+  **The wall stands; the characterisation does not.** Do not edit that sentence.
+  *What is actually open:* whether the worksheet gets built, or the owner files this year with a preparer if
+  a state refund arrives. That is a scope decision, not a defect fix.
+
+- **FR-197 — W-2 box 12 codes C and V refuse the whole return while changing no figure. Important. Owning phase: NOW. FR-102's shape, reproduced exactly.**
+  **Controller-verified:** `INERT_BOX12_CODES` (`return_refuse.rs:39`) carries **11** codes —
+  `["D","E","F","G","H","S","AA","BB","EE","DD","W"]` — of roughly 26 the IRS defines. Anything else hits
+  `RefuseReason::UnsupportedBox12Code` and the packet prints **zero pages**.
+  ★ **Code C** (group-term life insurance over $50,000) and **code V** (income from an NSO exercise) are
+  **already inside box 1 wages**, so admitting them changes no figure on the return. Refusing is therefore
+  over-conservative in the only way that still costs the filer everything: it is safe about the arithmetic
+  and total about the outcome. That is FR-102 — the HSA filer who could not print a single page — with a
+  different trigger. ★ The list is also the *"derive the list, or make the compiler hold it"* shape: 11
+  hand-typed codes beside a set of 26 that the IRS revises.
+
+- **FR-198 — a filer-facing advisory names a command that does not exist. Minor. Owning phase: NOW (one line).**
+  **Controller-verified:** `advisories.rs:623` tells the filer to use *"the tax-inputs editor (`btctax
+  tui-edit`, then T on the year)"*. There is no `tui-edit` subcommand on the `btctax` binary — the separate
+  binaries are **`btctax-tui`** and **`btctax-tui-edit`**. So the one instruction offered for fixing a
+  direct-deposit omission does not run.
+  ★★ **This is the SAME advisory as FR-177**, which asserts the retracted *"the IRS will mail a check"*. One
+  paragraph of filer-facing text, two defects: a fact the IRS withdrew and a command that does not exist.
+  Fix them together, and only after the owner rules on FR-177's scope question.
+
+- **FR-199 — `income clear` destroys a committed return's 46 answers with no guard, while a mere DRAFT requires `--discard-draft`. Important. Owning phase: NOW.**
+  Reported and not yet controller-reproduced. Two halves:
+  (a) **the weaker artifact is protected and the stronger is not** — a draft demands an explicit
+  `--discard-draft`, a committed return does not;
+  (b) after clearing, the packet prints the **Digital Asset question as unanswered** — the very answer
+  `clear` deleted. ★ That second half is the answered-ness invariant inverted: a destructive command
+  manufactures *un*-answeredness, and an unanswered digital-asset question on a return that had answered it
+  is a worse artifact than either state alone.
+  It surfaced as the only escape from FR-200's wall, which is how a data-loss path gets taken: as the
+  documented workaround for something else.
+
+- **FR-200 — a $750k+ mortgage, or a $600 bag of clothes, prints zero pages — and `--forms` cannot rescue the Bitcoin pages. Important. Owning phase: NOW.**
+  Reported: an over-$750k mortgage and `NonCryptoNoncashGift` (a thrift-store donation) each refuse the
+  whole packet. `--forms f8949,schedule-d` cannot narrow the output to the pages that ARE computable —
+  *"ignored on a full-return year"* — so a filer blocked on a Schedule A detail loses their **8949 and
+  Schedule D** too, which is the part btctax exists to produce.
+  ★ And the remedy offered for the gift wall is *"remove the gift"* — i.e. omit a real deduction to get a
+  printable return, which is the overstatement direction. Not a lie on the return, but guidance that costs
+  the filer money.
+  *The narrower question worth settling first:* should `--forms` be honoured on a full-return year when the
+  refusal is confined to a schedule the requested forms do not depend on?
+
+- **FR-201 — the interview never asks for estimated tax payments (1040 line 26), though the field exists. Minor. Owning phase: with the interview's next pass.**
+  ★★ **CONTROLLER NARROWING — the source report says line 26 has "no question, no advisory, no mention
+  anywhere, prints 0". That is wrong.** Verified: `return_inputs.rs:1854` declares
+  `pub estimated_tax_payments: Usd, // → 1040 26`; `packet.rs:1244` routes it; `printed.rs:691` is
+  *"L26 — estimated tax payments"*; and the input-form surface has `FieldId::PayEstimated` with a coverage
+  entry (`coverage.rs:1166`) and a getter (`sections.rs:1582`).
+  **What is true is narrower and still worth fixing:** the 46-prompt interview (`income answer`) does not ask
+  for it, so a filer who paid quarterly estimates and uses only the interview files without them — which
+  **overstates** tax. It is reachable through the editor and `income import`. One surface, not the model.
+  ★ Recorded this way deliberately: "no mention anywhere" would have sent someone to build a field that
+  already exists.
+
+- **FR-202 — Schedule A lines 8b/8c print `0` while the advisory on the same packet says btctax "leaves blank" both. Minor. Owning phase: with FR-198.**
+  Reported, not controller-reproduced (my grep hit `ScheduleDLines`' `line8b_*` columns, a different form —
+  the Schedule A 8b/8c are *"Home mortgage interest not reported to you on Form 1098"* and *"Points not
+  reported"*). Reported as stale since T9 added the inputs, and the same advisory is reported stale about
+  the HSA. ★ Worth fixing because it is the *"a tool claims something it did not do"* class — the packet and
+  its own advisory disagree about what the packet contains — and because `0` versus blank is the distinction
+  this project's testimony doctrine turns on. **Reproduce before editing.**
+
+- **FR-203 — `income import`'s TOML has no published schema, so the front door is undocumented. Important. Owning phase: NOW; it blocks every journey that is not the interview.**
+  Reported: nothing in `docs/` publishes the shape of the file `income import` consumes, and the one
+  advisory pointing at the alternative authoring surface names a command that does not exist (FR-198). ★ So a
+  filer whose scenario the interview cannot express has **no documented way in at all** — which makes every
+  "use `income import` instead" remedy in every refusal message unactionable. Cheap to fix from
+  `btctax-input-form`'s own spec, which already enumerates the fields.
+
+- **FR-204 — ★ how to read the drive report: behavioural findings solid, diagnostic claims overstated. No owning phase — a reading instruction.**
+  Recorded because it will matter to whoever folds `RECON-drive-to-filable-return.md`. Its **behavioural**
+  findings — which profiles print, which walls exist, reproduced in isolated vaults through the real
+  interview — verified cleanly and are the artifact's value. **Three of its diagnostic claims did not
+  survive**: the state-refund refusal is *not* an invitation to misstate (FR-196), line 26 is *not* absent
+  (FR-201), and the Schedule A 8b/8c grep points at Schedule D (FR-202). ★ The pattern is worth naming
+  because it is the natural failure mode of a journey walk: **walking the product measures behaviour
+  reliably and diagnoses causes unreliably**, since the walker sees the outside. Fold the walls; re-derive
+  every cause.
+
 - **FR-152 — `census_join` anchors captions to ABSOLUTE line indices in a generated file. Minor. Owning phase: the port machine.**
   A4's 110 `# Regenerate:` header additions shifted every extract by a line, and `forms/2024/f1040s1.map.toml`'s
   `extract_line` anchors (11/15/58) had to move to 15/19/62 — an edit outside A4's ownership, reported rather
