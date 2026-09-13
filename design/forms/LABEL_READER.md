@@ -52,6 +52,49 @@
 >    printed on the same row, as `f1040`'s `2a`/`2b` pair) is filed as `FOLLOWUPS.md` FR-27 and needs
 >    a row model, not a wider net.
 >
+> ### ★★★ A FOURTH such fact, found 2026-09-13 (FR-210) — fact 2 biting from the other side
+>
+> 4. **The sub-letter band was anchored on the candidate column's WIDEST token, not on the edge its
+>    numerals agree on.** Fact 2 says a letter suffix hangs past the column's right edge; fact 3 uses
+>    the bucket's **maximum** `x2` as the candidate's value. Put together, the value handed to
+>    `column_tokens` overshoots the alignment by however far the widest suffixed token hangs — on
+>    `f1040sa--2026-DRAFT` the numerals all end at **108.00** while `17f` ends at 111.00 and `17b` at
+>    113.50 — and the sub-letter band's left bound (`right − 2.0` = 109.0) then lands **right of where
+>    every bare sub-letter starts** (108.0).
+>
+>    Measured consequence: eight sub-letters dropped from Schedule A (`5a 5e 8a 8b 8c 17g 17h 17k`),
+>    which reprinted `5` twice and `17` three times, and **axis C refused both as ambiguous — which
+>    was correct.** The witness was wrong; the refusal was right. `f1040s1--2026-DRAFT` was worse: a
+>    prose `a` 15pt out was admitted, had no numeric parent, and the whole label set became a hard
+>    error, so every page axis on Schedule 1's work-list row read UNWITNESSED.
+>
+>    ★★ The fix is `numeral_right_edge` — the right edge the column's **unsuffixed** numerals agree
+>    on, taken as the MODE rather than the maximum, because right-alignment means agreement and a
+>    stray prose numeral must not outvote a column. The band around it is the same ±2.0pt the parent
+>    band already allows for wobble, and it is measured, not chosen: of the **633** bare letters that
+>    fall inside that band over all 87 fixtures, **624 sit at offset 0.00 or +0.09**, while the
+>    nearest bare letter that is *not* a label is prose at +0.74 and everything from +3.55 up is
+>    prose without exception. A bare sub-letter's left edge *is* the numeral column's right edge,
+>    because it is the tail of its parent's own printed word, split by the extractor at a zero-width
+>    gap.
+>
+>    ★ A second, smaller half: the row merge was order-sensitive. `f1040sc--2026-DRAFT` emits line
+>    16c's bare `c` at y=559.41 and its parent `16` at y=559.91 — one printed row, letter first — so
+>    the merge never fired and Schedule C printed `16` twice. It now merges in either order.
+>
+>    ★ Measured over all 87 committed fixtures: **12 changed, none lost a printed label.** Five 2026
+>    drafts gained 87 labels between them, every one of which was found printed in its own
+>    `design/forms/extract/<stem>.txt`; `f1040s1--2022`, `fw2--2024/2025/2026` and `f4868` shed
+>    prose-derived phantoms (`14a`, `62a`, a duplicate `8a`) — the same class fact 3's union
+>    experiment was rejected for. Unread line numbers across the port table went **13 → 6**, unread
+>    boxes **137 → 67**, and eight more surviving line numbers now show their changed meaning.
+>
+>    ★★ **Stated boundary.** Three prose letters still fall inside ±2.0 — `f1099b` p5 (+0.74),
+>    `fw2--2026` p7 (+1.71), `f4868` p3 (+1.90) — on three forms not in the emitting surface, and
+>    `f4868`'s phantom `9a` survives because of it. Tightening to +0.5 would remove them; it was not
+>    done, because the gap below the genuine population (0.09 → 0.74) is a tenth the width of the one
+>    above it (0.09 → 3.55), and dropping a real sub-letter is the defect this fact is about.
+>
 > ### ★★★ 50 vs 48 — RESOLVED by opening the PDF. Both counts were right.
 >
 > | | |

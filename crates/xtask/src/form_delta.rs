@@ -1613,25 +1613,73 @@ mod tests {
             "CHANGED printed for a form no axis found a change in: {wrong:?}"
         );
         // ★ a stem whose label axis cannot witness at all (FR-58): its moved cell must be the word,
-        //   and its 73 unread boxes are a NUMBER — the gap count is what the UNWITNESSED verdict is
+        //   and its unread boxes are a NUMBER — the gap count is what the UNWITNESSED verdict is
         //   made of, so a 0 there would be the emptiest cell in the table.
-        let f1040s1 = true_row("f1040s1");
-        let (_, excused, wrong) = numeric_plant(&f1040s1);
+        //
+        // ★★★ **FR-210 — the exemplar is DERIVED from the printer, never typed beside it.** It used
+        //     to be `f1040s1` at `2025 -> 2026-DRAFT`, whose TY2026 label set could not be read at
+        //     all (a prose `a` admitted into the margin column became an orphaned sub-letter). FR-210
+        //     fixed the reader, that row became all numbers, and both plants below would have become
+        //     no-ops — caught only because `plant` asserts it changes the cell it plants. So the stem
+        //     is now SEARCHED FOR over a tag pair the archive still has one on, and its **absence is
+        //     a hard failure that says what to do about it** rather than a quietly skipped plant.
+        //     `f1040v--2024 -> --2025` is the pair at the time of writing: a payment voucher prints
+        //     no numbered column at all, so `witness_text` refuses it outright, which is the only
+        //     shape that makes `label_compared == 0` on a non-empty pair.
+        //     ★ Seen RED: pointing `tags` at `("2025", "2026-DRAFT")` — the pair that no longer has
+        //     one — panics with the message below rather than skipping the plants.
+        let (blind_tags, blind) = {
+            let tags = ("2024", "2025");
+            let printed = super::port_status_over(&super::emitting_surface(), tags.0, tags.1)
+                .expect("the printer runs over the archive");
+            let i = header
+                .iter()
+                .position(|c| c == "lines that moved")
+                .expect("the moved column");
+            let row = printed
+                .lines()
+                .find(|l| {
+                    let cs: Vec<&str> = l.split('|').map(str::trim).collect();
+                    cs.len() == header.len() && cs[i].starts_with("**UNWITNESSED**")
+                })
+                .unwrap_or_else(|| {
+                    panic!(
+                        "no stem on the emitting surface has an UNWITNESSABLE label axis at \
+                         {tags:?} any more, so the two plants below cannot fire. Find a pair whose \
+                         label set one side REFUSES (a form with no numbered column, or an orphaned \
+                         sub-letter) and name its tags here — do not delete the plants: a number \
+                         printed where nothing was compared is the trap this table exists for."
+                    )
+                });
+            (tags, format!("{row}\n"))
+        };
+        // the same shape gate `numeric_plant` applies, against the blind pair's own tags
+        let blind_check = |row: &str| {
+            let parsed = parse_work_list_row_full(row)
+                .unwrap_or_else(|| panic!("plant does not parse as a table row at all: {row:?}"));
+            assert!(
+                parsed.1.is_some(),
+                "plant must parse as a NUMERIC row, or it is testing the excused arm by accident: \
+                 {row:?}"
+            );
+            check_work_list_with(row, blind_tags.0, blind_tags.1)
+        };
+        let (_, excused, wrong) = blind_check(&blind);
         assert!(
             wrong.is_empty() && excused.is_empty(),
-            "the printer's own f1040s1 row must be clean: {wrong:?}"
+            "the printer's own UNWITNESSED-axis row must be clean: {wrong:?}"
         );
-        let (_, _, wrong) = numeric_plant(&plant(&f1040s1, "lines that moved", "0"));
+        let (_, _, wrong) = blind_check(&plant(&blind, "lines that moved", "0"));
         assert_eq!(
             wrong.len(),
             1,
             "0 moved printed for a pair the reader cannot witness: {wrong:?}"
         );
-        let (_, _, wrong) = numeric_plant(&plant(&f1040s1, "boxes UNREAD", "0"));
+        let (_, _, wrong) = blind_check(&plant(&blind, "boxes UNREAD", "0"));
         assert_eq!(
             wrong.len(),
             1,
-            "0 boxes-unread printed for the 73 boxes that made the verdict UNWITNESSED: {wrong:?}"
+            "0 boxes-unread printed for the boxes that made the verdict UNWITNESSED: {wrong:?}"
         );
         // a genuine numeric row under a stem that has no pair at HEAD — the printer's own f6251 row
         // with only the FORM cell renamed, so nothing but the missing pair can red it

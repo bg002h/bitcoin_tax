@@ -153,27 +153,91 @@ fn candidate_columns(words: &[Word]) -> Vec<f64> {
     out
 }
 
+/// How far a bare sub-letter's LEFT edge may sit from [`numeral_right_edge`], in points.
+///
+/// ★★★ **MEASURED over all 87 committed geometry fixtures, not chosen.** A bare sub-letter is the
+/// tail of its parent's own printed word, which `pdftotext` split at a zero-width gap, so its left
+/// edge *is* the numeral column's right edge — of the **633** bare letters that fall inside this band
+/// across the corpus, **624** sit at offset 0.00 (623) or +0.09 (Schedule 1-A's `a`). The
+/// nearest bare letter that is NOT a label is prose at **+0.74**, and everything from **+3.55**
+/// upward is prose without exception. 2.0pt is therefore a wide margin on a population with almost
+/// no spread, and it is the same 2.0 the parent band already allows for column wobble.
+///
+/// ★ Stated boundary rather than a hidden one. The other nine in-band letters are: three prose `a`s
+/// on `f1099b` p5 (+0.74), two on `fw2--2026` p7 (+1.71) and two on `f4868` p3 (+1.90) — all on forms
+/// outside the emitting surface, and `f4868`'s phantom `9a` is the one label they produce — plus
+/// Form 8995's CENTRED roman row markers `i`/`v` at −1.16/−2.34, of which the band admits `i` only
+/// (so `1i` reads and `1ii`..`1v` never will, being multi-character; that is FR-27's row model, not
+/// this band). Tightening the upper bound to +0.5 would drop the prose three, and was not done,
+/// because the measured gap below them (0.09 → 0.74) is a tenth the width of the one above
+/// (0.09 → 3.55) and dropping a real sub-letter is the defect this constant exists to prevent.
+const SUB_LETTER_SLACK: f64 = 2.0;
+
+/// **The right edge the column's UNSUFFIXED numerals agree on** — the column's true alignment.
+///
+/// ★★★ **This is FR-210, and it is why `right` cannot be used for the sub-letter band.**
+/// [`candidate_columns`] returns a bucket's **maximum** `x2`, and a suffixed token ends further
+/// right than a bare one — on `f1040sa--2026-DRAFT` the numerals all end at **108.00** while `17f`
+/// ends at 111.00 and `17b` at 113.50, so the bucket maximum overshoots the alignment by 3–5.5pt.
+/// The band was anchored on that maximum, so its left bound (`right − 2.0` = 109.0) landed **right
+/// of where every bare sub-letter starts** (108.0) and the reader dropped `5a 5e 8a 8b 8c 17g 17h
+/// 17k` — printing `5` twice and `17` three times, which the caption axis then correctly refused as
+/// ambiguous. The *axis* was right; the *witness* was wrong.
+///
+/// ★★ The statistic is the MODE, not the maximum, and that is also measured: on `f1099b` a prose
+/// numeral inside the parent band ends at 415.12 where the real column ends at 404.89, so a maximum
+/// re-based three fixtures for no reason. Right-alignment means the numerals **agree**, so the value
+/// they agree on is the one to take; a stray cannot outvote a column. Ties go to the larger edge.
+///
+/// `None` when the column holds no unsuffixed numeral at all — the caller then has no alignment to
+/// measure and falls back to the cluster's own edge.
+fn numeral_right_edge(parents: &[&Word]) -> Option<f64> {
+    let mut counts: BTreeMap<i64, (usize, f64)> = BTreeMap::new();
+    for w in parents
+        .iter()
+        .filter(|w| w.text.chars().all(|c| c.is_ascii_digit()))
+    {
+        let e = counts
+            .entry((w.x2 * 100.0).round() as i64)
+            .or_insert((0, w.x2));
+        e.0 += 1;
+    }
+    // `max_by_key` keeps the LAST maximum and a `BTreeMap` iterates ascending, so a tie resolves to
+    // the larger right edge — deterministic, never "whichever the hasher yielded first".
+    counts.values().max_by_key(|(n, _)| *n).map(|(_, x)| *x)
+}
+
 /// The tokens one candidate column owns, in reading order, with same-row parents and sub-letters
 /// already merged.
 ///
 /// ★ Parents are matched on their RIGHT edge (the column is right-aligned). Sub-letters print bare
-/// and hang just past that edge — measured: parent x2≈50.4, sub-letter `b` at x=50.0.
+/// and start AT that edge — measured: parent x2≈50.4, sub-letter `b` at x=50.0. The edge is
+/// [`numeral_right_edge`], never the candidate's own value; see that function for why.
 fn column_tokens(words: &[Word], right: f64) -> Vec<Tok> {
-    let mut toks: Vec<Tok> = words
+    // ★ A parent token SPANS the column's right edge rather than ending at it. The NUMBER is
+    // right-aligned (x2≈`right`), but a letter suffix hangs past: `1` ends at 50.4 while `2a` ends
+    // at ~55. Requiring x2≈right dropped `2a` outright, and the bare sub-letters then inherited `1`
+    // as parent and came out as `1b`..`1e`. The left bound keeps prose out of the band.
+    let parents: Vec<&Word> = words
         .iter()
         .filter(|w| {
-            // ★ A parent token SPANS the column's right edge rather than ending at it. The
-            // NUMBER is right-aligned (x2≈`right`), but a letter suffix hangs past: `1` ends at
-            // 50.4 while `2a` ends at ~55. Requiring x2≈right dropped `2a` outright, and the bare
-            // sub-letters then inherited `1` as parent and came out as `1b`..`1e`. The left bound
-            // keeps prose out of the band.
-            let in_parent = is_numeric_label(&w.text)
+            is_numeric_label(&w.text)
                 && w.x >= right - 20.0
                 && w.x <= right + 1.0
-                && w.x2 >= right - 6.0;
-            let in_sub = is_bare_letter(&w.text) && w.x >= right - 2.0 && w.x <= right + 15.0;
-            in_parent || in_sub
+                && w.x2 >= right - 6.0
         })
+        .collect();
+    // ★★ The sub-letter band is calibrated FROM THE PARENTS THIS COLUMN ACTUALLY HOLDS, in a second
+    // pass, rather than from the candidate edge — the whole of FR-210.
+    let edge = numeral_right_edge(&parents).unwrap_or(right);
+    let mut toks: Vec<Tok> = parents
+        .iter()
+        .copied()
+        .chain(
+            words
+                .iter()
+                .filter(|w| is_bare_letter(&w.text) && (w.x - edge).abs() <= SUB_LETTER_SLACK),
+        )
         .map(|w| Tok {
             page: w.page,
             x2: w.x2,
@@ -181,6 +245,9 @@ fn column_tokens(words: &[Word], right: f64) -> Vec<Tok> {
             text: w.text.clone(),
         })
         .collect();
+    // ★ The sort is STABLE and parents are chained first, so a parent and its sub-letter sharing a
+    // y-row arrive parent-then-letter — which is the order the row merge below requires, and it no
+    // longer depends on the extractor having emitted them in that order.
     toks.sort_by(|a, b| {
         (a.page, a.y)
             .partial_cmp(&(b.page, b.y))
@@ -191,19 +258,33 @@ fn column_tokens(words: &[Word], right: f64) -> Vec<Tok> {
     // and `36`+`a` are printed on the SAME y-row: the label is `14a`, and the bare `14` beside it is
     // not a separate line. `4` and `22`, by contrast, sit on rows of their own and ARE standalone
     // headings. Measured, not assumed — same-row is `|dy| < 3.0`.
+    //
+    // ★★★ **The merge is ORDER-INSENSITIVE within the row, and that is FR-210's second half.** The
+    // sort key is `y`, and the extractor does not guarantee that a numeral and the letter beside it
+    // carry the *same* `y`: on `f1040sc--2026-DRAFT` line 16c the bare `c` is emitted at y=559.41
+    // and its parent `16` at y=559.91 — half a point apart, same printed row, letter FIRST. A merge
+    // that only looked at (numeral, letter) in that order left `16` standing on its own, so the form
+    // printed `16` twice and the caption axis refused line 16 as ambiguous. Same defect as the
+    // dropped sub-letters, same symptom, one row lower down.
     let mut merged: Vec<Tok> = Vec::new();
     for t in &toks {
         if let Some(prev) = merged.last() {
-            if prev.page == t.page
-                && (prev.y - t.y).abs() < 3.0
-                && is_numeric_label(&prev.text)
-                && is_bare_letter(&t.text)
-            {
-                let combined = format!("{}{}", prev.text, t.text);
+            let same_row = prev.page == t.page && (prev.y - t.y).abs() < 3.0;
+            // ★ Whichever order they arrived in, the LABEL is numeral-then-letter and the kept
+            // coordinates are the LETTER's — the sub-letter has the larger `x2`, and `locator_words`
+            // matches a merged token back to a word by `(x2, y)` to keep it out of the captions.
+            let pair = if same_row && is_numeric_label(&prev.text) && is_bare_letter(&t.text) {
+                Some((format!("{}{}", prev.text, t.text), t.clone()))
+            } else if same_row && is_bare_letter(&prev.text) && is_numeric_label(&t.text) {
+                Some((format!("{}{}", t.text, prev.text), prev.clone()))
+            } else {
+                None
+            };
+            if let Some((combined, keep)) = pair {
                 merged.pop();
                 merged.push(Tok {
                     text: combined,
-                    ..t.clone()
+                    ..keep
                 });
                 continue;
             }
@@ -248,6 +329,12 @@ fn resolve(toks: &[Tok]) -> (Vec<(String, u32, f64)>, Option<String>) {
 /// ★ Sub-letters (`b`, `c`, `d`, `e`) print BARE and slightly indented — measured on Schedule 1-A:
 /// parents at x=45, sub-letters at x=50. So the reader carries the last numeric parent, and the
 /// indentation is a second, geometric confirmation on top of the state machine.
+///
+/// ★★★ **A bare sub-letter is admitted on the edge the column's NUMERALS agree on, not on the
+/// candidate's own edge (FR-210).** The two differ by 3–5.5pt wherever the extractor emits suffixed
+/// labels as single tokens, and anchoring on the candidate dropped eight sub-letters from
+/// `f1040sa--2026-DRAFT`, printed `17` three times, and turned the form's most consequential caption
+/// collision into a refusal. See [`numeral_right_edge`] and [`SUB_LETTER_SLACK`].
 ///
 /// ★★★ **WHICH column, and why the old answer silently dropped Form 6251 line 1a.** An IRS form
 /// prints each line's number **twice** — once in the left margin, once again in the gutter beside
@@ -836,6 +923,220 @@ mod tests {
         assert!(
             witness_text(&g).is_err(),
             "a form with no numbered column must ERROR, never return an empty label set"
+        );
+    }
+
+    /// ★★★ **FR-210's KILL (B1) — the reader was fixed; the REFUSAL was not weakened.**
+    ///
+    /// The whole hazard in fixing FR-210 was that the cheap way to close a gap is to let the axis
+    /// pick one of two candidates. So this plants a sub-letter the reader **still cannot claim** —
+    /// printed 8pt right of the numerals' agreed edge, which is prose distance, well outside
+    /// [`SUB_LETTER_SLACK`] — and watches the whole chain behave as it must:
+    ///
+    /// | | the letter AT the column edge | the letter 8pt out (the plant) |
+    /// |---|---|---|
+    /// | `witness_text` | `1 2 2c 2d 3 4 5a` | `1 2 2c 2 3 4 5a` — the parent printed twice |
+    /// | `caption_join` | nothing ambiguous | `2` **ambiguous** |
+    /// | `caption_axis` | **1 collision at `2d`** | **0 collisions, a GAP at `2`** |
+    ///
+    /// ★★ The two revisions differ ONLY in line 2d's caption, so the right-hand column is the axis
+    /// declining to say anything about a line whose meaning really did change — *"a skipped field is
+    /// not a passed one"* — and the left-hand column is it saying so. One coordinate apart. If the
+    /// fix had been made in the axis instead of the witness, the right-hand column would print a
+    /// collision it guessed at, and this test is what reds.
+    ///
+    /// ★ And it is not only synthetic: `f8949` prints `1` and `2` once per page on **two** pages, so
+    /// nothing about the sub-letter band can ever disambiguate it. Its two line numbers were unread
+    /// before FR-210 and are asserted still unread here, on the committed fixture.
+    #[test]
+    fn a_sub_letter_the_reader_cannot_claim_is_still_refused_by_the_caption_axis() {
+        // `edge` is where the bare sub-letter's left edge sits; the numerals all end at x2=50.40.
+        let build = |edge: f64, sub_caption: &str| {
+            let mut words: Vec<Word> = Vec::new();
+            let mut put = |x: f64, y: f64, x2: f64, t: &str| {
+                words.push(Word {
+                    page: 1,
+                    x,
+                    y,
+                    x2,
+                    y2: y + 8.0,
+                    text: t.into(),
+                });
+            };
+            // The margin column: bare numerals right-aligned at x2=50.40, and Schedule A's exact
+            // shape — line 2 heads its sub-rows on a row of its own, and each sub-row REPRINTS the
+            // parent numeral beside a bare letter. `2c` is always claimable; `2d` is the plant.
+            // ★ The plant row is LAST of the three, deliberately: `resolve` collapses CONSECUTIVE
+            //   duplicates, so a bare `2` immediately under the heading would merge into it and no
+            //   ambiguity would arise at all. The defect only bites across an intervening label,
+            //   which is exactly how it bites on `f1040sa--2026-DRAFT` (17 → 17a…17f → 17).
+            put(45.67, 100.0, 50.40, "1");
+            put(45.67, 112.0, 50.40, "2");
+            put(45.67, 124.0, 50.40, "2");
+            put(50.40, 124.0, 55.30, "c");
+            put(45.67, 136.0, 50.40, "2");
+            put(edge, 136.0, edge + 4.9, "d");
+            put(45.67, 148.0, 50.40, "3");
+            put(45.67, 160.0, 50.40, "4");
+            // ★★★ **The token that makes this a kill for the ANCHOR and not just for the band.**
+            //     `5a` is ONE token (the extractor did not split it) and it ends 2.5pt right of the
+            //     numerals, in the neighbouring 2pt bucket — so `candidate_columns`, which returns
+            //     its bucket-pair's MAXIMUM, reports 52.90 while the column is actually aligned at
+            //     50.40. That is FR-210's mechanism in miniature: anchor the sub-letter band on the
+            //     candidate and its left bound (50.90) lands right of where `c` starts, so the
+            //     claimable sub-letter is lost AND the 8pt-out plant is wrongly admitted. Revert
+            //     `numeral_right_edge` to `right` and this test reds — MEASURED by planting exactly
+            //     that (`let edge = right;`): the label set came back `1 2 3 4 5a`, both claimable
+            //     sub-letters gone, and the 8pt-out plant then admitted.
+            put(45.67, 172.0, 52.90, "5a");
+            // one caption word per row, all to the right of the column
+            for (y, t) in [
+                (100.0, "alpha"),
+                (112.0, "heading"),
+                (124.0, "gamma"),
+                (136.0, sub_caption),
+                (148.0, "delta"),
+                (160.0, "omega"),
+                (172.0, "sigma"),
+            ] {
+                put(120.0, y, 160.0, t);
+            }
+            Geometry {
+                form: format!("synthetic-sub-letter-at-{edge}"),
+                pdf_sha256: String::new(),
+                pages: vec![crate::form_geometry::Page {
+                    n: 1,
+                    width: 612.0,
+                    height: 792.0,
+                }],
+                words,
+                boxes: vec![],
+            }
+        };
+        let labels = |g: &Geometry| -> Vec<String> {
+            witness_text(g)
+                .expect("witness")
+                .into_iter()
+                .map(|(l, _, _)| l)
+                .collect()
+        };
+        let axis = |old: &Geometry, new: &Geometry| {
+            let (co, cn) = (
+                caption_join(old).expect("old captions"),
+                caption_join(new).expect("new captions"),
+            );
+            let ls = crate::form_delta::line_set_axis(
+                &co.by_label.keys().cloned().collect(),
+                &cn.by_label.keys().cloned().collect(),
+            );
+            let a = crate::form_delta::caption_axis(&ls.survived, &co, &cn);
+            (co.ambiguous.clone(), a)
+        };
+
+        // ── the letter AT the edge: the witness claims it, and the axis reports the real change ──
+        let (ok_old, ok_new) = (build(50.40, "beta"), build(50.40, "epsilon"));
+        assert_eq!(
+            labels(&ok_old),
+            vec!["1", "2", "2c", "2d", "3", "4", "5a"],
+            "a sub-letter at the numerals' own right edge must be claimed"
+        );
+        let (ambiguous, a) = axis(&ok_old, &ok_new);
+        assert!(
+            ambiguous.is_empty(),
+            "nothing is printed twice once the sub-letter is claimed: {ambiguous:?}"
+        );
+        assert_eq!(
+            a.compared, 7,
+            "all seven line numbers compare; gaps: {:?}",
+            a.gaps
+        );
+        assert_eq!(
+            a.collisions.keys().collect::<Vec<_>>(),
+            vec!["2d"],
+            "the caption change at 2d must be reported AT 2d: {:?}",
+            a.collisions
+        );
+        assert!(a.gaps.is_empty(), "no gaps: {:?}", a.gaps);
+
+        // ── the PLANT: the letter 8pt out is prose distance, and the reader must not reach for it ──
+        let (bad_old, bad_new) = (build(58.40, "beta"), build(58.40, "epsilon"));
+        assert_eq!(
+            labels(&bad_old),
+            vec!["1", "2", "2c", "2", "3", "4", "5a"],
+            "a bare letter that far from the column is NOT a sub-letter, so the parent prints twice"
+        );
+        let (ambiguous, a) = axis(&bad_old, &bad_new);
+        assert!(
+            ambiguous.contains("2"),
+            "the label printed twice must be named ambiguous: {ambiguous:?}"
+        );
+        assert!(
+            a.collisions.is_empty(),
+            "★ THE KILL: an ambiguous label must never be compared, let alone reported as a hit — \
+             picking one of two candidates is worse than the gap it closes: {:?}",
+            a.collisions
+        );
+        assert_eq!(
+            a.gaps.get("2"),
+            Some(&crate::form_delta::CaptionGap::AmbiguousOld),
+            "line 2 must be a NAMED gap with its reason: {:?}",
+            a.gaps
+        );
+        assert_eq!(
+            a.compared, 5,
+            "only 1, 2c, 3, 4 and 5a compared — the caption change is UNREAD, not passed; gaps: {:?}",
+            a.gaps
+        );
+
+        // ── and on a real fixture the band can never help: two pages, each printing 1 and 2 ──
+        let g = form_geometry::load(&form_geometry::repo_root(), "f8949--2025")
+            .expect("f8949--2025 geometry fixture");
+        let caps = caption_join(&g).expect("f8949 captions");
+        assert_eq!(
+            caps.ambiguous.iter().map(String::as_str).collect::<Vec<_>>(),
+            vec!["1", "2"],
+            "Form 8949 prints 1 and 2 once per page on two pages; no sub-letter rule can tell them \
+             apart, so FR-210's fix must leave them refused"
+        );
+    }
+
+    /// ★★★ **FR-210's second half, on the form that has it: the row merge cannot depend on the
+    /// order the extractor happened to emit a row in.**
+    ///
+    /// `f1040sc--2026-DRAFT` prints line 16c's bare `c` at y=559.41 and its parent `16` at y=559.91
+    /// — half a point apart, one printed row, **letter first**. The merge only looked at
+    /// (numeral, letter) in that order, so `16` was left standing beside `16a`/`16b`, Schedule C
+    /// printed `16` twice, and axis C refused line 16 as ambiguous. Measured off the committed
+    /// geometry, not asserted about: `16` must appear exactly once and `16c` must be present.
+    /// ★ Seen RED: neutralising the letter-first arm of the merge to `if false` returns
+    /// `["16", "16a", "16b", "16c", "16"]` and this test fails.
+    ///
+    /// ★ Read against the text layer (`design/forms/extract/f1040sc--2026-DRAFT.txt` lines 94–99):
+    /// the form prints `16  Interest (see instructions):` then `16a Mortgage`, `16b Vehicle loan`,
+    /// `16c Other` — one heading and three sub-rows, which is exactly four labels.
+    #[test]
+    fn a_sub_letter_emitted_above_its_parent_still_merges_into_one_label() {
+        let g = form_geometry::load(&form_geometry::repo_root(), "f1040sc--2026-DRAFT")
+            .expect("Schedule C (2026 draft) geometry fixture");
+        let labels: Vec<String> = witness_text(&g)
+            .expect("witness")
+            .into_iter()
+            .map(|(l, _, _)| l)
+            .collect();
+        let sixteens: Vec<&str> = labels
+            .iter()
+            .map(String::as_str)
+            .filter(|l| l.starts_with("16"))
+            .collect();
+        assert_eq!(
+            sixteens,
+            vec!["16", "16a", "16b", "16c"],
+            "the interest block is one heading and three sub-rows; a second bare `16` here is the \
+             letter-first row that failed to merge"
+        );
+        assert!(
+            !caption_join(&g).expect("captions").ambiguous.contains("16"),
+            "line 16 must no longer be ambiguous, because it is no longer printed twice"
         );
     }
 

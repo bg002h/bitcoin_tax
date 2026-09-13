@@ -4,8 +4,10 @@
 Generated 2026-09-05 by `xtask form-delta <2025-final> <2026-draft>`; **regenerated 2026-09-06**
 after the x-aware label join changed the reader behind the "lines that moved" column (fold review
 L3: four cells were reader artifacts — f1040s2 27→23, f1040s3 3→2, f1040sa 5→2, **f6251 1→0**, so
-Form 6251 does NOT move a line for TY2026). **Regenerate when a final lands, OR when the label reader
-changes** — the handoff is a diff, not a rebuild from memory. `xtask`'s
+Form 6251 does NOT move a line for TY2026); **regenerated 2026-09-13 (FR-210)** after the sub-letter
+fix, which moved six rows and is the section *"REGENERATED 2026-09-13 (FR-210)"* below.
+**Regenerate when a final lands, OR when the label reader changes** — the handoff is a diff, not a
+rebuild from memory. `xtask`'s
 `the_committed_work_list_matches_form_delta_at_head` reds when any cell of a row here disagrees with the
 tool — **all eleven counts and both verdict words** — when an axis cell prints a number the axis never
 witnessed (or `UNWITNESSED` for an axis that did), when an excused row below actually HAS a pair, or when a
@@ -51,8 +53,13 @@ same fact.
 > ★★ **What the new column immediately says about TY2026.** `f1040sd` is the only form in the table
 > that is genuinely unchanged. `f6251`, `f8959`, `f8960`, `f1040sb` and `f8995a` all read `0` in every
 > older column and carry 2–12 changed line meanings; **Form 6251 was listed as `unchanged` and moves
-> the meaning of 8 line numbers.** `f1040sa`'s 8 are FR-185's cascade, including line 18 changing from
-> a checkbox to the total and the casualty line moving 15 → 16 *while widening who qualifies* (FR-187).
+> the meaning of 8 line numbers.** `f1040sa`'s 8 are FR-185's cascade, including the casualty line
+> moving 15 → 16 *while widening who qualifies* (FR-187).
+> ★ **Superseded in two details by FR-210's fix (2026-09-13):** Schedule A's count is **10**, not 8,
+> and the checkbox does not become the total — TY2025's line-18 checkbox travels **verbatim to line
+> 19** while TY2026's line 18 becomes the itemized-deduction **limitation** question. It is line
+> **17** that changes from the itemized total to *"Other itemized deductions"*, and that collision
+> was one of the two this table could not see. See the FR-210 section below.
 
 > ## ★★★ REGENERATED AGAIN 2026-09-13 (FR-209, FR-211) — one column carried two claims, and the map axis was printing a third of its work
 > **Not one of the older cells moved**: every count this table already had recomputes identically at HEAD.
@@ -71,18 +78,21 @@ same fact.
 >   whose FQN spelling changed is the same box on every other axis and a **map edit** all the same, because
 >   the bundled map stores the full FQN. Schedule C's row priced **6** edits (5 added, 1 removed) while
 >   **45 of its 104 paired boxes** were respellings; Schedule 1-A's 44, Schedule 2's 15, Schedule 3's 2,
->   Schedule SE's 2, Form 8995's 2 and Schedule A's 1 were equally invisible — and Schedule 1's **1** is
->   the only change of any kind its row can report at all, every page axis on it being UNWITNESSED.
+>   Schedule SE's 2, Form 8995's 2 and Schedule A's 1 were equally invisible — and Schedule 1's **1** was
+>   the only change of any kind its row could report at all, every page axis on it being UNWITNESSED.
+>   ★ **That last clause is superseded by FR-210 (2026-09-13):** Schedule 1's label set now reads, and
+>   its row carries **3** changed line meanings.
 >   `unpairable` is the pairing axis's own gap: **1** box, on Schedule A, neither added nor removed nor
 >   compared, because its leaf name repeats on one side.
 > * **`lines introduced` is new too — 65 printed line numbers that did not exist on the prior revision**
 >   (Schedule 1-A 28, Schedule 2 16, Schedule A 10, Form 8995 6, Form 8995-A 3, Schedule C 1, Form 6251 1).
 >   The table showed what each revision *retired* and never what it *added*, so a form could introduce a
->   line and read as all zeroes.
+>   line and read as all zeroes. ★ **FR-210 re-based this: the total is 74** (see below).
 > * **`boxes UNREAD` and `line numbers UNREAD` are FR-211** — a zero and an unmeasured, told apart. They
->   total **137** unread boxes and **13** unread line numbers, and no older cell mentioned either:
+>   totalled **137** unread boxes and **13** unread line numbers, and no older cell mentioned either:
 >   `f1040sc` printed `33` moved out of 104 paired boxes with **22** of them unread, `f8949` printed `0`
->   moved with **16**, and `f1040sd`'s `unchanged` rests on 51 of its 55.
+>   moved with **16**, and `f1040sd`'s `unchanged` rests on 51 of its 55. ★ **FR-210 took those two
+>   totals to 67 and 6** (see below); `f1040sc`, `f8949` and `f1040sd` are unmoved.
 > * **★ What FR-210 costs this table, stated rather than absorbed.** **9** of those 13 unread line numbers
 >   are the ambiguity FR-210 describes — `f1040s2`'s 1/13/17, `f1040s3`'s 13, **`f1040sa`'s 17** and 5,
 >   `f1040sc`'s 16, and both of `f8949`'s — where the reader prints one label more than once and the axis
@@ -91,6 +101,45 @@ same fact.
 >   checkers — so its consequence is recorded instead: **the most consequential Schedule A collision,
 >   TY2025's line-18 checkbox against TY2026's itemized total, is inside that 9 and prints as a gap rather
 >   than as a hit.** Schedule A's `8` is therefore a floor, not a count.
+>   ★★ **FR-210 was fixed 2026-09-13 and the bullet above is the record of what it cost, not the
+>   current state.** 7 of those 9 now read; `f8949`'s 2 do not and must not — see the next section.
+
+> ## ★★★ REGENERATED 2026-09-13 (FR-210) — the witness was wrong, and the refusal was right
+> `witness_text` anchored its sub-letter band on the candidate column's **widest** token rather than on
+> the right edge its **numerals** agree on. A suffixed label (`17f` ends at x2=111.00, `17b` at 113.50)
+> ends 3–5.5pt right of a bare one (`17` ends at 108.00), so the band's left bound landed right of
+> where every bare sub-letter starts and the reader dropped them. It printed `5` twice and `17` three
+> times on Schedule A, and **axis C refused both as ambiguous, which was correct** — *"a skipped field
+> is not a passed one"*. The fix is to the WITNESS; the axis still refuses what it cannot tell apart,
+> and `f8949`'s `1` and `2` (printed once per page, on two pages) are the proof: they were ambiguous
+> before, they are ambiguous now, and they are the two unread line numbers that remain.
+>
+> Measured over the 87 committed geometry fixtures, 12 changed and none lost a printed label:
+> `f1040s1--2026-DRAFT` went from a **hard error** (a prose `a` admitted as an orphaned sub-letter) to
+> 64 labels; `f1040sa` gained `5a 5e 8a 8b 8c 17g 17h 17k`; `f1040s2` gained 12 and `f1040s3` 2;
+> `f1040sc`'s `16c` now merges (its parent is emitted 0.5pt *below* the letter, so the row merge is
+> order-insensitive); `f6251--2026-DRAFT`'s `2` is its real `2a`, retiring a spurious 1-retired /
+> 1-introduced pair; and `f1040s1--2022`, `fw2--2024/2025/2026` and `f4868` shed prose-derived labels
+> (`14a`, `62a`, a duplicate `8a`). Every newly-read label — 64 + 12 + 2 + 8 + 1 across those five
+> drafts — was looked up in its own `design/forms/extract/<stem>.txt` and found printed there, so the
+> regeneration is justified by the DOCUMENT and not by the new output.
+>
+> | column | before | after |
+> |---|---|---|
+> | lines that moved | 123 | 113 |
+> | boxes UNREAD | **137** | **67** |
+> | lines retired | 34 | 22 |
+> | lines introduced | 65 | **74** |
+> | line numbers whose MEANING changed | 118 | **126** |
+> | line numbers UNREAD | **13** | **6** |
+>
+> ★★ **The eight new collisions are not bookkeeping.** Three of them are on `f1040s1`, whose row said
+> UNWITNESSED in every page column, and one is line **14** — *"moving expenses for members of the armed
+> forces"* becomes *"…armed forces **and the intelligence community**"*, an eligibility widening no axis
+> could previously see. Two are on Schedule A: line **17**, TY2025's itemized **total** against TY2026's
+> *"Other itemized deductions"* heading, and line **5e**, where the SALT cap moves **$40,000 → $40,400**
+> (**$20,000 → $20,200** MFS) and its phase-out start **$500,000 → $505,000** (**$250,000 → $252,500**).
+> A figure change inside a caption is exactly what this axis exists for.
 
 ★ Drafts are EVIDENCE ONLY. Nothing here is transcribed; these are counts of what CHANGED.
 
@@ -108,16 +157,16 @@ same fact.
 
 | form | common | added | removed | respelled | unpairable | lines that moved | boxes UNREAD | lines retired | lines introduced | line numbers whose MEANING changed | line numbers UNREAD | field map | the FORM |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `f1040s1` | 73 | 0 | 0 | 1 | 0 | **UNWITNESSED** — the 2026 draft's label set cannot be read (bare sub-letter `a` at p1 y=120.9 has no numeric parent; FR-58), so the moved count is NOT a number here | 73 | **UNWITNESSED** | **UNWITNESSED** | **UNWITNESSED** | **UNWITNESSED** | edits | **UNWITNESSED** |
+| `f1040s1` | 73 | 0 | 0 | 1 | 0 | 0 | 3 | 0 | 0 | 3 | 0 | edits | **CHANGED** |
 | `f1040s1a` | 54 | 131 | 0 | 44 | 0 | 44 | 2 | 7 | 28 | 33 | 3 | **REBUILT** | **CHANGED** |
-| `f1040s2` | 59 | 9 | 4 | 15 | 0 | 33 | 2 | 20 | 16 | 18 | 3 | edits | **CHANGED** |
-| `f1040s3` | 37 | 1 | 0 | 2 | 0 | 3 | 2 | 1 | 0 | 4 | 1 | edits | **CHANGED** |
-| `f1040sa` | 15 | 31 | 18 | 1 | 1 | 2 | 0 | 5 | 10 | 8 | 2 | **REBUILT** | **CHANGED** |
+| `f1040s2` | 59 | 9 | 4 | 15 | 0 | 25 | 2 | 15 | 22 | 21 | 0 | edits | **CHANGED** |
+| `f1040s3` | 37 | 1 | 0 | 2 | 0 | 3 | 2 | 0 | 1 | 4 | 0 | edits | **CHANGED** |
+| `f1040sa` | 15 | 31 | 18 | 1 | 1 | 0 | 0 | 0 | 13 | 10 | 0 | **REBUILT** | **CHANGED** |
 | `f1040sb` | 72 | 0 | 0 | 0 | 0 | 0 | 2 | 0 | 0 | 2 | 0 | transfers | **CHANGED** |
-| `f1040sc` | 104 | 5 | 1 | 45 | 0 | 33 | 22 | 0 | 1 | 16 | 1 | edits | **CHANGED** |
+| `f1040sc` | 104 | 5 | 1 | 45 | 0 | 33 | 22 | 0 | 1 | 16 | 0 | edits | **CHANGED** |
 | `f1040sd` | 55 | 0 | 0 | 0 | 0 | 0 | 4 | 0 | 0 | 0 | 0 | transfers | unchanged |
 | `f1040sse` | 27 | 0 | 0 | 2 | 0 | 0 | 3 | 0 | 0 | 5 | 0 | edits | **CHANGED** |
-| `f6251` | 62 | 0 | 0 | 0 | 0 | 0 | 2 | 1 | 1 | 8 | 0 | transfers | **CHANGED** |
+| `f6251` | 62 | 0 | 0 | 0 | 0 | 0 | 2 | 0 | 0 | 8 | 0 | transfers | **CHANGED** |
 | `f8949` | 202 | 0 | 0 | 0 | 0 | 0 | 16 | 0 | 0 | **UNWITNESSED** | 2 | transfers | **UNWITNESSED** |
 | `f8959` | 26 | 0 | 0 | 0 | 0 | 0 | 2 | 0 | 0 | 12 | 0 | transfers | **CHANGED** |
 | `f8960` | 38 | 0 | 0 | 0 | 0 | 0 | 5 | 0 | 0 | 2 | 0 | transfers | **CHANGED** |
