@@ -44,6 +44,19 @@ KICK_START = D(875950)  # i6251 p.9, line 4 — and, for MFS, the zero-exemption
 # state and local taxes exceed the cap lands Schedule A line 7 exactly ON it.
 SALT_CAP = {"mfj": D(10_000), "mfs": D(5_000), "single": D(10_000), "hoh": D(10_000)}
 
+# ★★★ FR-164 — the TAX YEAR every vector this file emits belongs to, stated once.
+#
+# `f6251_reference.py` is *"Form 6251 (2024), transcribed line by line"* and every constant this
+# module imports from it (`STD`, `EXM`, `PHASE`, `BP28`, `L19`) is a TY2024 figure, as are
+# `KICK_START` and `SALT_CAP` above. That was implicit: the emitted vectors carried no year at all,
+# and `verify_f6251.py` supplied one by default. The default is now deleted there, so the year has to
+# be WRITTEN — by the thing that knows it, which is this generator.
+#
+# ★ Porting this file to another year means re-reading that year's form into `f6251_reference.py`
+#   and bumping this together with it. A vector emitted with the wrong year is then refused
+#   downstream by `ots_direct._require_year` rather than scored under the wrong law.
+FIXTURE_TAX_YEAR = 2024
+
 
 def derive(st, wages, ltcg, gift, refund, ftc, salt=D(0)):
     """The 1040 figures a vector's inputs imply, then the whole Form 6251.
@@ -239,6 +252,13 @@ def main() -> int:
     # ── regression guard: this derivation must still reproduce every committed vector ──
     bad = 0
     for v in doc["vectors"]:
+        # ★ FR-164 — this derivation is TY2024-only (see FIXTURE_TAX_YEAR). A committed vector from
+        #   another year cannot be re-derived from these constants, and silently doing so would
+        #   "reproduce" it against the wrong law. Refuse rather than report a green guard.
+        if int(v.get("year", -1)) != FIXTURE_TAX_YEAR:
+            print(f"  ABORT {v['id']}: year {v.get('year')!r} but this generator derives TY"
+                  f"{FIXTURE_TAX_YEAR} only — re-read that year's form into f6251_reference.py.")
+            return 1
         i = v["inputs"]
         # ★ `state_local_tax` is absent from V1-V29, which predate G-6d. Absent means ZERO — those
         #   vectors deduct a cash gift only, which is precisely the gap V30 exists to close — and
@@ -337,6 +357,7 @@ def main() -> int:
             return 1
         new.append({
             "id": vid,
+            "year": FIXTURE_TAX_YEAR,
             "why": why,
             "inputs": {"filing_status": st, "wages": str(wages), "net_ltcg": str(ltcg),
                        "cash_gift": str(gift), "state_refund": str(refund),

@@ -37,9 +37,75 @@ use btctax_core::tax::return_1040::assemble_absolute;
 use btctax_core::tax::tables::{FullReturnParams, TaxTable};
 use btctax_core::tax::testonly::{
     build_golden_household, golden_households, golden_usd as usd, ty2024_params, ty2024_table,
-    GoldenHousehold,
+    ty2026_table, GoldenHousehold, GOLDEN_RETURNS_JSON,
 };
 use btctax_core::tax::FilingStatus;
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// FR-164 — THE CORPUS SAYS WHICH YEAR IT VALIDATED, AND THE PARAMS MUST AGREE.
+//
+// ★★★ `full_return_goldens.json` has always carried `_provenance.tax_year`, and **nothing read it**.
+// The year came instead from the NAMES of the two functions this file called — `ty2024_params()` and
+// `ty2024_table()` — which is not a check but a coincidence of spelling. Feed the TY2024 corpus to
+// another year's params and every household diverges on tax, so the most important test in the repo
+// would report a wall of red with no word about the year; feed a FUTURE year's corpus to
+// `ty2024_params()` and it is worse, because the divergences could be small enough to look like
+// rounding. Either way the one fact that would have explained it sat unread in the file.
+//
+// ★★ The check is DERIVED end to end: the expected year is the corpus's own label, and the actual
+// years are `FullReturnParams::year` and `TaxTable::year` — fields those structs already carry. No
+// year is typed here, so a TY2026 port that swaps the params in cannot leave a stale literal behind.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// The tax year the committed golden corpus says it validated (`_provenance.tax_year`).
+///
+/// Parsed with `serde_json` rather than added to `testonly::Goldens`, which deliberately exposes only
+/// `households`: the label is provenance about the FILE, and its one consumer is this gate.
+///
+/// ★ A corpus with no `tax_year` PANICS rather than defaulting. An unlabelled corpus is exactly the
+///   state FR-164 exists to end — the two blanks ("no year because it has none" and "no year because
+///   nobody wrote one") print identically and are not the same thing.
+fn baked_corpus_tax_year() -> i32 {
+    let doc: serde_json::Value =
+        serde_json::from_str(GOLDEN_RETURNS_JSON).expect("the golden file parses");
+    let y = doc["_provenance"]["tax_year"].as_i64().expect(
+        "full_return_goldens.json carries no `_provenance.tax_year`. It is written by \
+         scripts/oracle/gen_goldens.py from `corpus_tax_year()`; a corpus that does not say which \
+         year it validated cannot be checked against any year's parameters (FR-164).",
+    );
+    i32::try_from(y).expect("a four-digit tax year")
+}
+
+/// `Ok(())` iff the corpus, the params and the table are all the same tax year; otherwise the message
+/// a reader needs, naming every year involved.
+///
+/// Factored out (and pure) so [`the_baked_corpus_refuses_another_years_parameters`] can watch it
+/// discriminate on REAL values — `ty2024_table().year` vs `ty2026_table().year` — instead of on
+/// numbers the test typed.
+fn years_agree(corpus_year: i32, params_year: i32, table_year: i32) -> Result<(), String> {
+    if params_year == corpus_year && table_year == corpus_year {
+        return Ok(());
+    }
+    Err(format!(
+        "the baked oracle corpus validated TY{corpus_year} (its own `_provenance.tax_year`), but this \
+         test is feeding it FullReturnParams for TY{params_year} and a TaxTable for TY{table_year}. \
+         Every figure in `full_return_goldens.json` was computed by OpenTaxSolver and Tax-Calculator \
+         under TY{corpus_year} law, so a mismatch here does not test btctax — it compares two \
+         different tax years and calls the difference a defect. Either use TY{corpus_year}'s params \
+         and table, or regenerate the corpus for the year you mean \
+         (`.venv/bin/python scripts/oracle/gen_goldens.py`, SPEC §11) and re-review it."
+    ))
+}
+
+/// The params + table the baked corpus may be adjudicated against — the ONLY way this file obtains
+/// them, so a test cannot skip the year gate by reaching for `ty2024_params()` directly.
+fn corpus_params_and_table() -> (FullReturnParams, TaxTable) {
+    let (params, table) = (ty2024_params(), ty2024_table());
+    if let Err(why) = years_agree(baked_corpus_tax_year(), params.year, table.year) {
+        panic!("{why}");
+    }
+    (params, table)
+}
 
 /// ★ **The independent cross-check — against TWO engines, adjudicated by divergence CLASS.**
 ///
@@ -84,8 +150,7 @@ fn every_golden_household_matches_the_independent_oracles() {
         "the matrix must cover the SPEC §10 branches"
     );
 
-    let params = ty2024_params();
-    let table = ty2024_table();
+    let (params, table) = corpus_params_and_table();
     let mut diffs: Vec<String> = Vec::new();
 
     // ── Class liveness (§6.2/§6.4) — T11 ACTIVE ─────────────────────────────────────────────────────
@@ -519,8 +584,7 @@ fn stacking_ok_guards_golden_returns_against_btctax_alone() {
 /// their teeth live in the paper-level twin.)
 #[test]
 fn deeper_lines_have_teeth_at_the_compute_level() {
-    let params = ty2024_params();
-    let table = ty2024_table();
+    let (params, table) = corpus_params_and_table();
     // (baked witness, perturb ONLY the OTS leaf the line compares, the compute-level line tag that MUST
     // then appear). Each perturbation is a whole $100 — always across a `round_leaf` dollar boundary.
     // A deeper-line teeth case, aliased so the case table stays clippy-clean (type_complexity).
@@ -593,8 +657,7 @@ fn deeper_lines_have_teeth_at_the_compute_level() {
 /// this goes red; the function-level guard alone would not.
 #[test]
 fn the_main_loop_reports_a_both_oracle_l16_divergence() {
-    let params = ty2024_params();
-    let table = ty2024_table();
+    let (params, table) = corpus_params_and_table();
 
     // A real ABOVE-ceiling anchor (TI ≈ 253,943 ⇒ methodology class cannot fire).
     let mut h = golden_households()
@@ -623,5 +686,69 @@ fn the_main_loop_reports_a_both_oracle_l16_divergence() {
         "the main loop must REPORT a both-oracle L16 divergence that no class absorbs — its \
          `else {{ diffs.push(...) }}` FAIL-wiring, not just `stacking_ok`. Got diffs:\n{}",
         diffs.join("\n")
+    );
+}
+
+/// ★★★ **B1 for FR-164 — the year gate, watched discriminating.**
+///
+/// `corpus_params_and_table()` is the only door to the params in this file, and the claim it makes is
+/// that a corpus baked for one year cannot be adjudicated against another year's parameters. This
+/// test watches [`years_agree`] separate the two cases on REAL values — the corpus's own
+/// `_provenance.tax_year`, `ty2024_params().year`, `ty2024_table().year` and `ty2026_table().year` —
+/// so it cannot pass by agreeing with numbers the test typed.
+///
+/// ★ PLANT TO RE-RUN THE KILL: make `years_agree` `return Ok(())`, or drop the `panic!` from
+///   `corpus_params_and_table`. This test reds and the whole-file gate goes silent.
+///
+/// ★ Why `ty2026_table()` rather than a TY2026 `FullReturnParams`: there is no `ty2026_params()` and
+///   deliberately none is added — new years enter through `bundle.full_return_for(y)`, not through a
+///   second 354-reference single-year surface. The table is a real committed other-year artifact
+///   (`testonly::ty2026_table`), which is what makes the negative case real rather than synthetic.
+#[test]
+fn the_baked_corpus_refuses_another_years_parameters() {
+    let corpus_year = baked_corpus_tax_year();
+    let good_params = ty2024_params();
+    let good_table = ty2024_table();
+    let other_table = ty2026_table();
+
+    // The corpus's label is a real year, and it is the year the committed corpus was generated for.
+    assert!(
+        (2017..=2100).contains(&corpus_year),
+        "_provenance.tax_year is not a plausible tax year: {corpus_year}"
+    );
+
+    // 1. The matched case must PASS — otherwise the gate below is unfalsifiable.
+    assert_eq!(
+        years_agree(corpus_year, good_params.year, good_table.year),
+        Ok(()),
+        "TY{corpus_year} corpus + TY{} params + TY{} table must agree",
+        good_params.year,
+        good_table.year
+    );
+
+    // 2. A DIFFERENT year's table must be refused, and the message must name both years so the
+    //    reader is not left inferring the cause from a wall of tax diffs.
+    assert_ne!(
+        other_table.year, corpus_year,
+        "ty2026_table() must be a different year from the corpus for this kill to mean anything"
+    );
+    let err = years_agree(corpus_year, good_params.year, other_table.year)
+        .expect_err("the baked corpus fed a TY2026 TaxTable must be REFUSED");
+    assert!(
+        err.contains(&format!("TY{corpus_year}"))
+            && err.contains(&format!("TY{}", other_table.year)),
+        "the refusal must name the corpus year and the table year; got: {err}"
+    );
+
+    // 3. And a different year's PARAMS must be refused too — the params leg is not along for the
+    //    ride. (Mutating the field is how a TY2026 `FullReturnParams` would differ; there is no
+    //    `ty2026_params()` to reach for, and adding one is out of scope by design.)
+    let mut wrong_params = ty2024_params();
+    wrong_params.year = corpus_year + 2;
+    let err = years_agree(corpus_year, wrong_params.year, good_table.year)
+        .expect_err("the baked corpus fed another year's FullReturnParams must be REFUSED");
+    assert!(
+        err.contains(&format!("FullReturnParams for TY{}", wrong_params.year)),
+        "the refusal must name the params year; got: {err}"
     );
 }

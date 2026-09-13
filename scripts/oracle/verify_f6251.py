@@ -50,13 +50,46 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import taxcalc_exact  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-# A vector without an explicit `year` is TY2024, which is what every committed vector is today.
-DEFAULT_FIXTURE_YEAR = 2024
+FIXTURE = ROOT / "crates/btctax-core/src/tax/fixtures/form6251_vectors.json"
 
 
 def _year_of(v) -> int:
-    """The tax year a vector belongs to. Absent = TY2024, the year the fixture was authored in."""
-    return int(v.get("year", DEFAULT_FIXTURE_YEAR))
+    """The tax year a vector belongs to — STATED by the vector, never defaulted (FR-164).
+
+    ★★★ This was `int(v.get("year", DEFAULT_FIXTURE_YEAR))` with `DEFAULT_FIXTURE_YEAR = 2024`, and
+    **0 of the 31 committed vectors carried a `year`** — so every year this script printed, every
+    year it handed OTS, and the whole "fixture years present" census line rested on one literal that
+    no vector had ever agreed with. Adding the key to all 31 made the default unreachable, and it is
+    now deleted: a yearless vector refuses the run instead of being silently scored under 2024 law.
+
+    ★ B1 kill: `--selftest` claim 1. PLANT: give this a `.get(..., 2024)` fallback and it reds.
+    """
+    try:
+        return int(v["year"])
+    except KeyError:
+        raise KeyError(
+            f"vector {v.get('id', '?')!r} carries no `year`. There is no default — a TY2026 vector "
+            f"scored under TY2024 law is exactly the silence FR-164 deletes. Add \"year\": <yyyy> to "
+            f"it in {FIXTURE.name}; new vectors get it from design/amt-form6251/gen_e2_vectors.py."
+        ) from None
+
+
+def _fixture_year(vectors) -> int:
+    """The ONE tax year this fixture's vectors share, for the single vectorized Tax-Calculator pass.
+
+    ★ Why one and not per-vector: `taxcalc_exact.build_calculator(rows, year)` builds ONE `Records`
+      at ONE `start_year`, so a mixed-year fixture cannot be scored in a single pass. That boundary
+      is stated here and REFUSED rather than papered over with a majority year — the honest form of
+      `CLAUDE.md`'s "derive the list, or state exactly what it covers".
+    """
+    years = sorted({_year_of(v) for v in vectors})
+    if len(years) != 1:
+        raise RuntimeError(
+            f"the fixture spans {years}, but the taxcalc pass builds ONE Records at ONE start_year. "
+            "Group the vectors by year and run `build_calculator` once per group (the OTS pass "
+            "below is already per-vector and needs no change), or split the fixture."
+        )
+    return years[0]
 
 
 # ★ OTS's disqualifications are COMPUTED, never listed by vector name.
@@ -216,14 +249,19 @@ def main() -> int:
             "Upgrade: .venv/bin/pip install 'taxcalc>=6.8.2'"
         )
         return 2
-    vectors = json.loads(
-        (ROOT / "crates/btctax-core/src/tax/fixtures/form6251_vectors.json").read_text()
-    )["vectors"]
+    vectors = json.loads(FIXTURE.read_text())["vectors"]
+    # ★★★ FR-164 — these two were the LITERAL `2024`, not even a default: the OTS leg below already
+    #     threaded `_year_of(v)` (`run_form(..., year=...)` and the disqualification predicate), but
+    #     the taxcalc leg hardcoded the year in BOTH the row's `FLPDYR` and `build_calculator`'s
+    #     `start_year`. A TY2026 vector would have been scored against TY2024 policy by oracle 2
+    #     while oracle 1 scored it correctly — and the two-oracle design reads that as btctax being
+    #     wrong. The year now comes from the vectors themselves.
+    fixture_year = _fixture_year(vectors)
     rows = []
     for n, v in enumerate(vectors):
         i = v["inputs"]
         rows.append({
-            "RECID": n + 1, "FLPDYR": 2024,
+            "RECID": n + 1, "FLPDYR": fixture_year,
             "MARS": TAXCALC_MARS[i["filing_status"]],
             "e00200": float(i["wages"]), "e00200p": float(i["wages"]), "e00200s": 0.0,
             "p23250": float(i["net_ltcg"]),
@@ -243,7 +281,7 @@ def main() -> int:
             "e07300": float(i["sch3_line1_ftc"]),
             "s006": 1.0,
         })
-    calc = taxcalc_exact.build_calculator(rows, 2024)
+    calc = taxcalc_exact.build_calculator(rows, fixture_year)
     amt, amti = calc.array("c09600"), calc.array("c62100")
 
     print(f"{'vec':5}{'st':7}{'btctax AMT':>13}{'taxcalc':>12}  verdict")
@@ -329,9 +367,21 @@ def _witness_census(vectors, taxcalc_disqualified, ots_disqualified, ots_ran) ->
     return 0
 
 
-def o_year_label() -> str:
-    """The solver year this run will use, so a mismatched OTS_DIR/OTS_YEAR is visible in the output."""
-    return str(os.environ.get("OTS_YEAR", "2024"))
+def o_year_label(vectors) -> str:
+    """The solver year(s) this run will drive, derived from the VECTORS — so a mismatched
+    OTS_DIR/OTS_YEAR is visible in the output rather than inferred.
+
+    ★ FR-164 — this was `os.environ.get("OTS_YEAR", "2024")`: a banner with a default of its own,
+      which printed "2024" whatever tree `run_form` actually drove. The year that reaches OTS is
+      `_year_of(v)`, so that is the year the banner names; a declared `OTS_YEAR` that disagrees is
+      called out here and REFUSED by `ots_direct._require_year` before a solver runs.
+    """
+    years = sorted({_year_of(v) for v in vectors})
+    label = "/".join(str(y) for y in years)
+    declared = os.environ.get("OTS_YEAR", "").strip()
+    if declared and declared not in {str(y) for y in years}:
+        label += f" — but OTS_YEAR declares {declared}; ots_direct will REFUSE the mismatch"
+    return label
 
 
 def _ots_pass(vectors) -> tuple[int, dict[str, str], bool]:
@@ -342,7 +392,7 @@ def _ots_pass(vectors) -> tuple[int, dict[str, str], bool]:
     Absent `OTS_DIR` this prints a loud SKIP and returns 0 — a missing oracle is a gap in coverage, not
     a pass, and saying so is the whole point of the two-oracle standard.
     """
-    print(f"\n── oracle 1 · OpenTaxSolver {o_year_label()}, every printed Form 6251 line ──")
+    print(f"\n── oracle 1 · OpenTaxSolver {o_year_label(vectors)}, every printed Form 6251 line ──")
     if not os.environ.get("OTS_DIR"):
         print("  SKIPPED — OTS_DIR is unset, so AMT rests on ONE oracle for this run.")
         print("  Install: https://sourceforge.net/projects/opentaxsolver/files/OTS_2024/")
@@ -431,5 +481,78 @@ def _ots_pass(vectors) -> tuple[int, dict[str, str], bool]:
     return bad, disqualified, True
 
 
+def selftest() -> int:
+    """B1 — watch the FR-164 year plumbing discriminate. Pure: no OTS, no taxcalc run, no network.
+
+        .venv/bin/python scripts/oracle/verify_f6251.py --selftest
+
+    Five claims, each with the plant that reds it:
+
+      1. A vector with NO `year` is REFUSED. ★ PLANT: restore `DEFAULT_FIXTURE_YEAR = 2024` and
+         `v.get("year", DEFAULT_FIXTURE_YEAR)` in `_year_of` — claim 1 reds.
+      2. A vector's stated year is the year used (not a constant).
+      3. A MIXED-year fixture is REFUSED, because the taxcalc pass builds one `Records` at one
+         `start_year`. ★ PLANT: make `_fixture_year` `return years[0]` — claim 3 reds.
+      4. Every committed vector states a year, and the fixture's year is the one the taxcalc pass
+         will use. ★ PLANT: delete `"year"` from any vector in the fixture — claim 4 reds (and so
+         does claim 1's real-data leg).
+      5. The oracle-1 banner names the VECTORS' year. ★ PLANT: `return "2024"` in `o_year_label` —
+         claim 5 reds.
+    """
+    bad = 0
+
+    # (1) a yearless vector is refused
+    try:
+        _year_of({"id": "VX"})
+    except KeyError as e:
+        if "carries no `year`" not in str(e):
+            print(f"  FAIL: wrong refusal for a yearless vector: {e}"); bad += 1
+        else:
+            print("  a vector with no `year` is REFUSED: OK")
+    else:
+        print("  FAIL: a yearless vector was accepted — a default is back (FR-164)"); bad += 1
+
+    # (2) the stated year is the year used
+    if _year_of({"id": "VX", "year": 2026}) != 2026:
+        print("  FAIL: _year_of ignored the vector's own year"); bad += 1
+    else:
+        print("  a vector's stated year is the year used: OK")
+
+    # (3) a mixed-year fixture is refused
+    try:
+        _fixture_year([{"id": "A", "year": 2024}, {"id": "B", "year": 2026}])
+    except RuntimeError as e:
+        if "ONE Records at ONE start_year" not in str(e):
+            print(f"  FAIL: wrong refusal for a mixed-year fixture: {e}"); bad += 1
+        else:
+            print("  a MIXED-year fixture is REFUSED (one Calculator, one start_year): OK")
+    else:
+        print("  FAIL: a mixed-year fixture was scored in one pass — the year is wrong for some "
+              "vector by construction"); bad += 1
+
+    # (4) the committed fixture states its year on every vector
+    vectors = json.loads(FIXTURE.read_text())["vectors"]
+    missing = [v.get("id", "?") for v in vectors if "year" not in v]
+    if missing:
+        print(f"  FAIL: {len(missing)} committed vector(s) carry no `year`: {missing[:5]}"); bad += 1
+    else:
+        fy = _fixture_year(vectors)
+        print(f"  all {len(vectors)} committed vectors state a year; the taxcalc pass will use "
+              f"TY{fy}: OK")
+
+    # (5) the oracle-1 banner is year-derived, not a literal
+    lbl24 = o_year_label([{"id": "A", "year": 2024}])
+    lbl26 = o_year_label([{"id": "A", "year": 2026}])
+    if "2024" not in lbl24 or "2026" not in lbl26 or lbl24 == lbl26:
+        print(f"  FAIL: the OTS banner is not year-derived ({lbl24!r} vs {lbl26!r})"); bad += 1
+    else:
+        print("  the oracle-1 banner names the vectors' own year: OK")
+
+    print("verify_f6251: FR-164 year plumbing " + ("FAILED" if bad else "OK"))
+    return 1 if bad else 0
+
+
 if __name__ == "__main__":
+    if "--selftest" in sys.argv[1:]:
+        sys.exit(selftest())
     sys.exit(main())

@@ -16,7 +16,7 @@ non-deterministic across seeds. Run it by hand:
 
     export OTS_DIR=/path/to/OpenTaxSolver2024_22.07_linux64
     cargo build -p btctax-oracle-harness          # the §9 harness this drives
-    .venv/bin/python scripts/oracle/sweep.py --seed 1 --count 50
+    .venv/bin/python scripts/oracle/sweep.py --year 2024 --seed 1 --count 50
 
 ★ I4 (MANDATORY) — the sweep NEVER re-implements btctax's arithmetic in Python
 ------------------------------------------------------------------------------
@@ -84,20 +84,69 @@ except ImportError as e:  # pragma: no cover
 # ── The tax thresholds this sweep biases toward (SPEC §5.2) ────────────────────────────────────────
 # A grid STEPS OVER these edges; a threshold-biased random draw lands ON them, where the printed-chain
 # rounding and the Tax-Table $50 bins can hide an off-by-a-dollar bug.
-SCH_B_TRIGGER = 1_500  # taxable interest ≥ $1,500 ⇒ Schedule B files (Part I/II) — 1040 §Interest
-SALT_CAP = 10_000  # §164(b)(5): Sch A line 5e = min(5a+5b+5c, $10,000)
-OASDI_BASE = 168_600  # 2024 §1402(b)(1)/§3121 OASDI wage base — Sch SE L8a absorbs the band
+#
+# ★★★ FR-164 — THESE USED TO BE MODULE-LEVEL TY2024 LITERALS WITH NO YEAR ANYWHERE IN THE FILE.
+# `SALT_CAP = 10_000`, `OASDI_BASE = 168_600`, `STD_DEDUCTION = corpus.STD_DEDUCTION_2024` and
+# `QBI_8995_CEILING` are every one of them a TY2024 figure, and `sweep.py` had no `--year`, passed no
+# year to either oracle, and named no year in its output. So the answer to *"which tax year did this
+# sweep hunt in?"* was four unlabelled constants — and OBBBA moved two of them (the §164(b) cap goes
+# $10,000 → $40,000 at TY2025), which would have quietly turned the `salt_cap_edge` theme into a draw
+# nowhere near an edge while the run still reported "0 undeclared divergences".
+#
+# ★★ UNINDEXED STATUTE STAYS A CONSTANT, and says so. Two of the six are fixed dollar amounts in the
+# statute rather than inflation-adjusted figures, so keying them by year would invent a variation the
+# Code does not have — the honest form is to state which is which.
+SCH_B_TRIGGER = 1_500  # §6012 / 1040 Schedule B trigger — a STATUTORY amount, never indexed
 # The $200k/$250k Additional-Medicare (§3101(b)(2)) AND NIIT (§1411) MAGI thresholds, by status.
+# STATUTORY and explicitly NOT indexed (§1411(b), §3101(b)(2) name the dollar figures outright).
 ADDL_MEDICARE_NIIT = {"Single": 200_000, "Married/Joint": 250_000}
-STD_DEDUCTION = corpus.STD_DEDUCTION_2024  # {"Single": 14_600, "Married/Joint": 29_200} — crossover
 
 STATUSES = ["Single", "Married/Joint"]
 
-# §199A simple-Form-8995 taxable-income ceiling (2024). ABOVE it btctax REFUSES (Form 8995-A is out of
-# the sweep's domain, D-2), so an SE draw must keep earned income well under it. The compiled harness's
-# refusal screen is the authoritative D-2 gate; this is the generator-side bias that keeps most SE draws
-# admissible instead of wasting oracle runs on refusals.
-QBI_8995_CEILING = {"Single": 191_950, "Married/Joint": 383_900}
+# ── The YEAR-DEPENDENT thresholds, keyed by year, refusing an unknown one ──────────────────────────
+#
+# ★ Modelled on `corpus.salt_for(year)` (the pattern this file was told to copy): a year with no entry
+#   RAISES, naming what a new year must supply, instead of silently reusing the last one's figures.
+# ★ The §164(b) cap is READ FROM `corpus.SALT_CAP_BY_YEAR` rather than retyped — the corpus already
+#   holds it per year, with a straddle guard, and a second copy here is exactly the list that goes
+#   stale beneath a set that grew.
+_YEAR_THRESHOLDS = {
+    2024: {
+        # §63(c) standard deduction — the itemizing-wins crossover. ONE definition, in corpus.py.
+        "std_deduction": corpus.STD_DEDUCTION_2024,
+        # §1402(b)(1)/§3121 OASDI wage base — Sch SE L8a absorbs the band.
+        "oasdi_base": 168_600,
+        # §199A simple-Form-8995 taxable-income ceiling. ABOVE it btctax REFUSES (Form 8995-A is out
+        # of the sweep's domain, D-2), so an SE draw must keep earned income well under it. The
+        # compiled harness's refusal screen is the authoritative D-2 gate; this is the generator-side
+        # bias that keeps most SE draws admissible instead of wasting oracle runs on refusals.
+        "qbi_8995_ceiling": {"Single": 191_950, "Married/Joint": 383_900},
+    },
+}
+
+
+def thresholds_for(year: int) -> dict:
+    """The threshold figures this sweep biases toward, for `year`. Refuses a year it has none for.
+
+    ★ B1 kill: `--selftest` claim 1. PLANT: give this a fallback to 2024 and it reds.
+    """
+    try:
+        thr = dict(_YEAR_THRESHOLDS[year])
+    except KeyError:
+        raise KeyError(
+            f"no threshold table for TY{year}. Add one to `_YEAR_THRESHOLDS` with THAT year's §63(c) "
+            f"standard deduction, §1402(b)(1) OASDI wage base and §199A simple-8995 ceiling. There is "
+            f"no fallback: reusing another year's edges makes every threshold-biased theme draw away "
+            f"from the edge while the run still reports '0 undeclared divergences'."
+        ) from None
+    try:
+        thr["salt_cap"] = corpus.SALT_CAP_BY_YEAR[year]
+    except KeyError:
+        raise KeyError(
+            f"corpus.SALT_CAP_BY_YEAR has no §164(b) cap for TY{year}; add it there (with its axis) "
+            f"rather than typing a second copy here."
+        ) from None
+    return thr
 
 
 # ── The sweep-side known-defect registry (SPEC §10 suppression) — EMPTY today ──────────────────────
@@ -145,12 +194,14 @@ def _spice(rng: random.Random, inp: dict) -> None:
             inp["short_term_capital_gains"] = -rng.randint(1_000, 25_000)
 
 
-def _itemize(rng: random.Random, inp: dict, status: str, itemized_total_target: int, salt_total: int) -> None:
+def _itemize(rng: random.Random, inp: dict, status: str, itemized_total_target: int, salt_total: int,
+             thr: dict) -> None:
     """Attach a Schedule A sized so itemizing WINS (D-3): the itemized total STRICTLY exceeds the
     standard deduction. `salt_total` is the pre-cap 5a+5b sum; the mortgage is sized so
-    mortgage + min(salt_total, cap) ≈ `itemized_total_target` (kept ≥ STD + $1 by the caller)."""
+    mortgage + min(salt_total, cap) ≈ `itemized_total_target` (kept ≥ STD + $1 by the caller).
+    `thr` is the run's year's thresholds (`thresholds_for`) — the §164(b) cap is that year's."""
     state, realest = _split_salt(rng, salt_total)
-    capped_salt = min(salt_total, SALT_CAP)
+    capped_salt = min(salt_total, thr["salt_cap"])
     mortgage = max(0, itemized_total_target - capped_salt)
     inp["state_income_tax"] = state
     inp["real_estate_tax"] = realest
@@ -159,9 +210,12 @@ def _itemize(rng: random.Random, inp: dict, status: str, itemized_total_target: 
     inp["standard_or_itemized"] = "Itemized"
 
 
-def _gen_scenario(rng: random.Random) -> tuple[dict, str]:
+def _gen_scenario(rng: random.Random, thr: dict) -> tuple[dict, str]:
     """Draw ONE threshold-biased scenario. Returns (inputs, theme). Honors the domain by construction as
-    far as it can (SE⇒low W-2; itemizing-wins); the authoritative D-2/AMT/credit gates run downstream."""
+    far as it can (SE⇒low W-2; itemizing-wins); the authoritative D-2/AMT/credit gates run downstream.
+
+    `thr` is the run's year's threshold table — every edge this draw aims at comes from it (FR-164),
+    so a sweep can no longer be biased toward one year's thresholds while claiming another's."""
     theme = rng.choice(
         ["sch_b_edge", "salt_cap_edge", "std_crossover", "addl_medicare_edge", "se_oasdi_edge", "niit_edge", "capital_shapes", "broad"]
     )
@@ -174,28 +228,29 @@ def _gen_scenario(rng: random.Random) -> tuple[dict, str]:
 
     elif theme == "salt_cap_edge":
         inp["w2_income"] = rng.randint(60_000, 160_000)
-        salt_total = _near(rng, SALT_CAP, 800)  # tight on the $10k cap (straddles both sides)
+        salt_total = _near(rng, thr["salt_cap"], 800)  # tight on the cap (straddles both sides)
         # Mortgage clears STD comfortably so itemizing wins regardless of the cap outcome.
-        target = STD_DEDUCTION[status] + rng.randint(6_000, 20_000)
-        _itemize(rng, inp, status, target, salt_total)
+        target = thr["std_deduction"][status] + rng.randint(6_000, 20_000)
+        _itemize(rng, inp, status, target, salt_total, thr)
 
     elif theme == "std_crossover":
         inp["w2_income"] = rng.randint(40_000, 120_000)
         salt_total = rng.randint(2_000, 8_000)
         # Itemized total JUST above the standard deduction (D-3 from the winning side, near the crossover).
-        target = STD_DEDUCTION[status] + rng.randint(1, 1_500)
-        _itemize(rng, inp, status, target, salt_total)
+        target = thr["std_deduction"][status] + rng.randint(1, 1_500)
+        _itemize(rng, inp, status, target, salt_total, thr)
 
     elif theme == "addl_medicare_edge":
         # Medicare wages (= box 1 here) tight on the $200k/$250k Additional-Medicare threshold (§3101(b)(2)).
         inp["w2_income"] = _near(rng, ADDL_MEDICARE_NIIT[status], 2_500)
 
     elif theme == "se_oasdi_edge":
-        # SE⇒W-2 must stay low for §199A (D-2), so probe the OASDI wage base with MFJ headroom: a W-2 near
-        # $168,600 fills the OASDI band (Sch SE L8a), and a modest SE profit rides on top (8959 Part II).
+        # SE⇒W-2 must stay low for §199A (D-2), so probe the OASDI wage base with MFJ headroom: a W-2 at
+        # the year's wage base fills the OASDI band (Sch SE L8a), and a modest SE profit rides on top
+        # (8959 Part II).
         status = "Married/Joint"
         inp["filing_status"] = status
-        inp["w2_income"] = _near(rng, OASDI_BASE, 3_000)
+        inp["w2_income"] = _near(rng, thr["oasdi_base"], 3_000)
         inp["self_employment_income"] = rng.randint(15_000, 60_000)
 
     elif theme == "niit_edge":
@@ -231,7 +286,7 @@ def _gen_scenario(rng: random.Random) -> tuple[dict, str]:
     # SE present ⇒ keep earned income under the §199A simple-8995 ceiling so btctax does not refuse (D-2).
     if inp.get("self_employment_income", 0) > 0:
         earned = inp.get("w2_income", 0) + inp["self_employment_income"] * 0.9235
-        if earned > QBI_8995_CEILING[status] * 0.85:
+        if earned > thr["qbi_8995_ceiling"][status] * 0.85:
             inp["w2_income"] = min(inp.get("w2_income", 0), 40_000)
     # At least one income source (corpus.py's no-all-none rule).
     if not corpus._has_income(inp):
@@ -240,13 +295,17 @@ def _gen_scenario(rng: random.Random) -> tuple[dict, str]:
     return inp, theme
 
 
-def generate(seed: int, count: int) -> list[dict]:
+def generate(seed: int, count: int, year: int) -> list[dict]:
     """The K seeded, threshold-biased scenarios (reproducible from `seed`). Each is a
-    `{name, why, inputs, theme}` dict; `name` encodes the seed+index so a report is reproducible."""
+    `{name, why, inputs, theme}` dict; `name` encodes the seed+index so a report is reproducible.
+
+    `year` selects the threshold table every draw is biased toward (FR-164) — required, because the
+    edges ARE the sweep and last year's edges are not this year's."""
+    thr = thresholds_for(year)
     rng = random.Random(seed)
     out = []
     for i in range(count):
-        inp, theme = _gen_scenario(rng)
+        inp, theme = _gen_scenario(rng, thr)
         out.append(
             {
                 "name": f"sweep_s{seed}_i{i:04d}",
@@ -294,13 +353,47 @@ def _known_defect_arg(inputs: dict) -> str | None:
     return None
 
 
-def _verify_harness_freshness() -> None:
+GOLDEN_MATRIX = (
+    Path(__file__).resolve().parents[2] / "crates/btctax-core/tests/goldens/full_return_goldens.json"
+)
+
+
+def verify_year_matches_corpus(year: int) -> None:
+    """★★ FR-164 — `--year` must agree with the BAKED CORPUS's own `_provenance.tax_year`.
+
+    The compiled harness this sweep drives carries btctax's side, and its tax year is fixed at
+    `crates/btctax-oracle-harness/src/main.rs`'s `const YEAR` — the same year the corpus was baked
+    for. So btctax answers for the corpus's year whatever `--year` says. Left unchecked, `--year 2026`
+    would bias every draw at TY2026 edges and score them against a TY2024 btctax and a TY2026
+    taxcalc: manufactured divergences, in a tool whose entire output is divergences.
+
+    Pure — no OTS, no harness binary — and therefore run BEFORE either is required, so the operator
+    learns the year is wrong instead of being told to install a solver first.
+
+    ★ B1 kill: `--selftest` claim 5. PLANT: delete this call from `run_sweep` and it reds.
+    """
+    baked_year = json.loads(GOLDEN_MATRIX.read_text())["_provenance"]["tax_year"]
+    if int(baked_year) != int(year):
+        sys.exit(
+            f"--year {year} disagrees with the baked corpus's _provenance.tax_year ({baked_year}). "
+            f"btctax's side of this sweep comes from the compiled harness, which is fixed at the "
+            f"corpus's year (crates/btctax-oracle-harness/src/main.rs `const YEAR`) — so btctax would "
+            f"answer for TY{baked_year} while the draws and oracle 2 answered for TY{year}, and every "
+            f"divergence reported would be that mismatch. Run with --year {baked_year}, or port the "
+            f"harness and regenerate the corpus first."
+        )
+
+
+def _verify_harness_freshness(year: int) -> None:
     """Build-freshness gate — prove the harness binary is T7-m1-fresh (emits `reproduction_ok`) BEFORE
     spending oracle time. A binary built before T7-m1 lacks the field; defaulting a missing key to a pass
     would silently disable the structural witness in a DISCOVERY tool, so we fail loud and early with a
-    rebuild instruction instead. Probes `--check` on the refusal-free floor anchor."""
-    matrix_path = Path(__file__).resolve().parents[2] / "crates/btctax-core/tests/goldens/full_return_goldens.json"
-    matrix = json.loads(matrix_path.read_text())
+    rebuild instruction instead. Probes `--check` on the refusal-free floor anchor.
+
+    ★ The `--year` half of this gate is [`verify_year_matches_corpus`], which runs FIRST because it
+      needs neither OTS nor the harness binary.
+    """
+    matrix = json.loads(GOLDEN_MATRIX.read_text())
     probe = next(h for h in matrix["households"] if h["name"] == "single_w2_only_standard")
     chk = _harness_check(probe)
     if chk.get("malformed") or "reproduction_ok" not in chk:
@@ -310,7 +403,8 @@ def _verify_harness_freshness() -> None:
         )
 
 
-def _report_divergence(scenario: dict, seed: int, index: int, verdict: dict, injected: bool) -> None:
+def _report_divergence(scenario: dict, seed: int, index: int, verdict: dict, injected: bool,
+                       year: int) -> None:
     """Emit ONE paste-ready divergence report (SPEC §9): the scenario as a household dict, the disagreeing
     line, oracle-1 (OTS) / oracle-2 (taxcalc) / btctax-on-paper, and the seed+index to reproduce."""
     banner = " [INJECTED SELF-TEST]" if injected else ""
@@ -323,7 +417,8 @@ def _report_divergence(scenario: dict, seed: int, index: int, verdict: dict, inj
     print(f"    oracle-2 (taxcalc):  {verdict.get('taxcalc')}")
     print(f"    btctax-on-paper:     {verdict.get('on_paper')}   (btctax-internal {verdict.get('internal')})")
     print(f"    class: {verdict.get('class')}   reconciled: {verdict.get('reconciled')}")
-    print(f"  reproduce: sweep.py --seed {seed} --count {index + 1}   (scenario index {index})")
+    print(f"  reproduce: sweep.py --year {year} --seed {seed} --count {index + 1}   "
+          f"(scenario index {index})")
     if injected:
         print("  NOTE: this is the --inject-divergence SELF-TEST (an oracle figure was perturbed on purpose)")
         print("        to prove the sweep surfaces a report; it is NOT a real btctax finding.")
@@ -339,22 +434,27 @@ def _report_divergence(scenario: dict, seed: int, index: int, verdict: dict, inj
     print("    (iv) lawful epsilon                 → §10 triage (Σround≠roundΣ / cents-MAGI residual), never a class")
 
 
-def run_sweep(seed: int, count: int, inject: bool, verbose: bool) -> int:
+def run_sweep(seed: int, count: int, year: int, inject: bool, verbose: bool) -> int:
     """Generate K scenarios, admit (D-2 refusal-free + AMT/credit-free), live-diff each admitted one, and
-    report undeclared divergences. Returns the number of UNDECLARED divergences (0 = a clean run)."""
+    report undeclared divergences. Returns the number of UNDECLARED divergences (0 = a clean run).
+
+    `year` is REQUIRED and reaches all three engines: the threshold table the draws aim at, oracle 1's
+    solver year, oracle 2's `Records` start year, and the check against the baked corpus's own label
+    (FR-164). Nothing here may default it."""
+    verify_year_matches_corpus(year)  # cheapest and most likely to be wrong — checked first
     if not os.environ.get("OTS_DIR") or not ots_direct.OTS_DIR.exists():
-        sys.exit("set OTS_DIR to an unpacked OpenTaxSolver2024 tree (see ots_direct.py).")
+        sys.exit(f"set OTS_DIR to an unpacked OpenTaxSolver{year} tree (see ots_direct.py).")
     if not gen_goldens.HARNESS_BIN.exists():
         sys.exit(f"{gen_goldens.HARNESS_BIN} not found — build it: `cargo build -p btctax-oracle-harness`.")
-    _verify_harness_freshness()  # fail loud NOW if the binary predates T7-m1 (no `reproduction_ok`)
+    _verify_harness_freshness(year)  # year vs the baked corpus, then T7-m1 freshness — both fail loud
 
-    scenarios = generate(seed, count)
+    scenarios = generate(seed, count, year)
     all_inputs = [s["inputs"] for s in scenarios]
 
     # Batch oracle-2 (taxcalc) once: AMT/credit admission probe + the full expected dict (vectorized —
     # one Calculator pass each, not per-scenario).
-    amt_credits = gen_goldens._taxcalc_amt_credits(all_inputs)
-    taxcalc_full = gen_goldens.taxcalc_run(all_inputs)
+    amt_credits = gen_goldens._taxcalc_amt_credits(all_inputs, year)
+    taxcalc_full = gen_goldens.taxcalc_run(all_inputs, year)
 
     admitted = skipped = undeclared = suppressed = 0
     injected_done = False
@@ -390,7 +490,7 @@ def run_sweep(seed: int, count: int, inject: bool, verbose: bool) -> int:
         # Admitted — run oracle-1 (OTS) live and diff via the §9 harness `--check` (I4: all btctax
         # arithmetic + classification stays in Rust).
         admitted += 1
-        expected_ots = ots_direct.evaluate(inputs)
+        expected_ots = ots_direct.evaluate(inputs, year=year)
         expected_taxcalc = taxcalc_full[idx]
 
         injected = inject and not injected_done
@@ -454,7 +554,7 @@ def run_sweep(seed: int, count: int, inject: bool, verbose: bool) -> int:
                 continue
             if v.get("reconciled"):
                 continue
-            _report_divergence(scenario, seed, idx, v, injected)
+            _report_divergence(scenario, seed, idx, v, injected, year)
             found_here = True
             if not injected:
                 undeclared += 1
@@ -463,7 +563,7 @@ def run_sweep(seed: int, count: int, inject: bool, verbose: bool) -> int:
             print(f"[ok {idx}] {scenario['theme']}: reconciled", file=sys.stderr)
 
     print(
-        f"\n[sweep] seed={seed} count={count}: {admitted} admitted, {skipped} skipped (out of domain)."
+        f"\n[sweep] TY{year} seed={seed} count={count}: {admitted} admitted, {skipped} skipped (out of domain)."
         f" {suppressed} suppressed known-defect(s)."
     )
     if undeclared == 0:
@@ -473,22 +573,139 @@ def run_sweep(seed: int, count: int, inject: bool, verbose: bool) -> int:
     return undeclared
 
 
-def main() -> None:
+def _parser() -> argparse.ArgumentParser:
+    """The real CLI, factored out so `selftest` can prove `--year` is required on THIS parser rather
+    than on a look-alike built in the test (B1: the thing that decides must be the thing checked)."""
     ap = argparse.ArgumentParser(description="Live, non-CI, threshold-biased btctax-vs-two-oracle divergence sweep (SPEC §5.2/§9).")
     ap.add_argument("--seed", type=int, required=True, help="deterministic RNG seed (reproducible)")
     ap.add_argument("--count", type=int, required=True, help="number of threshold-biased scenarios to generate")
+    # ★ FR-164 — REQUIRED, no default. The year picks the threshold table every draw is biased toward,
+    #   the OTS solver year and taxcalc's start year; it is checked against the baked corpus's own
+    #   `_provenance.tax_year` before any oracle runs.
+    ap.add_argument("--year", type=int, required=True,
+                    help="tax year: the threshold table to bias draws toward AND the year both oracles "
+                         "are asked about. Must match the baked corpus's _provenance.tax_year.")
     ap.add_argument("--verbose", action="store_true", help="log per-scenario admission/skip reasons to stderr")
     ap.add_argument(
         "--inject-divergence",
         action="store_true",
         help="SELF-TEST: perturb one oracle figure on the first admitted scenario to prove the sweep surfaces a report",
     )
-    args = ap.parse_args()
-    undeclared = run_sweep(args.seed, args.count, args.inject_divergence, args.verbose)
+    ap.add_argument("--selftest", action="store_true",
+                    help="B1: watch the FR-164 year plumbing discriminate; needs no OTS and no harness "
+                         "(handled before the parser runs, so it needs no --seed/--count/--year)")
+    return ap
+
+
+def main() -> None:
+    args = _parser().parse_args()
+    undeclared = run_sweep(args.seed, args.count, args.year, args.inject_divergence, args.verbose)
     # A real undeclared divergence is a non-zero exit so a wrapper/CI notices; the injected self-test
     # still returns 0 (its perturbation is not counted as undeclared).
     sys.exit(1 if undeclared else 0)
 
 
+def selftest() -> int:
+    """B1 — watch the FR-164 year plumbing discriminate. Pure: no OTS, no harness binary, no network.
+
+        .venv/bin/python scripts/oracle/sweep.py --selftest
+
+    Four claims, each with the plant that reds it:
+
+      1. `thresholds_for` REFUSES a year it has no table for. ★ PLANT: add a fallback to TY2024 and
+         claim 1 reds.
+      2. The §164(b) cap it returns is `corpus.SALT_CAP_BY_YEAR`'s, not a second copy. ★ PLANT: type
+         `"salt_cap": 10_000` into `_YEAR_THRESHOLDS[2024]` and change the corpus value — claim 2 reds.
+      3. The draws are actually BIASED BY the table: two different threshold tables over one seed
+         produce different scenarios. ★ PLANT: revert `_gen_scenario` to module-level constants and
+         claim 3 reds (the year would stop reaching the draw).
+      4. `--year` is REQUIRED — argparse refuses a run without it. ★ PLANT: give it a default and
+         claim 4 reds.
+    """
+    bad = 0
+
+    # (1) an unknown year is refused
+    try:
+        thresholds_for(1999)
+    except KeyError as e:
+        if "no threshold table for TY1999" not in str(e):
+            print(f"  FAIL: wrong refusal for an unknown year: {e}"); bad += 1
+        else:
+            print("  thresholds_for REFUSES a year it has no table for: OK")
+    else:
+        print("  FAIL: thresholds_for(1999) returned a table — a fallback is back (FR-164)"); bad += 1
+
+    # (2) the SALT cap is the corpus's, not a copy
+    thr = thresholds_for(2024)
+    if thr["salt_cap"] != corpus.SALT_CAP_BY_YEAR[2024]:
+        print("  FAIL: the §164(b) cap is not corpus.SALT_CAP_BY_YEAR's"); bad += 1
+    else:
+        print(f"  the §164(b) cap is read from corpus.SALT_CAP_BY_YEAR ({thr['salt_cap']:,}): OK")
+
+    # (3) the table actually steers the draws — same seed, different thresholds, different scenarios
+    hypothetical = {
+        "std_deduction": {"Single": 31_500, "Married/Joint": 63_000},
+        "oasdi_base": 184_500,
+        "qbi_8995_ceiling": {"Single": 201_000, "Married/Joint": 402_000},
+        "salt_cap": 40_000,
+    }
+    rng_a, rng_b = random.Random(7), random.Random(7)
+    a = [_gen_scenario(rng_a, thr) for _ in range(40)]
+    b = [_gen_scenario(rng_b, hypothetical) for _ in range(40)]
+    if a == b:
+        print("  FAIL: 40 draws are IDENTICAL under two different threshold tables — the year does "
+              "not reach the draw, so every threshold-biased theme is biased at the wrong edge"); bad += 1
+    else:
+        differing = sum(1 for x, y in zip(a, b) if x != y)
+        print(f"  the threshold table steers the draws ({differing}/40 scenarios differ): OK")
+
+    # (4) --year is required — on the REAL parser, not a look-alike
+    import contextlib
+    import io
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        try:
+            _parser().parse_args(["--seed", "1", "--count", "1"])
+            refused = None
+        except SystemExit:
+            refused = "--year" in err.getvalue()
+    if refused is None:
+        print("  FAIL: the real parser accepted a run with NO --year (FR-164: it must be required)")
+        bad += 1
+    elif not refused:
+        print("  FAIL: the parser refused, but not for a missing --year"); bad += 1
+    else:
+        print("  --year is REQUIRED on the real parser (a run without it is refused): OK")
+    # And a run WITH it parses, so claim 4 is not passing merely because everything is refused.
+    ok = _parser().parse_args(["--seed", "1", "--count", "1", "--year", "2024"])
+    if ok.year != 2024:
+        print("  FAIL: --year did not reach args.year"); bad += 1
+
+    # (5) a --year that disagrees with the baked corpus is refused before any oracle runs
+    baked = json.loads(GOLDEN_MATRIX.read_text())["_provenance"]["tax_year"]
+    try:
+        verify_year_matches_corpus(int(baked) + 2)
+    except SystemExit as e:
+        if "disagrees with the baked corpus" not in str(e):
+            print(f"  FAIL: wrong refusal for a mismatched --year: {e}"); bad += 1
+        else:
+            print(f"  --year {int(baked) + 2} against a TY{baked} corpus is REFUSED: OK")
+    else:
+        print("  FAIL: a --year disagreeing with the baked corpus was accepted"); bad += 1
+    try:
+        verify_year_matches_corpus(int(baked))
+    except SystemExit as e:
+        print(f"  FAIL: the corpus's OWN year was refused ({e}) — the check cannot pass anything"); bad += 1
+    else:
+        print(f"  --year {baked} (the corpus's own) is accepted: OK")
+
+    print("sweep: FR-164 year plumbing " + ("FAILED" if bad else "OK"))
+    return 1 if bad else 0
+
+
 if __name__ == "__main__":
+    # ★ Checked before the parser is built: --selftest must run without --seed/--count/--year, which
+    #   are (deliberately) required for a real sweep.
+    if "--selftest" in sys.argv[1:]:
+        sys.exit(selftest())
     main()

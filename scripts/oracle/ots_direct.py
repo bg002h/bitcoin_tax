@@ -76,7 +76,62 @@ OTS_DIR = Path(os.environ.get("OTS_DIR", "")).expanduser()
 # (`OpenTaxSolver2024_22.07_linux64` and `OpenTaxSolver2025_23.06_linux64`), and pointing OTS_DIR at
 # the 2025 tree while this stayed 2024 failed with a confusing "solver not found" — the tree and the
 # year are two facts, so they are two settings.
-OTS_YEAR = int(os.environ.get("OTS_YEAR", "2024"))
+#
+# ★★★ FR-164 — THE `"2024"` DEFAULT IS DELETED, and the deletion is the point.
+#
+# `OTS_YEAR` names WHICH INSTALLED TREE to drive; a caller's `year=` names WHICH TAX YEAR it is
+# asking about. Those are two facts as well, and a default collapsed them into one silent answer:
+# with `OTS_YEAR` unset, every call ran the 2024 solvers and every caller believed it had said so.
+# Unset now means UNSTATED (`None`) — `_require_year` refuses rather than guesses — so a run either
+# names its year or stops. Kept as an environment setting (not a required argument) because it
+# describes an EXTERNAL install on this machine, which no argument can know; the tax year the caller
+# wants is passed in, and `_require_year` refuses the two when they disagree.
+_OTS_YEAR_ENV = os.environ.get("OTS_YEAR", "").strip()
+OTS_YEAR: int | None = int(_OTS_YEAR_ENV) if _OTS_YEAR_ENV else None
+
+
+def _require_year(year: int | None) -> int:
+    """The tax year this call is about — from the caller, else the declared install, else REFUSE.
+
+    ★ Used by the PURE, year-scoped logic (`_ots_amt_disqualified`), which reasons *about* solver
+      years and must be able to be asked about a year this machine has no install for — that is
+      exactly what `selftest_defect_years` does. Anything that actually RUNS a solver goes through
+      [`_require_installed_year`] instead.
+
+    ★ B1 kill: `selftest_year_is_never_assumed`. Restore `or 2024` here and it reds.
+    """
+    if year is not None:
+        return int(year)
+    if OTS_YEAR is not None:
+        return OTS_YEAR
+    raise RuntimeError(
+        "no tax year: this call passed no `year=` and OTS_YEAR is unset. There is no default — a "
+        "defaulted year is how a TY2026 run silently scored itself against the 2024 solvers. Set "
+        "OTS_YEAR to the year of the tree OTS_DIR points at, or pass `year=`."
+    )
+
+
+def _require_installed_year(year: int | None) -> int:
+    """[`_require_year`], plus: the year asked for must be the year `OTS_YEAR` says is installed.
+
+    ★ The two facts again. `OTS_DIR` + `OTS_YEAR` describe the tree ON DISK; the argument says which
+      tax year the caller is scoring. Where a solver is actually executed those must agree, and a
+      disagreement is a refusal — not a `FileNotFoundError` several frames down, and certainly not one
+      year's law applied to another year's return.
+
+    ★ Scoped to the RUN path on purpose (`_bin`, `_template`, `run_form`, `evaluate`, `version`).
+      Applying it to the pure defect-year predicate broke `selftest_defect_years`, which asks about
+      TY2025 and TY2024 in one process by design — found by planting the FR-164 defect and watching
+      what went red.
+    """
+    year = _require_year(year)
+    if OTS_YEAR is not None and year != OTS_YEAR:
+        raise RuntimeError(
+            f"asked to RUN TY{year} but OTS_YEAR declares the installed tree is {OTS_YEAR}. "
+            f"Point OTS_DIR at an OpenTaxSolver{year} tree and set OTS_YEAR={year}, or ask for "
+            f"TY{OTS_YEAR}. A mismatch here would score one year's return under another's law."
+        )
+    return year
 
 
 def _rust_const(name: str) -> int:
@@ -103,7 +158,7 @@ GOLDEN_ADULT_AGE = _rust_const("GOLDEN_ADULT_AGE")
 
 
 def _bin(form: str, year: int | None = None) -> Path:
-    year = OTS_YEAR if year is None else year
+    year = _require_installed_year(year)
     p = OTS_DIR / "bin" / f"taxsolve_{form}_{year}"
     if not p.exists():
         raise FileNotFoundError(
@@ -114,7 +169,7 @@ def _bin(form: str, year: int | None = None) -> Path:
 
 
 def _template(subdir: str, name: str, year: int | None = None) -> str:
-    year = OTS_YEAR if year is None else year
+    year = _require_installed_year(year)
     d = OTS_DIR / "tax_form_files" / subdir
     for cand in (f"{name}_{year}_template.txt", f"{name}_template.txt"):
         p = d / cand
@@ -279,7 +334,7 @@ def _ots_amt_disqualified(
     disqualification is scoped to the solver years that actually carry the defect — a defect fixed
     upstream must stop gating, or the fix buys us nothing.
     """
-    year = OTS_YEAR if year is None else year
+    year = _require_year(year)
     if not ots6251:
         return "OTS printed no Form 6251 for this household"
     line4 = ots6251.get("line4")
@@ -409,6 +464,7 @@ def run_form(
     year: int | None = None,
 ) -> tuple[dict[str, float], Path]:
     """Run one OTS solver; return its parsed lines and the path of its output file."""
+    year = _require_installed_year(year)  # FR-164: resolved ONCE — never re-defaulted per use
     template = _template(subdir, tname, year)
     # OTS reads a blank `YourName:` as consuming the NEXT line as its value, which then
     # derails the whole strict-order parse. Every identity field must carry something.
@@ -422,7 +478,7 @@ def run_form(
     # ★ Schedule 1-A is skippable in silence (see OTS_SCHEDULE_1A_SENTINEL) — refuse to run without it.
     if (
         form == "US_1040"
-        and (OTS_YEAR if year is None else year) >= OTS_FIRST_YEAR_WITH_SCHEDULE_1A
+        and year >= OTS_FIRST_YEAR_WITH_SCHEDULE_1A
         and not re.search(rf"^\s*{OTS_SCHEDULE_1A_SENTINEL}\b", filled, re.M)
     ):
         raise RuntimeError(
@@ -474,8 +530,16 @@ def _ots_aged_blind(h: dict) -> dict[str, str]:
     }
 
 
-def evaluate(h: dict) -> dict[str, float | None]:
-    """Compute one household's federal return by driving OTS end to end."""
+def evaluate(h: dict, *, year: int | None = None) -> dict[str, float | None]:
+    """Compute one household's federal return by driving OTS end to end.
+
+    ★ FR-164 — `year` is the TAX YEAR this household is being scored for, and it now reaches every
+      solver invocation below explicitly. It is keyword-only and resolved through
+      [`_require_year`], so an unstated year REFUSES instead of quietly meaning 2024: the caller
+      that knows which year its corpus is (`gen_goldens.CORPUS_TAX_YEAR`, `sweep.py --year`,
+      `check_return.py --year`) is the caller that must say so.
+    """
+    year = _require_installed_year(year)
     status = h.get("filing_status", "Single")
     w2 = h.get("w2_income", 0)
     se_profit = h.get("self_employment_income", 0)
@@ -509,7 +573,7 @@ def evaluate(h: dict) -> dict[str, float | None]:
                 "US_1040_Sched_SE",
                 "US_1040_Sched_SE",
                 {"L2": se_profit, "L5a": 0, "L8a": w2, "L8b": 0, "L8c": 0},
-                work,
+                work, year=year
             )
             se_tax, half_se = se.get("L12", 0.0), se.get("L13", 0.0)
             se_l10_oasdi = se.get("L10")     # OASDI leg — Sch SE L10 (0 once wages fill the band)
@@ -520,14 +584,14 @@ def evaluate(h: dict) -> dict[str, float | None]:
                 "Form_8959",
                 "Form_8959",
                 {"Status": status, "L1": w2, "L8": round(se_profit * 0.9235)},
-                work,
+                work, year=year
             )
             addl_medicare = f8959.get("L18", 0.0)
             f8959_l7 = f8959.get("L7")       # 8959 Part I leg (Additional Medicare on wages)
             f8959_l13 = f8959.get("L13")     # 8959 Part II leg (Additional Medicare on SE income)
         elif w2:
             f8959, _ = run_form(
-                "f8959", "Form_8959", "Form_8959", {"Status": status, "L1": w2}, work
+                "f8959", "Form_8959", "Form_8959", {"Status": status, "L1": w2}, work, year=year
             )
             addl_medicare = f8959.get("L18", 0.0)
             f8959_l7 = f8959.get("L7")       # 8959 Part I leg (Additional Medicare on wages)
@@ -588,7 +652,7 @@ def evaluate(h: dict) -> dict[str, float | None]:
         # Pass 1: no QBI deduction yet — it is limited BY taxable income, so it cannot be
         # known until the 1040 has produced one.
         p1, p1_out = run_form(
-            "US_1040", "US_1040", "US_1040", {**base, "L13": 0}, work, capgains=gains
+            "US_1040", "US_1040", "US_1040", {**base, "L13": 0}, work, capgains=gains, year=year
         )
 
         qbi_deduction = 0.0
@@ -621,7 +685,7 @@ def evaluate(h: dict) -> dict[str, float | None]:
                     "L1_i_c": round(se_profit - half_se),
                     "L12": qbi_cap_l12,
                 },
-                work,
+                work, year=year
             )
             qbi_deduction = f8995.get("L15", 0.0)
 
@@ -634,7 +698,7 @@ def evaluate(h: dict) -> dict[str, float | None]:
                 "US_1040",
                 {**base, "L13": qbi_deduction},
                 work,
-                capgains=gains,
+                capgains=gains, year=year
             )[0]
             if qbi_deduction
             else p1
@@ -670,7 +734,7 @@ def evaluate(h: dict) -> dict[str, float | None]:
                     "L5a": sch_d_net,
                     "L13": p1.get("L11", 0.0),
                 },
-                work,
+                work, year=year
             )
             niit = f8960.get("L17", 0.0)
 
@@ -680,7 +744,7 @@ def evaluate(h: dict) -> dict[str, float | None]:
         #    Reporting `None` (not witnessed) uses the same Option semantics the codebase already
         #    applies to weak witnesses (`qbi_cap_l12`), instead of inventing a defect-pinning path.
         ots6251 = _form6251_lines(final)
-        amt_disqualified = _ots_amt_disqualified(status, h, final, ots6251)
+        amt_disqualified = _ots_amt_disqualified(status, h, final, ots6251, year=year)
         amt_witnessed = None if amt_disqualified else final.get("L17", 0.0)
 
         salt_capped = None
@@ -737,16 +801,130 @@ def evaluate(h: dict) -> dict[str, float | None]:
         shutil.rmtree(work, ignore_errors=True)
 
 
-def version() -> str:
-    readme = OTS_DIR / "README"
-    for cand in (readme, OTS_DIR / "README.txt"):
+def _version_string(year: int, release: str | None, tree: str) -> str:
+    """The provenance string for the tree we RAN, from the year we ran it for. Pure, so the B1 kill
+    below can watch it discriminate without an OTS install.
+
+    ★★★ FR-164 / port-report R21 — THIS USED TO SAY `"OpenTaxSolver 2024"` UNCONDITIONALLY, and
+    `gen_goldens.py` writes it into the golden corpus as `_provenance.oracle_1_version`, which
+    **SPEC §11 gates golden regeneration on**. So the one instrument whose whole job is to notice an
+    engine-version change could not notice a change of engine YEAR: driving the 2025 tree printed
+    `"OpenTaxSolver 2024 (OpenTaxSolver2025_23.06_linux64)"` — a version gate blind to the exact
+    transition it guards (HARNESS.md class β: an instrument never seen discriminating).
+    """
+    suffix = f"v{release}" if release else f"({tree})"
+    return f"OpenTaxSolver {year} {suffix} [tree {tree}]"
+
+
+def version(year: int | None = None) -> str:
+    """The provenance string for the OTS install this run actually drove, for tax year `year`.
+
+    ★ The year is REQUIRED (via [`_require_year`]) and the tree is PROVEN: `_bin` raises unless
+      `OTS_DIR/bin/taxsolve_US_1040_<year>` exists, so this string can no longer name a year the
+      install cannot run. The tree's directory name is carried too — the README's release number
+      ("22.07") does not say which tax year the solvers are for.
+    """
+    year = _require_installed_year(year)
+    _bin("US_1040", year)  # refuses unless the tree can actually run this year's 1040 solver
+    release = None
+    for cand in (OTS_DIR / "README", OTS_DIR / "README.txt"):
         if cand.exists():
             m = re.search(r"OpenTaxSolver.*?(\d+\.\d+)", cand.read_text()[:2000])
             if m:
-                return f"OpenTaxSolver 2024 v{m.group(1)}"
-    return f"OpenTaxSolver 2024 ({OTS_DIR.name})"
+                release = m.group(1)
+                break
+    return _version_string(year, release, OTS_DIR.name)
+
+
+def selftest_year_is_never_assumed() -> None:
+    """B1 — the FR-164 kills for this module. Pure: needs no OTS install and no venv.
+
+    Three claims, each watched discriminating:
+
+      0. **`OTS_YEAR` itself carries no default** — checked against the environment, because claims
+         1-2 set the global themselves and cannot see an import-time default (the first version of
+         this selftest was green on exactly that plant).
+      1. **An unstated year REFUSES.** With `OTS_YEAR` unset there is no default, so
+         `_require_year(None)` raises. ★ PLANT TO RE-RUN THE KILL: give it back a fallback
+         (`return 2024`, or restore `OTS_YEAR = int(os.environ.get("OTS_YEAR", "2024"))`) and this
+         assertion reds.
+      2. **A stated year that CONTRADICTS the declared install refuses**, rather than running one
+         year's solvers for another year's return.
+      3. **`_version_string` is driven by its `year` argument** — the R21 defect was a literal
+         `"OpenTaxSolver 2024"` in that string. ★ PLANT: hardcode `2024` in `_version_string` and
+         the `"2025" in …` / inequality assertions red.
+    """
+    global OTS_YEAR
+    saved = OTS_YEAR
+
+    # ★★ 0. THE MODULE CONSTANT ITSELF HAS NO DEFAULT.
+    #
+    #    Found by planting the defect and watching NOTHING go red: claims 1-2 below set `OTS_YEAR`
+    #    themselves, so they exercise `_require_year` and are structurally blind to
+    #    `OTS_YEAR = ... else 2024` at import. The instrument was green on the exact defect it
+    #    existed to catch — HARNESS.md class β — so the binding is checked against the environment.
+    #
+    #    ★ Boundary, stated: this can only witness the UNSET case, which is the only case a default
+    #      ever applied to. With OTS_YEAR exported it asserts the export was honoured instead.
+    _env = os.environ.get("OTS_YEAR", "").strip()
+    if _env:
+        assert saved == int(_env), (
+            f"OTS_YEAR={_env!r} in the environment but the module bound {saved!r}"
+        )
+    else:
+        assert saved is None, (
+            f"OTS_YEAR is UNSET in this environment, but the module bound {saved!r}. A module-level "
+            "default is back: every call that passes no `year=` would silently mean that year. "
+            "(FR-164 — this is the defect, not a convenience.)"
+        )
+
+    try:
+        OTS_YEAR = None
+        try:
+            _require_year(None)
+        except RuntimeError as e:
+            assert "no tax year" in str(e), e
+        else:
+            raise AssertionError(
+                "_require_year(None) with OTS_YEAR unset must REFUSE — a defaulted year is FR-164"
+            )
+        assert _require_year(2026) == 2026, "an explicitly stated year must be honoured"
+
+        OTS_YEAR = 2024
+        assert _require_year(None) == 2024, "OTS_YEAR is the declared install year when none is passed"
+        # The PURE predicate path may be asked about any year — `selftest_defect_years` asks about
+        # TY2025 and TY2024 in one process, and must not be refused for it.
+        assert _require_year(2026) == 2026, (
+            "the pure year-scoped path must accept a year this machine has no install for — "
+            "`selftest_defect_years` depends on exactly that"
+        )
+        # The RUN path must refuse the same mismatch.
+        try:
+            _require_installed_year(2026)
+        except RuntimeError as e:
+            assert "OTS_YEAR declares" in str(e), e
+        else:
+            raise AssertionError(
+                "RUNNING TY2026 against an OTS_YEAR=2024 tree must REFUSE, not silently run 2024"
+            )
+        assert _require_installed_year(2024) == 2024, "the matching year must still run"
+    finally:
+        OTS_YEAR = saved
+
+    # R21 — the provenance string names the year it RAN.
+    v24 = _version_string(2024, "22.07", "OpenTaxSolver2024_22.07_linux64")
+    v25 = _version_string(2025, "23.06", "OpenTaxSolver2025_23.06_linux64")
+    assert "2024" in v24 and "2025" not in v24, v24
+    assert "2025" in v25 and "2024" not in v25, v25
+    assert v24 != v25, "the version string must distinguish two engine YEARS (R21)"
+    # And it must not FABRICATE a release number it could not read.
+    no_release = _version_string(2026, None, "OpenTaxSolver2026_x_linux64")
+    assert " v" not in no_release, no_release
+    assert "OpenTaxSolver2026_x_linux64" in no_release, no_release
 
 
 if __name__ == "__main__":  # offline self-check; needs no OTS install
     selftest_defect_years()
     print("ots_direct: defect-year scoping OK")
+    selftest_year_is_never_assumed()
+    print("ots_direct: the year is never assumed (FR-164) + R21 version string OK")

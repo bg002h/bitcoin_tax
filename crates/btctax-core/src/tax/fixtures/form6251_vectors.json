@@ -1,10 +1,11 @@
 {
   "_source": "Form 6251 (2024) + i6251 (2024), transcribed in PART_III.md",
   "_generated_by": "design/amt-form6251/f6251_reference.py (line-by-line transcription)",
-  "_note": "V1-V6 were independently derived in review r1 BEFORE any code existed and are reproduced here to the cent; V2b/V7-V10 are constructed. V11-V29 are the E2 population (FOLLOWUPS \u00a7G-6b): one AMT-owing vector per live Part III routing per filing status, emitted by design/amt-form6251/gen_e2_vectors.py, which asserts each vector's intended routing at generation time. Figures are EXACT CENTS (plan \u00a72).",
+  "_note": "V1-V6 were independently derived in review r1 BEFORE any code existed and are reproduced here to the cent; V2b/V7-V10 are constructed. V11-V29 are the E2 population (FOLLOWUPS \u00a7G-6b): one AMT-owing vector per live Part III routing per filing status, emitted by design/amt-form6251/gen_e2_vectors.py, which asserts each vector's intended routing at generation time. Figures are EXACT CENTS (plan \u00a72). Every vector carries an explicit `year` (FR-164): scripts/oracle/verify_f6251.py has no default fixture year, so a yearless vector refuses the run instead of being scored under TY2024 law by omission.",
   "vectors": [
     {
       "id": "V1",
+      "year": 2024,
       "why": "baseline; r1-verified",
       "inputs": {
         "filing_status": "mfj",
@@ -69,6 +70,7 @@
     },
     {
       "id": "V2",
+      "year": 2024,
       "why": "TMT discriminates the two Part III readings",
       "inputs": {
         "filing_status": "mfj",
@@ -133,6 +135,7 @@
     },
     {
       "id": "V2b",
+      "year": 2024,
       "why": "excess<gain: L16 caps, L17=0, L32 skip fires",
       "inputs": {
         "filing_status": "mfj",
@@ -197,6 +200,7 @@
     },
     {
       "id": "V3",
+      "year": 2024,
       "why": "0.44% margin; INSENSITIVE to Part III",
       "inputs": {
         "filing_status": "mfj",
@@ -261,6 +265,7 @@
     },
     {
       "id": "V4",
+      "year": 2024,
       "why": "AMT owed, no donation",
       "inputs": {
         "filing_status": "mfj",
@@ -325,6 +330,7 @@
     },
     {
       "id": "V5",
+      "year": 2024,
       "why": "the archetypal btctax user",
       "inputs": {
         "filing_status": "mfj",
@@ -389,6 +395,7 @@
     },
     {
       "id": "V6",
+      "year": 2024,
       "why": "a donation CREATES AMT",
       "inputs": {
         "filing_status": "mfj",
@@ -453,6 +460,7 @@
     },
     {
       "id": "V7",
+      "year": 2024,
       "why": "line 2b: refund is AMTI-neutral",
       "inputs": {
         "filing_status": "mfj",
@@ -517,6 +525,7 @@
     },
     {
       "id": "V8",
+      "year": 2024,
       "why": "MFS kicker = the IRS's own worked example",
       "inputs": {
         "filing_status": "mfs",
@@ -581,6 +590,7 @@
     },
     {
       "id": "V9",
+      "year": 2024,
       "why": "ATTACH required while AMT is $0",
       "inputs": {
         "filing_status": "mfj",
@@ -645,6 +655,7 @@
     },
     {
       "id": "V10",
+      "year": 2024,
       "why": "0% band engages (line 23 > 0)",
       "inputs": {
         "filing_status": "mfj",
@@ -709,6 +720,7 @@
     },
     {
       "id": "V11",
+      "year": 2024,
       "why": "R1 single \u2014 exemption phased to zero, line 23 = 0, line 18 on the 28% side",
       "inputs": {
         "filing_status": "single",
@@ -773,6 +785,7 @@
     },
     {
       "id": "V12",
+      "year": 2024,
       "why": "R2 single \u2014 the AMT 0% band (line 23) is live",
       "inputs": {
         "filing_status": "single",
@@ -837,6 +850,7 @@
     },
     {
       "id": "V13",
+      "year": 2024,
       "why": "R3 single \u2014 the exemption is on the 25% phase-out ramp, not zeroed",
       "inputs": {
         "filing_status": "single",
@@ -901,6 +915,7 @@
     },
     {
       "id": "V14",
+      "year": 2024,
       "why": "R4 single \u2014 exemption zeroed, line 23 = 0, line 18 on the 26% side",
       "inputs": {
         "filing_status": "single",
@@ -965,6 +980,7 @@
     },
     {
       "id": "V15",
+      "year": 2024,
       "why": "R1 hoh \u2014 exemption phased to zero, line 23 = 0, line 18 on the 28% side",
       "inputs": {
         "filing_status": "hoh",
@@ -1029,6 +1045,7 @@
     },
     {
       "id": "V16",
+      "year": 2024,
       "why": "R2 hoh \u2014 the AMT 0% band (line 23) is live; line 19 is hoh's own $63,000",
       "inputs": {
         "filing_status": "hoh",
@@ -1093,6 +1110,7 @@
     },
     {
       "id": "V17",
+      "year": 2024,
       "why": "R3 hoh \u2014 the exemption is on the 25% phase-out ramp",
       "inputs": {
         "filing_status": "hoh",
@@ -1157,6 +1175,7 @@
     },
     {
       "id": "V18",
+      "year": 2024,
       "why": "R4 hoh \u2014 exemption zeroed, line 23 = 0, line 18 on the 26% side",
       "inputs": {
         "filing_status": "hoh",
@@ -1221,6 +1240,7 @@
     },
     {
       "id": "V19",
+      "year": 2024,
       "why": "R2 mfj \u2014 the AMT 0% band (line 23) is live",
       "inputs": {
         "filing_status": "mfj",
@@ -1285,6 +1305,7 @@
     },
     {
       "id": "V20",
+      "year": 2024,
       "why": "R3 mfj \u2014 the exemption is on the 25% phase-out ramp",
       "inputs": {
         "filing_status": "mfj",
@@ -1349,6 +1370,7 @@
     },
     {
       "id": "V21",
+      "year": 2024,
       "why": "R4 mfj \u2014 exemption zeroed, line 23 = 0, line 18 on the 26% side",
       "inputs": {
         "filing_status": "mfj",
@@ -1413,6 +1435,7 @@
     },
     {
       "id": "V22",
+      "year": 2024,
       "why": "R3 mfs \u2014 the ramp, BELOW the kicker start: the only AMT-owing MFS routing OTS can witness",
       "inputs": {
         "filing_status": "mfs",
@@ -1477,6 +1500,7 @@
     },
     {
       "id": "V23",
+      "year": 2024,
       "why": "R1 mfs \u2014 exemption zeroed, which for MFS necessarily means the line-4 kicker is live too",
       "inputs": {
         "filing_status": "mfs",
@@ -1541,6 +1565,7 @@
     },
     {
       "id": "V24",
+      "year": 2024,
       "why": "R2 mfs \u2014 the AMT 0% band is live, with the kicker; line 18 on mfs's own $116,300 side",
       "inputs": {
         "filing_status": "mfs",
@@ -1605,6 +1630,7 @@
     },
     {
       "id": "V25",
+      "year": 2024,
       "why": "R4 mfs \u2014 exemption zeroed, line 23 = 0, line 18 on the 26% side, kicker live",
       "inputs": {
         "filing_status": "mfs",
@@ -1669,6 +1695,7 @@
     },
     {
       "id": "V26",
+      "year": 2024,
       "why": "R5 mfj \u2014 line 8 LIVE with AMT > 0. V20 is the same household with no FTC: the \u00a7904(j) elector's credit must move lines 8/9/10 and leave line 11 untouched",
       "inputs": {
         "filing_status": "mfj",
@@ -1733,6 +1760,7 @@
     },
     {
       "id": "V27",
+      "year": 2024,
       "why": "R5 single \u2014 line 8 live at the $300 non-MFJ \u00a7904(j) de-minimis. Control: V13",
       "inputs": {
         "filing_status": "single",
@@ -1797,6 +1825,7 @@
     },
     {
       "id": "V28",
+      "year": 2024,
       "why": "R7 mfj \u2014 the STANDARD deduction add-back (line 2a) landing on the phase-out ramp, where it is clawed back at 25% on the margin",
       "inputs": {
         "filing_status": "mfj",
@@ -1861,6 +1890,7 @@
     },
     {
       "id": "V29",
+      "year": 2024,
       "why": "R8 single \u2014 line 2b (the state-refund subtraction) with AMT > 0, so dropping it moves the AMT itself and not merely AMTI. Control: V13, same $175,000 ordinary bottom",
       "inputs": {
         "filing_status": "single",
@@ -1925,6 +1955,7 @@
     },
     {
       "id": "V30",
+      "year": 2024,
       "why": "G-6d mfj \u2014 SCHEDULE A LINE 7 > 0 at last: $25,000 of state and local taxes capped by \u00a7164(b)(6) to $10,000, which is this filer's whole Form 6251 line 2a add-back. Also the first vector whose long-term gain EXCEEDS taxable income, so the QDCGT worksheet's line 5 is zero and lines 20/27 print $0",
       "inputs": {
         "filing_status": "mfj",

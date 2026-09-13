@@ -164,6 +164,40 @@ GOLDEN_PATH = (
 )
 
 
+# ── The tax year this corpus is FOR — derived, never typed (FR-164) ───────────────────────────────
+#
+# ★★★ THE YEAR USED TO BE AN OMITTED ARGUMENT, in five places: `_taxcalc_row`, `taxcalc_credits`,
+# `taxcalc_run` and `_taxcalc_amt_credits` each defaulted `year: int = 2024`, `main()` passed none of
+# them anything, `ots_direct.OTS_YEAR` defaulted to 2024 from an unset env var, and the emitted
+# `_provenance.tax_year` was the literal `2024`. So the answer to *"which tax year did this corpus
+# validate?"* came from six independent defaults that nothing tied together, and a second year
+# entering the corpus would have moved some of them and not others.
+#
+# ★★ AND IT IS DERIVED RATHER THAN RETYPED, because a typed `CORPUS_TAX_YEAR = 2024` is the exact
+# shape `CLAUDE.md`'s highest-yield rule is about: correct on the day it is written, silently wrong
+# the day someone widens the builder. `corpus.py` already holds the two sets that decide it, and
+# `corpus.selftest_salt_axis()` already enforces their relationship IN BOTH DIRECTIONS — a bundled
+# year whose axis reaches no household must be declared dormant, and a dormancy note that has gone
+# stale is an error. So the reachable year IS the corpus's year, and widening the builder to a second
+# year makes this raise instead of silently mislabelling the bake.
+def corpus_tax_year() -> int:
+    """The ONE tax year `corpus.households()` can actually build, from `corpus.py`'s own year tables.
+
+    ★ B1 kill: `selftest_corpus_year` below. PLANT TO RE-RUN IT: `return 2024` here, or delete
+      TY2025 from `corpus.SALT_YEARS_NOT_REACHABLE`, and it reds.
+    """
+    reachable = sorted(set(corpus.SALT_BY_YEAR) - set(corpus.SALT_YEARS_NOT_REACHABLE))
+    if len(reachable) != 1:
+        raise RuntimeError(
+            f"the corpus builder reaches {len(reachable)} of the bundled years {reachable} — "
+            "`gen_goldens.py` bakes ONE year per file and can no longer name which. Either give the "
+            "generator an explicit `--year` and key GOLDEN_PATH by it, or restore the invariant that "
+            "exactly one bundled year is reachable (corpus.SALT_BY_YEAR minus "
+            "corpus.SALT_YEARS_NOT_REACHABLE). This is FR-164: the year must be stated, not assumed."
+        )
+    return reachable[0]
+
+
 def assert_baked_provenance_is_current() -> None:
     """The committed golden's `_provenance.corpus` must be what this generator would write.
 
@@ -259,7 +293,7 @@ def dependent_block(i: dict) -> dict:
     }
 
 
-def _taxcalc_row(n, i, year: int = 2024):
+def _taxcalc_row(n, i, year: int):
     """One Tax-Calculator input record from a household's `inputs` dict (the variable mapping the old
     inline builder used — factored out so the D-2 AMT/credit admission probe reuses it verbatim)."""
     return {
@@ -305,7 +339,7 @@ def _taxcalc_row(n, i, year: int = 2024):
     }
 
 
-def taxcalc_credits(households, year: int = 2024) -> list[dict]:
+def taxcalc_credits(households, year: int) -> list[dict]:
     """★★★ T11 — the CREDIT lines `taxcalc_run` deliberately does not bake, per household.
 
     They are not part of the golden corpus (whose cells are creditless by construction), so adding
@@ -334,7 +368,7 @@ def taxcalc_credits(households, year: int = 2024) -> list[dict]:
     ]
 
 
-def taxcalc_run(households, year: int = 2024):
+def taxcalc_run(households, year: int):
     """★ Oracle #2 — PSL Tax-Calculator (CC0), a lineage completely separate from OTS.
 
     Variables are Tax-Calculator's own (`e00200p` wages, `e00900p` Schedule C net profit, …).
@@ -420,7 +454,7 @@ def _harness_default(inputs):
     return json.loads(proc.stdout)
 
 
-def _taxcalc_amt_credits(inputs_list, year: int = 2024):
+def _taxcalc_amt_credits(inputs_list, year: int):
     """One vectorized Tax-Calculator pass over ALL candidates → [(AMT c09600, credits c07100), …].
     The D-2 admission predicate reads these as oracle-2's 1040 L17 (AMT) and L21 (credits)."""
     calc = taxcalc_exact.build_calculator(
@@ -432,7 +466,7 @@ def _taxcalc_amt_credits(inputs_list, year: int = 2024):
     ]
 
 
-def admit(candidates):
+def admit(candidates, year: int):
     """The D-2 refusal-free + AMT/credit-free ADMISSION loop (SPEC §4). Each candidate is piped
     through the §9 harness binary; a `refused` candidate is REJECTED (never silently kept). Admitted
     only if btctax assembles it AND both oracles report zero AMT and zero L21 credits:
@@ -457,7 +491,7 @@ def admit(candidates):
     silently.
     """
     anchor_names = {a["name"] for a in corpus.ANCHORS}
-    amt_credits = _taxcalc_amt_credits([h["inputs"] for h in candidates])
+    amt_credits = _taxcalc_amt_credits([h["inputs"] for h in candidates], year)
     admitted, rejected = [], []
     for h, (amt, credits) in zip(candidates, amt_credits):
         is_anchor = h["name"] in anchor_names
@@ -540,8 +574,12 @@ def verify_pinned_cells(admitted, ots, taxcalc):
 
 
 def main() -> None:
+    # ★ FR-164 — the year is STATED here, once, and reaches every oracle call and the emitted
+    #   provenance. Nothing below may re-derive or default it.
+    year = corpus_tax_year()
+    print(f"[year] baking TY{year} (derived from corpus.py's reachable SALT axis).", file=sys.stderr)
     candidates = corpus.households()
-    admitted, rejected = admit(candidates)
+    admitted, rejected = admit(candidates, year)
 
     # A rejection is never a silent drop — log every one (name + reason) to stderr.
     for name, reason in rejected:
@@ -573,8 +611,8 @@ def main() -> None:
     corpus.assert_pairwise_t2_coverage(admitted)
 
     inputs = [h["inputs"] for h in admitted]
-    ots = [ots_direct.evaluate(i) for i in inputs]
-    taxcalc = taxcalc_run(inputs)
+    ots = [ots_direct.evaluate(i, year=year) for i in inputs]
+    taxcalc = taxcalc_run(inputs, year)
 
     # The two §5.1 pinned cells must ACTUALLY flip their L16 provenance classes (checked, not assumed).
     verify_pinned_cells(admitted, ots, taxcalc)
@@ -608,14 +646,14 @@ def main() -> None:
                         "reported as mmacpherson/tenforty#278, fix in #279). The engine itself was "
                         "never at fault and reproduces these figures to the cent."
                     ),
-                    "oracle_1_version": ots_direct.version(),
+                    "oracle_1_version": ots_direct.version(year),
                     "oracle_2": (
                         "PSL Tax-Calculator (CC0) — a SECOND independent implementation of a completely "
                         "different lineage. Two oracles are worth far more than one: a single oracle can "
                         "only tell you that you DISAGREE, never which of you is wrong."
                     ),
                     "oracle_2_version": tc_version,
-                    "tax_year": 2024,
+                    "tax_year": year,
                     "generated": date.today().isoformat(),
                     "generator": "scripts/oracle/gen_goldens.py",
                     "corpus": CORPUS_DESCRIPTION,
@@ -657,5 +695,74 @@ def main() -> None:
     )
 
 
+def selftest() -> int:
+    """B1 — watch the FR-164 year machinery discriminate. Pure: no OTS, no network, no regeneration.
+
+        .venv/bin/python scripts/oracle/gen_goldens.py --selftest
+
+    Four claims:
+
+      1. `corpus_tax_year()` returns the ONE year the builder reaches, and `corpus.selftest_salt_axis()`
+         is what enforces that the pair it reads is honest (both directions).
+      2. It REFUSES when the reachable set stops being a singleton. ★ PLANT: this is exactly what
+         `return 2024` in `corpus_tax_year` would hide — with the plant in place, claim 2 reds.
+      3. The emitted `_provenance.tax_year` is that year and not a literal (checked against the
+         committed corpus, which must still say what the generator would write).
+      4. Every taxcalc entry point REFUSES a call with no year — the four `year: int = 2024`
+         defaults are gone. ★ PLANT: restore any one default and its assertion reds.
+    """
+    bad = 0
+
+    # (1) the derivation, resting on corpus.py's own both-directions invariant
+    corpus.selftest_salt_axis()
+    year = corpus_tax_year()
+    print(f"  corpus_tax_year() = {year} (bundled {sorted(corpus.SALT_BY_YEAR)}, "
+          f"dormant {sorted(corpus.SALT_YEARS_NOT_REACHABLE)})")
+    if year not in corpus.SALT_BY_YEAR:
+        print(f"  FAIL: {year} is not a bundled year"); bad += 1
+
+    # (2) the refusal — planted by widening the reachable set
+    saved = corpus.SALT_YEARS_NOT_REACHABLE
+    try:
+        corpus.SALT_YEARS_NOT_REACHABLE = {}
+        try:
+            got = corpus_tax_year()
+        except RuntimeError as e:
+            if "can no longer name which" not in str(e):
+                print(f"  FAIL: wrong refusal message: {e}"); bad += 1
+            else:
+                print("  refuses a corpus that reaches two bundled years: OK")
+        else:
+            print(f"  FAIL: two reachable years returned {got} instead of refusing"); bad += 1
+    finally:
+        corpus.SALT_YEARS_NOT_REACHABLE = saved
+
+    # (3) the committed corpus's own label is the derived year, not a literal
+    baked = json.loads(GOLDEN_PATH.read_text())["_provenance"]["tax_year"]
+    if baked != year:
+        print(f"  FAIL: the committed golden says tax_year {baked}, the generator would write {year}. "
+              "Regenerating would relabel the corpus — adjudicate before baking."); bad += 1
+    else:
+        print(f"  committed _provenance.tax_year == corpus_tax_year() == {year}: OK")
+
+    # (4) no taxcalc entry point has a year to fall back on
+    for fn, args in ((_taxcalc_row, (0, {})), (taxcalc_credits, ([{}],)),
+                     (taxcalc_run, ([{}],)), (_taxcalc_amt_credits, ([{}],))):
+        try:
+            fn(*args)
+        except TypeError as e:
+            if "year" not in str(e):
+                print(f"  FAIL: {fn.__name__} raised TypeError without naming `year`: {e}"); bad += 1
+            else:
+                print(f"  {fn.__name__} requires an explicit year: OK")
+        else:
+            print(f"  FAIL: {fn.__name__} ran with NO year — a default is back (FR-164)"); bad += 1
+
+    print("gen_goldens: FR-164 year plumbing " + ("FAILED" if bad else "OK"))
+    return 1 if bad else 0
+
+
 if __name__ == "__main__":
+    if "--selftest" in sys.argv[1:]:
+        sys.exit(selftest())
     main()

@@ -344,7 +344,7 @@ def main() -> None:
 
     # ── The two oracles ───────────────────────────────────────────────────────────────────────────
     try:
-        ots = ots_direct.evaluate(row)
+        ots = ots_direct.evaluate(row, year=year)  # FR-164: the year is never assumed
     except Exception as e:  # noqa: BLE001 — the message must name the remedy
         cannot_run(
             f"OpenTaxSolver could not be driven: {e}\nIs OTS_DIR set to an install directory?"
@@ -376,7 +376,7 @@ def main() -> None:
         witnesses.setdefault(line, set()).add(who)
 
     print(f"── btctax vs two independent engines · tax year {year} ──")
-    print(f"   OpenTaxSolver: {ots_direct.version()}")
+    print(f"   OpenTaxSolver: {ots_direct.version(year)}")
     print(f"   Tax-Calculator: {gen_goldens.tc.__version__}\n")
     print(f"{'line (label)':38s} {'btctax':>10s} {'oracle':>10s}  verdict")
 
