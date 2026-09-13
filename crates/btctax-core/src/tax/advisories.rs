@@ -236,6 +236,13 @@ pub enum Advisory {
     ///   it survived; `the_paper_check_advisory_is_silent_exactly_when_a_deposit_is_given` now
     ///   scans this module's own source for the retracted sentence, so every copy is covered.
     ///
+    /// ★★ A second retraction (2026-09): `message()` used to promise *"the IRS will mail a
+    ///    check"* when no deposit block was given. `design/forms/extract/i1040gi--2025.txt:23824-
+    ///    23827` — *"Starting in October 2025, the IRS will generally stop issuing paper checks
+    ///    for federal disbursements, including tax refunds, unless an exception applies"* — retires
+    ///    that promise; the message now says a mailed check *can no longer be relied on*, not that
+    ///    one is guaranteed. The same guard test scans for this sentence too.
+    ///
     /// ★★ Its guard is `direct_deposit.is_none()`, so a block that is PRESENT but malformed
     ///    silences it — the return is refused instead, and the refusal names the remedy. See
     ///    `RoutingNumber::canonical`'s doc (seam review I-3) for why that matters.
@@ -618,11 +625,13 @@ impl Advisory {
                     .to_string(),
             Advisory::RefundByPaperCheck { refund } => format!(
                 "REFUND BY PAPER CHECK — your return is due a refund of {}, and no direct-deposit \
-                 instruction was given, so the 1040's lines 35b–35d are blank. As filed, the IRS \
-                 will mail a check. If you would rather have it deposited, add your routing and \
-                 account numbers in the tax-inputs editor (`btctax tui-edit`, then T on the year) \
-                 or through `btctax income import`, and re-export — or write them on the printed \
-                 form by hand.",
+                 instruction was given, so the 1040's lines 35b–35d are blank. Starting in October \
+                 2025 the IRS generally stops issuing paper checks for federal disbursements, \
+                 including tax refunds, unless an exception applies — so as filed, a mailed check \
+                 can no longer be relied on. If you would rather have it deposited, add your \
+                 routing and account numbers in the tax-inputs editor (`btctax-tui-edit`, then `T` \
+                 on the year) or through `btctax income import`, and re-export — or write them on \
+                 the printed form by hand.",
                 fmt_usd(*refund)
             ),
             // ★ §3.4 (r5 M-1): the text branches on the deduction actually taken. The itemized filer filed a
@@ -3025,7 +3034,7 @@ mod tests {
         // 3. A refund AND a deposit block → SILENT. This is the whole of T10's change here.
         assert!(
             !fires(dec!(1234.56), block()),
-            "a filer who gave routing and account numbers must NOT be told the IRS will mail a check"
+            "a filer who gave routing and account numbers must NOT be reassured about a mailed check at all"
         );
         // 4. No refund, a deposit block → silent, from either conjunct.
         assert!(!fires(Usd::ZERO, block()));
@@ -3060,17 +3069,42 @@ mod tests {
             "the old unconditional wording claimed btctax cannot fill the block; it can: {m}"
         );
 
+        // ★★★ **The 2026-09 retraction, same treatment.** The message used to promise, in so many
+        //     words, that the IRS would send a check — a promise the IRS itself retired starting
+        //     October 2025 (`design/forms/extract/i1040gi--2025.txt:23824-23827`: paper checks for
+        //     federal disbursements, refunds included, generally stop "unless an exception
+        //     applies"). Same concat!-assembled needle, same reason: this comment must not spell
+        //     out the retracted sentence contiguously either, or the source scan below trips on
+        //     itself.
+        let needle2 = concat!("the IRS will ", "mail a check");
+        assert!(
+            !m.contains(needle2),
+            "the notice must not promise a mailed check as a certainty — the IRS retracted that \
+             starting October 2025: {m}"
+        );
+        assert!(
+            m.contains("can no longer be relied on"),
+            "the notice must say a paper check can no longer be relied on, not merely omit the old \
+             promise: {m}"
+        );
+
         // ★★★ **Seam review M-2 — AND NOT ANYWHERE ELSE IN THIS FILE EITHER.** The retracted claim
         //     survived T10 in the variant's own DOC COMMENT, three lines from the `message()` this
         //     test reads, because a doc comment is the one copy no assertion could reach. This scans
         //     the module's own source for it, so every copy in this file is covered — comment,
-        //     message and condition alike.
+        //     message and condition alike. Both retractions go through the same scan.
         let src = include_str!("advisories.rs");
         assert!(
             !src.contains(needle),
             "`advisories.rs` still claims {needle:?} somewhere — T10 fills the direct-deposit \
              block, and the sentence is retracted in the message, the fire condition and \
              LIMITATIONS.md. A doc comment saying otherwise is the copy that outlives them."
+        );
+        assert!(
+            !src.contains(needle2),
+            "`advisories.rs` still claims {needle2:?} somewhere — the IRS retracted that guarantee \
+             starting October 2025, and a surviving copy (message, doc comment or test) would be \
+             exactly the F2/F4 shape: an instrument that stopped discriminating."
         );
     }
 
@@ -3268,7 +3302,7 @@ mod tests {
         }
         .message();
         assert!(m.contains("$1,234.56"), "{m}");
-        assert!(m.contains("mail a check"), "{m}");
+        assert!(m.contains("can no longer be relied on"), "{m}");
 
         // The other-credits message must name the forms a filer would need to go claim.
         let oc = Advisory::OtherCreditsOmitted.message();

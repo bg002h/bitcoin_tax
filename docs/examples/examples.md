@@ -926,10 +926,12 @@ Check what this feature actually produced: open the Form 8275 PDF and confirm th
     would file an understated return under penalties of perjury. If it applies to you, this
     is a preparer's return.
   • REFUND BY PAPER CHECK — your return is due a refund of $8,954.20, and no direct-deposit
-    instruction was given, so the 1040's lines 35b–35d are blank. As filed, the IRS will
-    mail a check. If you would rather have it deposited, add your routing and account
-    numbers in the tax-inputs editor (`btctax tui-edit`, then T on the year) or through
-    `btctax income import`, and re-export — or write them on the printed form by hand.
+    instruction was given, so the 1040's lines 35b–35d are blank. Starting in October 2025
+    the IRS generally stops issuing paper checks for federal disbursements, including tax
+    refunds, unless an exception applies — so as filed, a mailed check can no longer be
+    relied on. If you would rather have it deposited, add your routing and account numbers
+    in the tax-inputs editor (`btctax-tui-edit`, then `T` on the year) or through `btctax
+    income import`, and re-export — or write them on the printed form by hand.
   • DATE OF BIRTH NOT ON FILE — the §63(f) additional standard deduction for age 65+ ($1,550
     per box) was NOT granted, because v1 never assumes a birthdate. If you (or your spouse)
     are 65 or older, enter the date of birth and re-run: your tax is currently OVERSTATED.

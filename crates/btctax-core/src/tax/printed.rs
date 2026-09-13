@@ -696,9 +696,13 @@ pub struct Form1040Lines {
     pub line32: Usd,
     /// L33 — **TOTAL PAYMENTS** = add **printed** 25d, 26 and 32.
     pub line33: Usd,
-    /// L34 / L35a — the overpayment refunded. Zero when the return owes. v1 never fills the
-    /// direct-deposit block (35b–35d), so a refund arrives as a paper check — the `RefundByPaperCheck`
-    /// advisory says so.
+    /// L34 / L35a — the overpayment refunded. Zero when the return owes. The direct-deposit block
+    /// (35b–35d) IS filled when the filer supplies routing/account/type numbers (`DirectDeposit`);
+    /// when they don't, those lines stay blank and a mailed check can no longer be relied on either
+    /// — starting in October 2025 the IRS generally stops issuing paper checks for federal
+    /// disbursements, including refunds, unless an exception applies
+    /// (`design/forms/extract/i1040gi--2025.txt:23824-23827`) — which is what the
+    /// `RefundByPaperCheck` advisory says.
     pub line34: Usd,
     /// L37 — the amount owed. Zero when the return is due a refund.
     pub line37: Usd,

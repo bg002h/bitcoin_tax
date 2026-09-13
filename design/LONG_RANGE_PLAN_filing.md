@@ -618,10 +618,13 @@ than the one N3 describes — the emitter deciding for the filer."*
 ### 7.4 The last-mile items that are correctly absent — **DO NOT BUILD**
 
 **Form 2210 / line 38** — blank is the i1040 instructions' own default and the IRS bills the penalty
-(`crates/btctax-forms/forms/2024/f1040.map.toml:253`). **Direct deposit / Form 8888** — a paper check is the disclosed
-consequence and bank details are PII the return does not need. **Line 36 (apply to next year)** —
-no election is offered. **Third-party designee** — an authorization the filer may not want. **Phone /
-email** — the email omission is a considered privacy choice.
+(`crates/btctax-forms/forms/2024/f1040.map.toml:253`). **Direct deposit — BUILT**, not absent: 1040
+lines 35b–35d are filled from `DirectDeposit` (`return_inputs.rs:1244`) when the filer supplies
+routing/account/type numbers. Only **Form 8888** (splitting a refund across multiple accounts) stays
+out of scope, and its reason stands on its own without the now-retracted paper-check justification —
+bank details for a second and third account are PII the return does not need. **Line 36 (apply to
+next year)** — no election is offered. **Third-party designee** — an authorization the filer may not
+want. **Phone / email** — the email omission is a considered privacy choice.
 
 ### 7.5 Not "never", but **NOT NOW** — the P2-profile items
 
