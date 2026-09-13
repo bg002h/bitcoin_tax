@@ -304,8 +304,13 @@ impl fmt::Display for BankNumberError {
 /// ★★ **Why the rule may still refuse rather than warn — on the true terms.** Not because the
 ///    failure degrades gracefully; it does not degrade at all. Because the refusal is **loud,
 ///    cell-anchored and self-clearing**: it names the cell (line 35b or 35d), the rule that failed
-///    and both remedies — *"Correct it, or delete the direct-deposit block: a return with none is
-///    complete, and the refund then arrives as a paper check"* — and `btctax_input_form::attribute`
+///    and both remedies — *"Correct it, or delete the direct-deposit block: a return with no
+///    deposit instruction is still complete and filable. Do not count on a cheque in the post
+///    instead"* (`return_refuse::screen_direct_deposit`'s own words — FR-208: this used to quote
+///    the pre-retraction *"the refund then arrives as a paper check"*, which the IRS retracted
+///    effective October 2025, `i1040gi--2025.txt:23824-23827`; under the retraction the argument
+///    for naming both remedies loudly is stronger, not weaker, since a filer who deletes the block
+///    now risks no cheque at all rather than merely a slower one) — and `btctax_input_form::attribute`
 ///    puts the editor's cursor on the exact field. A deleted block then files, and `RefundByPaperCheck`
 ///    does fire on THAT return. The filer is never stuck and never silently downgraded; they are
 ///    stopped and told. Against that, a false refusal of a genuine routing number is very close to

@@ -139,6 +139,24 @@ def build_calculator(rows, year: int, *, policy=None):
             f"already writes `{_CALCULATED_NOT_READ}` through the Calculator for every year outside "
             f"EXACT_OFF_YEARS, and asserts it stuck."
         )
+    # ★ FR-168: the ONE construction path checks that every row's own claimed year agrees with the
+    #   `year` this run was asked to build. `start_year=year` / `advance_to_year(year)` below follow
+    #   the ARGUMENT unconditionally — a row whose `FLPDYR` disagrees would be silently SCORED against
+    #   the argument's policy year while its own label claims a different one, which is FR-164's exact
+    #   defect shape one hop downstream: the year now REACHES every caller, and until this check
+    #   nothing confirmed the rows agreed with it. One loud check here makes the mismatch unwritable
+    #   across all four callers at once, rather than four separate disciplines.
+    mismatched = [(i, r.get("FLPDYR")) for i, r in enumerate(rows) if r.get("FLPDYR") != year]
+    if mismatched:
+        bad_indices = [i for i, _ in mismatched]
+        bad_years = sorted({y for _, y in mismatched})
+        raise RuntimeError(
+            f"row(s) {bad_indices[:5]}{'…' if len(bad_indices) > 5 else ''} carry FLPDYR "
+            f"{bad_years} but build_calculator(rows, year={year}) was asked to build {year}. Every "
+            f"row's FLPDYR must equal the `year` argument — this function's `start_year` and "
+            f"`advance_to_year` follow `year` unconditionally, so a disagreeing row would be scored "
+            f"against the WRONG year's policy while its own label claims otherwise (FR-168)."
+        )
     recs = tc.Records(
         data=pd.DataFrame(rows), start_year=year, gfactors=None, weights=None, adjust_ratios=None
     )
@@ -219,6 +237,19 @@ def selftest() -> int:
         assert "nothing to witness" in str(e), str(e)
     else:
         raise AssertionError("an empty run was accepted — it would report OK having checked nothing")
+
+    # (4b) ★★ FR-168: a row's own FLPDYR must agree with the `year` argument. ★ PLANT: delete the
+    #      `mismatched` check in `build_calculator` and this reds — a row labeled 2024 would be
+    #      silently scored against 2025's policy (`start_year`/`advance_to_year` follow the argument).
+    try:
+        build_calculator([{**row, "FLPDYR": 2024}], 2025)
+    except RuntimeError as e:
+        assert "FR-168" in str(e) and "2024" in str(e) and "2025" in str(e), str(e)
+    else:
+        raise AssertionError(
+            "a row claiming FLPDYR 2024 was accepted by build_calculator(rows, year=2025) — FR-168 "
+            "is re-armed: the row would be scored against the wrong year's policy"
+        )
 
     # (5) ★★★ THE BRANCH KILL, two-directional. "The flag is set" is what the broken code also looked
     #     like; the symptom was a SMOOTH value where a stepped one belongs. `verify_schedule_1a`

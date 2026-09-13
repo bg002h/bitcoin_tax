@@ -700,7 +700,7 @@ def selftest() -> int:
 
         .venv/bin/python scripts/oracle/gen_goldens.py --selftest
 
-    Four claims:
+    Five claims:
 
       1. `corpus_tax_year()` returns the ONE year the builder reaches, and `corpus.selftest_salt_axis()`
          is what enforces that the pair it reads is honest (both directions).
@@ -710,6 +710,9 @@ def selftest() -> int:
          committed corpus, which must still say what the generator would write).
       4. Every taxcalc entry point REFUSES a call with no year — the four `year: int = 2024`
          defaults are gone. ★ PLANT: restore any one default and its assertion reds.
+      5. FR-169: `assert_baked_provenance_is_current()` actually RUNS here — it has no other caller.
+         ★ PLANT (its own documented one): delete the NON_INTERACTION clause from CORPUS_DESCRIPTION
+         and this claim reds.
     """
     bad = 0
 
@@ -757,6 +760,14 @@ def selftest() -> int:
                 print(f"  {fn.__name__} requires an explicit year: OK")
         else:
             print(f"  FAIL: {fn.__name__} ran with NO year — a default is back (FR-164)"); bad += 1
+
+    # (5) FR-169: the cheap provenance-drift check actually runs — it had NO caller anywhere.
+    try:
+        assert_baked_provenance_is_current()
+    except AssertionError as e:
+        print(f"  FAIL: assert_baked_provenance_is_current() raised: {e}"); bad += 1
+    else:
+        print("  assert_baked_provenance_is_current(): OK (baked _provenance.corpus matches CORPUS_DESCRIPTION)")
 
     print("gen_goldens: FR-164 year plumbing " + ("FAILED" if bad else "OK"))
     return 1 if bad else 0
