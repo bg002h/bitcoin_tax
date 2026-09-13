@@ -8027,6 +8027,48 @@ build, each with an owning phase.
   two predicates are what the FR-136 declared-archive plants are built around and retargeting them belongs
   with that work.
 
+- **FR-174 — ⛔ BLOCKING. CI's residue after FR-165: 4 Windows + 1 macOS failures, both platform ASSUMPTIONS, both diagnosed. Owning phase: NOW.**
+  **Measured 2026-09-13** on run `34762577861` (`08fde5d26`). FR-165 took the platform-independent failures
+  to zero — **`test (ubuntu-latest)` is GREEN** — and Windows went **10 → 4**. What remains was never about
+  the PDFs and has been red the whole 8 days, invisible behind the louder failure.
+
+  | job | failures | |
+  |---|---|---|
+  | ubuntu | **0** | green |
+  | macOS | **1** | `216 passed; 1 failed` |
+  | Windows | **4** | `201 passed; 4 failed` (was 10) |
+
+  **Cause A — a path key whose separator is platform-dependent (3 Windows failures).**
+  `CAPTION_PARAPHRASES` (`line_coverage_check.rs:1078`) is keyed by a hardcoded forward-slash string,
+  `"crates/btctax-forms/forms/2024/f1040sa.map.toml"`. The *scanned* path is built by
+  `root.join("crates/btctax-forms/forms")` (`:1372`) and then joined per year, so on Windows it renders
+  **`crates/btctax-forms/forms\2024\f1040sa.map.toml`** — the literal prefix keeps `/`, the joined segments
+  get `\`. The lookup at `:1455` misses, so the caption is reported as an unexcused paraphrase **and** the
+  excuse row is reported as stale: one mismatch, both directions, which is exactly the 4 problems the run
+  printed (2 captions × 2 directions) across `the_committed_coverage_table_is_consistent_with_the_form_text`,
+  `the_obbba_line_1_rows_are_verbatim_and_a_moved_cross_reference_reds`, and
+  `each_rule_rejects_a_table_that_violates_it` (whose *control* table fails first, so its plants never run —
+  *"the control table must PASS — otherwise every plant below passes for the wrong reason"*).
+  ★ This is `CLAUDE.md`'s *"an excuse list keyed by VECTOR NAME is a liability"* in a new costume: the list
+  correctly states its mechanism, and its **key** is not portable. *Fix:* normalise separators on both sides
+  of the comparison; do not retype the keys with `\`.
+
+  **Cause B — `/tmp` hardcoded as the fallback temp dir (1 macOS + 1 Windows failure).**
+  `default_proof_path` returns the literal `"/tmp/<stem>-label-proof.pdf"` when `TMPDIR` is unset, and
+  `the_label_proof_default_path_honours_tmpdir` (`main.rs:690-716`) pins that literal. macOS's temp dir is
+  `/var/folders/…/T/` (the run's message: left `/var/folders/36/…/T/f8995a--2025-label-proof.pdf`, right
+  `/tmp/f8995a--2025-label-proof.pdf`); Windows's is `C:\Users\…\Temp\` and does not consult `TMPDIR` at all,
+  so on Windows the *first* assertion fails too. *Fix:* `std::env::temp_dir()`, which honours `TMPDIR` on
+  unix and `TMP`/`TEMP` on Windows — and which still returns `/tmp` on Linux when `TMPDIR` is unset, so the
+  operator guarantee the test was written to protect **survives on the platform operators use**. The test
+  then compares against `std::env::temp_dir()` rather than a literal, and may keep a Linux-only assertion of
+  the literal `/tmp` under `#[cfg(target_os = "linux")]`.
+  ★ Writing a label proof to `/tmp` on Windows is not a test problem — it is the tool being wrong.
+
+  ★★ **The process finding, which outlives both fixes:** these five were red for 8 days behind FR-165's six,
+  on a branch with no required checks. A red CI does not merely fail to catch the next defect — **it hides
+  the ones that arrive while it is red.** `make check` cannot see any of them: it runs one platform.
+
 - **FR-152 — `census_join` anchors captions to ABSOLUTE line indices in a generated file. Minor. Owning phase: the port machine.**
   A4's 110 `# Regenerate:` header additions shifted every extract by a line, and `forms/2024/f1040s1.map.toml`'s
   `extract_line` anchors (11/15/58) had to move to 15/19/62 — an edit outside A4's ownership, reported rather
