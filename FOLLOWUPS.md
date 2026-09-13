@@ -7964,18 +7964,18 @@ build, each with an owning phase.
     fixture(s) — 70 reproduce byte-for-byte, 0 rewritten, 0 unresolved"*, red on a planted box rename and
     green on revert. **No fallback**: there is no PDF read anywhere on the test path.
 
-- **FR-166 — `check_return.py:307` scores a yearless projection as TY2024 in silence. Important. Owning phase: NOW (Sep–Dec 2026).**
+- **FR-166 — ✅ CLOSED 2026-09-13 (folded f2c129150). `check_return.py:307` scores a yearless projection as TY2024 in silence. Important. Owning phase: NOW (Sep–Dec 2026).**
   `year = wrapper_year if wrapper_year is not None else 2024`. A projection carrying no `tax_year`, run
   without `--year`, is scored as TY2024 by **all three** engines at once. Exactly the class FR-164 deleted
   everywhere else, surviving one file. ★ The file's own `--year` help text already argues why it matters —
   it says a wrong year *"fabricated a divergence on 1040 line 15"*. *Fix:* refuse, naming
   `btctax income project --year`. Found by the FR-164 build agent at its own scope boundary.
 
-- **FR-167 — `verify_schedule_1a.py:85` carries a TY2025 default. Minor. Owning phase: NOW, with FR-166.**
+- **FR-167 — ✅ CLOSED 2026-09-13 (folded f2c129150). `verify_schedule_1a.py:85` carries a TY2025 default. Minor. Owning phase: NOW, with FR-166.**
   `def _rows(pol, name, year=2025)` — the same shape as `gen_goldens`'s four, in the second census script.
   Whether any caller relies on it is **unmeasured**; measure before deleting.
 
-- **FR-168 — `taxcalc_exact.build_calculator` never compares a row's `FLPDYR` to the `year` it was asked for. Important. Owning phase: NOW — highest leverage of the three.**
+- **FR-168 — ✅ CLOSED 2026-09-13 (folded c954e37bf). `taxcalc_exact.build_calculator` never compares a row's `FLPDYR` to the `year` it was asked for. Important. Owning phase: NOW — highest leverage of the three.**
   **Controller-verified 2026-09-13** by reading `:112-140`: it refuses empty `rows` and refuses an `exact`
   column (FR-124), and does nothing else. It is documented as *"the ONE construction path"* for a
   Tax-Calculator run, so **one loud check there makes a year mismatch unwritable across all four callers at
@@ -7983,7 +7983,7 @@ build, each with an owning phase.
   Needs a kill in the existing `selftest()`. ★ This is the residue of FR-164: the year now *reaches* the
   builder on every path, and the builder still does not check that the rows agree with it.
 
-- **FR-169 — ⚠️ `gen_goldens.assert_baked_provenance_is_current()` has NO CALLER. Important. Owning phase: NOW — one line.**
+- **FR-169 — ✅ CLOSED 2026-09-13 (folded c954e37bf). ⚠️ `gen_goldens.assert_baked_provenance_is_current()` has NO CALLER. Important. Owning phase: NOW — one line.**
   **Controller-verified 2026-09-13:** a grep over `crates/`, `scripts/` and `design/` finds the definition
   (`gen_goldens.py:201`), one prose mention (`:144`), and two agent reports that ran it **by hand** in
   September. Nothing invokes it automatically. Its own docstring calls it *"the cheap half that can run any
@@ -8202,7 +8202,7 @@ build, each with an owning phase.
   invisible to every instrument we own: **no line is blank**, so the field census cannot see it; both
   oracles take the split as an *input*, so their agreement says nothing (§G-9 exactly).
 
-- **FR-179 — `DocumentRow::ALL`'s completeness is pinned by a hand-typed `20`, and the doc comment claims otherwise. Important. Owning phase: the harness.**
+- **FR-179 — ✅ CLOSED 2026-09-13 (folded c954e37bf — a `document_rows!` macro generates both the enum and ALL from one list; a planted 21st variant is 11 compile errors). `DocumentRow::ALL`'s completeness is pinned by a hand-typed `20`, and the doc comment claims otherwise. Important. Owning phase: the harness.**
   **Controller-verified 2026-09-13.** `document_census.rs:96` declares `ALL` as a 20-element literal;
   `every_row_is_listed_and_round_trips` (`:1189`) asserts `DocumentRow::ALL.len() == 20` with the comment
   *"§5.1's eighteen rows plus T16's two HSA information returns"*, and the `ALL` doc comment claims *"the
@@ -8403,7 +8403,7 @@ build, each with an owning phase.
   *"a different hash means the IRS REVISED this document — review it, never silently absorb it"*, and a clean
   sweep is the evidence that the premise has teeth and nothing has been silently absorbed.
 
-- **FR-196 — ⛔ THE TOP WALL: an itemizer who received a state income-tax refund cannot file at all. Important. Owning phase: NOW — it is the owner's own profile.**
+- **FR-196 — ✅ CLOSED 2026-09-13 (folded 88d5a816d — the §111(a) worksheet transcribed and WIRED; the refusal survives narrowed to three states, with Pub525ItemizedDeductionRecovery new beside it). ⛔ THE TOP WALL: an itemizer who received a state income-tax refund cannot file at all. Important. Owning phase: NOW — it is the owner's own profile.**
   `RefuseReason::StateAndLocalRefundWorksheetNotComputed`, refused at `income import` before anything is
   stored. ★ **This is the definition of a second year of itemizing in a state with income tax**, and the
   owner confirmed 2026-09-13 that they itemize. The refusal is correct to exist — §111(a)'s tax-benefit rule
@@ -8463,7 +8463,7 @@ build, each with an owning phase.
   *The narrower question worth settling first:* should `--forms` be honoured on a full-return year when the
   refusal is confined to a schedule the requested forms do not depend on?
 
-- **FR-201 — the interview never asks for estimated tax payments (1040 line 26), though the field exists. Minor. Owning phase: with the interview's next pass.**
+- **FR-201 — ✅ CLOSED 2026-09-13 (folded 26647179 — MoneyId/MONEY_QUESTIONS, all three payment leaves, and a bare Enter over 0 records `Declined`). the interview never asks for estimated tax payments (1040 line 26), though the field exists. Minor. Owning phase: with the interview's next pass.**
   ★★ **CONTROLLER NARROWING — the source report says line 26 has "no question, no advisory, no mention
   anywhere, prints 0". That is wrong.** Verified: `return_inputs.rs:1854` declares
   `pub estimated_tax_payments: Usd, // → 1040 26`; `packet.rs:1244` routes it; `printed.rs:691` is
@@ -8483,7 +8483,7 @@ build, each with an owning phase.
   its own advisory disagree about what the packet contains — and because `0` versus blank is the distinction
   this project's testimony doctrine turns on. **Reproduce before editing.**
 
-- **FR-203 — `income import`'s TOML has no published schema, so the front door is undocumented. Important. Owning phase: NOW; it blocks every journey that is not the interview.**
+- **FR-203 — ✅ CLOSED 2026-09-13 (folded 26647179 — docs/income-import-schema.md, GENERATED by `xtask toml-schema`, and it fired on its first real test hours later when FR-196 added a field). `income import`'s TOML has no published schema, so the front door is undocumented. Important. Owning phase: NOW; it blocks every journey that is not the interview.**
   Reported: nothing in `docs/` publishes the shape of the file `income import` consumes, and the one
   advisory pointing at the alternative authoring surface names a command that does not exist (FR-198). ★ So a
   filer whose scenario the interview cannot express has **no documented way in at all** — which makes every
@@ -8562,7 +8562,7 @@ build, each with an owning phase.
   first because it needs nothing built: the TY2024 packet already prints, and **printer-and-paper defects are
   invisible to every test this project owns**, all of which check bytes.
 
-- **FR-205 — code H should FILE with an advisory, not refuse. Important. Owning phase: NOW, next round. Controller recommendation attached.**
+- **FR-205 — ✅ CLOSED 2026-09-13 (folded 3524bbfc + 972983c2b — code H files with an advisory naming Schedule 1 line 24f and the box-12 total as a CEILING, per the EicOmitted precedent). code H should FILE with an advisory, not refuse. Important. Owning phase: NOW, next round. Controller recommendation attached.**
   FR-197 correctly discovered that W-2 box 12 **code H** (§501(c)(18)(D) elective deferrals) was wrongly on
   the inert list: the amount is *"include[d] … in box 1 as wages"* and *"the employee will deduct the amount
   on their Form 1040"* — Schedule 1 line 24f, censused `unmodeled`. btctax filed the wages and never took
@@ -8580,7 +8580,7 @@ build, each with an owning phase.
   *Fix:* a new advisory naming Schedule 1 line 24f and the box-12 amount as a ceiling, with its own kill.
   **Not a one-line verdict flip** — that is why it was filed rather than improvised.
 
-- **FR-206 — ⚠️ `ELECTIVE_DEFERRAL_CODES` UNDER-DETECTS a §402(g) excess, which is the UNDERSTATEMENT direction. Important. Owning phase: NOW, with FR-205.**
+- **FR-206 — ✅ CLOSED 2026-09-13 (folded 972983c2b — ELECTIVE_DEFERRAL_CODES deleted; each of 33 rows carries a typed DeferralLimit, so a new row is an E0063). ⚠️ `ELECTIVE_DEFERRAL_CODES` UNDER-DETECTS a §402(g) excess, which is the UNDERSTATEMENT direction. Important. Owning phase: NOW, with FR-205.**
   Reported by the FR-197 agent and left untouched as a cap-rule adjudication, with the boundary recorded in
   the source. The §402(g) limit covers **designated Roth** deferrals too — per the instructions' own worked
   example — and `ELECTIVE_DEFERRAL_CODES` (`return_refuse.rs:42`) lists only `["D","E","F","G","S"]`.
@@ -8589,20 +8589,20 @@ build, each with an owning phase.
   the cap rule against §402(g) and the instructions, then derive the code set from the same table FR-197 built
   rather than typing a second list beside it.
 
-- **FR-207 — Form 8880 is justified `unmodeled` by a reason FR-197 just invalidated. Minor. Owning phase: with FR-205.**
+- **FR-207 — ✅ CLOSED 2026-09-13 (folded 972983c2b — the Form 8880 justification restated and the real gap relocated to disqualifier 2(c), the filer’s own student status). Form 8880 is justified `unmodeled` by a reason FR-197 just invalidated. Minor. Owning phase: with FR-205.**
   `f1040s3.map.toml:96` and `:156` justify Form 8880 (the retirement savings contributions credit) as
   unmodeled because *"no retirement contributions collected"*. ★ **Box 12 code D collects exactly that**, and
   FR-197 admits D. So the stated reason is now false even though the conclusion may still be right — Form
   8880 has its own AGI limits and an entirely separate eligibility test. **Restate the reason or change the
   verdict; do not leave a justification that the tree contradicts.**
 
-- **FR-208 — `packet.rs:307-308` quotes a message that no longer exists. Nit. Owning phase: opportunistic.**
+- **FR-208 — ✅ CLOSED 2026-09-13 (folded c954e37bf). `packet.rs:307-308` quotes a message that no longer exists. Nit. Owning phase: opportunistic.**
   It quotes verbatim the paper-check sentence that FR-197 and the sweep both rewrote, so it is now a quotation
   of retired text. Harmless to behaviour, but it is the third stale-copy-of-a-retracted-sentence in this one
   area today — which is the argument for the source-scanning guard that now exists, not for another manual
   sweep.
 
-- **★★★ FR-209 — FIVE forms are recorded `unchanged` in the TY2026 work list and collectively move the meaning of 30 line numbers. Important, and it re-bases the January plan. Owning phase: NOW.**
+- **★★★ FR-209 — ✅ CLOSED 2026-09-13 (folded 2d2c3ff7c + 80dfe46fd — the work list re-derived, `shape` replaced by two cells with DISJOINT vocabularies so "the map transfers" and "the form is unchanged" can never be conflated again). FIVE forms are recorded `unchanged` in the TY2026 work list and collectively move the meaning of 30 line numbers. Important, and it re-bases the January plan. Owning phase: NOW.**
   **Found by FR-192's new axis on its first run over the real January inputs, and reproduced by the controller.**
   `cargo run -p xtask -- form-delta f6251--2025 f6251--2026-DRAFT` prints
   *"★★★ **8 of 59** COMPARED surviving line number(s) now print a MATERIALLY DIFFERENT caption"*, including
@@ -8625,7 +8625,7 @@ build, each with an owning phase.
   *"unchanged, nothing to do"* conclusion attached to these five rows is void. **Re-derive every row's verdict
   from the three axes before any January work is scheduled against it.**
 
-- **FR-210 — Schedule A line 17 reads as an ambiguous GAP, not a collision, because `witness_text` misses margin sub-letters. Important. Owning phase: the TY2026 port.**
+- **FR-210 — ✅ CLOSED 2026-09-13 (folded a372b15d0 — `numeral_right_edge`, the mode of the column’s unsuffixed numerals; unread line numbers 13 -> 6, and the axis untouched). Schedule A line 17 reads as an ambiguous GAP, not a collision, because `witness_text` misses margin sub-letters. Important. Owning phase: the TY2026 port.**
   Axis C reds on 4 of the 6 Schedule A targets and **refuses line 17 as ambiguous**: `witness_text` does not
   pick up the margin sub-letters `a/e/g/h/k` on `f1040sa--2026-DRAFT`, so it prints `17` three times and the
   axis cannot tell which row it is looking at. ★ **This is correct behaviour for the axis** — refusing an
@@ -8645,13 +8645,13 @@ build, each with an owning phase.
   with the axis untouched. Unread line numbers 13 → 6, unread boxes 137 → 67.
 
 
-- **FR-211 — the work list's caption cell carries no gap count. Minor. Owning phase: with FR-209.**
+- **FR-211 — ✅ CLOSED 2026-09-13 (folded 80dfe46fd — boxes UNREAD and line numbers UNREAD now print beside every verdict). the work list's caption cell carries no gap count. Minor. Owning phase: with FR-209.**
   Reported in the build's §5: the numeric table gained caption columns but a row cannot distinguish *"0
   collisions because nothing changed"* from *"0 collisions because N lines could not be compared"* — which is
   FR-210's state on Schedule A. ★ Exactly the *"blank is the normal case"* distinction one level up: a zero
   and an unmeasured are identical in that cell and are not the same thing. Add the gap count beside it.
 
-- **★★★ FR-212 — `ROADMAP_STATUS.md:63` says "only two text cells differ" on Form 6251. The tool says EIGHT, and one of the six it missed is a six-figure TAXPAYER-ADVERSE threshold move. Important. Owning phase: NOW.**
+- **★★★ FR-212 — ✅ CLOSED 2026-09-13 (folded f2c129150 — the row now says EIGHT cells and cites the tool, not a hand count). `ROADMAP_STATUS.md:63` says "only two text cells differ" on Form 6251. The tool says EIGHT, and one of the six it missed is a six-figure TAXPAYER-ADVERSE threshold move. Important. Owning phase: NOW.**
   **Controller-verified against both extracts, 2026-09-13.** Form 6251 **line 5** — the AMT exemption
   phase-out threshold:
 
@@ -8674,7 +8674,7 @@ build, each with an owning phase.
   the instrument that says so is the axis that landed today. *Fix:* correct `:63`, and cite the tool rather
   than a hand count.
 
-- **FR-213 — `SPEC_1099da:358`'s "both forms unchanged" is false for Form 8949. Minor. Owning phase: with FR-212.**
+- **FR-213 — ✅ CLOSED 2026-09-13 (folded f2c129150 — restated as UNWITNESSED rather than wrong). `SPEC_1099da:358`'s "both forms unchanged" is false for Form 8949. Minor. Owning phase: with FR-212.**
   Form 8949's caption axis compared **0 of 2** lines, so the spec's claim rests on an axis that read nothing.
   ★ Not a wrong claim so much as an **unwitnessed** one — which is precisely the distinction FR-211 just added
   a column for. Restate it as unverified, or archive what is needed to verify it.
@@ -8687,12 +8687,12 @@ build, each with an owning phase.
   sightings now. **Do not resolve it from the citing form** — archive the 1040 and read it. Until then, treat
   every TY2026 claim about 1040 line numbering as resting on one indirect witness.
 
-- **FR-215 — the Schedule 1 line-24f census row should repoint at the new advisory. Minor. Owning phase: NOW, trivially.**
+- **FR-215 — ✅ CLOSED 2026-09-13 (folded 972983c2b). the Schedule 1 line-24f census row should repoint at the new advisory. Minor. Owning phase: NOW, trivially.**
   `crates/btctax-forms/forms/2024/f1040s1.map.toml:173` justifies line 24f as unmodeled; FR-205 now emits
   `Advisory::Section501c18DeductionForgone` naming that very line. Nothing is broken — the gate is green —
   so it is a follow-up, not a blocker. Reported by the FR-205 agent as outside its file ownership, correctly.
 
-- **FR-216 — five more refused box-12 codes are the same forgone-favourable class, and one contradicts a sibling surface. Important. Owning phase: NOW, with FR-215.**
+- **FR-216 — ✅ CLOSED 2026-09-13 (folded 972983c2b — the TP/14b contradiction resolved in favour of the advisory, after finding the advisory could never print on the document it was built for). five more refused box-12 codes are the same forgone-favourable class, and one contradicts a sibling surface. Important. Owning phase: NOW, with FR-215.**
   The FR-205 agent surveyed the class it had just built a verdict for, and did **not** convert the others, as
   instructed. Candidates: **`L P Q TP TT`**, plus `II` in both halves.
   ★★ **The sharpest is an internal contradiction, not an omission: box 14b ADVISES about the Schedule 1-A
@@ -8700,7 +8700,7 @@ build, each with an owning phase.
   fact, opposite postures — so whichever is right, the product currently disagrees with itself about a
   filer holding one piece of paper. Adjudicate that pair first; it decides the shape for the rest.
 
-- **FR-217 — is a §457(b) deferral (code G) really inside the same cap? Adjudicate. Important. Owning phase: NOW, with FR-216.**
+- **FR-217 — ✅ CLOSED 2026-09-13 (folded 972983c2b — fail-closed retained and ARGUED in the source; the limb now has a reader). is a §457(b) deferral (code G) really inside the same cap? Adjudicate. Important. Owning phase: NOW, with FR-216.**
   FR-206's fix sums `D E F G S AA BB EE` against one limit, with the authority pinned to the 1040's *"under
   all plans"* line-1h test after the agent found that **§402(g)(3) enumerates only §401(k), §408(k)(6) SEP
   and §403(b)** — omitting §457(b) (code G) and §501(c)(18) (code H).
@@ -8828,7 +8828,7 @@ build, each with an owning phase.
   ★ Same shape as FR-187 (*"federally declared"* → *"federally or state-declared"*): a **widening carried in a
   caption**, which a renumber-focused review skates past. Two independent instances now, so it is a class.
 
-- **★★★ FR-221 — the state-refund refusal names only ONE of the TWO exits the instruction gives. Important. Owning phase: NOW, with the FR-196 refusal removal. ★ It may make the owner's own wall SPURIOUS.**
+- **★★★ FR-221 — ✅ CLOSED 2026-09-13 (folded 88d5a816d — limb (b) is asked, as a return-level declaration that does NOT require the worksheet’s inputs). the state-refund refusal names only ONE of the TWO exits the instruction gives. Important. Owning phase: NOW, with the FR-196 refusal removal. ★ It may make the owner's own wall SPURIOUS.**
   **Controller-verified verbatim**, `design/forms/extract/i1040gi--2025.txt:41882-41887`:
   > *"**None of your refund is taxable** TIP if, in the year you paid the tax, you either **(a)** didn't
   > itemize deductions, or **(b) elected to deduct state and local general sales taxes instead of state and
@@ -8848,7 +8848,7 @@ build, each with an owning phase.
   **§63(f)** boxes, and — for a filer with no Form 1099-G — **any field for the refund amount**, there having
   been only a boolean.
 
-- **FR-196a — `cmd::tax`'s CarryProvenance forcing is a hand-list, and a DERIVED document asserted a normalisation the code did not perform. Important. Owning phase: NOW.**
+- **FR-196a — ✅ CLOSED 2026-09-13 (folded 88d5a816d — the CarryProvenance predicate is now SHARED with xtask toml-schema and joined by a test derived from maximal_sentinel, so the code and the generated document cannot disagree). `cmd::tax`'s CarryProvenance forcing is a hand-list, and a DERIVED document asserted a normalisation the code did not perform. Important. Owning phase: NOW.**
   Found in FR-196's blast radius. `cmd::tax` forces `CarryProvenance` to `user` at **five hand-listed
   sites**; the new `state_local_refund` field was a silent **sixth**. Meanwhile `xtask toml-schema`
   **derives** its *"forced to `user`"* annotation from the field path — so the regenerated
@@ -8859,7 +8859,7 @@ build, each with an owning phase.
   beside a derivation, with no test joining them — is what this entry is for.** *Fix:* derive the forcing
   from the same path predicate the schema generator uses, or assert the two agree.
 
-- **FR-222 — `g_1099[].box2_state_refund` has NO READER. Minor. Owning phase: with the FR-196 refusal removal.**
+- **FR-222 — ✅ CLOSED 2026-09-13 (folded 88d5a816d — 1099-G box 2 is now the worksheet’s input). `g_1099[].box2_state_refund` has NO READER. Minor. Owning phase: with the FR-196 refusal removal.**
   Noted by the FR-196 agent: `sch1.state_refund_taxable` exists and already feeds Schedule 1 line 1, so the
   new worksheet's **output** has a reader — but the 1099-G box that reports the refund **feeds nothing**.
   ★ *"An unread computed value is not thereby correct."* Wire it into the worksheet's input, or state in the
