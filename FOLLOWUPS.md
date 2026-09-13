@@ -8169,6 +8169,63 @@ build, each with an owning phase.
   state it names? ★ FR-87 was an unreachable refusal; FR-102 was a filer who could not print a page. Both
   are this shape, and neither is visible to a census that only asks whether a position is written down.
 
+- **FR-181 — ⚠️ NO TY2026 Form 1040 OR i1040gi IS ARCHIVED. Important, and on the January critical path. Owning phase: NOW.**
+  **Controller-verified 2026-09-13.** `design/forms/extract/` holds **24** TY2026 extracts — nine schedule
+  DRAFTs (`f1040s1`, `s1a`, `s2`, `s3`, `sa`, `sb`, `sc`, `sd`, `sse`), `f6251`, `f8949`, `f8959`, `f8960`,
+  `f8995`, `f8995a`, plus information returns — and **no `f1040--2026` and no `i1040gi--2026`, not even a
+  DRAFT.** Only `f1040--2024/2025` and `i1040gi--2024/2025` exist.
+  ★★ **The 1040 is the form the whole packet is built around**, and two live pieces of work need it:
+  - TY2026 **Schedule A**'s new §68-style gate reads *"Is 1040 **line 11b** minus 13a and 13b more than
+    $384,350?"* — unresolvable without the TY2026 1040;
+  - the **Itemized Deductions Worksheet** and the **Social Security Benefits Worksheet** both live in
+    `i1040gi`, so every quote from either is currently unverifiable.
+  ★ Found as a side effect of the retirement recon, which needed lines 4a–6d and discovered that **100% of
+  its TY2026 quotes depend on the two missing documents.** *Action:* archive both the moment the IRS posts
+  them (drafts if that is what exists), and until then mark every TY2026 claim that cites them as
+  unverified rather than carrying it forward as if read.
+
+- **FR-182 — ⚠️ OWNER RECONCILIATION. Retirement (T14) was CLOSED by owner ruling 2026-09-07; the owner asked for it again 2026-09-13. The REASON changed, not the facts. Owning phase: record before building.**
+  `FOLLOWUPS.md:6542`: *"**T14 is CLOSED — not needed.** It was gated on 1099-R *or* SSA-1099 and the owner
+  has ruled out both. No retirement screens, no Simplified Method worksheet, no Social Security Benefits
+  worksheet."* — from *"I won't have a 1099R this year"* and *"I won't have social security income this
+  year."*
+  On 2026-09-13 the owner asked for Phase 6 retirement first, and **separately confirmed their own TY2026
+  return has no retirement distributions.** ★ So the two are **consistent, not contradictory**: T14 was
+  closed because the owner does not need it, and it is now wanted as **breadth for other filers**. The
+  facts did not change; the justification did. Record it that way, or a future reader hits `:6542` and
+  reverses today's work on a stale rationale.
+  ★ **A real contradiction the recon did find, inside this file:** `:6542` says the owner ruled out *both*
+  halves and T14 is closed, while `:6576` — same day — says only the SSA-1099 half is closed and *"the
+  1099-R half is **still unanswered**, and T14 stands or falls on it."* Today's answer settles it: no
+  retirement distributions. **Reconcile the two entries.**
+
+- **FR-183 — ★★ SPEC LANDMINE, tax-OVERSTATING: the Social Security worksheet's line 6 omits Schedule 1 line 13, and the fix is already in the tree. Important. Owning phase: before any retirement build (blocks T14.3).**
+  `SPEC_retirement_income.md`'s S-5 prescribes worksheet line 6 as *"Sch 1 L15 + L18"*, from an
+  `adjustments` definition of `early_wd + half_se + student_loan`. **At HEAD `adjustments` also carries
+  `hsa_deduction_13`** (`return_1040.rs:2312`, T16), and the worksheet's own sentence is a BLOCK —
+  *"lines 11 through 20, and 23 and 25"* — which **contains line 13**. Omitting it shrinks line 6, inflates
+  provisional income, and **overstates the tax**.
+  ★★ **Textbook B3: the fix already exists in this repo, for the identical sentence.** `return_1040.rs:2338-2343`
+  records it for the §221 MAGI: *"adding it to `adjustments` and not here inflated the MAGI and OVERSTATED
+  the tax. Held by `form8889::tests::the_hsa_deduction_is_inside_the_section_221_magi`"*, and then states
+  the general rule — ***"It is a BLOCK, not a list: a future Schedule 1 lines 11–20 adjustment belongs here
+  the day it is added, and the worksheet's own sentence is the rule that says so."*** `:2349` does subtract
+  it. Nobody carried that to the spec, which is exactly B3's failure mode: a field of view, not ignorance.
+  ★ **Severity note, stated precisely:** the worksheet is NOT built, so this is a **latent** defect in a
+  spec, not a live money bug. It becomes a real overstatement the day T14.3 is built as written. *Fix:*
+  worksheet line 6 and `agi_before_student_loan`'s subtrahend are the **same quantity** and must share one
+  accessor, so the next adjustment cannot diverge them again.
+
+- **FR-184 — S-9's coverage checker is blind in the direction that matters: a 4b→6b label swap passes. Important. Owning phase: FIRST in any retirement build (T14.0).**
+  Reported as **measured, not read**: `label_precedes` reimplemented against the real extract puts the three
+  `"b Taxable amount"` rows at offsets 8977/9281/9577, all inside the 700-char window, so a row labelled
+  **4b is accepted at all three positions** and `5b` at two. r7 hardened two *other* halves of that
+  function. ★ So the checker cannot distinguish taxable-amount rows on lines 4b, 5b and 6b from each other —
+  which is precisely what a retirement build adds, and precisely the FR-114 shape (an instrument green
+  because it never ran over the region that mattered). **This blocks the retirement build rather than
+  following it:** the new rows are otherwise unverifiable. Not yet independently reproduced by the
+  controller — do that before acting.
+
 - **FR-152 — `census_join` anchors captions to ABSOLUTE line indices in a generated file. Minor. Owning phase: the port machine.**
   A4's 110 `# Regenerate:` header additions shifted every extract by a line, and `forms/2024/f1040s1.map.toml`'s
   `extract_line` anchors (11/15/58) had to move to 15/19/62 — an edit outside A4's ownership, reported rather
