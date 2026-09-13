@@ -1,6 +1,6 @@
 # CONTINUITY — bitcoin_tax (TaxApp)
 
-_Last updated: **2026-09-09**. Written at a deliberate pause; safe to exit. **Read this file first.**_
+_Last updated: **2026-09-13**. Written at a deliberate pause; safe to exit. **Read this file first.**_
 
 ---
 
@@ -8,7 +8,90 @@ _Last updated: **2026-09-09**. Written at a deliberate pause; safe to exit. **Re
 
 > ## ★★★ HANDOFF TO AN OPUS COORDINATOR (owner, 2026-09-07: "Let's find a time to switch to opus") — the loop from here is dispatch → machine-check → persist → ledger → fold → re-verify → push, and it needs no Fable: every remaining task (T8 in flight, T9–T12; T13/T14 on the owner's Q1; T15 post-v1) already has `BRIEF-build-interview-Tn.md`, `BRIEF-review-interview-Tn.md` and `BRIEF-reverify-interview-Tn.md` committed under `design/agent-reports/`. The rules that hold the loop: ONE opus builder or reviewer at a time (a sonnet verifier may run beside it, in a worktree); the builder edits the shared main tree and NOTHING is committed while it works (the pre-commit gate runs `make check` over the working tree); reviewers and verifiers run in `isolation: worktree` with `CARGO_TARGET_DIR=/scratch/code/bitcoin_tax/target-review` and their report is COPIED out, then `git worktree remove --force` + `git branch -D`; the report is persisted VERBATIM in its own commit before anything is folded; every measurable claim is machine-checked into `…-VERIFICATION.md` before acting; the fold is its own commit with the gate output in the message; push after each gate closes (`git push origin main`; the pre-push PII hook scans the range — synthetic identifiers only from the never-issued SSN space or `scripts/pii-scan-generic.sh`'s `ALLOWED_EIN`); commit messages via `git commit -q -F - <<'EOF'` with the two trailers. A stopped background agent is RESUMED by `SendMessage` with its id, never restarted while its edits are in the tree. The standing lessons every dispatch prompt repeats: no decision keys on a list typed beside derived data; a kill CALLS the instrument; a prompt hash keys on the registry's words, never display chrome; a new money leaf must reach the absolute chain (`every_money_leaf_household()`); a build's kills ask what the NEXT SURFACE does with what it wrote; a `Durable` fact is shown, never pre-filled; transcribe forms from the text layer. Owner-only items (never actioned autonomously): Q1/Q2/Q4, S1/S2/S7, T7's Notice 2026-20 order, the simulated real return (FR-64, the owner's TY2024 return is the reference and never enters the repo). The progress page is the artifact "Overnight Return" (scratchpad `overnight-return.html`; republish the same path to keep the URL).
 >
-> ## ★★★ RESUME 2026-09-11 (latest) — **B3 CLOSED, and year-package table STEP 5 CLOSED. Both green.**
+> ## ★★★ RESUME 2026-09-13 (LATEST) — the port rehearsal burned down, Fable's shape consult taken, TWO before-January items IN FLIGHT
+
+> **State when this was written:** `HEAD == origin/main == 422ab1fe2`, tree clean.
+> `make check` **3646 passed / 12 skipped** (the pre-commit gate ran it on every commit below).
+>
+> ### What closed since 2026-09-11
+>
+> 1. **The port rehearsal** (`REPORT-rehearse-port-f8995a-2025.md`) — a hand port of one real form through
+>    the 24-step runbook. The cleanest possible pair (111 common fields, 0 added, 0 removed, 0 labels moved)
+>    and it still produced **18 findings**, FR-134..FR-151.
+> 2. **All 18 burned down** by ten agents (5 opus / 5 sonnet) under exclusive file ownership in worktrees,
+>    integrated serially in six commits with kills independently re-planted. S5's integrated re-verification
+>    returned **0C/1I/1M, both findings the coordinator's own**, and reproduced 3646/3646 after
+>    `forms fetch --restore`. Six further items surfaced at agent ownership boundaries: FR-152..FR-157.
+> 3. **B1a amended** per Fable's call — *"the FIXTURE and the PLANT are the other half of the checker"*,
+>    with the boundary stated: **inject the oracle the checker consults, never the computation the checker is.**
+>    `design/HARNESS.md` 406 → 449 lines.
+> 4. **A 109 GB artifact incident, fixed at the root.** Agent `CARGO_TARGET_DIR`s inside the repo were not
+>    gitignored and `git add -A` swept ~205k paths into 2 of 8 unpushed commits; GitHub rejected the push with
+>    `remote unpack failed: index-pack failed`. filter-branch pass 1 **hand-listed ten directory names and
+>    missed five** — enumerate-instead-of-derive, inside the fix for it; pass 2 used `git ls-files "target-*"`.
+>    ★ `.gitignore:61` now carries `target-*/` as a **glob**, which is why an agent target dir is safe today.
+> 5. **FR-158 filed** — `scripts/hooks/deny-bypass.sh` reds on an `echo -n` that merely shares a command line
+>    with `git push`. The workaround used was to drop the `-n`, never to bypass the hook.
+>
+> ### ★★★ Fable's organization consult — the answer was "change nothing, EXCEPT delete the defaults"
+>
+> Report `ADVICE-fable-year-over-year-shape.md` (`2417f5dc3`), controller ledger (`557be34de`):
+> **11 of 14 measurable claims confirmed exactly, 3 corrected.** Its verdict: the **forms crate is finished**
+> for the second port (85 → 0 → 7 → 1 edit per `(stem, year)`); the per-port cost has **moved out of it** into
+> the oracle/golden layer, which the year-package design declared out of scope — correctly for the first port
+> and expensively for the second. *"You cannot learn from the reading that the meter was on the wrong range."*
+>
+> **Its own falsifier was tested and decided AGAINST itself:** item 1 would be a doc fix only if every vector
+> named its year — **0 of 31** vectors in `form6251_vectors.json` carry one; all ride `DEFAULT_FIXTURE_YEAR`.
+>
+> **The three corrections, all worth carrying:**
+> - `printed.rs` is **149** line-numbered fields across 10 structs, not 129. Fable quoted
+>   `TY2026_PORT_REPORT.md:455`'s 2026-09-05 figure, which this arc widened beneath: **107 → 129 → 149**.
+>   ★ That is *"a typed count beside a set that grows"* living in **prose**, in the document that prices the
+>   next port — and it already sized a "do not build" recommendation. FR-159.
+> - `validated_table_for` has **four** year arms, not "2024 => only"; only `validated_params_for` is
+>   2024-alone, and that is **fail-closed** (gated by `every_shipped_year_has_a_validated_counterpart:784`).
+>   The instrument is sound — all four tables come from `testonly.rs`, so it is NOT a self-comparison. Fable
+>   read the file's §2 header comment, which claims *"no other year"* and cites two wrong line numbers. FR-160.
+> - TY2026 fixture refs are **4**, not 9 — against **354** for TY2024. The asymmetry is worse, not better.
+>
+> **Filed with owning phases so the advice survives as a grep, not one document:** FR-164 (thread the year —
+> NOW, Important), FR-161 (text carry rule — AFTER the port; the *free* now-obligation is one sentence in the
+> January brief: **the FR-135 ratchet may not be widened**), FR-162 (compute revision axis — AFTER; now-obligation
+> is the rule in each rebuild brief, no code), FR-163 (old-year residue — a **ruling** the week the port closes,
+> explicitly NOT a mechanism), FR-159/FR-160 (Minor).
+>
+> ### ⚠️ IN FLIGHT when this was written — two agents, disjoint files, separate worktrees
+>
+> Briefs committed **before** dispatch at `422ab1fe2`:
+>
+> | item | tier | owns | brief |
+> |---|---|---|---|
+> | **FR-164** | opus | `scripts/oracle/{gen_goldens,ots_direct,verify_f6251,sweep}.py`, `crates/btctax-core/tests/golden_returns.rs` | `BRIEF-fr164-oracle-year-required.md` |
+> | **FR-156** | sonnet | `crates/btctax-forms/tests/{supported_years_cross_product,map_pdf_conformance}.rs` | `BRIEF-fr156-typed-counts.md` |
+>
+> Both were told to **not commit and not push**, to leave the worktree dirty, and to write their report with a
+> Bash heredoc (never the `Write` tool — FR-129). Reports expected at
+> `REPORT-build-fr164-oracle-year-required.md` and `REPORT-build-fr156-typed-counts.md`.
+>
+> ★ **FR-156 is dispatched as a QUESTION, not an edit order.** `BUNDLED_FORMS_PER_YEAR`'s doc comment says it
+> exists *"so that deleting an asset is as loud as adding one"*, and `year_record.rs` already holds
+> `forms_expected` to disk — so deriving the count from `YEAR.toml` goes **quiet** exactly when an asset and
+> its `YEAR.toml` line are deleted together. That would be a downgrade dressed as a derivation.
+> *"Change nothing, here is the trace"* is an accepted answer; silently deriving is not.
+>
+> **If this session died here:** nothing is committed from either agent, so the tree at `422ab1fe2` is
+> consistent. Re-dispatch from the two committed briefs, or `SendMessage` a still-live agent by id rather than
+> restarting it while its edits sit in a worktree.
+>
+> ### What is NOT the assistant's to start
+>
+> **S1** (never-mailed TY2025 rehearsal — survives the TY2025 ruling, it is "2025 helping 2026" in its purest
+> form), **S2** (real-2026 document inventory), **S7** (oracle fallback), **S8** (physical print rehearsal,
+> now unblocked). All four are the owner's decisions. The January critical path is: finals → worksheet
+> transcriptions → review to 0C/0I → OTS-2026 census → packet read → filed.
+
+> ## ★★★ RESUME 2026-09-11 (superseded — see the 2026-09-13 block above) — **B3 CLOSED, and year-package table STEP 5 CLOSED. Both green.**
 >
 > **State: clean.** `HEAD == origin/main`, tree clean, no worktrees, nothing in flight.
 > `make gate` **3596 passed / 12 skipped**, `cargo fmt --all --check` clean, `xtask line-coverage` 377 money
