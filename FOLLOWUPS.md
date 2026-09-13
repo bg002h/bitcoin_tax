@@ -8529,6 +8529,44 @@ build, each with an owning phase.
   area today — which is the argument for the source-scanning guard that now exists, not for another manual
   sweep.
 
+- **★★★ FR-209 — FIVE forms are recorded `unchanged` in the TY2026 work list and collectively move the meaning of 30 line numbers. Important, and it re-bases the January plan. Owning phase: NOW.**
+  **Found by FR-192's new axis on its first run over the real January inputs, and reproduced by the controller.**
+  `cargo run -p xtask -- form-delta f6251--2025 f6251--2026-DRAFT` prints
+  *"★★★ **8 of 59** COMPARED surviving line number(s) now print a MATERIALLY DIFFERENT caption"*, including
+  *"line 18's old text now prints at line 39 AND WAS REWORDED (similarity 0.62) — the number moved and the
+  RULE changed."* `TY2026_WORK_LIST.md:41` says `| f6251 | 62 | 0 | 0 | 0 | unchanged |`.
+
+  | form | work list said | meanings moved |
+  |---|---|---|
+  | `f6251` | unchanged | **8** |
+  | `f8959` | unchanged | **12** |
+  | `f8960` | unchanged | **2** |
+  | `f1040sb` | unchanged | **2** |
+  | `f8995a` | port (0/0/0) | **6** |
+  | `f1040sd` | unchanged | 0 — the only genuinely unchanged form |
+
+  ★★ **And f6251 is the form the 2026-09-11 owner ruling greenlit**, on the ground that it *"transfers its
+  whole field map: 62 fields, 0 renamed, 0 moved."* **That was true and remains true — of the FIELD MAP.** The
+  work list's `unchanged` was a claim about the FORM, and the two are different things; drawing that
+  distinction is precisely why FR-192 exists. The transcription work already done is not wasted, but the
+  *"unchanged, nothing to do"* conclusion attached to these five rows is void. **Re-derive every row's verdict
+  from the three axes before any January work is scheduled against it.**
+
+- **FR-210 — Schedule A line 17 reads as an ambiguous GAP, not a collision, because `witness_text` misses margin sub-letters. Important. Owning phase: the TY2026 port.**
+  Axis C reds on 4 of the 6 Schedule A targets and **refuses line 17 as ambiguous**: `witness_text` does not
+  pick up the margin sub-letters `a/e/g/h/k` on `f1040sa--2026-DRAFT`, so it prints `17` three times and the
+  axis cannot tell which row it is looking at. ★ **This is correct behaviour for the axis** — refusing an
+  ambiguous witness beats guessing, and *"a skipped field is not a passed one"* is in its own output — but it
+  means the single most consequential collision on the form (TY2025's **checkbox** at line 18 versus TY2026's
+  **itemized total**) is currently reported as a gap rather than a hit. Same family as FR-58. The agent left
+  it alone deliberately because fixing it re-bases three other checkers; that judgement is endorsed.
+
+- **FR-211 — the work list's caption cell carries no gap count. Minor. Owning phase: with FR-209.**
+  Reported in the build's §5: the numeric table gained caption columns but a row cannot distinguish *"0
+  collisions because nothing changed"* from *"0 collisions because N lines could not be compared"* — which is
+  FR-210's state on Schedule A. ★ Exactly the *"blank is the normal case"* distinction one level up: a zero
+  and an unmeasured are identical in that cell and are not the same thing. Add the gap count beside it.
+
 - **FR-152 — `census_join` anchors captions to ABSOLUTE line indices in a generated file. Minor. Owning phase: the port machine.**
   A4's 110 `# Regenerate:` header additions shifted every extract by a line, and `forms/2024/f1040s1.map.toml`'s
   `extract_line` anchors (11/15/58) had to move to 15/19/62 — an edit outside A4's ownership, reported rather
