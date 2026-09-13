@@ -8091,6 +8091,25 @@ build, each with an owning phase.
   ★ The 1-failure gate is what caught it, which is the argument for reading the summary line rather than
   the tail of the log: `tail -2` on a commit attempt hid the word BLOCKED earlier the same day.
 
+  ★★★ **SECOND OCCURRENCE, 2026-09-13, AND THE INSTRUCTION DID NOT PREVENT IT.** Wave-1 agent D was given
+  this rule verbatim in its brief — *"Run every command in the FOREGROUND — FR-175: an agent that backgrounds
+  its gate and ends its turn never writes its report, and that cost a round today"* — and stalled anyway, with
+  *"I'll pause here and wait for the `make check` monitor to report back before finalizing the report."*
+  **So rule 1 above is refuted as a fix.** Telling an agent not to background its gate does not stop it: the
+  behaviour is apparently reached by a monitor/wait affordance that reads as reasonable in the moment, not by
+  ignoring an instruction. Two agents, two briefs, one shape — the second brief containing the prohibition.
+  **What to do instead, since a brief line demonstrably does not work:**
+  - treat a stall as EXPECTED and make the controller's recovery cheap and safe — resume once by
+    `SendMessage` (never restart while edits are live), and if it stalls twice, verify and fold the diff
+    yourself, which is what happened to FR-174;
+  - ★ or better, remove the affordance: give such agents no long-running gate to background — have the
+    controller run the gate after integration, and ask the agent only for its kills and its report. The
+    agent's unique product is the **planted-defect evidence**, which is exactly what a stall destroys and
+    what the controller cannot reconstruct from a diff.
+  ★ Rule 2 above (never diff or integrate a worktree whose agent has not reported) is UNAFFECTED and was
+  followed here: agent D's tree was left untouched and the agent resumed instead.
+
+
 - **FR-176 — the pre-commit gate went RED then GREEN on the identical tree, under concurrent agent load. Important. Owning phase: the harness.**
   **Measured 2026-09-13.** An `--allow-empty` commit (no file change at all) was BLOCKED with
   *"pre-commit: BLOCKED — `make check` is RED"* while **five** agents were building in worktrees. Re-running
