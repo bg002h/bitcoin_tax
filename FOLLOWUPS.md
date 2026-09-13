@@ -8605,6 +8605,42 @@ build, each with an owning phase.
   FR-210's state on Schedule A. ★ Exactly the *"blank is the normal case"* distinction one level up: a zero
   and an unmeasured are identical in that cell and are not the same thing. Add the gap count beside it.
 
+- **★★★ FR-212 — `ROADMAP_STATUS.md:63` says "only two text cells differ" on Form 6251. The tool says EIGHT, and one of the six it missed is a six-figure TAXPAYER-ADVERSE threshold move. Important. Owning phase: NOW.**
+  **Controller-verified against both extracts, 2026-09-13.** Form 6251 **line 5** — the AMT exemption
+  phase-out threshold:
+
+  | filing status | TY2025 | TY2026 draft | change |
+  |---|---|---|---|
+  | MFJ / QSS | $1,252,700 | **$1,000,000** | **−$252,700** |
+  | Single / HoH | $626,350 | **$500,000** | **−$126,350** |
+  | MFS | 626,350 | **500,000** | −126,350 |
+
+  The exemption itself rises ($137,000→$140,200 MFJ, $88,100→$90,100 Single) — nowhere near an offset. A
+  **lower** phase-out start means the exemption is lost sooner, so **more filers owe AMT**: taxpayer-adverse,
+  and shaped like an OBBBA §55(d) reversion (a de-indexed reset to round numbers, re-indexed from there).
+  ★★ **And `ROADMAP_STATUS.md:63` is the row that PRICED the transcription decision** — the 2026-09-11 ruling
+  greenlit `f6251/2025` partly because *"Only two text cells differ."* The tool now says 8. The decision was
+  taken on a price that understated the delta by six cells, one of them this one.
+  ★ **The good news, and the precise shape of the risk: NO MONEY IS WRONG TODAY.** `tax_tables.rs:311` already
+  carries `phaseout_start_single_hoh_mfs: dec!(500000)` — the params were transcribed correctly from the
+  statute by whoever wrote `ty2026_full_return()`. So this is not a wrong figure; it is a wrong **price**,
+  which could have led to skipping review of cells that mattered. **We were lucky rather than careful**, and
+  the instrument that says so is the axis that landed today. *Fix:* correct `:63`, and cite the tool rather
+  than a hand count.
+
+- **FR-213 — `SPEC_1099da:358`'s "both forms unchanged" is false for Form 8949. Minor. Owning phase: with FR-212.**
+  Form 8949's caption axis compared **0 of 2** lines, so the spec's claim rests on an axis that read nothing.
+  ★ Not a wrong claim so much as an **unwitnessed** one — which is precisely the distinction FR-211 just added
+  a column for. Restate it as unverified, or archive what is needed to verify it.
+
+- **FR-214 — Form 6251's TY2026 text cites "Form 1040 line 7a", and it is the ONLY evidence in the tree that the 1040 renumbers line 7. Important. Owning phase: with FR-181.**
+  The 1040 itself is carried as **NO DRAFT** (FR-181: neither `f1040--2026` nor `i1040gi--2026` is archived),
+  so a *referencing* form is currently the sole witness to a change in the *referenced* one. ★ This is the
+  cross-form version of the collision shape: Form 6251 line 7 cites 1040 line 7 in TY2025 and **7a** in
+  TY2026 — the same discrepancy found on 2026-09-11 when the reviewer distrusted its brief. Two independent
+  sightings now. **Do not resolve it from the citing form** — archive the 1040 and read it. Until then, treat
+  every TY2026 claim about 1040 line numbering as resting on one indirect witness.
+
 - **FR-152 — `census_join` anchors captions to ABSOLUTE line indices in a generated file. Minor. Owning phase: the port machine.**
   A4's 110 `# Regenerate:` header additions shifted every extract by a line, and `forms/2024/f1040s1.map.toml`'s
   `extract_line` anchors (11/15/58) had to move to 15/19/62 — an edit outside A4's ownership, reported rather
