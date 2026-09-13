@@ -8110,7 +8110,7 @@ build, each with an owning phase.
   followed here: agent D's tree was left untouched and the agent resumed instead.
 
 
-- **FR-176 — the pre-commit gate went RED then GREEN on the identical tree, under concurrent agent load. Important. Owning phase: the harness.**
+- **FR-176 — ✅ CLOSED 2026-09-13 (root cause MEASURED; see the diagnosis appended below). the pre-commit gate went RED then GREEN on the identical tree, under concurrent agent load. Important. Owning phase: the harness.**
   **Measured 2026-09-13.** An `--allow-empty` commit (no file change at all) was BLOCKED with
   *"pre-commit: BLOCKED — `make check` is RED"* while **five** agents were building in worktrees. Re-running
   the same gate on the same tree minutes later: **`3650 tests run: 3650 passed, 12 skipped`, exit 0**,
@@ -8129,6 +8129,30 @@ build, each with an owning phase.
   private temp dir (there are `tempfile` users and at least one golden-packet test that writes); cargo's
   shared `~/.cargo` package-cache lock under six concurrent builds; or wall-clock sensitivity in a test with
   a timeout. **Do not guess — the hook's own output will name it.**
+
+  ★★★ **ROOT CAUSE, MEASURED 2026-09-13 while integrating wave 1 — it is NOT a flaky test.**
+  The post-integration gate failed **5** tests, all of them the `examples::tests` that shell out to
+  `cargo build`, and the real error was a LINK failure:
+
+      ld.lld: error: undefined hidden symbol: anon.dde2cbfe98b31e11a0ed4cd71ae398a8.65.llvm.<hash>
+        >>> referenced by year_record.rs:22 (crates/btctax-forms/src/year_record.rs:22)
+        >>> libbtctax_forms-c84a5d2ac63c54b4.rlib
+
+  Undefined **hidden anon LLVM symbols** referenced from a stale `.rlib` is the signature of a
+  **corrupted incremental-compilation cache**, produced by concurrent cargo invocations against one
+  target dir — four agents, plus the controller's own builds, plus the pre-commit hook's `make check`.
+  `cargo clean -p btctax-forms -p btctax-cli` restored it: **3678/3678, 0 FAIL**.
+  ★ **Why only those five tests:** they are the only ones that LINK A FRESH BINARY mid-suite, so they
+  are the only ones that can see a corrupt rlib. Every candidate mechanism the original entry guessed at
+  (a fixed temp path, a `~/.cargo` lock, a timeout) was wrong.
+  ★★ **So the flake is NOT one-directional after all, and that is the reassuring half:** a corrupt rlib
+  fails to LINK, which cannot produce a false GREEN — it can only fail loudly. The original entry's fear
+  that a false green was equally likely is retired.
+  **Mitigation, not a mechanism:** on an inexplicable link error, `cargo clean -p <crate>` before
+  believing the failure; and do not run `make check` concurrently with another build in the same tree.
+  Agents already use their own `CARGO_TARGET_DIR` — it is the CONTROLLER that shares one, while
+  integrating patches serially and re-gating each time.
+
 
 - **FR-177 — ✅ CLOSED 2026-09-13 (folded 303724f7 by OWNER RULING ("I see no decision requiring me. Just tell user what to do") — the retracted IRS fact swept from four surfaces; §7.4 corrected; direct deposit was ALREADY BUILT, only Form 8888 stays out). ⚠️ OWNER DECISION. `Advisory::RefundByPaperCheck` asserts an IRS behaviour the IRS retracted, and §7.4's DO-NOT-BUILD rests on the same retracted premise. Important. Owning phase: NOW, before TY2026.**
   **Both sides verified verbatim by the controller 2026-09-13.**
@@ -8640,6 +8664,30 @@ build, each with an owning phase.
   TY2026 — the same discrepancy found on 2026-09-11 when the reviewer distrusted its brief. Two independent
   sightings now. **Do not resolve it from the citing form** — archive the 1040 and read it. Until then, treat
   every TY2026 claim about 1040 line numbering as resting on one indirect witness.
+
+- **FR-215 — the Schedule 1 line-24f census row should repoint at the new advisory. Minor. Owning phase: NOW, trivially.**
+  `crates/btctax-forms/forms/2024/f1040s1.map.toml:173` justifies line 24f as unmodeled; FR-205 now emits
+  `Advisory::Section501c18DeductionForgone` naming that very line. Nothing is broken — the gate is green —
+  so it is a follow-up, not a blocker. Reported by the FR-205 agent as outside its file ownership, correctly.
+
+- **FR-216 — five more refused box-12 codes are the same forgone-favourable class, and one contradicts a sibling surface. Important. Owning phase: NOW, with FR-215.**
+  The FR-205 agent surveyed the class it had just built a verdict for, and did **not** convert the others, as
+  instructed. Candidates: **`L P Q TP TT`**, plus `II` in both halves.
+  ★★ **The sharpest is an internal contradiction, not an omission: box 14b ADVISES about the Schedule 1-A
+  tips deduction while box 12 code `TP` REFUSES over the same fact on the same W-2.** Two surfaces, one
+  fact, opposite postures — so whichever is right, the product currently disagrees with itself about a
+  filer holding one piece of paper. Adjudicate that pair first; it decides the shape for the rest.
+
+- **FR-217 — is a §457(b) deferral (code G) really inside the same cap? Adjudicate. Important. Owning phase: NOW, with FR-216.**
+  FR-206's fix sums `D E F G S AA BB EE` against one limit, with the authority pinned to the 1040's *"under
+  all plans"* line-1h test after the agent found that **§402(g)(3) enumerates only §401(k), §408(k)(6) SEP
+  and §403(b)** — omitting §457(b) (code G) and §501(c)(18) (code H).
+  ★ **§457(b) has its own separate limit** (§457(b)(2)/§457(e)(15)), so folding code G into a §402(g)-shaped
+  cap could be wrong in the *other* direction — refusing a filer who is within both limits. ★★ And
+  `CLAUDE.md`'s authority hierarchy is explicit that **instructions are not law**: pinning to the 1040's
+  paragraph is defensible for deciding *what btctax must refuse*, but it is not authority for *what the
+  limit is*. Adjudicate against the statute and record which limb each code belongs to. The current
+  behaviour fails closed, so this is a correctness question, not a live wrong figure.
 
 - **FR-152 — `census_join` anchors captions to ABSOLUTE line indices in a generated file. Minor. Owning phase: the port machine.**
   A4's 110 `# Regenerate:` header additions shifted every extract by a line, and `forms/2024/f1040s1.map.toml`'s
