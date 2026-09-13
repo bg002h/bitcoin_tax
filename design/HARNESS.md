@@ -295,11 +295,13 @@ performatively, and produces real future failures rather than the appearance of 
 from a range"* — encode it as its own invariant in A3's shape, which is what the label-reader design
 already specifies. The general lint is the thing that does not work; the specific invariant does.
 
-##### B1a — the FIXTURE is half the checker (amended 2026-09-07, owner-approved, FR-88)
+##### B1a — the FIXTURE and the PLANT are the other half of the checker (amended 2026-09-07, owner-approved, FR-88; widened to the plant 2026-09-13, owner-approved, FR-154)
 
-**A checker that walks a derived set must be fed a fixture derived from that same set — or must assert,
-in the test, that its fixture covers it.** A hand-written fixture standing beside a derived walk is the
-`1..=38` trap one level down: the checker is correct, and the fixture silently decides what it may see.
+**A kill test supplies the checker two things besides itself, and both must be constructed from the
+measured set — never borrowed from whatever the tree happens to hold today.** The **fixture** makes the
+checker's subject *present*; the **plant** makes it *wrong*. A hand-written value in either place,
+standing beside a derived walk, is the `1..=38` trap one level down: the checker is correct, and
+something the checker does not know silently decides what it may see.
 
 **Why this is an amendment and not a new rule.** B1 as originally written requires a checker be observed
 RED on a planted defect. It says nothing about the *input* the checker is given, and three consecutive
@@ -323,6 +325,47 @@ Deriving the fixture found what the guard was built for and could not see.
 ★ Where derivation is genuinely impossible, the honest form is an explicit assertion that the fixture
 covers the walked set, plus a sentence naming what it does not. A stated boundary is reviewable; a
 silent one is the defect.
+
+
+**The plant half — widened 2026-09-13 (FR-136, FR-154).** The fixture half has one symptom: silent
+green. The plant half has the opposite one, and it is worse. A plant that names a real artefact
+*because it happens to be absent* is correct on the day it is written and is un-planted by the first
+correct, unrelated commit that fills the absence — which, in a repo with a backlog, is the next thing
+anyone works on. It does not go green. It goes **red about the instrument**, at the moment a port is
+being shipped, and the cheapest discharge is to delete the test. And on a **complete** set there is no
+absence left to borrow, so the plant cannot be written at all.
+
+| plant | what it borrowed | what un-planted it |
+|---|---|---|
+| `year_record`, "expected but not bundled" | `f8995a`, absent from TY2025's bundle | supplying `f8995a/2025` — the port itself |
+| `year_record`, "bundled but not declared" | `f1040s1`, absent from TY2025's declaration | supplying `f1040s1/2025` — the same port |
+| `form_delta`, three work-list plants | `f8995a` with no 2017 side and no 2026 final | archiving one TY2026 final — what January does |
+
+★ Every one was correct when written, and the `f8995a` plants had **already been moved once** (the
+committed comment records tag 2025 → 2017 on 2026-09-06, after `f8995a--2025` was archived).
+Relocating a borrowed plant to a fresh absence is the r1 excuse-list move: it survives exactly until the
+next gap is filled, and the gaps are the backlog.
+
+**Two questions, one per half.** The fixture's: *"what in this fixture makes the checker's subject
+present at all?"* The plant's: **"what makes this plant a defect rather than a fact — and would it still
+be one on the day the set is complete?"** A borrowed-absence plant answers the first cleanly and fails
+the second, which is why the first alone did not catch it.
+
+**The forms that hold, for the plant.** *Derive the victim*: remove a member of the list the build
+measured, so every member is planted and no member's absence is assumed — `year_record` now plants every
+stem in `present_for(year)` three ways and appends a synthetic COMPLETE year that no bundled year can
+supply. Or *declare the premise with synthetic material*: a synthetic stem against an injected oracle
+whose contents the test states in one line (`form_delta::check_work_list_against(.., archived)`). ★ A
+declared premise incurs one debt — the **real** oracle must then be shown to discriminate, by a guard
+that is itself derived (`form_delta`'s is true for every `(stem, year)` in `BUNDLED` and false for a stem
+no archive can hold, and it is the only test that reds when `pdf_for` stops resolving bundled templates).
+
+★★ **The boundary, so this cannot be over-applied.** Inject the oracle the checker *consults*; never the
+computation the checker *is*. A plant that must borrow a real artefact's real content (`form_delta`'s
+`f1040` and `f1040s1` numeric rows, FR-155) keeps the borrow, asserts it with a message naming what will
+falsify it, and is **listed as a debt** — because freeing it by injecting `compute` would leave a kill
+that kills a mock. Where the fixture half's escape hatch is a discharge, the plant half's is only a
+deferral: it expires on the day the set completes, and the entry must say so.
 
 #### B2 — pass-by-path payloads
 
