@@ -7907,6 +7907,40 @@ build, each with an owning phase.
   default is the one that matters least; `gen_goldens.py` and `sweep.py` are where the year is genuinely
   unstated.
 
+- **FR-165 — ⛔ BLOCKING. CI's `test` job has been RED on all three OSes for 8 days: 6 `xtask::form_delta` tests require PDF bytes that `.gitignore` deliberately never commits. Owning phase: NOW, ahead of everything else.**
+  **Measured 2026-09-13, independently, after the FR-156 agent flagged "6 pre-existing failures" as unrelated
+  to its work — the flag was right and much larger than it treated it.**
+  - **Last green CI run: `2bd04d458`, 2026-09-05 21:15.** Zero successes in the 60 runs since. The
+    PDF-dependent tests landed `edc212b41` (2026-09-05, *"tool(form-delta): make draft→final a DIFF, not a
+    rebuild"*) — so CI went red essentially the moment they landed.
+  - **Failing on `test (ubuntu-latest)`, `test (macos-latest)` and `test (windows-latest)` alike** —
+    `209 passed; 6 failed`. Not a platform gotcha.
+  - **The 6, with their panic sites:** `every_common_field_is_either_compared_or_named_as_unwitnessed`
+    (`:1378`), `no_archived_pair_reports_a_clean_verdict_from_zero_comparisons` (`:1461`),
+    `port_status_prints_the_committed_work_list` (`:630`), `the_committed_work_list_matches_form_delta_at_head`
+    (`:568`), `the_work_list_checker_reds_on_every_planted_row` (`:684`),
+    `the_ty2026_drafts_are_ready_to_be_diffed_against_their_finals` (`:1127`).
+  - **Root cause, one line:** `form_delta.rs:64` — `let pdf = pdf_for(stem).ok_or_else(|| format!("no PDF
+    found for {stem}"))?;`. Field *spellings* come from the PDF's AcroForm. `.gitignore:68-71` commits the
+    text layer and never the PDF: *"IRS primary-source PDFs — publicly available, fetched on demand, never
+    committed … its committed TEXT LAYER lives in design/forms/extract/ (which IS what the tests read)."*
+    ★ **The gitignore's own claim is false for these six tests** — they read the PDF, not the extract.
+  - **Locally green, remotely red:** 125 PDFs sit on this disk (0 tracked), 126 extracts and 70 geometry
+    JSONs are committed. So `make check` passes here and cannot pass on any fresh checkout.
+  - ★★ **This is the `fast-validation-gate` caveat realised a second time** (first: 2026-07-18). `make check`
+    is nextest + clippy over the working tree; it is NOT CI. The controller reported *"gate green at 3646"*
+    on every commit today, which was true of `make check` and false of the repository. **`main` is not
+    branch-protected, so nothing surfaced it** — 8 days, ~60 pushes, no signal.
+  - **Direction for the fix (not yet done).** Commit a **derived field-list fixture** per archived form —
+    exactly symmetric to the extract and geometry fixtures that already exist for this reason — and have
+    `compute()` read *that* as the source of truth, with the existing `forms extract --all --check` shape
+    (A4: *"126 text layer(s) — 126 reproduce byte-for-byte, 0 rewritten"*) verifying the fixture against the
+    PDF when a PDF is present. **Rejected:** (a) skipping when the PDF is absent — this repo's rule is
+    *skipping is not passing*, and it would make the January-readiness test silently vacuous, which is worse
+    than red; (b) fetching from irs.gov in CI — a network dependency on every run, against an archive whose
+    whole purpose is reproducibility from committed bytes. ★ A *fallback* to the PDF is also wrong: a
+    fallback is how the fixture silently stops being checked.
+
 - **FR-152 — `census_join` anchors captions to ABSOLUTE line indices in a generated file. Minor. Owning phase: the port machine.**
   A4's 110 `# Regenerate:` header additions shifted every extract by a line, and `forms/2024/f1040s1.map.toml`'s
   `extract_line` anchors (11/15/58) had to move to 15/19/62 — an edit outside A4's ownership, reported rather
