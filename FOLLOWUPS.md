@@ -8091,6 +8091,26 @@ build, each with an owning phase.
   ★ The 1-failure gate is what caught it, which is the argument for reading the summary line rather than
   the tail of the log: `tail -2` on a commit attempt hid the word BLOCKED earlier the same day.
 
+- **FR-176 — the pre-commit gate went RED then GREEN on the identical tree, under concurrent agent load. Important. Owning phase: the harness.**
+  **Measured 2026-09-13.** An `--allow-empty` commit (no file change at all) was BLOCKED with
+  *"pre-commit: BLOCKED — `make check` is RED"* while **five** agents were building in worktrees. Re-running
+  the same gate on the same tree minutes later: **`3650 tests run: 3650 passed, 12 skipped`, exit 0**,
+  `git status --porcelain` empty both times. So the tree was never dirty and nothing was actually broken.
+  ★★ **A flaky gate is dangerous in BOTH directions**, which is why this is Important and not a Nit: a false
+  RED costs a cycle and trains the habit of re-running until green — which is indistinguishable from
+  bypassing it; a false GREEN is worse and this measurement gives no reason to believe the flake is
+  one-directional. `HARNESS.md`'s class-β is *"shipped an instrument never seen discriminating"*, and an
+  instrument whose verdict depends on machine load is discriminating on the wrong variable.
+  **What is NOT yet known, and must be measured before any fix:** which test failed. The diagnostic was lost
+  because the controller piped the commit through `grep -E "gates green|BLOCKED"` and kept two lines —
+  ★ the same truncation habit that hid the word BLOCKED earlier today and mis-reported a diffstat twice this
+  week. *First action is therefore not a fix but an instrument:* have the hook write its full output to a
+  file so a red is diagnosable after the fact, then reproduce under load.
+  ★ Candidate mechanisms worth testing, none confirmed: a test using a fixed filesystem path rather than a
+  private temp dir (there are `tempfile` users and at least one golden-packet test that writes); cargo's
+  shared `~/.cargo` package-cache lock under six concurrent builds; or wall-clock sensitivity in a test with
+  a timeout. **Do not guess — the hook's own output will name it.**
+
 - **FR-152 — `census_join` anchors captions to ABSOLUTE line indices in a generated file. Minor. Owning phase: the port machine.**
   A4's 110 `# Regenerate:` header additions shifted every extract by a line, and `forms/2024/f1040s1.map.toml`'s
   `extract_line` anchors (11/15/58) had to move to 15/19/62 — an edit outside A4's ownership, reported rather
