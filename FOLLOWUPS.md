@@ -8293,6 +8293,62 @@ build, each with an owning phase.
   cannot reach the two documents TY2026 Schedule A most needs. ★ Same family as FR-181 — the archive's
   coverage is derived from the wrong set.
 
+- **FR-190 — ★★ `form-delta`'s label axis is keyed to the FULL AcroForm FQN, so a container rename silently empties it — and the blindness is CONCENTRATED where the axis matters most. Important. Owning phase: NOW, before the TY2026 port uses it in anger.**
+  **Controller-reproduced independently 2026-09-13**, not taken from the report:
+  `f1040s3--2021`'s root subform is `form1[0]`; `f1040s3--2022`'s is `topmostSubform[0]`. Nothing else
+  differs. Measured on the committed geometry fixtures: **full-FQN intersection = 0; root-stripped
+  intersection = 40**, of 41 boxes. The tool prints `0 common / 40 added / 41 removed` and the loudest
+  banner in the corpus — *"★★ LINE→LABEL DRIFT UNWITNESSED"*, exit 1 — for the **calmest** transition in it.
+  Across the probe's 11 pairs: **71 of 159 real line moves (45%) never reached the output**, and the
+  `added`/`removed` lists they fall into carry **no printed-line label**, so the drift is unrecoverable from
+  what the tool prints. One character does it: `Lines4a-11_ReadOrder` → `Line4a-11_ReadOrder` costs 11 boxes.
+  ★ **Credit where due: the banner is HONEST** — *"this run is NOT evidence that no line moved."* It fails
+  loud, not quiet, which is why this is Important and not Critical. The defect is the blindness, not a lie
+  about it.
+  ★★ **The part that decides January:** the container rename and the renumbering are **correlated** — a
+  container is renamed *because* lines were renumbered — so the FQN key drops boxes **preferentially where
+  the axis matters most**. This is not random loss; it is loss concentrated on exactly the transitions the
+  tool exists to analyse. FR-114's shape at the port layer.
+  *Fix direction:* compare on a root-stripped (or container-insensitive) key, and keep the full FQN only for
+  reporting. B1: plant a root-subform rename on an otherwise identical pair and watch the axis still compare.
+
+- **FR-191 — `form-delta` has no line-SET axis: 62 retired line numbers reported as zero. Important. Owning phase: with FR-190.**
+  Schedule 8812 TY2021→TY2022 **killed 34 printed lines**; the output is *"54 removed"* field names, 8 shown,
+  none labelled. Across the corpus, 62 retired line numbers were invisible. ★ `label-census` can already
+  answer this question — `form-delta` neither runs it nor names it, which is the gap: two instruments exist
+  and nothing joins them. A retired line matters because code that still reads it reads a **blank**, and a
+  blank and a zero are indistinguishable on the page.
+
+- **FR-192 — ★★ `form-delta` has no line-MEANING axis, and that is the THIRD form today showing the collision shape. Important. Owning phase: with FR-190; it is runbook step 17's real question.**
+  Schedule 3 TY2020→TY2021: **13 line numbers survive and NINE name a different quantity.** Line 7 moves
+  from *the Part I total* to an *"other credits" subtotal* — which **double-counts lines 1–5** if the old
+  cross-reference is carried forward; line 8 moves from *net premium tax credit* to *the Part I total*.
+  ★★ **Three independent forms, one day, same shape:** Schedule 1-A 37→43 (found 2026-09-11, took two review
+  rounds to hold by a type), Schedule A's six-line cascade (FR-185), and Schedule 3's nine. **This is a
+  pattern, not an anomaly**, and it is the single most expensive thing about a year port: a surviving line
+  number whose meaning changed is invisible to a name diff, invisible to a label diff, and taxpayer-adverse
+  in whichever direction the substituted quantity happens to run.
+
+- **FR-193 — `labels_available == false` is UNREACHABLE via a form with no AcroForm. Minor (a test's premise, not a defect). Owning phase: whenever FR-190 is fixed.**
+  The probe was asked to confirm that a prior-year form lacking an AcroForm yields `labels_available == false`
+  rather than silently comparing nothing. It passed **by a stronger route than predicted**: `extract-geometry`
+  **hard-refuses** ("catalog has no AcroForm"), so no fixture is ever written and `form-delta` errors out
+  first. Verified on two genuinely AcroForm-free documents. ★ So the guard is real but the state
+  `no_archived_pair_reports_a_clean_verdict_from_zero_comparisons` was written to fear is not reachable *that
+  way* — it is reachable the FR-190 way instead, which is the state actually worth testing. Record it, so a
+  future reader does not conclude the check is dead.
+
+- **FR-194 — `f1040s8812` 404s for every year: the IRS stem is `f1040s8`. Nit, and the FOURTH instance of the runbook step-1 class. Owning phase: the port machine's stem table.**
+  Found while fetching prior-year revisions. ★ Worth recording only because it is the fourth time a port has
+  been slowed by a guessed IRS filename, which makes it a class rather than a typo: the stem belongs in a
+  table derived from what irs.gov actually serves, not inferred from the schedule's common name.
+
+- **FR-195 — ✅ POSITIVE, recorded because absence of drift is also a measurement. No owning phase.**
+  `forms fetch --restore` found **ZERO IRS revision drift across all 125 previously-archived documents** as
+  of 2026-09-13 — every sha256 still matches its note. ★ Recorded because the archive's whole premise is that
+  *"a different hash means the IRS REVISED this document — review it, never silently absorb it"*, and a clean
+  sweep is the evidence that the premise has teeth and nothing has been silently absorbed.
+
 - **FR-152 — `census_join` anchors captions to ABSOLUTE line indices in a generated file. Minor. Owning phase: the port machine.**
   A4's 110 `# Regenerate:` header additions shifted every extract by a line, and `forms/2024/f1040s1.map.toml`'s
   `extract_line` anchors (11/15/58) had to move to 15/19/62 — an edit outside A4's ownership, reported rather
