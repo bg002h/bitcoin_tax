@@ -80,7 +80,45 @@ pub enum Advisory {
     ///   charges, automatic gratuities and tips from an unlisted second occupation), so there is no
     ///   figure it could demand and no answer a refusal could clear. `codes` is what the employer
     ///   printed, quoted back so the filer can look it up.
-    TipsDeductionForgoneWithTtoc { codes: Vec<String> },
+    ///
+    /// ★★★ **FR-216 — THE TRIGGER IS NOW WIDER THAN THE NAME, deliberately, and this is the sentence
+    /// that says so.** Box 12 code `TP` (*"Total amount of cash tips reported to the employer"*) is
+    /// the SAME fact on the SAME W-2: the two are printed together by rule — code TP says *"You
+    /// must also list an occupation code in box 14b"* and box 14b says *"Use this box to report the
+    /// Treasury Tipped Occupation Code(s) **if cash tips are reported in box 12 with code TP**"*
+    /// (`iw2w3--2026.txt:2810-2819`, `:2935-2945`). Before FR-216 box 14b advised here while code TP
+    /// **refused** in `return_refuse`, so on a conforming 2026 W-2 the refusal always won and this
+    /// advisory could never print at all. One fact, one advisory; `codes` may be empty (a code TP
+    /// transcribed without its box 14b) and `cash_tips_reported` may be zero (a box 14b code with no
+    /// code TP beside it), and the message says only what it has.
+    ///
+    /// ★ The variant KEEPS its `WithTtoc` name even though the trigger outgrew it, because renaming
+    ///   it edits `return_inputs.rs` (an intra-doc link) and `xtask/src/box_census.rs` (a census
+    ///   note) — neither of which this change owns. FOLLOWUPS carries the rename.
+    ///
+    /// ★ `cash_tips_reported` is a **CEILING** on what Part II could claim and never the deduction:
+    ///   the 2026 Schedule 1-A asks for *"Qualified tips included in Form W-2, box 12, code 'TP'"*,
+    ///   which is the qualified SUBSET, and Part II then caps the deduction at $25,000 and phases it
+    ///   out on MAGI. Same discipline as [`Self::MixedUseMortgageNotAllocated`].
+    TipsDeductionForgoneWithTtoc {
+        codes: Vec<String>,
+        cash_tips_reported: Usd,
+    },
+    /// ★★★ **FR-216 / §225 (§3.4) — a Form W-2 reports box 12 code `TT`, and the return claims no
+    /// qualified overtime on Schedule 1-A Part III.**
+    ///
+    /// The mirror of [`Self::TipsDeductionForgoneWithTtoc`], one Part down, and the code's own
+    /// narrative is the whole case: *"Code TT—Total amount of qualified overtime compensation. …
+    /// Overtime compensation is still generally subject to federal income tax withholding"*
+    /// (`iw2w3--2026.txt:2811-2830`) — so the amount is inside box 1, which is what btctax files on
+    /// Form 1040 line 1a, and the §225 deduction that would take it back out sits on a Part btctax
+    /// **does** model and the filer has left empty. Nothing on the return is wrong; a deduction is
+    /// forgone, so the tax can only be OVERSTATED.
+    ///
+    /// ★ `ceiling` is the box 12 figure and is a CEILING, not the deduction: Schedule 1-A Part III
+    ///   caps it at $12,500 ($25,000 MFJ) and phases it out on MAGI, and the 2026 revision's line 16
+    ///   column (iii) asks only for the part *"included in Form W-2, box 12, code 'TT'"*.
+    OvertimeDeductionForgone { ceiling: Usd },
     /// ★★★ **FR-205 / §501(c)(18)(D) (§3.4) — a Form W-2 reports box 12 code H, and the Schedule 1
     /// line 24f deduction that takes it back out of income is not computed.**
     ///
@@ -513,18 +551,74 @@ impl Advisory {
                     "it"
                 }
             ),
-            Advisory::TipsDeductionForgoneWithTtoc { codes } => format!(
-                "NO TAX ON TIPS NOT CLAIMED — your Form W-2 box 14b carries Treasury Tipped \
-                 Occupation Code(s) {}, which is your employer's statement that your tips were \
-                 earned in a listed occupation. That is the condition Schedule 1-A Part II turns on \
-                 (\"These tips must have been received in an occupation listed at \
-                 IRS.gov/TippedOccupations\"), and this return claims no qualified tips — so the \
-                 §224 deduction is FORGONE and your tax is OVERSTATED by whatever it would have \
-                 been worth. btctax cannot claim it for you: the instructions exclude service \
-                 charges, automatic gratuities and tips from an occupation that is not on the list, \
-                 and only you can say how much of box 7 is left. Enter the qualified amount under \
-                 Schedule 1-A Part II if you have one.",
-                codes.join(", ")
+            // ★★★ FR-216 — three evidence shapes, and the sentence says only what the paper says.
+            //     A conforming 2026 W-2 carries BOTH box 14b and box 12 code TP (each instruction
+            //     requires the other), so that is the common case; the one-sided cases are a
+            //     transcription that stopped early.
+            // ★★ The `000` branch is not cosmetic: *"If any tips were received in a nonqualifying
+            //    occupation, then \"000\" must be input as one of the occupation code(s)"*
+            //    (`iw2w3--2026.txt:2935-2945`). A W-2 whose ONLY code is 000 is the employer saying
+            //    the occupation is NOT on the Treasury list — the opposite of what this advisory
+            //    used to assert about every code it found. It still prints, because a notice that
+            //    says "your paper says this does not qualify" forgoes nothing; it simply must not
+            //    claim the employer vouched for a listed occupation.
+            Advisory::TipsDeductionForgoneWithTtoc {
+                codes,
+                cash_tips_reported,
+            } => {
+                let all_nonqualifying = !codes.is_empty() && codes.iter().all(|c| c.trim() == "000");
+                let evidence = match (codes.is_empty(), all_nonqualifying) {
+                    (true, _) => String::new(),
+                    (false, true) => format!(
+                        " Your Form W-2 box 14b carries Treasury Tipped Occupation Code(s) {} — and \
+                         000 is the code for tips received in an occupation that is NOT on the \
+                         Treasury list, so an empty Part II may be exactly right. Check \
+                         IRS.gov/TippedOccupations before you decide.",
+                        codes.join(", ")
+                    ),
+                    (false, false) => format!(
+                        " Your Form W-2 box 14b carries Treasury Tipped Occupation Code(s) {}, \
+                         which is your employer's statement of the occupation the tips were earned \
+                         in. That is the condition Schedule 1-A Part II turns on (\"These tips must \
+                         have been received in an occupation listed at \
+                         IRS.gov/TippedOccupations\").",
+                        codes.join(", ")
+                    ),
+                };
+                let amount = if *cash_tips_reported > Usd::ZERO {
+                    format!(
+                        " Your Form W-2 also reports {} of cash tips in box 12 with code TP; that \
+                         figure is a CEILING on what Part II could claim and never the deduction — \
+                         Schedule 1-A asks only for the QUALIFIED part of it, then caps the \
+                         deduction at $25,000 and phases it out on your MAGI.",
+                        fmt_usd(*cash_tips_reported)
+                    )
+                } else {
+                    String::new()
+                };
+                format!(
+                    "NO TAX ON TIPS NOT CLAIMED — this return claims no qualified tips on Schedule \
+                     1-A Part II, and your Form W-2 says you had tips.{evidence}{amount} So the \
+                     §224 deduction is FORGONE and your tax is OVERSTATED by whatever it would have \
+                     been worth. btctax cannot claim it for you: the instructions exclude service \
+                     charges, automatic gratuities and tips from an occupation that is not on the \
+                     list, and only you can say how much is left. Enter the qualified amount under \
+                     Schedule 1-A Part II if you have one."
+                )
+            }
+            // ★ FR-216 — the §225 mirror, one Part down. The figure is a CEILING for the same two
+            //   reasons: Part III wants only the QUALIFIED part, and it then caps and phases out.
+            Advisory::OvertimeDeductionForgone { ceiling } => format!(
+                "NO TAX ON OVERTIME NOT CLAIMED — your Form W-2 reports {} in box 12 with code TT, \
+                 \"Total amount of qualified overtime compensation\", and this return claims no \
+                 qualified overtime on Schedule 1-A Part III. Overtime is wages: it is inside box 1, \
+                 which is what this return files on Form 1040 line 1a, and the §225 deduction that \
+                 would take part of it back out is not claimed — so your tax is OVERSTATED by up to \
+                 what that deduction would have been worth. The figure is a CEILING, not the \
+                 deduction: Part III caps it at $12,500 ($25,000 if married filing jointly) and \
+                 phases it out on your MAGI. Enter the qualified amount under Schedule 1-A Part III \
+                 if you have one.",
+                fmt_usd(*ceiling)
             ),
             // ★ FR-205 — the amount is named as a CEILING ("up to"), never as the deduction, because
             //   line 24f's own instruction sends the filer to Pub. 525 for a limit v1 does not model.
@@ -1369,8 +1463,37 @@ pub fn advisories(
         });
     }
 
+    // ★★★ FR-216 — ONE reader for every box 12 code this module advises over, rather than the same
+    //     `flat_map` typed once per code. The code is trimmed and upper-cased exactly as
+    //     `return_refuse`'s screen reads it, so a W-2 transcribed with a lower-case "h" or a stray
+    //     space cannot be admitted by the screen and skipped by the advisory.
+    let box12_total = |code: &str| -> Usd {
+        ri.w2s
+            .iter()
+            .flat_map(|w| w.box12.iter())
+            .filter(|e| e.code.trim().to_uppercase() == code)
+            .map(|e| e.amount)
+            .sum()
+    };
+
     // §3.4 — EIC: earned income present and AGI low enough that the household might qualify.
-    if earned_income > Usd::ZERO && agi < EIC_ADVISORY_AGI_CEILING {
+    //
+    // ★★★ **FR-216 — `earned_income` is wages + net SE earnings, and TWO box 12 codes carry earned
+    //     income that is OUTSIDE both.** Nontaxable combat pay (code `Q`) and Medicaid waiver
+    //     payments excluded under Notice 2014-7 (code `II`) are both outside box 1 by their own
+    //     instructions, yet the Form 1040 lets the filer ELECT them into earned income *"for
+    //     purposes of claiming a credit or other tax benefit"* — line 1i for combat pay,
+    //     line 1d + Schedule 1 line 8s for waiver payments (`i1040gi--2025.txt:2260-2280`,
+    //     `:42323-42348`). A caregiver whose whole wage is code `II` therefore has
+    //     `earned_income == 0` and, before FR-216, no EIC advisory at all — while FR-216 admits that
+    //     return, so the forgone REFUNDABLE credit would have gone unsaid. §3.4 permits a
+    //     conservative omission only if the filer is told, so the codes join the trigger.
+    // ★ The AGI ceiling still applies and is the eligibility heuristic: both amounts are outside
+    //   AGI too, so a household this could newly reach is a low-AGI one by construction.
+    let electable_earned_income = box12_total("Q") + box12_total("II");
+    if (earned_income > Usd::ZERO || electable_earned_income > Usd::ZERO)
+        && agi < EIC_ADVISORY_AGI_CEILING
+    {
         out.push(Advisory::EicOmitted);
     }
 
@@ -1378,6 +1501,20 @@ pub fn advisories(
     //     Schedule 1-A Part II. §3.4's conservative-omission shape: the filer is FORGOING a §224
     //     deduction their own W-2 evidences, which overstates their tax, and the only lawful
     //     response is to say so.
+    //
+    // ★★★ FR-216 — and box 12 code `TP` is the SAME fact, so it fires the SAME advisory. The two
+    //     boxes are printed together by rule (`iw2w3--2026.txt:2810-2819` and `:2935-2945` each
+    //     require the other), and until FR-216 this surface ADVISED while `return_refuse` REFUSED
+    //     over code TP — so on a conforming 2026 W-2 the refusal won and this advisory was
+    //     unreachable. Two surfaces, one piece of paper, opposite postures.
+    //
+    // ★★ YEAR-GATED on the schedule's own window, derived from `SCHEDULE_1A_YEARS` via
+    //    `schedule_1a_params` rather than a second copy of `2025..=2028`. Box 14b and code TP are
+    //    2026 additions, but a hand-typed one on a TY2024 return would otherwise make this advisory
+    //    name a Part of a schedule that does not exist in that year — a false sentence about the
+    //    filer's own return. `Schedule1aNotOnThisYearsReturn` cannot catch it, because that refusal
+    //    needs Part II to CARRY data and this advisory fires only when it is empty.
+    let schedule_1a_exists = crate::tax::tables::schedule_1a_params(ri.tax_year).is_some();
     let ttoc_codes: Vec<String> = ri
         .w2s
         .iter()
@@ -1385,29 +1522,38 @@ pub fn advisories(
         .filter(|c| !c.is_empty())
         .map(str::to_string)
         .collect();
+    let box12_code_tp = box12_total("TP");
     let claims_tips = ri
         .schedule_1a
         .tips
         .as_ref()
         .is_some_and(|t| t.qualified_tips_reported > Usd::ZERO);
-    if !ttoc_codes.is_empty() && !claims_tips {
-        out.push(Advisory::TipsDeductionForgoneWithTtoc { codes: ttoc_codes });
+    if schedule_1a_exists && !claims_tips && (!ttoc_codes.is_empty() || box12_code_tp > Usd::ZERO) {
+        out.push(Advisory::TipsDeductionForgoneWithTtoc {
+            codes: ttoc_codes,
+            cash_tips_reported: box12_code_tp,
+        });
+    }
+
+    // ★★★ FR-216 — the §225 mirror: box 12 code `TT` beside an unclaimed Schedule 1-A Part III.
+    //     There is no box-14b analogue for overtime, so the code is the whole evidence.
+    let box12_code_tt = box12_total("TT");
+    let claims_overtime = ri
+        .schedule_1a
+        .overtime
+        .as_ref()
+        .is_some_and(|o| o.qualified_overtime_reported > Usd::ZERO);
+    if schedule_1a_exists && !claims_overtime && box12_code_tt > Usd::ZERO {
+        out.push(Advisory::OvertimeDeductionForgone {
+            ceiling: box12_code_tt,
+        });
     }
 
     // ★★★ FR-205 / §501(c)(18)(D) — a box 12 code H entry. The same shape as the TTOC note above:
     //     the employer's paper evidences a deduction v1 does not compute, so the return is truthful
     //     and conservative and the filer has to be told. Fires ONLY on a code-H entry with money on
-    //     it, and the total is the CEILING (see the variant's doc). ★ The box 12 code is read the way
-    //     `return_refuse`'s screen reads it — trimmed and upper-cased — so a W-2 transcribed with a
-    //     lower-case "h" or a stray space is not silently skipped by the advisory while the screen
-    //     admits it.
-    let box12_code_h: Usd = ri
-        .w2s
-        .iter()
-        .flat_map(|w| w.box12.iter())
-        .filter(|e| e.code.trim().to_uppercase() == "H")
-        .map(|e| e.amount)
-        .sum();
+    //     it, and the total is the CEILING (see the variant's doc).
+    let box12_code_h = box12_total("H");
     if box12_code_h > Usd::ZERO {
         out.push(Advisory::Section501c18DeductionForgone {
             ceiling: box12_code_h,
@@ -1884,6 +2030,254 @@ mod tests {
                 .any(|a| matches!(a, Advisory::Section501c18DeductionForgone { .. })),
             "the advisory must read the code the way the screen reads it"
         );
+    }
+
+    /// ★★★ **FR-216 — the tips advisory's THREE evidence shapes, and the `000` code that means the
+    /// opposite of what this note used to assert about every code it found.**
+    ///
+    /// Box 14b and box 12 code `TP` are printed together by rule, so the common case carries both.
+    /// The one-sided cases are a transcription that stopped early, and each must still be told —
+    /// which is why the trigger is a disjunction rather than the box-14b conjunct it used to be.
+    ///
+    /// ★★ The fourth case is the correctness one. *"If any tips were received in a nonqualifying
+    ///    occupation, then \"000\" must be input as one of the occupation code(s)"*
+    ///    (`iw2w3--2026.txt:2935-2945`). A W-2 whose ONLY code is `000` is the employer stating the
+    ///    occupation is **not** on the Treasury list — so the old sentence *"which is your employer's
+    ///    statement that your tips were earned in a listed occupation"* was false on exactly the paper
+    ///    that says otherwise, in the direction of encouraging a deduction the form denies. The note
+    ///    still prints (a notice that says "your paper says this does not qualify" forgoes nothing),
+    ///    and it no longer claims the employer vouched for anything.
+    #[test]
+    fn the_tips_advisory_reads_box_12_code_tp_and_never_claims_000_is_a_listed_occupation() {
+        use crate::tax::return_inputs::{Box12Entry, Owner, W2};
+        let w2 = |ttoc: &str, tp: Usd| ReturnInputs {
+            tax_year: 2026,
+            filing_status: crate::tax::types::FilingStatus::Single,
+            w2s: vec![W2 {
+                owner: Owner::Taxpayer,
+                employer: "Diner".into(),
+                box1_wages: dec!(31000),
+                box7_ss_tips: dec!(9000),
+                box14b_treasury_tipped_occupation_codes: ttoc.into(),
+                box12: if tp > Usd::ZERO {
+                    vec![Box12Entry {
+                        code: "TP".into(),
+                        amount: tp,
+                    }]
+                } else {
+                    vec![]
+                },
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let note = |ri: &ReturnInputs| -> Option<String> {
+            advisories(
+                ri,
+                &LedgerState::default(),
+                dec!(31000),
+                dec!(31000),
+                Usd::ZERO,
+                &crate::tax::testonly::ty2024_params(),
+                ri.tax_year,
+                false,
+            )
+            .iter()
+            .find(|a| matches!(a, Advisory::TipsDeductionForgoneWithTtoc { .. }))
+            .map(Advisory::message)
+        };
+
+        // (a) BOTH boxes — the conforming W-2. One note, naming the code AND the ceiling.
+        let both = note(&w2("102", dec!(9000))).expect("a conforming tipped W-2 must be advised");
+        for want in [
+            "102",
+            "code TP",
+            "$9,000",
+            "CEILING",
+            "Schedule 1-A Part II",
+        ] {
+            assert!(both.contains(want), "must name {want:?}: {both}");
+        }
+
+        // (b) CODE TP ALONE — the box 14b transcription was missed. ★ THE KILL: before FR-216 the
+        //     trigger was box 14b alone, so this return was told nothing by this surface at all (and
+        //     was refused outright by the box 12 screen).
+        let tp_only = note(&w2("", dec!(9000))).expect(
+            "★ THE KILL: box 12 code TP is evidence of tips all by itself and must be advised",
+        );
+        assert!(tp_only.contains("$9,000") && tp_only.contains("code TP"));
+        assert!(
+            !tp_only.contains("Treasury Tipped Occupation Code(s) ,")
+                && !tp_only.contains("Code(s) ."),
+            "with no box 14b the message must not print an empty code list: {tp_only}"
+        );
+
+        // (c) BOX 14b ALONE — the original FR-65 case, unchanged, and with no dollar figure invented.
+        let ttoc_only = note(&w2("102", Usd::ZERO)).expect("a box 14b code alone still advises");
+        assert!(ttoc_only.contains("102") && !ttoc_only.contains("code TP"));
+
+        // (d) ★★ `000` ONLY — the employer says the occupation is NOT on the list. The note prints and
+        //     must NOT claim otherwise.
+        let nonqualifying = note(&w2("000", dec!(9000))).expect("still advised");
+        assert!(
+            nonqualifying.contains("NOT on the")
+                && nonqualifying.contains("may be exactly right"),
+            "★ THE KILL: a lone 000 is the employer stating a NONQUALIFYING occupation: {nonqualifying}"
+        );
+        assert!(
+            !nonqualifying.contains("statement of the occupation the tips were earned in"),
+            "…and must not also assert the employer vouched for a listed one: {nonqualifying}"
+        );
+        // …while `000` BESIDE a real code is the mixed case the instruction describes, and that one
+        // does carry the employer's statement of a listed occupation.
+        let mixed = note(&w2("000, 102", dec!(9000))).expect("still advised");
+        assert!(
+            mixed.contains("statement of the occupation the tips were earned in"),
+            "a 000 beside a listed code is the mixed case: {mixed}"
+        );
+
+        // (e) NEITHER box ⇒ silent, so the trigger really is the paper and not "a W-2 exists".
+        assert!(
+            note(&w2("", Usd::ZERO)).is_none(),
+            "with no box 14b and no code TP the advisory must not fire"
+        );
+    }
+
+    /// ★★★ **FR-216 — the two Schedule 1-A advisories are YEAR-GATED on the schedule's own window.**
+    ///
+    /// Box 14b and box 12 codes `TP`/`TT` are 2026 additions, but nothing stops a filer typing one
+    /// onto a TY2024 return — and `RefuseReason::Schedule1aNotOnThisYearsReturn` cannot catch it,
+    /// because that refusal needs Part II/III to CARRY data and these advisories fire only when they
+    /// are empty. Without the gate the note would name a Part of a schedule that does not exist in
+    /// that year: a false sentence about the filer's own return.
+    ///
+    /// ★ The window is read through `tables::schedule_1a_params` rather than a second copy of
+    ///   `2025..=2028`, so the sunset moves in one place.
+    #[test]
+    fn the_schedule_1a_advisories_are_silent_in_a_year_that_has_no_schedule_1a() {
+        use crate::tax::return_inputs::{Box12Entry, Owner, W2};
+        let in_year = |year: i32| ReturnInputs {
+            tax_year: year,
+            filing_status: crate::tax::types::FilingStatus::Single,
+            w2s: vec![W2 {
+                owner: Owner::Taxpayer,
+                employer: "Diner".into(),
+                box1_wages: dec!(31000),
+                box14b_treasury_tipped_occupation_codes: "102".into(),
+                box12: vec![
+                    Box12Entry {
+                        code: "TP".into(),
+                        amount: dec!(9000),
+                    },
+                    Box12Entry {
+                        code: "TT".into(),
+                        amount: dec!(7000),
+                    },
+                ],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let schedule_1a_notes = |year: i32| -> usize {
+            advisories(
+                &in_year(year),
+                &LedgerState::default(),
+                dec!(31000),
+                dec!(31000),
+                Usd::ZERO,
+                &crate::tax::testonly::ty2024_params(),
+                year,
+                false,
+            )
+            .iter()
+            .filter(|a| {
+                matches!(
+                    a,
+                    Advisory::TipsDeductionForgoneWithTtoc { .. }
+                        | Advisory::OvertimeDeductionForgone { .. }
+                )
+            })
+            .count()
+        };
+        assert_eq!(
+            schedule_1a_notes(2026),
+            2,
+            "a Schedule 1-A year with both codes unclaimed owes the filer both notes"
+        );
+        assert_eq!(
+            schedule_1a_notes(2024),
+            0,
+            "★ THE KILL: TY2024 has no Schedule 1-A at all, so a note naming Part II or Part III \
+             would be a false sentence about this return"
+        );
+        assert_eq!(
+            schedule_1a_notes(2029),
+            0,
+            "…and the §224/§225 provisions expire after 2028, so the gate has to hold at both ends"
+        );
+    }
+
+    /// ★★★ **FR-216 — `earned_income` is wages plus net SE earnings, and TWO box 12 codes carry
+    /// earned income that is outside BOTH. So the EIC advisory has to read them, or admitting those
+    /// codes admits a forgone refundable credit in silence.**
+    ///
+    /// Code `Q` (nontaxable combat pay, §112) and code `II` (Medicaid waiver payments under Notice
+    /// 2014-7 — *"the amount … NOT reported in box 1"*) are outside box 1 by their own instructions,
+    /// so neither reaches `earned_income`. The Form 1040 nonetheless lets the filer ELECT them into
+    /// earned income *"for purposes of claiming a credit or other tax benefit"* (line 1i for combat
+    /// pay; line 1d plus Schedule 1 line 8s for waiver payments). FR-216 admits both codes, so §3.4's
+    /// *"provided the filer is told"* requires this trigger — a caregiver whose entire wage is code
+    /// `II` has `earned_income == 0` and would otherwise have been told nothing at all.
+    #[test]
+    fn the_eic_advisory_counts_combat_pay_and_medicaid_waiver_payments_as_electable_earned_income()
+    {
+        use crate::tax::return_inputs::{Box12Entry, Owner, W2};
+        let all_excluded = |code: &str| ReturnInputs {
+            tax_year: 2024,
+            filing_status: crate::tax::types::FilingStatus::Single,
+            w2s: vec![W2 {
+                owner: Owner::Taxpayer,
+                employer: "County".into(),
+                // ★ Box 1 is ZERO on purpose: that is the whole point. The money is real and is
+                //   outside box 1, so `earned_income` — wages plus net SE earnings — is zero too.
+                box1_wages: Usd::ZERO,
+                box12: vec![Box12Entry {
+                    code: code.into(),
+                    amount: dec!(24000),
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let eic = |ri: &ReturnInputs| {
+            advisories(
+                ri,
+                &LedgerState::default(),
+                Usd::ZERO, // earned_income: wages + net SE earnings, and there are none
+                Usd::ZERO, // agi: both amounts are outside AGI as well
+                Usd::ZERO,
+                &crate::tax::testonly::ty2024_params(),
+                2024,
+                false,
+            )
+            .iter()
+            .any(|a| matches!(a, Advisory::EicOmitted))
+        };
+
+        for code in ["Q", "II"] {
+            assert!(
+                eic(&all_excluded(code)),
+                "★ THE KILL: box 12 code {code} is earned income the filer may elect in, so a return \
+                 carrying it and nothing else must still be told the EIC was not computed"
+            );
+        }
+        // …and the trigger is those codes, not "a box 12 row exists".
+        for code in ["D", "DD", "H"] {
+            assert!(
+                !eic(&all_excluded(code)),
+                "box 12 code {code} is not electable earned income and must not fire the EIC note"
+            );
+        }
     }
 
     use super::*;
