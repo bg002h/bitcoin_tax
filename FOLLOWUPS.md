@@ -8794,6 +8794,55 @@ build, each with an owning phase.
   ★ Same shape as FR-187 (*"federally declared"* → *"federally or state-declared"*): a **widening carried in a
   caption**, which a renumber-focused review skates past. Two independent instances now, so it is a class.
 
+- **★★★ FR-221 — the state-refund refusal names only ONE of the TWO exits the instruction gives. Important. Owning phase: NOW, with the FR-196 refusal removal. ★ It may make the owner's own wall SPURIOUS.**
+  **Controller-verified verbatim**, `design/forms/extract/i1040gi--2025.txt:41882-41887`:
+  > *"**None of your refund is taxable** TIP if, in the year you paid the tax, you either **(a)** didn't
+  > itemize deductions, or **(b) elected to deduct state and local general sales taxes instead of state and
+  > local income taxes**."*
+  `RefuseReason::StateAndLocalRefundWorksheetNotComputed`'s message offers only limb **(a)** — *"answer 'no'
+  if you did not itemize in the year you paid the tax"*. **Limb (b) is never asked.** So an itemizer who
+  elected the §164(b)(5) sales-tax deduction in the prior year is **refused today while owing nothing on the
+  refund.**
+  ★★ **`schedule_a.salt_use_sales_tax` already exists** — for the **current** year. The TIP turns on the
+  **prior** year's election. The field is one year out from the question, which is why nothing noticed.
+  ★ **This bears directly on the owner:** they itemize and their state taxes income, so FR-196's wall is live
+  for them — *unless* limb (b) applies, in which case the wall is spurious and the correct answer is a
+  blank Schedule 1 line 1. **Ask them which election they made in the prior year before scheduling the
+  worksheet build as a blocker.**
+  Four more requirements the refusal omits, now collected by FR-196: the nine **Pub. 525 exceptions** (under
+  any of which the worksheet may not be used at all), the prior-year **filing status**, the prior-year
+  **§63(f)** boxes, and — for a filer with no Form 1099-G — **any field for the refund amount**, there having
+  been only a boolean.
+
+- **FR-196a — `cmd::tax`'s CarryProvenance forcing is a hand-list, and a DERIVED document asserted a normalisation the code did not perform. Important. Owning phase: NOW.**
+  Found in FR-196's blast radius. `cmd::tax` forces `CarryProvenance` to `user` at **five hand-listed
+  sites**; the new `state_local_refund` field was a silent **sixth**. Meanwhile `xtask toml-schema`
+  **derives** its *"forced to `user`"* annotation from the field path — so the regenerated
+  `docs/income-import-schema.md` **documented a normalisation the code was not doing.**
+  ★★ This is a new and instructive shape: not a stale document, but a **correct derived document describing
+  intended behaviour the code had not implemented**. The derivation was right and the code was wrong, which
+  is the opposite of every drift found today. The sixth site was closed inline; **the class — a hand-list
+  beside a derivation, with no test joining them — is what this entry is for.** *Fix:* derive the forcing
+  from the same path predicate the schema generator uses, or assert the two agree.
+
+- **FR-222 — `g_1099[].box2_state_refund` has NO READER. Minor. Owning phase: with the FR-196 refusal removal.**
+  Noted by the FR-196 agent: `sch1.state_refund_taxable` exists and already feeds Schedule 1 line 1, so the
+  new worksheet's **output** has a reader — but the 1099-G box that reports the refund **feeds nothing**.
+  ★ *"An unread computed value is not thereby correct."* Wire it into the worksheet's input, or state in the
+  source why the filer-entered figure is preferred over the box.
+  ★ Also recorded: **taxcalc's `e00700`** (*"Taxable refunds of state and local income taxes"*) is verified
+  present, so the worksheet's output is **oracle-checkable** once `GoldenInputs` gains the axis — which is
+  the cheapest possible second witness for a figure the two-oracle rule would otherwise never see.
+
+- **FR-223 — `make check` can OOM-kill rustc under concurrent agents, and it is NOT FR-176. Minor, but record it so nobody misdiagnoses. Owning phase: the harness.**
+  The FR-196 agent hit `signal: 9, SIGKILL` on `btctax-forms::broker_boxes` because `make check` runs
+  **nextest and clippy concurrently** while sibling agents held ~24 GB. Running the two halves serially in
+  separate target dirs fixed it.
+  ★★ **Two distinct concurrency failures now exist and they must not be conflated**: FR-176 is a corrupted
+  incremental cache presenting as an `ld.lld: undefined hidden symbol` **link** error, cured by
+  `cargo clean -p <crate>`; this one is **memory**, presenting as SIGKILL, cured by serialising. A SIGKILL is
+  not a stale rlib and a link error is not OOM.
+
 - **FR-152 — `census_join` anchors captions to ABSOLUTE line indices in a generated file. Minor. Owning phase: the port machine.**
   A4's 110 `# Regenerate:` header additions shifted every extract by a line, and `forms/2024/f1040s1.map.toml`'s
   `extract_line` anchors (11/15/58) had to move to 15/19/62 — an edit outside A4's ownership, reported rather
