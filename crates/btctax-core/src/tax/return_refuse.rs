@@ -24,21 +24,508 @@ use crate::tax::tables::{FullReturnParams, TaxTable, EMPLOYEE_OASDI_RATE};
 use crate::tax::types::{Carryforward, FilingStatus};
 use rust_decimal_macros::dec;
 
-/// The W-2 box-12 codes a Common W-2 household return can carry — the inert ones (elective deferrals
-/// and purely informational) plus, since **T16**, the one code a form actually READS. Any OTHER code
-/// refuses (SPEC §4.10 / audit I1 — an allowlist, not a blocklist).
+/// **One row of the IRS's own Form W-2 box 12 code table**: the code as the employer prints it, the
+/// description the IRS prints beside it, and what btctax does about it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Box12Code {
+    /// The code, upper-case, exactly as box 12a–12d carries it.
+    code: &'static str,
+    /// The code's description, **verbatim** from the *Form W-2 Reference Guide for Box 12 Codes*
+    /// printed in the archived instructions — whitespace collapsed, nothing else changed. Checked
+    /// against the extract by [`tests::the_box12_table_is_the_irs_table`]; it is not decoration —
+    /// the refusal message quotes it so a filer can match the row on their paper.
+    label: &'static str,
+    /// Admit or refuse, and why. See [`Box12Verdict`].
+    verdict: Box12Verdict,
+}
+
+/// **Why a box 12 code does or does not stop a return.**
 ///
-/// ★★★ **`W` moved in with Form 8889, and its arrival is the finding.** Code W is *"Employer
-/// contributions to your Health Savings Account"*, and Form 8889 line 9's own instruction is *"These
-/// contributions should be shown on Form W-2, box 12, code W"* — so before T16 the code refused
-/// `UnsupportedBox12Code`, which was the correct answer while no form read it and is the wrong one
-/// now. ★ It is NOT inert: [`crate::tax::form8889::employer_contributions_from_w2s`] sums it, the
-/// Employer Contribution Worksheet adjusts it for the calendar/tax-year gap, and line 12 subtracts
-/// the result from the filer's own limit. A code W beside a return that files no Form 8889 is a
-/// CONTRADICTION and refuses on its own rule below.
-const INERT_BOX12_CODES: &[&str] = &["D", "E", "F", "G", "H", "S", "AA", "BB", "EE", "DD", "W"];
+/// ★★★ **Three ways to be admitted, two to be refused, and the split is the whole rule.** A code is
+/// admitted only where it is *provably* unable to change a figure — because the amount is already
+/// inside box 1, because nothing reads it, or because something btctax files DOES read it and has
+/// been made to. Everything else refuses, so a code nobody has adjudicated fails **closed**
+/// (*widening an exemption is never the safe edit*).
+///
+/// ★★ **Every refusal carries its own exit, because the type will not let it not.** `exit` is a
+/// field rather than a convention: *"a refusal with no exit is just a brick with better prose"*, and
+/// a table of twenty-odd refusals is exactly where one would go missing.
+///
+/// ★ **No exit ever says "delete the row".** The W-2 is the employer's testimony and the filer's
+/// transcription of it; telling someone to drop a line off their own W-2 so the software will print
+/// is telling them to file something that is not what they were sent. The lawful exits are: file
+/// with a preparer, complete the form btctax does model, or — for a code that is not a code —
+/// re-read the paper.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Box12Verdict {
+    /// **ADMITTED.** The employer has already included the amount in box 1, which btctax files on
+    /// Form 1040 line 1a, so reading box 12 would change nothing. The payload is the instruction
+    /// sentence that says so — this is the one verdict whose proof is printed on the form.
+    AlreadyInBox1(&'static str),
+    /// **ADMITTED.** The amount is outside box 1 *and* no line of the 1040, of a schedule btctax
+    /// files, or of a worksheet it computes reads it. The payload says why the silence is lawful.
+    NoLineReadsIt(&'static str),
+    /// **ADMITTED, and read.** Something btctax actually files consumes it; the payload names what.
+    ReadByBtctax(&'static str),
+    /// **REFUSED.** It drives a line btctax does not compute. `drives` names the line and says which
+    /// way the error would run; `exit` says what the filer can do instead.
+    DrivesAnUncomputedLine {
+        drives: &'static str,
+        exit: &'static str,
+    },
+    /// **REFUSED.** The IRS prints the code and btctax has not adjudicated it. `why` says what is
+    /// unresolved — an honest boundary is reviewable, a silent one is the defect.
+    NotAdjudicated {
+        why: &'static str,
+        exit: &'static str,
+    },
+}
+
+impl Box12Verdict {
+    /// The two halves of the sentence a refused code prints — what it drives, and the way out.
+    /// `None` means the return prints.
+    ///
+    /// ★ The `match` is `_`-free on purpose: a sixth verdict is a **compile error** here rather than
+    ///   a code that silently starts admitting, which is `CLAUDE.md`'s second form of *"derive the
+    ///   list, or make the compiler hold it"*.
+    fn refusal(self) -> Option<(&'static str, &'static str)> {
+        match self {
+            Self::AlreadyInBox1(_) | Self::NoLineReadsIt(_) | Self::ReadByBtctax(_) => None,
+            Self::DrivesAnUncomputedLine { drives, exit }
+            | Self::NotAdjudicated { why: drives, exit } => Some((drives, exit)),
+        }
+    }
+
+    /// Does a return carrying this code print?
+    ///
+    /// ★ `#[cfg(test)]` because the screen itself needs the two payload halves and so asks
+    ///   [`Self::refusal`] directly; the boolean is what the cross-checks assert over. Compiled in
+    ///   the test build only, rather than carried as an `#[allow(dead_code)]` that hides the next
+    ///   method to fall out of use.
+    #[cfg(test)]
+    fn admits(self) -> bool {
+        self.refusal().is_none()
+    }
+}
+
+/// **Every box 12 code the IRS prints, with a verdict for each — the whole table, not a sample.**
+///
+/// ★★★ **FR-197: this replaced ELEVEN hand-typed codes beside a set of THIRTY-THREE.** The list it
+/// replaces — `D E F G H S AA BB EE DD W` — was right about what it named and silent about what it
+/// did not: every other code returned [`RefuseReason::UnsupportedBox12Code`] and the packet printed
+/// **zero pages**. Among them were **C** (*"Taxable cost of group-term life insurance over
+/// $50,000"*) and **V** (*"Income from exercise of nonstatutory stock option(s)"*), whose amounts
+/// the employer has **already included in box 1** — so they could never have changed a figure, and
+/// they stopped the whole return. Safe about the arithmetic, total about the outcome.
+///
+/// ★★ **Both halves are derived, and the derivation is a test rather than a promise.** The codes and
+/// the [`Box12Code::label`]s are transcribed from the *Form W-2 Reference Guide for Box 12 Codes* in
+/// `design/forms/extract/iw2w3--<year>.txt`, and [`tests::the_box12_table_is_the_irs_table`]
+/// re-derives them from **every archived revision** on every run — out of two independent regions of
+/// each document (the Reference Guide table and the per-code narrative headings), which must agree
+/// before either is believed. A code the IRS prints that this table does not classify is a FAILING
+/// TEST rather than a silent refusal; a label that drifts from the printed one fails too. Its kill
+/// is [`tests::a_table_that_has_fallen_behind_the_irs_is_caught`] (B1).
+///
+/// ★ **What is NOT derived, said plainly rather than implied.**
+/// 1. The **verdicts** are judgment, and no extract can hold them. Each row names the authority it
+///    was decided from, above the row.
+/// 2. The **labels** are the latest archived revision's wording. Four codes are worded differently
+///    between the three archived revisions (`F` and `S` changed in 2025; `P` and `W` in 2026 — `W`
+///    by an apostrophe alone), so only the code SET is checked against all of them.
+/// 3. Only archived revisions are covered. "Every code the IRS prints" means every code in
+///    `design/forms/extract/iw2w3--*.txt`; the 2027 guide is one `xtask forms-fetch` and one red
+///    test away.
+/// 4. The three codes the 2026 revision added (`TA`, `TP`, `TT`) are all refused, so this table
+///    needs no year axis. The first one admitted gives it one — a code that does not exist in the
+///    return's year is a transcription error, and today all three refuse anyway.
+const BOX12_CODES: &[Box12Code] = &[
+    // ── Uncollected tax → Schedule 2 line 13: *"Uncollected social security and Medicare or RRTA
+    //    tax on tips or group-term life insurance. This tax should be shown in box 12 of Form W-2
+    //    with codes A and B or M and N."* (`i1040gi--2025.txt:44983-44987`.) An additional TAX in
+    //    every case, so admitting one UNDERSTATES what is owed.
+    Box12Code {
+        code: "A",
+        label: "Uncollected social security or RRTA tax on tips",
+        verdict: Box12Verdict::DrivesAnUncomputedLine {
+            drives: "is social security tax your employer could not collect out of your pay, and \
+                     Schedule 2 line 13 is where the 1040 collects it instead — btctax does not \
+                     compute that line, so filing this return would understate the tax you owe",
+            exit: "File this return with a preparer",
+        },
+    },
+    Box12Code {
+        code: "B",
+        label: "Uncollected Medicare tax on tips (but not Additional Medicare Tax)",
+        verdict: Box12Verdict::DrivesAnUncomputedLine {
+            drives: "is Medicare tax your employer could not collect out of your pay, and Schedule \
+                     2 line 13 is where the 1040 collects it instead — btctax does not compute \
+                     that line, so filing this return would understate the tax you owe",
+            exit: "File this return with a preparer",
+        },
+    },
+    // ── ★ FR-197's cheap win. *"Show the taxable cost of group-term life insurance coverage over
+    //    $50,000 … Also include this amount in boxes 1, 3 (up to the social security wage base),
+    //    and 5."* (`iw2w3--2026.txt:2428-2434`.) It is already inside the figure btctax files.
+    Box12Code {
+        code: "C",
+        label: "Taxable cost of group-term life insurance over $50,000",
+        verdict: Box12Verdict::AlreadyInBox1(
+            "\"Also include this amount in boxes 1, 3 (up to the social security wage base), and \
+             5.\" — the employer has already put it in box 1, which is what Form 1040 line 1a \
+             files. The uncollected tax ON it is codes M and N, which refuse.",
+        ),
+    },
+    // ── Elective deferrals: the part of the salary the employee did NOT receive, so outside box 1
+    //    and changing no line btctax files. The one figure they drive is the §402(g) cross-employer
+    //    cap, which [`ELECTIVE_DEFERRAL_CODES`] sums and `screen_inputs_tiered` refuses over.
+    Box12Code {
+        code: "D",
+        label: "Elective deferrals under a section 401(k) cash or deferred arrangement plan \
+                (including a SIMPLE 401(k) arrangement)",
+        verdict: Box12Verdict::ReadByBtctax(
+            "outside box 1, and summed against the §402(g) limit by ELECTIVE_DEFERRAL_CODES",
+        ),
+    },
+    Box12Code {
+        code: "E",
+        label: "Elective deferrals under a section 403(b) salary reduction agreement",
+        verdict: Box12Verdict::ReadByBtctax(
+            "outside box 1, and summed against the §402(g) limit by ELECTIVE_DEFERRAL_CODES",
+        ),
+    },
+    Box12Code {
+        code: "F",
+        label: "Elective deferrals under a section 408(k)(6) salary reduction SEP (this includes \
+                elective deferrals made to a Roth SEP IRA)",
+        verdict: Box12Verdict::ReadByBtctax(
+            "outside box 1, and summed against the §402(g) limit by ELECTIVE_DEFERRAL_CODES",
+        ),
+    },
+    Box12Code {
+        code: "G",
+        label: "Elective deferrals and employer contributions (including nonelective deferrals) to \
+                a section 457(b) deferred compensation plan",
+        verdict: Box12Verdict::ReadByBtctax(
+            "outside box 1, and summed against the §402(g) limit by ELECTIVE_DEFERRAL_CODES",
+        ),
+    },
+    // ── ★★★ **H IS THE ONE ROW THAT NARROWS THE OLD LIST, and the instruction says why in its own
+    //    sentence.** Code H was admitted as "inert" and is not: *"Be sure to include this amount in
+    //    box 1 as wages. The employee will deduct the amount on their Form 1040 or 1040-SR."*
+    //    (`iw2w3--2026.txt:2535-2538`) — that deduction is **Schedule 1 line 24f**, *"Enter
+    //    contributions to section 501(c)(18)(D) pension plans"* (`i1040gi--2025.txt:43215-43217`),
+    //    which btctax censuses `unmodeled` (`btctax-forms/forms/2024/f1040s1.map.toml:173`). So the
+    //    amount is in box 1, btctax files it as wages, and the deduction that is supposed to come
+    //    back out never does: the return OVERSTATES the filer's tax by the whole entry, silently.
+    //    Refusing over a forgone deduction is what this screen already does one rule up, where the
+    //    statutory-employee W-2 refuses because filing it would *"forgo the Schedule C deductions"*.
+    Box12Code {
+        code: "H",
+        label: "Elective deferrals to a section 501(c)(18)(D) tax-exempt organization plan",
+        verdict: Box12Verdict::DrivesAnUncomputedLine {
+            drives: "is in your box 1 wages AND deductible back out on Schedule 1 line 24f \
+                     (\"contributions to section 501(c)(18)(D) pension plans\") — btctax files the \
+                     wages and does not compute line 24f, so this return would overstate your tax \
+                     by the whole entry",
+            exit: "File this return with a preparer",
+        },
+    },
+    Box12Code {
+        code: "J",
+        label: "Nontaxable sick pay",
+        verdict: Box12Verdict::NoLineReadsIt(
+            "\"… any sick pay that was paid by a third party and was not includible in income \
+             (and not shown in boxes 1, 3, and 5) …\" — outside box 1 by the instruction's own \
+             words, and \
+             the Form 1040 instructions never name it: \"sick pay\" does not occur in \
+             i1040gi--2025.txt.",
+        ),
+    },
+    Box12Code {
+        code: "K",
+        label: "20% excise tax on excess golden parachute payments",
+        verdict: Box12Verdict::DrivesAnUncomputedLine {
+            drives: "is a 20% excise tax that belongs on Schedule 2 line 17k (\"This tax should be \
+                     shown in box 12 of Form W-2 with code K\") — btctax does not compute that \
+                     line, so filing this return would understate the tax you owe",
+            exit: "File this return with a preparer",
+        },
+    },
+    Box12Code {
+        code: "L",
+        label: "Substantiated employee business expense reimbursements",
+        verdict: Box12Verdict::DrivesAnUncomputedLine {
+            drives: "is the substantiated (nontaxable) part of an expense reimbursement, which \
+                     Form 2106 nets against the expenses a reservist, performing artist or \
+                     fee-basis official deducts on Schedule 1 line 12 — btctax models neither",
+            exit: "File this return with a preparer",
+        },
+    },
+    Box12Code {
+        code: "M",
+        label: "Uncollected social security or RRTA tax on taxable cost of group-term life \
+                insurance over $50,000 (former employees only)",
+        verdict: Box12Verdict::DrivesAnUncomputedLine {
+            drives: "is social security tax your former employer could not collect, and Schedule 2 \
+                     line 13 is where the 1040 collects it instead — btctax does not compute that \
+                     line, so filing this return would understate the tax you owe",
+            exit: "File this return with a preparer",
+        },
+    },
+    Box12Code {
+        code: "N",
+        label: "Uncollected Medicare tax on taxable cost of group-term life insurance over \
+                $50,000 (but not Additional Medicare Tax) (former employees only)",
+        verdict: Box12Verdict::DrivesAnUncomputedLine {
+            drives: "is Medicare tax your former employer could not collect, and Schedule 2 line \
+                     13 is where the 1040 collects it instead — btctax does not compute that line, \
+                     so filing this return would understate the tax you owe",
+            exit: "File this return with a preparer",
+        },
+    },
+    Box12Code {
+        code: "P",
+        label: "Excludable moving expense reimbursements paid directly to a member of the U.S. \
+                Armed Forces or intelligence community",
+        verdict: Box12Verdict::DrivesAnUncomputedLine {
+            drives: "is the reimbursement Form 3903 subtracts from the moving expenses an Armed \
+                     Forces member deducts on Schedule 1 line 14 — btctax models neither, so it \
+                     can neither claim that deduction nor reduce it by this amount",
+            exit: "File this return with a preparer",
+        },
+    },
+    Box12Code {
+        code: "Q",
+        label: "Nontaxable combat pay",
+        verdict: Box12Verdict::DrivesAnUncomputedLine {
+            drives: "is combat pay you may ELECT into earned income for the earned income credit \
+                     (\"The amount of your nontaxable combat pay should be shown in box 12 of \
+                     Form(s) W-2 with code Q\", Form 1040 line 1i) — btctax neither computes the \
+                     EIC nor records that election, and the election is yours to make",
+            exit: "File this return with a preparer",
+        },
+    },
+    Box12Code {
+        code: "R",
+        label: "Employer contributions to an Archer MSA",
+        verdict: Box12Verdict::DrivesAnUncomputedLine {
+            drives: "is an employer contribution to an Archer MSA, which Form 8853 takes against \
+                     your own contribution limit and Schedule 1 line 23 deducts — btctax files \
+                     Form 8889 (HSAs) and refuses Archer MSA activity outright, by its own rule",
+            exit: "File this return with a preparer",
+        },
+    },
+    Box12Code {
+        code: "S",
+        label: "Employee salary reduction contributions under a section 408(p) SIMPLE plan (this \
+                includes salary reduction contributions made to a Roth SIMPLE IRA)",
+        verdict: Box12Verdict::ReadByBtctax(
+            "outside box 1, and summed against the §402(g) limit by ELECTIVE_DEFERRAL_CODES",
+        ),
+    },
+    Box12Code {
+        code: "T",
+        label: "Adoption benefits",
+        verdict: Box12Verdict::DrivesAnUncomputedLine {
+            drives: "is an adoption benefit, excluded from box 1 only up to the annual limit — \
+                     \"Report all amounts including those in excess of the … exclusion\" — and \
+                     Form 8839 line 31 carries the taxable remainder to Form 1040 line 1f, which \
+                     btctax does not compute",
+            exit: "File this return with a preparer",
+        },
+    },
+    // ── ★ FR-197's other cheap win. *"Show the spread … from your employee's … exercise of
+    //    nonstatutory stock option(s). Include this amount in boxes 1, 3 (up to the social security
+    //    wage base), and 5."* (`iw2w3--2026.txt:2623-2633`.)
+    Box12Code {
+        code: "V",
+        label: "Income from exercise of nonstatutory stock option(s)",
+        verdict: Box12Verdict::AlreadyInBox1(
+            "\"Include this amount in boxes 1, 3 (up to the social security wage base), and 5.\" — \
+             the spread is already in box 1, which is what Form 1040 line 1a files. It is also the \
+             basis of the shares, which matters when they are SOLD and not on this return.",
+        ),
+    },
+    // ── ★★★ T16 — the code that moved in with Form 8889, and the reason this table needs a
+    //    "something reads it" verdict at all. Form 8889 line 9's own instruction is *"These
+    //    contributions should be shown on Form W-2, box 12, code W"*; before T16 the code refused,
+    //    which was correct while nothing read it and wrong the moment something did.
+    //    [`crate::tax::form8889::employer_contributions_from_w2s`] sums it, the Employer
+    //    Contribution Worksheet adjusts it for the calendar/tax-year gap, and line 12 subtracts the
+    //    result from the filer's own limit. A code W beside a return that says no HSA activity
+    //    happened is a CONTRADICTION, and refuses on its own rule in the W-2 loop below.
+    Box12Code {
+        code: "W",
+        label: "Employer contributions (including employee contributions through a cafeteria plan) \
+                to an employee’s health savings account (HSA)",
+        verdict: Box12Verdict::ReadByBtctax(
+            "Form 8889 line 9 — crate::tax::form8889::employer_contributions_from_w2s sums it, and \
+             a code W beside a return declaring no HSA activity refuses its own contradiction",
+        ),
+    },
+    Box12Code {
+        code: "Y",
+        label: "Deferrals under a section 409A nonqualified deferred compensation plan",
+        verdict: Box12Verdict::NoLineReadsIt(
+            "a deferral, not income: outside box 1, and the IRS does not even require it — \"It is \
+             not necessary to show deferrals in box 12 with code Y.\" The 1040 instructions name \
+             code Z for §409A and never code Y. What FAILS §409A is code Z, which refuses.",
+        ),
+    },
+    Box12Code {
+        code: "Z",
+        label: "Income under a nonqualified deferred compensation plan that fails to satisfy \
+                section 409A",
+        verdict: Box12Verdict::DrivesAnUncomputedLine {
+            drives: "is §409A-failed deferred compensation: it is in box 1 AND it carries an \
+                     additional 20% tax plus interest on Schedule 2 line 17h (\"This income should \
+                     be shown in box 12 of Form W-2 with code Z, or in box 15 of Form \
+                     1099-MISC\") — btctax does not compute that \
+                     line, so filing this return would understate the tax you owe",
+            exit: "File this return with a preparer",
+        },
+    },
+    // ── Designated Roth contributions are made out of pay the employee DID receive, so they are
+    //    inside box 1 already and nothing takes them back out.
+    //    ★ Boundary, stated: they are also a Form 8880 (saver's credit) input, and btctax censuses
+    //      that form `unmodeled` for every filer — `btctax-forms/forms/2025/f1040s3.map.toml:156`,
+    //      covered by `Advisory::OtherCreditsOmitted`. That boundary is the missing FORM, not this
+    //      code: an IRA contribution reaches Form 8880 without passing through box 12 at all, so
+    //      refusing here would close nothing and would stop every 401(k) household from filing.
+    Box12Code {
+        code: "AA",
+        label: "Designated Roth contributions under a section 401(k) plan",
+        verdict: Box12Verdict::AlreadyInBox1(
+            "a designated Roth contribution is made out of pay that WAS received and taxed, so it \
+             is inside box 1 and nothing deducts it back out",
+        ),
+    },
+    Box12Code {
+        code: "BB",
+        label: "Designated Roth contributions under a section 403(b) plan",
+        verdict: Box12Verdict::AlreadyInBox1(
+            "a designated Roth contribution is made out of pay that WAS received and taxed, so it \
+             is inside box 1 and nothing deducts it back out",
+        ),
+    },
+    Box12Code {
+        code: "DD",
+        label: "Cost of employer-sponsored health coverage",
+        verdict: Box12Verdict::NoLineReadsIt(
+            "\"The amount reported with code DD is not taxable.\" It is an Affordable Care Act \
+             reporting item, and no line of the 1040 or of any schedule btctax files reads it.",
+        ),
+    },
+    Box12Code {
+        code: "EE",
+        label: "Designated Roth contributions under a governmental section 457(b) plan",
+        verdict: Box12Verdict::AlreadyInBox1(
+            "a designated Roth contribution is made out of pay that WAS received and taxed, so it \
+             is inside box 1 and nothing deducts it back out",
+        ),
+    },
+    Box12Code {
+        code: "FF",
+        label: "Permitted benefits under a qualified small employer health reimbursement \
+                arrangement",
+        verdict: Box12Verdict::DrivesAnUncomputedLine {
+            drives: "is a QSEHRA permitted benefit, and \"A qualified small employer health \
+                     reimbursement arrangement (QSEHRA) is considered to be a subsidized health \
+                     plan maintained by an employer\" — which DISQUALIFIES the self-employed \
+                     health insurance deduction for the months it covers and bears on the premium \
+                     tax credit; btctax models neither, so it cannot apply the disqualification",
+            exit: "File this return with a preparer",
+        },
+    },
+    Box12Code {
+        code: "GG",
+        label: "Income from qualified equity grants under section 83(i)",
+        verdict: Box12Verdict::AlreadyInBox1(
+            "\"This amount is wages for box 1 and you must withhold income tax under section \
+             3401(i) …\" — already inside the figure Form 1040 line 1a files, and \"83(i)\" does \
+             not occur in i1040gi--2025.txt at all.",
+        ),
+    },
+    Box12Code {
+        code: "HH",
+        label: "Aggregate deferrals under section 83(i) elections as of the close of the calendar \
+                year",
+        verdict: Box12Verdict::NoLineReadsIt(
+            "a running total of income DEFERRED under §83(i), not income of this year: outside box \
+             1, and \"83(i)\" does not occur in i1040gi--2025.txt. What ends the deferral is \
+             reported as code GG, in the year it ends.",
+        ),
+    },
+    Box12Code {
+        code: "II",
+        label: "Medicaid waiver payments excluded from gross income under Notice 2014-7",
+        verdict: Box12Verdict::DrivesAnUncomputedLine {
+            drives: "is a Medicaid waiver payment the 1040 instructions send to Schedule 1 line 8s \
+                     (\"Your nontaxable Medicaid waiver payments may have been reported to you on \
+                     Form(s) W-2, box 12, with Code II\"), and which may also be ELECTED into \
+                     earned income for the earned income credit — btctax computes neither",
+            exit: "File this return with a preparer",
+        },
+    },
+    // ── The three codes the 2026 revision added. All refuse, so this table needs no year axis yet.
+    Box12Code {
+        code: "TA",
+        label: "Employer contributions under a section 128 Trump account contribution program paid \
+                to a Trump account of an employee or a dependent of an employee",
+        verdict: Box12Verdict::NotAdjudicated {
+            why: "is a §128 Trump account employer contribution — a code the IRS first prints on \
+                  the 2026 Form W-2. It is excluded from the employee's gross income up to $2,500 \
+                  a year against a $5,000 account limit, and btctax has adjudicated neither that \
+                  limit, nor what a contribution over it does, nor how it meets Form 4547",
+            exit: "File this return with a preparer",
+        },
+    },
+    Box12Code {
+        code: "TP",
+        label: "Total amount of cash tips reported to the employer",
+        verdict: Box12Verdict::DrivesAnUncomputedLine {
+            drives: "is the total cash tips you reported to your employer, and the §224 deduction \
+                     on Schedule 1-A Part II is figured from the QUALIFIED subset of them — which \
+                     btctax asks you for directly, because the qualifying occupation and the \
+                     qualifying tips are yours to state and not your employer's. btctax does not \
+                     reconcile the two figures, and a return holding this one while Part II is \
+                     empty is a return whose deduction nothing claimed",
+            exit: "Complete Schedule 1-A Part II if those tips qualify, and file with a preparer",
+        },
+    },
+    Box12Code {
+        code: "TT",
+        label: "Total amount of qualified overtime compensation",
+        verdict: Box12Verdict::DrivesAnUncomputedLine {
+            drives: "is the qualified overtime the §225 deduction on Schedule 1-A Part III is \
+                     figured from — which btctax asks you for directly. btctax does not reconcile \
+                     the two figures, and a return holding this one while Part III is empty is a \
+                     return whose deduction nothing claimed",
+            exit: "Complete Schedule 1-A Part III if that overtime qualifies, and file with a \
+                   preparer",
+        },
+    },
+];
+
+/// The table row for `code` (already trimmed and upper-cased), or `None` — meaning the IRS prints no
+/// such code, which is a transcription error rather than an unsupported feature.
+fn box12_row(code: &str) -> Option<&'static Box12Code> {
+    BOX12_CODES.iter().find(|r| r.code == code)
+}
 
 /// The §402(g) elective-deferral codes whose cross-employer sum is capped (SPEC F3).
+///
+/// ★ Every member must be an ADMITTED [`BOX12_CODES`] row, or the cap silently stops summing it —
+///   pinned by [`tests::every_elective_deferral_code_is_an_admitted_box12_code`].
+///
+/// ★★ **Boundary, stated rather than implied (FR-197).** The §402(g) limit is a limit on elective
+///    deferrals *and designated Roth contributions* — the W-2 instructions' own worked example says
+///    so: *"Even though the 2026 limit for elective deferrals and designated Roth contributions is
+///    $24,500, Alex’s total elective deferral amount of $26,500 is reported in box 12 with code
+///    D"*. This list sums only the pre-tax codes, so an excess made up of `AA`/`BB`/`EE` is not
+///    detected. Widening it is a change to the CAP rule rather than to the code table, with its own
+///    §402A adjudication to do, and it is FILED rather than done here.
 const ELECTIVE_DEFERRAL_CODES: &[&str] = &["D", "E", "F", "G", "S"];
 
 /// ★★★ **T10 / §5.4 — which cell of the direct-deposit block a refusal is about.**
@@ -367,13 +854,27 @@ pub enum RefuseReason {
     /// the filer stated, not a blank waiting to be filled, and no amount of answering questions
     /// turns a mistyped routing number into a routable one.
     ///
-    /// ★★ The exit is *remove the block*, never *answer something*. A return with NO deposit
-    ///    instruction is a perfectly good return — the refund arrives as a paper check and
-    ///    [`crate::tax::advisories::Advisory::RefundByPaperCheck`] says so — which is why this rule
-    ///    can afford to be strict: the cost of refusing is a cheque in the post, and the cost of
-    ///    accepting is a refund wired to a number nobody can recall it from
-    ///    (*"The IRS isn't responsible for a lost refund if you enter the wrong account
-    ///    information."*, `i1040gi--2025.txt:24023-24026`).
+    /// ★★ The exit is *correct the cell, or remove the block*, never *answer something*. A return
+    ///    with NO deposit instruction is still a complete, filable return — it simply does not say
+    ///    where to send a refund, and [`crate::tax::advisories::Advisory::RefundByPaperCheck`] is
+    ///    what tells the filer how that refund will, and will not, reach them.
+    ///
+    /// ★★ **The factual clause here was RETRACTED BY THE IRS, and is corrected rather than
+    ///    deleted.** It used to read *"the refund arrives as a paper check"*. It no longer does:
+    ///    *"Starting in October 2025, the IRS will generally stop issuing paper checks for federal
+    ///    disbursements, including tax refunds, unless an exception applies."*
+    ///    (`i1040gi--2025.txt:23824-23827`.)
+    ///
+    ///    **The strictness never rested on that clause and does not soften with it.** The two costs
+    ///    are not commensurable, which is the whole argument: refusing costs the filer another look
+    ///    at their cheque — and, for the type, the one question [`DirectDepositCell::Kind`] says is
+    ///    not on it at all — three cells, every one of them fixable, with the return filable in the
+    ///    meantime; while accepting costs a refund wired irrecoverably to whoever
+    ///    owns the account that was actually typed (*"The IRS isn't responsible for a lost refund if
+    ///    you enter the wrong account information."*, `i1040gi--2025.txt:24023-24026`). If anything
+    ///    the retraction argues for getting those three cells RIGHT, which is what this rule is for:
+    ///    direct deposit IS built ([`crate::tax::return_inputs::DirectDeposit`] — 35b routing, 35c
+    ///    type, 35d account), so a filer who wants to be paid has the whole instruction available.
     DirectDepositNumberMalformed {
         /// Which of the two cells. An ENUM, not a string: the input form dispatches on it to anchor
         /// the refusal, and a `&'static str` compared with `contains` is a spelling nobody checks.
@@ -2113,7 +2614,9 @@ fn screen_filing_status_assertions(ri: &ReturnInputs) -> Option<Refusal> {
 /// instruction is.
 ///
 /// ★ The exit is *correct it, or delete the block* — never *answer something*: a return with no
-///   deposit instruction is complete, and `income answer` is not reachable at import anyway
+///   deposit instruction is complete and filable (though since October 2025 a paper refund cheque
+///   is no longer something to rely on — see [`RefuseReason::DirectDepositNumberMalformed`]), and
+///   `income answer` is not reachable at import anyway
 ///   (`no_refusal_in_the_import_tier_prescribes_income_answer`).
 fn screen_direct_deposit(ri: &ReturnInputs) -> Option<Refusal> {
     use crate::tax::packet::{AccountNumber, BankNumberError, RoutingNumber};
@@ -2125,8 +2628,11 @@ fn screen_direct_deposit(ri: &ReturnInputs) -> Option<Refusal> {
                 "the direct-deposit {cell} on this return {why}. A refund sent to a number the bank \
                  cannot route is not recoverable — the instructions say so (\"The IRS isn't \
                  responsible for a lost refund if you enter the wrong account information.\"). \
-                 Correct it, or delete the direct-deposit block: a return with none is complete, \
-                 and the refund then arrives as a paper check."
+                 Correct it, or delete the direct-deposit block: a return with no deposit \
+                 instruction is still complete and filable. Do not count on a cheque in the post \
+                 instead — \"Starting in October 2025, the IRS will generally stop issuing paper \
+                 checks for federal disbursements, including tax refunds, unless an exception \
+                 applies.\" — so a correct routing and account number is how a refund reaches you."
             ),
         )
     };
@@ -2157,8 +2663,11 @@ fn screen_direct_deposit(ri: &ReturnInputs) -> Option<Refusal> {
              check the correct box to ensure your deposit is accepted.\" btctax will not guess \
              between checking and savings: a deposit sent against the wrong box is rejected and the \
              refund is delayed. Choose Checking or Savings on line 35c, or delete the \
-             direct-deposit block: a return with none is complete, and the refund then arrives as a \
-             paper check."
+             direct-deposit block: a return with no deposit instruction is still complete and \
+             filable. Do not count on a cheque in the post instead — \"Starting in October 2025, \
+             the IRS will generally stop issuing paper checks for federal disbursements, including \
+             tax refunds, unless an exception applies.\" — so a correct routing and account number \
+             is how a refund reaches you."
                 .to_string(),
         );
     }
@@ -3298,11 +3807,59 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
         }
         for entry in &w2.box12 {
             let code = entry.code.trim().to_uppercase();
-            if !INERT_BOX12_CODES.contains(&code.as_str()) {
-                return refuse(
-                    RefuseReason::UnsupportedBox12Code(code.clone()),
-                    format!("W-2 box 12 code {code} is not supported in v1"),
-                );
+            // ★★★ **FR-197 — the verdict comes out of [`BOX12_CODES`], the IRS's own code table.**
+            //     Three outcomes, and the two refusals say different things because they are
+            //     different facts: a code the IRS prints that btctax cannot carry is a LIMIT of this
+            //     tool, and a code the IRS does not print at all is a TRANSCRIPTION ERROR on the
+            //     filer's desk. The old message — *"box 12 code K is not supported in v1"* — said
+            //     the first about both, named no line, and left a filer holding a W-2 with a code C
+            //     (already inside box 1, changing no figure) with nothing to do about it.
+            //
+            //     ★ The `refuse(RefuseReason::UnsupportedBox12Code(..), ..)` calls stay INLINE in
+            //       this body on purpose: `every_param_free_rule_is_censused_from_the_source_and_
+            //       fires_on_both_paths` reads the census out of this function's source text, and a
+            //       rule that moves into a helper leaves the census — and the rule — unwatched.
+            match box12_row(&code) {
+                None if code.is_empty() => {
+                    return refuse(
+                        RefuseReason::UnsupportedBox12Code(code.clone()),
+                        "a Form W-2 carries a box 12 row with an amount but NO code. Box 12 is a \
+                         code and an amount together — \"Even if only one item is entered, you must \
+                         use the IRS code designated for that item\" — and without the code there \
+                         is no way to know what the money is. Type the code exactly as the employer \
+                         printed it to the left of the vertical line in box 12a–12d, or remove the \
+                         empty row.",
+                    );
+                }
+                None => {
+                    return refuse(
+                        RefuseReason::UnsupportedBox12Code(code.clone()),
+                        format!(
+                            "W-2 box 12 code {code} is not a code the IRS prints in the Form W-2 \
+                             instructions (they run A through II, plus TA, TP and TT from 2026). \
+                             btctax will not guess which code was meant. Re-read the paper: the \
+                             code is the capital letter or two to the LEFT of the vertical line in \
+                             box 12a–12d, and the money is to the right."
+                        ),
+                    );
+                }
+                Some(row) => {
+                    if let Some((drives, exit)) = row.verdict.refusal() {
+                        return refuse(
+                            RefuseReason::UnsupportedBox12Code(code.clone()),
+                            format!(
+                                "the Form W-2 from {} reports box 12 code {code} — \"{}\" — which \
+                                 {drives}. {exit}.",
+                                if w2.employer.trim().is_empty() {
+                                    "(unnamed employer)"
+                                } else {
+                                    w2.employer.trim()
+                                },
+                                row.label
+                            ),
+                        );
+                    }
+                }
             }
             // ★★★ T16 — a code-W amount is an EMPLOYER HSA CONTRIBUTION, which is trigger (a) of
             //     the §223 declaration in the filer's own words ("anyone … put money into one for
@@ -4001,6 +4558,15 @@ mod tests {
     /// three value rules are measured by [`the_document_census_refuses_each_incoherent_state`], which
     /// calls `screen_inputs` directly and so cannot be masked by this helper.
     fn reason(ri: &ReturnInputs) -> Option<RefuseReason> {
+        refusal(ri).map(|r| r.reason)
+    }
+
+    /// [`reason`], but the whole [`Refusal`].
+    ///
+    /// ★ The DETAIL is the only part of a refusal a filer ever sees, so a rule whose message names
+    ///   no code, no line and no exit is a rule that does not work — measured, not assumed, by
+    ///   [`an_inert_box12_code_files_and_a_consequential_one_refuses_by_name`].
+    fn refusal(ri: &ReturnInputs) -> Option<Refusal> {
         let mut ri = ri.clone();
         for row in crate::tax::document_census::DocumentRow::ALL {
             let has_rows =
@@ -4009,7 +4575,7 @@ mod tests {
                 ri.documents.set(*row, Some(true));
             }
         }
-        screen_inputs(&ri, &tbl(), &params()).map(|r| r.reason)
+        screen_inputs(&ri, &tbl(), &params())
     }
 
     // ════════════════════════════════════════════════════════════════════════════════════════════
@@ -6458,6 +7024,381 @@ mod tests {
         r.foreign_accounts = Some(false);
         r.foreign_trust = Some(false);
         assert_eq!(reason(&r), None);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════════════════════
+    // ★★★ **FR-197 — THE BOX 12 CODE TABLE IS THE IRS'S TABLE, RE-DERIVED ON EVERY RUN.**
+    //
+    // The defect this replaces was not a mistake anyone made: `INERT_BOX12_CODES` was correct on the
+    // day it was typed, and the IRS then printed more codes. Nothing red. So the repair cannot be
+    // "type the rest of them" — it has to be an instrument that fails when the set moves again, and
+    // one that has been WATCHED failing (B1).
+    // ════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// The workspace root, from this crate's manifest directory.
+    fn repo_root() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(|p| p.parent())
+            .expect("crates/btctax-core -> workspace root")
+            .to_path_buf()
+    }
+
+    /// Every archived revision of the Form W-2/W-3 instructions, as `(year, text)`, oldest first.
+    ///
+    /// ★ **Read out of the extract DIRECTORY, never from a list of years typed here.** Archiving
+    ///   `iw2w3--2027.txt` pulls a new revision into every assertion below with no edit to this
+    ///   file — which is the whole point, because the thing being repaired is a list that did not
+    ///   know its set had grown.
+    fn archived_w2_instructions() -> Vec<(i32, String)> {
+        let dir = repo_root().join("design/forms/extract");
+        let mut out: Vec<(i32, String)> = std::fs::read_dir(&dir)
+            .unwrap_or_else(|e| panic!("{} must be readable: {e}", dir.display()))
+            .map(|e| e.expect("a readable directory entry").path())
+            .filter_map(|p| {
+                let name = p.file_name()?.to_str()?.to_string();
+                let year: i32 = name
+                    .strip_prefix("iw2w3--")?
+                    .strip_suffix(".txt")?
+                    .parse()
+                    .ok()?;
+                let text = std::fs::read_to_string(&p)
+                    .unwrap_or_else(|e| panic!("{} must be readable: {e}", p.display()));
+                Some((year, text))
+            })
+            .collect();
+        out.sort_by_key(|(y, _)| *y);
+        assert!(
+            out.len() >= 3,
+            "the archived W-2 instruction extracts have moved or vanished — {} found under {}, and \
+             everything below would then be measuring nothing",
+            out.len(),
+            dir.display()
+        );
+        out
+    }
+
+    /// A line that is nothing but one or two capitals — the shape every box 12 code has.
+    fn is_box12_code(s: &str) -> bool {
+        (1..=2).contains(&s.len()) && s.chars().all(|c| c.is_ascii_uppercase())
+    }
+
+    /// The `(code, description)` pairs printed in the *Form W-2 Reference Guide for Box 12 Codes*.
+    ///
+    /// The guide is a three-column table, and `pdftotext -layout` emits each cell as a code line, a
+    /// blank, then the description's wrapped lines — which is what this walks. Whitespace inside a
+    /// description is collapsed to single spaces; nothing else is touched, so a label that matches is
+    /// the IRS's own wording character for character.
+    fn reference_guide_pairs(text: &str) -> Vec<(String, String)> {
+        let mut out: Vec<(String, String)> = Vec::new();
+        let mut inside = false;
+        let mut code: Option<String> = None;
+        let mut words: Vec<&str> = Vec::new();
+        for raw in text.lines() {
+            // The header carries a leading form feed (the page break pdftotext emits).
+            let line = raw.trim_matches(|c: char| c.is_whitespace() || c == '\u{c}');
+            if !inside {
+                inside = line == "Form W-2 Reference Guide for Box 12 Codes";
+                continue;
+            }
+            if line == "See Box 12 Codes." {
+                break;
+            }
+            if is_box12_code(line) {
+                if let Some(c) = code.take() {
+                    out.push((c, words.join(" ")));
+                }
+                code = Some(line.to_string());
+                words.clear();
+            } else if !line.is_empty() {
+                words.extend(line.split_whitespace());
+            }
+        }
+        if let Some(c) = code {
+            out.push((c, words.join(" ")));
+        }
+        out
+    }
+
+    /// Every code with its own `Code XX—…` heading in the per-code narrative — a SECOND, independent
+    /// region of the same document.
+    ///
+    /// ★ It exists so [`reference_guide_pairs`] cannot be believed on its own. Two regions of the
+    ///   IRS's document agreeing is evidence; one region parsed by a rule written here is not, and a
+    ///   parse that quietly stops matching is the failure mode this whole file is about.
+    fn narrative_codes(text: &str) -> std::collections::BTreeSet<String> {
+        text.lines()
+            .filter_map(|l| {
+                let (code, _) = l.strip_prefix("Code ")?.split_once('\u{2014}')?;
+                if is_box12_code(code) {
+                    Some(code.to_string())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// **Everything wrong with `table`, measured against the archived instructions.** Empty means
+    /// the table IS the IRS's table.
+    ///
+    /// ★ It takes the table as an ARGUMENT rather than reading [`BOX12_CODES`], which is what lets
+    ///   [`a_table_that_has_fallen_behind_the_irs_is_caught`] hand it a table with a code dropped, a
+    ///   code invented and a label mistyped, and watch each one come back named.
+    fn box12_table_problems(table: &[Box12Code]) -> Vec<String> {
+        use std::collections::{BTreeMap, BTreeSet};
+        let mut problems: Vec<String> = Vec::new();
+        let mut union: BTreeSet<String> = BTreeSet::new();
+        let mut newest: Option<(i32, BTreeMap<String, String>)> = None;
+
+        for (year, text) in &archived_w2_instructions() {
+            let pairs = reference_guide_pairs(text);
+            let guide: BTreeMap<String, String> = pairs.iter().cloned().collect();
+            // ★ A BROKEN PARSE MUST BE LOUD, never silently permissive: the empty set is a subset of
+            //   everything, so a parse that stops finding the region would make every check below
+            //   pass on nothing at all. 30 is the smallest code count any archived revision prints.
+            if guide.len() < 30 || guide.len() != pairs.len() {
+                problems.push(format!(
+                    "iw2w3--{year}: the Reference Guide parse yielded {} codes out of {} rows — the \
+                     region markers or the column layout have moved, and nothing below is measuring \
+                     anything",
+                    guide.len(),
+                    pairs.len()
+                ));
+                continue;
+            }
+            let guide_codes: BTreeSet<String> = guide.keys().cloned().collect();
+            let narrative = narrative_codes(text);
+            if narrative != guide_codes {
+                problems.push(format!(
+                    "iw2w3--{year}: the Reference Guide table and the per-code narrative disagree \
+                     about which codes exist (guide only: {:?}; narrative only: {:?}) — one of the \
+                     two parses has stopped working",
+                    guide_codes.difference(&narrative).collect::<Vec<_>>(),
+                    narrative.difference(&guide_codes).collect::<Vec<_>>()
+                ));
+            }
+            union.extend(guide_codes);
+            newest = Some((*year, guide));
+        }
+
+        let classified: BTreeSet<String> = table.iter().map(|r| r.code.to_string()).collect();
+        if classified.len() != table.len() {
+            problems.push("the table classifies the same code twice".to_string());
+        }
+        for missing in union.difference(&classified) {
+            problems.push(format!(
+                "box 12 code {missing} is printed in the Form W-2 instructions and this table does \
+                 not classify it — an unclassified code refuses the whole return, silently, which \
+                 is exactly what FR-197 found"
+            ));
+        }
+        for invented in classified.difference(&union) {
+            problems.push(format!(
+                "box 12 code {invented} is in this table and in NO archived revision of the Form \
+                 W-2 instructions"
+            ));
+        }
+
+        let (year, guide) = newest.expect("at least one archived revision parsed");
+        for row in table {
+            // Labels are pinned to the NEWEST revision only — four codes are worded differently
+            // between revisions, so a code the newest guide does not print goes label-unchecked.
+            if let Some(printed) = guide.get(row.code) {
+                if printed != row.label {
+                    problems.push(format!(
+                        "box 12 code {}: the label is not what iw2w3--{year} prints\n    table: \
+                         {}\n    IRS:   {printed}",
+                        row.code, row.label
+                    ));
+                }
+            }
+            if let Some((drives, exit)) = row.verdict.refusal() {
+                if drives.trim().is_empty() || exit.trim().is_empty() {
+                    problems.push(format!(
+                        "box 12 code {} refuses without saying what it drives or how to get past it \
+                         — a refusal with no exit is just a brick with better prose",
+                        row.code
+                    ));
+                }
+            }
+        }
+        problems
+    }
+
+    /// ★★★ **The table IS the IRS's table** — code for code and label for label, across every
+    /// archived revision, out of two independent regions of each.
+    ///
+    /// This is the assertion the eleven-code list could not make: there was nothing to check it
+    /// against except the person who typed it.
+    #[test]
+    fn the_box12_table_is_the_irs_table() {
+        let problems = box12_table_problems(BOX12_CODES);
+        assert!(
+            problems.is_empty(),
+            "the box 12 table has fallen behind the IRS:\n{}",
+            problems.join("\n")
+        );
+    }
+
+    /// ★★★ **B1 — THE KILL. Three planted defects, three named failures.**
+    ///
+    /// A conformance checker is worth its runtime only if it can tell a conformant table from a stale
+    /// one, so this plants (a) code `C` deleted — FR-197's own defect, exactly: a code the IRS prints
+    /// that nothing classifies; (b) an invented code `QQ`; (c) a label off by one digit, the defect a
+    /// re-read cannot catch because both spellings look like English. The premise — that the REAL
+    /// table is clean — is asserted first, or a checker that reds on everything would pass this.
+    #[test]
+    fn a_table_that_has_fallen_behind_the_irs_is_caught() {
+        assert!(
+            box12_table_problems(BOX12_CODES).is_empty(),
+            "the premise: the real table is conformant"
+        );
+
+        // (a) a code the IRS prints, dropped from the table.
+        let dropped: Vec<Box12Code> = BOX12_CODES
+            .iter()
+            .copied()
+            .filter(|r| r.code != "C")
+            .collect();
+        let problems = box12_table_problems(&dropped);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("box 12 code C is printed")),
+            "★ THE KILL: a code the IRS prints that the table does not classify must be reported, \
+             got {problems:?}"
+        );
+
+        // (b) a code in the table that the IRS does not print.
+        let mut invented: Vec<Box12Code> = BOX12_CODES.to_vec();
+        invented.push(Box12Code {
+            code: "QQ",
+            label: "Not a code the IRS has ever printed",
+            verdict: Box12Verdict::NoLineReadsIt("invented by this test"),
+        });
+        let problems = box12_table_problems(&invented);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("box 12 code QQ is in this table")),
+            "★ THE KILL: an invented code must be reported, got {problems:?}"
+        );
+
+        // (c) a label that has drifted from the printed one, by one digit.
+        let mut mistyped: Vec<Box12Code> = BOX12_CODES.to_vec();
+        for row in &mut mistyped {
+            if row.code == "C" {
+                row.label = "Taxable cost of group-term life insurance over $5,000";
+            }
+        }
+        let problems = box12_table_problems(&mistyped);
+        assert!(
+            problems.iter().any(|p| p.contains("the label is not what")),
+            "★ THE KILL: a label off by a digit must be reported, got {problems:?}"
+        );
+    }
+
+    /// ★ [`ELECTIVE_DEFERRAL_CODES`] only ever sums a code the table ADMITS: a code that starts
+    ///   refusing never reaches the §402(g) sum, so the cap would go on being computed over a
+    ///   smaller set than its own doc comment claims. One hand-typed list checked against the
+    ///   derived one.
+    #[test]
+    fn every_elective_deferral_code_is_an_admitted_box12_code() {
+        for code in ELECTIVE_DEFERRAL_CODES {
+            let row = box12_row(code)
+                .unwrap_or_else(|| panic!("§402(g) code {code} is not in BOX12_CODES at all"));
+            assert!(
+                row.verdict.admits(),
+                "§402(g) code {code} is REFUSED by the box 12 table, so the cap can never see it — \
+                 the sum and the table disagree about which codes exist"
+            );
+        }
+    }
+
+    /// ★★★ **FR-197's behavioural kill: an inert code FILES, a consequential one still refuses BY
+    /// NAME, and the message tells the filer which code stopped them and what to do about it.**
+    ///
+    /// Under the eleven-code list every code in the first loop but `D` and `DD` refused, and the
+    /// packet printed zero pages — including code `C`, whose amount the employer has already put in
+    /// box 1, so it could never have changed a figure.
+    #[test]
+    fn an_inert_box12_code_files_and_a_consequential_one_refuses_by_name() {
+        let with = |code: &str| {
+            let mut r = ri();
+            r.w2s.push(W2 {
+                employer: "ACME".into(),
+                box1_wages: dec!(80000),
+                box12: vec![Box12Entry {
+                    code: code.into(),
+                    amount: dec!(2400),
+                }],
+                ..Default::default()
+            });
+            r
+        };
+
+        // (1) ADMITTED — nothing refuses, so the return computes and the packet prints.
+        for inert in [
+            "C", "V", "GG", "J", "Y", "HH", "DD", "D", "AA", "BB", "EE", "E", "F", "G", "S",
+        ] {
+            assert_eq!(
+                reason(&with(inert)),
+                None,
+                "★ box 12 code {inert} changes no figure on the return and must file"
+            );
+        }
+
+        // (2) REFUSED — by name, with the line it drives and an exit, on the employer's own W-2.
+        for (code, line) in [
+            ("A", "Schedule 2 line 13"),
+            ("K", "Schedule 2 line 17k"),
+            ("H", "Schedule 1 line 24f"),
+            ("Z", "Schedule 2 line 17h"),
+            ("TP", "Schedule 1-A Part II"),
+            ("TA", "Trump account"),
+        ] {
+            let got =
+                refusal(&with(code)).unwrap_or_else(|| panic!("box 12 code {code} must refuse"));
+            assert_eq!(
+                got.reason,
+                RefuseReason::UnsupportedBox12Code(code.to_string()),
+                "box 12 code {code} must refuse under its own name"
+            );
+            for expected in [
+                &format!("box 12 code {code}") as &str,
+                line,
+                "ACME",
+                "preparer",
+            ] {
+                assert!(
+                    got.detail.contains(expected),
+                    "★ THE KILL: the refusal for box 12 code {code} must name {expected:?} — a \
+                     filer holding this W-2 has to be told which row stopped them, what it drives \
+                     and what to do. Got: {}",
+                    got.detail
+                );
+            }
+        }
+
+        // (3) A code the IRS does not print is a DIFFERENT fact — a transcription error, not a
+        //     limit of this tool — and says so, because the remedy is the paper and not a preparer.
+        let got = refusal(&with("QQ")).expect("a code the IRS does not print must refuse");
+        assert_eq!(
+            got.reason,
+            RefuseReason::UnsupportedBox12Code("QQ".to_string())
+        );
+        assert!(
+            got.detail.contains("is not a code the IRS prints")
+                && got.detail.contains("box 12a–12d"),
+            "got: {}",
+            got.detail
+        );
+
+        // (4) And a box 12 row with an amount but NO code names that, rather than reporting the
+        //     empty string as an unsupported code.
+        let got = refusal(&with("")).expect("a box 12 row with no code must refuse");
+        assert!(got.detail.contains("NO code"), "got: {}", got.detail);
     }
 
     #[test]
