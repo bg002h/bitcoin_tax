@@ -686,18 +686,38 @@ mod tests {
     /// `TMPDIR` pointed elsewhere the 239,238-byte PDF still landed in `/tmp`, a 32 GB tmpfs shared
     /// with every build on this box. This pins the *mechanism* — `std::env::temp_dir()` — so a future
     /// edit cannot quietly go back to a literal.
+    ///
+    /// ★ FR-174: the TMPDIR-unset assertion used to pin the literal `"/tmp/…"` unconditionally, which
+    /// is only true on Linux. macOS's `std::env::temp_dir()` consults `confstr(_CS_DARWIN_USER_TEMP_DIR)`
+    /// even with `TMPDIR` unset (`/var/folders/…/T/`, never `/tmp`), and Windows's does not consult
+    /// `TMPDIR` at all (`%TMP%`/`%TEMP%`) — so a literal `/tmp` failed the *first* assertion there too.
+    /// Compare against the real `std::env::temp_dir()` instead, which is what the function under test
+    /// itself does, and keep the Linux-specific literal as a narrower, platform-gated assertion.
+    /// ★★ FR-174, the Windows half — which the first fold MISSED. `std::env::temp_dir()` consults
+    /// `TMPDIR` on unix (`getenv`) but `TMP` then `TEMP` on Windows (`GetTempPath2`), and never
+    /// `TMPDIR`. So setting `TMPDIR` on Windows changes nothing, the path stays at `%TMP%`, and the
+    /// FIRST assertion below fails — which is exactly the message CI printed for 8 days:
+    /// `the default proof path ignored TMPDIR: C:\Users\RUNNER~1\AppData\Local\Temp\…`.
+    ///
+    /// ★ The function under test was ALWAYS right: it has called `std::env::temp_dir()` since it was
+    /// written. Both failures were the TEST asserting a Linux fact on three platforms.
+    #[cfg(unix)]
+    const TEMP_DIR_VAR: &str = "TMPDIR";
+    #[cfg(windows)]
+    const TEMP_DIR_VAR: &str = "TMP";
+
     #[test]
     fn the_label_proof_default_path_honours_tmpdir() {
         // SAFETY: single-threaded within this test, and the variable is restored before returning.
-        let before = std::env::var_os("TMPDIR");
+        let before = std::env::var_os(TEMP_DIR_VAR);
         let dir = tempfile::tempdir().expect("tempdir");
-        unsafe { std::env::set_var("TMPDIR", dir.path()) };
+        unsafe { std::env::set_var(TEMP_DIR_VAR, dir.path()) };
         // ★ The REAL function the `label-proof` arm calls — not a re-implementation of it, and not a
         //   grep of the source, either of which can pass while the arm keeps its literal.
         let got = std::path::PathBuf::from(default_proof_path("f8995a--2025"));
         assert!(
             got.starts_with(dir.path()),
-            "the default proof path ignored TMPDIR: {}",
+            "the default proof path ignored {TEMP_DIR_VAR}: {}",
             got.display()
         );
         assert_eq!(
@@ -707,18 +727,30 @@ mod tests {
             got.display()
         );
 
-        // ★★ And with TMPDIR unset the behaviour is exactly what it always was.
-        unsafe { std::env::remove_var("TMPDIR") };
+        // ★★ And with TMPDIR unset the behaviour is exactly what `std::env::temp_dir()` itself does on
+        // THIS platform — never a hardcoded `/tmp`, which is a Linux-only fact.
+        unsafe { std::env::remove_var(TEMP_DIR_VAR) };
+        let want = std::env::temp_dir().join("f8995a--2025-label-proof.pdf");
+        assert_eq!(
+            default_proof_path("f8995a--2025"),
+            want.to_string_lossy(),
+            "an operator who has not set TMPDIR must see exactly what std::env::temp_dir() reports, \
+             not a platform assumption baked into the test"
+        );
+        // ★ The promise worth pinning literally: on Linux (this CI runner, this development box) an
+        // unset TMPDIR really does mean `/tmp` — unlike macOS (`confstr` → `/var/folders/…/T/`) or
+        // Windows (`%TMP%`/`%TEMP%`, TMPDIR never consulted).
+        #[cfg(target_os = "linux")]
         assert_eq!(
             default_proof_path("f8995a--2025"),
             "/tmp/f8995a--2025-label-proof.pdf",
-            "an operator who has not set TMPDIR must see no change"
+            "on Linux, an operator who has not set TMPDIR must see no change"
         );
 
         unsafe {
             match before {
-                Some(v) => std::env::set_var("TMPDIR", v),
-                None => std::env::remove_var("TMPDIR"),
+                Some(v) => std::env::set_var(TEMP_DIR_VAR, v),
+                None => std::env::remove_var(TEMP_DIR_VAR),
             }
         }
     }

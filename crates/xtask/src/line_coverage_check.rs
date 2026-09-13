@@ -1434,6 +1434,15 @@ fn bundled_maps(root: &Path) -> Result<Vec<BundledMap>, String> {
     Ok(out)
 }
 
+/// ★ FR-174 Cause A. `CAPTION_PARAPHRASES` is keyed by hardcoded forward-slash literals, but a `rel`
+/// built from `Path::display()` (as [`bundled_maps`] builds it) renders `\` on Windows — so the two
+/// sides of the lookup below disagree on separator alone, and a genuinely-excused caption reads as
+/// unexcused. Normalise BOTH sides to `/` at the comparison rather than retyping the table with `\`,
+/// which would just move the disease to a second, Windows-only key list.
+fn normalize_path_sep(p: &str) -> String {
+    p.replace('\\', "/")
+}
+
 /// The rule, as a pure function of one map's source and its own year's extract, so a planted
 /// carried-forward caption can be watched going red (harness B1).
 ///
@@ -1448,14 +1457,14 @@ fn map_caption_problems(
     let mut errs = Vec::new();
     let mut used = Vec::new();
     let caps = map_captions(src);
+    let rel_norm = normalize_path_sep(rel);
     for (label, q) in &caps {
         if hays.iter().any(|h| caption_present(h, q)) {
             continue;
         }
-        match CAPTION_PARAPHRASES
-            .iter()
-            .position(|(m, l, text, _)| *m == rel && l == label && text == q)
-        {
+        match CAPTION_PARAPHRASES.iter().position(|(m, l, text, _)| {
+            normalize_path_sep(m) == rel_norm && l == label && text == q
+        }) {
             Some(i) => used.push(i),
             None => errs.push(format!(
                 "{rel}: the caption on {label} is NOT printed on {extract_name}:\n      {q:?}\n    \
@@ -2731,6 +2740,45 @@ line16 = \"g\"
                     .any(|(l, q)| l == label && q == text),
                 "{rel} no longer carries the caption {text:?} on {label} — the row is describing \
                  something that has changed"
+            );
+        }
+    }
+
+    /// ★★★ **B1 — FR-174 Cause A, the mechanism reproduced without a Windows runner.**
+    ///
+    /// `bundled_maps` builds `rel` from `Path::display()`, which is backslash-separated on Windows;
+    /// `CAPTION_PARAPHRASES` is keyed by hardcoded forward-slash literals. On Windows the two never
+    /// match, so BOTH of an excused row's own captions misfire: the caption itself reads as an
+    /// unexcused paraphrase, and [`stale_paraphrase_claims`] simultaneously reads the excuse row as
+    /// describing nothing. Reproduce the mechanism directly — feed the lookup a `rel` rendered the way
+    /// Windows renders it — rather than requiring the OS.
+    #[test]
+    fn the_excuse_lookup_survives_a_backslash_rendered_rel() {
+        for (i, (rel, label, text, _)) in CAPTION_PARAPHRASES.iter().enumerate() {
+            let windows_rel = rel.replace('/', "\\");
+            assert_ne!(
+                &windows_rel, rel,
+                "the fixture must actually change the separator, or this proves nothing"
+            );
+            // A minimal map source carrying ONLY this one caption — isolated from the map's other
+            // captions, which are irrelevant to the lookup under test.
+            let src = format!("{label} = \"x.y\" # {text:?}\n");
+            // extract is EMPTY: the caption cannot be found verbatim, so the excuse table is the
+            // ONLY way this can pass.
+            let (n, errs, used) = map_caption_problems(&windows_rel, &src, "irrelevant.txt", "");
+            assert_eq!(
+                n, 1,
+                "the fixture must produce exactly the one caption under test: {src:?}"
+            );
+            assert!(
+                errs.is_empty(),
+                "a backslash-rendered rel must still match its excuse row for {label}: {errs:?}"
+            );
+            assert_eq!(
+                used,
+                vec![i],
+                "the excuse row at index {i} must be marked USED even though the key was rendered \
+                 with backslashes"
             );
         }
     }

@@ -8069,6 +8069,28 @@ build, each with an owning phase.
   on a branch with no required checks. A red CI does not merely fail to catch the next defect — **it hides
   the ones that arrive while it is red.** `make check` cannot see any of them: it runs one platform.
 
+- **FR-175 — a dispatched agent that BACKGROUNDS its gate and ends its turn never writes its report. Important. Owning phase: the harness (dispatch-brief boilerplate).**
+  **Measured 2026-09-13 on FR-174.** The agent finished its implementation correctly, then launched
+  `make check` in the background and ended its turn with *"I've kicked off the `make check` retry in the
+  background and will report back once it completes."* It was resumed once by `SendMessage` (never
+  restarted — its edits were live in a worktree) with an explicit four-step list ending in the report, and
+  it stalled **the same way again**: *"Waiting for this `make check` run to complete."* Two stalls, one
+  shape. The report was never written, so the standing rule *"the agent persists its own report, the
+  controller is never the only copy"* produced **no copy at all** — and the controller had to reconstruct
+  from the diff, which is exactly the independence the rule exists to protect.
+  ★★ **Worse, and this is the real cost:** the controller snapshotted the worktree while the agent was
+  still live, and captured it **mid-kill** — the applied diff was the agent's *planted* state (the lookup
+  reverted to `*m == rel`, `rel_norm` computed and unused). `make check` went red 3650/1 and a cycle went
+  into debugging a defect that was a deliberate plant. **Two rules follow, and both are cheap:**
+  1. **Dispatch briefs must say: run the gate in the FOREGROUND.** A backgrounded gate turns the report
+     into a promise the agent's turn cannot keep. Add it to the working-rules boilerplate beside the
+     existing *"capture once, grep twice"* line.
+  2. **Never diff or integrate a worktree whose agent has not delivered its report.** The report is the
+     signal that the tree is in a settled state rather than a planted one. An agent mid-B1 has a
+     deliberately broken tree, by design — that is the whole method.
+  ★ The 1-failure gate is what caught it, which is the argument for reading the summary line rather than
+  the tail of the log: `tail -2` on a commit attempt hid the word BLOCKED earlier the same day.
+
 - **FR-152 — `census_join` anchors captions to ABSOLUTE line indices in a generated file. Minor. Owning phase: the port machine.**
   A4's 110 `# Regenerate:` header additions shifted every extract by a line, and `forms/2024/f1040s1.map.toml`'s
   `extract_line` anchors (11/15/58) had to move to 15/19/62 — an edit outside A4's ownership, reported rather
