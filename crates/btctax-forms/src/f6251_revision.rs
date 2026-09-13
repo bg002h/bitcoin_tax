@@ -43,12 +43,33 @@
 //!
 //! ## How it is closed
 //!
-//! [`revision`] is an **`_`-free match over [`LineSet`]**, so `f6251/2026` cannot be pointed at
-//! [`crate::line_set::Schema::Form6251ObbbaMap`] without an arm here — that is `E0004`, a build
-//! error, per `CLAUDE.md`'s *"derive the list, or make the compiler hold it."* And an arm written by
-//! copying TY2025's cells does not survive either: `tests/f6251_obbba.rs` asserts every cell below
-//! is **verbatim in that revision's own archived extract**, so TY2025's "line 37" reds against
-//! `f6251--2026.txt`.
+//! `f6251/2026` cannot be pointed at [`crate::line_set::Schema::Form6251ObbbaMap`] without an arm
+//! here: that is a **build error**, per `CLAUDE.md`'s *"derive the list, or make the compiler hold
+//! it."* And an arm written by copying TY2025's cells does not survive either: `tests/f6251_obbba.rs`
+//! asserts every cell below is **verbatim in that revision's own archived extract**, so TY2025's
+//! "line 37" reds against `f6251--2026.txt`.
+//!
+//! ★★ **FR-141 — the trap was an `_`-free match over EVERY [`LineSet`], and its blast radius was
+//! wrong.** Porting Form 8995-A to TY2025 — a form with no connection to the AMT — produced an
+//! `E0004` in this module, because every unrelated revision had to be listed in a "not this schema"
+//! arm. Measured on the port rehearsal: 1 of the 7 per-`(stem, year)` hand-edits was this file
+//! (`design/agent-reports/REPORT-rehearse-port-f8995a-2025.md` F10). The fail-closed behaviour was
+//! right and the reach was not: a module about Form 6251 should red when Form 6251 changes.
+//!
+//! So the totality is now asserted where it belongs — over the revisions whose SCHEMA is this field
+//! map — and it is still the compiler that asserts it, at build time, not a test:
+//!
+//! ```text
+//! const _: () = { for ls in LineSet::ALL { if schema(ls) == Form6251ObbbaMap { assert!(revision(ls).is_some()) } } };
+//! ```
+//!
+//! [`crate::line_set::schema`] is `const fn`, so that walk runs during compilation: wiring a new
+//! revision onto this schema without stating its cells is `E0080`, a **failed const evaluation**, and
+//! porting an unrelated form is nothing at all. ★ The one thing lost against `E0004` is the compiler
+//! naming the variant, so `tests::every_obbba_revision_has_cells` and the integration test in
+//! `tests/f6251_obbba.rs` stay: they do name it. ★★ What is NOT lost is the property the E0004 was
+//! there for — **`_ => None` here is not a swept default, it is a guarded one**, and the guard is
+//! checked by the same compiler pass that would have raised the E0004.
 //!
 //! ★★★ **And the third leg, which closes the COMPUTATION side:**
 //! [`ObbbaRevision::schedule_1a_line_agreeing_with`] compares the line this revision PRINTS against
@@ -255,59 +276,63 @@ const F6251_2025: ObbbaRevision = ObbbaRevision {
         "If you reported capital gain distributions directly on Form 1040 or 1040-SR, line 7;",
 };
 
-/// ★★★ **THE TRAP.** Exhaustive over [`LineSet`] with **no `_` arm**: adding a revision — and in
-/// particular pointing `f6251/2026` at [`crate::line_set::Schema::Form6251ObbbaMap`] — is a compile
-/// error until its own cells are stated here.
+/// ★★★ **THE TRAP.** Pointing a revision — `f6251/2026` in particular — at
+/// [`crate::line_set::Schema::Form6251ObbbaMap`] without stating its own cells here does not compile.
 ///
-/// `None` means "this revision is not the OBBBA-era Form 6251", which every non-6251 line set is.
-/// A 6251 revision on this schema that answered `None` would compile, so
-/// `tests/f6251_obbba.rs::every_revision_on_this_schema_has_its_year_varying_cells` closes that leg
-/// too — derived from `LineSet::ALL` and [`crate::line_set::schema`], never from a list.
+/// `None` means "this revision is not the OBBBA-era Form 6251", which every non-6251 line set is, and
+/// the `_` arm below is **guarded, not swept**: the `const _: ()` block under this function walks
+/// `LineSet::ALL` during compilation and fails the build if a revision on this schema lands in it. FR-141 replaced
+/// an `_`-free match over every `LineSet` — which reduced to the same guarantee while reddening this
+/// Form 6251 module on the port of any unrelated form — with that const walk. `const fn` because the
+/// guard calls it at compile time.
 #[must_use]
-pub fn revision(ls: LineSet) -> Option<&'static ObbbaRevision> {
+pub const fn revision(ls: LineSet) -> Option<&'static ObbbaRevision> {
     match ls {
         LineSet::F6251_2025 => Some(&F6251_2025),
 
-        // ── Not this schema. Listed rather than swept by `_`, which is the whole mechanism. ──
-        LineSet::F1040_2024
-        | LineSet::F1040s1_2024
-        | LineSet::F1040s2_2024
-        | LineSet::F1040s3_2024
-        | LineSet::F1040sa_2024
-        | LineSet::F1040sb_2024
-        | LineSet::F1040sc_2024
-        | LineSet::F1040v_2024
-        | LineSet::F4868_2024
-        | LineSet::F6251_2024
-        | LineSet::F8275_2024
-        | LineSet::F8283_2024
-        | LineSet::F8949_2024
-        | LineSet::F8889_2024
-        | LineSet::F8959_2024
-        | LineSet::F8960_2024
-        | LineSet::F8995_2024
-        | LineSet::F8995a_2024
-        | LineSet::ScheduleD_2024
-        | LineSet::ScheduleSe_2024
-        | LineSet::F1040_2025
-        | LineSet::F1040s1a_2025
-        | LineSet::F1040s2_2025
-        | LineSet::F1040s3_2025
-        | LineSet::F1040sa_2025
-        | LineSet::F1040sb_2025
-        | LineSet::F1040sc_2025
-        | LineSet::F1040v_2025
-        | LineSet::F4868_2025
-        | LineSet::F8283_2025
-        | LineSet::F8949_2025
-        | LineSet::F8889_2025
-        | LineSet::F8959_2025
-        | LineSet::F8960_2025
-        | LineSet::F8995_2025
-        | LineSet::ScheduleD_2025
-        | LineSet::ScheduleSe_2025 => None,
+        // ── Not this schema. Guarded by the `const _: ()` walk below, which is why this sweep is
+        //    honest here and was not before FR-141 (`CLAUDE.md`: derive the list, or make the
+        //    COMPILER hold it — this is the second form, not an exception to the rule).
+        _ => None,
     }
 }
+
+/// ★★★ **The totality of the arms above, held by the compiler — and confined to Form 6251.**
+///
+/// Every revision whose schema is [`crate::line_set::Schema::Form6251ObbbaMap`] states its own
+/// year-varying cells, or this `const` fails to evaluate and the build stops (`E0080`). The walk is
+/// derived twice over — `LineSet::ALL` is generated from the bundled rows (FR-141) and the schema comes
+/// from the one hand-written match — so there is no list here to fall behind either of them.
+///
+/// ★ Why this shape and not an `_`-free match: that version reddened this module when ANY form was
+/// ported to a new year (rehearsal F10 / FR-141), which is a Form 6251 guard firing on Form 8995-A.
+/// This one fires when, and only when, a revision joins this field map.
+///
+/// ★★ B1: watched red 2026-09-12 on a planted `f6251/2026` map wired to this schema with no arm —
+/// `error[E0080]: evaluation panicked`. `tests::every_obbba_revision_has_cells` is the same assertion
+/// as a test, kept because it NAMES the revision (a const panic cannot format one).
+/// ★ Anonymous (`const _`) because that is the static-assert idiom the compiler evaluates whether or
+/// not anything names it — a NAMED const nobody uses is a `dead_code` warning, and `-D warnings` would
+/// have made the guard's own presence the thing that broke the build.
+const _: () = {
+    let mut i = 0;
+    while i < LineSet::ALL.len() {
+        let ls = LineSet::ALL[i];
+        if matches!(
+            crate::line_set::schema(ls),
+            crate::line_set::Schema::Form6251ObbbaMap
+        ) {
+            assert!(
+                revision(ls).is_some(),
+                "a revision is wired to Form6251ObbbaMap and states none of its own year-varying \
+                 cells: it would inherit another revision's Schedule 1-A cross-reference, and the AMT \
+                 base would be wrong with every other instrument green. Add its arm to \
+                 `f6251_revision::revision` — `tests::every_obbba_revision_has_cells` names which one."
+            );
+        }
+        i += 1;
+    }
+};
 
 #[cfg(test)]
 mod tests {
@@ -447,6 +472,9 @@ mod tests {
     /// unit-test binary alone cannot be green on a missing arm.)
     #[test]
     fn every_obbba_revision_has_cells() {
+        // ★ The PRIMARY instrument for this property is the `const _: ()` guard above, which fails
+        //   the BUILD. This test is the one that can name the offending revision, and it is also what
+        //   keeps the property falsifiable from a test run alone.
         for ls in LineSet::ALL {
             if crate::line_set::schema(*ls) == crate::line_set::Schema::Form6251ObbbaMap {
                 assert!(

@@ -26,228 +26,47 @@
 //! renamed, 0 moved**, and yet eight numbered lines print DIFFERENT text, two of them
 //! cross-references — Schedule 1-A line **37** → **43** on line 1a, and Form 1040 line **7** →
 //! **7a** on line 7. A single struct serving both would fill either year's PDF with nothing red.
-//! So the year-varying cells of that layout live in [`crate::f6251_revision`], keyed per revision
-//! and held by an `_`-free match over [`LineSet`]: wiring `f6251/2026` onto this schema without
-//! stating its own cells is a **build error**.
+//! So the year-varying cells of that layout live in [`crate::f6251_revision`], keyed per revision and
+//! held by the compiler: wiring `f6251/2026` onto this schema without stating its own cells is a
+//! **build error** (`E0080` from that module's `const` walk over `ALL` — it was an `_`-free match over
+//! every `LineSet` until FR-141, which is why porting Form 8995-A used to red a Form 6251 module).
 //!
 //! Many-to-one by design: several revisions may parse into one struct (`Form1040Map` absorbs
 //! 2024/2025 with `Option` lines today).
+//!
+//! ## ★★ FR-141 — [`LineSet`] is GENERATED; only [`schema`] is typed
+//!
+//! The enum, [`LineSet::parse`], [`LineSet::as_str`] and [`LineSet::ALL`] are written by `build.rs`
+//! from the `line_set` row of every bundled map (`$OUT_DIR/line_set_generated.rs`, included below).
+//! They are pure transcription of a string that is already on disk, and the port rehearsal measured
+//! what typing them costs: **7 hand-edits in this file and `f6251_revision.rs` for one new
+//! `(stem, year)`, six of which decided nothing** (`design/agent-reports/REPORT-rehearse-port-f8995a-2025.md`
+//! F10 → `FOLLOWUPS.md` FR-141). It is now **one** — the [`schema`] arm.
+//!
+//! ★★★ **The build error survived the generation, which was the whole condition on doing it.** A new
+//! map means a new variant, and [`schema`] is still an `_`-free match over every variant, so the port
+//! stops at `E0004` in this file until a human says which struct transcribes the revision. Nothing
+//! about a new row can compile silently.
+//!
+//! ★★ And two of the seven were worse than redundant. [`LineSet::ALL`] is what every gate walking the
+//! revision set iterates (`tests/line_set_wiring.rs`, `tests/f6251_obbba.rs`,
+//! `tests/supported_years_cross_product.rs`), and nothing held it to the glob: measured 2026-09-12, a
+//! port that added the variant, the `parse` arm, the `as_str` arm and the [`schema`] arm but forgot the
+//! `ALL` entry reds **NOTHING** — the whole suite passes and that revision is never measured by any of
+//! those gates again. Deriving `ALL` closes a hole, not just a keystroke.
+//!
+//! ★ FR-146 is closed by the same change rather than by a fix: two variants had the doc comment of
+//! their *neighbour* (`"f8959/2024"`'s sentence sat above `F8889_2024`, and the 2025 block repeated
+//! the slip), which is only possible while the comment and the variant are typed separately. They are
+//! now emitted from the same string, and `tests::every_generated_doc_comment_names_its_own_row` holds
+//! that pairing on the generated text so the generator cannot drift back into it.
 
-/// The closed set of line-set revisions this build knows. Generated 2026-09-05 from the 37 rows; the four `f4868`/`f1040v` revisions added 2026-09-06 (spec 4868/1040-V R1) made 41, and the S9 drop of the TY2017 form package (owner ruling 2026-09-06) removed its five, leaving 36.
-#[allow(non_camel_case_types)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum LineSet {
-    /// `"f1040/2024"`.
-    F1040_2024,
-    /// `"f1040s1/2024"`.
-    F1040s1_2024,
-    /// `"f1040s2/2024"`.
-    F1040s2_2024,
-    /// `"f1040s3/2024"`.
-    F1040s3_2024,
-    /// `"f1040sa/2024"`.
-    F1040sa_2024,
-    /// `"f1040sb/2024"`.
-    F1040sb_2024,
-    /// `"f1040sc/2024"`.
-    F1040sc_2024,
-    /// `"f1040v/2024"`.
-    F1040v_2024,
-    /// `"f4868/2024"`.
-    F4868_2024,
-    /// `"f6251/2024"`.
-    F6251_2024,
-    /// `"f8275/2024"`.
-    F8275_2024,
-    /// `"f8283/2024"`.
-    F8283_2024,
-    /// `"f8949/2024"`.
-    F8949_2024,
-    /// `"f8959/2024"`.
-    /// Form 8889, TY2024 (T16).
-    F8889_2024,
-    F8959_2024,
-    /// `"f8960/2024"`.
-    F8960_2024,
-    /// `"f8995/2024"`.
-    F8995_2024,
-    /// `"f8995a/2024"`.
-    F8995a_2024,
-    /// `"schedule_d/2024"`.
-    ScheduleD_2024,
-    /// `"schedule_se/2024"`.
-    ScheduleSe_2024,
-    /// `"f1040/2025"`.
-    F1040_2025,
-    /// `"f1040s1a/2025"` — UNWIRED: not yet verified against a struct (design r2 §10 step 5).
-    F1040s1a_2025,
-    /// `"f1040s2/2025"` — wired at step 5 (2026-09-05): map ⊆ PDF fields, the label join and `[census]` all green; parses into the 2024 struct (a constants-only revision of the same line set).
-    F1040s2_2025,
-    /// `"f1040s3/2025"` — wired at step 5 (2026-09-05): map ⊆ PDF fields, the label join and `[census]` all green; parses into the 2024 struct (a constants-only revision of the same line set).
-    F1040s3_2025,
-    /// `"f1040sa/2025"` — wired at step 5 (2026-09-05): map ⊆ PDF fields, the label join and `[census]` all green; parses into the 2024 struct (a constants-only revision of the same line set).
-    F1040sa_2025,
-    /// `"f1040sb/2025"` — wired at step 5 (2026-09-05): map ⊆ PDF fields, the label join and `[census]` all green; parses into the 2024 struct (a constants-only revision of the same line set).
-    F1040sb_2025,
-    /// `"f1040sc/2025"` — wired at step 5 (2026-09-05): map ⊆ PDF fields, the label join and `[census]` all green; parses into the 2024 struct (a constants-only revision of the same line set).
-    F1040sc_2025,
-    /// `"f1040v/2025"`.
-    F1040v_2025,
-    /// `"f4868/2025"`.
-    F4868_2025,
-    /// `"f6251/2025"` — UNWIRED: not yet verified against a struct (design r2 §10 step 5).
-    F6251_2025,
-    /// `"f8283/2025"`.
-    F8283_2025,
-    /// `"f8949/2025"`.
-    F8949_2025,
-    /// `"f8959/2025"` — wired at step 5 (2026-09-05): map ⊆ PDF fields, the label join and `[census]` all green; parses into the 2024 struct (a constants-only revision of the same line set).
-    /// Form 8889, TY2025 (T16). The SAME line set as 2024 — measured: the two grids' label
-    /// readings are identical and the extracts differ only in the year and the §223(b) figures.
-    F8889_2025,
-    F8959_2025,
-    /// `"f8960/2025"` — wired at step 5 (2026-09-05): map ⊆ PDF fields, the label join and `[census]` all green; parses into the 2024 struct (a constants-only revision of the same line set).
-    F8960_2025,
-    /// `"f8995/2025"` — wired at step 5 (2026-09-05): map ⊆ PDF fields, the label join and `[census]` all green; parses into the 2024 struct (a constants-only revision of the same line set).
-    F8995_2025,
-    /// `"schedule_d/2025"`.
-    ScheduleD_2025,
-    /// `"schedule_se/2025"`.
-    ScheduleSe_2025,
-}
-
-impl LineSet {
-    /// Parse a row's `line_set` string. `None` is a revision this build does not know — a refusal.
-    pub fn parse(s: &str) -> Option<LineSet> {
-        match s {
-            "f1040/2024" => Some(LineSet::F1040_2024),
-            "f1040s1/2024" => Some(LineSet::F1040s1_2024),
-            "f1040s2/2024" => Some(LineSet::F1040s2_2024),
-            "f1040s3/2024" => Some(LineSet::F1040s3_2024),
-            "f1040sa/2024" => Some(LineSet::F1040sa_2024),
-            "f1040sb/2024" => Some(LineSet::F1040sb_2024),
-            "f1040sc/2024" => Some(LineSet::F1040sc_2024),
-            "f1040v/2024" => Some(LineSet::F1040v_2024),
-            "f4868/2024" => Some(LineSet::F4868_2024),
-            "f6251/2024" => Some(LineSet::F6251_2024),
-            "f8275/2024" => Some(LineSet::F8275_2024),
-            "f8283/2024" => Some(LineSet::F8283_2024),
-            "f8949/2024" => Some(LineSet::F8949_2024),
-            "f8889/2024" => Some(LineSet::F8889_2024),
-            "f8959/2024" => Some(LineSet::F8959_2024),
-            "f8960/2024" => Some(LineSet::F8960_2024),
-            "f8995/2024" => Some(LineSet::F8995_2024),
-            "f8995a/2024" => Some(LineSet::F8995a_2024),
-            "schedule_d/2024" => Some(LineSet::ScheduleD_2024),
-            "schedule_se/2024" => Some(LineSet::ScheduleSe_2024),
-            "f1040/2025" => Some(LineSet::F1040_2025),
-            "f1040s1a/2025" => Some(LineSet::F1040s1a_2025),
-            "f1040s2/2025" => Some(LineSet::F1040s2_2025),
-            "f1040s3/2025" => Some(LineSet::F1040s3_2025),
-            "f1040sa/2025" => Some(LineSet::F1040sa_2025),
-            "f1040sb/2025" => Some(LineSet::F1040sb_2025),
-            "f1040sc/2025" => Some(LineSet::F1040sc_2025),
-            "f1040v/2025" => Some(LineSet::F1040v_2025),
-            "f4868/2025" => Some(LineSet::F4868_2025),
-            "f6251/2025" => Some(LineSet::F6251_2025),
-            "f8283/2025" => Some(LineSet::F8283_2025),
-            "f8949/2025" => Some(LineSet::F8949_2025),
-            "f8889/2025" => Some(LineSet::F8889_2025),
-            "f8959/2025" => Some(LineSet::F8959_2025),
-            "f8960/2025" => Some(LineSet::F8960_2025),
-            "f8995/2025" => Some(LineSet::F8995_2025),
-            "schedule_d/2025" => Some(LineSet::ScheduleD_2025),
-            "schedule_se/2025" => Some(LineSet::ScheduleSe_2025),
-            _ => None,
-        }
-    }
-
-    /// The row string this variant names.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            LineSet::F1040_2024 => "f1040/2024",
-            LineSet::F1040s1_2024 => "f1040s1/2024",
-            LineSet::F1040s2_2024 => "f1040s2/2024",
-            LineSet::F1040s3_2024 => "f1040s3/2024",
-            LineSet::F1040sa_2024 => "f1040sa/2024",
-            LineSet::F1040sb_2024 => "f1040sb/2024",
-            LineSet::F1040sc_2024 => "f1040sc/2024",
-            LineSet::F1040v_2024 => "f1040v/2024",
-            LineSet::F4868_2024 => "f4868/2024",
-            LineSet::F6251_2024 => "f6251/2024",
-            LineSet::F8275_2024 => "f8275/2024",
-            LineSet::F8283_2024 => "f8283/2024",
-            LineSet::F8949_2024 => "f8949/2024",
-            LineSet::F8889_2024 => "f8889/2024",
-            LineSet::F8959_2024 => "f8959/2024",
-            LineSet::F8960_2024 => "f8960/2024",
-            LineSet::F8995_2024 => "f8995/2024",
-            LineSet::F8995a_2024 => "f8995a/2024",
-            LineSet::ScheduleD_2024 => "schedule_d/2024",
-            LineSet::ScheduleSe_2024 => "schedule_se/2024",
-            LineSet::F1040_2025 => "f1040/2025",
-            LineSet::F1040s1a_2025 => "f1040s1a/2025",
-            LineSet::F1040s2_2025 => "f1040s2/2025",
-            LineSet::F1040s3_2025 => "f1040s3/2025",
-            LineSet::F1040sa_2025 => "f1040sa/2025",
-            LineSet::F1040sb_2025 => "f1040sb/2025",
-            LineSet::F1040sc_2025 => "f1040sc/2025",
-            LineSet::F1040v_2025 => "f1040v/2025",
-            LineSet::F4868_2025 => "f4868/2025",
-            LineSet::F6251_2025 => "f6251/2025",
-            LineSet::F8283_2025 => "f8283/2025",
-            LineSet::F8949_2025 => "f8949/2025",
-            LineSet::F8889_2025 => "f8889/2025",
-            LineSet::F8959_2025 => "f8959/2025",
-            LineSet::F8960_2025 => "f8960/2025",
-            LineSet::F8995_2025 => "f8995/2025",
-            LineSet::ScheduleD_2025 => "schedule_d/2025",
-            LineSet::ScheduleSe_2025 => "schedule_se/2025",
-        }
-    }
-
-    /// Every variant, for the tests that hold this set to the rows on disk.
-    pub const ALL: &'static [LineSet] = &[
-        LineSet::F1040_2024,
-        LineSet::F1040s1_2024,
-        LineSet::F1040s2_2024,
-        LineSet::F1040s3_2024,
-        LineSet::F1040sa_2024,
-        LineSet::F1040sb_2024,
-        LineSet::F1040sc_2024,
-        LineSet::F1040v_2024,
-        LineSet::F4868_2024,
-        LineSet::F6251_2024,
-        LineSet::F8275_2024,
-        LineSet::F8283_2024,
-        LineSet::F8949_2024,
-        LineSet::F8889_2024,
-        LineSet::F8959_2024,
-        LineSet::F8960_2024,
-        LineSet::F8995_2024,
-        LineSet::F8995a_2024,
-        LineSet::ScheduleD_2024,
-        LineSet::ScheduleSe_2024,
-        LineSet::F1040_2025,
-        LineSet::F1040s1a_2025,
-        LineSet::F1040s2_2025,
-        LineSet::F1040s3_2025,
-        LineSet::F1040sa_2025,
-        LineSet::F1040sb_2025,
-        LineSet::F1040sc_2025,
-        LineSet::F1040v_2025,
-        LineSet::F4868_2025,
-        LineSet::F6251_2025,
-        LineSet::F8283_2025,
-        LineSet::F8949_2025,
-        LineSet::F8889_2025,
-        LineSet::F8959_2025,
-        LineSet::F8960_2025,
-        LineSet::F8995_2025,
-        LineSet::ScheduleD_2025,
-        LineSet::ScheduleSe_2025,
-    ];
-}
+// ★ FR-141 — the enum, `parse`, `as_str` and `ALL`, GENERATED by `build.rs` from the `line_set` row
+//   of every `forms/<year>/*.map.toml`. See the module header: the four were pure transcription of a
+//   string already on disk, `ALL` was a list nothing held to the glob, and `schema` below — the one
+//   arm that encodes a decision — is still hand-written and still `_`-free, so a new row is still a
+//   build error until a human answers it.
+include!(concat!(env!("OUT_DIR"), "/line_set_generated.rs"));
 
 /// Which struct parses a revision — or [`Schema::Unwired`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -313,8 +132,13 @@ pub enum Schema {
     Unwired,
 }
 
-/// ★ THE MATCH. Exhaustive over [`LineSet`]: a new revision without an arm is a compile error.
-pub fn schema(ls: LineSet) -> Schema {
+/// ★ THE MATCH — the one thing a new row still costs a human, and the reason FR-141's generation did
+/// not weaken anything. Exhaustive over [`LineSet`] with no `_` arm: a new revision without an arm is
+/// `E0004`, in this file, naming the variant.
+///
+/// ★ `const` since FR-141 so [`crate::f6251_revision`] can hold its own totality at compile time
+/// without an `_`-free match over every unrelated revision — see that module's header.
+pub const fn schema(ls: LineSet) -> Schema {
     match ls {
         LineSet::F1040_2024 => Schema::Form1040Map,
         LineSet::F1040s1_2024 => Schema::Schedule1Map,
@@ -336,6 +160,19 @@ pub fn schema(ls: LineSet) -> Schema {
         LineSet::F8995a_2024 => Schema::Form8995AMap,
         LineSet::ScheduleD_2024 => Schema::ScheduleDMap,
         LineSet::ScheduleSe_2024 => Schema::ScheduleSeMap,
+        // ── TY2025. ★ FR-141/FR-146: the notes below were doc comments on the variants until the
+        //    variants became generated. They are JUDGMENT, so they belong beside the judgment — and
+        //    two of them were attached to the wrong variant while they lived up there.
+        //
+        //    ★ Eight were wired at step 5 (2026-09-05) on one measured finding: map ⊆ PDF fields, the
+        //      line→printed-label join and `[census]` all green, and each parses into the 2024 struct
+        //      — a constants-only revision of the same line set. They are `f1040s2`, `f1040s3`,
+        //      `f1040sa`, `f1040sb`, `f1040sc`, `f8959`, `f8960`, `f8995`.
+        //    ★ `f8889/2025` is the SAME line set as 2024 — measured: the two grids' label readings
+        //      are identical and the extracts differ only in the year and the §223(b) figures (T16).
+        //    ★ `f6251/2025` left `Unwired` on 2026-09-11 for `Form6251ObbbaMap`, the line-1a/1b
+        //      transcription struct. `f1040s1a/2025` stays `Unwired` permanently — `Schema::Unwired`
+        //      carries the owner ruling.
         LineSet::F1040_2025 => Schema::Form1040Map,
         LineSet::F1040s1a_2025 => Schema::Unwired,
         LineSet::F1040s2_2025 => Schema::Schedule2Map,
@@ -361,6 +198,43 @@ pub fn schema(ls: LineSet) -> Schema {
 mod tests {
     use super::*;
 
+    /// The text `build.rs` generated. The three tests below hold the GENERATOR, not the enum: with the
+    /// revision set derived, "is this variant right" is not a question a human answers any more, and
+    /// "did the thing that reads the rows read them correctly" is.
+    const GENERATED: &str = include_str!(concat!(env!("OUT_DIR"), "/line_set_generated.rs"));
+
+    /// Each generated variant paired with the doc line `build.rs` emitted directly above it — the row
+    /// string it quotes and the map file(s) it says carry that revision. Both halves are the
+    /// generator's own account of what it read, which is what makes them checkable against the maps.
+    fn generated_docs() -> std::collections::BTreeMap<String, (String, String)> {
+        let mut out = std::collections::BTreeMap::new();
+        let mut pending: Option<(String, String)> = None;
+        for line in GENERATED.lines() {
+            let t = line.trim();
+            if let Some(doc) = t.strip_prefix("/// `\"") {
+                let (row, rest) = doc.split_once('"').expect("a closing quote");
+                // The tail reads "` — the revision transcribed by `forms/<year>/<stem>.map.toml`."; keep
+                // the file list, and fall back to the whole tail if the generator's wording moves (the
+                // `contains` join below works either way — this only keeps the message readable).
+                let carried_by = rest
+                    .split_once("transcribed by ")
+                    .map_or(rest.trim(), |(_, tail)| tail.trim().trim_end_matches('.'));
+                pending = Some((row.to_string(), carried_by.to_string()));
+                continue;
+            }
+            if t.starts_with("//") || t.is_empty() {
+                continue;
+            }
+            if let Some(pair) = pending.take() {
+                out.insert(t.trim_end_matches(',').to_string(), pair);
+            }
+            if out.len() == LineSet::ALL.len() {
+                break; // past the enum body; `parse` / `as_str` / `ALL` follow.
+            }
+        }
+        out
+    }
+
     #[test]
     fn every_variant_round_trips_through_its_string() {
         for ls in LineSet::ALL {
@@ -370,10 +244,99 @@ mod tests {
         // A revision this build no longer bundles does not parse — the five TY2017 revisions were
         // dropped by S9 (owner ruling 2026-09-06) and must not survive as a parseable string.
         assert_eq!(LineSet::parse("f1040/2017"), None);
-        // 37 → 41 on 2026-09-06 (the four Form 4868 / Form 1040-V revisions, spec 4868/1040-V R1),
-        // then 41 → 36 the same day: S9 dropped the five TY2017 revisions with their form package.
-        // 36 → 38 on 2026-09-07 (T16 / FR-76): the TY2024 and TY2025 Form 8889 revisions.
-        assert_eq!(LineSet::ALL.len(), 38);
+    }
+
+    /// ★★★ **The generator's kill — and what used to be `assert_eq!(LineSet::ALL.len(), 38)`.**
+    ///
+    /// That was a hand-typed number beside a set that grows, and the port rehearsal counted it as one of
+    /// the seven per-`(stem, year)` edits (FR-141). The set is derived now, so the assertion that can
+    /// actually fail is this one: what `build.rs` read out of the maps with a LINE SCAN must be what
+    /// `MapRow::read` reads out of the same files with a real TOML parse — **per map**, not just as a
+    /// set. Two independent readers of one string, joined on the file they both read.
+    ///
+    /// ★ Per-map matters. A set comparison alone passes if two maps' revisions are SWAPPED, and the
+    /// generated variant set — which `schema`'s `_`-free match already pins — would be identical. The
+    /// join is via the generator's own doc line, which names the map it read each revision from.
+    ///
+    /// ★★ It is the liveness check on `ALL` too: every bundled map's revision is in it. Nothing held
+    /// that while the list was typed — measured 2026-09-12, a port that forgot the `ALL` entry red
+    /// NOTHING, and that revision was then skipped by every gate that iterates it.
+    #[test]
+    fn every_bundled_map_names_the_revision_the_generator_attributed_to_it() {
+        use std::collections::BTreeSet;
+        let docs = generated_docs();
+        let mut from_toml: BTreeSet<String> = BTreeSet::new();
+        for (stem, year) in crate::bundled::BUNDLED {
+            let text = crate::bundled::map_text(*stem, *year).expect("a bundled pair has a map");
+            let row = crate::map::MapRow::read(text)
+                .unwrap_or_else(|e| panic!("{}/{year}: the row must parse: {e}", stem.file_stem()));
+            let ls = LineSet::parse(&row.line_set).unwrap_or_else(|| {
+                panic!(
+                    "forms/{year}/{}.map.toml names revision `{}`, which the generated `LineSet` does \
+                     not know. `build.rs` read this same file: the line scan and the TOML parse \
+                     disagree, and every gate that walks `LineSet::ALL` measures the scan's answer.",
+                    stem.file_stem(),
+                    row.line_set
+                )
+            });
+            let (_, carried_by) = docs
+                .get(&format!("{ls:?}"))
+                .unwrap_or_else(|| panic!("{ls:?} has no generated doc line"));
+            let expected_file = format!("forms/{year}/{}.map.toml", stem.file_stem());
+            assert!(
+                carried_by.contains(&expected_file),
+                "`forms/{year}/{}.map.toml` names revision `{}`, but the generator recorded that \
+                 revision as \"{carried_by}\" — the line scan and the TOML parse are reading \
+                 different files, or the same file differently. Note the SET can still match: this \
+                 is what a set comparison alone cannot see.",
+                stem.file_stem(),
+                row.line_set
+            );
+            from_toml.insert(row.line_set);
+        }
+        let generated: BTreeSet<String> =
+            LineSet::ALL.iter().map(|ls| ls.as_str().into()).collect();
+        assert_eq!(
+            generated, from_toml,
+            "the generated revision set is not the set the bundled maps name. A revision only the \
+             TOML parse knows is a map no gate looks at; one only the scan knows is a phantom."
+        );
+        assert!(
+            !generated.is_empty(),
+            "no revisions at all — the two readers agree because neither read anything"
+        );
+    }
+
+    /// ★★ **FR-146, machine-checked.** Two variants carried their NEIGHBOUR's doc comment
+    /// (`"f8959/2024"`'s sentence sat above `F8889_2024`, and the 2025 block repeated the slip), which
+    /// is only possible while the text and the variant are typed separately. They come off one string
+    /// now — and this holds that pairing on the generated text, so the generator cannot drift back into
+    /// it by emitting the doc line and the variant out of step.
+    ///
+    /// ★ Said plainly, because the alternative was a weak check: a misplaced doc comment in HAND-WRITTEN
+    /// source is invisible to the compiler and to every test — which is exactly why FR-146 survived
+    /// until a human read the file. Generation is what makes it checkable at all; the kill is a one-line
+    /// mutation in `build.rs` (emit the previous revision's doc), watched red 2026-09-12.
+    #[test]
+    fn every_generated_doc_comment_names_its_own_row() {
+        let docs = generated_docs();
+        assert_eq!(
+            docs.len(),
+            LineSet::ALL.len(),
+            "only {} of {} variants carried a readable doc line — a parse that sees nothing cannot \
+             see a misattached comment either",
+            docs.len(),
+            LineSet::ALL.len()
+        );
+        for ls in LineSet::ALL {
+            let (quoted, _) = &docs[&format!("{ls:?}")];
+            assert_eq!(
+                quoted.as_str(),
+                ls.as_str(),
+                "the doc comment above `{ls:?}` describes `{quoted}` — the FR-146 slip, in the \
+                 generator this time"
+            );
+        }
     }
 
     /// The Unwired set is EXACTLY `f1040s1a/2025` — a shrink-only pin: wiring one edits this list
