@@ -7941,6 +7941,46 @@ build, each with an owning phase.
     whole purpose is reproducibility from committed bytes. ★ A *fallback* to the PDF is also wrong: a
     fallback is how the fixture silently stops being checked.
 
+- **FR-166 — `check_return.py:307` scores a yearless projection as TY2024 in silence. Important. Owning phase: NOW (Sep–Dec 2026).**
+  `year = wrapper_year if wrapper_year is not None else 2024`. A projection carrying no `tax_year`, run
+  without `--year`, is scored as TY2024 by **all three** engines at once. Exactly the class FR-164 deleted
+  everywhere else, surviving one file. ★ The file's own `--year` help text already argues why it matters —
+  it says a wrong year *"fabricated a divergence on 1040 line 15"*. *Fix:* refuse, naming
+  `btctax income project --year`. Found by the FR-164 build agent at its own scope boundary.
+
+- **FR-167 — `verify_schedule_1a.py:85` carries a TY2025 default. Minor. Owning phase: NOW, with FR-166.**
+  `def _rows(pol, name, year=2025)` — the same shape as `gen_goldens`'s four, in the second census script.
+  Whether any caller relies on it is **unmeasured**; measure before deleting.
+
+- **FR-168 — `taxcalc_exact.build_calculator` never compares a row's `FLPDYR` to the `year` it was asked for. Important. Owning phase: NOW — highest leverage of the three.**
+  **Controller-verified 2026-09-13** by reading `:112-140`: it refuses empty `rows` and refuses an `exact`
+  column (FR-124), and does nothing else. It is documented as *"the ONE construction path"* for a
+  Tax-Calculator run, so **one loud check there makes a year mismatch unwritable across all four callers at
+  once** — which beats four separate disciplines, and is the same argument that made FR-164 worth doing.
+  Needs a kill in the existing `selftest()`. ★ This is the residue of FR-164: the year now *reaches* the
+  builder on every path, and the builder still does not check that the rows agree with it.
+
+- **FR-169 — ⚠️ `gen_goldens.assert_baked_provenance_is_current()` has NO CALLER. Important. Owning phase: NOW — one line.**
+  **Controller-verified 2026-09-13:** a grep over `crates/`, `scripts/` and `design/` finds the definition
+  (`gen_goldens.py:201`), one prose mention (`:144`), and two agent reports that ran it **by hand** in
+  September. Nothing invokes it automatically. Its own docstring calls it *"the cheap half that can run any
+  time"* and it carries a `PLANT TO RE-RUN THE KILL` note — ★ **an instrument that has never run, which is
+  B1's own subject matter.** `HARNESS.md` B1: *"No checker exists until it has been observed RED on a
+  planted defect."* This one was written with its plant documented and then never wired to anything.
+  *Fix:* one line into `--selftest`. The FR-164 agent deliberately did **not** wire it, to keep its scope
+  honest — the right call, and the reason it is filed rather than silently absorbed.
+
+- **FR-170 — `btctax-oracle-harness/src/main.rs:68 const YEAR: i32 = 2024` is the last unstated year in the sweep path. Minor, but GATING for a TY2026 sweep. Owning phase: the TY2026 port.**
+  btctax's own side of a live sweep is fixed at 2024 with no way to say so from outside. After FR-164
+  `sweep.py` *checks* it indirectly through the corpus label but cannot *read* it. A `--year` on the harness,
+  refusing a year it has no params for, closes the loop.
+
+- **FR-171 — `verify_f6251.py`'s taxcalc pass is one `Records` at one `start_year`, so a mixed-year fixture is now REFUSED. Minor. Owning phase: the TY2026 port.**
+  A deliberate, documented boundary rather than a defect — the refusal message says exactly this. When the
+  first TY2026 vector lands, that pass must be grouped by year. ★ Recorded because it is the honest third
+  option from *"Derive the list, or make the compiler hold it"*: state in the source exactly what is covered
+  and what is not.
+
 - **FR-152 — `census_join` anchors captions to ABSOLUTE line indices in a generated file. Minor. Owning phase: the port machine.**
   A4's 110 `# Regenerate:` header additions shifted every extract by a line, and `forms/2024/f1040s1.map.toml`'s
   `extract_line` anchors (11/15/58) had to move to 15/19/62 — an edit outside A4's ownership, reported rather
