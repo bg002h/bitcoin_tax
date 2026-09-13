@@ -51,6 +51,14 @@ scripts/.pii-patterns.bak
 # Generated man-page PDFs (build artifacts; gropdf embeds a timestamp → not reproducible).
 # Regenerate with `make docs` / `cargo run -p xtask -- docs --pdf`. The .1 sources ARE committed.
 docs/pdf/
+# ★★ DERIVED, not enumerated (2026-09-13). Ten agent worktrees were given
+#    CARGO_TARGET_DIR=<repo>/target-<agent>, and `make check` derived target-<agent>-clippy
+#    beside each. None matched a rule here, `git add -A` swept them in, and GitHub REJECTED the
+#    push: `index-pack failed` on 103.5 MB binaries over its 100 MB limit — 109 GB on disk,
+#    ~205k paths in two commits, stripped by filter-branch before anything was published.
+#    The first fix attempt hand-listed ten directory names and MISSED the five -clippy ones,
+#    which is the same enumerate-instead-of-derive defect one level down. Hence a glob.
+target-*/
 target-clippy/
 __pycache__/
 
