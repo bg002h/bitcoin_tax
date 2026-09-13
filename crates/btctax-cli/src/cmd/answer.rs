@@ -18,7 +18,8 @@ use btctax_core::tax::provenance::{
     DependentGate,
 };
 use btctax_core::tax::questions::{
-    FormQuestion, QuestionId, SkippableKind, SkippableQuestion, FORM_QUESTIONS, SKIPPABLE_QUESTIONS,
+    FormQuestion, MoneyId, MoneyQuestion, QuestionId, SkippableKind, SkippableQuestion,
+    FORM_QUESTIONS, MONEY_QUESTIONS, SKIPPABLE_QUESTIONS,
 };
 use btctax_core::tax::return_inputs::ReturnInputs;
 use btctax_core::tax::tables::FullReturnParams;
@@ -42,6 +43,18 @@ pub enum Ask {
         /// The row's index in `header.dependents`, resolved at enumeration time.
         row: usize,
     },
+    /// ★★★ **FR-201 — a FIGURE the interview must ask for, because no document reports it.**
+    ///
+    /// From the core [`MONEY_QUESTIONS`] registry. Neither class (A) nor class (B): a `Usd` leaf has
+    /// no unanswered state, so silence cannot refuse and cannot forgo a benefit the way a skipped
+    /// `Option<bool>` does. What it CAN do is leave a payment the filer made off Form 1040 line 26 —
+    /// **overstating their own tax by the amount paid** — which is why the interview now asks, and why
+    /// a bare Enter keeps whatever is shown rather than demanding a number.
+    ///
+    /// ★ It IS recorded (`AnswerKey::Money`), and the state follows the value: a figure entered is
+    ///   `Given`, a bare Enter over `0` is `Declined` — *asked, and no payment claimed*. So the
+    ///   FR-109 skip applies and these are not re-asked once settled. See [`MoneyId`].
+    Money(&'static MoneyQuestion),
 }
 
 impl Ask {
@@ -49,14 +62,22 @@ impl Ask {
     pub fn declaration_id(&self) -> Option<QuestionId> {
         match self {
             Ask::Declaration(q) => Some(q.id),
-            Ask::Skippable(_) | Ask::DependentGate { .. } => None,
+            Ask::Skippable(_) | Ask::DependentGate { .. } | Ask::Money(_) => None,
         }
     }
     /// The gate identity and row if this is a dependent gate — for tests that assert WHICH gates are live.
     pub fn dependent_gate(&self) -> Option<(DependentGate, usize)> {
         match self {
             Ask::DependentGate { gate, row } => Some((gate.gate, *row)),
-            Ask::Declaration(_) | Ask::Skippable(_) => None,
+            Ask::Declaration(_) | Ask::Skippable(_) | Ask::Money(_) => None,
+        }
+    }
+    /// FR-201 — the registry [`MoneyId`] if this is a money figure, for tests that assert WHICH
+    /// figures are put to the filer.
+    pub fn money_id(&self) -> Option<MoneyId> {
+        match self {
+            Ask::Money(m) => Some(m.id),
+            Ask::Declaration(_) | Ask::Skippable(_) | Ask::DependentGate { .. } => None,
         }
     }
     /// Whether a bare Enter with nothing on file is a legitimate outcome. True for skippables (DOBs), false
@@ -159,6 +180,22 @@ pub fn live_questions_with(ri: &ReturnInputs, params: Option<&FullReturnParams>)
             .filter(|s| (s.live)(ri))
             .map(Ask::Skippable),
     );
+    // ★★★ **FR-201 — THE PAYMENT FIGURES, LAST.** Derived from the core [`MONEY_QUESTIONS`] registry
+    //     with each entry's own `live` predicate, exactly as the two registries above are.
+    //
+    // ★★ **Why last.** They are the only asks here that are neither fail-loud nor a forgone §63(f)-style
+    //    benefit; everything above must be answered before the return can be stored at all, and a
+    //    filer whose session is interrupted has lost nothing they could not re-enter in one line. It is
+    //    also where the 1040 puts them — after income and deductions, in the payments block.
+    //
+    // ★ The interview asked for NONE of these until FR-201, so an interview-only filer who paid
+    //   quarterly estimates filed without them and OVERSTATED their own tax. See `MoneyId`.
+    asks.extend(
+        MONEY_QUESTIONS
+            .iter()
+            .filter(|m| (m.live)(ri))
+            .map(Ask::Money),
+    );
     asks
 }
 
@@ -198,6 +235,8 @@ enum AskedKey {
         row: usize,
         gate: DependentGate,
     },
+    /// FR-201 — a payment figure. Per-session only, like every other member here.
+    Money(MoneyId),
 }
 
 /// ★★★ **FR-109 — WHICH of the live questions are put to the filer.**
@@ -241,6 +280,21 @@ fn answer_key_of(ri: &ReturnInputs, ask: &Ask) -> Option<AnswerKey> {
             ssn_hash: dependent_ssn_hash(&ri.header.dependents.get(*row)?.ssn),
             gate: gate.gate,
         },
+        // ★★★ **FR-201 — A MONEY ASK IS RECORDED LIKE ANY OTHER.**
+        //
+        //     The first draft of this fix returned `None` here, on the reasoning that adding a fourth
+        //     `AnswerKey` variant was too wide a change for a Minor. **Two tests reported that as a
+        //     regression rather than a limit:** with no record, `needs_asking` can never skip these
+        //     three, so `income answer` asked them on every session and FR-109's *"Nothing to ask"*
+        //     sentence — a deliberately built property, with its own KAT — became unreachable.
+        //
+        // ★ The variant turned out to cost four small arms (`provenance.rs`'s `Display`, `FromStr`
+        //   and `current_prompt`; `scrub.rs`'s rekey already has a catch-all, and every other
+        //   `AnswerKey` site in the workspace CONSTRUCTS rather than matches). And it buys the thing
+        //   this repo actually cares about: a `0` on Form 1040 line 26 now carries **provenance** —
+        //   `Declined` means *asked, and no payment claimed*, which is not the same blank as
+        //   *nobody asked*.
+        Ask::Money(m) => AnswerKey::Money(m.id),
     })
 }
 
@@ -278,6 +332,12 @@ pub fn needs_asking(ri: &ReturnInputs, ask: &Ask) -> bool {
                 .get(*row)
                 .is_some_and(|d| gate_is_answered(d, gate.gate)),
             Ask::Skippable(_) => false,
+            // ★★★ **FR-201 — NO LEAF TEST, exactly as for a skippable, and for the same reason.** A
+            //     `Usd` leaf has no unanswered state, so `0` IS a lawful answer once a record says it
+            //     was asked: `Declined` means *asked, and no payment claimed*. Applying the class-(A)
+            //     leaf test here would make a `0` read as unanswered forever and re-ask the three
+            //     figures every session — which is the behaviour this arm exists to avoid.
+            Ask::Money(_) => false,
         },
     }
 }
@@ -286,6 +346,7 @@ fn asked_key_of(a: &Ask) -> AskedKey {
     match a {
         Ask::Declaration(q) => AskedKey::Question(q.id),
         Ask::Skippable(sk) => AskedKey::Skippable(sk.id),
+        Ask::Money(m) => AskedKey::Money(m.id),
         Ask::DependentGate { gate, row } => AskedKey::DependentGate {
             row: *row,
             gate: gate.gate,
@@ -866,6 +927,9 @@ pub fn answer_return_inputs(
                 //   same round can move a row onto another branch — so it is re-checked here like
                 //   every other ask, and a row that has been REMOVED simply reads as not live.
                 Ask::DependentGate { gate, row } => gate.live(&ri, *row),
+                // FR-201 — re-checked on the same terms as everything else, even though no money
+                // entry's `live` depends on an answer today: the registry decides, not this site.
+                Ask::Money(m) => (m.live)(&ri),
             };
             if !still_live {
                 continue;
@@ -1193,6 +1257,45 @@ pub fn answer_return_inputs(
                     //   comparand — seam review C-1.
                     record_answer(&mut ri, key, &words, now, AnswerState::Given);
                 }
+                // ★★★ **FR-201 — ONE PAYMENT FIGURE.** Neither class (A) nor class (B): a `Usd` leaf
+                //     has no unanswered state, so a bare Enter KEEPS what is shown (which may be `0`,
+                //     the correct return for most filers) and nothing refuses.
+                //
+                // ★★ **The current figure is shown**, so `--re-answer` (and a run that re-asks because
+                //    the prompt was reworded) costs one keystroke rather than a retype — and a filer
+                //    walking their return before signing it can SEE what is on line 26.
+                //
+                // ★ **A negative is REFUSED, never stored.** `parse_nonneg_usd_arg` is the same guard
+                //   the CLI's basis/FMV flags use, and for the same reason one level over: a negative
+                //   payment would ADD to the tax owed on a line that exists only to reduce it.
+                Ask::Money(m) => {
+                    let cur = (m.get)(&ri);
+                    loop {
+                        write!(
+                            out,
+                            "{} [{}; currently {cur}; Enter to keep]: ",
+                            m.prompt, m.line
+                        )?;
+                        out.flush()?;
+                        let mut line = String::new();
+                        if input.read_line(&mut line)? == 0 {
+                            return Err(CliError::Usage(
+                                "input ended before every question was answered — nothing was stored"
+                                    .into(),
+                            ));
+                        }
+                        if line.trim().is_empty() {
+                            break;
+                        }
+                        match crate::eventref::parse_nonneg_usd_arg(line.trim(), "a payment") {
+                            Ok(v) => {
+                                (m.set)(&mut ri, v);
+                                break;
+                            }
+                            Err(e) => writeln!(out, "  {e}; or Enter to keep {cur}")?,
+                        }
+                    }
+                }
             }
             // ★★★ R10.3 — one record per prompt PUT TO THE FILER. Placed after the `Ask` match so the
             //     three SKIPPABLE shapes (date / yes-no / choice) share one recording site instead of
@@ -1209,6 +1312,19 @@ pub fn answer_return_inputs(
             if let Ask::Skippable(sk) = ask {
                 let state = skippable_state(sk, &ri);
                 record_answer(&mut ri, AnswerKey::Skippable(sk.id), sk.prompt, now, state);
+            }
+            // ★★★ **FR-201 — the money record, on the skippable's own terms.** The state FOLLOWS THE
+            //     VALUE (`skippable_state`'s rule): a figure entered is `Given`, and a bare Enter over
+            //     `0` is `Declined` — *asked, and no payment claimed*. That is what makes a zero on
+            //     Form 1040 line 26 distinguishable from a line nobody ever put to the filer, which is
+            //     the whole of *"blank is the normal case, but provenance is not optional"*.
+            if let Ask::Money(m) = ask {
+                let state = if (m.get)(&ri).is_zero() {
+                    AnswerState::Declined
+                } else {
+                    AnswerState::Given
+                };
+                record_answer(&mut ri, AnswerKey::Money(m.id), m.prompt, now, state);
             }
         }
     }
@@ -1612,6 +1728,10 @@ mod tests {
                                 .expect("a YesNo gate declares its claim path"),
                         ),
                     },
+                    // ★ FR-201 — a payment figure takes no part in "clears the screen": a `Usd` leaf
+                    //   has no unanswered state, so no screen can refuse for want of one. Left
+                    //   deliberately at `0`, which is what a filer who paid no estimates would leave.
+                    Ask::Money(_) => {}
                 }
             }
         }
@@ -1659,12 +1779,31 @@ mod tests {
         usize,
         std::collections::BTreeSet<(usize, DependentGate)>,
     ) {
+        // Every money figure kept as it stands (a bare Enter) — the neutral script.
+        t7_script_with_money(seed, params, |_| "\n".to_string())
+    }
+
+    /// [`t7_script`], with control over what is TYPED at each money prompt — so a test can put a real
+    /// figure in and read it back off the stored return (FR-201).
+    fn t7_script_with_money(
+        seed: &ReturnInputs,
+        params: Option<&FullReturnParams>,
+        money_keys: impl Fn(MoneyId) -> String,
+    ) -> (
+        String,
+        usize,
+        std::collections::BTreeSet<(usize, DependentGate)>,
+    ) {
         let mut ri = seed.clone();
         let mut decl: std::collections::BTreeSet<QuestionId> = std::collections::BTreeSet::new();
         let mut skip: std::collections::BTreeSet<btctax_core::tax::questions::SkippableId> =
             std::collections::BTreeSet::new();
         let mut gates: std::collections::BTreeSet<(usize, DependentGate)> =
             std::collections::BTreeSet::new();
+        // ★ FR-201 — a money ask carries no `AnswerRecord`, so the COMMAND puts it every session and
+        //   this generator needs its own per-run seen-set, exactly as it keeps one for the other three
+        //   shapes. Without it the round never empties and the sweep bound below trips.
+        let mut money: std::collections::BTreeSet<MoneyId> = std::collections::BTreeSet::new();
         let mut script = String::new();
         let mut sweeps = 0usize;
         loop {
@@ -1674,6 +1813,7 @@ mod tests {
                     Ask::Declaration(q) => !decl.contains(&q.id),
                     Ask::Skippable(sk) => !skip.contains(&sk.id),
                     Ask::DependentGate { gate, row } => !gates.contains(&(*row, gate.gate)),
+                    Ask::Money(m) => !money.contains(&m.id),
                 })
                 .collect();
             if round.is_empty() {
@@ -1691,6 +1831,7 @@ mod tests {
                     Ask::Declaration(q) => (q.live)(&ri),
                     Ask::Skippable(s) => (s.live)(&ri),
                     Ask::DependentGate { gate, row } => gate.live(&ri, *row),
+                    Ask::Money(m) => (m.live)(&ri),
                 };
                 if !still_live {
                     continue;
@@ -1704,6 +1845,12 @@ mod tests {
                     Ask::Skippable(sk) => {
                         skip.insert(sk.id);
                         script.push('\n');
+                    }
+                    // ★ FR-201 — a bare Enter KEEPS the figure shown, which is the neutral keystroke
+                    //   for a money ask just as it is for a skippable.
+                    Ask::Money(m) => {
+                        money.insert(m.id);
+                        script.push_str(&money_keys(m.id));
                     }
                     Ask::DependentGate { gate, row } => {
                         gates.insert((row, gate.gate));
@@ -1949,6 +2096,8 @@ mod tests {
                                 .expect("a YesNo gate declares its claim path"),
                         ),
                     },
+                    // FR-201 — a payment figure plays no part in the dependent-gate chain.
+                    Ask::Money(_) => {}
                 }
             }
         }
@@ -2735,24 +2884,50 @@ mod tests {
         assert!(Ask::Skippable(reg(SkippableId::BlindTaxpayer)).is_skippable());
     }
 
-    /// The mandatory declarations are not skippable; the DOBs are. (Anchored to the enum shape, not a value:
-    /// every `Skippable` is skippable, every `Declaration` is not.)
+    /// The mandatory declarations are not skippable; the DOBs are.
+    ///
+    /// ★★★ **FR-201 — this test used to assert a BIJECTION (`is_skippable() ==
+    ///     declaration_id().is_none()`) and it was never true of the type, only of the fixture.** A
+    ///     dependent gate has always been neither a declaration nor skippable; the fixture simply
+    ///     carries no dependent row, so nothing exercised the third case. The money asks made the
+    ///     gap visible — which is the compiler blast radius doing its job — so the property is now
+    ///     stated per variant, over an exhaustive `match` that reds when a FIFTH `Ask` shape is added.
     #[test]
     fn only_the_skippables_are_skippable() {
         for ask in live_questions(&with_spouse(single())) {
-            assert_eq!(
-                ask.is_skippable(),
-                ask.declaration_id().is_none(),
-                "a declaration must not be skippable; a skippable must not be a declaration"
-            );
-            // ★ Every skippable `Ask` is a genuine entry of the CORE registry (the source of truth
-            // post-move) — the prompt scope IS the `SKIPPABLE_QUESTIONS` scope, by derivation.
-            if let Ask::Skippable(s) = ask {
-                assert!(
-                    SKIPPABLE_QUESTIONS.iter().any(|r| r.id == s.id),
-                    "a skippable Ask must come from SKIPPABLE_QUESTIONS, got {:?}",
-                    s.id
-                );
+            match &ask {
+                // Silence on a declaration is exactly what D-8 forbids.
+                Ask::Declaration(_) => assert!(
+                    !ask.is_skippable(),
+                    "a declaration must not be skippable — its silence is what D-8 forbids"
+                ),
+                // ★ Every skippable `Ask` is a genuine entry of the CORE registry (the source of truth
+                //   post-move) — the prompt scope IS the `SKIPPABLE_QUESTIONS` scope, by derivation.
+                Ask::Skippable(s) => {
+                    assert!(
+                        ask.is_skippable(),
+                        "a Skippable Ask must report as skippable"
+                    );
+                    assert!(ask.declaration_id().is_none(), "…and carry no QuestionId");
+                    assert!(
+                        SKIPPABLE_QUESTIONS.iter().any(|r| r.id == s.id),
+                        "a skippable Ask must come from SKIPPABLE_QUESTIONS, got {:?}",
+                        s.id
+                    );
+                }
+                // NEITHER, each for its own reason: a §152 gate is a class-(A) declaration on a ROW
+                // (so its silence is not lawful, and it carries no return-level `QuestionId`), and a
+                // money figure has no unanswered state at all (so there is nothing to skip).
+                Ask::DependentGate { .. } | Ask::Money(_) => {
+                    assert!(
+                        !ask.is_skippable(),
+                        "neither a dependent gate nor a payment figure is a class-(B) skippable"
+                    );
+                    assert!(
+                        ask.declaration_id().is_none(),
+                        "…nor a return-level declaration"
+                    );
+                }
             }
         }
     }
@@ -3189,6 +3364,138 @@ mod tests {
             !needs_asking(&ri, &sk_ask),
             "`Declined` is provenance — asked and passed over — and R12 still lists the benefit as \
              forgone, so re-asking it every session is the behaviour FR-109 removes"
+        );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+    //  FR-201 — the interview asks for the payments no document reports
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// ★★★ **FR-201 — EVERY `MoneyId` IS PUT TO THE FILER, and the set is read off the registry.**
+    ///
+    /// The defect was that the interview asked for NONE of them, so `income answer` was a complete
+    /// authoring surface for every declaration and a silent one for the three payment figures — and a
+    /// filer who paid quarterly estimates filed with line 26 blank, **overstating their own tax by the
+    /// amount they had already paid**.
+    ///
+    /// ★ Anchored to `MoneyId::ALL`, never to a count or a hand-list: a fourth payment leaf is a
+    ///   compile error in `questions.rs::payments_are_all_accounted_for`, and the moment its `MoneyId`
+    ///   exists this test demands the interview ask for it.
+    #[test]
+    fn the_interview_asks_for_every_payment_figure() {
+        let asked: std::collections::BTreeSet<MoneyId> = live_questions(&fr109_seed())
+            .iter()
+            .filter_map(Ask::money_id)
+            .collect();
+        let expected: std::collections::BTreeSet<MoneyId> = MoneyId::ALL.iter().copied().collect();
+        assert_eq!(
+            asked, expected,
+            "the interview does not put every payment figure to the filer. A figure no document \
+             reports and no prompt asks for is one the filer can only reach by hand-editing a TOML \
+             — and the one it costs them is Form 1040 line 26, which REDUCES the tax."
+        );
+    }
+
+    /// ★★★ **FR-201's KILL — a typed estimated-tax payment reaches the STORED return.**
+    ///
+    /// The sibling above asserts the question is *offered*; this drives `answer_return_inputs` itself
+    /// with a scripted keyboard, types a figure at the Form 1040 line 26 prompt, and reads the value
+    /// back out of the vault. It is the test that reds when the ask is removed, when the prompt's
+    /// keystroke lands on the wrong leaf, or when the value is parsed and dropped.
+    ///
+    /// ★ The other two figures are left at a bare Enter, which also pins the *"Enter keeps what is
+    ///   shown"* half: they must still read `0` afterwards, not the 8,000.
+    #[test]
+    fn a_typed_estimated_tax_payment_reaches_the_stored_return() {
+        let (_dir, vault) = t7_vault();
+        let seed = fr109_seed();
+        let params = fr109_params();
+        {
+            let mut s = Session::open(&vault, &t7_pp()).unwrap();
+            crate::input_form_store::save_draft(&mut s, 2024, &seed).unwrap();
+        }
+        let (script, _, _) = t7_script_with_money(&seed, Some(&params), |id| match id {
+            MoneyId::EstimatedTaxPayments => "8000\n".to_string(),
+            // Enter — keep what is shown, which on a fresh return is 0.
+            MoneyId::ExtensionPayment | MoneyId::OtherWithholding => "\n".to_string(),
+        });
+
+        let mut keys = script.as_bytes();
+        let mut screen: Vec<u8> = Vec::new();
+        answer_return_inputs(
+            &vault,
+            &t7_pp(),
+            2024,
+            time::macros::date!(2026 - 02 - 03),
+            &mut keys,
+            &mut screen,
+            AnswerOptions::default(),
+        )
+        .expect("every live question is scripted");
+        let screen = String::from_utf8(screen).unwrap();
+        let ri = t7_draft(&vault, 2024);
+
+        assert_eq!(
+            ri.payments.estimated_tax_payments,
+            dec!(8000),
+            "the figure typed at the line 26 prompt did not reach the stored return.\nscreen:\n{screen}"
+        );
+        assert_eq!(
+            (ri.payments.extension_payment, ri.payments.other_withholding),
+            (dec!(0), dec!(0)),
+            "a bare Enter must KEEP the figure shown, and must not spill the one typed at another \
+             prompt into this leaf"
+        );
+        // …and the filer was told which line they were answering.
+        assert!(
+            screen.contains("Form 1040 line 26"),
+            "the estimated-tax prompt must cite its own form line so the filer can check it against \
+             their Form 1040-ES vouchers:\n{screen}"
+        );
+    }
+
+    /// ★★★ **FR-201 — A NEGATIVE PAYMENT IS REFUSED AND RE-ASKED, never stored.**
+    ///
+    /// Line 26 exists only to REDUCE the tax, so a negative there would increase it — the wrong
+    /// direction, silently, from a typo. The guard is `parse_nonneg_usd_arg`, the same one the CLI's
+    /// basis and FMV flags use; this is the observation of it discriminating at this prompt (B1).
+    #[test]
+    fn a_negative_payment_is_refused_and_the_prompt_is_put_again() {
+        let (_dir, vault) = t7_vault();
+        let seed = fr109_seed();
+        let params = fr109_params();
+        {
+            let mut s = Session::open(&vault, &t7_pp()).unwrap();
+            crate::input_form_store::save_draft(&mut s, 2024, &seed).unwrap();
+        }
+        // A negative, then a good figure at the SAME prompt — so the run only completes if the bad
+        // one was rejected and the prompt re-asked rather than consumed.
+        let (script, _, _) = t7_script_with_money(&seed, Some(&params), |id| match id {
+            MoneyId::EstimatedTaxPayments => "-8000\n8000\n".to_string(),
+            MoneyId::ExtensionPayment | MoneyId::OtherWithholding => "\n".to_string(),
+        });
+
+        let mut keys = script.as_bytes();
+        let mut screen: Vec<u8> = Vec::new();
+        answer_return_inputs(
+            &vault,
+            &t7_pp(),
+            2024,
+            time::macros::date!(2026 - 02 - 03),
+            &mut keys,
+            &mut screen,
+            AnswerOptions::default(),
+        )
+        .expect("the second, valid figure completes the run");
+        let screen = String::from_utf8(screen).unwrap();
+        assert_eq!(
+            t7_draft(&vault, 2024).payments.estimated_tax_payments,
+            dec!(8000),
+            "the negative must have been refused and the good figure taken:\n{screen}"
+        );
+        assert!(
+            screen.contains("must be >= 0"),
+            "the refusal must SAY why, at the prompt, rather than silently re-asking:\n{screen}"
         );
     }
 }

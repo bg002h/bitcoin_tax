@@ -120,6 +120,14 @@ jobs:
           cargo run --locked -p xtask -- examples > docs/examples/examples.md
           git diff --exit-code -- docs/examples/examples.md \
             || { echo "::error::docs/examples/examples.md is STALE — run 'cargo run -p xtask -- examples > docs/examples/examples.md'"; exit 1; }
+      - name: Regenerate the income-import TOML schema and assert it is committed (FR-203 drift gate)
+        # Same shape as the golden gate above. The in-tree half
+        # (`toml_schema::tests::the_committed_schema_matches_a_fresh_generation`) fires on every
+        # `make check`; this is the one that cannot be skipped by running a narrower test filter.
+        run: |
+          cargo run --locked -p xtask -- toml-schema > docs/income-import-schema.md
+          git diff --exit-code -- docs/income-import-schema.md \
+            || { echo "::error::docs/income-import-schema.md is STALE — run 'cargo run -p xtask -- toml-schema > docs/income-import-schema.md'"; exit 1; }
       - name: Forms-coverage census (HARD — every census form emits and is demonstrated in J6)
         run: cargo test -p btctax-forms --test census --locked
       - name: Subcommand-coverage report (SOFT — advisory, never fails the job)

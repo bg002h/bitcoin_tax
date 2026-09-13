@@ -6,7 +6,7 @@
 //! invariant held by convention instead of construction (see [`super::return_inputs`]'s doc and D-8).
 
 use crate::conventions::Usd;
-use crate::tax::return_inputs::ReturnInputs;
+use crate::tax::return_inputs::{Payments, ReturnInputs};
 use crate::tax::return_refuse::RefuseReason;
 use crate::tax::types::FilingStatus;
 use time::Date;
@@ -3589,6 +3589,166 @@ pub fn parent_alive_from_token(t: &str) -> Option<crate::tax::return_inputs::Par
     }
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+//  FR-201 — THE MONEY REGISTRY: the figures the interview must ASK, because no document reports them
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// ★★★ **FR-201 — one figure the interview must put to the filer, because nothing else can.**
+///
+/// **The defect this exists to close.** `payments.estimated_tax_payments` has been declared, routed to
+/// Form 1040 line 26, printed, and reachable from the input form since it was built — and the
+/// `income answer` interview **never asked for it**. A filer who paid quarterly estimates and authored
+/// their return through the interview filed without them, which **OVERSTATES their tax by the whole
+/// amount paid**. The field was never missing; one surface was silent.
+///
+/// ★★ It is a live journey, not a hypothetical: `open_next_year::seed` deliberately carries *"every
+/// single dollar except the carryforwards"* forward as blank, so a filer who files year N with btctax
+/// and opens year N+1 walks the interview on a return whose payment boxes are all zero.
+///
+/// ## Why a THIRD registry rather than a `SkippableKind::Money`
+///
+/// The obvious shape — a fourth [`SkippableKind`] — is wrong twice. `SkippableQuestion`'s accessors
+/// are `Option<bool>` / `Date` / `&'static str`, so a money variant would leave every existing entry
+/// carrying a fifth dead accessor; and `SkippableKind` is matched exhaustively in six places across
+/// three crates, including [`crate::tax::return_refuse::screen_inputs`], whose loop asks *"is this
+/// class-(A) entry answered"* — a question a `Usd` cannot answer, because `Usd` has no unanswered
+/// state. A money figure is a different KIND of thing from a declaration, and the registries are split
+/// by answer shape already (see [`SkippableQuestion`]'s own note on why a class-(A) entry lives in the
+/// class-(B) registry).
+///
+/// ## ★★★ Asking is recorded, so a zero has PROVENANCE
+///
+/// These asks carry a [`crate::tax::provenance::AnswerKey::Money`] record, and the state follows the
+/// value exactly as a skippable's does: a figure entered is `Given`, a bare Enter over `0` is
+/// `Declined` — *asked, and no payment claimed*. A `Usd` leaf has no `None`, so on the printed page
+/// *"I paid no estimates"* and *"nobody ever asked"* are the same `0`; the record is what separates
+/// them, and it is also what lets `income answer` stop re-asking a figure already settled.
+///
+/// ★ Nothing here can REFUSE, and nothing here should: a zero payment box is the overwhelmingly
+///   common, correct return. What the record buys is the distinction, not a gate.
+///
+/// ## What is NOT closed here
+///
+/// The **other** two surfaces that write these leaves — `income import` and the input form — record
+/// nothing, because `record_answer` writes only when btctax itself put the question. So an imported
+/// `0` is still an unprovenanced blank; `needs_asking` reads that as `NeverAsked` and the interview
+/// asks once, which converges (the same shape FR-109 documents for an imported declaration).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum MoneyId {
+    /// Form 1040 **line 26** — *"Estimated tax payments and amount applied from prior year return."*
+    EstimatedTaxPayments,
+    /// Schedule 3 **line 10** — *"Amount paid with request for extension to file."*
+    ExtensionPayment,
+    /// Form 1040 **line 25c** — *"Other forms"* federal income tax withheld.
+    OtherWithholding,
+}
+
+impl MoneyId {
+    /// Every money identity, in registry order. Mirrors [`SkippableId::ALL`] and is pinned the same
+    /// way: [`tests::every_money_id_is_in_all_in_registry_order_with_exactly_one_entry`]'s `match` is
+    /// exhaustive, so a NEW variant is a compile error until it is listed here.
+    pub const ALL: &'static [MoneyId] = &[
+        MoneyId::EstimatedTaxPayments,
+        MoneyId::ExtensionPayment,
+        MoneyId::OtherWithholding,
+    ];
+}
+
+/// One figure the interview asks for. The same fn-pointer shape as [`FormQuestion`] and
+/// [`SkippableQuestion`], with a `Usd` accessor pair.
+pub struct MoneyQuestion {
+    pub id: MoneyId,
+    /// The prompt, phrased as the FORM phrases it — the words the filer can check against a bank
+    /// statement or a Form 1040-ES voucher.
+    pub prompt: &'static str,
+    /// What entering nothing costs, for a UI that shows help beside the prompt.
+    pub help: &'static str,
+    /// The form line this figure prints on, for the prompt's own citation.
+    pub line: &'static str,
+    /// THE liveness predicate. Every entry is always live today: a payment is a fact about the filer,
+    /// not about a document btctax has seen, so there is no document whose absence could gate it.
+    pub live: fn(&ReturnInputs) -> bool,
+    /// The figure on file (`Usd::ZERO` when nothing was entered — see the type's note on why that is
+    /// not the same as *unanswered* and why this fix does not pretend to close it).
+    pub get: fn(&ReturnInputs) -> Usd,
+    /// Record a figure.
+    pub set: fn(&mut ReturnInputs, Usd),
+}
+
+/// ★★★ **THE MONEY REGISTRY.** Three prompts, and `income answer` derives its money asks from this
+/// list exactly as it derives its declarations from [`FORM_QUESTIONS`].
+///
+/// **Why all three and not only FR-201's `estimated_tax_payments`.** They are one class — a payment
+/// the filer made that NO document in btctax's census reports, whose omission overstates the tax by
+/// its own amount — and picking one of a set of three by hand is precisely the shape `CLAUDE.md`'s
+/// highest-yield rule is about. [`payments_are_all_accounted_for`] is the structural half: a fourth
+/// field on [`Payments`] is a **compile error** there, not a silently unasked figure.
+///
+/// ★ The extension payment already had half a fix: `render.rs` notices an extension filed with no
+///   `payments.extension_payment` recorded and names the surfaces that can record it — *"`income
+///   import`'s `payments.extension_payment`, the TUI input form's Payments section"*. The interview
+///   was absent from that list because the interview could not do it. Now it can.
+pub const MONEY_QUESTIONS: &[MoneyQuestion] = &[
+    MoneyQuestion {
+        id: MoneyId::EstimatedTaxPayments,
+        line: "Form 1040 line 26",
+        prompt: "Estimated tax payments you made for this tax year, plus any amount applied from \
+                 your prior-year return (Form 1040 line 26)",
+        help: "The quarterly Form 1040-ES payments you sent in, and any prior-year refund you \
+               elected to apply to this year. btctax cannot see these — no W-2 or 1099 reports \
+               them — so leaving this at 0 when you did pay means you are taxed as though you had \
+               not, and you OVERSTATE what you owe by the whole amount.",
+        live: |_| true,
+        get: |ri| ri.payments.estimated_tax_payments,
+        set: |ri, v| ri.payments.estimated_tax_payments = v,
+    },
+    MoneyQuestion {
+        id: MoneyId::ExtensionPayment,
+        line: "Schedule 3 line 10",
+        prompt: "Amount you paid with a request for an extension to file (Form 4868), if any \
+                 (Schedule 3 line 10)",
+        help: "If you filed Form 4868 and sent money with it, that payment is a credit on your \
+               return. Leaving it at 0 loses the credit and overstates what you owe.",
+        live: |_| true,
+        get: |ri| ri.payments.extension_payment,
+        set: |ri, v| ri.payments.extension_payment = v,
+    },
+    MoneyQuestion {
+        id: MoneyId::OtherWithholding,
+        line: "Form 1040 line 25c",
+        prompt: "Federal income tax withheld on forms OTHER than a W-2 or 1099 you transcribed \
+                 above — e.g. Form W-2G or a Schedule K-1 (Form 1040 line 25c)",
+        help:
+            "Withholding btctax has not already read off a document you entered. Enter only what \
+               is NOT on a W-2 or 1099 above, or it will be counted twice.",
+        live: |_| true,
+        get: |ri| ri.payments.other_withholding,
+        set: |ri, v| ri.payments.other_withholding = v,
+    },
+];
+
+/// ★★★ **THE TRIPWIRE THAT MAKES [`MONEY_QUESTIONS`] A DERIVATION RATHER THAN A LIST.**
+///
+/// A `..`-free destructure of [`Payments`], mapping every field to the [`MoneyId`] that asks for it.
+/// A fourth payment leaf is then an **E0027 here**, in the file that decides what the interview asks —
+/// not a figure the interview silently stops collecting.
+///
+/// ★ Written as a function rather than a test so it lives in the shipped source beside the registry it
+///   polices, exactly as `classifier::classify_payments` does for the provenance census.
+#[must_use]
+pub fn payments_are_all_accounted_for(p: &Payments) -> [(MoneyId, Usd); MoneyId::ALL.len()] {
+    let Payments {
+        estimated_tax_payments,
+        extension_payment,
+        other_withholding,
+    } = p;
+    [
+        (MoneyId::EstimatedTaxPayments, *estimated_tax_payments),
+        (MoneyId::ExtensionPayment, *extension_payment),
+        (MoneyId::OtherWithholding, *other_withholding),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3798,6 +3958,63 @@ mod tests {
     /// bearing reason: [`crate::tax::provenance::AnswerKey`]'s wire parser scans `ALL`, so a variant
     /// missing from it is a stored answer that can never be read back. The `match` is exhaustive, so
     /// a NEW variant is a compile error here until a human lists it.
+    /// ★★★ **FR-201 — `MoneyId::ALL` is complete, in registry order, one entry each.** The mirror of
+    /// [`every_skippable_id_is_in_all_in_registry_order_with_exactly_one_entry`], pinned the same way:
+    /// this `match` is exhaustive, so a NEW [`MoneyId`] variant is a compile error until it is listed
+    /// in `ALL` — and the count assertion then forces the registry entry.
+    #[test]
+    fn every_money_id_is_in_all_in_registry_order_with_exactly_one_entry() {
+        for (i, id) in MoneyId::ALL.iter().enumerate() {
+            let idx = match id {
+                MoneyId::EstimatedTaxPayments => 0,
+                MoneyId::ExtensionPayment => 1,
+                MoneyId::OtherWithholding => 2,
+            };
+            assert_eq!(idx, i, "MoneyId::ALL is out of order / missing {id:?}");
+            assert_eq!(
+                MONEY_QUESTIONS.iter().filter(|m| m.id == *id).count(),
+                1,
+                "exactly one MONEY_QUESTIONS entry for {id:?}"
+            );
+        }
+        assert_eq!(MoneyId::ALL.len(), MONEY_QUESTIONS.len());
+    }
+
+    /// ★★★ **FR-201 — EVERY `Payments` LEAF IS ASKED, and the registry's accessors reach the leaf they
+    /// name.**
+    ///
+    /// Two halves, and the second is the one that matters. [`payments_are_all_accounted_for`]'s
+    /// `..`-free destructure makes a NEW `Payments` field a compile error; this test makes a registry
+    /// entry whose `get`/`set` point at the WRONG leaf a red. Without it, `ExtensionPayment`'s setter
+    /// could write `estimated_tax_payments` and every count above would still pass.
+    #[test]
+    fn every_payments_leaf_is_asked_and_each_accessor_reaches_its_own_leaf() {
+        use rust_decimal_macros::dec;
+        let mut ri = ReturnInputs::default();
+        // Distinct per leaf, so a swapped accessor cannot coincide.
+        for (n, m) in MONEY_QUESTIONS.iter().enumerate() {
+            (m.set)(&mut ri, dec!(1) + Usd::from(n as u32) * dec!(1000));
+        }
+        let accounted = payments_are_all_accounted_for(&ri.payments);
+        assert_eq!(
+            accounted.len(),
+            MoneyId::ALL.len(),
+            "the `Payments` destructure and MoneyId::ALL must cover the same set"
+        );
+        for (id, value) in accounted {
+            let q = MONEY_QUESTIONS
+                .iter()
+                .find(|m| m.id == id)
+                .unwrap_or_else(|| panic!("a `Payments` leaf mapped to {id:?} with no prompt"));
+            assert_eq!(
+                (q.get)(&ri),
+                value,
+                "{id:?}'s registry accessor does not read the `Payments` leaf the destructure maps \
+                 it to — a swapped get/set, which every count-based check above would pass"
+            );
+        }
+    }
+
     #[test]
     fn every_skippable_id_is_in_all_in_registry_order_with_exactly_one_entry() {
         for (i, id) in SkippableId::ALL.iter().enumerate() {

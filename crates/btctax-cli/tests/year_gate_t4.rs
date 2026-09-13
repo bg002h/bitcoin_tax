@@ -18,6 +18,31 @@ use btctax_cli::{cmd, Session};
 use btctax_store::Passphrase;
 use std::path::PathBuf;
 
+/// ★★★ **The keystroke for each ask, IN ORDER — never a count per class.**
+///
+/// The two callers below used to build `"n\n".repeat(declarations) + "\n".repeat(rest)`, which is a
+/// count of two classes plus an assumption about their ORDER (*"a bare Enter passes over each
+/// skippable, which `live_questions` appends after the declarations"*). FR-201 appended a third shape
+/// AFTER the skippables and the assumption broke silently: the money asks counted as
+/// `!is_skippable()`, so the script sent `n` at a dollar prompt, the prompt refused it and re-asked,
+/// and the run died on *"input ended before every question was answered"*.
+///
+/// So the script is now derived **per ask, positionally**, over an exhaustive `match` — a fourth shape
+/// is a compile error here rather than a mis-aligned script.
+fn keystrokes_for(asks: &[cmd::answer::Ask]) -> String {
+    use cmd::answer::Ask;
+    asks.iter()
+        .map(|a| match a {
+            // "n" on every declaration: these fixtures carry no document rows, so an all-No census is
+            // coherent. A dependent gate is a class-(A) declaration on a row and takes the same
+            // keystroke — neither fixture here has a dependent, so no `GateKind::Date` arises.
+            Ask::Declaration(_) | Ask::DependentGate { .. } => "n\n",
+            // A bare Enter: skip the benefit / keep the figure shown.
+            Ask::Skippable(_) | Ask::Money(_) => "\n",
+        })
+        .collect()
+}
+
 /// The params-less year: bundled, declared `preparing`, no `FullReturnParams`.
 const NO_PACKAGE_YEAR: i32 = 2026;
 
@@ -641,12 +666,10 @@ fn income_answer_on_a_draft_only_year_writes_the_draft_and_commits_nothing() {
     }
 
     // ★ The script is DERIVED from the registry, never a magic count — the count is exactly what
-    //   broke `tax_report`'s script when the interview grew. "n" answers every declaration (this
-    //   return carries no document rows, so a "no" census is coherent); a bare Enter passes over
-    //   each skippable, which `live_questions` appends after the declarations.
+    //   broke `tax_report`'s script when the interview grew. See [`keystrokes_for`]: one keystroke per
+    //   ask, in the order the command will put them.
     let asks = btctax_cli::cmd::answer::live_questions(&ri);
-    let declarations = asks.iter().filter(|a| !a.is_skippable()).count();
-    let script = "n\n".repeat(declarations) + &"\n".repeat(asks.len() - declarations);
+    let script = keystrokes_for(&asks);
     let mut keystrokes = script.as_bytes();
     let mut screen: Vec<u8> = Vec::new();
     cmd::answer::answer_return_inputs(
@@ -1097,10 +1120,9 @@ fn a_question_that_dies_earlier_in_the_same_round_is_never_put_to_the_filer() {
         "the premise: the answer that kills the gate is asked BEFORE it"
     );
 
-    // Every declaration `n` (the census is all-No on a return with no rows, which is coherent), a
-    // bare Enter for each skippable. The refund question's `n` is what kills the gate.
-    let declarations = asks.iter().filter(|a| !a.is_skippable()).count();
-    let script = "n\n".repeat(declarations) + &"\n".repeat(asks.len() - declarations);
+    // One keystroke per ask, in order ([`keystrokes_for`]). The refund question's `n` is what kills
+    // the gate.
+    let script = keystrokes_for(&asks);
     let mut keystrokes = script.as_bytes();
     let mut screen: Vec<u8> = Vec::new();
     cmd::answer::answer_return_inputs(

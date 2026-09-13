@@ -755,6 +755,20 @@ pub enum AnswerKey {
         ssn_hash: String,
         gate: DependentGate,
     },
+    /// ★★★ **FR-201 — a PAYMENT FIGURE the interview asks for** ([`crate::tax::questions::MoneyId`]).
+    ///
+    /// **Why a money leaf needs a record when no other `Usd` has one.** `payments.*` are `Usd`, so
+    /// they have no `None`: on the printed page *"I made no estimated payments"* and *"nobody ever
+    /// asked me"* are the same `0`, which is the answered-ness defect this file exists to make
+    /// structural. Every other money leaf on the return arrives with a document behind it, or is a
+    /// figure the filer typed into a section they opened; these three are asked by btctax and
+    /// answerable with one keystroke, so they are the one money set where *asking* is an event worth
+    /// recording — and recording it is also what lets `income answer` stop re-asking them.
+    ///
+    /// The state follows the VALUE, exactly as a skippable's does: a figure entered is `Given`, and a
+    /// bare Enter over `0` is [`AnswerState::Declined`] — *asked, and no payment claimed*, which is a
+    /// lawful and extremely common answer.
+    Money(crate::tax::questions::MoneyId),
 }
 
 /// The serde wire form of an [`AnswerKey`] — a stable string, because a `BTreeMap` key must be one.
@@ -766,6 +780,7 @@ impl fmt::Display for AnswerKey {
             AnswerKey::DependentGate { ssn_hash, gate } => {
                 write!(f, "dependent:{ssn_hash}:{gate:?}")
             }
+            AnswerKey::Money(id) => write!(f, "money:{id:?}"),
         }
     }
 }
@@ -797,6 +812,16 @@ impl FromStr for AnswerKey {
                 .iter()
                 .find(|id| format!("{id:?}") == rest)
                 .map(|id| AnswerKey::Skippable(*id))
+                .ok_or_else(err);
+        }
+        // FR-201 — resolved against `MoneyId::ALL` rather than the registry, on the same terms as the
+        // two above: a key that outlived its registry entry must still PARSE, so the gate that refuses
+        // it can name it.
+        if let Some(rest) = s.strip_prefix("money:") {
+            return crate::tax::questions::MoneyId::ALL
+                .iter()
+                .find(|id| format!("{id:?}") == rest)
+                .map(|id| AnswerKey::Money(*id))
                 .ok_or_else(err);
         }
         if let Some(rest) = s.strip_prefix("dependent:") {
@@ -1051,6 +1076,12 @@ pub fn current_prompt(key: &AnswerKey, ri: &ReturnInputs) -> Option<Cow<'static,
             let q = crate::tax::dependent_gates::entry(*gate);
             (!q.needs_params()).then(|| q.prompt_text(ri, None))
         }
+        // FR-201 — the money prompts are static text (none quotes a value off the return), so the
+        // registry's own words are the hashed words.
+        AnswerKey::Money(id) => crate::tax::questions::MONEY_QUESTIONS
+            .iter()
+            .find(|m| m.id == *id)
+            .map(|m| Cow::Borrowed(m.prompt)),
     }
 }
 

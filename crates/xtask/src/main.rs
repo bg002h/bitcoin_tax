@@ -61,6 +61,9 @@ mod schedule_1a_membership;
 /// yes/no question and the answer belongs in the suite, where `make check` asks it on every commit.
 #[cfg(test)]
 mod service_center_check;
+/// FR-203 — the published `income import` TOML schema (`docs/income-import-schema.md`), DERIVED from
+/// the serialized shape of `ReturnInputs` rather than typed beside it.
+mod toml_schema;
 mod verdict_reach;
 /// FR-108 — a filer-facing sentence with the wrap indentation still inside its quotes.
 mod wrapped_literal_check;
@@ -128,6 +131,7 @@ const SUBCOMMANDS: &[(&str, &[&str], &str)] = &[
     ("prompt-check", &[], ""),
     ("stop-list", &[], ""),
     ("subcommand-coverage", &[], ""),
+    ("toml-schema", &[], ""),
     ("verdict-reach", &[], ""),
     ("wrapped-literals", &[], ""),
 ];
@@ -236,6 +240,11 @@ fn main() {
         }
         Some("subcommand-coverage") => {
             examples::run_coverage();
+        }
+        // FR-203 — the published `income import` TOML schema. Writes to STDOUT, like `examples`, so
+        // the regeneration command and the CI drift gate are one redirect apart.
+        Some("toml-schema") => {
+            toml_schema::run();
         }
         Some("authority-conflicts") => {
             if let Err(e) = authority_conflicts::run() {

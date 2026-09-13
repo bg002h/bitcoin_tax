@@ -98,6 +98,12 @@ fn answer_script(
         btctax_core::tax::provenance::DependentGate,
         usize,
     )> = std::collections::BTreeSet::new();
+    // ★ FR-201 — the payment figures. This generator reads `live_questions` directly and writes no
+    //   `AnswerRecord`, so it keeps its own per-run seen-set where the COMMAND relies on
+    //   `needs_asking`: without it the round never empties and the script grows eight newlines where
+    //   the command reads three.
+    let mut asked_money: std::collections::BTreeSet<btctax_core::tax::questions::MoneyId> =
+        std::collections::BTreeSet::new();
     let mut script = String::new();
     for _ in 0..8 {
         let round: Vec<Ask> = live_questions(&ri)
@@ -105,6 +111,7 @@ fn answer_script(
             .filter(|a| match a {
                 Ask::Declaration(q) => !asked_decl.contains(&q.id),
                 Ask::Skippable(sk) => !asked_skip.contains(&sk.id),
+                Ask::Money(m) => !asked_money.contains(&m.id),
                 // ★★★ T7 / R6 — the per-row gates join the sweep, keyed by (gate, row) as the
                 //     command keys them by (gate, identity). None of the fixtures this script
                 //     drives carries a dependent row, so the arm is here to keep the script honest
@@ -126,6 +133,11 @@ fn answer_script(
                 }
                 Ask::Skippable(sk) => {
                     asked_skip.insert(sk.id);
+                    script.push('\n');
+                }
+                // ★ FR-201 — a bare Enter keeps the figure shown (0 on these fixtures).
+                Ask::Money(m) => {
+                    asked_money.insert(m.id);
                     script.push('\n');
                 }
                 Ask::DependentGate { gate, row } => {
@@ -3887,17 +3899,19 @@ fn a_re_import_keeps_every_answer_record_already_on_the_row() {
     //   passes for the wrong reason, which is the whole failure class this file exists to catch.
     assert_eq!(
         before.len(),
-        38,
-        "the interview wrote {} records, not the 38 this kill was measured against — if the \
+        41,
+        "the interview wrote {} records, not the 41 this kill was measured against — if the \
          registry grew, update the number; if it SHRANK, the keystroke script is under-answering \
          and the survival assertion below has stopped meaning anything. ★ It was 30 before T5, \
          which added the 1098-E census row and R3's three document-less income questions, 34 \
          before T6, which added R9's Digital Assets question, and 35 before T16, which added the \
          two HSA information-return census rows, and 37 before T9, which added R8's \
          sale-of-a-main-home question (always live; the three tests under it are not, and neither \
-         is the Form 8396 gate on a return with no Form 1098) (Form 8889's own seven questions are \
-         NOT here: they are live only when the §223 trigger is affirmed, and this fixture answers \
-         it No)",
+         is the Form 8396 gate on a return with no Form 1098), and 38 before FR-201, which added \
+         the THREE payment figures the interview never asked for — all three `Declined` here, \
+         because this fixture presses Enter over each and *asked, and no payment claimed* is \
+         exactly what that records (Form 8889's own seven questions are NOT here: they are live \
+         only when the §223 trigger is affirmed, and this fixture answers it No)",
         before.len()
     );
 

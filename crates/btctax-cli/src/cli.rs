@@ -470,6 +470,11 @@ pub enum Optimize {
 pub enum IncomeCmd {
     /// Import full-return inputs from an offline TOML file into the vault for a tax year.
     ///
+    /// The file format is published in `docs/income-import-schema.md`: every key btctax honours, with
+    /// its TOML type, which keys the parser requires, and a complete worked example you can copy and
+    /// edit. That document is generated from the same types this command deserializes, so it cannot
+    /// drift away from what the import accepts.
+    ///
     /// From TY2026 (a Form 1099-DA basis-reporting year) the file also carries the broker-reporting
     /// answers: one table per exchange provider, one slot per cohort —
     /// `[broker_reporting.coinbase]` with `covered = "basis_matches"` and `noncovered = "not_reported"`
@@ -665,10 +670,20 @@ pub enum IncomeCmd {
     /// them without editing a TOML file. It never asks for a secret — SSNs and the IP PIN belong to
     /// `set-pii`, which does not echo what you type.
     ///
-    /// Only the questions this return still needs are asked. One you have already answered — in the
-    /// words it is asked in now — is skipped; `--re-answer` puts every one of them again.
+    /// It ALSO asks for the payments you made that no W-2 or 1099 reports: your estimated (Form
+    /// 1040-ES) payments, anything you sent with an extension request, and withholding from forms you
+    /// did not transcribe. Those are not fail-loud — nothing refuses a zero, because zero is the right
+    /// answer for most filers — but nothing else in this command could ask for them either, so a filer
+    /// who paid quarterly estimates and used only the interview filed without them and OVERSTATED
+    /// their own tax. They are asked last, and a bare Enter keeps the figure shown.
     ///
-    /// Requires an existing return for the year (create one with `income import`).
+    /// Only the questions this return still needs are asked. One you have already answered — in the
+    /// words it is asked in now — is skipped; `--re-answer` puts every one of them again. The payment
+    /// figures are the exception: btctax records when it asked you a question, and it keeps no such
+    /// record for a figure, so those three are offered every session with their current value.
+    ///
+    /// Requires an existing return for the year (create one with `income import` — its file format is
+    /// documented in `docs/income-import-schema.md`).
     Answer {
         /// The tax year (e.g. 2024).
         #[arg(long)]

@@ -891,6 +891,10 @@ fn answer_everything_no(ri: &ReturnInputs) -> Vec<u8> {
                 Ask::DependentGate { gate, row } => {
                     !asked.contains(&format!("g{:?}{row}", gate.gate))
                 }
+                // ★ FR-201 — the payment figures. This generator reads `live_questions` directly and
+                //   writes no `AnswerRecord`, so it needs its own per-run seen-key where the COMMAND
+                //   relies on `needs_asking`; without it the round never empties.
+                Ask::Money(m) => !asked.contains(&format!("m{:?}", m.id)),
             })
             .collect();
         if round.is_empty() {
@@ -905,6 +909,11 @@ fn answer_everything_no(ri: &ReturnInputs) -> Vec<u8> {
                 }
                 Ask::Skippable(sk) => {
                     asked.insert(format!("s{:?}", sk.id));
+                    script.push('\n');
+                }
+                // ★ FR-201 — a bare Enter keeps the figure shown, which on these fixtures is 0.
+                Ask::Money(m) => {
+                    asked.insert(format!("m{:?}", m.id));
                     script.push('\n');
                 }
                 // ★★★ T7 / R6 — answered at the registry's declared claim-path polarity, because a

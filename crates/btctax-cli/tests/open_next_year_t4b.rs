@@ -535,6 +535,11 @@ fn sweep_script(
         btctax_core::tax::provenance::DependentGate,
         usize,
     )> = std::collections::BTreeSet::new();
+    // ★ FR-201 — the payment figures. This generator reads `live_questions` directly and writes no
+    //   `AnswerRecord`, so it needs its own per-run seen-set where the COMMAND relies on
+    //   `needs_asking`; without it the round never empties.
+    let mut money: std::collections::BTreeSet<btctax_core::tax::questions::MoneyId> =
+        std::collections::BTreeSet::new();
     let mut script = String::new();
     for _ in 0..8 {
         let round: Vec<Ask> = cmd::answer::live_questions(&ri)
@@ -544,6 +549,7 @@ fn sweep_script(
                 Ask::Skippable(sk) => !skip.contains(&sk.id),
                 // ★★★ T7 / R6 — the per-row §152 gates join the sweep too.
                 Ask::DependentGate { gate, row } => !gates.contains(&(gate.gate, *row)),
+                Ask::Money(m) => !money.contains(&m.id),
             })
             .collect();
         if round.is_empty() {
@@ -559,6 +565,16 @@ fn sweep_script(
                 Ask::Skippable(sk) => {
                     skip.insert(sk.id);
                     script.push_str(&skippable(sk.id));
+                }
+                // ★★★ FR-201 — a bare Enter KEEPS the figure shown. That matters to this file
+                //     specifically: `seed` carries *"every single dollar except the carryforwards"*
+                //     forward as blank, so these three arrive at `0` in year N+1 and this keystroke is
+                //     the filer declining to correct them — which is exactly the journey FR-201 is
+                //     about, and `the_seed_carries_no_payment_figure_and_the_interview_asks_for_them`
+                //     below is where it is asserted rather than assumed.
+                Ask::Money(m) => {
+                    money.insert(m.id);
+                    script.push('\n');
                 }
                 // ★★★ T7 / R6 — a seeded dependent row is BLOCKING through its gates (FR-70), so a
                 //     script that skipped them would end the run mid-interview. Answered at the
