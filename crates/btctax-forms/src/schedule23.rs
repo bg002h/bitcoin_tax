@@ -10,7 +10,7 @@
 //! them and either reject a correct map or, worse, accept a wrong one. `push_money`'s descent key is
 //! `(group, ordinal)`, so the page index is the group.
 
-use crate::cells::{page_of, push_identity, push_money};
+use crate::cells::{page_of, push_identity, push_money, push_money_opt};
 use crate::error::FormsError;
 use crate::map::{Schedule1Map, Schedule2Map, Schedule3Map};
 use crate::pdf;
@@ -191,27 +191,36 @@ pub fn fill_schedule_1_with_map(
     let mut writes: Vec<(String, pdf::FieldValue)> = Vec::new();
     let mut placements: Vec<FlatPlacement> = Vec::new();
 
-    let plan: [(Usd, usize); 12] = [
-        (lines.line1, COL_AMOUNT),  // 1  taxable state/local refund
-        (lines.line3, COL_AMOUNT),  // 3  business income (Schedule C net)
-        (lines.line7, COL_AMOUNT),  // 7  unemployment
-        (lines.line8f, COL_MID),    // 8f income from Form 8889          ★ T16 — a lettered 8x cell
-        (lines.line8v, COL_MID),    // 8v digital assets as ordinary income
-        (lines.line9, COL_AMOUNT),  // 9  total other income
-        (lines.line10, COL_AMOUNT), // 10 -> 1040 L8
-        (lines.line13, COL_AMOUNT), // 13 HSA deduction (Form 8889 L13)  ★ T16          (page 2)
-        (lines.line15, COL_AMOUNT), // 15 deductible part of SE tax      (page 2)
-        (lines.line18, COL_AMOUNT), // 18 early-withdrawal penalty       (page 2)
-        (lines.line21, COL_AMOUNT), // 21 student-loan interest          (page 2)
-        (lines.line26, COL_AMOUNT), // 26 -> 1040 L10                    (page 2)
+    // ★★★ **FR-196 — `Option<Usd>`, and line 1 is the one that can be `None`.** §111(a) reaches
+    //     *"none of your refund is taxable"* four ways (either TIP limb, either worksheet STOP), and
+    //     every one is a line the form tells the filer NOT to fill in. `push_money_opt` declines to
+    //     write it — the same *"fixed at the writer"* repair Form 1040 lines 34/35a/37 carry, because
+    //     `Usd` still cannot express blank (§G-11 P0b). A `Some(0)` still prints: that is a zero the
+    //     worksheet computed, which is different testimony from a line left empty.
+    let plan: [(Option<Usd>, usize); 12] = [
+        (lines.line1, COL_AMOUNT), // 1  taxable state/local refund  ★ BLANKABLE
+        (Some(lines.line3), COL_AMOUNT), // 3  business income (Schedule C net)
+        (Some(lines.line7), COL_AMOUNT), // 7  unemployment
+        (Some(lines.line8f), COL_MID), // 8f income from Form 8889   ★ T16 — a lettered 8x cell
+        (Some(lines.line8v), COL_MID), // 8v digital assets as ordinary income
+        (Some(lines.line9), COL_AMOUNT), // 9  total other income
+        (Some(lines.line10), COL_AMOUNT), // 10 -> 1040 L8
+        (Some(lines.line13), COL_AMOUNT), // 13 HSA deduction (Form 8889 L13)  ★ T16     (page 2)
+        (Some(lines.line15), COL_AMOUNT), // 15 deductible part of SE tax      (page 2)
+        (Some(lines.line18), COL_AMOUNT), // 18 early-withdrawal penalty       (page 2)
+        (Some(lines.line21), COL_AMOUNT), // 21 student-loan interest          (page 2)
+        (Some(lines.line26), COL_AMOUNT), // 26 -> 1040 L10                    (page 2)
     ];
 
     let mut ord_on_page = [0u32; 2];
     for (cell, (value, col)) in map.lines().iter().zip(plan) {
         let page = page_of(cell.fields()[0]) as u32;
         let ord = ord_on_page[page as usize];
+        // ★ The ordinal advances whether or not the cell is written, so the DESCENT of the cells that
+        //   are written stays strictly increasing — a skipped blank leaves a gap in the numbering, not
+        //   an out-of-order placement.
         ord_on_page[page as usize] += 1;
-        push_money(
+        push_money_opt(
             &mut writes,
             &mut placements,
             cell,

@@ -115,31 +115,7 @@ pub fn import_return_inputs(
     //   `maximal_sentinel` reds it identically WITH and WITHOUT this block, so the stamp was already
     //   being lost on that path before this change and nothing here made it worse. That pre-existing
     //   divergence is filed as FR-18; it is not this branch's to fix.
-    {
-        use btctax_core::tax::return_inputs::CarryProvenance;
-        ri.capital_loss_carryforward_in_provenance = CarryProvenance::User;
-        ri.charitable_carryover_in_provenance = CarryProvenance::User;
-        ri.qbi.reit_ptp_carryforward_in_provenance = CarryProvenance::User;
-        ri.qbi.qbi_carryforward_in_provenance = CarryProvenance::User;
-        for item in &mut ri.charitable_carryover_in {
-            item.provenance = CarryProvenance::User;
-        }
-        // ★★★ **FR-196 — THE SIXTH SITE, AND THE FACT THAT IT IS A SIXTH IS THE FINDING.** The
-        //     §111(a) worksheet's prior-year block carries its own `CarryProvenance`, and this block
-        //     is a hand-written LIST of provenance sites — *"correct on the day it is written"*,
-        //     exactly `CLAUDE.md`'s highest-yield rule. It did not know the set had grown, and
-        //     nothing red: `xtask toml-schema` DERIVES its *"forced to `user`"* annotation from the
-        //     path suffix, so the generated schema doc asserted this key was normalised while the
-        //     code did not touch it — a doc claiming a guarantee the code did not keep.
-        //
-        // ★ Forcing `User` is unconditionally right here today: nothing yet writes
-        //   `ComputedFromPriorReturn` into this block, so any other value in a TOML is a stamp
-        //   nobody earned. The CLASS defect — this list versus a derived walk over every
-        //   `CarryProvenance` leaf — is filed rather than improvised; see `REPORT-wave2-E.md`.
-        if let Some(w) = &mut ri.state_local_refund {
-            w.provenance = CarryProvenance::User;
-        }
-    }
+    force_carry_provenance_to_user(&mut ri);
     // ★★★ **THE ANSWER LOG IS BTCTAX'S SIGNATURE ABOUT THE *ASKING*, AND THE IMPORT SURFACE MUST
     //     NOT BE ABLE TO SIGN IT EITHER.** (Seam review C1.)
     //
@@ -310,6 +286,52 @@ pub fn import_return_inputs(
     crate::input_form_store::coherence_clear(s.conn(), year, &coherence)?;
     return_inputs::set(s.conn(), year, &ri)?;
     s.save()
+}
+
+/// ★★★ **EVERY `CarryProvenance` AN IMPORTED FILE CARRIES BECOMES `user`.** Split out of
+/// [`import_return_inputs`] so the joining test below can run it without a vault.
+///
+/// `Computed` is btctax's signature and three surfaces act on it — `m4_authority` goes SILENT rather
+/// than dispute a figure btctax wrote, `BenefitCarryoversNotStated` stops asking, and the write-back's
+/// `--force` guard stops protecting — so a forged stamp buys silence from all three at once, on a
+/// figure with no derivation behind it. Every provenance field is `#[serde(default)]`, so before this
+/// ran a hand-written TOML could simply say `capital_loss_carryforward_in_provenance = "computed"` and
+/// mint it (reproduced end-to-end: a $99,000 carryover btctax never derived, stored as `Computed`,
+/// exit 0).
+///
+/// ★★ NORMALISE, never REFUSE — the keys are a legitimate part of the shape `income scrub` emits, so
+/// rejecting them would make import unable to read a file btctax itself wrote. Called BEFORE the
+/// preservation block, which re-stamps `Computed` from the STORED row, where it is genuinely btctax's
+/// own authorship.
+///
+/// ★★★ **FR-196a — THIS IS A LIST, AND THE THING THAT KEEPS IT HONEST IS A TEST, NOT CARE.** FR-196
+/// added a sixth `CarryProvenance` leaf and nothing red, while `xtask toml-schema` **derived** the
+/// published *"forced to `user`"* annotation from the field path — so `docs/income-import-schema.md`
+/// asserted a normalisation this function was not performing. Rust has no reflection over *"every leaf
+/// of type T"*, so the honest repair is the one `scrub_axis::replaced_paths` uses for the same problem:
+/// let the DERIVED set be the authority and pin the behaviour against it.
+/// [`tests::every_provenance_key_the_schema_says_is_forced_actually_is`] derives the key set from
+/// `maximal_sentinel` through the ONE shared predicate
+/// ([`btctax_core::tax::return_inputs::import_forces_provenance_to_user`], which `note_for` also
+/// calls), plants `computed` at every one of them, runs this function, and demands `user` back. A
+/// seventh leaf is therefore covered here or the test reds.
+fn force_carry_provenance_to_user(ri: &mut ReturnInputs) {
+    use btctax_core::tax::return_inputs::CarryProvenance;
+    ri.capital_loss_carryforward_in_provenance = CarryProvenance::User;
+    ri.charitable_carryover_in_provenance = CarryProvenance::User;
+    ri.qbi.reit_ptp_carryforward_in_provenance = CarryProvenance::User;
+    ri.qbi.qbi_carryforward_in_provenance = CarryProvenance::User;
+    // ★ THE WHOLE CLASS, not the one field a review named: the per-ITEM charitable stamp is
+    //   normalised too, and the preservation block filters `existing` items by exactly that field.
+    for item in &mut ri.charitable_carryover_in {
+        item.provenance = CarryProvenance::User;
+    }
+    // ★ FR-196's sixth site. Forcing `User` is unconditionally right today: nothing yet writes
+    //   `ComputedFromPriorReturn` into the §111(a) worksheet's block, so any other value in a TOML is
+    //   a stamp nobody earned.
+    if let Some(w) = &mut ri.state_local_refund {
+        w.provenance = CarryProvenance::User;
+    }
 }
 
 /// Parse a `ReturnInputs` from TOML text (split out for testing).
@@ -1430,6 +1452,163 @@ mod tests {
     use btctax_core::tax::return_inputs::CharitableClass;
     use btctax_core::FilingStatus;
     use rust_decimal_macros::dec;
+
+    /// Every leaf path of a serialized `ReturnInputs`, in the vocabulary
+    /// `docs/income-import-schema.md` publishes: `a.b` for a key under a table, `a[].b` for a key
+    /// inside a repeated one.
+    ///
+    /// ★ The SAME walk `xtask::toml_schema` runs over the same fixture, so the paths this yields are
+    ///   the paths that document annotates. Duplicated here rather than imported because `xtask` is a
+    ///   dev tool the CLI does not depend on — and the thing that must not be duplicated is the
+    ///   PREDICATE, which both sides now take from `btctax_core`.
+    /// ★ Collects `(path, value)` for EVERY leaf, including each element of a repeated table, so a
+    ///   per-row stamp (`charitable_carryover_in[].provenance`) is checked on every row rather than
+    ///   only on the first — that field is the one the preservation block filters `existing` by.
+    fn leaf_values(v: &toml::Value, path: &str, out: &mut Vec<(String, toml::Value)>) {
+        match v {
+            toml::Value::Table(t) => {
+                for (k, child) in t {
+                    let p = if path.is_empty() {
+                        k.clone()
+                    } else {
+                        format!("{path}.{k}")
+                    };
+                    leaf_values(child, &p, out);
+                }
+            }
+            toml::Value::Array(a) => {
+                for e in a {
+                    leaf_values(e, &format!("{path}[]"), out);
+                }
+            }
+            _ => out.push((path.to_string(), v.clone())),
+        }
+    }
+
+    /// Set every leaf whose path matches `want` to the string `to`, in place.
+    fn plant(
+        v: &mut toml::Value,
+        path: &str,
+        want: &dyn Fn(&str) -> bool,
+        to: &str,
+        hits: &mut u32,
+    ) {
+        match v {
+            toml::Value::Table(t) => {
+                for (k, child) in t.iter_mut() {
+                    let p = if path.is_empty() {
+                        k.clone()
+                    } else {
+                        format!("{path}.{k}")
+                    };
+                    if want(&p) {
+                        *child = toml::Value::String(to.to_string());
+                        *hits += 1;
+                    } else {
+                        plant(child, &p, want, to, hits);
+                    }
+                }
+            }
+            toml::Value::Array(a) => {
+                for e in a.iter_mut() {
+                    plant(e, &format!("{path}[]"), want, to, hits);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// ★★★ **FR-196a — THE DERIVED DOCUMENT AND THE IMPORT'S NORMALISATION, JOINED.**
+    ///
+    /// The defect this exists for: `cmd::tax` forced `CarryProvenance` to `user` at **five
+    /// hand-listed sites** while `xtask toml-schema` **DERIVED** the *"forced to `user`"* annotation
+    /// from the field path. FR-196 added a sixth `CarryProvenance` leaf, nothing red, and
+    /// `docs/income-import-schema.md` went out asserting a normalisation the code was not performing —
+    /// *"a correct derived document describing intended behaviour the code had not implemented"*, which
+    /// is the opposite of every drift this repo has found before. A hand-written TOML could have
+    /// stamped `computed_from_prior_return` on figures nobody derived.
+    ///
+    /// ★★ **Both halves are derived, which is what makes this a joint rather than a restatement.**
+    /// The key set comes from `maximal_sentinel` — *"every `Option` is `Some`, every `Vec` non-empty,
+    /// every nested struct present"*, and an exhaustive `..`-free literal, so a new field is a compile
+    /// error there before it can be an unseen key here. The predicate is the ONE
+    /// `import_forces_provenance_to_user` that `note_for` also calls. So the document cannot claim a
+    /// key is forced unless this test demands it, and it cannot silently stop claiming it either.
+    ///
+    /// ★★★ **The kill (B1):** delete any one line of
+    /// [`force_carry_provenance_to_user`] — which is literally FR-196's defect, a provenance leaf the
+    /// list does not reach — and this reds naming that exact path. Observed, not assumed.
+    #[test]
+    fn every_provenance_key_the_schema_says_is_forced_actually_is() {
+        use btctax_core::tax::return_inputs::import_forces_provenance_to_user as forced;
+        let fixture = btctax_core::tax::scrub_axis::maximal_sentinel();
+
+        // (1) DERIVE the key set the published document annotates *"forced to `user`"*.
+        let as_toml = toml::Value::try_from(&fixture).expect("ReturnInputs serializes to TOML");
+        let mut leaves = Vec::new();
+        leaf_values(&as_toml, "", &mut leaves);
+        let provenance: Vec<String> = leaves
+            .iter()
+            .map(|(p, _)| p.clone())
+            .filter(|p| forced(p))
+            .collect();
+        assert!(
+            provenance.len() >= 6,
+            "the derivation found {} provenance keys, which is fewer than the six that existed when \
+             this test was written — the walk or the predicate has stopped working, and a silently \
+             EMPTY expectation is exactly how this class of check goes green while blind: {provenance:?}",
+            provenance.len()
+        );
+
+        // (2) PLANT `computed` at every one of them, through the real TOML surface.
+        let mut planted = as_toml.clone();
+        let mut hits = 0u32;
+        plant(&mut planted, "", &|p| forced(p), "computed", &mut hits);
+        assert_eq!(
+            hits as usize,
+            provenance.len(),
+            "the plant did not reach every derived provenance key"
+        );
+        let text = toml::to_string(&planted).expect("the planted fixture re-serializes");
+        let mut ri = parse_return_inputs_toml(&text).expect("the planted TOML parses");
+
+        // ★★★ …and the plant must be SEEN to have taken, on the parsed `ReturnInputs` itself. Without
+        //     this the whole test would pass on a file that never carried a forged stamp — a checker
+        //     that cannot fail, which is the exact shape B1 exists to forbid.
+        let planted_back = toml::Value::try_from(&ri).expect("serializes");
+        let mut planted_leaves = Vec::new();
+        leaf_values(&planted_back, "", &mut planted_leaves);
+        let forged: Vec<&String> = planted_leaves
+            .iter()
+            .filter(|(p, v)| forced(p) && v.as_str() == Some("computed"))
+            .map(|(p, _)| p)
+            .collect();
+        assert_eq!(
+            forged.len(),
+            provenance.len(),
+            "the forged `computed` stamps did not survive parsing, so nothing below would prove \
+             anything: {} of {} keys carry it",
+            forged.len(),
+            provenance.len()
+        );
+
+        // (3) The import's normalisation must bring every one of them back to `user`.
+        force_carry_provenance_to_user(&mut ri);
+        let after = toml::Value::try_from(&ri).expect("serializes");
+        let mut after_leaves = Vec::new();
+        leaf_values(&after, "", &mut after_leaves);
+        let still_computed: Vec<&String> = after_leaves
+            .iter()
+            .filter(|(p, v)| forced(p) && v.as_str() != Some("user"))
+            .map(|(p, _)| p)
+            .collect();
+        assert!(
+            still_computed.is_empty(),
+            "`docs/income-import-schema.md` publishes these keys as \"forced to `user`\" and \
+             `import_return_inputs` does not force them, so the document asserts a guarantee the \
+             code does not keep (FR-196a): {still_computed:?}"
+        );
+    }
 
     /// ★★★ **K13 — M4 never disputes a figure btctax itself wrote, and never audits its own
     /// rounding.**

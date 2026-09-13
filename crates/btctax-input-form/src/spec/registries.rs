@@ -311,6 +311,13 @@ const DECL_FIELDS: &[Field] = &[
         ri.itemized_prior_year = None;
         Ok(())
     }),
+    // ★★★ FR-221 — index 66, the §111(a) TIP's limb (b). Appended at the END of `FORM_QUESTIONS`
+    //     for the array-index reason above, so its index is that array's last. The label and help
+    //     come from the registry entry, which is where the prompt wording lives.
+    decl_tristate!(66, FieldId::DeclPriorYearElectedSalesTax, |ri| {
+        ri.prior_year_elected_sales_tax = None;
+        Ok(())
+    }),
     // ★★★ Index 40 — R9 / T6's DIGITAL ASSETS question, Form 1040 page 1. Appended at the END for
     //     the array-index reason above.
     decl_tristate!(40, FieldId::DeclDigitalAssetActivity, |ri| {
@@ -784,6 +791,11 @@ pub fn field_to_question(id: FieldId) -> Option<QuestionId> {
         FieldId::DeclInterestOrDividendsWithout1099 => QuestionId::InterestOrDividendsWithout1099,
         FieldId::DeclStateRefundWithout1099g => QuestionId::StateRefundWithout1099g,
         FieldId::DeclItemizedPriorYear => QuestionId::ItemizedPriorYear,
+        // ★ FR-221 — the §111(a) TIP's limb (b). NOT deduped to `SaSaltUseSalesTax`: that leaf is
+        //   THIS year's §164(b)(5) election on this year's Schedule A, and this question asks about
+        //   the election made in the year the tax was PAID. Same words, different year, different
+        //   answer — a dedup here would answer one from the other.
+        FieldId::DeclPriorYearElectedSalesTax => QuestionId::PriorYearElectedSalesTax,
         FieldId::DeclDigitalAssetActivity => QuestionId::DigitalAssetActivity,
         // ★ T16 — Form 8889's seven declarations.
         FieldId::DeclHsaFamilyCoverage => QuestionId::HsaFamilyCoverage,
@@ -881,6 +893,9 @@ pub fn question_to_field(id: QuestionId) -> FieldId {
         QuestionId::InterestOrDividendsWithout1099 => FieldId::DeclInterestOrDividendsWithout1099,
         QuestionId::StateRefundWithout1099g => FieldId::DeclStateRefundWithout1099g,
         QuestionId::ItemizedPriorYear => FieldId::DeclItemizedPriorYear,
+        // ★ FR-221 — the same TIP's limb (b); see the reverse arm for why it is NOT deduped to
+        //   `SaSaltUseSalesTax`.
+        QuestionId::PriorYearElectedSalesTax => FieldId::DeclPriorYearElectedSalesTax,
         // ★ R9 / T6 — Form 1040 page 1's Digital Assets question. Not deduped anywhere: no other
         //   section carries it, and the crypto/1099-DA block asks about BROKER REPORTING, which is
         //   a different question with a different answer space.

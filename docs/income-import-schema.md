@@ -14,7 +14,7 @@ cargo run -p xtask -- toml-schema > docs/income-import-schema.md
 
 Start from [the worked example](#a-complete-worked-example) below and delete what does not apply to you.
 
-**Almost every key is optional to the PARSER** — `ReturnInputs` carries `#[serde(default)]` on nearly every field — so a short file parses. **64 are not**, and they are measured rather than remembered — each one was deleted from a complete file and handed back to the deserializer:
+**Almost every key is optional to the PARSER** — `ReturnInputs` carries `#[serde(default)]` on nearly every field — so a short file parses. **63 are not**, and they are measured rather than remembered — each one was deleted from a complete file and handed back to the deserializer:
 
 - `b_1099[].payer`
 - `capital_loss_carryforward_in.long`
@@ -66,7 +66,6 @@ Start from [the worked example](#a-complete-worked-example) below and delete wha
 - `state_local_refund.prior_year_aged_blind.spouse_blind`
 - `state_local_refund.prior_year_aged_blind.taxpayer_aged`
 - `state_local_refund.prior_year_aged_blind.taxpayer_blind`
-- `state_local_refund.prior_year_elected_sales_tax`
 - `state_local_refund.prior_year_filing_status`
 - `state_local_refund.prior_year_mfs_spouse_itemized`
 - `state_local_refund.prior_year_schedule_a_line17`
@@ -394,6 +393,7 @@ Two key groups are read and then **normalised away**, with a note on stderr rath
 | `payments.estimated_tax_payments` | string |  |
 | `payments.extension_payment` | string |  |
 | `payments.other_withholding` | string |  |
+| `prior_year_elected_sales_tax` | boolean |  |
 | `qbi` | table |  |
 | `qbi.qbi_carryforward_in` | string |  |
 | `qbi.qbi_carryforward_in_provenance` | string | forced to `user` |
@@ -497,7 +497,6 @@ Two key groups are read and then **normalised away**, with a note on stderr rath
 | `state_local_refund.prior_year_aged_blind.spouse_blind` | boolean | **required** |
 | `state_local_refund.prior_year_aged_blind.taxpayer_aged` | boolean | **required** |
 | `state_local_refund.prior_year_aged_blind.taxpayer_blind` | boolean | **required** |
-| `state_local_refund.prior_year_elected_sales_tax` | boolean | **required** |
 | `state_local_refund.prior_year_filing_status` | string | **required** |
 | `state_local_refund.prior_year_mfs_spouse_itemized` | boolean | **required** |
 | `state_local_refund.prior_year_schedule_a_line17` | string | **required** |

@@ -106,6 +106,13 @@ pub const RENDERED_PROMPTS: &[RenderedPrompt] = &[
     //   tax"*. Naming the wrong year would make the question uncheckable against the filer's papers.
     (QuestionId::StateRefundWithout1099g, state_refund_prompt),
     (QuestionId::ItemizedPriorYear, itemized_prior_year_prompt),
+    // ★★★ FR-221 — limb (b) quotes the same year limb (a) does, for the same reason: *"the year you
+    //     paid the tax"* is a year the filer must check a specific Schedule A against, and a prompt
+    //     naming the wrong one is a question they cannot answer from their own papers.
+    (
+        QuestionId::PriorYearElectedSalesTax,
+        prior_year_elected_sales_tax_prompt,
+    ),
     // ★★★ R9 / T6 — the Digital Assets question quotes the YEAR because the form's own sentence
     //   does (*"At any time during 2025, did you…"*), and it is the year the filer must check their
     //   records against. Rendered, so a return whose `tax_year` changes re-asks it for free (R10.4).
@@ -154,6 +161,25 @@ fn itemized_prior_year_prompt(ri: &ReturnInputs) -> String {
          of a state or local income tax refund is taxable if, in the year you paid the tax, you did \
          not itemize.)",
         ri.tax_year - 1
+    )
+}
+
+/// ★★★ **FR-221 — the §111(a) TIP's limb (b), asked of the year the tax was PAID.**
+///
+/// *"Did you elect to deduct state and local general sales taxes instead of state and local income
+/// taxes on your 2025 Schedule A?"* The year is `tax_year - 1`, exactly as
+/// [`itemized_prior_year_prompt`]'s is: the two questions are the two limbs of one sentence about one
+/// year, and a prompt naming a different year than its sibling would be unanswerable from the same
+/// piece of paper. The TIP is quoted verbatim after it, so the filer can see what their answer buys.
+fn prior_year_elected_sales_tax_prompt(ri: &ReturnInputs) -> String {
+    format!(
+        "On your {y} Schedule A, did you elect to deduct state and local GENERAL SALES TAXES instead \
+         of state and local income taxes? (That is Schedule A line 5a's either/or. Form 1040 \
+         instructions, Schedule 1 line 1: \"None of your refund is taxable if, in the year you paid \
+         the tax, you either (a) didn\u{2019}t itemize deductions, or (b) elected to deduct state and \
+         local general sales taxes instead of state and local income taxes.\" Answer \"no\" if you \
+         deducted state or local INCOME taxes, which is the usual case.)",
+        y = ri.tax_year - 1
     )
 }
 
@@ -417,6 +443,12 @@ pub enum QuestionId {
     /// **The reporting rule's first bullet** (`i1040sd--2025.txt:321-322`), asked positively — can
     /// the filer exclude ALL of the gain?
     HomeSaleCanExcludeAllGain,
+    /// ★★★ **FR-221 — the §111(a) TIP's limb (b)** (`i1040gi--2025.txt:41882-41887`): in the year the
+    /// tax was paid, did the filer elect to deduct state and local **general sales taxes** instead of
+    /// state and local income taxes? Live iff [`Self::ItemizedPriorYear`] is live and answered `Yes` —
+    /// limb (b) is only asked of a filer limb (a) did not already exit. APPENDED AT THE END for the
+    /// `decl_tristate!` array-index reason recorded above.
+    PriorYearElectedSalesTax,
 }
 
 impl QuestionId {
@@ -492,6 +524,8 @@ impl QuestionId {
         QuestionId::HomeSaleTest1OwnedAndLived,
         QuestionId::HomeSaleTest2NoRecentExclusion,
         QuestionId::HomeSaleCanExcludeAllGain,
+        // ★★★ FR-221 — the §111(a) TIP's limb (b), index 66.
+        QuestionId::PriorYearElectedSalesTax,
     ];
 }
 
@@ -2507,6 +2541,47 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         durability: Durability::PerYear,
         neutral: true,
     },
+    // ── ★★★ FR-221 — THE §111(a) TIP'S LIMB (b). The second half of a sentence btctax had only ever
+    //    asked the first half of. ──
+    FormQuestion {
+        id: QuestionId::PriorYearElectedSalesTax,
+        // ★ The STATIC fallback; the words shown quote year N−1 (`RENDERED_PROMPTS`).
+        prompt: "On that PRIOR-YEAR Schedule A, did you elect to deduct state and local GENERAL SALES \
+                 TAXES instead of state and local income taxes? (Form 1040 instructions, Schedule 1 \
+                 line 1: \"None of your refund is taxable if, in the year you paid the tax, you \
+                 either (a) didn't itemize deductions, or (b) elected to deduct state and local \
+                 general sales taxes instead of state and local income taxes.\")",
+        unanswered: RefuseReason::PriorYearElectedSalesTaxUnanswered,
+        unanswered_detail:
+            "this return reports a state or local income tax refund and you ITEMIZED in the year you \
+             paid the tax, so §111(a) turns on which SALT deduction you elected that year. The Form \
+             1040 instructions give two ways for none of the refund to be taxable, and this is the \
+             second: a filer who elected GENERAL SALES TAXES deducted no state income tax at all, so \
+             the refund produced no tax benefit and Schedule 1 line 1 is correctly BLANK. btctax will \
+             not assume either way \u{2014} assuming \"yes\" would blank a taxable line on your behalf, \
+             and assuming \"no\" would send you to a worksheet you do not owe. If you elected income \
+             taxes (the usual answer, and the one on Schedule A line 5a), answer \"no\" and btctax \
+             will work the State and Local Income Tax Refund Worksheet. Run `btctax income answer`",
+        // ★★★ **Live iff limb (a) is live AND answered `Yes`.** Both conjuncts matter and neither is a
+        //     second copy of another predicate: the first goes through `question_is_live` so a STALE
+        //     answer cannot keep this question alive on a return that no longer reports a refund
+        //     (`ItemizedPriorYear`'s own note), and the second is what makes limb (b) asked only of a
+        //     filer limb (a) did not already exit. A filer who did not itemize is asked nothing here:
+        //     the TIP is a disjunction, and one limb is enough.
+        live: |ri| {
+            question_is_live(QuestionId::ItemizedPriorYear, ri)
+                && ri.itemized_prior_year == Some(true)
+        },
+        get: |ri| ri.prior_year_elected_sales_tax,
+        set: |ri, v| ri.prior_year_elected_sales_tax = Some(v),
+        // ★ §G-15 — PER-YEAR, for `ItemizedPriorYear`'s own reason: it names a DIFFERENT prior year
+        //   every year, so an answer given for 2025's return is not an answer about 2026's.
+        durability: Durability::PerYear,
+        // ★★ Neutral at FALSE, and the direction is the argument: forgoing the exit routes the filer
+        //    into the worksheet, which can only make the refund MORE taxable. `true` would blank a
+        //    taxable line on nobody's testimony.
+        neutral: false,
+    },
 ];
 
 /// ★★★ **T9 / R8 — the Form 8396 gate's liveness.**
@@ -3837,6 +3912,8 @@ mod tests {
                 QuestionId::HomeSaleTest1OwnedAndLived => 63,
                 QuestionId::HomeSaleTest2NoRecentExclusion => 64,
                 QuestionId::HomeSaleCanExcludeAllGain => 65,
+                // ★★★ FR-221 — the §111(a) TIP's limb (b).
+                QuestionId::PriorYearElectedSalesTax => 66,
             };
             assert_eq!(idx, i, "QuestionId::ALL is out of order / missing {id:?}");
             assert_eq!(
@@ -3847,16 +3924,16 @@ mod tests {
         }
         assert_eq!(
             QuestionId::ALL.len(),
-            66,
+            67,
             "17 declarations + the 20 R3 document-census rows + R10.4's filing-status confirmation \
              + T5's four document-less-income-door questions + R9/T6's Digital Assets question \
              + T16's seven Form 8889 questions + the T16 seam review's two (the SPOUSE's HDHP \
              plan, and R3's document-less distribution door) + T7/R6's filer-TIN question \
              + R7/T8's eight (two HoH tests, FR-67's \u{a7}6013(g)/(h) election gate, five QSS \
              conditions) + R8/T9's five (the Form 8396 gate and the four sale-of-a-main-home \
-             answers)"
+             answers) + FR-221's one (the \u{a7}111(a) TIP's limb (b))"
         );
-        assert_eq!(FORM_QUESTIONS.len(), 66, "one entry per declaration");
+        assert_eq!(FORM_QUESTIONS.len(), 67, "one entry per declaration");
     }
 
     /// ★★★ §G-6/ISO — THE OUT-OF-SCOPE QUESTION MUST NAME THE ISO EXERCISE, WHICH IS NOT INCOME.

@@ -2376,6 +2376,20 @@ mod tests {
                     Some(true),
                 );
             }
+            // ★ FR-221 — the same TIP's limb (b): the same refund, plus limb (a) answered YES, which
+            //   is this question's other liveness conjunct.
+            QuestionId::PriorYearElectedSalesTax => {
+                r.g_1099 = vec![btctax_core::tax::return_inputs::Form1099G {
+                    payer: "State of Example".into(),
+                    box2_state_refund: dec!(900),
+                    ..Default::default()
+                }];
+                r.documents.set(
+                    btctax_core::tax::document_census::DocumentRow::G1099,
+                    Some(true),
+                );
+                r.itemized_prior_year = Some(true);
+            }
             _ => {}
         }
         r

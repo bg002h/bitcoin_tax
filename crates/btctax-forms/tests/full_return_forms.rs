@@ -1302,18 +1302,18 @@ fn schedule_a_agi_inline_column_swap_fails_closed() {
 #[test]
 fn schedule_1_fills_both_parts_across_two_pages() {
     let lines = Schedule1Lines {
-        line1: dec!(1200),   // taxable state refund
-        line3: dec!(40000),  // crypto Schedule C net
-        line7: dec!(3000),   // unemployment
-        line8f: Usd::ZERO,   // ★ T16 — no Form 8889 on this fixture
-        line8v: dec!(5000),  // non-business crypto ordinary income
-        line9: dec!(5000),   // total other income (8a-8z) = 8f + 8v
-        line10: dec!(49200), // 1,200 + 40,000 + 3,000 + 5,000 → 1040 L8
-        line13: Usd::ZERO,   // ★ T16 — no HSA deduction on this fixture
-        line15: dec!(2825),  // half of SE tax
-        line18: dec!(150),   // early-withdrawal penalty
-        line21: dec!(2500),  // student-loan interest
-        line26: dec!(5475),  // 2,825 + 150 + 2,500 → 1040 L10
+        line1: Some(dec!(1200)), // taxable state refund
+        line3: dec!(40000),      // crypto Schedule C net
+        line7: dec!(3000),       // unemployment
+        line8f: Usd::ZERO,       // ★ T16 — no Form 8889 on this fixture
+        line8v: dec!(5000),      // non-business crypto ordinary income
+        line9: dec!(5000),       // total other income (8a-8z) = 8f + 8v
+        line10: dec!(49200),     // 1,200 + 40,000 + 3,000 + 5,000 → 1040 L8
+        line13: Usd::ZERO,       // ★ T16 — no HSA deduction on this fixture
+        line15: dec!(2825),      // half of SE tax
+        line18: dec!(150),       // early-withdrawal penalty
+        line21: dec!(2500),      // student-loan interest
+        line26: dec!(5475),      // 2,825 + 150 + 2,500 → 1040 L10
     };
     let pdf = btctax_forms::fill_schedule_1(&lines, &kitchen_sink_header(), 2024).unwrap();
     let g = |fqn: &str| tv(&pdf, fqn);
@@ -1356,6 +1356,61 @@ fn schedule_1_fills_both_parts_across_two_pages() {
         g("form1[0].Page1[0].f1_06[0]"),
         None,
         "L2b is a DATE field, not money"
+    );
+}
+
+/// ★★★ **FR-196 — A BLANK SCHEDULE 1 LINE 1 WRITES NOTHING INTO THE CELL.**
+///
+/// §111(a) reaches *"none of your refund is taxable"* four ways — either limb of the Form 1040
+/// instructions' TIP, and either of the State and Local Income Tax Refund Worksheet's two STOPs — and
+/// every one of them is a line the form tells the filer **not to fill in**. A `0` there is testimony
+/// the filer never gave (*"an entry is testimony"*), and `Usd` cannot express blank (§G-11 P0b), so
+/// the repair is at the WRITER: `line1: Option<Usd>` + `push_money_opt`, exactly as Form 1040 lines
+/// 34/35a/37 are already gated on the form's own comparison.
+///
+/// ★★ **The rest of the schedule must still print**, which is what makes this a discrimination rather
+/// than a blanket silence: line 7 carries unemployment off the same Form 1099-G, and line 10 still
+/// sums (a blank line contributes nothing, which is what the paper does too).
+#[test]
+fn schedule_1_line_1_is_left_empty_when_section_111a_says_blank() {
+    let lines = Schedule1Lines {
+        line1: None, // ★ BLANK BY DECISION — not a computed zero
+        line3: Usd::ZERO,
+        line7: dec!(1200), // unemployment, so the schedule still files
+        line8f: Usd::ZERO,
+        line8v: Usd::ZERO,
+        line9: Usd::ZERO,
+        line10: dec!(1200), // a blank line 1 adds nothing
+        line13: Usd::ZERO,
+        line15: Usd::ZERO,
+        line18: Usd::ZERO,
+        line21: Usd::ZERO,
+        line26: Usd::ZERO,
+    };
+    let pdf = btctax_forms::fill_schedule_1(&lines, &kitchen_sink_header(), 2024).unwrap();
+    let g = |fqn: &str| tv(&pdf, fqn);
+    assert_eq!(
+        g("form1[0].Page1[0].f1_04[0]"),
+        None,
+        "L1 must be EMPTY, not \"0\" — a zero here is testimony the filer never gave"
+    );
+    assert_eq!(
+        g("form1[0].Page1[0].f1_11[0]").as_deref(),
+        Some("1200"),
+        "…and the rest of the schedule still prints, so this is a discrimination not a silence"
+    );
+    // L10 → 1040 L8.
+    assert_eq!(g("form1[0].Page1[0].f1_38[0]").as_deref(), Some("1200"));
+    // ★ The CONTROL, in the same test: a computed zero is a different answer and DOES print.
+    let zero = Schedule1Lines {
+        line1: Some(Usd::ZERO),
+        ..lines
+    };
+    let pdf0 = btctax_forms::fill_schedule_1(&zero, &kitchen_sink_header(), 2024).unwrap();
+    assert_eq!(
+        tv(&pdf0, "form1[0].Page1[0].f1_04[0]").as_deref(),
+        Some("0"),
+        "a zero the worksheet actually computed is a stated figure and prints"
     );
 }
 

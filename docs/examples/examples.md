@@ -830,6 +830,7 @@ $ btctax --vault v.pgp income show --year 2024
   "state_refund_without_1099g": null,
   "hsa_distribution_without_1099sa": null,
   "itemized_prior_year": null,
+  "prior_year_elected_sales_tax": null,
   "state_local_refund": null,
   "digital_asset_activity": true,
   "schedule_b_filer_records": [],
@@ -1346,7 +1347,7 @@ Schedule D (raw pre-netting part totals) — tax year 2024
       • YOUR date of birth — up to $1550
       • YOUR SPOUSE's date of birth — up to $1550
       • For EVERY charitable gift of $250 or more that this return DEDUCTS — this year, or in a later year because it exceeded its §170(b) percentage-of-income ceiling and is carrying forward — do you already hold — or will you obtain before you file — a CONTEMPORANEOUS WRITTEN ACKNOWLEDGMENT from the charity showing (1) the amount of money and a description (but not the value) of any property donated, and (2) whether the organization gave you any goods or services in return, with a description and estimate of their value if it did? (Schedule A lines 11 and 12: "If you made any gift of $250 or more, see instructions." In figuring whether a gift is $250 or more, don't combine separate donations — so answer YES if you made no single gift that large. Don't attach the acknowledgment to your return; keep it for your records. ★ ANSWER FOR THE CARRYOVER TOO: a gift held back by the ceiling is DEFERRED, not denied, and §170(f)(8)(C)'s deadline still runs from THIS return — so "I am deducting nothing this year" is not a reason to answer yes.)
-    (35 answered, 46 not applicable to this return)
+    (35 answered, 47 not applicable to this return)
 
   Sale of your main home
     sold your main home during the year: no

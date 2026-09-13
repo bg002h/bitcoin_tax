@@ -536,17 +536,25 @@ pub fn maximal_sentinel() -> ReturnInputs {
         //   itemizing ⇒ no tax benefit ⇒ the refund is not income and Schedule 1 line 1 is blank by
         //   decision. `Some(true)` would refuse and mask every cell of the matrix.
         itemized_prior_year: Some(false),
+        // ★★★ FR-221 — the TIP's limb (b), realized for the same maximal-fixture reason. `false` is
+        //   its neutral; `Some(true)` would exit by the TIP, which changes no money leaf here but
+        //   would make the fixture assert a different thing than it says it does.
+        prior_year_elected_sales_tax: Some(false),
         // ★★★ FR-196 — the §111(a) worksheet's prior-year block, REALIZED, because a maximal fixture
         //   leaves no `Option` at `None`: an absent block contributes no money leaf, and the
         //   `LEAF_SOURCE` KAT's second direction (*"every prefix matches at least one money leaf"*)
         //   would then have nothing to match its `state_local_refund` prefix against.
         //
-        // ★ Every exception answered `false` and the sales-tax election `false`, so the block is the
-        //   usable-worksheet case. It sits beside `itemized_prior_year: Some(false)` — which exits by
-        //   the TIP before the worksheet begins — and that is deliberate and NOT a contradiction: the
-        //   block's presence is not a claim that it applies, and nothing refuses on the pair.
+        // ★ Every exception answered `false`, so the block is the usable-worksheet case. It sits
+        //   beside `itemized_prior_year: Some(false)` — which exits by the TIP before the worksheet
+        //   begins — and that is deliberate and NOT a contradiction: the block's presence is not a
+        //   claim that it applies, and nothing refuses on the pair. ★★ FR-196's two-testimonies rule
+        //   does not fire here either, and NOT because the attested figure is zero — it is `dec!(1)`
+        //   below. It does not fire because the TIP's limb (a) answered `Some(false)` ends §111(a)
+        //   before the worksheet is entered, so the block is unused input rather than a second answer
+        //   to Schedule 1 line 1. Answer `itemized_prior_year: Some(true)` on this fixture and the
+        //   pair becomes two testimonies about one line, which refuses.
         state_local_refund: Some(crate::tax::state_local_refund::StateLocalRefundFacts {
-            prior_year_elected_sales_tax: false,
             refund_not_on_a_1099g: dec!(64),
             prior_year_filing_status: FilingStatus::Single,
             prior_year_schedule_a_line5d: dec!(61),

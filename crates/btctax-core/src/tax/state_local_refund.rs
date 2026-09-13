@@ -50,9 +50,12 @@
 //! **The TIP is an exit, not commentary.** *"None of your refund is taxable if, in the year you paid
 //! the tax, you either (a) didn't itemize deductions, or (b) elected to deduct state and local
 //! general sales taxes instead of state and local income taxes."* Limb (a) is the question btctax
-//! already asks (`ReturnInputs::itemized_prior_year`); limb (b) **was never asked**, and a filer who
-//! elected sales taxes owes nothing on the refund. Both are [`TipLimb`], and both produce a Schedule
-//! 1 line 1 that is **blank by decision**.
+//! already asks (`ReturnInputs::itemized_prior_year`); limb (b) **was never asked until FR-221**, and
+//! a filer who elected sales taxes owes nothing on the refund. Both are now return-level
+//! declarations ([`ReturnInputs::prior_year_elected_sales_tax`](crate::tax::return_inputs::ReturnInputs::prior_year_elected_sales_tax)),
+//! both are [`TipLimb`], and both produce a Schedule 1 line 1 that is **blank by decision** —
+//! reachable with **none** of the worksheet's own twenty-one prior-year inputs, which is what makes
+//! them exits rather than second walls.
 
 use crate::conventions::Usd;
 use crate::tax::types::FilingStatus;
@@ -608,16 +611,21 @@ impl PriorYearAgedBlindBoxes {
 /// typed one are never the same bytes.
 ///
 /// ★ Every field is serde-REQUIRED, per [`PriorYearAgedBlindBoxes`].
+///
+/// ★★★ **FR-221 — THE TIP'S LIMB (b) IS NOT IN THIS BLOCK, AND THAT IS THE POINT.** It was, for one
+/// commit, and that made the exit *require the worksheet's inputs*: every field here is
+/// serde-required, so a filer who elected the §164(b)(5) general sales tax in the prior year could
+/// only reach *"none of your refund is taxable"* by first transcribing last year's Schedule A lines
+/// 5d, 5e and 17, last year's filing status, its four §63(f) boxes and nine Pub. 525 declarations —
+/// twenty-one figures that decide nothing for them. Limb (b) is now
+/// [`crate::tax::return_inputs::ReturnInputs::prior_year_elected_sales_tax`], a return-level
+/// declaration beside limb (a)'s own
+/// [`itemized_prior_year`](crate::tax::return_inputs::ReturnInputs::itemized_prior_year), which is
+/// what makes *"whichever limb the filer answers, the return completes"* true: one limb exits, the
+/// other works the worksheet, and **neither needs the other's inputs**. It also leaves exactly ONE
+/// place on the return that answers limb (b), so the two-testimonies shape cannot arise inside it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StateLocalRefundFacts {
-    /// **The TIP's limb (b)** — *"elected to deduct state and local general sales taxes instead of
-    /// state and local income taxes"* in the year the tax was paid.
-    ///
-    /// ★★★ **The exit that was never asked.** `ReturnInputs::itemized_prior_year` asks the TIP's
-    /// limb (a) and nothing asks limb (b), so a filer who itemized but elected SALES taxes hit the
-    /// refusal with nothing taxable to compute. `true` ⇒ none of the refund is taxable and Schedule
-    /// 1 line 1 is blank BY DECISION.
-    pub prior_year_elected_sales_tax: bool,
     /// **Worksheet line 1's other half** — *"Enter the income tax refund from Form(s) 1099-G **(or
     /// similar statement)**"*, for the part of the refund NO Form 1099-G reported.
     ///
@@ -823,7 +831,10 @@ pub enum TipLimb {
     /// *"(a) didn't itemize deductions"* — `ReturnInputs::itemized_prior_year == Some(false)`.
     DidNotItemize,
     /// *"(b) elected to deduct state and local general sales taxes instead of state and local
-    /// income taxes"*.
+    /// income taxes"* —
+    /// [`ReturnInputs::prior_year_elected_sales_tax`](crate::tax::return_inputs::ReturnInputs::prior_year_elected_sales_tax)
+    /// `== Some(true)`. ★ The PRIOR year's election, which is a different fact from
+    /// `schedule_a.salt_use_sales_tax` (this year's §164(b)(5) choice on this year's Schedule A).
     ElectedSalesTax,
 }
 
@@ -878,6 +889,16 @@ pub enum NotUsable {
     /// [`tests::every_filing_status_has_exactly_one_line5_bullet`]; carried as a value rather than a
     /// panic because this crate's compute core does not panic.
     NoLine5AmountForStatus(FilingStatus),
+    /// ★★★ **This return reports no state or local income tax refund at all**, so there is nothing
+    /// for §111(a) to measure: the gate
+    /// [`crate::tax::questions::QuestionId::ItemizedPriorYear`] is not live — no transcribed Form
+    /// 1099-G box 2, and the document-less refund question not answered *Yes*.
+    ///
+    /// ★★ **Raised by [`decide`], not by [`figure`]**, because it is a fact about the RETURN rather
+    /// than about the worksheet's arguments. It exists because the worksheet's output now prints: a
+    /// stray facts block used to change nothing, and once Schedule 1 line 1 reads it, a block on a
+    /// refund-less return would print income with the TIP's limb (a) never asked.
+    NoRefundReported,
 }
 
 /// Work the worksheet — or say why it cannot be worked.
@@ -887,11 +908,16 @@ pub enum NotUsable {
 /// `None` is an unanswered class-(A) declaration that `screen_inputs` refuses on before this is
 /// reached; here it simply falls through to the facts, which refuse when absent.
 ///
+/// `prior_year_elected_sales_tax` is the answer to the TIP's limb (b) (FR-221), asked at return
+/// level for the same reason and answered by the same kind of declaration. `Some(true)` exits with
+/// **no other input at all**; `Some(false)` and `None` both continue.
+///
 /// `refund` is worksheet line 1's first sentence — *"the income tax refund from Form(s) 1099-G (or
 /// similar statement)"* — before the line's own cap is applied.
 pub fn figure(
     tax_year: i32,
     itemized_prior_year: Option<bool>,
+    prior_year_elected_sales_tax: Option<bool>,
     refund_on_forms_1099g: Usd,
     facts: Option<&StateLocalRefundFacts>,
 ) -> Result<Decision, NotUsable> {
@@ -902,11 +928,21 @@ pub fn figure(
     if itemized_prior_year == Some(false) {
         return Ok(Decision::NotTaxableByTip(TipLimb::DidNotItemize));
     }
-    let facts = facts.ok_or(NotUsable::FactsNotCollected)?;
-    // ★ The TIP's limb (b). Also revision-independent, and also an exit rather than a zero.
-    if facts.prior_year_elected_sales_tax {
+    // ★★★ **FR-221 — the TIP's limb (b), BEFORE the facts block and not inside it.** *"…or (b)
+    //     elected to deduct state and local general sales taxes instead of state and local income
+    //     taxes."* A filer who made that election deducted no income tax at all, so §111(a)'s
+    //     tax-benefit rule makes none of the refund income and the worksheet has nothing to
+    //     measure. Checked HERE — ahead of `FactsNotCollected` — because the exit must not require
+    //     the twenty-one prior-year figures the worksheet path needs: that is precisely what
+    //     *"neither limb may require the other's inputs"* means, and it is the difference between
+    //     an exit and a second wall. ★ `None` is an unanswered class-(A) declaration that
+    //     `screen_inputs` refuses on (`PriorYearElectedSalesTaxUnanswered`) before this is reached;
+    //     here it falls through to the worksheet, which is the OVERSTATING direction and therefore
+    //     the safe one.
+    if prior_year_elected_sales_tax == Some(true) {
         return Ok(Decision::NotTaxableByTip(TipLimb::ElectedSalesTax));
     }
+    let facts = facts.ok_or(NotUsable::FactsNotCollected)?;
     // "Before you begin: Be sure you have read the Exception in the instructions for this line to
     //  see if you can use this worksheet instead of Pub. 525…"
     if let Some(e) = facts.exception_that_applies() {
@@ -1021,6 +1057,109 @@ pub fn figure(
         },
         part: TaxablePart::Amount(line9),
     })
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// The return's own two readers — ONE definition each, shared by `screen_inputs` and by the print.
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// **Worksheet line 1's first sentence, off the return** — *"Enter the income tax refund from
+/// Form(s) 1099-G (or similar statement)"*, before line 1's own cap.
+///
+/// ★★★ **FR-222 — this is the reader Form 1099-G box 2 never had.** The box was transcribed, shown
+/// in `transcription_warnings` and counted by the census, and **no money line read it**: the figure
+/// that reached Schedule 1 line 1 was the hand-attested
+/// [`crate::tax::return_inputs::Schedule1Inputs::state_refund_taxable`], whose own doc said *"§111
+/// worksheet not modeled"*. *"An unread computed value is not thereby correct"* — and a transcribed
+/// box with no reader is the same defect one step earlier. The box is now worksheet line 1's input,
+/// so the filer who transcribes their 1099-G is the filer the worksheet figures.
+///
+/// ★ **Summed, not "the" 1099-G.** Line 1 says *"Form(s)"*, plural, so every row's box 2 counts; the
+/// block's own [`StateLocalRefundFacts::refund_not_on_a_1099g`] adds *"(or similar statement)"* to
+/// it inside [`figure`], which is where the cap is applied. The filer-entered figure does not
+/// *replace* the reported box — it is the part no form reported — because a filer holding one 1099-G
+/// and one refund cheque with no form behind it owes both.
+///
+/// ★★ **Oracle-checkable, though not yet checked.** Tax-Calculator's `e00700` is *"Taxable refunds of
+/// state and local income taxes"* (verified present in the installed `taxcalc`), so this output has a
+/// second witness available the moment `GoldenInputs` gains the axis — filed as FR-196d. Until then
+/// the figure is self-consistent only, which is exactly what that follow-up exists to say out loud.
+#[must_use]
+pub fn refund_on_forms_1099g(ri: &crate::tax::return_inputs::ReturnInputs) -> Usd {
+    ri.g_1099.iter().map(|g| g.box2_state_refund).sum()
+}
+
+/// Work §111(a) for this return: the [`Decision`], or why the worksheet cannot be used.
+///
+/// ★★★ **ONE definition, read by BOTH `screen_inputs` and the printed Schedule 1.** The refusal and
+/// the figure must agree by construction, not by two call sites that happen to pass the same
+/// arguments — *"two chains ⇒ the test IS the comparison"*, and the cheaper repair is to have one
+/// chain. Every caller passes the whole return and gets the same answer.
+pub fn decide(ri: &crate::tax::return_inputs::ReturnInputs) -> Result<Decision, NotUsable> {
+    // ★★★ **THE RETURN-LEVEL PRECONDITION: a refund must be REPORTED before §111(a) measures one.**
+    //     The §111(a) gate's own liveness is that fact — a transcribed Form 1099-G box 2, or the
+    //     document-less refund question answered Yes — and it is read through `question_is_live`
+    //     rather than re-typed, so this cannot drift from the question that asks limb (a).
+    //     Without it a hand-written TOML carrying the facts block on a refund-less return would
+    //     print worksheet line 1 as income with limb (a) never asked: `NoRefundReported` refuses
+    //     instead, and the block's 22 figures are never silently unread.
+    if !crate::tax::questions::question_is_live(
+        crate::tax::questions::QuestionId::ItemizedPriorYear,
+        ri,
+    ) {
+        return Err(NotUsable::NoRefundReported);
+    }
+    figure(
+        ri.tax_year,
+        ri.itemized_prior_year,
+        ri.prior_year_elected_sales_tax,
+        refund_on_forms_1099g(ri),
+        ri.state_local_refund.as_ref(),
+    )
+}
+
+/// **What Schedule 1 line 1 PRINTS** — `None` meaning the line is **blank**, never a zero.
+///
+/// ★★★ **The `Option` is the deliverable, all the way to the page.** `None` and `Some(0)` are
+/// different testimony: the first is a line §111(a) says not to fill in, the second a figure the
+/// filer states. Both TIP exits and both worksheet STOPs are `None`, and
+/// `printed::schedule_1_lines` carries that through to an emitter that DECLINES TO WRITE (§G-11's
+/// *"fixed at the writer"* pattern, as Form 1040 lines 34/37 already are).
+///
+/// ★★ **When the worksheet has NOT decided, the hand-attested figure still prints**, unchanged:
+/// `Err(_)` here is a state `screen_inputs` refuses on, so the fallback is what a return that cannot
+/// reach this worksheet has always printed. The one state that is both `Err` and fileable is a
+/// return where no refund exists at all (the §111(a) gate is not live), and there the attested
+/// figure is the only testimony there is.
+///
+/// ★★★ **A NON-ZERO ATTESTATION IS NEVER DROPPED, and the reason is a direction argument rather
+/// than a preference.** `sch1.state_refund_taxable` is a figure the filer typed for this line. If a
+/// §111(a) decision existed and silently replaced it with a blank, the return would go out
+/// UNDERSTATED by the whole of it — so the attestation wins whenever it is non-zero, and the two
+/// states are then distinguished by what else is on the return:
+///
+/// - the `state_local_refund` block is present (or limb (b) was answered *Yes*) **and** the
+///   attestation is non-zero ⇒ two testimonies about one line, and `screen_inputs` REFUSES
+///   ([`crate::tax::return_refuse::RefuseReason::TwoTestimoniesAboutStateRefund`]). btctax cannot
+///   know which figure is the filer's real answer, so it refuses rather than choose.
+/// - only the TIP's limb (a) decided (*"you did not itemize"*) and the attestation is non-zero ⇒ the
+///   attested figure prints, exactly as it does today, and this is FR-196e's decision rather than
+///   its silence. The two are not necessarily a contradiction: Pub. 525's *Itemized Deduction
+///   Recoveries* can make a recovery of an item from **another** year income on this same line, and
+///   limb (a) is a statement about the year *this* refund's tax was paid in. Printing the filer's own
+///   figure can only OVERSTATE against the TIP; blanking it would understate, and refusing it would
+///   wall a state that files today.
+///
+/// A zero attestation is not testimony at all here — nothing on the input surface asks for it, and it
+/// is `Usd::ZERO` on a defaulted return (§G-23's *"stated zero"*) — so a decision may take that line
+/// over.
+#[must_use]
+pub fn schedule_1_line1(ri: &crate::tax::return_inputs::ReturnInputs) -> Option<Usd> {
+    let attested = ri.sch1.state_refund_taxable;
+    match decide(ri) {
+        Ok(d) if attested == Usd::ZERO => d.schedule_1_line1(),
+        _ => Some(attested),
+    }
 }
 
 #[cfg(test)]
@@ -1776,7 +1915,6 @@ mod tests {
         line17: Usd,
     ) -> StateLocalRefundFacts {
         StateLocalRefundFacts {
-            prior_year_elected_sales_tax: false,
             refund_not_on_a_1099g: Usd::ZERO,
             prior_year_filing_status: status,
             prior_year_schedule_a_line5d: line5d,
@@ -1811,7 +1949,8 @@ mod tests {
     #[test]
     fn vector1_the_refund_is_fully_taxable() {
         let facts = itemizer(FilingStatus::Single, dec!(8000), dec!(8000), dec!(20000));
-        let d = figure(2025, Some(true), dec!(900), Some(&facts)).expect("the worksheet applies");
+        let d = figure(2025, Some(true), Some(false), dec!(900), Some(&facts))
+            .expect("the worksheet applies");
         let Decision::Worksheet { sheet, part } = d else {
             panic!("the worksheet was worked, not exited by the TIP: {d:?}")
         };
@@ -1841,7 +1980,8 @@ mod tests {
     #[test]
     fn vector2_the_tax_benefit_was_only_partial() {
         let facts = itemizer(FilingStatus::Mfj, dec!(9000), dec!(9000), dec!(30000));
-        let d = figure(2025, Some(true), dec!(3000), Some(&facts)).expect("the worksheet applies");
+        let d = figure(2025, Some(true), Some(false), dec!(3000), Some(&facts))
+            .expect("the worksheet applies");
         let Decision::Worksheet { sheet, part } = d else {
             panic!("the worksheet was worked: {d:?}")
         };
@@ -1872,7 +2012,7 @@ mod tests {
     #[test]
     fn vector3_the_standard_deduction_year_leaves_the_line_blank_not_zero() {
         // No facts needed at all — limb (a) of the TIP decides before the worksheet begins.
-        let d = figure(2025, Some(false), dec!(900), None).expect("the TIP decides");
+        let d = figure(2025, Some(false), Some(false), dec!(900), None).expect("the TIP decides");
         assert_eq!(d, Decision::NotTaxableByTip(TipLimb::DidNotItemize));
         assert_eq!(
             d.schedule_1_line1(),
@@ -1883,21 +2023,38 @@ mod tests {
         //   block. A filer who typed the prior-year figures and then answered "no" must not be routed
         //   into the worksheet by the block's mere existence.
         let facts = itemizer(FilingStatus::Single, dec!(8000), dec!(8000), dec!(20000));
-        let d2 = figure(2025, Some(false), dec!(900), Some(&facts)).expect("the TIP still decides");
+        let d2 = figure(2025, Some(false), Some(false), dec!(900), Some(&facts))
+            .expect("the TIP still decides");
         assert_eq!(d2, Decision::NotTaxableByTip(TipLimb::DidNotItemize));
         assert_eq!(d2.schedule_1_line1(), None);
     }
 
-    /// ★★★ **VECTOR 3b — the TIP's OTHER limb, which nothing in btctax asked before now.** An
+    /// ★★★ **VECTOR 3b — the TIP's OTHER limb, which nothing in btctax asked before FR-221.** An
     /// itemizer who ELECTED SALES TAXES deducted no income tax at all, so §111(a) makes none of the
-    /// refund income — and today that filer is refused. The line is blank, not zero.
+    /// refund income — and before FR-221 that filer was refused. The line is blank, not zero.
+    ///
+    /// ★★★ **AND IT NEEDS NO OTHER INPUT — that is the part FR-221 turns on.** The exit is taken with
+    /// `facts: None`, i.e. with no prior-year Schedule A, no prior-year filing status, no §63(f)
+    /// boxes and no Pub. 525 declarations. While limb (b) lived INSIDE the facts block every one of
+    /// those twenty-one serde-required fields stood between this filer and their own exit, so the
+    /// second assertion below is the one that would red if it moved back:
+    /// *"neither limb may require the other's inputs."*
     #[test]
     fn vector3b_the_sales_tax_election_year_also_leaves_the_line_blank() {
-        let mut facts = itemizer(FilingStatus::Single, dec!(8000), dec!(8000), dec!(20000));
-        facts.prior_year_elected_sales_tax = true;
-        let d = figure(2025, Some(true), dec!(900), Some(&facts)).expect("the TIP decides");
+        let d = figure(2025, Some(true), Some(true), dec!(900), None).expect("the TIP decides");
         assert_eq!(d, Decision::NotTaxableByTip(TipLimb::ElectedSalesTax));
         assert_eq!(d.schedule_1_line1(), None);
+        assert_ne!(
+            d.schedule_1_line1(),
+            Some(Usd::ZERO),
+            "blank, never a computed zero"
+        );
+        // …and the exit does not depend on the block being ABSENT either: a filer who typed the
+        // prior-year figures and then answered limb (b) Yes still exits.
+        let facts = itemizer(FilingStatus::Single, dec!(8000), dec!(8000), dec!(20000));
+        let d2 = figure(2025, Some(true), Some(true), dec!(900), Some(&facts))
+            .expect("the TIP still decides");
+        assert_eq!(d2, Decision::NotTaxableByTip(TipLimb::ElectedSalesTax));
     }
 
     /// ★★ **The line-3 STOP** — the §164(b)(6) limitation had already disallowed more than the whole
@@ -1908,7 +2065,8 @@ mod tests {
         // TY2024 line 5d $18,000 against a $10,000 line 5e ⇒ line 2 = $8,000, and a $900 refund is
         // not more than that.
         let facts = itemizer(FilingStatus::Single, dec!(18000), dec!(10000), dec!(20000));
-        let d = figure(2025, Some(true), dec!(900), Some(&facts)).expect("the worksheet applies");
+        let d = figure(2025, Some(true), Some(false), dec!(900), Some(&facts))
+            .expect("the worksheet applies");
         let Decision::Worksheet { sheet, part } = d else {
             panic!("the worksheet was worked: {d:?}")
         };
@@ -1927,7 +2085,8 @@ mod tests {
     #[test]
     fn the_line8_stop_is_reached_when_itemizing_bought_nothing() {
         let facts = itemizer(FilingStatus::Single, dec!(8000), dec!(8000), dec!(14000));
-        let d = figure(2025, Some(true), dec!(900), Some(&facts)).expect("the worksheet applies");
+        let d = figure(2025, Some(true), Some(false), dec!(900), Some(&facts))
+            .expect("the worksheet applies");
         let Decision::Worksheet { sheet, part } = d else {
             panic!("the worksheet was worked: {d:?}")
         };
@@ -1944,7 +2103,8 @@ mod tests {
     #[test]
     fn line1_is_capped_at_the_prior_years_schedule_a_line5d() {
         let facts = itemizer(FilingStatus::Single, dec!(500), dec!(500), dec!(20000));
-        let d = figure(2025, Some(true), dec!(900), Some(&facts)).expect("the worksheet applies");
+        let d = figure(2025, Some(true), Some(false), dec!(900), Some(&facts))
+            .expect("the worksheet applies");
         let Decision::Worksheet { sheet, .. } = d else {
             panic!("{d:?}")
         };
@@ -1965,7 +2125,8 @@ mod tests {
         let mut facts = itemizer(FilingStatus::Single, dec!(8000), dec!(8000), dec!(20000));
         facts.refund_not_on_a_1099g = dec!(250);
         // The caller transcribed $900 of Form 1099-G box 2; the filer also got $250 with no form.
-        let d = figure(2025, Some(true), dec!(900), Some(&facts)).expect("the worksheet applies");
+        let d = figure(2025, Some(true), Some(false), dec!(900), Some(&facts))
+            .expect("the worksheet applies");
         let Decision::Worksheet { sheet, part } = d else {
             panic!("{d:?}")
         };
@@ -1979,7 +2140,8 @@ mod tests {
         //   capping rather than after: capping each half separately would let a filer past the cap.
         facts.prior_year_schedule_a_line5d = dec!(1000);
         facts.prior_year_schedule_a_line5e = dec!(1000);
-        let d2 = figure(2025, Some(true), dec!(900), Some(&facts)).expect("the worksheet applies");
+        let d2 = figure(2025, Some(true), Some(false), dec!(900), Some(&facts))
+            .expect("the worksheet applies");
         let Decision::Worksheet { sheet: s2, .. } = d2 else {
             panic!("{d2:?}")
         };
@@ -1995,7 +2157,8 @@ mod tests {
         let mut facts = itemizer(FilingStatus::Mfj, dec!(9000), dec!(9000), dec!(30000));
         facts.prior_year_aged_blind.taxpayer_aged = true;
         facts.prior_year_aged_blind.taxpayer_blind = true;
-        let d = figure(2025, Some(true), dec!(3000), Some(&facts)).expect("the worksheet applies");
+        let d = figure(2025, Some(true), Some(false), dec!(3000), Some(&facts))
+            .expect("the worksheet applies");
         let Decision::Worksheet { sheet, part } = d else {
             panic!("{d:?}")
         };
@@ -2012,7 +2175,8 @@ mod tests {
     fn the_mfs_note_skips_lines_5_through_7() {
         let mut facts = itemizer(FilingStatus::Mfs, dec!(6000), dec!(5000), dec!(9000));
         facts.prior_year_mfs_spouse_itemized = true;
-        let d = figure(2025, Some(true), dec!(1500), Some(&facts)).expect("the worksheet applies");
+        let d = figure(2025, Some(true), Some(false), dec!(1500), Some(&facts))
+            .expect("the worksheet applies");
         let Decision::Worksheet { sheet, part } = d else {
             panic!("{d:?}")
         };
@@ -2030,7 +2194,8 @@ mod tests {
         //   NOTHING is taxable. The Note is not cosmetic — it is the difference between $500 of income
         //   and none.
         facts.prior_year_mfs_spouse_itemized = false;
-        let d2 = figure(2025, Some(true), dec!(1500), Some(&facts)).expect("the worksheet applies");
+        let d2 = figure(2025, Some(true), Some(false), dec!(1500), Some(&facts))
+            .expect("the worksheet applies");
         let Decision::Worksheet { part: p2, .. } = d2 else {
             panic!("{d2:?}")
         };
@@ -2107,7 +2272,7 @@ mod tests {
                 "{e:?} must be the condition the walk reports"
             );
             assert_eq!(
-                figure(2025, Some(true), dec!(900), Some(&facts)),
+                figure(2025, Some(true), Some(false), dec!(900), Some(&facts)),
                 Err(NotUsable::Pub525Exception(e)),
                 "{e:?} must REFUSE — Pub. 525's Itemized Deduction Recoveries governs, and btctax \
                  models no part of it"
@@ -2130,7 +2295,7 @@ mod tests {
         let facts = itemizer(FilingStatus::Single, dec!(8000), dec!(8000), dec!(20000));
         let unarchived = REVISIONS.iter().map(|r| r.year).max().expect("non-empty") + 1;
         assert_eq!(
-            figure(unarchived, Some(true), dec!(900), Some(&facts)),
+            figure(unarchived, Some(true), Some(false), dec!(900), Some(&facts)),
             Err(NotUsable::NoArchivedRevision {
                 tax_year: unarchived
             })
@@ -2142,12 +2307,12 @@ mod tests {
     #[test]
     fn uncollected_facts_refuse() {
         assert_eq!(
-            figure(2025, Some(true), dec!(900), None),
+            figure(2025, Some(true), Some(false), dec!(900), None),
             Err(NotUsable::FactsNotCollected)
         );
         // ★ An UNANSWERED prior-year-itemize declaration does not sneak through as a TIP exit either.
         assert_eq!(
-            figure(2025, None, dec!(900), None),
+            figure(2025, None, None, dec!(900), None),
             Err(NotUsable::FactsNotCollected)
         );
     }
@@ -2169,5 +2334,301 @@ mod tests {
             err.to_string().contains("exception_owed_amt_in_prior_year"),
             "the error must name the missing field: {err}"
         );
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════════════════════
+    // 7. ★★★ **END TO END — THE SCREEN AND THE PRINTED LINE.** Everything above tests the
+    //    worksheet in isolation. These drive a whole return through `screen_inputs` AND through
+    //    `assemble_absolute` → `printed::schedule_1_lines`, because the wall FR-196 removes is at
+    //    the screen and the figure it releases is on the page — and *"an unread computed value is
+    //    not thereby correct."*
+    // ════════════════════════════════════════════════════════════════════════════════════════════
+
+    use crate::tax::return_inputs::{Form1099G, ReturnInputs};
+
+    /// An itemizer who received a state income tax refund on a Form 1099-G, on a TY2024 return.
+    ///
+    /// ★ The 1099-G also carries $1,200 of box-1 unemployment, and that is load-bearing rather than
+    ///   decoration: `printed::schedule_1_lines` returns `None` when the whole schedule is empty, so
+    ///   a return whose only Schedule 1 item is a BLANK line 1 files no Schedule 1 at all and the
+    ///   assertion *"line 1 is blank"* would be made against nothing. With line 7 populated the
+    ///   schedule files, and the blank is observed ON the printed schedule.
+    fn refund_household() -> ReturnInputs {
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            tax_year: 2024,
+            g_1099: vec![Form1099G {
+                payer: "STATE OF EXAMPLE".into(),
+                box1_unemployment: dec!(1200),
+                box2_state_refund: dec!(900),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        ri.header.taxpayer.first_name = "Pat".into();
+        ri.header.taxpayer.last_name = "Roe".into();
+        ri.header.taxpayer.ssn = "222334444".into();
+        // The TIP's limb (a): they DID itemize in the year they paid the tax, which is the answer
+        // that opens both the worksheet and limb (b).
+        ri.itemized_prior_year = Some(true);
+        crate::tax::testonly::answer_all_live_declarations(&mut ri);
+        ri
+    }
+
+    fn refusal(ri: &ReturnInputs) -> Option<crate::tax::return_refuse::RefuseReason> {
+        crate::tax::return_refuse::screen_inputs(
+            ri,
+            &crate::tax::testonly::ty2024_table(),
+            &crate::tax::testonly::ty2024_params(),
+        )
+        .map(|r| r.reason)
+    }
+
+    /// Schedule 1 line 1 **as printed**, and whether the schedule files at all.
+    fn printed_line1(ri: &ReturnInputs) -> Option<Option<Usd>> {
+        let ar = crate::tax::return_1040::assemble_absolute(
+            ri,
+            &Default::default(),
+            &crate::tax::testonly::ty2024_params(),
+            &crate::tax::testonly::ty2024_table(),
+            2024,
+        );
+        crate::tax::printed::schedule_1_lines(&ar).map(|s1| s1.line1)
+    }
+
+    /// ★★★ **B1 — THE SALES-TAX-ELECTION FILER FILES, WITH A BLANK LINE 1.** FR-221's whole point:
+    /// before it, this filer was refused with nothing to compute, because btctax asked limb (a) of
+    /// the TIP and never limb (b).
+    ///
+    /// ★★★ **And they file with NO prior-year figures at all** — `state_local_refund` stays `None`.
+    /// That is the *"neither limb may require the other's inputs"* half, and it is why limb (b) is a
+    /// return-level declaration rather than one of the block's twenty-two serde-required fields.
+    #[test]
+    fn b1_the_sales_tax_election_filer_files_with_a_blank_schedule_1_line_1() {
+        let mut ri = refund_household();
+        ri.prior_year_elected_sales_tax = Some(true);
+        assert!(
+            ri.state_local_refund.is_none(),
+            "the premise: the exit needs none of the worksheet's inputs"
+        );
+        assert_eq!(refusal(&ri), None, "this return must FILE");
+        assert_eq!(
+            decide(&ri),
+            Ok(Decision::NotTaxableByTip(TipLimb::ElectedSalesTax))
+        );
+        // BLANK, and asserted against the zero it must not be.
+        assert_eq!(schedule_1_line1(&ri), None);
+        assert_ne!(schedule_1_line1(&ri), Some(Usd::ZERO));
+        assert_eq!(
+            printed_line1(&ri),
+            Some(None),
+            "Schedule 1 FILES (line 7 carries the unemployment) and its line 1 is BLANK"
+        );
+    }
+
+    /// ★★★ **B1 — THE INCOME-TAX FILER WITH THE PRIOR-YEAR FIGURES FILES VIA THE WORKSHEET**, and
+    /// the figure reaches the printed line. This is the wall coming down: the same return refused
+    /// `StateAndLocalRefundWorksheetNotComputed` before FR-196 no matter what the filer supplied.
+    ///
+    /// ★ Hand-checked against the TY2024 revision: L1 = min(900, 5d 8,000) = 900; L2 skipped (5d is
+    ///   not more than 5e); L3 = 900; L4 = 20,000; L5 = 13,850 (the 2023 single figure the 2024
+    ///   revision prints); L6 = -0-; L7 = 13,850; L8 = 6,150; L9 = min(900, 6,150) = **900**.
+    #[test]
+    fn b1_the_income_tax_filer_with_the_facts_files_via_the_worksheet() {
+        let mut ri = refund_household();
+        ri.prior_year_elected_sales_tax = Some(false);
+        ri.state_local_refund = Some(itemizer(
+            FilingStatus::Single,
+            dec!(8000),
+            dec!(8000),
+            dec!(20000),
+        ));
+        assert_eq!(refusal(&ri), None, "this return must FILE");
+        let Ok(Decision::Worksheet { sheet, part }) = decide(&ri) else {
+            panic!("the worksheet was worked: {:?}", decide(&ri))
+        };
+        assert_eq!(sheet.line5, Some(dec!(13850)), "the 2024 revision's line 5");
+        assert_eq!(part, TaxablePart::Amount(dec!(900)));
+        assert_eq!(schedule_1_line1(&ri), Some(dec!(900)));
+        assert_eq!(
+            printed_line1(&ri),
+            Some(Some(dec!(900))),
+            "the worksheet's line 9 is what Schedule 1 line 1 PRINTS"
+        );
+        // ★★ …and it reaches AGI, which is the half a printed-line assertion misses: AGI is the
+        //    argument to the §221 phase-out, the §1411 MAGI, the AMT, the §170(b) base and the
+        //    itemize election. $1,200 unemployment + $900 refund.
+        let ar = crate::tax::return_1040::assemble_absolute(
+            &ri,
+            &Default::default(),
+            &crate::tax::testonly::ty2024_params(),
+            &crate::tax::testonly::ty2024_table(),
+            2024,
+        );
+        assert_eq!(
+            ar.agi,
+            dec!(2100),
+            "the refund is INCOME, and AGI carries it"
+        );
+    }
+
+    /// ★★★ **B1 — A PUB. 525 EXCEPTION REFUSES UNDER ITS OWN NEW REASON, QUOTING THE FORM.** E's
+    /// §7(1), ranked first among the removal's obligations: *"the form FORBIDS this worksheet for
+    /// you"* is a different fact with a different remedy from *"btctax has not been given the
+    /// figures"*, so it is a different reason — and the detail quotes THAT revision's own sentence.
+    #[test]
+    fn b1_a_pub525_exception_refuses_under_the_new_reason_quoting_the_form() {
+        let mut ri = refund_household();
+        ri.prior_year_elected_sales_tax = Some(false);
+        let mut facts = itemizer(FilingStatus::Single, dec!(8000), dec!(8000), dec!(20000));
+        facts.exception_owed_amt_in_prior_year = true;
+        ri.state_local_refund = Some(facts);
+        let r = crate::tax::return_refuse::screen_inputs(
+            &ri,
+            &crate::tax::testonly::ty2024_table(),
+            &crate::tax::testonly::ty2024_params(),
+        )
+        .expect("an affirmed Exception condition refuses");
+        assert_eq!(
+            r.reason,
+            crate::tax::return_refuse::RefuseReason::Pub525ItemizedDeductionRecovery(
+                Pub525Exception::E6OwedAmtInPriorYear
+            ),
+            "NOT `StateAndLocalRefundWorksheetNotComputed` — supplying more figures cannot cure it"
+        );
+        // ★★ The quote is the REVISION's, read back from the table rather than re-typed here: this
+        //    return is TY2024, so the 2024 wording is what the filer must see.
+        let sentence = REVISION_2024
+            .exception_text(Pub525Exception::E6OwedAmtInPriorYear)
+            .expect("the 2024 revision transcribes exception 6");
+        assert!(
+            r.detail.contains(sentence),
+            "the refusal must quote the condition the filer affirmed, verbatim: {}",
+            r.detail
+        );
+        assert!(
+            r.detail
+                .contains("Itemized Deduction Recoveries in Pub. 525"),
+            "…and name the authority that governs instead: {}",
+            r.detail
+        );
+    }
+
+    /// ★★★ **B1 — TWO TESTIMONIES ABOUT ONE LINE REFUSE.** E's §7(3). Both routes into §111(a) are
+    /// exercised, because each is a separate way for the filer to have answered Schedule 1 line 1 —
+    /// and the negative control is in the same test, so the rule is shown to discriminate rather
+    /// than merely to fire.
+    #[test]
+    fn b1_two_testimonies_about_schedule_1_line_1_refuse() {
+        use crate::tax::return_refuse::RefuseReason;
+        // (a) the worksheet's figures, beside a hand-attested figure for the same line.
+        let mut worked = refund_household();
+        worked.prior_year_elected_sales_tax = Some(false);
+        worked.state_local_refund = Some(itemizer(
+            FilingStatus::Single,
+            dec!(8000),
+            dec!(8000),
+            dec!(20000),
+        ));
+        assert_eq!(
+            refusal(&worked),
+            None,
+            "the control: with nothing attested, the worksheet decides and the return files"
+        );
+        let mut both = worked.clone();
+        both.sch1.state_refund_taxable = dec!(900);
+        assert_eq!(
+            refusal(&both),
+            Some(RefuseReason::TwoTestimoniesAboutStateRefund)
+        );
+        // (b) the TIP's limb (b) exit, beside the same attested figure. The exit says none of it is
+        //     taxable; the figure says $900 of it is.
+        let mut exited = refund_household();
+        exited.prior_year_elected_sales_tax = Some(true);
+        assert_eq!(refusal(&exited), None, "the control again");
+        let mut exited_both = exited.clone();
+        exited_both.sch1.state_refund_taxable = dec!(900);
+        assert_eq!(
+            refusal(&exited_both),
+            Some(RefuseReason::TwoTestimoniesAboutStateRefund)
+        );
+        // ★★★ …and the ATTESTED figure is never silently dropped, which is why the refusal has to
+        //     exist: `schedule_1_line1` prefers it over a decision precisely so that no path can
+        //     understate by the whole of it.
+        assert_eq!(schedule_1_line1(&exited_both), Some(dec!(900)));
+    }
+
+    /// ★★★ **The worksheet's figures on a return that reports NO refund refuse** — the state the
+    /// wiring created, and therefore the wiring's to close. Before Schedule 1 line 1 read the
+    /// worksheet, a stray block changed nothing; now its line 1 would print income with the TIP's
+    /// limb (a) never asked, because the §111(a) gate is not live to ask it.
+    #[test]
+    fn a_facts_block_on_a_return_with_no_refund_refuses() {
+        let mut ri = refund_household();
+        ri.g_1099.clear();
+        ri.documents
+            .set(crate::tax::document_census::DocumentRow::G1099, Some(false));
+        // ★ A `No` on the census row opens the document-less refund question, which must be answered
+        //   or IT refuses first and masks the rule under test.
+        ri.state_refund_without_1099g = Some(false);
+        ri.itemized_prior_year = None;
+        ri.state_local_refund = Some(itemizer(
+            FilingStatus::Single,
+            dec!(8000),
+            dec!(8000),
+            dec!(20000),
+        ));
+        assert!(
+            !crate::tax::questions::question_is_live(
+                crate::tax::questions::QuestionId::ItemizedPriorYear,
+                &ri
+            ),
+            "the premise: nothing on this return reports a state or local income tax refund"
+        );
+        assert_eq!(decide(&ri), Err(NotUsable::NoRefundReported));
+        assert_eq!(
+            refusal(&ri),
+            Some(crate::tax::return_refuse::RefuseReason::StateLocalRefundFactsWithoutARefund)
+        );
+        // ★ And the printed line falls back to the attested figure rather than to the worksheet's:
+        //   an `Err` never prints a worksheet amount.
+        assert_eq!(schedule_1_line1(&ri), Some(Usd::ZERO));
+    }
+
+    /// ★★★ **FR-222 — FORM 1099-G BOX 2 IS THE WORKSHEET'S INPUT, and the KILL is that changing the
+    /// box changes the printed line.** The box had no money reader at all before this: it was
+    /// transcribed, displayed and censused while the figure on Schedule 1 line 1 came from a
+    /// hand-attested scalar. A test that only asserted *"900 in, 900 out"* would pass just as well
+    /// if the worksheet read the attestation, so the box is MOVED and the output must move with it.
+    #[test]
+    fn fr222_form_1099g_box2_is_what_the_worksheet_reads() {
+        let mut ri = refund_household();
+        ri.prior_year_elected_sales_tax = Some(false);
+        ri.state_local_refund = Some(itemizer(
+            FilingStatus::Single,
+            dec!(8000),
+            dec!(8000),
+            dec!(20000),
+        ));
+        assert_eq!(refund_on_forms_1099g(&ri), dec!(900));
+        assert_eq!(schedule_1_line1(&ri), Some(dec!(900)));
+        // Halve the reported box and the taxable part halves with it.
+        ri.g_1099[0].box2_state_refund = dec!(450);
+        assert_eq!(refund_on_forms_1099g(&ri), dec!(450));
+        assert_eq!(schedule_1_line1(&ri), Some(dec!(450)));
+        // ★ *"Form(s)"*, plural: a SECOND 1099-G adds to the first rather than replacing it.
+        ri.g_1099.push(Form1099G {
+            payer: "CITY OF EXAMPLE".into(),
+            box2_state_refund: dec!(200),
+            ..Default::default()
+        });
+        assert_eq!(refund_on_forms_1099g(&ri), dec!(650));
+        assert_eq!(schedule_1_line1(&ri), Some(dec!(650)));
+        // ★ …and the block's own *"(or similar statement)"* half ADDS to the boxes, never replaces
+        //   them — the direction that would understate if it were wrong.
+        let mut facts = itemizer(FilingStatus::Single, dec!(8000), dec!(8000), dec!(20000));
+        facts.refund_not_on_a_1099g = dec!(100);
+        ri.state_local_refund = Some(facts);
+        assert_eq!(schedule_1_line1(&ri), Some(dec!(750)));
     }
 }

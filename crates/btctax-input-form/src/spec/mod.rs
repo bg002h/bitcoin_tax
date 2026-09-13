@@ -190,7 +190,7 @@ mod tests {
             );
         }
         assert_eq!(
-            decl_count, 40,
+            decl_count, 41,
             "29 declarations are Decl* fields (the other two dedup to Schedule A). ★ R10.4 / T4b \
              added the sixteenth (the carried filing status's confirmation); ★ R3 / T5 added the \
              four of the DOCUMENT-LESS INCOME DOOR — wages with no W-2, interest or dividends with \
@@ -203,7 +203,7 @@ mod tests {
              instructions' line 1 and line 3 rule 1 both read \"you or your spouse\") and M-1's \
              document-less HSA distribution door (line 14a). \u{2605}\u{2605}\u{2605} T7 / R6 added the \
              thirty-first: Step 5 question 1 of Who Qualifies as Your Dependent, the one dependent \
-             gate that is about the FILER rather than about a row. \u{2605}\u{2605}\u{2605} R7 / T8 added EIGHT: Head of household's two tests, FR-67's \u{a7}6013(g)/(h) nonresident-alien-spouse election gate, and Qualifying surviving spouse's five conditions. \u{2605}\u{2605}\u{2605} R8 / T9 added the FORTIETH: Schedule A's Line 8a Caution \u{2014} the \u{a7}25 mortgage interest credit (Form 8396). Its four siblings, the sale-of-a-main-home answers, are deduped to the HomeSale section instead."
+             gate that is about the FILER rather than about a row. \u{2605}\u{2605}\u{2605} R7 / T8 added EIGHT: Head of household's two tests, FR-67's \u{a7}6013(g)/(h) nonresident-alien-spouse election gate, and Qualifying surviving spouse's five conditions. \u{2605}\u{2605}\u{2605} R8 / T9 added the FORTIETH: Schedule A's Line 8a Caution \u{2014} the \u{a7}25 mortgage interest credit (Form 8396). Its four siblings, the sale-of-a-main-home answers, are deduped to the HomeSale section instead. \u{2605}\u{2605}\u{2605} FR-221 added the FORTY-FIRST: the \u{a7}111(a) TIP's limb (b) \u{2014} whether that prior-year Schedule A elected state and local GENERAL SALES TAXES instead of income taxes. It is NOT deduped to the Schedule A sales-tax election, which is THIS year's: the same words about a different year, and an independent answer."
         );
         assert_eq!(
             deduped,
@@ -222,8 +222,8 @@ mod tests {
         // The delegating Decl* fields + the foreign_country_names Text field.
         assert_eq!(
             decls.fields.len(),
-            41,
-            "40 declarations + foreign_country_names"
+            42,
+            "41 declarations + foreign_country_names"
         );
         assert!(decls
             .fields
@@ -343,6 +343,11 @@ mod tests {
                     box2_state_refund: rust_decimal_macros::dec!(1),
                     ..Default::default()
                 }];
+                // ★★★ FR-221 — the liveness primer for the §111(a) TIP's limb (b): it is live iff
+                //     limb (a) is live AND answered YES. Safe to prime here for the same reason the
+                //     census rows are — the test drives one field at a time through the registry, and
+                //     limb (a) itself is driven by the loop above.
+                ri.itemized_prior_year = Some(true);
                 // ★★★ T16 — the liveness primer for Form 8889's seven declarations, which share
                 //     one predicate: the §223 trigger is affirmed. Safe to prime here for the same
                 //     reason the census rows are — the test drives one field at a time through the

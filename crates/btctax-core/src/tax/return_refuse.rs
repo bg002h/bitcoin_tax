@@ -1669,16 +1669,96 @@ pub enum RefuseReason {
     StateRefundWithout1099gUnanswered,
     /// **A live `itemized_prior_year` is `None`** — UNANSWERED class.
     ItemizedPriorYearUnanswered,
-    /// ★★★ **A state or local income tax refund is TAXABLE and btctax does not compute the
-    /// worksheet.**
+    /// ★★★ **FR-221 — a live `prior_year_elected_sales_tax` is `None`** (the TIP's limb (b)) —
+    /// UNANSWERED class. Live only when limb (a) was answered *Yes*, so it is asked of exactly the
+    /// filers the worksheet is about.
+    PriorYearElectedSalesTaxUnanswered,
+    /// ★★★ **btctax CANNOT WORK THE STATE AND LOCAL INCOME TAX REFUND WORKSHEET FOR THIS RETURN —
+    /// NARROWED BY FR-196 TO THREE STATES.**
     ///
-    /// §111(a)'s tax-benefit rule: a refund is income only to the extent the tax deducted produced a
-    /// benefit, which the **State and Local Income Tax Refund Worksheet** measures. btctax models no
-    /// part of it. So `itemized_prior_year = Some(false)` leaves Schedule 1 line 1 blank BY DECISION
-    /// (no benefit ⇒ no income), and `Some(true)` refuses — reached identically from a transcribed
-    /// 1099-G box 2 and from the document-less refund question, because the filer owes the same
-    /// answer either way (R3/I1).
+    /// §111(a)'s tax-benefit rule makes a refund income only to the extent the deduction produced a
+    /// benefit, and the **State and Local Income Tax Refund Worksheet**
+    /// ([`crate::tax::state_local_refund`]) now measures that. So this is no longer *"btctax models no
+    /// part of it"*; it is the residue, and it is exactly three states, each of which the worksheet
+    /// itself reports:
+    ///
+    /// - [`NotUsable::FactsNotCollected`] — the prior-year figures were never collected
+    ///   (`state_local_refund` is `None`), which is where every existing vault is;
+    /// - [`NotUsable::NoArchivedRevision`] — no `i1040gi` revision is archived for the year, so lines
+    ///   5 and 6's constants are unknown and btctax will not borrow a neighbouring year's;
+    /// - [`NotUsable::NoLine5AmountForStatus`] — line 5's bullet list named no amount for the
+    ///   prior-year filing status (unreachable today, carried as a value rather than a panic).
+    ///
+    /// ★★ **What it no longer refuses is the point:** an itemizer in an income-tax state who supplies
+    /// the prior-year figures now FILES, with the worksheet's own figure (or its blank) on Schedule 1
+    /// line 1. ★ And the ninth Pub. 525 condition is a DIFFERENT refusal —
+    /// [`Self::Pub525ItemizedDeductionRecovery`] — because *"the form forbids this worksheet for
+    /// you"* has a different remedy from *"btctax has not been given the figures"*.
+    ///
+    /// [`NotUsable::FactsNotCollected`]: crate::tax::state_local_refund::NotUsable::FactsNotCollected
+    /// [`NotUsable::NoArchivedRevision`]: crate::tax::state_local_refund::NotUsable::NoArchivedRevision
+    /// [`NotUsable::NoLine5AmountForStatus`]: crate::tax::state_local_refund::NotUsable::NoLine5AmountForStatus
     StateAndLocalRefundWorksheetNotComputed,
+    /// ★★★ **THE FORM FORBIDS THE WORKSHEET FOR THIS FILER — one of Pub. 525's nine Exception
+    /// conditions applies.**
+    ///
+    /// The worksheet's own first instruction is *"Be sure you have read the Exception in the
+    /// instructions for this line to see if you can use this worksheet instead of Pub. 525"*, and the
+    /// Exception says *"See Itemized Deduction Recoveries in Pub. 525 instead of using the State and
+    /// Local Income Tax Refund Worksheet in these instructions if any of the following applies."*
+    /// btctax models no part of Pub. 525's *Itemized Deduction Recoveries*.
+    ///
+    /// ★★★ **Deliberately NOT a reuse of [`Self::StateAndLocalRefundWorksheetNotComputed`], and E's
+    /// §7 ranks this first among the removal's obligations.** They are different facts with different
+    /// remedies: *"btctax has not been given the figures"* is fixed by supplying them, while *"the
+    /// form forbids this worksheet for you"* cannot be fixed by any input at all — the filer must
+    /// work Pub. 525. Collapsing the two would send a filer to fetch figures that would not help.
+    /// The detail quotes **that revision's own sentence** for the condition they affirmed, through
+    /// [`crate::tax::state_local_refund::Revision::exception_text`], so they read back the words they
+    /// answered rather than a paraphrase of them.
+    Pub525ItemizedDeductionRecovery(crate::tax::state_local_refund::Pub525Exception),
+    /// ★★★ **TWO TESTIMONIES ABOUT SCHEDULE 1 LINE 1** — INVALID class, and E's §7(3).
+    ///
+    /// `sch1.state_refund_taxable` is a figure the filer states for Schedule 1 line 1. §111(a) now
+    /// answers the same line, from either of two routes the filer takes deliberately: a present
+    /// `state_local_refund` block (they worked the worksheet) or `prior_year_elected_sales_tax ==
+    /// Some(true)` (they took the TIP's limb (b) exit). A non-zero attested figure beside either is
+    /// **two answers to one line**, and btctax cannot know which is the filer's real one.
+    ///
+    /// ★★ **Refusing is the only honest instrument here, and it is `FilerRecordsContradicted`'s
+    /// shape.** Silently preferring the worksheet would drop the attested amount — an understatement
+    /// of the whole of it; silently preferring the attestation would make the filer's own answers to
+    /// the worksheet unread, which is *"a figure with no reader"* in its two-chains form, *"where the
+    /// correct instrument is the comparison."*
+    ///
+    /// ★ **Neither state is reachable on a return that files today**: the block arrived with FR-196
+    /// and the limb-(b) question with FR-221, so this refusal cannot wall anything that was fileable
+    /// before it existed. The TIP's limb (a) is deliberately NOT one of its triggers — see the note
+    /// on [`crate::tax::state_local_refund::schedule_1_line1`] for why that case prints the attested
+    /// figure instead (FR-196e's decision: Pub. 525 can make a recovery from another year income on
+    /// this same line, and printing the filer's own figure can only overstate).
+    TwoTestimoniesAboutStateRefund,
+    /// ★★★ **A REFUND AMOUNT NO FORM 1099-G REPORTED, BESIDE AN ANSWER SAYING THERE WAS NONE** —
+    /// INVALID class, and E's §7(5): *"the same contradiction one question over."*
+    ///
+    /// `state_local_refund.refund_not_on_a_1099g` is worksheet line 1's *"(or similar statement)"*
+    /// half — the refund no form reported — and `state_refund_without_1099g` is the class-(A)
+    /// declaration that asks whether such a refund exists. A non-zero amount beside a `Some(false)`
+    /// is a figure contradicting its own authorising answer, exactly as
+    /// [`Self::FilerRecordsContradicted`] is for a Schedule B row beside its closed door.
+    StateRefundWithout1099gContradicted,
+    /// ★★★ **THE WORKSHEET'S PRIOR-YEAR FIGURES ON A RETURN THAT REPORTS NO REFUND** — INVALID class.
+    ///
+    /// The §111(a) gate ([`crate::tax::questions::QuestionId::ItemizedPriorYear`]) is live exactly
+    /// when this return reports a state or local income tax refund — a transcribed Form 1099-G box 2,
+    /// or the document-less refund question answered *Yes*. A `state_local_refund` block on a return
+    /// where it is NOT live is a worksheet for a refund nothing on the return reports, and its line 1
+    /// would print income on a §6065-signed page with the TIP's limb (a) never asked.
+    ///
+    /// ★★ **This refusal exists because the figure now has a reader.** While the worksheet's output
+    /// was unread a stray block changed nothing; wiring it into Schedule 1 line 1 is what made the
+    /// state matter, so the rule lands in the same commit as the wiring rather than after it.
+    StateLocalRefundFactsWithoutARefund,
     // ── ★★★ R4 / T5 — the box decisions that REFUSE. ────────────────────────────────────────────
     /// ★★★ **Form 1099-INT box 11, 12 or 13 (bond premium) is > 0.**
     ///
@@ -1909,6 +1989,7 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         state_refund_without_1099g: _,
         hsa_distribution_without_1099sa: _,
         itemized_prior_year: _,
+        prior_year_elected_sales_tax: _,
         schedule_c,
         schedule_a,
         // ★★★ FR-196 — the §111(a) worksheet's prior-year block DOES carry money: three Schedule A
@@ -2491,8 +2572,9 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             //   box 2 total it is added to.
             refund_not_on_a_1099g,
             // A filing status, the §63(f) boxes, the nine Pub. 525 exception declarations, the
-            // sales-tax election, the MFS pair and a provenance tag — no money among them.
-            prior_year_elected_sales_tax: _,
+            // MFS pair and a provenance tag — no money among them. (The TIP's limb (b) is not in
+            // this block since FR-221; it is the return-level `prior_year_elected_sales_tax`, and it
+            // is not money either.)
             prior_year_filing_status: _,
             prior_year_mfs_spouse_itemized: _,
             prior_year_aged_blind: _,
@@ -3770,28 +3852,200 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
             ),
         );
     }
-    // ★★★ R3/I1 + R4 — the STATE AND LOCAL INCOME TAX REFUND WORKSHEET, reached identically from a
-    //     transcribed 1099-G box 2 and from the document-less refund question. §111(a) is why the
-    //     gate and not the answer decides: a refund is income only to the extent the deduction
-    //     produced a tax benefit, so a filer who did NOT itemize last year owes nothing and their
-    //     Schedule 1 line 1 is blank BY DECISION rather than by omission.
-    if crate::tax::questions::question_is_live(
-        crate::tax::questions::QuestionId::ItemizedPriorYear,
-        ri,
-    ) && ri.itemized_prior_year == Some(true)
+    // ★★★ **R3/I1 + R4 + FR-196/FR-221 — THE STATE AND LOCAL INCOME TAX REFUND WORKSHEET, NOW
+    //     WORKED.** The rule that stood here refused every itemizer in an income-tax state — *"the
+    //     definition of a second year of itemizing"* — because btctax modelled no part of §111(a).
+    //     `state_local_refund` models all of it, so the CONDITION is replaced by a call to the
+    //     worksheet and the refusal survives NARROWED to what the worksheet itself cannot answer.
+    //     Nothing here decides §111(a) a second time: `state_local_refund::decide` is the one
+    //     definition, and `printed::schedule_1_lines` reads the same function for the figure.
+    //
+    // ★★ **Written INLINE rather than in a helper, deliberately.** The param-free tier census reads
+    //    each refusal reason named in THIS function's body plus four helpers it names by hand; a
+    //    fifth helper would be invisible to it (T10's defect verbatim: *"the whole rule would be
+    //    uncensused while the test still printed OK"*). Inline, every reason below is censused for
+    //    free and arrives needing a fixture.
     {
-        return refuse(
-            RefuseReason::StateAndLocalRefundWorksheetNotComputed,
-            "you received a refund, credit or offset of state or local income taxes and you \
-             ITEMIZED on your prior-year return, so §111(a)'s tax-benefit rule makes some or all of \
-             it income on Schedule 1 line 1. How much is decided by the STATE AND LOCAL INCOME TAX \
-             REFUND WORKSHEET in the Form 1040 instructions, which btctax does not compute — it \
-             needs last year's Schedule A, its SALT cap, the standard deduction you could have \
-             taken and the §164(b)(6) limitation. btctax refuses rather than guess a figure in the \
-             understatement direction. Work the worksheet by hand and file with a preparer, or \
-             answer \"no\" if you did not itemize in the year you paid the tax — then none of the \
-             refund is taxable and Schedule 1 line 1 is correctly blank",
+        use crate::tax::state_local_refund::{self as slr, NotUsable};
+        let gate_live = crate::tax::questions::question_is_live(
+            crate::tax::questions::QuestionId::ItemizedPriorYear,
+            ri,
         );
+        let off_form = ri
+            .state_local_refund
+            .map_or(Usd::ZERO, |w| w.refund_not_on_a_1099g);
+        // ── (i) E §7(5) — a refund amount no Form 1099-G reported, beside the answer that says there
+        //        was no such refund. The same shape as `FilerRecordsContradicted`, one question over.
+        //
+        // ★★ **NOT gated on the §111(a) gate, and E's §7(5) recipe would have been UNREACHABLE if it
+        //    were.** `state_refund_without_1099g` is live only when the 1099-G census row says *"I
+        //    received none"*, and that forbids a transcribed box 2 — so on a return where this
+        //    question is live and answered `No`, the §111(a) gate can only be live through this very
+        //    answer being `Yes`. Placed here, ahead of the gate, it fires on the state it is about;
+        //    placed inside the gate it could never fire at all. (A refusal that cannot fire is the
+        //    defect this repo names *"a gate that cannot fail"*.)
+        if off_form != Usd::ZERO
+            && crate::tax::questions::question_is_live(
+                crate::tax::questions::QuestionId::StateRefundWithout1099g,
+                ri,
+            )
+            && ri.state_refund_without_1099g == Some(false)
+        {
+            return refuse(
+                RefuseReason::StateRefundWithout1099gContradicted,
+                format!(
+                    "the State and Local Income Tax Refund Worksheet's figures on this return state \
+                     ${off_form} of refund that no Form 1099-G reported, and you answered \"no\" to \
+                     the question that asks whether you received a refund without a Form 1099-G. \
+                     Worksheet line 1 takes both halves — it says \"the income tax refund from \
+                     Form(s) 1099-G (or similar statement)\" — so that amount would raise the income \
+                     on Schedule 1 line 1 while your own answer says it does not exist. btctax \
+                     cannot know which of the two is wrong, so it refuses rather than choose: set \
+                     that amount to 0 if every refund you received is on a Form 1099-G, or change \
+                     the answer to \"yes\" if part of it is not"
+                ),
+            );
+        }
+        // ── (ii) The worksheet's figures on a return that reports NO refund. Outside the gate,
+        //         because that IS the condition. ──
+        if !gate_live && ri.state_local_refund.is_some() {
+            return refuse(
+                RefuseReason::StateLocalRefundFactsWithoutARefund,
+                "this return carries the prior-year figures for the STATE AND LOCAL INCOME TAX \
+                 REFUND WORKSHEET, and nothing on it reports a state or local income tax refund: no \
+                 Form 1099-G box 2 amount, and the question about a refund that arrived without a \
+                 Form 1099-G is not answered \"yes\". Worksheet line 9 goes on Schedule 1 line 1, \
+                 which is a figure you sign for under §6065, and §111(a) would be deciding it with \
+                 the Form 1040 instructions' own first test — whether you itemized in the year you \
+                 paid the tax — never asked. btctax cannot know which half is wrong, so it refuses \
+                 rather than choose: transcribe the Form 1099-G that reports the refund (box 2), or \
+                 answer \"yes\" to the refund question if no form was issued, or remove the \
+                 prior-year worksheet figures if you received no refund",
+            );
+        }
+        if gate_live && ri.itemized_prior_year == Some(true) {
+            // ── (iii) E §7(3) — TWO TESTIMONIES about Schedule 1 line 1. ──
+            let attested = ri.sch1.state_refund_taxable;
+            let answered_line1_another_way =
+                ri.state_local_refund.is_some() || ri.prior_year_elected_sales_tax == Some(true);
+            if attested != Usd::ZERO && answered_line1_another_way {
+                let how = if ri.state_local_refund.is_some() {
+                    "you also supplied the prior-year figures the STATE AND LOCAL INCOME TAX REFUND \
+                     WORKSHEET asks for, and btctax has worked it"
+                } else {
+                    "you also answered that in the year you paid the tax you elected to deduct state \
+                     and local GENERAL SALES TAXES instead of income taxes, which the Form 1040 \
+                     instructions say makes NONE of the refund taxable"
+                };
+                return refuse(
+                    RefuseReason::TwoTestimoniesAboutStateRefund,
+                    format!(
+                        "this return states ${attested} of taxable state or local income tax refund \
+                         directly on Schedule 1 line 1, and {how}. That is two answers to one line, \
+                         on a return you sign under §6065. btctax cannot know which is your real \
+                         answer — printing the worksheet's would drop the ${attested} you typed, and \
+                         printing yours would leave every answer you gave the worksheet unread — so \
+                         it refuses rather than choose: clear the direct Schedule 1 line 1 amount and \
+                         let §111(a) decide it, or remove the prior-year worksheet figures (and the \
+                         sales-tax election answer) and keep your own figure"
+                    ),
+                );
+            }
+            // ── (iv) The worksheet itself. It refuses on its OWN refusals and on nothing else. ──
+            match slr::decide(ri) {
+                // ★★★ **DECIDED, SO NO REFUSAL.** An amount, or a blank the form itself prescribes
+                //     (either TIP limb, either STOP). This is the wall coming down.
+                Ok(_) => {}
+                // ★ Unreachable under `gate_live`, and a REFUSAL rather than a no-op on purpose: the
+                //   fail-open direction here would drop a worksheet figure from Schedule 1 line 1,
+                //   and (i) above already gives this state its message.
+                Err(NotUsable::NoRefundReported) => {
+                    return refuse(
+                        RefuseReason::StateLocalRefundFactsWithoutARefund,
+                        "this return reports no state or local income tax refund, so §111(a) has \
+                         nothing to measure — and the §111(a) gate is live, which is a contradiction \
+                         btctax will not print through. Remove the prior-year worksheet figures, or \
+                         transcribe the Form 1099-G that reports the refund",
+                    )
+                }
+                Err(NotUsable::FactsNotCollected) => {
+                    return refuse(
+                        RefuseReason::StateAndLocalRefundWorksheetNotComputed,
+                        "you received a refund, credit or offset of state or local income taxes and \
+                         you ITEMIZED in the year you paid the tax, so §111(a)'s tax-benefit rule \
+                         makes some or all of it income on Schedule 1 line 1. How much is decided by \
+                         the STATE AND LOCAL INCOME TAX REFUND WORKSHEET in the Form 1040 \
+                         instructions, and btctax works that worksheet — but it needs the figures the \
+                         worksheet reads off your PRIOR-YEAR return, and this return does not carry \
+                         them: last year's Schedule A lines 5d, 5e and 17, last year's filing status, \
+                         last year's age/blindness boxes, and the nine Pub. 525 Exception conditions. \
+                         btctax refuses rather than guess a figure in the understatement direction. \
+                         Supply them in the `[state_local_refund]` table of an `income import` file \
+                         (`docs/income-import-schema.md` lists every key), or answer \"no\" if you \
+                         did not itemize in the year you paid the tax — then none of the refund is \
+                         taxable and Schedule 1 line 1 is correctly blank",
+                    )
+                }
+                Err(NotUsable::NoArchivedRevision { tax_year }) => {
+                    return refuse(
+                        RefuseReason::StateAndLocalRefundWorksheetNotComputed,
+                        format!(
+                            "you received a refund, credit or offset of state or local income taxes \
+                             and you ITEMIZED in the year you paid the tax, so §111(a) makes some or \
+                             all of it income on Schedule 1 line 1 — and the STATE AND LOCAL INCOME \
+                             TAX REFUND WORKSHEET that decides how much is printed in the Form 1040 \
+                             instructions for {tax_year}, which btctax does not carry yet. Its lines \
+                             5 and 6 print {prior}'s standard deduction and age/blindness amounts, \
+                             and btctax will NOT borrow a neighbouring year's figures: that would be \
+                             a wrong number in whichever direction the indexing happened to run. \
+                             Work the worksheet by hand and file with a preparer",
+                            prior = tax_year - 1
+                        ),
+                    )
+                }
+                Err(NotUsable::NoLine5AmountForStatus(status)) => {
+                    return refuse(
+                        RefuseReason::StateAndLocalRefundWorksheetNotComputed,
+                        format!(
+                            "the STATE AND LOCAL INCOME TAX REFUND WORKSHEET's line 5 asks for \"the \
+                             amount shown below for the filing status claimed on your prior-year \
+                             Form 1040 or 1040-SR\", and the bullet list in the revision btctax \
+                             carries names no amount for {status:?}. btctax refuses rather than \
+                             choose one. Work the worksheet by hand and file with a preparer"
+                        ),
+                    )
+                }
+                // ★★★ **E §7(1) — A DIFFERENT FACT WITH A DIFFERENT REMEDY, so a different reason.**
+                //     *"The form FORBIDS this worksheet for you"* cannot be fixed by supplying any
+                //     figure; the filer must work Pub. 525's *Itemized Deduction Recoveries*. The
+                //     detail quotes THAT REVISION'S OWN SENTENCE for the condition they affirmed, so
+                //     they read back the words they answered.
+                Err(NotUsable::Pub525Exception(e)) => {
+                    let quoted = slr::revision_for(ri.tax_year)
+                        .and_then(|rev| rev.exception_text(e))
+                        .map_or_else(
+                            || format!("Exception condition {}", e.number()),
+                            |t| format!("Exception condition {}: \"{t}\"", e.number()),
+                        );
+                    return refuse(
+                        RefuseReason::Pub525ItemizedDeductionRecovery(e),
+                        format!(
+                            "the State and Local Income Tax Refund Worksheet may NOT be used for \
+                             this return, and that is the form's own instruction rather than a gap \
+                             in btctax. Its first line reads \"Be sure you have read the Exception \
+                             in the instructions for this line to see if you can use this worksheet \
+                             instead of Pub. 525\", and the Exception says \"See Itemized Deduction \
+                             Recoveries in Pub. 525 instead of using the State and Local Income Tax \
+                             Refund Worksheet in these instructions if any of the following \
+                             applies.\" You answered yes to {quoted}. btctax models no part of Pub. \
+                             525's Itemized Deduction Recoveries, so no figure you supply here can \
+                             make this worksheet the right instrument: work that section of Pub. 525 \
+                             and file with a preparer, or correct that answer if it was a mistake"
+                        ),
+                    )
+                }
+            }
+        }
     }
 
     // ★★★ THE CAPITAL LOSS CARRYOVER WORKSHEET'S TWO HEADER CONDITIONS, ANSWERED ADVERSELY.
@@ -5932,6 +6186,13 @@ mod tests {
         );
         let mut itemized = refund.clone();
         itemized.itemized_prior_year = Some(true);
+        // ★ FR-221 — and the same TIP's limb (b) is asked next, of exactly this filer.
+        assert_eq!(
+            raw(&itemized),
+            Some(RefuseReason::PriorYearElectedSalesTaxUnanswered),
+            "limb (b) is live iff limb (a) was answered Yes"
+        );
+        itemized.prior_year_elected_sales_tax = Some(false);
         let r = screen_inputs(&itemized, &tbl(), &params()).expect("a taxable refund refuses");
         assert_eq!(
             r.reason,
@@ -6291,9 +6552,17 @@ mod tests {
             "a filer who did not itemize in the year they paid the tax owes nothing on the refund \
              — Schedule 1 line 1 is correctly blank and the return must file"
         );
-        // Answered YES — the worksheet btctax does not compute.
+        // Answered YES — and now the TIP's OTHER limb is asked (FR-221), before the worksheet.
         let mut yes = p2b.clone();
         yes.itemized_prior_year = Some(true);
+        assert_eq!(
+            raw(&yes),
+            Some(RefuseReason::PriorYearElectedSalesTaxUnanswered),
+            "an itemizer is asked limb (b) of the same TIP: a filer who elected GENERAL SALES TAXES \
+             that year owes nothing on the refund, and btctax will not assume either answer"
+        );
+        // …limb (b) answered NO ⇒ the worksheet, whose figures this return does not carry.
+        yes.prior_year_elected_sales_tax = Some(false);
         let r = screen_inputs(&yes, &tbl(), &params()).expect("an itemizer's refund refuses");
         assert_eq!(
             r.reason,
@@ -6699,6 +6968,20 @@ mod tests {
                 }];
                 r.documents
                     .set(crate::tax::document_census::DocumentRow::G1099, Some(true));
+            }
+            // ★★★ FR-221 — the TIP's limb (b) needs the same refund AND limb (a) answered YES, which
+            //     is a sibling registry entry's NON-NEUTRAL answer. The scenario sets it directly for
+            //     exactly the reason the three home-sale tests do: the neutral loop would answer limb
+            //     (a) `false`, which is the TIP's own exit, and this question would never be live.
+            QuestionId::PriorYearElectedSalesTax => {
+                r.g_1099 = vec![crate::tax::return_inputs::Form1099G {
+                    payer: "State of Example".into(),
+                    box2_state_refund: dec!(900),
+                    ..Default::default()
+                }];
+                r.documents
+                    .set(crate::tax::document_census::DocumentRow::G1099, Some(true));
+                r.itemized_prior_year = Some(true);
             }
             // ★★★ T16 — Form 8889's seven questions share ONE liveness predicate: the §223 trigger
             //     declaration is affirmed. So they share one scenario, exactly as the three
@@ -10619,6 +10902,42 @@ mod param_free_tier {
         w
     }
 
+    /// ★★★ FR-196 — a USABLE §111(a) worksheet block: an itemizer who elected income taxes, hit none
+    /// of the nine Pub. 525 exceptions, and whose prior-year Schedule A leaves a real benefit to
+    /// measure. Every field is spelled out because the struct is `..`-free by design (no
+    /// `Default`), which is what makes a new field a compile error here rather than a silent `false`.
+    fn state_local_refund_facts(
+        mut f: impl FnMut(&mut crate::tax::state_local_refund::StateLocalRefundFacts),
+    ) -> crate::tax::state_local_refund::StateLocalRefundFacts {
+        let mut w = crate::tax::state_local_refund::StateLocalRefundFacts {
+            refund_not_on_a_1099g: Usd::ZERO,
+            prior_year_filing_status: FilingStatus::Single,
+            prior_year_schedule_a_line5d: dec!(8000),
+            prior_year_schedule_a_line5e: dec!(8000),
+            prior_year_schedule_a_line17: dec!(20000),
+            prior_year_mfs_spouse_itemized: false,
+            prior_year_aged_blind: crate::tax::state_local_refund::PriorYearAgedBlindBoxes {
+                taxpayer_aged: false,
+                taxpayer_blind: false,
+                spouse_aged: false,
+                spouse_blind: false,
+            },
+            mfs_spouse_boxes_permitted: false,
+            exception_refund_for_another_year: false,
+            exception_not_an_income_tax_refund: false,
+            exception_zero_rate_on_preferential_income: false,
+            exception_refund_exceeds_incremental_deduction: false,
+            exception_last_estimated_payment_in_filing_year: false,
+            exception_owed_amt_in_prior_year: false,
+            exception_unusable_credits: false,
+            exception_could_be_claimed_as_dependent: false,
+            exception_joint_state_return_not_joint_now: false,
+            provenance: crate::tax::return_inputs::CarryProvenance::User,
+        };
+        f(&mut w);
+        w
+    }
+
     fn sched_c() -> ScheduleCInputs {
         ScheduleCInputs {
             owner: Owner::Taxpayer,
@@ -10973,9 +11292,62 @@ mod param_free_tier {
             r.interest_or_dividends_without_1099 = Some(false);
             r.schedule_b_filer_records.push(sb_record());
         });
+        // ★★★ **E §7(2) — THIS FIXTURE IS DELIBERATELY UNCHANGED BY FR-196/FR-221, and that was the
+        //     obligation: *"keep the existing reachability fixture unchanged, but CHECK it still
+        //     refuses"*.** It does, and now via the worksheet's own `FactsNotCollected`: the refund
+        //     question answered Yes makes the §111(a) gate live, limb (a) `Some(true)` sends the filer
+        //     into the worksheet, `answer_remaining` answers limb (b) at its neutral (`false`), and
+        //     `state_local_refund` is `None` — never collected. The reason is the same; what it MEANS
+        //     is narrower.
         add("StateAndLocalRefundWorksheetNotComputed", &|r| {
             r.state_refund_without_1099g = Some(true);
             r.itemized_prior_year = Some(true);
+        });
+        // ── ★★★ FR-196/FR-221 — the §111(a) worksheet's other three refusals. ──
+        //
+        // ★ Each carries the SAME live-gate preconditions (a transcribed Form 1099-G box 2 with its
+        //   census row answered, so the gate is live from the document side) and differs in exactly
+        //   the one fact it is about.
+        add("Pub525ItemizedDeductionRecovery", &|r| {
+            r.documents.set(DocumentRow::G1099, Some(true));
+            r.g_1099.push(crate::tax::return_inputs::Form1099G {
+                payer: "State of Example".into(),
+                box2_state_refund: dec!(900),
+                ..Default::default()
+            });
+            r.itemized_prior_year = Some(true);
+            // Exception 6 — *"You owed alternative minimum tax in Y−1"* — affirmed, so the form
+            // forbids the worksheet and Pub. 525's Itemized Deduction Recoveries governs.
+            r.state_local_refund = Some(state_local_refund_facts(|w| {
+                w.exception_owed_amt_in_prior_year = true;
+            }));
+        });
+        add("TwoTestimoniesAboutStateRefund", &|r| {
+            r.documents.set(DocumentRow::G1099, Some(true));
+            r.g_1099.push(crate::tax::return_inputs::Form1099G {
+                payer: "State of Example".into(),
+                box2_state_refund: dec!(900),
+                ..Default::default()
+            });
+            r.itemized_prior_year = Some(true);
+            r.state_local_refund = Some(state_local_refund_facts(|_| {}));
+            // …and the same line stated directly, which is the second testimony.
+            r.sch1.state_refund_taxable = dec!(900);
+        });
+        // ★ The §111(a) gate is NOT live here: every census row is `Some(false)` on `ri()`, so there
+        //   is no Form 1099-G box 2, and `answer_remaining` answers the document-less refund question
+        //   at its neutral (`false`). The worksheet's figures are therefore a worksheet for a refund
+        //   nothing on this return reports.
+        add("StateLocalRefundFactsWithoutARefund", &|r| {
+            r.state_local_refund = Some(state_local_refund_facts(|_| {}));
+        });
+        // ★ The off-form amount beside the answer that says no such refund exists. The census row is
+        //   `Some(false)` (so the question is LIVE) and `answer_remaining` answers it at its neutral
+        //   `false` — which is the contradicting answer.
+        add("StateRefundWithout1099gContradicted", &|r| {
+            r.state_local_refund = Some(state_local_refund_facts(|w| {
+                w.refund_not_on_a_1099g = dec!(250);
+            }));
         });
         add("AmortizableBondPremiumNotComputed", &|r| {
             r.documents.set(DocumentRow::Int1099, Some(true));

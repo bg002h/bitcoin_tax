@@ -8890,6 +8890,13 @@ mod b3_i1_the_drawn_sentence_is_the_recorded_one {
         let mut refund = base(FilingStatus::Single, 2024);
         refund.state_refund_without_1099g = Some(true);
         out.push(("state refund", refund));
+        // ★ FR-221 — the same refund with limb (a) ANSWERED YES, which is what makes the TIP's other
+        //   limb (`PriorYearElectedSalesTax`) live. A separate probe rather than an edit to the one
+        //   above, because that probe's job is to catch limb (a) being drawn UNANSWERED.
+        let mut itemized_refund = base(FilingStatus::Single, 2024);
+        itemized_refund.state_refund_without_1099g = Some(true);
+        itemized_refund.itemized_prior_year = Some(true);
+        out.push(("state refund, itemized", itemized_refund));
         // An HSA return on a joint status, with no Form 1099-SA — the two Form 8889 declarations that
         // need those exact conditions.
         let mut hsa = base(FilingStatus::Mfj, 2024);

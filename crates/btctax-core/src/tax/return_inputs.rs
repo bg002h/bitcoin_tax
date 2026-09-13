@@ -1571,6 +1571,37 @@ pub struct CharitableCarryItem {
     pub provenance: CarryProvenance,
 }
 
+/// ★★★ **FR-196a — DOES `income import` FORCE THIS TOML KEY'S PROVENANCE TO `user`?** The ONE
+/// definition of that predicate, over a serialized key path in the vocabulary
+/// `docs/income-import-schema.md` publishes (`a.b`, `a[].b`).
+///
+/// **Why it lives here and not in either of its two callers.** It had two definitions, and they
+/// disagreed: `cmd::tax::import_return_inputs` normalised a **hand-written list of five sites**,
+/// while `xtask::toml_schema::note_for` **derived** the published *"forced to `user`"* annotation
+/// from the path suffix. When FR-196 added a sixth [`CarryProvenance`] leaf, the derivation was right
+/// and the code was wrong — the regenerated schema document asserted a normalisation the import did
+/// not perform, so a hand-written TOML could have stamped `computed_from_prior_return` on figures
+/// nobody derived, buying silence from all three surfaces that read the stamp (`m4_authority`,
+/// `BenefitCarryoversNotStated`, and the write-back's `--force` guard). ★ That is a new shape worth
+/// naming: not a stale document, but a **correct derived document describing behaviour the code had
+/// not implemented.**
+///
+/// ★★ The two callers now share this predicate, and
+/// `cmd::tax::tests::every_provenance_key_the_schema_says_is_forced_actually_is` joins them: it
+/// derives the provenance key set from [`crate::tax::scrub_axis::maximal_sentinel`] through this
+/// predicate, plants `computed` at every one of them, runs the real import normalisation, and demands
+/// `user` back. A seventh leaf is then covered or the test reds.
+///
+/// ★ **What it does NOT cover, stated rather than implied** (`CLAUDE.md` repair 3): it keys on the
+/// PATH, so a [`CarryProvenance`] leaf named something other than `provenance` / `*_provenance` is
+/// outside both the forcing and the published annotation. That is consistent — the document and the
+/// code would agree in being wrong together — but it is not total, and the repair is a name, not a
+/// second list. `provenance` and `_provenance` are the only two spellings in the type today.
+#[must_use]
+pub fn import_forces_provenance_to_user(path: &str) -> bool {
+    path == "provenance" || path.ends_with("_provenance") || path.ends_with(".provenance")
+}
+
 /// Schedule A inputs (SPEC §4.6). SALT honors the §164(b)(5) income-OR-sales either/or (R2-I4).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ScheduleAInputs {
@@ -1579,6 +1610,11 @@ pub struct ScheduleAInputs {
     /// §164(b)(5) election — a class-(B) TRI-STATE (P9 §2.2). `Some(true)` → 5a = sales-tax amount only;
     /// `Some(false)` → income taxes only; `None` = never asked (the `SalesTaxElectionNotAsked` advisory fires
     /// on `None`, scoped to returns that carry a Schedule A).
+    ///
+    /// ★★ **THIS year's election, on THIS year's Schedule A.** The §111(a) TIP's limb (b) asks the
+    /// same question about *the year the tax was paid* — the prior year — and that is a separate
+    /// field, [`ReturnInputs::prior_year_elected_sales_tax`] (FR-221). The two are independent
+    /// answers and neither may be read for the other.
     #[serde(default)]
     pub salt_use_sales_tax: Option<bool>,
     #[serde(default)]
@@ -2616,9 +2652,38 @@ pub struct ReturnInputs {
     ///
     /// Live iff `state_refund_without_1099g == Some(true)` **or** any `g_1099[].box2_state_refund > 0`.
     /// §111(a)'s tax-benefit rule: a `No` makes the refund non-taxable and Schedule 1 line 1 blank by
-    /// DECISION; a `Yes` refuses naming the State and Local Income Tax Refund Worksheet.
+    /// DECISION; a `Yes` sends the filer to the State and Local Income Tax Refund Worksheet
+    /// ([`Self::state_local_refund`]) — and to limb (b) of the same TIP,
+    /// [`Self::prior_year_elected_sales_tax`].
     #[serde(default)]
     pub itemized_prior_year: Option<bool>,
+    /// ★★★ **FR-221 — THE TIP'S LIMB (b), THE EXIT THAT WAS NEVER OFFERED.**
+    ///
+    /// *"**None of your refund is taxable** if, in the year you paid the tax, you either (a) didn't
+    /// itemize deductions, or **(b) elected to deduct state and local general sales taxes instead of
+    /// state and local income taxes**"* (`i1040gi--2025.txt:41882-41887`). Limb (a) is
+    /// [`Self::itemized_prior_year`]. Limb (b) is this, and until FR-221 **nothing asked it**: an
+    /// itemizer who made the §164(b)(5) election deducted no state income tax at all, owes nothing
+    /// under §111(a), and was refused with nothing to compute.
+    ///
+    /// ★★★ **A DIFFERENT FACT FROM `schedule_a.salt_use_sales_tax`, which is why nothing noticed.**
+    /// [`ScheduleAInputs::salt_use_sales_tax`] is **this** year's §164(b)(5) election on **this**
+    /// year's Schedule A line 5a. The TIP turns on the election made in *the year the tax was paid* —
+    /// the PRIOR year — and the two answers are independent: a filer can elect income taxes this year
+    /// having elected sales taxes last year, which is exactly the filer this field exists for. The
+    /// name says `prior_year_` for that reason, and no code path reads one for the other.
+    ///
+    /// Live iff [`Self::itemized_prior_year`] is live **and** answered `Some(true)` — limb (b) is only
+    /// asked of a filer limb (a) did not already exit. A class-(A) declaration: `None` blocks
+    /// ([`crate::tax::return_refuse::RefuseReason::PriorYearElectedSalesTaxUnanswered`]), `Some(true)`
+    /// leaves Schedule 1 line 1 **blank by decision**, and `Some(false)` continues into the worksheet.
+    ///
+    /// ★★ **Neutral at `false`, and the direction is the argument.** Forgoing the exit routes the
+    /// filer into the worksheet, which can only make the refund MORE taxable — the overstating, safe
+    /// direction, recoverable by answering. The reverse default would blank a taxable line on a
+    /// §6065-signed return on nobody's testimony.
+    #[serde(default)]
+    pub prior_year_elected_sales_tax: Option<bool>,
     /// ★★★ **FR-196 — the §111(a) STATE AND LOCAL INCOME TAX REFUND WORKSHEET's own inputs.**
     ///
     /// The worksheet ([`crate::tax::state_local_refund`]) asks for last year's Schedule A lines 5d,
@@ -2921,6 +2986,10 @@ impl Default for ReturnInputs {
             state_refund_without_1099g: None,
             hsa_distribution_without_1099sa: None,
             itemized_prior_year: None,
+            // ★★★ FR-221 — `None`: limb (b) of the TIP has not been asked either. A defaulted
+            //     `Some(false)` would forgo the exit on nobody's testimony; a defaulted `Some(true)`
+            //     would blank a taxable line on nobody's.
+            prior_year_elected_sales_tax: None,
             // ★★★ FR-196 — `None`: never collected. The §111(a) worksheet refuses on it rather than
             //     working itself from a block of defaulted zeros and `false`s, which would be the
             //     same laundering one level down: a zero on last year's Schedule A line 5e caps

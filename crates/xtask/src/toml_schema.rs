@@ -115,10 +115,19 @@ fn kind_of(v: &toml::Value) -> &'static str {
 /// Both mechanisms are in `cmd::tax::import_return_inputs`, which NORMALISES rather than refuses (the
 /// keys are a legitimate part of the shape `income scrub` emits, so refusing them would make btctax
 /// unable to read a file it writes).
+///
+/// ★★★ **FR-196a — THE PROVENANCE PREDICATE IS NO LONGER A SECOND COPY OF THE IMPORT'S.** It used to
+/// be spelled out here while the import normalised a hand-written list of five sites, and when FR-196
+/// added a sixth `CarryProvenance` leaf **this derivation was right and the code was wrong**: the
+/// regenerated document asserted a normalisation the import did not perform. Both now call
+/// [`btctax_core::tax::return_inputs::import_forces_provenance_to_user`], which is the one definition,
+/// and `cmd::tax`'s own test plants `computed` at every key this predicate annotates and demands
+/// `user` back — so the document and the behaviour are joined by a test rather than by two authors
+/// having written the same `ends_with`.
 fn note_for(path: &str) -> &'static str {
     if path.starts_with("answer_log") {
         "**discarded** on import"
-    } else if path.ends_with("_provenance") || path.ends_with(".provenance") {
+    } else if btctax_core::tax::return_inputs::import_forces_provenance_to_user(path) {
         "forced to `user`"
     } else {
         ""

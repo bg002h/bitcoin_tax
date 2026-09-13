@@ -302,7 +302,16 @@ pub struct ScheduleCParts {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Schedule1Parts {
     /// L1 — taxable refunds/credits/offsets of state and local income taxes (§111 tax-benefit rule).
-    pub state_refund_1: Usd,
+    ///
+    /// ★★★ **`None` = the line is BLANK, and that is not the same answer as `Some(0)`** (FR-196/§G-11).
+    /// §111(a) reaches *"none of your refund is taxable"* four different ways — either limb of the
+    /// TIP, and either of the worksheet's two STOPs — and every one of them is a line the form tells
+    /// the filer not to fill in, never a zero to enter.
+    /// [`crate::tax::state_local_refund::schedule_1_line1`] is the one definition of this value, and
+    /// the `Option` survives from there through [`crate::tax::printed::Schedule1Lines::line1`] to an
+    /// emitter that declines to write — the same *"fixed at the writer"* repair Form 1040 lines 34
+    /// and 37 already carry.
+    pub state_refund_1: Option<Usd>,
     /// L3 — business income: the crypto **Schedule C** net (gross SE income − expenses, floored at 0;
     /// a Schedule C LOSS is refused upstream, §465 at-risk being out of scope).
     pub schedule_c_net_3: Usd,
@@ -1366,7 +1375,9 @@ pub(crate) fn form8615_unearned(ri: &ReturnInputs, state: &LedgerState, year: i3
     sum_taxable_interest(ri)
         + sum_ordinary_dividends(ri)
         + capital_gain_line7(ri, state, year, ri.filing_status)
-        + ri.sch1.state_refund_taxable
+        // ★ FR-196 — the §111(a) figure, not the raw attestation: a blank contributes nothing, and a
+        //   worksheet amount contributes all of it. `schedule_1_line1` is the one definition.
+        + crate::tax::state_local_refund::schedule_1_line1(ri).unwrap_or(Usd::ZERO)
         + sum_unemployment(ri)
         + crypto_income(state, year).nonbusiness_ordinary
 }
@@ -1707,7 +1718,9 @@ pub fn derive_tax_profile(ri: &ReturnInputs, params: &FullReturnParams, year: i3
         .as_ref()
         .map(|c| c.other_gross_receipts)
         .unwrap_or(Usd::ZERO);
-    let sch1_income = ri.sch1.state_refund_taxable + sum_unemployment(ri) + non_ledger_sch_c;
+    let sch1_income = crate::tax::state_local_refund::schedule_1_line1(ri).unwrap_or(Usd::ZERO)
+        + sum_unemployment(ri)
+        + non_ledger_sch_c;
 
     // Sch 1 Part II adjustments (non-crypto): L18 early-withdrawal penalty + L21 student-loan.
     // (L15 ½-SE is crypto-Schedule-C-driven → excluded here.)
@@ -2312,7 +2325,14 @@ pub fn assemble_absolute(
     let hsa_deduction_13 = form_8889
         .as_ref()
         .map_or(Usd::ZERO, |f| f.schedule_1_line_13());
-    let schedule_1_income = ri.sch1.state_refund_taxable
+    // ★★★ **FR-196 — Schedule 1 line 1 is now §111(a)'s OWN answer, and this sum reaches AGI.** A
+    //     blank contributes nothing (`unwrap_or(0)`, which is what a blank line adds to line 10 on
+    //     the paper form); a worksheet amount contributes all of it. Before the wiring this read the
+    //     hand-attested figure, so an itemizer's taxable refund could not reach AGI at all — and AGI
+    //     is the argument to the §221 phase-out, the §1411 MAGI, the AMT, the §170(b) base, the
+    //     §213(a) floor and the itemize election.
+    let state_refund_line1 = crate::tax::state_local_refund::schedule_1_line1(ri);
+    let schedule_1_income = state_refund_line1.unwrap_or(Usd::ZERO)
         + sum_unemployment(ri)
         + schedule_c_net
         + crypto.nonbusiness_ordinary
@@ -2366,7 +2386,9 @@ pub fn assemble_absolute(
     });
 
     let schedule_1 = Schedule1Parts {
-        state_refund_1: ri.sch1.state_refund_taxable,
+        // ★ The SAME value the AGI sum above used, carried as an `Option` so the blank survives to
+        //   the page. Read once, not twice: two calls would be two chances to disagree.
+        state_refund_1: state_refund_line1,
         schedule_c_net_3: schedule_c_net,
         unemployment_7: sum_unemployment(ri),
         crypto_ordinary_8v: crypto.nonbusiness_ordinary,
@@ -3069,7 +3091,12 @@ pub(crate) fn form6251_inputs_from_parts(
         deduction_l14: total_deductions_l14,
         schedule_a_line7: schedule_a.map_or(Usd::ZERO, |p| p.salt_5e),
         itemized,
-        state_refund_sch1_l1: ri.sch1.state_refund_taxable,
+        // ★★ Form 6251 line 2b subtracts *"Taxable refunds of state and local income taxes"* — the
+        //    figure that actually PRINTS on Schedule 1 line 1, so it reads §111(a)'s answer too. A
+        //    blank line 1 has nothing to add back, which is why `unwrap_or(0)` is the form's own
+        //    reading rather than a convenience.
+        state_refund_sch1_l1: crate::tax::state_local_refund::schedule_1_line1(ri)
+            .unwrap_or(Usd::ZERO),
         net_capital_gain: net_ltcg,
         qualified_dividends,
         qdcgt_line5_regular: (taxable_income - pref.min(taxable_income)).max(Usd::ZERO),

@@ -130,6 +130,7 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         state_refund_without_1099g,
         hsa_distribution_without_1099sa,
         itemized_prior_year,
+        prior_year_elected_sales_tax,
         state_local_refund,
         digital_asset_activity,
         claiming_mortgage_interest_credit,
@@ -351,6 +352,16 @@ pub fn classify(ri: &ReturnInputs) -> Census {
     //     and a `false` btctax assumed rather than asked would blank Schedule 1 line 1 on the
     //     filer's behalf — an understatement laundered as a lawful blank.
     c.declaration(itemized_prior_year, QuestionId::ItemizedPriorYear);
+    // ★★★ FR-221 — the SAME TIP's limb (b), and the same class for the same reason: *"None of your
+    //     refund is taxable if, in the year you paid the tax, you either (a) didn't itemize
+    //     deductions, or (b) elected to deduct state and local general sales taxes instead of state
+    //     and local income taxes."* A `true` btctax assumed rather than asked would blank Schedule 1
+    //     line 1 on the filer's behalf; a `false` it assumed would send them to a worksheet they do
+    //     not owe. Class (A) either way.
+    c.declaration(
+        prior_year_elected_sales_tax,
+        QuestionId::PriorYearElectedSalesTax,
+    );
     // ★★★ R9 / T6 — the Form 1040 page-1 DIGITAL ASSETS question. Class (A) and ALWAYS live: the
     //     form prints it on every return, and the box that prints is now this ANSWER rather than
     //     the ledger predicate, which could only ever say *Yes* or leave a mandatory question
@@ -944,7 +955,6 @@ fn classify_state_local_refund(
 ) {
     use crate::tax::state_local_refund::{PriorYearAgedBlindBoxes, StateLocalRefundFacts};
     let StateLocalRefundFacts {
-        prior_year_elected_sales_tax,
         prior_year_filing_status,
         // Three Schedule A figures off last year's return, plus worksheet line 1's other half.
         // `Usd`, which the `_` rule permits, and every one is negative-screened in
@@ -971,7 +981,9 @@ fn classify_state_local_refund(
                        parse; answered-ness for the whole §111(a) worksheet lives in whether \
                        `ReturnInputs::state_local_refund` is `Some`, and the worksheet REFUSES while \
                        it is `None`";
-    c.exempt(prior_year_elected_sales_tax, Class::SerdeRequired, WHY);
+    // ★ FR-221 — the TIP's limb (b) is NOT in this block any more; it is the return-level
+    //   declaration `prior_year_elected_sales_tax`, classified beside `itemized_prior_year` above,
+    //   because an exit may not require the worksheet's own twenty-one inputs.
     c.exempt(prior_year_mfs_spouse_itemized, Class::SerdeRequired, WHY);
     c.exempt(mfs_spouse_boxes_permitted, Class::SerdeRequired, WHY);
     c.exempt(exception_refund_for_another_year, Class::SerdeRequired, WHY);

@@ -2102,7 +2102,7 @@ pub fn cover_schedule1lines(l: &crate::tax::printed::Schedule1Lines) -> Coverage
 
 fn zero_schedule1lines() -> crate::tax::printed::Schedule1Lines {
     crate::tax::printed::Schedule1Lines {
-        line1: Usd::ZERO,
+        line1: Some(Usd::ZERO),
         line3: Usd::ZERO,
         line7: Usd::ZERO,
         line8f: Usd::ZERO,

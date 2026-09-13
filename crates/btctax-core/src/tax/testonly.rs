@@ -2337,8 +2337,16 @@ pub const ORACLE_INVISIBLE: &[OracleInvisibleLeaf] = &[
     OracleInvisibleLeaf {
         prefix: "g_1099[].box2_state_refund",
         because: InvisibleBecause::NotInTheOracleRow,
-        note: "the taxable state refund is taken from `sch1.state_refund_taxable` (§111 recovery); \
-               see that entry",
+        note: "★ FR-196/FR-222 — this box NOW HAS A MONEY READER: it is worksheet line 1's input in \
+               `state_local_refund`, whose line 9 is what Schedule 1 line 1 prints. What keeps it \
+               invisible is the OTHER half — `GoldenInputs` has no taxable-state-refund field, so no \
+               corpus household can carry one. Tax-Calculator's `e00700` (\"Taxable refunds of state \
+               and local income taxes\") is the variable that WOULD take the figure, and OTS's S1_1 \
+               is named in this list already; adding the axis is FR-196d, and it is what would make \
+               the §111(a) worksheet's output double-oracle-checked rather than only \
+               self-consistent. (The note this replaces said the figure came from \
+               `sch1.state_refund_taxable` — true until the worksheet was wired, and the exact shape \
+               of \"a list correct on the day it was written\".)",
     },
     OracleInvisibleLeaf {
         prefix: "g_1099[].box5_rtaa_payments",

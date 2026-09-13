@@ -376,6 +376,35 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::ItemizedPriorYearUnanswered | R::StateAndLocalRefundWorksheetNotComputed => {
             vec![decl(QuestionId::ItemizedPriorYear)]
         }
+        // ★★★ FR-221 — the TIP's limb (b). Its own declaration, and REACHABLE by construction: the
+        //     field is live exactly when limb (a) is answered Yes, which is the only state that
+        //     raises this refusal.
+        R::PriorYearElectedSalesTaxUnanswered => {
+            vec![decl(QuestionId::PriorYearElectedSalesTax)]
+        }
+        // ★★★ FR-196 — the §111(a) worksheet's own refusals. Three of them point at a section the v1
+        //     form does not have: `state_local_refund`'s twenty-one prior-year figures arrive through
+        //     `income import` alone (they are the ONE `EXEMPT_LEAVES` entry in `spec/coverage.rs`,
+        //     with FR-196b named as the task that removes the exemption). `NotInForm` is the honest
+        //     anchor for exactly that — *"a deferred/TOML-import section"* — and pointing them at the
+        //     limb-(a) declaration instead would be worse than saying nothing: answering it "no" does
+        //     not supply a prior-year Schedule A, does not un-affirm a Pub. 525 condition, and does
+        //     not remove a contradicting figure.
+        R::Pub525ItemizedDeductionRecovery(_)
+        | R::StateRefundWithout1099gContradicted
+        | R::StateLocalRefundFactsWithoutARefund => vec![Anchor::NotInForm {
+            note: "the §111(a) worksheet's prior-year figures (`[state_local_refund]`) are a \
+                   deferred (non-v1-form) section entered via TOML import — the one `EXEMPT_LEAVES` \
+                   entry in `spec/coverage.rs`, whose removal is FR-196b",
+        }],
+        // ★ The two-testimonies refusal DOES have a form anchor for one of its two exits: the
+        //   directly-attested Schedule 1 line 1 figure. It is `sch1.state_refund_taxable`, which is
+        //   itself an `EXEMPT_LEAVES` entry, so the remedy the form can offer is the limb-(b)
+        //   declaration — the other way the filer answered the same line, and the one they can
+        //   correct here.
+        R::TwoTestimoniesAboutStateRefund => {
+            vec![decl(QuestionId::PriorYearElectedSalesTax)]
+        }
         // ── ★★★ R9 / T6 — the Digital Assets question. BOTH legs anchor on the declaration, and
         //    neither is `NotInForm`: the unanswered one is cleared by answering it, and the
         //    CONTRADICTED one is cleared either by answering it the other way (right here) or by
@@ -880,16 +909,24 @@ mod tests {
         //   `ReturnInputs` scalar with NO `Field` at all (the form-coverage census exempts it by
         //   name), so its refusal cannot anchor on one: the cure is to open the right year.
         const ADDED_BY_B3_C1: usize = 1;
+        // ★★ FR-196 added the fourth — ONE arm covering three of the §111(a) worksheet's refusals
+        //    (`Pub525ItemizedDeductionRecovery`, `StateRefundWithout1099gContradicted`,
+        //    `StateLocalRefundFactsWithoutARefund`). All three are cured inside `[state_local_refund]`,
+        //    the TOML-only block that is the one `EXEMPT_LEAVES` entry in `spec/coverage.rs` — so the
+        //    v1 form has no field to point at, and FR-196b is the task that changes that. ★ The count
+        //    is of `NotInForm` ANCHORS in the source, so three reasons sharing one arm add ONE.
+        const ADDED_BY_FR196: usize = 1;
+        let expect = BEFORE_T5 - 5 + ADDED_BY_I4 + ADDED_BY_FR103 + ADDED_BY_B3_C1 + ADDED_BY_FR196;
         let now = src[start..end].matches("Anchor::NotInForm {").count();
         assert_eq!(
-            now,
-            BEFORE_T5 - 5 + ADDED_BY_I4 + ADDED_BY_FR103 + ADDED_BY_B3_C1,
+            now, expect,
             "T5 re-attributed exactly five anchors (PrivateActivityBondAmt, \
              UnrecapturedOrSpecialRateGain, InconsistentDividendSubset, ForeignTaxOverCeiling, \
-             Form1099BNeedsForm8949), the I-4 fold added one (QualifiedTipsCautionNotMet) and \
-             FR-103 added one (Schedule1aNotOnThisYearsReturn) and B3's C-1 added one \
-             (ReturnInputsYearNotStated); the source now has {now} `NotInForm` anchors, not {}",
-            BEFORE_T5 - 5 + ADDED_BY_I4 + ADDED_BY_FR103 + ADDED_BY_B3_C1
+             Form1099BNeedsForm8949), the I-4 fold added one (QualifiedTipsCautionNotMet), FR-103 \
+             added one (Schedule1aNotOnThisYearsReturn), B3's C-1 added one \
+             (ReturnInputsYearNotStated) and FR-196 added one (the §111(a) worksheet's three \
+             TOML-only refusals, sharing one arm); the source now has {now} `NotInForm` anchors, \
+             not {expect}"
         );
 
         // The five, and every anchor each yields must be a real Field or Section of `form_spec()`.

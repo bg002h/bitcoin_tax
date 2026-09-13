@@ -465,6 +465,12 @@ fn fixture_for(field: &Field, base: &ReturnInputs) -> ReturnInputs {
                 Some(false),
             );
         }
+        // ★★★ FR-221 — the §111(a) TIP's limb (b) is live iff limb (a) is live AND answered YES, and
+        //     the maximal fixture leaves limb (a) unanswered. Same structural shape as
+        //     `DeclHsaActivity` and the three home-sale tests above: one fixture cannot both cover the
+        //     gate and satisfy it, so limb (a) is primed here for the question it opens. (The gate's
+        //     other half — a 1099-G box 2 > 0 — is already primed in the fixture itself.)
+        FieldId::DeclPriorYearElectedSalesTax => ri.itemized_prior_year = Some(true),
         // ★★★ Seam review M-1 — the SAME structural reason one form over: the door is live exactly
         //     when the Form 1099-SA census row says `No`, and the maximal fixture transcribes a
         //     1099-SA row (so `reconcile` answers that row `Yes`). One fixture cannot both hold the
@@ -771,9 +777,16 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
         //     minimum tax in 2024"* is a question a filer can only answer off last year's return —
         //     and a wrong prompt here turns a required Pub. 525 refusal into a computed figure.
         //
-        //     ★ Nothing is reachable through the gap today: `screen_inputs` still refuses on
-        //     `RefuseReason::StateAndLocalRefundWorksheetNotComputed`, so no return carrying this
-        //     block can be committed at all, and the TOML import surface carries the fields.
+        //     ★★★ **THE "NOTHING IS REACHABLE" HALF OF THIS EXEMPTION IS GONE, and the exemption is
+        //     weaker for it.** It used to read *"`screen_inputs` still refuses on
+        //     `StateAndLocalRefundWorksheetNotComputed`, so no return carrying this block can be
+        //     committed at all"* — true when written, false since FR-196 narrowed that refusal to the
+        //     three states the worksheet itself reports. A return carrying this block now COMMITS and
+        //     its worksheet figure PRINTS on Schedule 1 line 1, so the only thing standing between a
+        //     filer and these twenty-one figures is that they must be typed into an `income import`
+        //     TOML (`docs/income-import-schema.md` publishes every key) rather than answered in the
+        //     editor. That is a usability gap, not a safety one — but it is no longer *"unreachable"*,
+        //     and FR-196b is now the task on the critical path rather than a tidy-up.
         //     REMOVE THIS ENTRY when the form section lands.
         "state_local_refund",
     ];
@@ -866,7 +879,7 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     // change happened to keep the sets balanced.
     let field_count: usize = form_spec().iter().map(|s| s.fields.len()).sum();
     assert_eq!(
-        field_count, 279,
+        field_count, 280,
         "expected 216 Fields — 117 before T5, plus its FIFTY-EIGHT: the four document-less income \
          declarations (R3), W-2 boxes 13 and 14b, and the six document sections (1099-INT 14, \
          1099-DIV 14, 1099-B 8, 1099-G 7, 1098-E 4, and R5's five filer's-records leaves) — plus \
@@ -880,18 +893,18 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
          declaration (Form 8889 line 1 / line 3 rule 1) and M-1's document-less distribution door \
          (line 14a). ★★★ T7 / R6 added TWENTY-ONE: the twenty per-row §152 gates of Who \
          Qualifies as Your Dependent, plus Step 5 question 1 — the one gate that is about the \
-         FILER rather than about a row. \u{2605}\u{2605}\u{2605} R7 / T8 added TEN: Head of household's two tests, its MARITAL BASIS (a `Choice`, and the registry's first class-(A) skippable), the entry space for a non-dependent qualifying child, FR-67's \u{a7}6013(g)/(h) nonresident-alien-spouse election gate, and Qualifying surviving spouse's five conditions. \u{2605}\u{2605}\u{2605} R8 / T9 added TWENTY-TWO: the Form 1098 section's THIRTEEN (lender, TIN, transcription date, boxes 1, 2, 3, 4, 5, 6, 7, 8 and 10, and the per-row shared-interest gate), Schedule A line 8b's FOUR (the recipient's name, identifying number and address, and the amount), the sale-of-a-main-home section's FOUR, and Schedule A's Line 8a Caution (the Form 8396 mortgage interest credit). Line 8c replaced `SaMortgage1098` on the Schedule A section, so that one is a swap and not a twenty-third. \u{2605}\u{2605}\u{2605} T10 / \u{a7}5.4 added EIGHT \u{2014} the TRAILER: the spouse's Identity Protection PIN (this census's own motivating gap), the header's three foreign-address cells, the signature block's phone number, and the direct-deposit block's three (routing, account type, account number). Every one of the eight was a TY2024 cell censused `unmodeled` behind `Advisory::UnmodeledReturnOptionsOmitted`; collecting them is what let nine census entries retire."
+         FILER rather than about a row. \u{2605}\u{2605}\u{2605} R7 / T8 added TEN: Head of household's two tests, its MARITAL BASIS (a `Choice`, and the registry's first class-(A) skippable), the entry space for a non-dependent qualifying child, FR-67's \u{a7}6013(g)/(h) nonresident-alien-spouse election gate, and Qualifying surviving spouse's five conditions. \u{2605}\u{2605}\u{2605} R8 / T9 added TWENTY-TWO: the Form 1098 section's THIRTEEN (lender, TIN, transcription date, boxes 1, 2, 3, 4, 5, 6, 7, 8 and 10, and the per-row shared-interest gate), Schedule A line 8b's FOUR (the recipient's name, identifying number and address, and the amount), the sale-of-a-main-home section's FOUR, and Schedule A's Line 8a Caution (the Form 8396 mortgage interest credit). Line 8c replaced `SaMortgage1098` on the Schedule A section, so that one is a swap and not a twenty-third. \u{2605}\u{2605}\u{2605} T10 / \u{a7}5.4 added EIGHT \u{2014} the TRAILER: the spouse's Identity Protection PIN (this census's own motivating gap), the header's three foreign-address cells, the signature block's phone number, and the direct-deposit block's three (routing, account type, account number). Every one of the eight was a TY2024 cell censused `unmodeled` behind `Advisory::UnmodeledReturnOptionsOmitted`; collecting them is what let nine census entries retire. \u{2605}\u{2605}\u{2605} FR-221 added the 280th: the \u{a7}111(a) TIP's limb (b) \u{2014} whether the PRIOR year's Schedule A elected state and local general sales taxes instead of income taxes. A separate leaf from this year's `schedule_a.salt_use_sales_tax`, because it asks about the year the tax was PAID."
     );
     assert_eq!(
         covered.len(),
-        279,
-        "★★★ EVERY Field is now distinctly covered — 279 of 279, and the last gap closed at T9. \
+        280,
+        "★★★ EVERY Field is now distinctly covered — 280 of 280, and the last gap closed at T9. \
          It was 115 of 117 before T5, then 174 of 175, then 182 of 183, and the one always missing \
          was `DocForm1098`, whose census row was shadowed by the \
          `schedule_a.mortgage_interest_1098` scalar and so was never live. T9 replaced the scalar \
          with the `form_1098` document rows, `row_is_live` opened the row on the itemize election, \
          and the leaf became coverable. T16's thirty-three, the seam review's two, R7 / T8's ten \
-         and R8 / T9's twenty-two are all covered, and so are T10's eight."
+         and R8 / T9's twenty-two are all covered, and so are T10's eight and FR-221's one."
     );
 
     // ── 5. ★ I-6: PIN the observed FieldId → leaf-path map against a literal (kills TRANSPOSITION). ──
@@ -1325,6 +1338,12 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
         "state_refund_without_1099g",
     ),
     (FieldId::DeclItemizedPriorYear, "itemized_prior_year"),
+    // ── ★★★ FR-221 — the same TIP's limb (b), a separate leaf from `schedule_a.salt_use_sales_tax`
+    //    (this year's election) because it asks about the year the tax was PAID. ──
+    (
+        FieldId::DeclPriorYearElectedSalesTax,
+        "prior_year_elected_sales_tax",
+    ),
     // ── ★★★ R9 / T6 — Form 1040 page 1's DIGITAL ASSETS question. ──
     (FieldId::DeclDigitalAssetActivity, "digital_asset_activity"),
     // ── ★★★ R4 / T5 — W-2 boxes 13 and 14b, which the struct had no field for at all. ──

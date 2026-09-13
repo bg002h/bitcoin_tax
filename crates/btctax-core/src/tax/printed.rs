@@ -496,7 +496,13 @@ pub fn schedule_2_lines(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Schedule1Lines {
     /// L1 — taxable state/local income-tax refund.
-    pub line1: Usd,
+    ///
+    /// ★★★ **`None` PRINTS NOTHING** (FR-196). §111(a) reaches *"none of your refund is taxable"* by
+    /// either limb of the TIP or either of the worksheet's STOPs, and each is a line the form tells
+    /// the filer not to fill in — so the emitter DECLINES TO WRITE rather than printing a `0` the
+    /// filer never stated. `Some(0)` is a different answer and still prints: a computed zero the
+    /// worksheet actually reached.
+    pub line1: Option<Usd>,
     /// L3 — business income (the crypto Schedule C net).
     pub line3: Usd,
     /// L7 — unemployment compensation.
@@ -530,13 +536,16 @@ pub fn schedule_1_lines(ar: &AbsoluteReturn) -> Option<Schedule1Lines> {
     let p = &ar.schedule_1;
 
     // Part I — additional income.
-    let line1 = round_dollar(p.state_refund_1);
+    // ★★★ FR-196 — the rounding is INSIDE the `Option`: a blank line stays blank and a stated figure
+    //     rounds exactly as every other line does. `line10` then adds what the paper adds — nothing
+    //     for a blank line.
+    let line1 = p.state_refund_1.map(round_dollar);
     let line3 = round_dollar(p.schedule_c_net_3);
     let line7 = round_dollar(p.unemployment_7);
     let line8f = round_dollar(p.hsa_income_8f);
     let line8v = round_dollar(p.crypto_ordinary_8v);
     let line9 = line8f + line8v; // 8a-8e, 8g-8u and 8w-8z are blank
-    let line10 = line1 + line3 + line7 + line9; // ★ sums the PRINTED lines
+    let line10 = line1.unwrap_or(Usd::ZERO) + line3 + line7 + line9; // ★ sums the PRINTED lines
 
     // Part II — adjustments to income.
     let line15 = round_dollar(p.half_se_15);
@@ -1890,7 +1899,7 @@ mod tests {
             agi: z,
             se,
             schedule_1: crate::tax::return_1040::Schedule1Parts {
-                state_refund_1: z,
+                state_refund_1: Some(z),
                 schedule_c_net_3: z,
                 unemployment_7: z,
                 crypto_ordinary_8v: z,

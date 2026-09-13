@@ -319,6 +319,10 @@ pub enum FieldId {
     DeclStateRefundWithout1099g,
     /// §111(a) — did the PRIOR-YEAR return itemize? Return-level (R3/I1).
     DeclItemizedPriorYear,
+    /// ★★★ FR-221 — §111(a)'s TIP, limb (b): did that prior-year Schedule A elect state and local
+    ///   GENERAL SALES TAXES instead of income taxes? Live iff `DeclItemizedPriorYear` is live and
+    ///   answered *Yes*. ★ A different leaf from `SaSaltUseSalesTax`, which is THIS year's election.
+    DeclPriorYearElectedSalesTax,
     /// ★★★ R9 / T6 — Form 1040 page 1's DIGITAL ASSETS question, above line 1a. Always live: the
     ///   form prints it on every return and the box that prints is this ANSWER.
     DeclDigitalAssetActivity,
