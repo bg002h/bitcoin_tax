@@ -2193,3 +2193,321 @@ cells = ["a[0].b[0].f1_20[0]"]
 pub fn label_join_public(stem: &str) -> Result<std::collections::BTreeMap<String, String>, String> {
     label_join(stem)
 }
+
+// ─────────────────────────── the CAPTION reader (FR-192's axis C) ───────────────────────────
+
+/// The candidate label columns of a geometry, for the caption reader and its tests.
+///
+/// ★ Exposed rather than re-derived: a second copy of the bucketing would drift from the one
+/// [`witness_text`] actually chooses between, and the caption reader would then be filtering on a
+/// different set of columns from the one its label set came out of.
+pub fn label_column_edges(g: &Geometry) -> Vec<f64> {
+    candidate_columns(&g.words)
+}
+
+/// A word's identity inside one geometry — page and position. Two words of the same text at
+/// different places are different words, so the key is positional and never the text.
+type WordKey = (u32, i64, i64);
+
+fn word_key(w: &Word) -> WordKey {
+    (
+        w.page,
+        (w.x * 100.0).round() as i64,
+        (w.y * 100.0).round() as i64,
+    )
+}
+
+fn is_label_shaped(s: &str) -> bool {
+    is_numeric_label(s) || is_bare_letter(s)
+}
+
+/// [`label_join`]'s in-row window, reused rather than re-typed: an inline label is printed right
+/// before its box, and 12pt is the measured separation between the largest accepted gap (11.30pt)
+/// and the nearest rejected candidate anywhere in the corpus (12.30pt).
+const GUTTER_WINDOW: f64 = 12.0;
+
+/// **Every word that LOCATES a line rather than DESCRIBES it**, so the caption reader can drop them.
+///
+/// ★★★ **This is the whole difference between a caption check and a noise generator.** An IRS form
+/// prints each line's number at least twice — once in the margin column, once again in the gutter
+/// immediately left of the amount box — and the gutter one lands *inside* the row whose caption is
+/// being read. It is identical in both revisions, so it cannot by itself flag a false change; what it
+/// does is MOVE, because a one-point shift in the box it sits beside re-orders it against the prose.
+/// Measured on `f8995--2024` → `f8995--2025`, the pair whose printed form did not change at all: the
+/// gutter `3` sits **12.30pt** left of its box in TY2024 and **11.30pt** in TY2025 — the box moved,
+/// not the numeral — and that alone reported lines 3 and 7 as reworded.
+///
+/// Three sources, in widening order, and the third is why a per-word gap test is not enough:
+///
+/// 1. the primary label column's own tokens ([`column_tokens`]);
+/// 2. **confirmed** gutter labels — a label-shaped word on an AcroForm box's row, immediately to its
+///    left, inside [`label_join`]'s own in-row window ([`GUTTER_WINDOW`], not a second constant);
+/// 3. the **stragglers of a confirmed gutter COLUMN** — a label-shaped word sharing a 2pt right-edge
+///    bucket (the width [`candidate_columns`] buckets on) with three or more confirmed ones. This is
+///    what catches the 12.30pt `3` above: its column is confirmed by its neighbours even on the
+///    revision where its own gap falls outside the window.
+///
+/// ★ Stated boundary: rule 3 drops a label-shaped word a caption genuinely needed, if that word sits
+/// in a confirmed gutter column. Measured over all 87 committed fixtures, the entire population of
+/// label-shaped words 12–16pt left of a box is 8 words, and rule 3 is the only way any of them is
+/// reachable at all.
+fn locator_words(g: &Geometry, primary_right: f64) -> std::collections::BTreeSet<WordKey> {
+    let mut out: std::collections::BTreeSet<WordKey> = std::collections::BTreeSet::new();
+    // `column_tokens` merges a parent with its sub-letter, so match its kept position back to words
+    for t in column_tokens(&g.words, primary_right) {
+        for w in &g.words {
+            if w.page == t.page && (w.x2 - t.x2).abs() < 0.001 && (w.y - t.y).abs() < 0.001 {
+                out.insert(word_key(w));
+            }
+        }
+    }
+    let shaped: Vec<&Word> = g
+        .words
+        .iter()
+        .filter(|w| is_label_shaped(&w.text))
+        .collect();
+    let mut buckets: BTreeMap<i64, usize> = BTreeMap::new();
+    // `in_row` = the label's whole vertical extent lies inside the box's span, and it is to the box's
+    // LEFT. The same predicate `label_join` uses, minus its gap bound, which rules 2 and 3 then apply
+    // differently.
+    let in_row = |w: &Word, b: &crate::form_geometry::Box_| -> Option<f64> {
+        let (top, bottom) = g.box_top_down_y(b)?;
+        (w.page == b.page && w.y >= top - 2.0 && w.y2 <= bottom && w.x2 <= b.x + 1.0)
+            .then_some(b.x - w.x2)
+    };
+    for b in &g.boxes {
+        for w in &shaped {
+            if in_row(w, b).is_some_and(|gap| gap <= GUTTER_WINDOW) {
+                out.insert(word_key(w));
+                *buckets.entry((w.x2 / 2.0).round() as i64).or_default() += 1;
+            }
+        }
+    }
+    let gutter: std::collections::BTreeSet<i64> = buckets
+        .keys()
+        .copied()
+        .filter(|b| buckets[b] + buckets.get(&(b + 1)).copied().unwrap_or(0) >= 3)
+        .flat_map(|b| [b, b - 1])
+        .collect();
+    for w in &shaped {
+        // ★★ Rule 3 requires BOTH the gutter column AND a box on the word's own row. Requiring only
+        // the column was tried and produced an ASYMMETRIC false positive, which is the worst kind:
+        // Schedule A's line-15 caption says *"enter the amount from line 18 of that form"*, and the
+        // prose `18` wraps to x2=407.46 on TY2024 and x2=404.09 on TY2025 — inside the gutter column
+        // on the second revision only. The token was dropped from one caption and kept in the other,
+        // and the line reported itself as reworded when nothing about it had changed. A prose number
+        // has no box on its row; a gutter numeral always does.
+        if gutter.contains(&((w.x2 / 2.0).round() as i64))
+            && g.boxes.iter().any(|b| in_row(w, b).is_some())
+        {
+            out.insert(word_key(w));
+        }
+    }
+    out
+}
+
+/// How much taller than a page's MODAL word a caption word may be.
+///
+/// ★★★ **Derived per page, because an absolute point size is a typed constant beside a set that
+/// grows.** The first cut here was an absolute 12.0pt, measured across all 87 fixtures as sitting in
+/// a real gap (largest body word 11.95pt, smallest heading 12.43pt) — and it was still wrong:
+/// `f1040s3--2020` sets its body text at **12.83pt**, so every caption on Schedule 3 for TY2020,
+/// 2021 and 2022 came out EMPTY and the axis reported those three pairs as clean. One edit, this
+/// repo's dominant failure shape.
+///
+/// The scale therefore comes from the page. Body text is by a wide margin the commonest word height
+/// on a form page, so the modal height *is* the body size, whatever the revision chose. What the
+/// ceiling removes is the form title, section headings, and — the one that decides January — the
+/// **`DRAFT` / `DO NOT FILE` watermark**, which a draft prints at 16.0–53.63pt where its body is
+/// 9.33–10.49pt. Comparing a draft to its final is the whole purpose of the tool, and one watermark
+/// token inside a caption span reds every line it touches.
+///
+/// Measured over the 15 committed `*-DRAFT` fixtures: **zero** watermark tokens survive into any
+/// caption. Held by `form_delta::tests::the_draft_watermark_never_reaches_a_caption`.
+const BODY_HEIGHT_FACTOR: f64 = 1.35;
+
+/// One revision's printed captions, by line label.
+pub struct CaptionSet {
+    /// label → the caption's normalised tokens. **Empty is a GAP, never "unchanged"** — a reader that
+    /// found no describing word in a line's span has said nothing about that line.
+    pub by_label: BTreeMap<String, Vec<String>>,
+    /// Labels this revision prints more than once. Their caption is ambiguous, so they are named and
+    /// never compared: the TY2026 Schedule 1-A grid really does print two rows claiming `6a`, and
+    /// silently picking one would be a guess.
+    pub ambiguous: std::collections::BTreeSet<String>,
+}
+
+/// **Reduce a caption to what it MEANS, so whitespace and dotted leaders cannot red it.**
+///
+/// ★★ *"Materially changed"*, defined: two captions differ materially **iff their token sequences
+/// differ**, where a token is a maximal run of `[0-9a-z$%]` after lowercasing and every other
+/// character is a separator. A dot-leader run, a line break, a reflowed space, a curly versus
+/// straight apostrophe, an em dash versus a hyphen and a parenthesis are therefore all invisible to
+/// the comparison — while every word, every cross-referenced line number and every printed dollar
+/// figure is load-bearing.
+///
+/// ★ The boundary, stated rather than hidden: a change that is **only** punctuation is by this
+/// definition not material. `$384,350` becomes the two tokens `$384` and `350` — consistently on both
+/// sides, so it compares, but it would not distinguish `384,350` from `384350`.
+pub fn normalise_caption_text(s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    for ch in s.to_lowercase().chars() {
+        if ch.is_ascii_alphanumeric() || ch == '$' || ch == '%' {
+            cur.push(ch);
+        } else if !cur.is_empty() {
+            out.push(std::mem::take(&mut cur));
+        }
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+/// [`normalise_caption_text`] over words already in reading order. A word boundary is also a token
+/// boundary, so two words cannot fuse into one token by the reader dropping the space between them.
+fn normalise_caption(words: &[&Word]) -> Vec<String> {
+    words
+        .iter()
+        .flat_map(|w| normalise_caption_text(&w.text))
+        .collect()
+}
+
+/// **Reading order that survives REFLOW.** Words are grouped into visual LINES first — a new line
+/// starts when a word's top drops more than half a body height below the line's first word — then
+/// lines run top to bottom and words within a line left to right.
+///
+/// ★ Ordering on a rounded `y` instead was tried, and it is what a reflow-sensitive caption check
+/// looks like: a one-point shift between revisions moved a single word across the rounding boundary
+/// and swapped it against its neighbour, reporting `f1040sse--2024` → `--2025` line 15 and
+/// `f1040sa--2024` → `--2025` line 12 as reworded when only the layout had moved.
+fn reading_order(mut ws: Vec<&Word>, body_h: f64) -> Vec<&Word> {
+    ws.sort_by(|a, b| {
+        (a.y, a.x)
+            .partial_cmp(&(b.y, b.x))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let mut out: Vec<&Word> = Vec::with_capacity(ws.len());
+    let mut line: Vec<&Word> = Vec::new();
+    for w in ws {
+        if line.first().is_some_and(|f| w.y - f.y > body_h / 2.0) {
+            line.sort_by(|a, b| a.x.total_cmp(&b.x));
+            out.append(&mut line);
+        }
+        line.push(w);
+    }
+    line.sort_by(|a, b| a.x.total_cmp(&b.x));
+    out.append(&mut line);
+    out
+}
+
+/// **The caption reader — FR-192's axis C.** For every printed line label, the text the form prints
+/// to describe it, normalised.
+///
+/// ★★★ **This is the axis that sees a surviving line number whose MEANING changed**, the single most
+/// expensive thing about a year port: invisible to a field-name diff (nothing was renamed), invisible
+/// to a line→label diff (the box still sits beside the same number), and taxpayer-adverse in
+/// whichever direction the substituted quantity happens to run. Three independent forms showed the
+/// shape in one day — Schedule 1-A 37→43, Schedule A's six-line cascade (FR-185), and Schedule 3's
+/// nine of thirteen (FR-192).
+///
+/// A line owns the vertical span from its own label down to the next label on the page — the same
+/// model [`assign_boxes`] uses for boxes, and for the same reason: that is how the form reads. The
+/// LAST label on a page is bounded by the lowest AcroForm box instead of by the page foot, because
+/// below the last box is the footer — `Cat. No.`, the Paperwork Reduction Act notice, and a
+/// **revision date that changes on every revision**, which would otherwise red the last line of
+/// every form on every port.
+pub fn caption_join(g: &Geometry) -> Result<CaptionSet, String> {
+    caption_join_tuned(g, BODY_HEIGHT_FACTOR)
+}
+
+/// [`caption_join`] with the body-height ceiling as a PARAMETER.
+///
+/// ★★ This exists so that [`BODY_HEIGHT_FACTOR`] can be watched **red on a planted defect** rather
+/// than merely asserted about (B1): a test raises the ceiling past the `DRAFT` watermark, observes the
+/// watermark reaching a caption, and then observes the shipped ceiling keeping it out. A constant no
+/// test can move is a constant nobody has seen working.
+pub fn caption_join_tuned(g: &Geometry, height_factor: f64) -> Result<CaptionSet, String> {
+    let labels = witness_text(g)?;
+    // The caption reader must filter on the SAME column the label set came out of, so the column is
+    // recovered by reproducing the set rather than re-derived by a second scoring pass.
+    let primary_right = label_column_edges(g)
+        .into_iter()
+        .find(|r| resolve(&column_tokens(&g.words, *r)).0 == labels)
+        .ok_or_else(|| {
+            format!(
+                "{}: no candidate label column reproduces the chosen label set",
+                g.form
+            )
+        })?;
+    let locators = locator_words(g, primary_right);
+    // the lowest AcroForm box on each page, top-down: the foot of the line-item body
+    let mut lowest: BTreeMap<u32, f64> = BTreeMap::new();
+    for b in &g.boxes {
+        if let Some((_, bottom)) = g.box_top_down_y(b) {
+            let e = lowest.entry(b.page).or_insert(f64::MIN);
+            *e = e.max(bottom);
+        }
+    }
+    // the modal word height on a page IS that page's body size
+    let mut body: BTreeMap<u32, f64> = BTreeMap::new();
+    for p in &g.pages {
+        let mut h: BTreeMap<i64, usize> = BTreeMap::new();
+        for w in g.words.iter().filter(|w| w.page == p.n) {
+            *h.entry(((w.y2 - w.y) * 100.0).round() as i64).or_default() += 1;
+        }
+        if let Some((k, _)) = h.iter().max_by_key(|(_, n)| **n) {
+            body.insert(p.n, *k as f64 / 100.0);
+        }
+    }
+    let mut rows: BTreeMap<u32, Vec<(f64, String)>> = BTreeMap::new();
+    for (l, p, y) in &labels {
+        rows.entry(*p).or_default().push((*y, l.clone()));
+    }
+    for v in rows.values_mut() {
+        v.sort_by(|a, b| a.0.total_cmp(&b.0));
+    }
+    let mut set = CaptionSet {
+        by_label: BTreeMap::new(),
+        ambiguous: std::collections::BTreeSet::new(),
+    };
+    for (p, v) in &rows {
+        let body_h = body.get(p).copied().unwrap_or(10.0);
+        for (i, (y, l)) in v.iter().enumerate() {
+            let top = y - 2.0;
+            let bot = match v.get(i + 1) {
+                Some((ny, _)) => ny - 2.0,
+                None => match lowest.get(p) {
+                    Some(b) => (b + 2.0).max(top + 12.0),
+                    None => f64::MAX,
+                },
+            };
+            let ws: Vec<&Word> = g
+                .words
+                .iter()
+                .filter(|w| {
+                    w.page == *p
+                        && w.y >= top
+                        && w.y < bot
+                        && w.x2 > primary_right
+                        && w.y2 - w.y <= body_h * height_factor
+                        && !locators.contains(&word_key(w))
+                })
+                .collect();
+            let caption = normalise_caption(&reading_order(ws, body_h));
+            if set.by_label.contains_key(l) {
+                set.ambiguous.insert(l.clone());
+            } else {
+                set.by_label.insert(l.clone(), caption);
+            }
+        }
+    }
+    Ok(set)
+}
+
+/// [`caption_join`] over an archived stem, for `form_delta`.
+pub fn caption_join_public(stem: &str) -> Result<CaptionSet, String> {
+    let g = crate::form_geometry::load(&crate::form_geometry::repo_root(), stem)?;
+    caption_join(&g)
+}

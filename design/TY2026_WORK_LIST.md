@@ -10,8 +10,29 @@ changes** — the handoff is a diff, not a rebuild from memory. `xtask`'s
 an excused row below actually HAS a pair, or when a stem with a map in any bundled year has no row in either table.
 **Regenerate with `cargo run -p xtask -- port-status 2025 2026-DRAFT`** (FR-50): it prints both tables from the
 emitting surface; `port_status_prints_the_committed_work_list` holds this document to it. The shape column
-is mechanical: **REBUILT** when added + removed exceed the common fields, **unchanged** when nothing was
-added, removed or moved with labels compared, **port** otherwise.
+is mechanical: **REBUILT** when added + removed exceed the common fields, **unchanged** when NO axis found
+anything (nothing added, removed or moved, no line retired or introduced, no caption changed, with every
+axis actually witnessed), **port** otherwise.
+
+> ## ★★★ REGENERATED 2026-09-13 — three axes were added and the numbers moved on every row
+> Before this regeneration the table had ONE axis that reads the printed page ("lines that moved"),
+> and it was keyed on the full AcroForm FQN. Three things changed (FR-190, FR-191, FR-192):
+>
+> * **`common`/`added`/`removed` now pair boxes container-insensitively.** A container rename used to
+>   empty the label axis outright — `f1040s3--2021` → `--2022` renames only the root subform and the
+>   tool printed `0 common / 40 added / 41 removed`. Across the 58 consecutive pairs the committed
+>   fixtures can form, the old key paired 3,373 boxes and the new one pairs 4,177.
+> * **`lines retired`** is new: which printed line NUMBERS the revision stopped printing. Code that
+>   still reads a retired line reads a **blank**, and a blank and a zero are the same thing on paper.
+> * **`line numbers whose MEANING changed`** is new and is the expensive column. A line number that
+>   survives while its printed caption changes is invisible to a name diff AND to a label diff, and
+>   taxpayer-adverse in whichever direction the substituted quantity runs.
+>
+> ★★ **What the new column immediately says about TY2026.** `f1040sd` is the only form in the table
+> that is genuinely unchanged. `f6251`, `f8959`, `f8960`, `f1040sb` and `f8995a` all read `0` in every
+> older column and carry 2–12 changed line meanings; **Form 6251 was listed as `unchanged` and moves
+> the meaning of 8 line numbers.** `f1040sa`'s 8 are FR-185's cascade, including line 18 changing from
+> a checkbox to the total and the casualty line moving 15 → 16 *while widening who qualifies* (FR-187).
 
 ★ Drafts are EVIDENCE ONLY. Nothing here is transcribed; these are counts of what CHANGED.
 
@@ -27,23 +48,23 @@ added, removed or moved with labels compared, **port** otherwise.
 > which has a cover sheet. Found by an independent recon lens; now guarded by
 > `no_committed_geometry_fixture_contains_a_draft_cover_sheet`.
 
-| form | common | added | removed | lines that moved | shape |
-|---|---|---|---|---|---|
-| `f1040s1` | 72 | 1 | 1 | **UNWITNESSED** — the 2026 draft's label set cannot be read (bare sub-letter `a` at p1 y=120.9 has no numeric parent; FR-58), so the moved count is NOT a number here | port |
-| `f1040s1a` | 10 | 175 | 44 | 1 | **REBUILT** |
-| `f1040s2` | 44 | 24 | 19 | 23 | port |
-| `f1040s3` | 35 | 3 | 2 | 2 | port |
-| `f1040sa` | 14 | 33 | 19 | 2 | **REBUILT** |
-| `f1040sb` | 72 | 0 | 0 | 0 | unchanged |
-| `f1040sc` | 59 | 50 | 46 | 8 | **REBUILT** |
-| `f1040sd` | 55 | 0 | 0 | 0 | unchanged |
-| `f1040sse` | 25 | 2 | 2 | 0 | port |
-| `f6251` | 62 | 0 | 0 | 0 | unchanged |
-| `f8949` | 202 | 0 | 0 | 0 | unchanged |
-| `f8959` | 26 | 0 | 0 | 0 | unchanged |
-| `f8960` | 38 | 0 | 0 | 0 | unchanged |
-| `f8995` | 22 | 14 | 11 | 8 | **REBUILT** |
-| `f8995a` | 111 | 3 | 0 | 0 | port |
+| form | common | added | removed | lines that moved | lines retired | line numbers whose MEANING changed | shape |
+|---|---|---|---|---|---|---|---|
+| `f1040s1` | 73 | 0 | 0 | **UNWITNESSED** — the 2026 draft's label set cannot be read (bare sub-letter `a` at p1 y=120.9 has no numeric parent; FR-58), so the moved count is NOT a number here | **UNWITNESSED** | **UNWITNESSED** | port |
+| `f1040s1a` | 54 | 131 | 0 | 44 | 7 | 33 | **REBUILT** |
+| `f1040s2` | 59 | 9 | 4 | 33 | 20 | 18 | port |
+| `f1040s3` | 37 | 1 | 0 | 3 | 1 | 4 | port |
+| `f1040sa` | 15 | 31 | 18 | 2 | 5 | 8 | **REBUILT** |
+| `f1040sb` | 72 | 0 | 0 | 0 | 0 | 2 | port |
+| `f1040sc` | 104 | 5 | 1 | 33 | 0 | 16 | port |
+| `f1040sd` | 55 | 0 | 0 | 0 | 0 | 0 | unchanged |
+| `f1040sse` | 27 | 0 | 0 | 0 | 0 | 5 | port |
+| `f6251` | 62 | 0 | 0 | 0 | 1 | 8 | port |
+| `f8949` | 202 | 0 | 0 | 0 | 0 | **UNWITNESSED** | port |
+| `f8959` | 26 | 0 | 0 | 0 | 0 | 12 | port |
+| `f8960` | 38 | 0 | 0 | 0 | 0 | 2 | port |
+| `f8995` | 24 | 12 | 9 | 8 | 0 | 4 | port |
+| `f8995a` | 111 | 3 | 0 | 0 | 0 | 6 | port |
 
 ## Not listed — stated PER CELL, never omitted (Fable plan review I8)
 
