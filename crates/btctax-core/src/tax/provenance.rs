@@ -157,6 +157,17 @@ pub const LEAF_SOURCE: &[(&str, Source)] = &[
     //     figures have a document behind them and which came from the filer's books.
     ("schedule_b_filer_records", Source::FilerRecords),
     ("qbi", Source::FilerRecords),
+    // ★★★ FR-196 — the §111(a) State and Local Income Tax Refund Worksheet's three prior-year
+    //     Schedule A figures (lines 5d, 5e and 17). `FilerRecords` because the worksheet says *"the
+    //     amount reported on your Y−1 Schedule A"* — a figure the filer reads off the return they
+    //     filed last year, which is their own books and NOT an information return. There is no
+    //     `DocumentKind` for a prior-year 1040 and inventing one would put a census row, an `ALL`
+    //     entry and a `transcribed_on` column on a document nobody issues to anybody.
+    //
+    // ★ When the prior year IS in the vault these same fields can be carried instead, stamped
+    //   `CarryProvenance::ComputedFromPriorReturn`; the sibling provenance scalar on the block is
+    //   what distinguishes the two, exactly as it does for the carryovers below.
+    ("state_local_refund", Source::FilerRecords),
     // ★ Form 8960 line 9b — i8960's *"any reasonable method"* allocation. Collected, never computed:
     //   the method is the FILER'S election, so the figure is theirs.
     ("form_8960_line9b", Source::FilerRecords),

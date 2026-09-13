@@ -48,6 +48,10 @@ pub mod schedule_1a;
 pub mod scrub;
 pub mod scrub_axis;
 pub mod se;
+/// ★★★ **FR-196 — the §111(a) STATE AND LOCAL INCOME TAX REFUND WORKSHEET (Schedule 1, line 1)**,
+/// transcribed line by line from every archived `i1040gi` revision, plus the nine Pub. 525 Exception
+/// conditions that decide whether it may be used at all. See module doc.
+pub mod state_local_refund;
 pub mod tables;
 /// Test scaffolding (synthetic households + TY2024 fixtures) shared with `btctax-forms`' KATs and the
 /// P7 golden-return matrix. No tax logic — every figure is a fixture, not a fact.

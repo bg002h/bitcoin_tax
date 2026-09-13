@@ -2619,6 +2619,31 @@ pub struct ReturnInputs {
     /// DECISION; a `Yes` refuses naming the State and Local Income Tax Refund Worksheet.
     #[serde(default)]
     pub itemized_prior_year: Option<bool>,
+    /// ★★★ **FR-196 — the §111(a) STATE AND LOCAL INCOME TAX REFUND WORKSHEET's own inputs.**
+    ///
+    /// The worksheet ([`crate::tax::state_local_refund`]) asks for last year's Schedule A lines 5d,
+    /// 5e and 17, last year's filing status, last year's §63(f) boxes, and the nine Pub. 525
+    /// Exception conditions. **None of those is anywhere else on this struct** — [`Self::schedule_a`]
+    /// is THIS year's — so the form asks something the input surface could not answer, and
+    /// `CLAUDE.md`'s rule is to collect it.
+    ///
+    /// `None` = **never collected**, which is where every existing vault is and which the worksheet
+    /// refuses on ([`crate::tax::state_local_refund::NotUsable::FactsNotCollected`]). Answered-ness
+    /// lives in the block's PRESENCE: inside it every field is serde-required, so there is no `false`
+    /// for an unanswered declaration to hide in.
+    ///
+    /// ★★ **Live exactly when [`Self::itemized_prior_year`] is** — the same
+    /// `QuestionId::ItemizedPriorYear` predicate — because the same fact opens both: a state or local
+    /// income tax refund, from a transcribed Form 1099-G box 2 or from the document-less question.
+    ///
+    /// ★★★ **NOT YET READ BY `screen_inputs`.** `RefuseReason::StateAndLocalRefundWorksheetNotComputed`
+    /// still refuses on `itemized_prior_year == Some(true)` regardless of this block, deliberately:
+    /// `return_refuse.rs` is owned elsewhere in this wave, so the worksheet lands first and the
+    /// refusal is lifted in its own commit. Until then a populated block changes nothing — which is
+    /// the fail-CLOSED direction, but it does mean a filer can enter these figures and still be
+    /// refused. See `REPORT-wave2-E.md` for the exact removal.
+    #[serde(default)]
+    pub state_local_refund: Option<crate::tax::state_local_refund::StateLocalRefundFacts>,
     /// ★★★ **R9 / T6 — THE DIGITAL ASSETS QUESTION, Form 1040 page 1, above line 1a.**
     ///
     /// *"At any time during 2025, did you: (a) receive (as a reward, award, or payment for property
@@ -2896,6 +2921,12 @@ impl Default for ReturnInputs {
             state_refund_without_1099g: None,
             hsa_distribution_without_1099sa: None,
             itemized_prior_year: None,
+            // ★★★ FR-196 — `None`: never collected. The §111(a) worksheet refuses on it rather than
+            //     working itself from a block of defaulted zeros and `false`s, which would be the
+            //     same laundering one level down: a zero on last year's Schedule A line 5e caps
+            //     line 2 at the whole of line 5d, and a defaulted `false` on any of the nine Pub. 525
+            //     exceptions computes a figure where the form demands a refusal.
+            state_local_refund: None,
             // ★★★ R9 — `None`: a fresh return has not been asked the Digital Assets question. A
             //     defaulted `Some(false)` would swear "no digital assets" on the filer's behalf,
             //     which is the one direction this field exists to close.

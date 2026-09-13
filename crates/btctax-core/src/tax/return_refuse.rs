@@ -1911,6 +1911,11 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         itemized_prior_year: _,
         schedule_c,
         schedule_a,
+        // ★★★ FR-196 — the §111(a) worksheet's prior-year block DOES carry money: three Schedule A
+        //     figures off last year's return. Each is a form-box magnitude (≥ 0), so each is
+        //     negative-screened below; the rest of the block is a filing status, declarations and a
+        //     provenance tag.
+        state_local_refund,
         // spec 1099-DA — testimony about the broker's forms, not a money field
         broker_reporting: _,
         itemize_election: _,
@@ -2470,6 +2475,50 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         } = item;
         if neg(*amount) {
             return Some("charitable carryover amount");
+        }
+    }
+    // ★★★ FR-196 — the §111(a) State and Local Income Tax Refund Worksheet's three prior-year
+    //     Schedule A figures. Each is a form-box magnitude on a return the filer already filed, so a
+    //     negative is a corrupt import — and a negative line 5e would make worksheet line 2 LARGER
+    //     than line 5d, which understates the taxable part of the refund.
+    if let Some(w) = state_local_refund {
+        let crate::tax::state_local_refund::StateLocalRefundFacts {
+            prior_year_schedule_a_line5d,
+            prior_year_schedule_a_line5e,
+            prior_year_schedule_a_line17,
+            // ★ Worksheet line 1's other half — the refund no Form 1099-G reported. A form-box
+            //   magnitude like the rest, and a NEGATIVE one would silently reduce the transcribed
+            //   box 2 total it is added to.
+            refund_not_on_a_1099g,
+            // A filing status, the §63(f) boxes, the nine Pub. 525 exception declarations, the
+            // sales-tax election, the MFS pair and a provenance tag — no money among them.
+            prior_year_elected_sales_tax: _,
+            prior_year_filing_status: _,
+            prior_year_mfs_spouse_itemized: _,
+            prior_year_aged_blind: _,
+            mfs_spouse_boxes_permitted: _,
+            exception_refund_for_another_year: _,
+            exception_not_an_income_tax_refund: _,
+            exception_zero_rate_on_preferential_income: _,
+            exception_refund_exceeds_incremental_deduction: _,
+            exception_last_estimated_payment_in_filing_year: _,
+            exception_owed_amt_in_prior_year: _,
+            exception_unusable_credits: _,
+            exception_could_be_claimed_as_dependent: _,
+            exception_joint_state_return_not_joint_now: _,
+            provenance: _,
+        } = w;
+        if neg(*prior_year_schedule_a_line5d) {
+            return Some("the prior year's Schedule A line 5d (state and local taxes)");
+        }
+        if neg(*prior_year_schedule_a_line5e) {
+            return Some("the prior year's Schedule A line 5e (the §164(b)(6) limitation)");
+        }
+        if neg(*prior_year_schedule_a_line17) {
+            return Some("the prior year's Schedule A line 17 (total itemized deductions)");
+        }
+        if neg(*refund_not_on_a_1099g) {
+            return Some("the state or local income tax refund not reported on a Form 1099-G");
         }
     }
     // ★★ Schedule 1-A's three money leaves. Negative amounts here are impossible on their face —

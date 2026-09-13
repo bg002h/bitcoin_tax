@@ -830,6 +830,7 @@ $ btctax --vault v.pgp income show --year 2024
   "state_refund_without_1099g": null,
   "hsa_distribution_without_1099sa": null,
   "itemized_prior_year": null,
+  "state_local_refund": null,
   "digital_asset_activity": true,
   "schedule_b_filer_records": [],
   "claiming_mortgage_interest_credit": false,

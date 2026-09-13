@@ -130,6 +130,7 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         state_refund_without_1099g,
         hsa_distribution_without_1099sa,
         itemized_prior_year,
+        state_local_refund,
         digital_asset_activity,
         claiming_mortgage_interest_credit,
         home_sale,
@@ -364,6 +365,9 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         QuestionId::ClaimingMortgageInterestCredit,
     );
     classify_home_sale(&mut c, home_sale);
+    if let Some(w) = state_local_refund {
+        classify_state_local_refund(&mut c, w);
+    }
     if let Some(sc) = schedule_c {
         classify_schedule_c(&mut c, sc);
     }
@@ -914,6 +918,125 @@ fn classify_home_sale(c: &mut Census, h: &crate::tax::return_inputs::HomeSale) {
         QuestionId::HomeSaleTest2NoRecentExclusion,
     );
     c.declaration(can_exclude_all_gain, QuestionId::HomeSaleCanExcludeAllGain);
+}
+
+/// ★★★ **FR-196 — the §111(a) State and Local Income Tax Refund Worksheet's prior-year block.**
+///
+/// Thirteen `bool` leaves and one nested four-`bool` struct, every one of them a fact about LAST
+/// YEAR's return that the worksheet asks for by name and no other part of `ReturnInputs` holds.
+///
+/// ★★ **They are class `SerdeRequired`, not class-(A) declarations, and the distinction is the whole
+/// design.** Answered-ness lives one level up, in whether
+/// [`ReturnInputs::state_local_refund`](crate::tax::return_inputs::ReturnInputs::state_local_refund)
+/// is `Some` at all: the block is absent until the filer works through the worksheet, and the
+/// worksheet REFUSES while it is absent
+/// ([`NotUsable::FactsNotCollected`](crate::tax::state_local_refund::NotUsable::FactsNotCollected)).
+/// Inside a present block no field carries `#[serde(default)]`, so a TOML that omits one refuses to
+/// parse and there is no `false` for an unanswered box to hide in — which is exactly what §2.8's
+/// `SerdeRequired` class means. Thirteen more `FORM_QUESTIONS` rows would move the answered-ness from
+/// a structural property to thirteen more things a registry has to remember.
+///
+/// ★ Each exemption names the form sentence the leaf transcribes, so a reader can check the claim
+///   against `state_local_refund.rs` without leaving this file.
+fn classify_state_local_refund(
+    c: &mut Census,
+    w: &crate::tax::state_local_refund::StateLocalRefundFacts,
+) {
+    use crate::tax::state_local_refund::{PriorYearAgedBlindBoxes, StateLocalRefundFacts};
+    let StateLocalRefundFacts {
+        prior_year_elected_sales_tax,
+        prior_year_filing_status,
+        // Three Schedule A figures off last year's return, plus worksheet line 1's other half.
+        // `Usd`, which the `_` rule permits, and every one is negative-screened in
+        // `return_refuse::first_negative_amount`.
+        prior_year_schedule_a_line5d: _,
+        prior_year_schedule_a_line5e: _,
+        prior_year_schedule_a_line17: _,
+        refund_not_on_a_1099g: _,
+        prior_year_mfs_spouse_itemized,
+        prior_year_aged_blind,
+        mfs_spouse_boxes_permitted,
+        exception_refund_for_another_year,
+        exception_not_an_income_tax_refund,
+        exception_zero_rate_on_preferential_income,
+        exception_refund_exceeds_incremental_deduction,
+        exception_last_estimated_payment_in_filing_year,
+        exception_owed_amt_in_prior_year,
+        exception_unusable_credits,
+        exception_could_be_claimed_as_dependent,
+        exception_joint_state_return_not_joint_now,
+        provenance,
+    } = w;
+    const WHY: &str = "§2.8 — no #[serde(default)] on this field, so a TOML without it refuses to \
+                       parse; answered-ness for the whole §111(a) worksheet lives in whether \
+                       `ReturnInputs::state_local_refund` is `Some`, and the worksheet REFUSES while \
+                       it is `None`";
+    c.exempt(prior_year_elected_sales_tax, Class::SerdeRequired, WHY);
+    c.exempt(prior_year_mfs_spouse_itemized, Class::SerdeRequired, WHY);
+    c.exempt(mfs_spouse_boxes_permitted, Class::SerdeRequired, WHY);
+    c.exempt(exception_refund_for_another_year, Class::SerdeRequired, WHY);
+    c.exempt(
+        exception_not_an_income_tax_refund,
+        Class::SerdeRequired,
+        WHY,
+    );
+    c.exempt(
+        exception_zero_rate_on_preferential_income,
+        Class::SerdeRequired,
+        WHY,
+    );
+    c.exempt(
+        exception_refund_exceeds_incremental_deduction,
+        Class::SerdeRequired,
+        WHY,
+    );
+    c.exempt(
+        exception_last_estimated_payment_in_filing_year,
+        Class::SerdeRequired,
+        WHY,
+    );
+    c.exempt(exception_owed_amt_in_prior_year, Class::SerdeRequired, WHY);
+    c.exempt(exception_unusable_credits, Class::SerdeRequired, WHY);
+    c.exempt(
+        exception_could_be_claimed_as_dependent,
+        Class::SerdeRequired,
+        WHY,
+    );
+    c.exempt(
+        exception_joint_state_return_not_joint_now,
+        Class::SerdeRequired,
+        WHY,
+    );
+    c.exempt(
+        prior_year_filing_status,
+        Class::SerdeRequired,
+        "§2.8 — LAST YEAR's filing status, which worksheet lines 5, 6 and the MFS Note all read. No \
+         #[serde(default)], so it is required at import; `FilingStatus`'s own `#[default]` reaches \
+         only Rust-side fixtures. It is NOT this year's status and must never be defaulted from it",
+    );
+    c.exempt(
+        provenance,
+        Class::DataDerived,
+        "the figures' origin — typed by the filer, or carried from a prior-year return btctax \
+         computed (§G-23's \"stated zero\"). DATA about the amounts, not a defaulted answer for the \
+         filer",
+    );
+    let PriorYearAgedBlindBoxes {
+        taxpayer_aged,
+        taxpayer_blind,
+        spouse_aged,
+        spouse_blind,
+    } = prior_year_aged_blind;
+    for b in [taxpayer_aged, taxpayer_blind, spouse_aged, spouse_blind] {
+        c.exempt(
+            b,
+            Class::SerdeRequired,
+            "worksheet line 6's four §63(f) checkboxes, for the PRIOR year. Serde-required (§2.8), \
+             and the spouse pair additionally FAILS CLOSED for a prior-year MFS filer unless the \
+             line-6 footnote is affirmed — an over-claimed box shrinks the taxable part of the \
+             refund",
+        );
+    }
 }
 
 fn classify_1098e(_c: &mut Census, e: &crate::tax::return_inputs::Form1098E) {

@@ -536,6 +536,41 @@ pub fn maximal_sentinel() -> ReturnInputs {
         //   itemizing ⇒ no tax benefit ⇒ the refund is not income and Schedule 1 line 1 is blank by
         //   decision. `Some(true)` would refuse and mask every cell of the matrix.
         itemized_prior_year: Some(false),
+        // ★★★ FR-196 — the §111(a) worksheet's prior-year block, REALIZED, because a maximal fixture
+        //   leaves no `Option` at `None`: an absent block contributes no money leaf, and the
+        //   `LEAF_SOURCE` KAT's second direction (*"every prefix matches at least one money leaf"*)
+        //   would then have nothing to match its `state_local_refund` prefix against.
+        //
+        // ★ Every exception answered `false` and the sales-tax election `false`, so the block is the
+        //   usable-worksheet case. It sits beside `itemized_prior_year: Some(false)` — which exits by
+        //   the TIP before the worksheet begins — and that is deliberate and NOT a contradiction: the
+        //   block's presence is not a claim that it applies, and nothing refuses on the pair.
+        state_local_refund: Some(crate::tax::state_local_refund::StateLocalRefundFacts {
+            prior_year_elected_sales_tax: false,
+            refund_not_on_a_1099g: dec!(64),
+            prior_year_filing_status: FilingStatus::Single,
+            prior_year_schedule_a_line5d: dec!(61),
+            prior_year_schedule_a_line5e: dec!(62),
+            prior_year_schedule_a_line17: dec!(63),
+            prior_year_mfs_spouse_itemized: false,
+            prior_year_aged_blind: crate::tax::state_local_refund::PriorYearAgedBlindBoxes {
+                taxpayer_aged: true,
+                taxpayer_blind: true,
+                spouse_aged: true,
+                spouse_blind: true,
+            },
+            mfs_spouse_boxes_permitted: true,
+            exception_refund_for_another_year: false,
+            exception_not_an_income_tax_refund: false,
+            exception_zero_rate_on_preferential_income: false,
+            exception_refund_exceeds_incremental_deduction: false,
+            exception_last_estimated_payment_in_filing_year: false,
+            exception_owed_amt_in_prior_year: false,
+            exception_unusable_credits: false,
+            exception_could_be_claimed_as_dependent: false,
+            exception_joint_state_return_not_joint_now: false,
+            provenance: CarryProvenance::User,
+        }),
         schedule_c: Some(ScheduleCInputs {
             owner: Owner::Taxpayer,
             business_description: "SENTINEL_business_description".into(),

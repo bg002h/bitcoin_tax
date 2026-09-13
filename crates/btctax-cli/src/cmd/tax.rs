@@ -124,6 +124,21 @@ pub fn import_return_inputs(
         for item in &mut ri.charitable_carryover_in {
             item.provenance = CarryProvenance::User;
         }
+        // ★★★ **FR-196 — THE SIXTH SITE, AND THE FACT THAT IT IS A SIXTH IS THE FINDING.** The
+        //     §111(a) worksheet's prior-year block carries its own `CarryProvenance`, and this block
+        //     is a hand-written LIST of provenance sites — *"correct on the day it is written"*,
+        //     exactly `CLAUDE.md`'s highest-yield rule. It did not know the set had grown, and
+        //     nothing red: `xtask toml-schema` DERIVES its *"forced to `user`"* annotation from the
+        //     path suffix, so the generated schema doc asserted this key was normalised while the
+        //     code did not touch it — a doc claiming a guarantee the code did not keep.
+        //
+        // ★ Forcing `User` is unconditionally right here today: nothing yet writes
+        //   `ComputedFromPriorReturn` into this block, so any other value in a TOML is a stamp
+        //   nobody earned. The CLASS defect — this list versus a derived walk over every
+        //   `CarryProvenance` leaf — is filed rather than improvised; see `REPORT-wave2-E.md`.
+        if let Some(w) = &mut ri.state_local_refund {
+            w.provenance = CarryProvenance::User;
+        }
     }
     // ★★★ **THE ANSWER LOG IS BTCTAX'S SIGNATURE ABOUT THE *ASKING*, AND THE IMPORT SURFACE MUST
     //     NOT BE ABLE TO SIGN IT EITHER.** (Seam review C1.)

@@ -941,6 +941,12 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
         //   other figure and fail-loud declaration.
         opened_from: _,
         filing_status_confirmed: _,
+        // ★ FR-196 — the §111(a) worksheet's prior-year block: three Schedule A figures, last year's
+        //   filing status, the four §63(f) boxes, nine Pub. 525 declarations and a provenance tag.
+        //   No name, no TIN, no address, no free text — nothing that identifies anyone, so it is
+        //   preserved like every other figure and declaration. (It says nothing about WHICH state
+        //   either: the worksheet asks for amounts, never for the taxing jurisdiction.)
+        state_local_refund: _,
     } = ri;
 
     let mut out = ri.clone();

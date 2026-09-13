@@ -14,7 +14,7 @@ cargo run -p xtask -- toml-schema > docs/income-import-schema.md
 
 Start from [the worked example](#a-complete-worked-example) below and delete what does not apply to you.
 
-**Almost every key is optional to the PARSER** — `ReturnInputs` carries `#[serde(default)]` on nearly every field — so a short file parses. **41 are not**, and they are measured rather than remembered — each one was deleted from a complete file and handed back to the deserializer:
+**Almost every key is optional to the PARSER** — `ReturnInputs` carries `#[serde(default)]` on nearly every field — so a short file parses. **64 are not**, and they are measured rather than remembered — each one was deleted from a complete file and handed back to the deserializer:
 
 - `b_1099[].payer`
 - `capital_loss_carryforward_in.long`
@@ -51,6 +51,29 @@ Start from [the worked example](#a-complete-worked-example) below and delete wha
 - `schedule_a.mortgage_interest_not_on_1098[].recipient_name`
 - `schedule_b_filer_records[].payer_name`
 - `schedule_c.owner`
+- `state_local_refund.exception_could_be_claimed_as_dependent`
+- `state_local_refund.exception_joint_state_return_not_joint_now`
+- `state_local_refund.exception_last_estimated_payment_in_filing_year`
+- `state_local_refund.exception_not_an_income_tax_refund`
+- `state_local_refund.exception_owed_amt_in_prior_year`
+- `state_local_refund.exception_refund_exceeds_incremental_deduction`
+- `state_local_refund.exception_refund_for_another_year`
+- `state_local_refund.exception_unusable_credits`
+- `state_local_refund.exception_zero_rate_on_preferential_income`
+- `state_local_refund.mfs_spouse_boxes_permitted`
+- `state_local_refund.prior_year_aged_blind`
+- `state_local_refund.prior_year_aged_blind.spouse_aged`
+- `state_local_refund.prior_year_aged_blind.spouse_blind`
+- `state_local_refund.prior_year_aged_blind.taxpayer_aged`
+- `state_local_refund.prior_year_aged_blind.taxpayer_blind`
+- `state_local_refund.prior_year_elected_sales_tax`
+- `state_local_refund.prior_year_filing_status`
+- `state_local_refund.prior_year_mfs_spouse_itemized`
+- `state_local_refund.prior_year_schedule_a_line17`
+- `state_local_refund.prior_year_schedule_a_line5d`
+- `state_local_refund.prior_year_schedule_a_line5e`
+- `state_local_refund.provenance`
+- `state_local_refund.refund_not_on_a_1099g`
 - `w2s[].box12[].amount`
 - `w2s[].box12[].code`
 - `w2s[].box1_wages`
@@ -103,7 +126,7 @@ Two key groups are read and then **normalised away**, with a note on stderr rath
 
 ## Every key `income import` honours
 
-**365 paths, 330 of them leaves that take a value.** Derived from the serialized shape of `ReturnInputs` over `btctax_core::tax::scrub_axis::maximal_sentinel()` — the fixture whose every `Option` is `Some`, every `Vec` non-empty and every nested struct present, written as an exhaustive `..`-free struct literal so a new field is a compile error before it can be an unpublished key.
+**389 paths, 352 of them leaves that take a value.** Derived from the serialized shape of `ReturnInputs` over `btctax_core::tax::scrub_axis::maximal_sentinel()` — the fixture whose every `Option` is `Some`, every `Vec` non-empty and every nested struct present, written as an exhaustive `..`-free struct literal so a new field is a compile error before it can be an unpublished key.
 
 **Reading the paths.** `a.b` is the key `b` under `[a]`. `a[]` is a repeated table, written `[[a]]` once per row, and `a[].b` is a key inside one of those rows. A `<placeholder>` segment is a key YOU choose, not a literal:
 
@@ -458,6 +481,30 @@ Two key groups are read and then **normalised away**, with a note on stderr rath
 | `schedule_c.qbi_ubia` | string |  |
 | `schedule_c.qbi_w2_wages` | string |  |
 | `schedule_c.will_file_required_1099` | boolean |  |
+| `state_local_refund` | table |  |
+| `state_local_refund.exception_could_be_claimed_as_dependent` | boolean | **required** |
+| `state_local_refund.exception_joint_state_return_not_joint_now` | boolean | **required** |
+| `state_local_refund.exception_last_estimated_payment_in_filing_year` | boolean | **required** |
+| `state_local_refund.exception_not_an_income_tax_refund` | boolean | **required** |
+| `state_local_refund.exception_owed_amt_in_prior_year` | boolean | **required** |
+| `state_local_refund.exception_refund_exceeds_incremental_deduction` | boolean | **required** |
+| `state_local_refund.exception_refund_for_another_year` | boolean | **required** |
+| `state_local_refund.exception_unusable_credits` | boolean | **required** |
+| `state_local_refund.exception_zero_rate_on_preferential_income` | boolean | **required** |
+| `state_local_refund.mfs_spouse_boxes_permitted` | boolean | **required** |
+| `state_local_refund.prior_year_aged_blind` | table | **required** |
+| `state_local_refund.prior_year_aged_blind.spouse_aged` | boolean | **required** |
+| `state_local_refund.prior_year_aged_blind.spouse_blind` | boolean | **required** |
+| `state_local_refund.prior_year_aged_blind.taxpayer_aged` | boolean | **required** |
+| `state_local_refund.prior_year_aged_blind.taxpayer_blind` | boolean | **required** |
+| `state_local_refund.prior_year_elected_sales_tax` | boolean | **required** |
+| `state_local_refund.prior_year_filing_status` | string | **required** |
+| `state_local_refund.prior_year_mfs_spouse_itemized` | boolean | **required** |
+| `state_local_refund.prior_year_schedule_a_line17` | string | **required** |
+| `state_local_refund.prior_year_schedule_a_line5d` | string | **required** |
+| `state_local_refund.prior_year_schedule_a_line5e` | string | **required** |
+| `state_local_refund.provenance` | string | **required**; forced to `user` |
+| `state_local_refund.refund_not_on_a_1099g` | string | **required** |
 | `state_refund_without_1099g` | boolean |  |
 | `tax_year` | integer |  |
 | `w2_wages_without_w2` | boolean |  |

@@ -2182,6 +2182,23 @@ pub const ORACLE_INVISIBLE: &[OracleInvisibleLeaf] = &[
         because: InvisibleBecause::PriorYearCarryIn,
         note: "§170(d)(1) — moves Schedule A line 11/12; neither engine takes a carry-in",
     },
+    // ★★★ FR-196 — the §111(a) State and Local Income Tax Refund Worksheet's three PRIOR-YEAR
+    //     Schedule A figures (lines 5d, 5e and 17). A one-year engine has no input for last year's
+    //     Schedule A, so nothing on either side can take them.
+    //
+    // ★★ **What IS takeable is the worksheet's OUTPUT**, and it must not be confused with these
+    //    inputs: Tax-Calculator's `e00700` is *"Taxable refunds of state and local income taxes"*
+    //    (verified in the installed `taxcalc/records_variables.json`), so once the worksheet is wired
+    //    to Schedule 1 line 1 the RESULTING figure belongs in `GoldenInputs` and in the corpus — an
+    //    axis this row cannot express today, which is why no golden household carries a taxable
+    //    refund. These three leaves stay invisible either way; the amount they produce must not.
+    OracleInvisibleLeaf {
+        prefix: "state_local_refund",
+        because: InvisibleBecause::PriorYearCarryIn,
+        note: "the prior year's Schedule A lines 5d/5e/17 and that year's §63(f) boxes, which the \
+               §111(a) tax-benefit worksheet reads; both engines compute one year from scratch and \
+               neither takes a prior-year Schedule A",
+    },
     OracleInvisibleLeaf {
         prefix: "qbi",
         because: InvisibleBecause::PriorYearCarryIn,

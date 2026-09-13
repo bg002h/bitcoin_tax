@@ -753,6 +753,29 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
         "schedule_c.other_gross_receipts",
         "sch1.state_refund_taxable",
         "sch1.ira_deduction_claimed",
+        // ★★★ **FR-196 — the §111(a) worksheet's prior-year block, EXEMPT DELIBERATELY AND
+        //     NARROWLY, with the task that removes the exemption named.**
+        //
+        //     A LEAF entry, not a prefix, and that matters twice over. The prefix ratchet above is
+        //     AT its ceiling (5 of 5), so a prefix could not be added without moving a pin whose own
+        //     comment says the only direction that hides a leaf is up. And a leaf entry is narrower
+        //     on purpose: it covers the block only while the fixture leaves it `None`. The day the
+        //     fixture populates it, eighteen leaf paths appear and this census demands a Field for
+        //     every one of them — which is the census working, not a nuisance.
+        //
+        //     ★ Same shape as `schedule_1a` above, and held back for the same stated reason: these
+        //     are ~14 filer DECLARATIONS (nine Pub. 525 exception conditions, the sales-tax
+        //     election, the MFS pair, four §63(f) boxes) plus three prior-year Schedule A figures,
+        //     and *"prompt wording is the deliverable here, not plumbing"*. Each of the nine
+        //     exceptions has to state the condition that permits a YES — *"You owed alternative
+        //     minimum tax in 2024"* is a question a filer can only answer off last year's return —
+        //     and a wrong prompt here turns a required Pub. 525 refusal into a computed figure.
+        //
+        //     ★ Nothing is reachable through the gap today: `screen_inputs` still refuses on
+        //     `RefuseReason::StateAndLocalRefundWorksheetNotComputed`, so no return carrying this
+        //     block can be committed at all, and the TOML import surface carries the fields.
+        //     REMOVE THIS ENTRY when the form section lands.
+        "state_local_refund",
     ];
     let is_exempt = |path: &str| {
         EXEMPT_LEAVES.contains(&path)
