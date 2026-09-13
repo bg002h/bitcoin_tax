@@ -8111,6 +8111,64 @@ build, each with an owning phase.
   shared `~/.cargo` package-cache lock under six concurrent builds; or wall-clock sensitivity in a test with
   a timeout. **Do not guess — the hook's own output will name it.**
 
+- **FR-177 — ⚠️ OWNER DECISION. `Advisory::RefundByPaperCheck` asserts an IRS behaviour the IRS retracted, and §7.4's DO-NOT-BUILD rests on the same retracted premise. Important. Owning phase: NOW, before TY2026.**
+  **Both sides verified verbatim by the controller 2026-09-13.**
+  The advisory (`advisories.rs:619-626`) tells the filer: *"REFUND BY PAPER CHECK — your return is due a
+  refund of {}, and no direct-deposit instruction was given, so the 1040's lines 35b–35d are blank.
+  **As filed, the IRS will mail a check.**"*
+  The TY2025 instructions (`design/forms/extract/i1040gi--2025.txt:23824-23827`) say: *"Starting in October
+  2025, the IRS **will generally stop issuing paper checks** for federal disbursements, **including tax
+  refunds**, unless an exception applies."*
+  ★ **TY2026 is the first year this software files.** So the sentence is not merely stale — it is
+  reassurance pointed the wrong way: it tells a filer that doing nothing yields a check, when doing nothing
+  may now yield no delivery mechanism at all. The return's figures are unaffected; the *advice* is wrong.
+  ★★ **The owner-facing half, and the reason this is a decision and not a fix:**
+  `LONG_RANGE_PLAN_filing.md` §7.4 rules *"Direct deposit / Form 8888 — DO NOT BUILD"*, justified as
+  ***"a paper check is the disclosed consequence** and bank details are PII the return does not need."*
+  **That justification is void.** The privacy half stands on its own; the "disclosed consequence" half no
+  longer describes reality. §7.4 needs a re-ruling for TY2026: either direct deposit becomes buildable, or
+  the ruling is restated on the privacy ground alone and the advisory is rewritten to say what actually
+  happens. **Do not silently rewrite the sentence — the scope ruling is the owner's.**
+  ★ **The irony worth recording**: this variant's own doc comment (`:232-237`) narrates that this exact
+  class already happened here once — a retracted sentence surviving in one uncovered copy — and a test,
+  `the_paper_check_advisory_is_silent_exactly_when_a_deposit_is_given`, now scans the module's source for
+  **that** retracted sentence. The instrument exists, and it is keyed to yesterday's retraction.
+  ★ One correction to the source report: it said the TY2024 instructions have **zero** occurrences of
+  "paper check". There is **one** (`i1040gi--2024.txt:43483`), in an index entry — *"Returning an erroneous
+  refund—Paper check or direct deposit"* — unrelated to issuance policy. The drift conclusion stands; the
+  count did not.
+
+- **FR-178 — community property (Form 8958) is absent from code while MFS is fully built. Important. Owning phase: with the scenario census's disposition.**
+  `Form 8958`: **0** real occurrences in `crates/` (★ a single grep hit is a FALSE POSITIVE — the string
+  `8958` inside a Bitcoin price, `btc_usd_daily_close.csv:5650`, `2026-01-02,89584.13`). `community
+  property`: **0** in `crates/`, 27 in `design/`. Meanwhile MFS is a fully built, fully tested filing
+  status, and `address_state` is already collected — so the input needed to detect the nine community
+  property states is already in hand.
+  **Direction of harm: UNDERSTATES** for the lower-earning spouse, which is the worse direction. And it is
+  invisible to every instrument we own: **no line is blank**, so the field census cannot see it; both
+  oracles take the split as an *input*, so their agreement says nothing (§G-9 exactly).
+
+- **FR-179 — `DocumentRow::ALL`'s completeness is pinned by a hand-typed `20`, and the doc comment claims otherwise. Important. Owning phase: the harness.**
+  **Controller-verified 2026-09-13.** `document_census.rs:96` declares `ALL` as a 20-element literal;
+  `every_row_is_listed_and_round_trips` (`:1189`) asserts `DocumentRow::ALL.len() == 20` with the comment
+  *"§5.1's eighteen rows plus T16's two HSA information returns"*, and the `ALL` doc comment claims *"the
+  exhaustive `match`es make a new variant a compile error; **this pins that `ALL` lists it too**."*
+  ★ **It does not.** An exhaustive `match` forces ARMS for a new variant; it does not force MEMBERSHIP in a
+  separate array literal. Add a 21st row, add the arms the compiler demands, forget `ALL` — `ALL.len()` is
+  still 20 and the test is green. The row is then absent from every completeness iteration built on `ALL`,
+  including the bijection check, which iterates `ALL` and therefore cannot miss what `ALL` omits.
+  ★★ This is `CLAUDE.md`'s T8–T12 disease on **the one gate every out-of-scope income scenario passes
+  through**, and a test whose doc comment asserts a guarantee it does not deliver is the green-and-blind
+  class. *Fix:* derive the count, or add a variant→`ALL` membership check that reds on omission — then
+  plant a 21st variant and watch it red (B1).
+
+- **FR-180 — the census verifies a refusal is RECORDED, never that it FIRES. Important. Owning phase: next, and it is where an FR-102 would live.**
+  The scenario census's own stated blind spot, and the controller agrees it is the right next instrument.
+  With **128** `RefuseReason` variants (verified; the brief's 140 was a loose grep by the controller), the
+  open question is **reachability**: can a filer actually reach each refusal, and does each one fire on the
+  state it names? ★ FR-87 was an unreachable refusal; FR-102 was a filer who could not print a page. Both
+  are this shape, and neither is visible to a census that only asks whether a position is written down.
+
 - **FR-152 — `census_join` anchors captions to ABSOLUTE line indices in a generated file. Minor. Owning phase: the port machine.**
   A4's 110 `# Regenerate:` header additions shifted every extract by a line, and `forms/2024/f1040s1.map.toml`'s
   `extract_line` anchors (11/15/58) had to move to 15/19/62 — an edit outside A4's ownership, reported rather
