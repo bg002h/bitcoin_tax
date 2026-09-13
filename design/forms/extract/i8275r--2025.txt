@@ -1,6 +1,6 @@
 # GENERATED — do not hand-edit. Text layer of design/forms/2025/i8275r--2025.pdf
 # sha256:0e8fc129510766bf…  |  pdftotext (no flags)
-# Regenerate: cargo run -p xtask -- forms extract
+# Regenerate: cargo run -p xtask -- forms extract i8275r--2025
 #
 Instructions for Form 8275-R
 

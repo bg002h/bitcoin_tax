@@ -1,6 +1,6 @@
 # GENERATED — do not hand-edit. Text layer of design/forms/2024/f1040s2--2024.pdf
-# sha256:2efb90815ed0b92c…  |  pdftotext -layout
-# Regenerate: cargo run -p xtask -- forms extract
+# sha256:2efb90815ed0b92c…  |  pdftotext -layout  |  form feeds -> LF
+# Regenerate: cargo run -p xtask -- forms extract f1040s2--2024
 #
 SCHEDULE 2                                                                                                                                           OMB No. 1545-0074
                                                               Additional Taxes

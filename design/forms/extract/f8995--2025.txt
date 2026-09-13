@@ -1,6 +1,6 @@
 # GENERATED — do not hand-edit. Text layer of design/forms/2025/f8995--2025.pdf
-# sha256:55380ad230303e15…  |  pdftotext -layout
-# Regenerate: cargo run -p xtask -- forms extract
+# sha256:55380ad230303e15…  |  pdftotext -layout  |  form feeds -> LF
+# Regenerate: cargo run -p xtask -- forms extract f8995--2025
 #
 Form     8995                            Qualified Business Income Deduction                                                   OMB No. 1545-0074
 

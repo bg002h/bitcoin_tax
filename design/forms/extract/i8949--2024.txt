@@ -1,6 +1,6 @@
 # GENERATED — do not hand-edit. Text layer of design/forms/2024/i8949--2024.pdf
-# sha256:d32a75d0e183c0f1…  |  pdftotext (no flags)
-# Regenerate: cargo run -p xtask -- forms extract
+# sha256:d32a75d0e183c0f1…  |  pdftotext (no flags)  |  form feeds -> LF
+# Regenerate: cargo run -p xtask -- forms extract i8949--2024
 #
 2024
 

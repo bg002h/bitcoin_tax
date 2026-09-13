@@ -1,3 +1,7 @@
+# GENERATED — do not hand-edit. Text layer of design/forms/2026/f1099g--2026.pdf
+# sha256:65a416c52508d8a3…  |  pdftotext -layout
+# Regenerate: cargo run -p xtask -- forms extract f1099g--2026
+#
                                          Attention:
 Which Revision To Use for Which Year. We issue information returns up to a year in
 advance of when issuers will first file them. For all forms that we do not issue annually (such

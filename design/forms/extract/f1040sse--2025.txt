@@ -1,6 +1,6 @@
 # GENERATED — do not hand-edit. Text layer of design/forms/2025/f1040sse--2025.pdf
-# sha256:05bc2b3e1dfca65d…  |  pdftotext -layout
-# Regenerate: cargo run -p xtask -- forms extract
+# sha256:05bc2b3e1dfca65d…  |  pdftotext -layout  |  form feeds -> LF
+# Regenerate: cargo run -p xtask -- forms extract f1040sse--2025
 #
 SCHEDULE SE                                                                                                                                OMB No. 1545-0074
 (Form 1040)                                                 Self-Employment Tax

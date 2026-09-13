@@ -1,3 +1,7 @@
+# GENERATED — do not hand-edit. Text layer of design/forms/2026/f1099b--2026.pdf
+# sha256:31fb17392add5485…  |  pdftotext -layout
+# Regenerate: cargo run -p xtask -- forms extract f1099b--2026
+#
                                          Attention:
 Copy A of this form is provided for informational purposes only. Copy A appears in red,
 similar to the official IRS form. The official printed version of Copy A of this IRS form is

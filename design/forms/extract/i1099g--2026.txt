@@ -1,3 +1,7 @@
+# GENERATED — do not hand-edit. Text layer of design/forms/2026/i1099g--2026.pdf
+# sha256:e89dac8a60ad285a…  |  pdftotext (no flags)
+# Regenerate: cargo run -p xtask -- forms extract i1099g--2026
+#
 Instructions for Form 1099-G
 (Rev. December 2026)
 

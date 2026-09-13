@@ -1,6 +1,6 @@
 # GENERATED — do not hand-edit. Text layer of design/forms/2024/f8275--2024.pdf
-# sha256:9b4b82e3d0dd4ece…  |  pdftotext -layout
-# Regenerate: cargo run -p xtask -- forms extract
+# sha256:9b4b82e3d0dd4ece…  |  pdftotext -layout  |  form feeds -> LF
+# Regenerate: cargo run -p xtask -- forms extract f8275--2024
 #
 Form    8275                                              Disclosure Statement
                                      Don’t use this form to disclose items or positions that are contrary to Treasury

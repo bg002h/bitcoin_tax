@@ -1,6 +1,6 @@
 # GENERATED — do not hand-edit. Text layer of design/forms/2024/f8960--2024.pdf
-# sha256:fca6fa8dc422ac06…  |  pdftotext -layout
-# Regenerate: cargo run -p xtask -- forms extract
+# sha256:fca6fa8dc422ac06…  |  pdftotext -layout  |  form feeds -> LF
+# Regenerate: cargo run -p xtask -- forms extract f8960--2024
 #
        8960                                  Net Investment Income Tax—
                                             Individuals, Estates, and Trusts

@@ -1,6 +1,6 @@
 # GENERATED — do not hand-edit. Text layer of design/forms/2024/i1040sb--2024.pdf
-# sha256:9b4311e121738a53…  |  pdftotext (no flags)
-# Regenerate: cargo run -p xtask -- forms extract
+# sha256:9b4311e121738a53…  |  pdftotext (no flags)  |  form feeds -> LF
+# Regenerate: cargo run -p xtask -- forms extract i1040sb--2024
 #
 2024 Instructions for
 Schedule B (Form 1040)

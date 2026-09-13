@@ -1,6 +1,6 @@
 # GENERATED — do not hand-edit. Text layer of design/forms/2025/i1040sb--2025.pdf
-# sha256:b92f31ece57a82ea…  |  pdftotext (no flags)
-# Regenerate: cargo run -p xtask -- forms extract
+# sha256:b92f31ece57a82ea…  |  pdftotext (no flags)  |  form feeds -> LF
+# Regenerate: cargo run -p xtask -- forms extract i1040sb--2025
 #
 2025
 

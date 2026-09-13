@@ -1,6 +1,6 @@
 # GENERATED — do not hand-edit. Text layer of design/forms/2024/i1040gi--2024.pdf
-# sha256:0ae53ed5020d69e6…  |  pdftotext (no flags)
-# Regenerate: cargo run -p xtask -- forms extract
+# sha256:0ae53ed5020d69e6…  |  pdftotext (no flags)  |  form feeds -> LF
+# Regenerate: cargo run -p xtask -- forms extract i1040gi--2024
 #
 TAX YEAR
 

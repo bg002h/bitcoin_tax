@@ -1,6 +1,6 @@
 # GENERATED — do not hand-edit. Text layer of design/forms/2025/f1040--2025.pdf
-# sha256:3d31c226df0d189c…  |  pdftotext -layout
-# Regenerate: cargo run -p xtask -- forms extract
+# sha256:3d31c226df0d189c…  |  pdftotext -layout  |  form feeds -> LF
+# Regenerate: cargo run -p xtask -- forms extract f1040--2025
 #
        1040 U.S. Individual Income Tax Return 2025
                         Department of the Treasury—Internal Revenue Service

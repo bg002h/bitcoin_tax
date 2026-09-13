@@ -1,6 +1,6 @@
 # GENERATED — do not hand-edit. Text layer of design/forms/2025/f8275r--2025.pdf
 # sha256:132e3f2702fb3ca5…  |  pdftotext -layout
-# Regenerate: cargo run -p xtask -- forms extract
+# Regenerate: cargo run -p xtask -- forms extract f8275r--2025
 #
 Form   8275-R                               Regulation Disclosure Statement
                                  Use this form only to disclose items or positions that are contrary to Treasury

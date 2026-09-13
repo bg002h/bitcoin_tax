@@ -1,3 +1,7 @@
+# GENERATED — do not hand-edit. Text layer of design/forms/2022/i1098--2022.pdf
+# sha256:a0de2cd965c5faf6…  |  pdftotext (no flags)
+# Regenerate: cargo run -p xtask -- forms extract i1098--2022
+#
 Instructions for Form 1098
 
 Department of the Treasury

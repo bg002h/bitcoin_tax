@@ -1,6 +1,6 @@
 # GENERATED — do not hand-edit. Text layer of design/forms/2024/i1040sse--2024.pdf
-# sha256:8cc5629c3032491e…  |  pdftotext (no flags)
-# Regenerate: cargo run -p xtask -- forms extract
+# sha256:8cc5629c3032491e…  |  pdftotext (no flags)  |  form feeds -> LF
+# Regenerate: cargo run -p xtask -- forms extract i1040sse--2024
 #
 Department of the Treasury
 Internal Revenue Service

@@ -1,3 +1,7 @@
+# GENERATED — do not hand-edit. Text layer of design/forms/2024/f5498sa--2024.pdf
+# sha256:07409c2db1e2ca6a…  |  pdftotext -layout
+# Regenerate: cargo run -p xtask -- forms extract f5498sa--2024
+#
                     2727                       VOID               CORRECTED
 TRUSTEE’S name, street address, city or town, state or province, country,   1 Employee’s or self-                OMB No. 1545-1518
 ZIP or foreign postal code, and telephone number                              employed person’s Archer

@@ -1,3 +1,7 @@
+# GENERATED — do not hand-edit. Text layer of design/forms/2025/f1099sa--2025.pdf
+# sha256:cc2324629a9bd416…  |  pdftotext -layout
+# Regenerate: cargo run -p xtask -- forms extract f1099sa--2025
+#
                     9494                       VOID               CORRECTED
 TRUSTEE’S/PAYER’S name, street address, city or town, state or province,                               OMB No. 1545-1517
 country, ZIP or foreign postal code, and telephone number                                                                               Distributions

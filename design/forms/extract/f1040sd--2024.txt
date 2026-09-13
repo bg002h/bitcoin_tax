@@ -1,6 +1,6 @@
 # GENERATED — do not hand-edit. Text layer of design/forms/2024/f1040sd--2024.pdf
-# sha256:5a006b1a9a17c19a…  |  pdftotext -layout
-# Regenerate: cargo run -p xtask -- forms extract
+# sha256:5a006b1a9a17c19a…  |  pdftotext -layout  |  form feeds -> LF
+# Regenerate: cargo run -p xtask -- forms extract f1040sd--2024
 #
 SCHEDULE D
 (Form 1040)                                       Capital Gains and Losses                                                           OMB No. 1545-0074

@@ -1,3 +1,7 @@
+# GENERATED — do not hand-edit. Text layer of design/forms/2024/i8889--2024.pdf
+# sha256:accd65700f75c261…  |  pdftotext (no flags)
+# Regenerate: cargo run -p xtask -- forms extract i8889--2024
+#
 2024
 
 Instructions for Form 8889

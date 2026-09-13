@@ -1,3 +1,7 @@
+# GENERATED — do not hand-edit. Text layer of design/forms/2025/f8889--2025.pdf
+# sha256:15ed4587f75bec57…  |  pdftotext -layout
+# Regenerate: cargo run -p xtask -- forms extract f8889--2025
+#
        8889                                       Health Savings Accounts (HSAs)                                               OMB No. 1545-0074
 
 

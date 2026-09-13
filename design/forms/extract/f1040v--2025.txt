@@ -1,3 +1,7 @@
+# GENERATED — do not hand-edit. Text layer of design/forms/2025/f1040v--2025.pdf
+# sha256:2426bb330ac54b76…  |  pdftotext -layout
+# Regenerate: cargo run -p xtask -- forms extract f1040v--2025
+#
   2025 Form 1040-V                                                                                                                                   Department of the Treasury
                                                                                                                                                      Internal Revenue Service
 

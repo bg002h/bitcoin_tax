@@ -1,6 +1,6 @@
 # GENERATED — do not hand-edit. Text layer of design/forms/2024/f8959--2024.pdf
-# sha256:b8375fc44add4ea9…  |  pdftotext -layout
-# Regenerate: cargo run -p xtask -- forms extract
+# sha256:b8375fc44add4ea9…  |  pdftotext -layout  |  form feeds -> LF
+# Regenerate: cargo run -p xtask -- forms extract f8959--2024
 #
 Form   8959                                       Additional Medicare Tax
                                  If any line does not apply to you, leave it blank. See separate instructions.

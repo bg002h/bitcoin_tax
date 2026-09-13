@@ -1,3 +1,7 @@
+# GENERATED — do not hand-edit. Text layer of design/forms/2024/f1040s8--2024.pdf
+# sha256:8b5143ca127b754b…  |  pdftotext -layout
+# Regenerate: cargo run -p xtask -- forms extract f1040s8--2024
+#
 SCHEDULE 8812                                      Credits for Qualifying Children                                                  OMB No. 1545-0074
 (Form 1040)                                           and Other Dependents
                                                      Attach to Form 1040, 1040-SR, or 1040-NR.

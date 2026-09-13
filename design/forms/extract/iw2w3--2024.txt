@@ -1,3 +1,7 @@
+# GENERATED — do not hand-edit. Text layer of design/forms/2024/iw2w3--2024.pdf
+# sha256:1eae396d17506e18…  |  pdftotext (no flags)
+# Regenerate: cargo run -p xtask -- forms extract iw2w3--2024
+#
 2024
 
 General Instructions for

@@ -1,3 +1,7 @@
+# GENERATED — do not hand-edit. Text layer of design/forms/2024/fw2--2024.pdf
+# sha256:318af9431e372ef7…  |  pdftotext -layout
+# Regenerate: cargo run -p xtask -- forms extract fw2--2024
+#
                                          Attention:
 You may file Forms W-2 and W-3 electronically on the SSA’s Employer
 W-2 Filing Instructions and Information web page, which is also accessible

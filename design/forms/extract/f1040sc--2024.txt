@@ -1,6 +1,6 @@
 # GENERATED — do not hand-edit. Text layer of design/forms/2024/f1040sc--2024.pdf
-# sha256:f56bfd48f3604fc0…  |  pdftotext -layout
-# Regenerate: cargo run -p xtask -- forms extract
+# sha256:f56bfd48f3604fc0…  |  pdftotext -layout  |  form feeds -> LF
+# Regenerate: cargo run -p xtask -- forms extract f1040sc--2024
 #
 SCHEDULE C                                               Profit or Loss From Business                                                                         OMB No. 1545-0074
 (Form 1040)

@@ -1,6 +1,6 @@
 # GENERATED — do not hand-edit. Text layer of design/forms/2025/i8615--2025.pdf
 # sha256:902ca736f1205e72…  |  pdftotext (no flags)
-# Regenerate: cargo run -p xtask -- forms extract
+# Regenerate: cargo run -p xtask -- forms extract i8615--2025
 #
 2025
 

@@ -1,3 +1,7 @@
+# GENERATED — do not hand-edit. Text layer of design/forms/2024/i1040s8--2024.pdf
+# sha256:90a5507b485f6e8c…  |  pdftotext -layout
+# Regenerate: cargo run -p xtask -- forms extract i1040s8--2024
+#
 2024 Instructions for Schedule 8812
 Credits for
                                                     Use Schedule 8812 (Form 1040) to figure your child tax credit (CTC), credit for other depend-

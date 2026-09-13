@@ -1,3 +1,7 @@
+# GENERATED — do not hand-edit. Text layer of design/forms/2025/f4868--2025.pdf
+# sha256:36c7607db08ff469…  |  pdftotext -layout
+# Regenerate: cargo run -p xtask -- forms extract f4868--2025
+#
 Form   4868                             Application for Automatic Extension of Time
                                          To File U.S. Individual Income Tax Return
                                                                                                                                                   OMB No. 1545-0074

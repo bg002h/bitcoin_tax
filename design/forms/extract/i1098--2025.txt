@@ -1,3 +1,7 @@
+# GENERATED — do not hand-edit. Text layer of design/forms/2025/i1098--2025.pdf
+# sha256:d1d6647dd6a3bc6f…  |  pdftotext (no flags)
+# Regenerate: cargo run -p xtask -- forms extract i1098--2025
+#
 Instructions for Form 1098
 (Rev. April 2025)
 

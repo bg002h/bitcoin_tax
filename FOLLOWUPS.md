@@ -7827,10 +7827,14 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
 - **FR-138 — a fully archived form-year still cannot satisfy `authority_coverage_may_only_improve`, and the only cheap discharge is a FALSE statement. Important. Owning phase: design r2 §9 / the port machine.** (rehearsal F5)
   `archived_form_years()` counts a `(form, year)` as archived only if `cite_check::FORMS` has a row AND a duplicate extract pair exists under a second root. So a genuinely archived document must be described as `"not-yet-archived: …"` to keep the ratchet green — a gate whose cheapest discharge is writing something untrue about a document that exists. *Fix:* have the ratchet read the `design/forms/extract/` convention the manifest join already reads, and retire the second root.
 
-- **FR-139 — runbook step 4 is tagged M and is not executable in the repo's own isolated-worktree workflow. Important. Owning phase: the port machine (`forms fetch`).** (rehearsal F6)
+- ✅ **CLOSED 2026-09-12** (A4) — `xtask forms fetch --restore [--from-dir] [--stem]`, new `crates/xtask/src/forms_fetch.rs`: the list is derived from the notes on disk, every document is **hashed before it is written**, and the whole path is offline-safe (tests inject in-process closures; nothing opens a socket). ★ It pays more than filed: six committed `form_delta` tests are red in ANY isolated worktree for the same missing-PDF reason, and one offline restore takes `form_delta` to 12/12. ★ Refuted: the entry's "124 documents" is **125** (tree-derived).
+  Original entry:
+  **FR-139 — runbook step 4 is tagged M and is not executable in the repo's own isolated-worktree workflow. Important. Owning phase: the port machine (`forms fetch`).** (rehearsal F6)
   `xtask authority-manifest --regen` refuses — correctly and loudly, naming 124 documents — in any tree lacking every gitignored authority PDF, which is every isolated worktree. *Fix:* `forms fetch --restore`, reading each note's URL and sha256; the notes already carry exactly that data.
 
-- **FR-140 — 58 committed extracts name a regeneration command that does not exist; 52 record none at all. Important. Owning phase: the port machine (`forms extract`), build-order item 6.** (rehearsal F8)
+- ✅ **CLOSED 2026-09-12** (A4) — `xtask forms extract <stem> | --all [--check] | --adopt`, new `crates/xtask/src/forms_extract.rs`, plus 110 header-only edits with **0 body bytes changed**. Controller-verified on main: `forms extract --all --check` → **126 text layer(s), 126 reproduce byte-for-byte, 0 rewritten, 0 unresolved**. ★★★ **THE PRESCRIBED FIX WAS INSUFFICIENT AND DANGEROUS:** the recorded flags do not reproduce **54 of 126** extracts, because `pdftotext` emits form feeds between pages and 54 committed extracts have them replaced by `\n` with **nothing recording it**. A `forms extract` built to this entry's wording would have **rewritten 54 archived authorities on their page boundaries and reported success.** The header now records a fourth field (`form feeds → LF`) with its own planted-defect kill. ★ One file outside A4's ownership was edited and reported: `forms/2024/f1040s1.map.toml`, 3 `extract_line` anchors (11/15/58 → 15/19/62), because `census_join` anchors captions to ABSOLUTE line indices and that extract was the only header-gaining one any map cites — the gate validates the "only collision" claim, since a second shifted map would red `census_join`. See FR-152.
+  Original entry:
+  **FR-140 — 58 committed extracts name a regeneration command that does not exist; 52 record none at all. Important. Owning phase: the port machine (`forms extract`), build-order item 6.** (rehearsal F8)
   Measured over `design/forms/extract/`: **126** extracts, **74** carry a `# Regenerate:` line, **58** of those name `xtask forms extract` — a subcommand that does not exist. *Fix:* build `forms extract` (design §4 already specifies reading each file's own recorded flags) and backfill the 52 headers.
 
 - **FR-141 — the per-(stem, year) cost moved into two files, one of them Form-6251-specific. Important. Owning phase: year-package table step 6 / the port machine.** (rehearsal F10)
@@ -7839,7 +7843,9 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
 - **FR-142 — nothing fills the new year's template. Important. Owning phase: the TY2026 build.** (rehearsal F17)
   All 10 fill cases in `tests/f8995a_fill.rs` use `Form8995AMap::ty2024()`. `packet.rs` is year-generic (controller-verified: `Form8995AMap::for_year` reads the glob at `map.rs:3269`), so a ported year is *wired* but never *filled* — "right number in the right box" is unproven for it. *Fix:* parameterise the fill tests over `bundled_years()` where the map schema is shared.
 
-- **FR-143 — runbook step 4's documented flag is wrong, and unknown flags are ignored rather than refused. Minor. Owning phase: ownerless residue.** (rehearsal F7)
+- ✅ **CLOSED 2026-09-12** (A4) — `main.rs` now carries one `SUBCOMMANDS` table (name / accepted flags / argument spelling), refuses any unrecognised `-`-leading argument **before** dispatch, and generates its usage text from that table — which revealed the hand-written usage was missing `verdict-reach` and `wrapped-literals`. ★ Refuted, and worse than filed: `--regenerate` did not exit 1, it printed *"OK — every entry resolves and every source is listed"* and **exited 0**.
+  Original entry:
+  **FR-143 — runbook step 4's documented flag is wrong, and unknown flags are ignored rather than refused. Minor. Owning phase: ownerless residue.** (rehearsal F7)
   The runbook says `--regenerate`; the code accepts only `--regen` (`main.rs:136`), and `--regenerate` falls through to the read-only check rather than refusing.
 
 - **FR-144 — `archive_drafts.py::STEMS` is a hand-typed 18 against `Stem::ALL`'s 21. Minor. Owning phase: ownerless residue.** (rehearsal F9)
@@ -7854,7 +7860,9 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
 - **FR-147 — one suite test cannot pass under the `CARGO_TARGET_DIR` override the review workflow mandates. Minor. Owning phase: the harness.** (rehearsal F13)
   `harness_check::the_write_hook_denies_new_archives_and_asks_once_per_new_directory` requires a binary at `<repo>/target/debug/xtask`. This is one of the environmental worktree failures the standing caveat describes; naming it makes the caveat checkable.
 
-- **FR-148 — `xtask label-proof` writes to a hardcoded `/tmp/<stem>-label-proof.pdf`. Minor. Owning phase: ownerless residue.** (rehearsal F14)
+- ✅ **CLOSED 2026-09-12** (A4) — `default_proof_path()` now uses `std::env::temp_dir()`, so `TMPDIR` is honoured; the kill calls the real function both with and without it set.
+  Original entry:
+  **FR-148 — `xtask label-proof` writes to a hardcoded `/tmp/<stem>-label-proof.pdf`. Minor. Owning phase: ownerless residue.** (rehearsal F14)
   On this box `/tmp` is a 32 GB tmpfs shared with builds — the constellation directive warns about exactly that. *Fix:* honour `TMPDIR`.
 
 - **FR-149 — runbook step 1's real output, `YEAR.toml`, is not in the runbook. Minor. Owning phase: the port machine.** (rehearsal F15)

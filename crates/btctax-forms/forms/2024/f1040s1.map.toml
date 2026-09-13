@@ -94,17 +94,17 @@ ssn  = "form1[0].Page1[0].f1_02[0]"
 #     nobody checked.
 [[direction]]
 caption      = "For 2024, enter the amount reported to you on Form(s) 1099-K"
-extract_line = 11
+extract_line = 15
 
 [[direction]]
 caption      = "Part I       Additional Income"
-extract_line = 15
+extract_line = 19
 first_line   = "1"
 last_line    = "10"
 
 [[direction]]
 caption      = "Part II     Adjustments to Income"
-extract_line = 58
+extract_line = 62
 first_line   = "11"
 last_line    = "26"
 [census]

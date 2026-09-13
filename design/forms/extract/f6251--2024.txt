@@ -1,6 +1,6 @@
 # GENERATED — do not hand-edit. Text layer of design/forms/2024/f6251--2024.pdf
-# sha256:7fea4e4298121b6e…  |  pdftotext -layout
-# Regenerate: cargo run -p xtask -- forms extract
+# sha256:7fea4e4298121b6e…  |  pdftotext -layout  |  form feeds -> LF
+# Regenerate: cargo run -p xtask -- forms extract f6251--2024
 #
        6251                                   Alternative Minimum Tax—Individuals                                                                    OMB No. 1545-0074
 

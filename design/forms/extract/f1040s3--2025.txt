@@ -1,6 +1,6 @@
 # GENERATED — do not hand-edit. Text layer of design/forms/2025/f1040s3--2025.pdf
-# sha256:008cfd3fe3ebd086…  |  pdftotext -layout
-# Regenerate: cargo run -p xtask -- forms extract
+# sha256:008cfd3fe3ebd086…  |  pdftotext -layout  |  form feeds -> LF
+# Regenerate: cargo run -p xtask -- forms extract f1040s3--2025
 #
 SCHEDULE 3                                                                                                                     OMB No. 1545-0074
                                            Additional Credits and Payments

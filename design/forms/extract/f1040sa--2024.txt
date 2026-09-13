@@ -1,6 +1,6 @@
 # GENERATED — do not hand-edit. Text layer of design/forms/2024/f1040sa--2024.pdf
-# sha256:4bfff9a524c6db94…  |  pdftotext -layout
-# Regenerate: cargo run -p xtask -- forms extract
+# sha256:4bfff9a524c6db94…  |  pdftotext -layout  |  form feeds -> LF
+# Regenerate: cargo run -p xtask -- forms extract f1040sa--2024
 #
 SCHEDULE A                                                         Itemized Deductions                                                                      OMB No. 1545-0074
 (Form 1040)

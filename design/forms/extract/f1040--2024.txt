@@ -1,6 +1,6 @@
 # GENERATED — do not hand-edit. Text layer of design/forms/2024/f1040--2024.pdf
-# sha256:0a7a54354283044c…  |  pdftotext -layout
-# Regenerate: cargo run -p xtask -- forms extract
+# sha256:0a7a54354283044c…  |  pdftotext -layout  |  form feeds -> LF
+# Regenerate: cargo run -p xtask -- forms extract f1040--2024
 #
  Form   1040 U.S. Individual Income Tax Return 2024
                        Department of the Treasury—Internal Revenue Service

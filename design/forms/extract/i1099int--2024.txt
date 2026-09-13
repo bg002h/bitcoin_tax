@@ -1,3 +1,7 @@
+# GENERATED — do not hand-edit. Text layer of design/forms/2024/i1099int--2024.pdf
+# sha256:6f13ff025d4ab270…  |  pdftotext (no flags)
+# Regenerate: cargo run -p xtask -- forms extract i1099int--2024
+#
 Instructions for Forms
 1099-INT and 1099-OID
 

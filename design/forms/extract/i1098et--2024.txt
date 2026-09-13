@@ -1,3 +1,7 @@
+# GENERATED — do not hand-edit. Text layer of design/forms/2024/i1098et--2024.pdf
+# sha256:9469677eb306ea5b…  |  pdftotext (no flags)
+# Regenerate: cargo run -p xtask -- forms extract i1098et--2024
+#
 2024
 
 Department of the Treasury

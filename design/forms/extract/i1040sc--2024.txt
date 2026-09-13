@@ -1,6 +1,6 @@
 # GENERATED — do not hand-edit. Text layer of design/forms/2024/i1040sc--2024.pdf
-# sha256:a68b4717ef5f8c36…  |  pdftotext (no flags)
-# Regenerate: cargo run -p xtask -- forms extract
+# sha256:a68b4717ef5f8c36…  |  pdftotext (no flags)  |  form feeds -> LF
+# Regenerate: cargo run -p xtask -- forms extract i1040sc--2024
 #
 2024 Instructions for Schedule C
 Profit or Loss

@@ -1,6 +1,6 @@
 # GENERATED — do not hand-edit. Text layer of design/forms/2025/i8283--2025.pdf
-# sha256:2de015f75bcf2fa9…  |  pdftotext (no flags)
-# Regenerate: cargo run -p xtask -- forms extract
+# sha256:2de015f75bcf2fa9…  |  pdftotext (no flags)  |  form feeds -> LF
+# Regenerate: cargo run -p xtask -- forms extract i8283--2025
 #
 Instructions for Form 8283
 (Rev. December 2025)
