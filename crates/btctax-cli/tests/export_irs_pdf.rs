@@ -1696,10 +1696,18 @@ fn a_full_return_with_more_8949_legs_than_a_page_holds_now_files_on_multiple_cop
 
     use btctax_forms::testonly::*;
     let doc = load(&f8949).unwrap();
+    // ★★ FR-218 — this asserted `4` ("2 copies × 2 pages"). `dca_events_2024` buys in 2022 and sells
+    //    in 2024, so all 16 legs are LONG-TERM and the filer has nothing to report in Part I: the two
+    //    Part I pages were filed blank, each stamped with their name and SSN. `i8949`
+    //    (`design/forms/extract/i8949--2024.txt:422-424`): *"You don't need to complete and file an
+    //    entire copy of Form 8949 (Parts I and II) if you can check a single box to describe all your
+    //    transactions. In that case, complete and file either Part I or II and check the box that
+    //    describes the transactions."* ⌈16/14⌉ = 2 Part II pages, 0 Part I pages.
     assert_eq!(
         doc.get_pages().len(),
-        4,
-        "16 legs ⇒ 2 copies × 2 pages — the 15th and 16th legs have somewhere to print"
+        2,
+        "16 long-term legs ⇒ ⌈16/14⌉ = 2 Part II pages and NO Part I page — the 15th and 16th legs \
+         have somewhere to print, and the filer files no blank part (FR-218)"
     );
 }
 

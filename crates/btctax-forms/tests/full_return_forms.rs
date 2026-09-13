@@ -4269,8 +4269,19 @@ fn lt_legs(n: u32) -> Vec<btctax_core::forms::Form8949Row> {
 }
 
 /// ★★★ **P2b, half 1 of the B1 pair.** 15 long-term legs — ONE more than the TY2024 grid holds —
-/// must FILE, on two copies, with the 15th leg readable on copy 2 and each copy carrying its own
-/// "Name(s) shown on return" header on BOTH of its pages.
+/// must FILE, on two copies, with the 15th leg readable on copy 2 and each filed page carrying its own
+/// "Name(s) shown on return" header.
+///
+/// ★★★ **FR-218 rewrote two of the expectations below, and the instruction is the reason.** This
+/// asserted `4` pages ("2 copies × 2 pages") and that *"both copies' page 1 is named"* — but page 1 is
+/// **Part I**, and this filer has no short-term transactions at all. So the form filed two blank Part I
+/// pages, each stamped with the filer's name and SSN, asserting nothing. `i8949`
+/// (`design/forms/extract/i8949--2024.txt:422-424`): *"You don't need to complete and file an entire
+/// copy of Form 8949 (Parts I and II) if you can check a single box to describe all your transactions.
+/// In that case, complete and file **either Part I or II** and check the box that describes the
+/// transactions."* ★ This is the defect the owner found by printing the S8b packet — *"the first page
+/// of 8949 is printed twice"* — with the golden, the read-back verifier, both oracles and the Schedule
+/// D roll-up green the whole time.
 ///
 /// Mutation-verified: restoring the direct `fill_8949_parts_with_identity` call reds this at the
 /// `expect()` with `FormsError::Overflow { part: "Part II", rows: 15, capacity: 14 }`.
@@ -4290,7 +4301,11 @@ fn the_full_return_8949_paginates_and_the_fifteenth_leg_lands_on_copy_two() {
         .expect("★ 15 legs must FILE, not refuse");
 
     let doc = load(&pdf).unwrap();
-    assert_eq!(doc.get_pages().len(), 4, "2 copies × 2 pages");
+    assert_eq!(
+        doc.get_pages().len(),
+        2,
+        "★ FR-218 — a long-term-only filer files TWO Part II pages and ZERO Part I pages"
+    );
 
     // Part II row 1, column (a) — one per copy, each showing that copy's FIRST leg. Copy 2's is leg
     // 15 (`14.00000000 BTC`), which is the leg the old code could not print at all.
@@ -4302,21 +4317,29 @@ fn the_full_return_8949_paginates_and_the_fifteenth_leg_lands_on_copy_two() {
         "★ the 15th leg reads back on copy 2"
     );
 
-    // Every page of every copy carries its own identity header (each 8949 page is a filed page).
-    assert_eq!(
-        values_ending(&pdf, "Page1[0].f1_1[0]"),
-        vec!["John Doe & Jane Doe".to_string(); 2],
-        "both copies' page 1 is named"
-    );
+    // Every FILED page carries its own identity header (each 8949 page that is filed is a filed page).
     assert_eq!(
         values_ending(&pdf, "Page2[0].f2_1[0]"),
         vec!["John Doe & Jane Doe".to_string(); 2],
-        "both copies' page 2 is named"
+        "both Part II pages are named"
     );
     assert_eq!(
         values_ending(&pdf, "Page2[0].f2_2[0]"),
         vec!["123-45-6789".to_string(); 2],
-        "…and carries the SSN"
+        "…and carry the SSN"
+    );
+    // ★★★ FR-218 — and there is no Part I page to name. Not "a Part I page with a blank grid": no
+    //     page, no widget, no header. A name-and-SSN page that asserts nothing is a page of the
+    //     filer's sworn return that says nothing, filed twice.
+    assert!(
+        values_ending(&pdf, "Page1[0].f1_1[0]").is_empty(),
+        "a long-term-only filer's 8949 must carry NO Part I name cell at all: {:?}",
+        values_ending(&pdf, "Page1[0].f1_1[0]")
+    );
+    assert!(
+        values_ending(&pdf, "Page1[0].f1_2[0]").is_empty(),
+        "…and no Part I SSN cell: {:?}",
+        values_ending(&pdf, "Page1[0].f1_2[0]")
     );
 }
 

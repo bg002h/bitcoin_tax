@@ -49,9 +49,16 @@ fn check_states(doc: &lopdf::Document, fields: &[Field], suffix: &str) -> Vec<Op
         .collect()
 }
 
-/// ★ R3's worked example: a G + I short-term set (each ≤ cap) with a single J long-term set →
-/// TWO copies; copy 1 page 1 boxed G, copy 2 page 1 boxed I, copy 1 page 2 boxed J, copy 2 page 2
-/// blank. Read back from the PDF's checkbox states, not from the struct.
+/// ★ R3's worked example: a G + I short-term set (each ≤ cap) with a single J long-term set → two
+/// physical copies and **three filed pages** — Part I boxed G, Part I boxed I, Part II boxed J. Read
+/// back from the PDF's checkbox states, not from the struct.
+///
+/// ★★ **FR-218 changed this count from 4 to 3, and the instruction is the reason.** The comment here
+/// used to end *"copy 2 page 2 blank"* — that blank Part II page was filed, and `i8949`
+/// (`design/forms/extract/i8949--2024.txt:422-424`) says *"You don't need to complete and file an
+/// entire copy of Form 8949 (Parts I and II) if you can check a single box to describe all your
+/// transactions. In that case, complete and file **either Part I or II** and check the box that
+/// describes the transactions."* Two short-term page-sets and one long-term page-set is three pages.
 #[test]
 fn a_mixed_short_term_set_prints_one_page_set_per_box() {
     let rows = vec![
@@ -62,7 +69,11 @@ fn a_mixed_short_term_set_prints_one_page_set_per_box() {
     ];
     let bytes = fill_form_8949(&rows, 2025).expect("T3: broker boxes print on 2025");
     let doc = load(&bytes).unwrap();
-    assert_eq!(doc.get_pages().len(), 4, "2 copies × 2 pages");
+    assert_eq!(
+        doc.get_pages().len(),
+        3,
+        "two Part I page-sets (G, I) + one Part II page-set (J) = 3 filed pages (FR-218)"
+    );
     let fields = collect_fields(&doc).unwrap();
     // Part I: box G (c1_1[3], on "4") checked on exactly one copy, box I (c1_1[5], on "6") on the other
     let g = check_states(&doc, &fields, "Page1[0].c1_1[3]");
@@ -85,7 +96,8 @@ fn a_mixed_short_term_set_prints_one_page_set_per_box() {
             "{suffix}: {st:?}"
         );
     }
-    // Part II: box J (c2_1[3], on "4") on exactly one copy; the other copy's Part II is blank
+    // Part II: box J (c2_1[3], on "4") on exactly one copy; the other copy files NO Part II page at
+    // all (FR-218), so there is no second J/L checkbox in the document to be Off.
     let j = check_states(&doc, &fields, "Page2[0].c2_1[3]");
     assert_eq!(
         j.iter().filter(|s| s.as_deref() == Some("4")).count(),

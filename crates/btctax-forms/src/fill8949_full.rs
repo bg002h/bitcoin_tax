@@ -74,11 +74,20 @@ fn printed_part_data(rows: &[Printed8949Row]) -> PartData {
 /// **PAGINATES, exactly as the crypto slice does** ([`crate::fill_form_8949`]): more rows than the
 /// revision's grid holds (`map.rows_per_page` — 14 on 2024/2017, 11 on the 2025 digital-asset
 /// revision) are chunked into ⌈rows/grid⌉ page copies per part, each filled and geometry-verified on
-/// ORIGINAL field names, then merged with per-copy field renaming ([`crate::overflow::merge_copies`])
-/// so no two copies share a `/V`. Each copy carries the FILER's identity on **both** of its pages —
-/// every 8949 page is a filed page and the header is per-page (P6 r1 I3). ★ FR-113 — and the merged
+/// ORIGINAL field names, then merged with per-copy field renaming ([`crate::overflow::merge_pages`])
+/// so no two copies share a `/V`. Each copy carries the FILER's identity on every page it FILES —
+/// every filed 8949 page needs its own header (P6 r1 I3). ★ FR-113 — and the merged
 /// page order GROUPS the parts (every Part I page, then every Part II page), a permutation of the
 /// page tree that leaves every cell and value where it was.
+///
+/// ★★★ **FR-218 — the two parts paginate INDEPENDENTLY.** The emitted form carries `|ST pages|` Part I
+/// pages and `|LT pages|` Part II pages, and nothing else. The COPY count is still `max(|ST|, |LT|)`
+/// (a copy is one physical template), but a copy whose part has run out of rows files only its other
+/// page — `i8949` says *"complete and file **either Part I or II**"*
+/// (`design/forms/extract/i8949--2024.txt:422-424`). Before the fix the copy count was the max and
+/// each copy filed BOTH pages, so a long-term-only filer needing two Part II pages received two blank
+/// Part I pages carrying their name and SSN. The owner found it by printing the packet, with the
+/// golden, the read-back verifier, both oracles and the Schedule D roll-up all green.
 ///
 /// ★ **Per-copy totals; the grand total is Schedule D's, not this function's.** The form's line 2
 /// says "Enter each total here", so each copy totals only its own rows, and Σ per-copy totals ≡
@@ -99,7 +108,8 @@ pub fn fill_8949_full_with_map(
     let cap = map.rows_per_page;
     // ★ spec 1099-DA R3/T3 — the same rule as `fill_form_8949`: per part, rows grouped by BOX in
     //   letter order, each group paginated on its own, the groups' pages concatenated; copies =
-    //   max(|ST pages|, |LT pages|); an exhausted side is left blank; a page never mixes boxes.
+    //   max(|ST pages|, |LT pages|); a page never mixes boxes.
+    //   ★★ FR-218 — an exhausted side is NOT "left blank": it contributes no page to that copy.
     fn pages(part: &[Printed8949Row], cap: usize) -> Vec<Vec<Printed8949Row>> {
         let mut by_box: std::collections::BTreeMap<String, Vec<Printed8949Row>> =
             std::collections::BTreeMap::new();
@@ -131,9 +141,39 @@ pub fn fill_8949_full_with_map(
         )?);
     }
     if n_copies == 1 {
+        // One copy is already the whole document, in the right order, with FR-218's reduction applied
+        // by the filler — so the common case is byte-identical to a direct fill.
         return Ok(copies.remove(0));
     }
     // ★ FR-113 — grouped by part, exactly as the slice path does: every Part I page, then every Part
     //   II page. A permutation of the page tree; the rows, their cells and their totals are untouched.
-    crate::overflow::merge_copies_ordered(&copies, crate::overflow::PageOrder::ByPosition)
+    // ★★ FR-218 — and the plan emits exactly |ST pages| Part I pages and |LT pages| Part II pages.
+    crate::overflow::merge_pages(
+        &copies,
+        &part_page_plan(map, st_pages.len(), lt_pages.len())?,
+    )
+}
+
+/// The [`crate::overflow::PagePick`] plan for these two parts' page counts, with each part's page index
+/// read off the MAP rather than assumed ("Part I is page 0").
+pub(crate) fn part_page_plan(
+    map: &Form8949Map,
+    st_pages: usize,
+    lt_pages: usize,
+) -> Result<Vec<crate::overflow::PagePick>, FormsError> {
+    let mut groups: Vec<(usize, usize)> = Vec::new();
+    for (term, n) in [("short", st_pages), ("long", lt_pages)] {
+        if n == 0 {
+            continue; // a part with no rows contributes no page, so its page index is not consulted
+        }
+        let page = map.part(term).map(|p| p.page).ok_or_else(|| {
+            FormsError::Structure(format!(
+                "the {} Form 8949 map declares no {term}-term part, so the {n} page(s) of rows \
+                 routed to it have no page to print on",
+                map.year
+            ))
+        })?;
+        groups.push((page, n));
+    }
+    Ok(crate::overflow::independent_part_plan(&groups))
 }

@@ -168,9 +168,12 @@ pub fn fill_8949_parts(
     fill_8949_parts_inner(short, long, map, None)
 }
 
-/// As [`fill_8949_parts`], with the FILER's identity written on **both pages** — the full-return path.
-/// An unnamed 8949 is not filable, and it is a TWO-page form: each page carries its own
-/// "Name(s) shown on return" + SSN header (Fable P6 r1 I3).
+/// As [`fill_8949_parts`], with the FILER's identity written on **every page it files** — the
+/// full-return path. An unnamed 8949 is not filable, and each page carries its own "Name(s) shown on
+/// return" + SSN header (Fable P6 r1 I3).
+///
+/// ★ FR-218 — "every page it files" is not "both pages": a part with no rows is not filed at all, so
+/// it gets no header either. See [`pages_to_file`].
 pub fn fill_8949_parts_with_identity(
     short: &PartData,
     long: &PartData,
@@ -178,6 +181,76 @@ pub fn fill_8949_parts_with_identity(
     header: &btctax_core::tax::packet::ReturnHeader,
 ) -> Result<Vec<u8>, FormsError> {
     fill_8949_parts_inner(short, long, map, Some(header))
+}
+
+/// Rows were routed to a part this revision's map cannot place, so they have nowhere to print.
+fn unplaceable_part(year: i32, term: &str, rows: usize) -> FormsError {
+    FormsError::Structure(format!(
+        "the {year} Form 8949 map declares no {term}-term part, but {rows} row(s) are routed to it \
+         — they would vanish from the filed form"
+    ))
+}
+
+/// ★★★ **FR-218 — which of the template's pages this copy actually files**, as a strictly increasing
+/// set of 0-based page indices.
+///
+/// `i8949` (`design/forms/extract/i8949--2024.txt:422-424`): *"You don't need to complete and file an
+/// entire copy of Form 8949 (Parts I and II) if you can check a single box to describe all your
+/// transactions. In that case, complete and file **either Part I or II** and check the box that
+/// describes the transactions."* A part with no rows is therefore not a blank page to be filed — it is
+/// no page at all. Before FR-218 every copy filed both pages, so a long-term-only filer needing two
+/// Part II pages received two blank Part I pages, each carrying their name and SSN, and the owner found
+/// it by printing the packet.
+///
+/// ★ The kept set is **derived from the map's own part→page mapping**, never a literal `{0, 1}`: a
+/// revision that moves a part to another page keeps deciding correctly. Two things fail CLOSED here
+/// rather than silently dropping a page — a part whose `term` is neither `"short"` nor `"long"` (there
+/// would be no rows to consult), and a template page that no part claims (nothing would decide whether
+/// to file it).
+fn pages_to_file(
+    map: &Form8949Map,
+    short: &PartData,
+    long: &PartData,
+    template_pages: usize,
+) -> Result<Vec<usize>, FormsError> {
+    let mut mapped: Vec<usize> = Vec::new();
+    let mut keep: Vec<usize> = Vec::new();
+    for p in &map.parts {
+        let live = match p.term.as_str() {
+            "short" => !short.rows.is_empty(),
+            "long" => !long.rows.is_empty(),
+            other => {
+                return Err(FormsError::Structure(format!(
+                    "the {} Form 8949 map declares a part {other:?} that is neither \"short\" nor \
+                     \"long\" — which rows decide whether its page is filed is then undefined",
+                    map.year
+                )))
+            }
+        };
+        mapped.push(p.page);
+        if live {
+            keep.push(p.page);
+        }
+    }
+    mapped.sort_unstable();
+    mapped.dedup();
+    if mapped != (0..template_pages).collect::<Vec<usize>>() {
+        return Err(FormsError::Structure(format!(
+            "the {} Form 8949 map's parts claim pages {mapped:?}, but the bundled template has \
+             {template_pages} page(s) — a page no part claims has nothing to decide whether it is \
+             filed",
+            map.year
+        )));
+    }
+    keep.sort_unstable();
+    keep.dedup();
+    if keep.is_empty() {
+        // Neither part has a row. That is not a filed Form 8949 at all (`form_8949_printed` returns
+        // `None` for a year with no disposals), and FR-218 is about a blank page filed BESIDE a
+        // populated one — so the row-less fill keeps the template's shape unchanged.
+        return Ok(mapped);
+    }
+    Ok(keep)
 }
 
 fn fill_8949_parts_inner(
@@ -203,25 +276,36 @@ fn fill_8949_parts_inner(
 
     let mut writes: Vec<(String, pdf::FieldValue)> = Vec::new();
     let mut placements: Vec<Placement> = Vec::new();
-    if let Some(p) = map.part("short") {
-        place_part(p, short, &mut writes, &mut placements)?;
-    }
-    if let Some(p) = map.part("long") {
-        place_part(p, long, &mut writes, &mut placements)?;
+    for (term, data) in [("short", short), ("long", long)] {
+        match map.part(term) {
+            Some(p) => place_part(p, data, &mut writes, &mut placements)?,
+            // A map that declares no such part cannot print it. That is only survivable when the part
+            // is empty; rows routed to a part the map cannot place would vanish off the filed form,
+            // which is an understatement, so it refuses.
+            None if data.rows.is_empty() => {}
+            None => return Err(unplaceable_part(map.year, term, data.rows.len())),
+        }
     }
 
     let mut doc = pdf::load(pdf::f8949_pdf(map.year)?)?;
     let blank_fields = pdf::collect_fields(&doc)?;
+    let keep = pages_to_file(map, short, long, doc.get_pages().len())?;
 
-    // The filer's identity, on BOTH pages. `Geo::Check` = authorized + in the no-unmapped set, but
-    // excluded from the column-geometry oracle (an identity cell is in no data column).
+    // The filer's identity, on every page this copy FILES. `Geo::Check` = authorized + in the
+    // no-unmapped set, but excluded from the column-geometry oracle (an identity cell is in no data
+    // column). ★ FR-218 — a page this copy does not file gets no name and no SSN, because it is not a
+    // page of the return. The loop is driven by `keep` and INDEXES the map's identity blocks by page
+    // (`identity_page1` is template page 0, `identity_page2` page 1), so a filed page with no identity
+    // block refuses rather than going out unnamed — including on a future revision with a third page.
     if let Some(header) = filer {
-        for cells in [&map.identity_page1, &map.identity_page2] {
-            let cells = cells.as_ref().ok_or_else(|| {
+        let blocks = [&map.identity_page1, &map.identity_page2];
+        for &page in &keep {
+            let cells = blocks.get(page).copied().and_then(Option::as_ref).ok_or_else(|| {
                 FormsError::Geometry(format!(
-                    "the {} Form 8949 map has no [identity] block — a full return cannot file an \
-                     unnamed Form 8949",
-                    map.year
+                    "the {} Form 8949 map has no [identity] block for filed page {} — a full return \
+                     cannot file an unnamed Form 8949",
+                    map.year,
+                    page + 1
                 ))
             })?;
             let ssn = crate::cells::render_ssn(
@@ -250,6 +334,10 @@ fn fill_8949_parts_inner(
     let index = pdf::index(&blank_fields);
     pdf::drop_xfa_and_set_needappearances(&mut doc)?;
     pdf::apply_writes(&mut doc, &index, &writes)?;
+    // ★★ FR-218 — reduce the copy to the pages it files, AFTER the writes (the index above is built
+    //    from the unreduced template) and BEFORE the read-back verify, so the geometry oracle and the
+    //    no-unmapped scan run on the document that is actually emitted.
+    crate::overflow::retain_pages(&mut doc, &keep)?;
     pdf::strip_nondeterminism(&mut doc);
     let bytes = pdf::save(&mut doc)?;
 

@@ -129,8 +129,13 @@ pub(crate) fn fmt_money(d: Usd) -> String {
 /// ★ **Page order (FR-113):** the merged document groups the parts — every Part I page, then every
 /// Part II page — instead of concatenating each physical copy's two pages. A filer assembling the
 /// paper packet by hand was meeting short-term and long-term alternating. It is a permutation of the
-/// page tree and nothing more: same pages, same cells, same values (see
-/// [`overflow::PageOrder::ByPosition`]).
+/// page tree and nothing more: same pages, same cells, same values (see [`overflow::merge_pages`]).
+///
+/// ★★★ **FR-218 — the two parts paginate INDEPENDENTLY**, here exactly as on the full-return path
+/// ([`fill_8949_full`]): the emitted form carries `|ST pages|` Part I pages and `|LT pages|` Part II
+/// pages and nothing else, because `i8949` says *"complete and file **either Part I or II**"*
+/// (`design/forms/extract/i8949--2024.txt:422-424`). A part with no rows on a given copy is not a
+/// blank page to be filed.
 pub fn fill_form_8949(rows: &[Form8949Row], year: i32) -> Result<Vec<u8>, FormsError> {
     let map = Form8949Map::for_year(year)?;
     let cap = map.rows_per_page;
@@ -138,11 +143,13 @@ pub fn fill_form_8949(rows: &[Form8949Row], year: i32) -> Result<Vec<u8>, FormsE
     // ★ spec 1099-DA R3/T3 — one page-set per (part, BOX): per part, the rows are grouped by box in
     //   letter order (C/F or G,H,I / J,K,L), each group paginated ⌈n/cap⌉ on its own, and the groups'
     //   pages CONCATENATED into one page list per part; copies = max(|ST pages|, |LT pages|); copy k
-    //   carries ST page k on page 1 and LT page k on page 2, an exhausted side left blank. Each
-    //   page's checkbox is its group's letter, resolved against the map by `place_part` (a letter the
-    //   map does not name refuses). The 1040 filer never sees a mixed page.
-    //   ★ FR-113 — copy k is still filled as a whole two-page form (and verified as one); only the
-    //     MERGED page order groups Part I before Part II.
+    //   carries ST page k on page 1 and LT page k on page 2. Each page's checkbox is its group's
+    //   letter, resolved against the map by `place_part` (a letter the map does not name refuses). The
+    //   1040 filer never sees a mixed page.
+    //   ★ FR-113 — copy k is filled as one physical form (and verified as one); only the MERGED page
+    //     order groups Part I before Part II.
+    //   ★★ FR-218 — an exhausted side is NOT "left blank": `fill_8949_parts` reduces copy k to the
+    //     pages whose part has rows, so |ST pages| + |LT pages| pages are emitted in all.
     fn pages<'a>(part: &[&'a Form8949Row], cap: usize) -> Vec<Vec<&'a Form8949Row>> {
         let mut by_box: std::collections::BTreeMap<String, Vec<&'a Form8949Row>> =
             std::collections::BTreeMap::new();
@@ -174,7 +181,8 @@ pub fn fill_form_8949(rows: &[Form8949Row], year: i32) -> Result<Vec<u8>, FormsE
     // ★ FR-113 — the copies' pages are GROUPED by part (every Part I page, then every Part II page)
     //   rather than concatenated copy by copy, so a filer assembling the paper packet does not meet
     //   short-term and long-term alternating. A page-order permutation and nothing else.
-    overflow::merge_copies_ordered(&copies, overflow::PageOrder::ByPosition)
+    let plan = fill8949_full::part_page_plan(&map, st_pages.len(), lt_pages.len())?;
+    overflow::merge_pages(&copies, &plan)
 }
 
 /// Stamp a diagonal `DRAFT — ESTIMATE, NOT FOR FILING` watermark on every page of a filled form.

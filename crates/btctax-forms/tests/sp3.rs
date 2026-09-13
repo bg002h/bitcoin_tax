@@ -109,10 +109,15 @@ fn ty2024_8949_14_rows() {
         ));
     }
     let bytes = btctax_forms::fill_form_8949(&rows, 2024).unwrap();
+    // ★★ FR-218 — this asserted `2` ("14 rows = 1 copy"), counting the physical template copy rather
+    //    than the pages the filer files. These 14 rows are ALL short-term, so there is nothing to
+    //    report in Part II, and `i8949` (`design/forms/extract/i8949--2024.txt:422-424`) says *"You
+    //    don't need to complete and file an entire copy of Form 8949 (Parts I and II) … complete and
+    //    file either Part I or II"*. One Part I page, no Part II page.
     assert_eq!(
         load(&bytes).unwrap().get_pages().len(),
-        2,
-        "14 rows = 1 copy"
+        1,
+        "14 short-term rows and no long-term rows = ONE filed page (Part I), not a copy of both parts"
     );
 }
 

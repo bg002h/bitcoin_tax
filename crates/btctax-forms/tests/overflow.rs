@@ -8,7 +8,10 @@ use btctax_forms::testonly::*;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
-/// 26 short-term + 13 long-term rows → ⌈26/11⌉=3 and ⌈13/11⌉=2 → 3 physical copies (6 pages).
+/// 26 short-term + 13 long-term rows → ⌈26/11⌉=3 Part I pages and ⌈13/11⌉=2 Part II pages on the
+/// TY2025 grid — **five** filed pages, on three physical template copies.
+const BIG_ST: usize = 26;
+const BIG_LT: usize = 13;
 fn big_fixture() -> Vec<Form8949Row> {
     let mut rows = Vec::new();
     for i in 0..26u32 {
@@ -40,11 +43,30 @@ fn values_ending(doc: &lopdf::Document, fields: &[Field], suffix: &str) -> Vec<S
         .collect()
 }
 
+/// ★★ **FR-218 changed the expected page count here, and the instruction is the reason.** This asserted
+/// `6` — three template copies × two pages — which is one page more than the filer has anything to put
+/// on: 26 short-term rows fill three Part I pages, 13 long-term rows fill two Part II pages, so copy
+/// 3's Part II page was filed blank. `i8949` (`design/forms/extract/i8949--2024.txt:422-424`): *"You
+/// don't need to complete and file an entire copy of Form 8949 (Parts I and II) if you can check a
+/// single box to describe all your transactions. In that case, complete and file **either Part I or
+/// II**…"* The new expectation is derived from the fixture and the revision's grid, not from the
+/// emitter's output.
 #[test]
 fn eleven_rows_per_page() {
+    let cap = Form8949Map::ty2025().rows_per_page;
     let bytes = btctax_forms::fill_form_8949(&big_fixture(), 2025).unwrap();
     let doc = load(&bytes).unwrap();
-    assert_eq!(doc.get_pages().len(), 6, "3 copies × 2 pages");
+    let (st_pages, lt_pages) = (BIG_ST.div_ceil(cap), BIG_LT.div_ceil(cap));
+    assert_eq!(
+        (st_pages, lt_pages),
+        (3, 2),
+        "premise: the fixture spans three Part I pages and two Part II pages on the {cap}-row grid"
+    );
+    assert_eq!(
+        doc.get_pages().len(),
+        st_pages + lt_pages,
+        "|Part I pages| + |Part II pages| — never max(|ST|,|LT|) copies of BOTH parts (FR-218)"
+    );
 
     // Each physical Part I page holds AT MOST 11 rows: the col-a descriptor appears once per filled
     // row. Copy 0 fills all 11 (row 11 = f1_83 present); the last copy fills the 4-row remainder.
@@ -391,4 +413,307 @@ fn the_full_return_8949_groups_its_parts_and_conserves_every_row() {
         emitted, entered,
         "every full-return row entered must be emitted exactly once"
     );
+}
+
+// ── ★★★ FR-218 — a part with NO rows is not a blank page; it is NO page ──────────────────────────
+//
+// Found by the OWNER, on paper, printing the S8b packet: *"the first page of 8949 is printed twice."*
+// Pages 1 and 2 of that 4-page form had identical text layers. The cause was that the copy count was
+// `max(|ST pages|, |LT pages|)` and each copy then filled BOTH parts, so a part with zero rows still
+// emitted a page — once per copy, each carrying the filer's name and SSN.
+//
+// ★★ **Nothing this project owns could catch it, which is why the kill below is STRUCTURAL rather than
+// visual.** The PDF is byte-stable so the golden passed; every filled field read back so the read-back
+// verifier passed; both oracles agreed on every figure; and the two Part II pages' subtotals rolled up
+// to Schedule D exactly. A test that looks at VALUES cannot see this defect at all — the blank page's
+// cells are correctly blank. What distinguishes it is that the PAGE EXISTS, which is a fact about the
+// page tree and the widget annotations, not about any value.
+//
+// The authority (`design/forms/extract/i8949--2024.txt:422-424`): *"You don't need to complete and file
+// an entire copy of Form 8949 (Parts I and II) if you can check a single box to describe all your
+// transactions. In that case, complete and file **either Part I or II** and check the box that
+// describes the transactions."*
+
+/// `n` rows in `part`: proceeds `100 × (i+1)`, basis 50.
+fn legs(part: Form8949Part, n: usize) -> Vec<Form8949Row> {
+    (0..n)
+        .map(|i| {
+            row(
+                part,
+                &format!("{part:?}-{i:03} BTC"),
+                dec!(100) * Decimal::from(i + 1),
+                dec!(50),
+                false,
+            )
+        })
+        .collect()
+}
+
+/// Every field name a `PartMap` claims, relative to each copy's ROOT component (which the merge renames
+/// per copy) — the data grid, the line-2 totals row, and the part's box checkboxes.
+///
+/// ★ Derived from the map, never a hand-written list of FQNs: a revision that renames a cell or moves a
+/// part to another page re-derives this, which is what keeps the page classifier below a measurement.
+fn part_cells(p: &PartMap) -> Vec<String> {
+    let below = |f: &str| {
+        f.split_once('.')
+            .map(|(_, r)| r.to_string())
+            .unwrap_or_else(|| f.to_string())
+    };
+    let mut v: Vec<String> = p.rows.iter().flatten().map(|f| below(f)).collect();
+    for f in [
+        &p.totals.proceeds_d,
+        &p.totals.cost_e,
+        &p.totals.adj_g,
+        &p.totals.gain_h,
+    ] {
+        v.push(below(f));
+    }
+    v.push(below(&p.box_field));
+    for b in p.boxes.values() {
+        v.push(below(&b.field));
+    }
+    v
+}
+
+/// Each page's `/Annots` widget ids, in document page order. `/Annots` may be an indirect reference to
+/// the array; a version of this helper that skipped the deref would see every page as annotation-free —
+/// and would then report an empty page set as agreement.
+fn annots_per_page(doc: &lopdf::Document) -> Vec<Vec<lopdf::ObjectId>> {
+    doc.get_pages()
+        .into_values()
+        .map(|pid| {
+            doc.get_dictionary(pid)
+                .ok()
+                .and_then(|d| d.get(b"Annots").ok())
+                .and_then(|o| doc.dereference(o).ok())
+                .and_then(|(_, o)| o.as_array().ok())
+                .map(|a| a.iter().filter_map(|o| o.as_reference().ok()).collect())
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
+/// ★★★ Which PART each page of the emitted document belongs to, in page order — decided by whose mapped
+/// widgets sit on that page, **not** by any value. A blank Part I page classifies as `"short"` exactly
+/// as a populated one does, which is what makes this instrument able to see FR-218 at all.
+///
+/// A page carrying no part's widgets, or two parts', is an assertion failure rather than a silent
+/// verdict: an instrument that cannot classify a page must say so instead of reporting agreement
+/// (`design/HARNESS.md` class β).
+fn part_of_each_page(doc: &lopdf::Document, fields: &[Field], map: &Form8949Map) -> Vec<String> {
+    let by_part: Vec<(String, Vec<String>)> = map
+        .parts
+        .iter()
+        .map(|p| (p.term.clone(), part_cells(p)))
+        .collect();
+    annots_per_page(doc)
+        .iter()
+        .enumerate()
+        .map(|(i, annots)| {
+            let mut hits: Vec<String> = by_part
+                .iter()
+                .filter(|(_, cells)| {
+                    fields
+                        .iter()
+                        .any(|f| annots.contains(&f.id) && cells.iter().any(|c| f.fqn.ends_with(c)))
+                })
+                .map(|(term, _)| term.clone())
+                .collect();
+            assert_eq!(
+                hits.len(),
+                1,
+                "page {i} must carry exactly ONE part's widgets — got {hits:?}. This classifier \
+                 cannot report a verdict it did not measure."
+            );
+            hits.remove(0)
+        })
+        .collect()
+}
+
+/// ★★★ **FR-218 — B1, and the planted defect is the blank page itself.** The emitted page sequence must
+/// be exactly `|ST pages|` Part I pages then `|LT pages|` Part II pages: **zero** Part I pages for a
+/// long-term-only filer, **zero** Part II pages for a short-term-only filer, and both for a mixed one.
+///
+/// Both emitters are checked, because they are two independent implementations of the same rule
+/// (`fill_form_8949` for the crypto slice, `fill_8949_full` for the packet) and a test on one holds
+/// nothing about the other.
+#[test]
+fn a_part_with_no_rows_files_no_page_at_all() {
+    let map = Form8949Map::ty2024();
+    let cap = map.rows_per_page;
+    // ★ The multi-page shapes are DERIVED from the revision's grid, so a revision that regrids keeps
+    //   testing them instead of silently collapsing to one page per part.
+    let cases: [(&str, usize, usize, &[&str]); 6] = [
+        ("long-term only, one page", 0, 3, &["long"]),
+        ("long-term only, two pages", 0, cap + 1, &["long", "long"]),
+        ("short-term only, one page", 3, 0, &["short"]),
+        (
+            "short-term only, two pages",
+            cap + 1,
+            0,
+            &["short", "short"],
+        ),
+        (
+            "the owner's shape: one Part I page, two Part II pages",
+            3,
+            cap + 1,
+            &["short", "long", "long"],
+        ),
+        (
+            "mixed, two pages each",
+            cap + 1,
+            cap + 1,
+            &["short", "short", "long", "long"],
+        ),
+    ];
+    for (label, n_st, n_lt, expected) in cases {
+        let mut rows = legs(Form8949Part::ShortTerm, n_st);
+        rows.extend(legs(Form8949Part::LongTerm, n_lt));
+        // The premise: the fixture really spans the page counts the expectation names.
+        assert_eq!(
+            (n_st.div_ceil(cap), n_lt.div_ceil(cap)),
+            (
+                expected.iter().filter(|t| **t == "short").count(),
+                expected.iter().filter(|t| **t == "long").count()
+            ),
+            "{label}: premise — ⌈rows/{cap}⌉ per part must be the expected page set"
+        );
+
+        let slice = btctax_forms::fill_form_8949(&rows, 2024).expect("the slice 8949 fills");
+        let printed =
+            btctax_core::tax::printed::form_8949_printed(&rows).expect("the fixture has rows");
+        let full = btctax_forms::fill_8949_full(
+            &printed,
+            &btctax_core::tax::testonly::kitchen_sink_header(),
+            2024,
+        )
+        .expect("the full-return 8949 fills");
+        for (path, pdf) in [("slice", &slice), ("full return", &full)] {
+            let doc = load(pdf).unwrap();
+            let fields = collect_fields(&doc).unwrap();
+            assert_eq!(
+                part_of_each_page(&doc, &fields, &map),
+                expected,
+                "{label} ({path}): the filed page sequence must be exactly the parts that have rows \
+                 — i8949 says \"complete and file either Part I or II\""
+            );
+        }
+    }
+}
+
+/// ★★★ **FR-218 — the full-return 8949 puts the filer's NAME AND SSN on filed pages only.**
+///
+/// The blank pages were not anonymous: the identity header is per-page, so a long-term-only filer's two
+/// blank Part I pages each carried their name and SSN — a page of sworn testimony that asserts nothing,
+/// filed twice. This counts the identity cells per part and requires the count to equal that part's
+/// filed page count, so it reds both on a blank page that exists and on a filed page left unnamed.
+#[test]
+fn the_full_return_8949_names_only_the_pages_it_files() {
+    let map = Form8949Map::ty2024();
+    let cap = map.rows_per_page;
+    let rows = legs(Form8949Part::LongTerm, cap + 1);
+    let printed = btctax_core::tax::printed::form_8949_printed(&rows).expect("there are rows");
+    let pdf = btctax_forms::fill_8949_full(
+        &printed,
+        &btctax_core::tax::testonly::kitchen_sink_header(),
+        2024,
+    )
+    .unwrap();
+    let doc = load(&pdf).unwrap();
+    let fields = collect_fields(&doc).unwrap();
+    let pages = part_of_each_page(&doc, &fields, &map);
+    assert_eq!(
+        pages,
+        vec!["long", "long"],
+        "premise: two Part II pages only"
+    );
+
+    let below = |f: &str| f.split_once('.').map(|(_, r)| r.to_string()).unwrap();
+    for (term, cells) in [
+        (
+            "short",
+            map.identity_page1.as_ref().expect("page 1 identity"),
+        ),
+        (
+            "long",
+            map.identity_page2.as_ref().expect("page 2 identity"),
+        ),
+    ] {
+        let filed = pages.iter().filter(|t| *t == term).count();
+        for (what, fqn) in [("name", &cells.name), ("SSN", &cells.ssn)] {
+            let found = values_ending(&doc, &fields, &below(fqn)).len();
+            assert_eq!(
+                found, filed,
+                "the {term} part files {filed} page(s) but carries {found} {what} cell(s) — a page \
+                 the filer does not file must not carry their identity (FR-218)"
+            );
+        }
+    }
+}
+
+/// ★★★ **FR-218 must not disturb the SCHEDULE D ROLL-UP.** The form's line 2 says *"Enter each total
+/// here"*, so every filed page totals only its own rows; Schedule D lines 3 and 10 cite *"Totals for
+/// all transactions reported on **Form(s) 8949**"*, plural, and therefore the SUM of those per-page
+/// totals. The owner's own packet was the worked example — two Part II pages, controller-verified:
+/// 352655 + 468635 = 821290 (d), 86361 + 102520 = 188881 (e), 266294 + 366115 = 632409 (h). Page
+/// surgery is exactly the kind of change that could break that roll-up silently, because a dropped page
+/// has no rows and so contributes 0 to every column.
+///
+/// Asserted on columns (d), (e) and (h) of BOTH parts, over a fixture whose every part spans two pages,
+/// so the sum is over more than one page in every case.
+#[test]
+fn every_filed_pages_line2_totals_sum_to_the_parts_schedule_d_total() {
+    let map = Form8949Map::ty2024();
+    let cap = map.rows_per_page;
+    let mut rows = legs(Form8949Part::ShortTerm, cap + 2);
+    rows.extend(legs(Form8949Part::LongTerm, cap + 3));
+    let printed = btctax_core::tax::printed::form_8949_printed(&rows).expect("there are rows");
+    let pdf = btctax_forms::fill_8949_full(
+        &printed,
+        &btctax_core::tax::testonly::kitchen_sink_header(),
+        2024,
+    )
+    .unwrap();
+    let doc = load(&pdf).unwrap();
+    let fields = collect_fields(&doc).unwrap();
+    // The premise: every part really does span more than one page, or a "sum" over one page proves
+    // nothing about the roll-up.
+    assert_eq!(
+        part_of_each_page(&doc, &fields, &map),
+        vec!["short", "short", "long", "long"],
+        "premise: two Part I pages and two Part II pages"
+    );
+
+    let below = |f: &str| f.split_once('.').map(|(_, r)| r.to_string()).unwrap();
+    let sum_cells = |fqn: &str| -> i64 {
+        let vals = values_ending(&doc, &fields, &below(fqn));
+        assert!(
+            vals.len() >= 2,
+            "{fqn}: expected one line-2 total per filed page, got {vals:?}"
+        );
+        vals.iter()
+            .map(|v| {
+                v.parse::<i64>()
+                    .unwrap_or_else(|e| panic!("{fqn} = {v:?}: {e}"))
+            })
+            .sum()
+    };
+    for (term, part, totals) in [
+        ("short", map.part("short").unwrap(), printed.st_totals),
+        ("long", map.part("long").unwrap(), printed.lt_totals),
+    ] {
+        for (col, fqn, expected) in [
+            ("(d) proceeds", &part.totals.proceeds_d, totals.proceeds_d),
+            ("(e) cost", &part.totals.cost_e, totals.cost_e),
+            ("(h) gain", &part.totals.gain_h, totals.gain_h),
+        ] {
+            assert_eq!(
+                Decimal::from(sum_cells(fqn)),
+                expected,
+                "{term} {col}: Σ the filed pages' line-2 totals must equal the figure Schedule D \
+                 cites for that part"
+            );
+        }
+    }
 }
