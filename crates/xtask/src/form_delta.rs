@@ -1023,6 +1023,109 @@ pub fn emitting_surface() -> std::collections::BTreeSet<String> {
     stems
 }
 
+/// **What the FIELD MAP says — and ONLY the field map.** Whether a bundled map's box names carry
+/// forward to the next revision.
+///
+/// ★★★ **FR-209 exists because one word carried two claims.** This is a statement about the
+/// **AcroForm**, and it is a different statement from [`form_verdict`]'s, which is about the
+/// **printed page**. Form 6251's TY2026 draft pairs all 62 boxes, respells none and moves no printed
+/// line — the field map *transfers*, and the 2026-09-11 ruling that greenlit its transcription on
+/// exactly that ground was right — while **8** of its surviving line numbers now describe something
+/// else. The work list said `unchanged`, which was true of the map and read as true of the form. Two
+/// facts, two columns, two vocabularies: a map `transfers` / takes `edits` / is `REBUILT`; a form is
+/// `unchanged` / `CHANGED` / `UNWITNESSED`. No word appears in both lists.
+///
+/// **What it does not cover.** A box left unpaired because its leaf name repeats on one side
+/// ([`Delta::pair_ambiguous`]) is neither an edit nor a transfer — it is UNMEASURED. Following
+/// [`LabelVerdict`]'s precedent (a verdict carries its evidence rather than being demoted by it), it
+/// does not change the word; its count is printed in the `unpairable` column beside it, and the
+/// verdict is not to be read without that column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FieldMapVerdict {
+    /// Every box paired, none respelled, none added, none removed: the map's FQNs carry forward
+    /// verbatim. Says NOTHING about what those boxes now sit beside.
+    Transfers,
+    /// The map needs per-box edits — boxes added, removed, or respelled. ★ A respelled box is the
+    /// same box, so it is compared on every other axis, but the bundled map stores the full FQN and
+    /// every respelling is an edit. 45 of Schedule C's 104 paired boxes are respellings, and before
+    /// FR-209 the work list showed none of them.
+    Edits,
+    /// Added + removed exceed the boxes that paired at all: this is not a port of a map.
+    Rebuilt,
+}
+
+impl FieldMapVerdict {
+    /// The cell exactly as the work list prints it. ★ Disjoint from [`FormVerdict::cell`]'s
+    /// vocabulary by construction — that is what makes a conflated cell a test failure and not a
+    /// judgement call.
+    pub fn cell(self) -> &'static str {
+        match self {
+            FieldMapVerdict::Transfers => "transfers",
+            FieldMapVerdict::Edits => "edits",
+            FieldMapVerdict::Rebuilt => "**REBUILT**",
+        }
+    }
+}
+
+pub fn field_map_verdict(d: &Delta) -> FieldMapVerdict {
+    if d.added.len() + d.removed.len() > d.common.len() {
+        FieldMapVerdict::Rebuilt
+    } else if d.added.is_empty() && d.removed.is_empty() && d.renamed.is_empty() {
+        FieldMapVerdict::Transfers
+    } else {
+        FieldMapVerdict::Edits
+    }
+}
+
+/// **What the three axes that read the PRINTED PAGE say about the form.** Never about the map — see
+/// [`field_map_verdict`].
+///
+/// ★★ `Unchanged` is a claim that **no axis found a change and every axis actually looked**. It is
+/// NOT a claim that every box and every line was read: the two UNREAD columns beside it carry what
+/// was not (FR-211), and `f1040sd`'s `unchanged` rests on 51 of 55 paired boxes — the other four sit
+/// beside no printed line on either revision, so no line-move comparison exists for them to fail.
+/// Read the verdict and its UNREAD columns together or not at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormVerdict {
+    /// Every page axis witnessed something, and none of them found a change.
+    Unchanged,
+    /// At least one axis found a change: a printed line moved, a line number was retired or
+    /// introduced, or a surviving line number's caption now means something else.
+    Changed,
+    /// No axis found a change and at least one axis could not look. **This is the cell the whole
+    /// document has been corrected for twice** — the draft cover-sheet offset on 2026-09-05 and
+    /// FR-209 on 2026-09-13 — so it gets its own word rather than sharing `unchanged`'s.
+    Unwitnessed,
+}
+
+impl FormVerdict {
+    pub fn cell(self) -> &'static str {
+        match self {
+            FormVerdict::Unchanged => "unchanged",
+            FormVerdict::Changed => "**CHANGED**",
+            FormVerdict::Unwitnessed => "**UNWITNESSED**",
+        }
+    }
+}
+
+pub fn form_verdict(d: &Delta) -> FormVerdict {
+    let found_a_change = !d.label_moved.is_empty()
+        || !d.caption_collisions.is_empty()
+        || d.line_set
+            .as_ref()
+            .is_some_and(|l| !l.retired.is_empty() || !l.introduced.is_empty());
+    // every axis LOOKED: the label axis compared a binding (or there was no box to compare), the
+    // line set read both sides, and the caption axis compared a surviving line number
+    let every_axis_witnessed = (d.label_compared > 0 || d.common.is_empty())
+        && d.line_set.is_some()
+        && d.caption_compared > 0;
+    match (found_a_change, every_axis_witnessed) {
+        (true, _) => FormVerdict::Changed,
+        (false, true) => FormVerdict::Unchanged,
+        (false, false) => FormVerdict::Unwitnessed,
+    }
+}
+
 /// `xtask port-status <prior-tag> <new-tag>` — the work list's two tables, printed from the emitting
 /// surface (FR-50): one row per stem, NEVER an omitted row. A pair that computes prints its counts,
 /// with the moved cell a number only when labels were compared (else `**UNWITNESSED**`); a pair that
@@ -1053,48 +1156,52 @@ pub fn port_status_over(
         let (a, b) = (format!("{form}--{prior_tag}"), format!("{form}--{new_tag}"));
         match compute(&a, &b) {
             Ok(d) => {
+                // ★★ FR-191 / FR-192 — the axis cells. The work list is what a person reads in
+                //    January, so an axis that only `form-delta` prints is an axis nobody consults.
+                //    Every one prints **UNWITNESSED** rather than 0 when the reader could not run:
+                //    a clean number from no comparisons is the trap this document was corrected for.
+                //    ★ ONE closure decides that for all of them, so a cell added later cannot get a
+                //    laxer rule by accident — FR-114's shape exactly.
+                //    ★ and each cell carries ITS OWN witness: Form 8949 prints two line numbers, so
+                //    its line SET reads perfectly while its caption axis has nothing to compare.
+                let cell = |n: usize, witnessed: bool| {
+                    if witnessed {
+                        n.to_string()
+                    } else {
+                        "**UNWITNESSED**".to_string()
+                    }
+                };
+                let page = d.line_set.is_some();
                 let moved = if d.label_compared == 0 && !d.common.is_empty() {
                     "**UNWITNESSED** — a side's label set could not be read".to_string()
                 } else {
                     d.label_moved.len().to_string()
                 };
-                // ★★ FR-191 / FR-192 — the two new cells. The work list is what a person reads in
-                //    January, so an axis that only `form-delta` prints is an axis nobody consults.
-                //    Both print **UNWITNESSED** rather than 0 when the reader could not run, for the
-                //    same reason the moved cell does: a clean number from no comparisons is the trap
-                //    this document was corrected for.
-                //    ★ and each cell carries ITS OWN witness: Form 8949 prints two line numbers, so
-                //    its line SET reads perfectly while its caption axis has nothing to compare.
-                let retired = match &d.line_set {
-                    Some(ls) => ls.retired.len().to_string(),
-                    None => "**UNWITNESSED**".to_string(),
-                };
-                let captions = if d.caption_compared == 0 {
-                    "**UNWITNESSED**".to_string()
-                } else {
-                    d.caption_collisions.len().to_string()
-                };
-                let shape = if d.added.len() + d.removed.len() > d.common.len() {
-                    "**REBUILT**"
-                } else if d.added.is_empty()
-                    && d.removed.is_empty()
-                    && d.label_compared > 0
-                    && d.label_moved.is_empty()
-                    && d.caption_compared > 0
-                    && d.caption_collisions.is_empty()
-                    && d.line_set
-                        .as_ref()
-                        .is_some_and(|l| l.retired.is_empty() && l.introduced.is_empty())
-                {
-                    "unchanged"
-                } else {
-                    "port"
-                };
+                let retired = cell(d.line_set.as_ref().map_or(0, |l| l.retired.len()), page);
+                let introduced = cell(d.line_set.as_ref().map_or(0, |l| l.introduced.len()), page);
+                let captions = cell(d.caption_collisions.len(), d.caption_compared > 0);
+                // ★★★ FR-211 — the two UNREAD cells. A `0` in a collision cell and a `0` in a cell
+                //     whose axis compared nothing are the same three pixels and are not the same
+                //     fact, so the count of what was NOT compared prints beside what was.
+                //     ★ Each is witnessed by what makes it KNOWABLE, which is not the same thing as
+                //     what makes its neighbour a number: `compared + unwitnessed == common` is an
+                //     invariant of the label axis, so `boxes UNREAD` is always a number even when
+                //     `lines that moved` is UNWITNESSED; and the caption gaps are enumerated from
+                //     the SURVIVING line set, so Form 8949 prints `UNWITNESSED | 2` — nothing
+                //     compared, two line numbers unread — which is the exact pair of facts FR-211
+                //     says one cell cannot hold.
+                let boxes_unread = d.label_unwitnessed.len();
+                let lines_unread = cell(d.caption_gaps.len(), page);
                 numeric.push(format!(
-                    "| `{form}` | {} | {} | {} | {moved} | {retired} | {captions} | {shape} |",
+                    "| `{form}` | {} | {} | {} | {} | {} | {moved} | {boxes_unread} | {retired} | \
+                     {introduced} | {captions} | {lines_unread} | {} | {} |",
                     d.common.len(),
                     d.added.len(),
-                    d.removed.len()
+                    d.removed.len(),
+                    d.renamed.len(),
+                    d.pair_ambiguous.len(),
+                    field_map_verdict(&d).cell(),
+                    form_verdict(&d).cell(),
                 ));
             }
             Err(_) => {
@@ -1121,8 +1228,10 @@ pub fn port_status_over(
     }
     let mut out = String::new();
     out.push_str(
-        "| form | common | added | removed | lines that moved | lines retired | line numbers whose \
-         MEANING changed | shape |\n|---|---|---|---|---|---|---|---|\n",
+        "| form | common | added | removed | respelled | unpairable | lines that moved | boxes \
+         UNREAD | lines retired | lines introduced | line numbers whose MEANING changed | line \
+         numbers UNREAD | field map | the FORM \
+         |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n",
     );
     for r in &numeric {
         out.push_str(r);
@@ -1275,7 +1384,76 @@ mod tests {
             );
             dflt(row)
         };
-        let (_, _, wrong) = numeric_plant("| `f6251` | 62 | 0 | 0 | 1 | 1 | 8 | port |\n");
+        // ★★★ FR-209 — every numeric plant below is **the printer's own row with exactly ONE cell
+        //     replaced**, and the column is named by the word the table prints rather than by an
+        //     index. Two hazards die together: a plant can no longer disagree with the tool in a
+        //     SECOND cell and red for a reason it did not intend (the 2026-09-13 failure one
+        //     paragraph up), and widening the table from six cells to thirteen no longer means
+        //     re-typing thirteen numbers per plant — which is the hand-transcription this document
+        //     exists to stop doing. The control assertions are what make that safe: if the
+        //     printer's own row is not clean, every plant below is testing the wrong thing and says
+        //     so.
+        let true_row = |stem: &str| -> String {
+            let one: std::collections::BTreeSet<String> = [stem.to_string()].into_iter().collect();
+            let printed = super::port_status_over(&one, "2025", "2026-DRAFT").unwrap();
+            let row = printed
+                .lines()
+                .find(|l| l.starts_with(&format!("| `{stem}` |")))
+                .unwrap_or_else(|| panic!("the printer printed no numeric row for {stem}"))
+                .to_string();
+            format!("{row}\n")
+        };
+        // the column INDEX comes from the printer's own header line — printed over an EMPTY surface,
+        // so it costs nothing — and a renamed or reordered column panics the plant instead of
+        // silently editing the neighbouring cell
+        let header: Vec<String> =
+            super::port_status_over(&Default::default(), "2025", "2026-DRAFT")
+                .unwrap()
+                .lines()
+                .next()
+                .unwrap()
+                .split('|')
+                .map(|c| c.trim().to_string())
+                .collect();
+        let plant = |row: &str, column: &str, value: &str| -> String {
+            let i = header.iter().position(|c| c == column).unwrap_or_else(|| {
+                panic!("the printer prints no column named {column:?}: {header:?}")
+            });
+            let mut cs: Vec<String> = row
+                .trim_end()
+                .split('|')
+                .map(|c| c.trim().to_string())
+                .collect();
+            assert_eq!(
+                cs.len(),
+                header.len(),
+                "a plant's row must have the printer's own cell count: {row:?}"
+            );
+            assert_ne!(
+                cs[i], value,
+                "a plant must CHANGE the cell it plants — {column} already reads {value:?}"
+            );
+            cs[i] = value.to_string();
+            format!("| {} |\n", cs[1..cs.len() - 1].join(" | "))
+        };
+
+        // ★★ THE row FR-209 is about, asserted in the table's own words: Form 6251's field map
+        //    transfers (62 paired, 0 added, 0 removed, 0 respelled — the 2026-09-11 ruling that
+        //    greenlit its transcription on that ground was right) AND the form changed (8 surviving
+        //    line numbers now describe something else). One `shape` column could not hold both, and
+        //    held the wrong one.
+        let f6251 = true_row("f6251");
+        assert!(
+            f6251.contains("| transfers | **CHANGED** |"),
+            "FR-209's own row: the map transfers and the FORM changed: {f6251}"
+        );
+        let (compared, excused, wrong) = numeric_plant(&f6251);
+        assert!(
+            wrong.is_empty() && excused.is_empty() && compared == ["f6251"],
+            "the printer's own f6251 row must be CLEAN — every plant below is this row with one \
+             cell changed: {wrong:?}"
+        );
+        let (_, _, wrong) = numeric_plant(&plant(&f6251, "lines that moved", "1"));
         assert_eq!(wrong.len(), 1, "the MOVED cell off by one: {wrong:?}");
         // ★★ FR-165 — the common/added/removed comparison had NO plant, and the assertion above
         //    calls itself "a cell off by one" while planting the MOVED cell, so nothing had ever
@@ -1284,69 +1462,184 @@ mod tests {
         //    FR-165 replaced the SOURCE of those three numbers — they come from the committed
         //    geometry fixture's box names rather than from the PDF — so the one comparison that
         //    would notice the new source disagreeing with the document was the unwatched one.
-        let (_, _, wrong) = numeric_plant("| `f6251` | 61 | 0 | 0 | 0 | 1 | 8 | port |\n");
+        let (_, _, wrong) = numeric_plant(&plant(&f6251, "common", "61"));
         assert_eq!(wrong.len(), 1, "the COMMON cell off by one: {wrong:?}");
-        let (_, _, wrong) = numeric_plant("| `f6251` | 62 | 1 | 0 | 0 | 1 | 8 | port |\n");
+        let (_, _, wrong) = numeric_plant(&plant(&f6251, "added", "1"));
         assert_eq!(wrong.len(), 1, "the ADDED cell off by one: {wrong:?}");
-        let (_, _, wrong) = numeric_plant("| `f6251` | 62 | 0 | 1 | 0 | 1 | 8 | port |\n");
+        let (_, _, wrong) = numeric_plant(&plant(&f6251, "removed", "1"));
         assert_eq!(wrong.len(), 1, "the REMOVED cell off by one: {wrong:?}");
-        // ★★★ FR-191 / FR-192 — the two NEW axis cells, each planted in both directions. Without
-        //     these the columns would print numbers nobody compares, which is the whole shape the
-        //     work-list checker exists to prevent.
-        let (_, _, wrong) = numeric_plant("| `f6251` | 62 | 0 | 0 | 0 | 2 | 8 | port |\n");
+        // ★★★ FR-209 — the two field-map cells the table never had. A RESPELLED box is the same box
+        //     and a map edit all the same: Schedule C's row priced 6 edits (5 added, 1 removed)
+        //     while 45 of its 104 paired boxes were respellings the document did not show.
+        let (_, _, wrong) = numeric_plant(&plant(&f6251, "respelled", "1"));
+        assert_eq!(wrong.len(), 1, "the RESPELLED cell off by one: {wrong:?}");
+        let (_, _, wrong) = numeric_plant(&plant(&f6251, "unpairable", "1"));
+        assert_eq!(wrong.len(), 1, "the UNPAIRABLE cell off by one: {wrong:?}");
+        // ★★★ FR-191 / FR-192 — the axis cells, each planted in both directions. Without these the
+        //     columns would print numbers nobody compares, which is the whole shape the work-list
+        //     checker exists to prevent.
+        let (_, _, wrong) = numeric_plant(&plant(&f6251, "lines retired", "2"));
         assert_eq!(wrong.len(), 1, "the RETIRED cell off by one: {wrong:?}");
-        let (_, _, wrong) = numeric_plant("| `f6251` | 62 | 0 | 0 | 0 | 1 | 9 | port |\n");
+        let (_, _, wrong) = numeric_plant(&plant(&f6251, "lines introduced", "2"));
+        assert_eq!(wrong.len(), 1, "the INTRODUCED cell off by one: {wrong:?}");
+        let (_, _, wrong) =
+            numeric_plant(&plant(&f6251, "line numbers whose MEANING changed", "9"));
         assert_eq!(
             wrong.len(),
             1,
             "the MEANING-CHANGED cell off by one: {wrong:?}"
         );
-        let (_, _, wrong) =
-            numeric_plant("| `f6251` | 62 | 0 | 0 | 0 | **UNWITNESSED** | 8 | port |\n");
+        // ★★★ FR-211 — the two UNREAD cells, planted like any other axis cell, because a gap count
+        //     nobody compares is exactly as useless as a collision count nobody compares.
+        let (_, _, wrong) = numeric_plant(&plant(&f6251, "boxes UNREAD", "3"));
+        assert_eq!(
+            wrong.len(),
+            1,
+            "the BOXES-UNREAD cell off by one: {wrong:?}"
+        );
+        let (_, _, wrong) = numeric_plant(&plant(&f6251, "line numbers UNREAD", "1"));
+        assert_eq!(
+            wrong.len(),
+            1,
+            "the LINES-UNREAD cell off by one: {wrong:?}"
+        );
+        let (_, _, wrong) = numeric_plant(&plant(&f6251, "lines retired", "**UNWITNESSED**"));
         assert_eq!(
             wrong.len(),
             1,
             "UNWITNESSED printed for a line SET the tool read: {wrong:?}"
         );
-        let (_, _, wrong) =
-            numeric_plant("| `f6251` | 62 | 0 | 0 | 0 | 1 | **UNWITNESSED** | port |\n");
+        let (_, _, wrong) = numeric_plant(&plant(
+            &f6251,
+            "line numbers whose MEANING changed",
+            "**UNWITNESSED**",
+        ));
         assert_eq!(
             wrong.len(),
             1,
             "UNWITNESSED printed for a caption axis that compared: {wrong:?}"
         );
+        let (_, _, wrong) = numeric_plant(&plant(&f6251, "lines that moved", "**UNWITNESSED**"));
+        assert_eq!(
+            wrong.len(),
+            1,
+            "UNWITNESSED printed for a pair that WAS compared: {wrong:?}"
+        );
+        // ★ the gap cells are never UNWITNESSED on a pair whose axes ran: `compared + unwitnessed ==
+        //   common` makes the box gap knowable even when nothing compared, and the caption gaps are
+        //   enumerated from the surviving line set.
+        let (_, _, wrong) = numeric_plant(&plant(&f6251, "boxes UNREAD", "**UNWITNESSED**"));
+        assert_eq!(
+            wrong.len(),
+            1,
+            "UNWITNESSED printed for a box-gap count that is always knowable: {wrong:?}"
+        );
+        let (_, _, wrong) = numeric_plant(&plant(&f6251, "line numbers UNREAD", "**UNWITNESSED**"));
+        assert_eq!(
+            wrong.len(),
+            1,
+            "UNWITNESSED printed for a caption-gap count read off the surviving line set: {wrong:?}"
+        );
+        // ★★★ FR-209's kill, in the two words that were the defect. `unchanged` on a form whose
+        //     captions moved is the cell that was committed on 2026-09-13; `edits` on a map that
+        //     transfers is the same error mirrored. Two columns, two vocabularies, two plants.
+        let (_, _, wrong) = numeric_plant(&plant(&f6251, "the FORM", "unchanged"));
+        assert_eq!(
+            wrong.len(),
+            1,
+            "`unchanged` printed for a form that moved the meaning of 8 line numbers: {wrong:?}"
+        );
+        let (_, _, wrong) = numeric_plant(&plant(&f6251, "the FORM", "**UNWITNESSED**"));
+        assert_eq!(
+            wrong.len(),
+            1,
+            "UNWITNESSED printed for a form every axis witnessed: {wrong:?}"
+        );
+        let (_, _, wrong) = numeric_plant(&plant(&f6251, "field map", "edits"));
+        assert_eq!(
+            wrong.len(),
+            1,
+            "`edits` printed for a map that transfers verbatim: {wrong:?}"
+        );
+        let (_, _, wrong) = numeric_plant(&plant(&f6251, "field map", "**REBUILT**"));
+        assert_eq!(wrong.len(), 1, "REBUILT printed for 62/0/0: {wrong:?}");
         // ★ and the opposite direction on the ONE stem whose caption axis genuinely cannot witness:
         //   Form 8949 prints two line numbers and both are ambiguous, so its line SET reads fine
         //   (0 retired) while its caption axis has nothing to compare. A 0 there is the trap.
-        let (_, _, wrong) = numeric_plant("| `f8949` | 202 | 0 | 0 | 0 | 0 | 0 | port |\n");
+        let f8949 = true_row("f8949");
+        let (_, excused, wrong) = numeric_plant(&f8949);
+        assert!(
+            wrong.is_empty() && excused.is_empty(),
+            "the TRUE row for that stem, with its line set still a number: {wrong:?}"
+        );
+        let (_, _, wrong) =
+            numeric_plant(&plant(&f8949, "line numbers whose MEANING changed", "0"));
         assert_eq!(
             wrong.len(),
             1,
             "0 meaning-changed printed for an axis that compared nothing: {wrong:?}"
         );
-        let (_, excused, wrong) =
-            numeric_plant("| `f8949` | 202 | 0 | 0 | 0 | 0 | **UNWITNESSED** | port |\n");
+        // ★★★ FR-211 stated as a kill: the caption cell already says UNWITNESSED here, and a `0`
+        //     beside it would claim nothing was left unread — about the two line numbers that are
+        //     the entire reason nothing was compared.
+        let (_, _, wrong) = numeric_plant(&plant(&f8949, "line numbers UNREAD", "0"));
+        assert_eq!(
+            wrong.len(),
+            1,
+            "0 lines-unread printed beside a caption axis that compared nothing: {wrong:?}"
+        );
+        let (_, _, wrong) = numeric_plant(&plant(&f8949, "the FORM", "unchanged"));
+        assert_eq!(
+            wrong.len(),
+            1,
+            "`unchanged` printed for a form an axis could not look at: {wrong:?}"
+        );
+        // ★★ the other direction on the one row entitled to the word: `f1040sd` is the only form in
+        //    the table all three page axes witnessed and none of them found anything.
+        let f1040sd = true_row("f1040sd");
+        assert!(
+            f1040sd.contains("| transfers | unchanged |"),
+            "f1040sd is the one genuinely unchanged form: {f1040sd}"
+        );
+        let (_, excused, wrong) = numeric_plant(&f1040sd);
         assert!(
             wrong.is_empty() && excused.is_empty(),
-            "…and the TRUE row for that stem, with its line set still a number: {wrong:?}"
+            "the printer's own f1040sd row must be clean: {wrong:?}"
         );
-        let (_, _, wrong) = numeric_plant("| `f1040` | 199 | 0 | 0 | 0 | 0 | 0 | unchanged |\n");
+        let (_, _, wrong) = numeric_plant(&plant(&f1040sd, "the FORM", "**CHANGED**"));
+        assert_eq!(
+            wrong.len(),
+            1,
+            "CHANGED printed for a form no axis found a change in: {wrong:?}"
+        );
+        // ★ a stem whose label axis cannot witness at all (FR-58): its moved cell must be the word,
+        //   and its 73 unread boxes are a NUMBER — the gap count is what the UNWITNESSED verdict is
+        //   made of, so a 0 there would be the emptiest cell in the table.
+        let f1040s1 = true_row("f1040s1");
+        let (_, excused, wrong) = numeric_plant(&f1040s1);
+        assert!(
+            wrong.is_empty() && excused.is_empty(),
+            "the printer's own f1040s1 row must be clean: {wrong:?}"
+        );
+        let (_, _, wrong) = numeric_plant(&plant(&f1040s1, "lines that moved", "0"));
+        assert_eq!(
+            wrong.len(),
+            1,
+            "0 moved printed for a pair the reader cannot witness: {wrong:?}"
+        );
+        let (_, _, wrong) = numeric_plant(&plant(&f1040s1, "boxes UNREAD", "0"));
+        assert_eq!(
+            wrong.len(),
+            1,
+            "0 boxes-unread printed for the 73 boxes that made the verdict UNWITNESSED: {wrong:?}"
+        );
+        // a genuine numeric row under a stem that has no pair at HEAD — the printer's own f6251 row
+        // with only the FORM cell renamed, so nothing but the missing pair can red it
+        let (_, _, wrong) = numeric_plant(&plant(&f6251, "form", "`f1040`"));
         assert_eq!(
             wrong.len(),
             1,
             "a numeric row whose pair does not exist: {wrong:?}"
-        );
-        let (_, _, wrong) = numeric_plant("| `f1040s1` | 72 | 1 | 1 | 0 | 0 | 0 | port |\n");
-        assert!(
-            !wrong.is_empty(),
-            "0 moved printed for a pair the reader cannot witness: {wrong:?}"
-        );
-        let (_, _, wrong) =
-            numeric_plant("| `f6251` | 62 | 0 | 0 | **UNWITNESSED** | 1 | 8 | port |\n");
-        assert_eq!(
-            wrong.len(),
-            1,
-            "UNWITNESSED printed for a pair that WAS compared: {wrong:?}"
         );
         let (_, _, wrong) =
             dflt("| `f6251` | yes | `f6251--2025` | **NO DRAFT** — planted | **NO DRAFT** |\n");
@@ -1613,11 +1906,34 @@ mod tests {
             match (cells, pair) {
                 (Some(row), Ok(d)) => {
                     compared.push(form.clone());
-                    let counts = (d.common.len(), d.added.len(), d.removed.len());
-                    if counts != (row.common, row.added, row.removed) {
+                    // ★ FR-209 — `respelled` and `unpairable` joined this tuple because the table
+                    //   priced Schedule C's map at 6 edits (5 added, 1 removed) while 45 of its 104
+                    //   paired boxes were RESPELLED, i.e. 45 map edits the document never showed.
+                    let counts = (
+                        d.common.len(),
+                        d.added.len(),
+                        d.removed.len(),
+                        d.renamed.len(),
+                        d.pair_ambiguous.len(),
+                    );
+                    if counts
+                        != (
+                            row.common,
+                            row.added,
+                            row.removed,
+                            row.respelled,
+                            row.unpairable,
+                        )
+                    {
                         wrong.push(format!(
                             "{form}: table says {:?}, form-delta at HEAD says {counts:?}",
-                            (row.common, row.added, row.removed)
+                            (
+                                row.common,
+                                row.added,
+                                row.removed,
+                                row.respelled,
+                                row.unpairable
+                            )
                         ));
                     }
                     // ★ An axis cell is a number ONLY when that axis actually compared something: a
@@ -1661,6 +1977,12 @@ mod tests {
                         d.line_set.is_some(),
                         d.line_set.as_ref().map_or(0, |l| l.retired.len()),
                     );
+                    axis(
+                        "introduced",
+                        row.introduced,
+                        d.line_set.is_some(),
+                        d.line_set.as_ref().map_or(0, |l| l.introduced.len()),
+                    );
                     // FR-192: the caption axis is witnessed only by an actual caption comparison.
                     axis(
                         "meaning changed",
@@ -1668,6 +1990,49 @@ mod tests {
                         d.caption_compared > 0,
                         d.caption_collisions.len(),
                     );
+                    // ★★★ FR-211 — the two UNREAD cells, through the SAME closure, each witnessed by
+                    //     what makes it knowable rather than by its neighbour. `compared +
+                    //     unwitnessed == common` is an invariant of the label axis, so the box gap is
+                    //     always a number — even on `f1040s1`, whose moved cell is UNWITNESSED and
+                    //     whose 73 unread boxes are the whole reason it is. And the caption gaps are
+                    //     enumerated from the surviving line set, so `f8949` owes `UNWITNESSED | 2`:
+                    //     a `0` there would say "nothing unread" about the two line numbers that are
+                    //     the only reason its caption axis compared nothing.
+                    axis(
+                        "boxes UNREAD",
+                        row.boxes_unread,
+                        true,
+                        d.label_unwitnessed.len(),
+                    );
+                    axis(
+                        "line numbers UNREAD",
+                        row.lines_unread,
+                        d.line_set.is_some(),
+                        d.caption_gaps.len(),
+                    );
+                    // ★★★ FR-209 — the two VERDICT cells, derived by the functions the PRINTER uses,
+                    //     never re-implemented here. Two vocabularies with no word in common: a cell
+                    //     that says `unchanged` about a form whose captions moved is the exact defect
+                    //     this checker was widened for, and it is now one string comparison.
+                    for (name, printed, derived) in [
+                        (
+                            "field map",
+                            row.field_map.as_str(),
+                            super::field_map_verdict(&d).cell(),
+                        ),
+                        (
+                            "the FORM",
+                            row.form.as_str(),
+                            super::form_verdict(&d).cell(),
+                        ),
+                    ] {
+                        if printed != derived {
+                            wrong.push(format!(
+                                "{form}: column {name:?} says {printed:?}, form-delta at HEAD says \
+                                 {derived:?}"
+                            ));
+                        }
+                    }
                 }
                 (Some(_), Err(e)) => {
                     wrong.push(format!("{form}: a numeric row, but no pair at HEAD ({e})"))
@@ -1712,7 +2077,7 @@ mod tests {
         (compared, excused, wrong)
     }
 
-    /// A row of either work-list table: `| \`form\` | common | added | removed | moved | shape |`
+    /// A row of either work-list table: a numeric row (see [`NumericRow`] for the cell order)
     /// → `(form, Some(cells), _, _)`; a "Not listed" row (`| \`form\` | emitted? | prior | TY2026
     /// side | cell |`) → `(form, None, the prior-side cell, the TY2026-side cell)`.
     #[allow(clippy::type_complexity)]
@@ -1738,26 +2103,63 @@ mod tests {
             None if cells.get(i).is_some_and(|c| c.contains("UNWITNESSED")) => Some(None),
             None => None,
         };
-        let numeric = match (n(2), n(3), n(4), axis(5), axis(6), axis(7)) {
+        // ★ a VERDICT cell is a word, and the empty string is not one of the words — so a row that
+        //   stops before its verdict cells is not a numeric row at all rather than a numeric row
+        //   with two cells nobody compares (FR-114 again).
+        let word = |i: usize| {
+            cells
+                .get(i)
+                .filter(|c| !c.is_empty())
+                .map(|c| c.to_string())
+        };
+        let numeric = match (
+            n(2),
+            n(3),
+            n(4),
+            n(5),
+            n(6),
+            axis(7),
+            axis(8),
+            axis(9),
+            axis(10),
+            axis(11),
+            axis(12),
+            word(13),
+            word(14),
+        ) {
             (
                 Some(common),
                 Some(added),
                 Some(removed),
+                Some(respelled),
+                Some(unpairable),
                 Some(moved),
+                Some(boxes_unread),
                 Some(retired),
+                Some(introduced),
                 Some(captions),
+                Some(lines_unread),
+                Some(field_map),
+                Some(form_cell),
             ) => Some(NumericRow {
                 common,
                 added,
                 removed,
+                respelled,
+                unpairable,
                 moved,
+                boxes_unread,
                 retired,
+                introduced,
                 captions,
+                lines_unread,
+                field_map,
+                form: form_cell,
             }),
             _ => None,
         };
         let last = if numeric.is_some() {
-            cells.get(8)
+            cells.get(14)
         } else {
             cells.get(5)
         };
@@ -1770,20 +2172,44 @@ mod tests {
         ))
     }
 
-    /// The numeric cells of one work-list row.
+    /// The cells of one work-list row, in the order the table prints them:
+    /// `| form | common | added | removed | respelled | unpairable | lines that moved | boxes UNREAD
+    /// | lines retired | lines introduced | line numbers whose MEANING changed | line numbers UNREAD
+    /// | field map | the FORM |`.
     ///
     /// ★★ A struct rather than a growing tuple, so that adding an axis to the table is a **build
     /// error** at every site that reads a row rather than a silently ignored column — FR-114's shape
-    /// is exactly an instrument that printed a new cell nobody checked.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    /// is exactly an instrument that printed a new cell nobody checked. Measured again on 2026-09-13
+    /// when FR-209 widened this from six cells to thirteen: the compiler named every reader, and the
+    /// eight plants below each failed to parse until their new cells were filled in.
+    #[derive(Debug, Clone, PartialEq, Eq)]
     struct NumericRow {
         common: usize,
         added: usize,
         removed: usize,
+        /// Paired boxes whose FQN spelling changed — the same box, and a map edit all the same.
+        respelled: usize,
+        /// Boxes that could not be paired at all because a leaf name repeats on one side. Neither an
+        /// edit nor a transfer: UNMEASURED, and the reason the `field map` verdict must be read with
+        /// this column (FR-211).
+        unpairable: usize,
         /// `None` = the cell says UNWITNESSED.
         moved: Option<usize>,
+        /// FR-211 — paired boxes the line→label axis could not read. The gap count that the `lines
+        /// that moved` cell beside it says nothing about.
+        boxes_unread: Option<usize>,
         retired: Option<usize>,
+        introduced: Option<usize>,
         captions: Option<usize>,
+        /// FR-211 — surviving line numbers the caption axis could not compare. A `0` in `captions`
+        /// with a positive number here is *"nothing was found because nothing was looked at"*, which
+        /// is the fact that cell alone could not tell from *"nothing changed"*.
+        lines_unread: Option<usize>,
+        /// The two VERDICT cells, verbatim. Two words from two disjoint vocabularies
+        /// ([`super::FieldMapVerdict::cell`], [`super::FormVerdict::cell`]) — FR-209 is what happens
+        /// when one word has to carry both claims.
+        field_map: String,
+        form: String,
     }
 
     use super::*;
