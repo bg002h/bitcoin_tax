@@ -7993,7 +7993,7 @@ build, each with an owning phase.
   option from *"Derive the list, or make the compiler hold it"*: state in the source exactly what is covered
   and what is not.
 
-- **FR-172 — a 187 KB IRS PDF is COMMITTED at the repo root under the filename `--out`. Minor. Owning phase: NOW, with any commit touching `.gitignore`.**
+- **FR-172 — ✅ CLOSED 2026-09-13. — a 187 KB IRS PDF is COMMITTED at the repo root under the filename `--out`. Minor. Owning phase: NOW, with any commit touching `.gitignore`.**
   Found 2026-09-13 by the FR-165 build agent, and found only because `tar -T` refused the filename: `git
   ls-files` lists a tracked file literally named `--out` (`file` says *PDF document, version 1.7, 2 page(s)*),
   187,143 bytes, added in `a1c6fc849` (2026-09-05) — the same day FR-165's trigger landed. It is plainly the
@@ -8003,6 +8003,17 @@ build, each with an owning phase.
   consider whether the ignore rule should be `*.pdf` with `!` exceptions for the bundled templates rather than
   a path-scoped glob, so a stray PDF anywhere is refused by default. ★ A leading-`--` filename is also a small
   hazard for every tool that takes options.
+
+  **CLOSED.** Controller-verified before deleting, rather than deleting on the report: `file` says PDF 1.7,
+  2 pages, 187,143 bytes; `pdftotext` says **Form 6251 (2025)**; its sha256 matches **no** archived PDF, and
+  it renders 127 text lines against the archived `f6251--2025.pdf`'s 126 — so it is a *derived* artifact (the
+  output of the page-drop in `a1c6fc849`, the very commit that added it), not a primary source. Nothing in
+  `crates/`, `scripts/`, `design/` or the `Makefile` reads it. Removed with `git rm`; a copy is in this
+  session's scratch, and it is re-fetchable from irs.gov via the archive's `.pdf.txt` note regardless.
+  ★ **Both halves of the mechanism are now guarded**, because the old rule was path-scoped to
+  `design/forms/**/*.pdf`: `.gitignore` gains `/*.pdf` (a PDF where none belongs) and `/-*` (a flag that
+  became a filename — the actual defect). Neither stops `git add -f`, which is the honest boundary.
+
 
 - **FR-173 — `form_delta`'s excused-arm predicate and its ARCHIVE oracle now read different artifacts. Minor. Owning phase: with the FR-136 borrowed-absence work in `map_pdf_conformance.rs`.**
   FR-165 made `compute` fail on a missing GEOMETRY FIXTURE rather than on a missing PDF, while

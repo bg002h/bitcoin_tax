@@ -86,6 +86,15 @@ __pycache__/
 #     derived artifact, add it here.
 design/forms/**/*.pdf
 
+# ★★ FR-172 — and the rule above is PATH-SCOPED, which is how a 187,143-byte IRS PDF came to be
+#    committed at the REPO ROOT under the filename `--out` (a1c6fc849, 2026-09-05): a tool's `--out`
+#    flag was consumed as a positional path, the file landed at the root where nothing guarded it,
+#    and `git add -A` took it. It was found only because `tar -T` choked on the leading dashes.
+#    Two guards, because the mechanism has two halves — a PDF where none belongs, and a FLAG that
+#    became a filename:
+/*.pdf
+/-*
+
 # Compiler ICE dumps — rustc writes these to CWD on an internal error. One was committed on
 # 2026-08-02 and found by review r6 (N-1); it is build debris, never a source artifact.
 rustc-ice-*.txt
