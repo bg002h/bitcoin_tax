@@ -8453,7 +8453,9 @@ build, each with an owning phase.
   It surfaced as the only escape from FR-200's wall, which is how a data-loss path gets taken: as the
   documented workaround for something else.
 
-- **FR-200 — a $750k+ mortgage, or a $600 bag of clothes, prints zero pages — and `--forms` cannot rescue the Bitcoin pages. Important. Owning phase: NOW.**
+- **✅ CLOSED (folds 46a50cfd7 + e339d68a3) — FR-200 — a $750k+ mortgage, or a $600 bag of clothes, printed zero pages. Both now FILE. Reports `076d0d45f` and `cae0c4187`.**
+  ★★★ **Closed by implementing the tax scenarios, not by loosening the printer.** The controller initially put the `--forms`-on-a-blocked-year question to the owner as a policy choice and was corrected: *"This is the dumbest question you have ever asked me. Fix the real problem which is the software bug itself."* That was right, and the standing ruling already answered it — *"support all the tax scenarios"*. Both refusals existed because a form had never been transcribed: Pub 936 Table 1 (16 lines) and Form 8283 Section A (9 columns). Neither was a hard tax question, and the `--forms` question dissolved once there was nothing to refuse.
+  ★ Residue, deliberately still refusing and each naming its own condition: the FMV mortgage limit ([[FR-243]] — the instructions cite a Pub 936 section that does not exist), the April-2018 transition rule, publicly traded securities in Section A (F-4 below), vehicles, intellectual property and inventory. *"Widening an exemption is never the safe edit."*
   Reported: an over-$750k mortgage and `NonCryptoNoncashGift` (a thrift-store donation) each refuse the
   whole packet. `--forms f8949,schedule-d` cannot narrow the output to the pages that ARE computable —
   *"ignored on a full-return year"* — so a filer blocked on a Schedule A detail loses their **8949 and
@@ -9377,3 +9379,62 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   **settle it against §163(h) itself, not against the instructions.** ★★ Do not resolve this by assuming
   the publication is right because it is newer: the instructions are the more recently revised document
   for TY2024, and neither is law. `tax-authority-hierarchy` applies — only the statute and reg are.
+
+- **★★★ FR-244 — the Form 8283 FILING threshold is measured PRE-ceiling by the screen and POST-ceiling by the packet, so btctax can omit a Form 8283 that i8283 requires. Important, PRE-EXISTING (it governs crypto donations today, not just Section A). Owning phase: whichever cycle next touches the packet's attachment decisions.**
+  Reported by the FR-200b implementer as F-1 and **verified by the controller against the archived
+  instructions**, which is why it is filed at Important rather than as a note:
+  - `design/forms/extract/i8283--2024.txt:51-52` — *"For this purpose, “amount of your deduction” means
+    your **deduction before applying any income limits** that could…"*
+  - `crates/btctax-core/src/tax/packet.rs:1232` — `.filter(|a| a.line12 > FORM_8283_THRESHOLD)`, i.e. the
+    **post-ceiling** printed Schedule A line 12.
+  They part company exactly when a §170(b) percentage ceiling binds: gross noncash over $500, printed
+  line 12 at or under $500 ⇒ **i8283 requires a Form 8283 and btctax attaches none.** An omitted required
+  attachment is a §170(f)(11) denial risk — *the very risk `NonCryptoNoncashGift` was created to avoid*,
+  reappearing one layer down.
+  ★ `packet.rs:1049` already half-knows: it notes that *"the §170(b) ceilings legitimately make it smaller
+  than the sum of the 8283's"* rows. The comment treats the gap as benign; the instruction says the
+  threshold is not measured on that quantity at all.
+  ★★ Why it was not closed in FR-200b, and this is the right call: the fix changes a **presence test that
+  byte-goldens depend on**, so it belongs in a cycle that can re-baseline them deliberately. The
+  implementer made the screen the conservative superset meanwhile, so nothing regressed. ★ And the fix is
+  **not** "use the pre-ceiling number in both places" without checking the other direction — a form
+  attached when none is required is a different defect, and [[a-golden-cannot-validate-its-own-regeneration]]
+  applies to the re-baseline.
+
+- **★★ FR-245 — `no_oracle_invisible_entry_is_stale` does not discriminate: it checks that a prefix matches some leaf path, not that the exemption is NEEDED. Minor (green-and-blind instrument). Owning phase: with the next oracle-projection work.**
+  Found by the FR-200b implementer **by probing it**, which is the part worth keeping: it added an
+  `ORACLE_INVISIBLE` entry for `filing_status` — a routing fact that demonstrably DOES reach the oracle
+  row, proven by `every_filing_status_round_trips_through_the_oracle_row` — and the checker stayed
+  **green**. So an over-broad exemption can be added and nothing objects.
+  ★ It is the [[green-and-blind-instruments]] shape in an exemption list, and it matters because an
+  exemption list is precisely where a silent widening hides. ★★ Note what the implementer did with the
+  blind instrument rather than trusting it: it took the verdict of the **derived** sibling,
+  `every_routing_fact_either_reaches_the_row_or_is_named_in_oracle_invisible`, and added **no** entry —
+  the right instinct, and the reason no false exemption landed.
+
+- **✅ REFUTED, not filed — the FR-200b report's F-3 ("add `booklet_for("f8283")` and two ratchet bumps retire").**
+  The controller **measured it both ways** rather than accepting it: `xtask line-coverage` reports the
+  **identical** counts with the arm and without it — 33 exceptions, 19 unlocatable. Section A's money
+  figures are table **columns** `(g)`/`(h)` beneath the lettered rows A–D, not `Line` headings, so
+  `line_region` has no heading to locate whatever booklet is bound. The arm was kept in `e339d68a3`
+  because it is the correct mapping under the convention that `match` already states, and its comment now
+  says plainly that it retires nothing. The three ratchets were raised on their own merits with reasons in
+  the diff. ★ Recorded because a plausible one-line fix that does not work is worth more written down than
+  silently dropped — the next person would have tried it too.
+
+- **FR-246 — publicly traded securities in Form 8283 Section A still refuse. Minor. Owning phase: with the next charitable work.**
+  The recorded boundary of FR-200b, with the instruction passages quoted in the source. To close: collect
+  the five column (c) sub-fields, the >12-month holding answer and the §170(b)(1)(C)(iii) election, then
+  delete `NoncashGiftRefusal::PubliclyTradedSecurity`. ★ Column (g)'s own instruction is *"Do not complete
+  this column … unless you elect"* that provision, so the election is not optional detail — it decides
+  whether a column is filled at all.
+
+- **FR-247 — the interview form has no fields for the nine Section A columns. Minor. Owning phase: with the interview's next pass.**
+  A recorded exemption in FR-200b, and the note that matters: **removing the exemption is what makes the
+  coverage KAT police the nine columns**, so this is a gate that switches on rather than a chore.
+
+- **FR-248 — a ledger Section A donation's column (i) (method used to determine FMV) can print BLANK. Nit. Owning phase: with the next charitable work.**
+  `fmv_method` is `""` for a Section A ledger donation unless the filer stored an override. Pre-existing
+  and honest — a *noncash* gift's empty (i) now refuses, because that path has a filer to ask — but
+  Reg. §1.170A-16(c)(3)(v)'s fully-complete requirement arguably reaches the ledger path too. ★ The
+  authority here is the REG, which outranks the instructions ([[tax-authority-hierarchy]]).
