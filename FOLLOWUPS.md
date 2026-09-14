@@ -8223,7 +8223,19 @@ build, each with an owning phase.
   state it names? ★ FR-87 was an unreachable refusal; FR-102 was a filer who could not print a page. Both
   are this shape, and neither is visible to a census that only asks whether a position is written down.
 
-- **FR-181 — ⚠️ NO TY2026 Form 1040 OR i1040gi IS ARCHIVED. Important, and on the January critical path. Owning phase: NOW.**
+- **⏳ BLOCKED ON THE IRS, now INSTRUMENTED (f690303a4) — FR-181 — no TY2026 Form 1040 or i1040gi is archived. Important, on the January critical path. Owning phase: NOW, but the action is now a COMMAND rather than a memory.**
+  ★★ **Controller-probed 2026-09-14: neither document exists in any form, final or draft.** Measured,
+  not assumed:
+  | url | result |
+  |---|---|
+  | `irs-prior/f1040--2026.pdf` | **404** |
+  | `irs-prior/i1040gi--2026.pdf` | **404** |
+  | `irs-dft/f1040--dft.pdf` | 200, but it is the **TY2025** draft — its face reads *"1040 U.S. Individual Income Tax Return 2025"*, footer *"Form 1040 (2025)"* |
+  | `irs-dft/i1040gi--dft.pdf` | 200, also **TY2025** — 446 mentions of 2025 against 37 of 2026 |
+  ★★★ **So archiving the draft would COMMIT [[FR-226]]'s defect deliberately** — a TY2025 document filed under 2026. It was not done, and that is the finding: *"drafts if that is what exists"* only helps when the draft is the right year.
+  ★ **Audited while here, because the above raised the question:** all 15 archived `--2026-DRAFT` extracts really are TY2026 (4–10 `2026` lines each against a single cross-reference). The gap is specifically the 1040 and its instructions — the IRS posts drafts per form on different schedules — not systemic mislabeling.
+  ★★★ **What DID land: the instrument.** `authority_refresh::WANTED` now carries both documents, and `xtask authority-refresh --check` asks a third question — *has a WANTED document been posted?* — reading the fetched PDF's **own face year**, because a 200 is not arrival (the draft above proves it; a status-only probe would fire forever and then be muted). ★★ And `authority-refresh` HAD NO RUNNER at all — no CI job, no make target — which is exactly how [[FR-242]] went unnoticed; `.github/workflows/authority-watch.yml` now runs it weekly, held by `some_workflow_actually_runs_this_command`.
+  ★ **Remaining human action when it fires:** archive both, give each a census entry per edition, then DELETE its row from `WANTED` so the ordinary drift and newer-edition probes take over. ★ The second half of this entry — *"mark every TY2026 claim that cites them as unverified"* — is still OPEN and is not covered by the probe.
   **Controller-verified 2026-09-13.** `design/forms/extract/` holds **24** TY2026 extracts — nine schedule
   DRAFTs (`f1040s1`, `s1a`, `s2`, `s3`, `sa`, `sb`, `sc`, `sd`, `sse`), `f6251`, `f8949`, `f8959`, `f8960`,
   `f8995`, `f8995a`, plus information returns — and **no `f1040--2026` and no `i1040gi--2026`, not even a
