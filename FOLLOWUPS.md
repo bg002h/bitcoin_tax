@@ -9357,3 +9357,23 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   filer receives for a 2026 return — which is exactly the year this product intends to file. A gate that
   exits 1 at HEAD is also a gate whose next failure nobody will notice, so this is worth closing for the
   instrument's sake as much as the forms'. ★ Note it is NOT part of `make check`, which is why it sat here.
+
+- **★★ FR-243 — AUTHORITY CONFLICT: `i1040sca` sends the filer to Pub. 936 for the fair-market-value mortgage limit, and Pub. 936 (2025) does not contain it. Important. Owning phase: with the next mortgage work; the refusal is correct meanwhile.**
+  Found while folding FR-200a and **verified by the controller against both archived texts**, not taken
+  from the report:
+  - `design/forms/extract/i1040sca--2024.txt:925` — *"Limit when loans exceed the fair market value of the
+    home. If the total amount of all mortgages is more than the fair market value of the home, **see Pub.
+    936** to figure your deduction."*
+  - `legal/text/irs-publications/Pub936_Home_Mortgage_Interest_Deduction.txt` — **no FMV worksheet and no
+    statement of the limit.** Two occurrences of *"fair market value"* in the whole publication: one a
+    co-op cost/FMV allocation (`:264`), one an unrelated worked example (`:1040`). Table 1 has no FMV line.
+  So the instructions route a filer to a publication that no longer covers the case. btctax refuses under
+  `RefuseReason::MortgageFairMarketValueLimit` and **that is the correct conservative answer** — *"widening
+  an exemption is never the safe edit"*, and there is no archived worksheet to transcribe.
+  ★ **The likely explanation, NOT yet confirmed against primary law and deliberately recorded as an
+  hypothesis:** the FMV limit historically bit home-EQUITY debt, and TCJA suspended the home-equity
+  interest deduction for 2018–2025, which would make the limit largely moot for the revisions in the tree.
+  OBBBA's treatment after 2025 is the part that matters for the year this product intends to file, so
+  **settle it against §163(h) itself, not against the instructions.** ★★ Do not resolve this by assuming
+  the publication is right because it is newer: the instructions are the more recently revised document
+  for TY2024, and neither is law. `tax-authority-hierarchy` applies — only the statute and reg are.
