@@ -9265,10 +9265,28 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   inlined payload cannot go missing this way; a path can, and it fails *silently* — the agent simply
   finds no file and proceeds on the dispatch prompt alone, which is the under-specified artifact that
   `CLAUDE.md` warns agents amplify into confident divergent readings.
-  ★ **The fix is ordering, and it is free:** commit the brief **before** dispatching, always. A brief
-  carries no executable content, so `--no-verify` is appropriate and the commit costs seconds. ★ The
-  cheap machine-check, worth doing until the ordering is habit:
-  `test -f <worktree>/<brief path>` immediately after dispatch — it is one command and it caught this.
+  ★★★ **CORRECTED, same day, 2026-09-14 — MY FIRST FIX WAS WRONG, and it is recorded rather than
+  silently replaced because the wrong version is the instructive one.** I wrote that the fix is
+  *"commit the brief before dispatching, always"* and filed it as free and sufficient. It is neither.
+  On the very next dispatch I committed the brief first, dispatched, and the brief was **still absent**
+  — because a worktree here does **not** branch from current `HEAD`. It branches from a **fixed older
+  base**: three consecutive agents all landed on `cc29bb30e`, one of them 11 commits behind main. So
+  ordering cannot fix this, and "commit first" was a plausible mechanism I never tested before writing
+  it down as the remedy — the exact failure this file calls B1.
+  ★★ **The fix that actually works is post-dispatch and unconditional:**
+  ```
+  cp <brief> <worktree>/<brief path> && test -f <worktree>/<brief path>
+  ```
+  then `SendMessage` the agent the absolute main-tree path as a fallback. Do it **every** time, not
+  only when suspicious — the check is one command and it has now caught this three times out of three.
+  ★★ **And the larger consequence, which is worth more than the brief problem:** because the base is
+  stale rather than `HEAD`, **every** delivered agent diff is against an old tree, so integration is a
+  real 3-way **merge** and never a file copy. This is not theoretical — copying the FR-227 agent's
+  `blockers.rs` in would have silently reverted the I-1 fold closed hours earlier, because its base
+  predated it. Before folding any agent's work: `git log --oneline <their base>..HEAD` to see what
+  they could not have seen, and `git merge` rather than `cp`. ★ Also check whether the files they
+  touched moved under them; if those files are byte-identical between their base and HEAD, their
+  findings transfer unchanged and no reconciliation is needed.
   ★★ And note which instrument did NOT catch it: nothing did. There is no gate on "the agent can read
   its own brief", the agents did not report a missing file, and both would have produced *something* —
   work against my dispatch prompt, graded against a brief they never saw. **The controller would have
