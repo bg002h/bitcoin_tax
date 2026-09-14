@@ -48,6 +48,7 @@ mod forms_extract;
 mod forms_fetch;
 mod harness_check;
 mod label_reader;
+mod ledger_check;
 mod line_coverage_check;
 mod package_check;
 mod prompt_check;
@@ -94,6 +95,7 @@ mod wrapped_literal_check;
 /// arms and reds if one is missing a row. Adding an arm without declaring its flags fails the suite.
 const SUBCOMMANDS: &[(&str, &[&str], &str)] = &[
     ("archive-check", &[], ""),
+    ("ledger-check", &[], ""),
     ("authority-conflicts", &[], ""),
     ("blockers", &[], "[<year>]"),
     ("authority-manifest", &["--regen"], "[--regen]"),
@@ -299,6 +301,12 @@ fn main() {
             };
             if let Err(e) = blockers::run(year) {
                 eprintln!("xtask blockers {year}: {e}");
+                std::process::exit(1);
+            }
+        }
+        Some("ledger-check") => {
+            if let Err(e) = ledger_check::run() {
+                eprintln!("xtask ledger-check: {e}");
                 std::process::exit(1);
             }
         }
