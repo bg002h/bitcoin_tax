@@ -5783,7 +5783,8 @@ understates tax with no refusal."*
   deleted** (`form8615_screens_a_filer_who_is_nobodys_dependent`), and every guarantee was observed
   RED on its named mutation. **The original entry follows, unedited, for the record.**
 
-- **FR-29 ★★★ CRITICAL — the Form 8615 (kiddie tax) screen is gated on DEPENDENCY, which is not one
+- **✅ CLOSED — FR-29 ★★★ CRITICAL — the Form 8615 (kiddie tax) screen was gated on DEPENDENCY, which is not one
+  ★ **Header was STALE — this is a DUPLICATE of the fix record 12 lines above** (*"FR-29 ★★★ CRITICAL — ✅ FIXED 2026-09-05 on `fix/fr29-form8615-gate`"*), and the duplicate is why this read as open. Marked during the 2026-09-14 reconciliation. ★★ Verified against source rather than trusted: the fix is held by a committed MUTATION kill at `crates/btctax-core/src/tax/return_1040.rs:6102` — *"G1 — DEPENDENCY IS NOT ONE OF FORM 8615'S CONDITIONS"*, citing `i8615--2025.txt:58-61` (*"These rules apply whether or not the child is a dependent."*) and naming its own mutation. ★ The cited expression `can_be_claimed_as_dependent_taxpayer != Some(false)` DOES still appear at `:161`, and that use is CORRECT and unrelated — it is §63(c)(5)'s dependent standard-deduction floor, whose own comment records that the direction can only OVERSTATE tax. Finding the string is not finding the defect.
   of Form 8615's conditions.** `crates/btctax-core/src/tax/return_1040.rs:989` reads
   `if ri.header.can_be_claimed_as_dependent_taxpayer != Some(false)`. The five conditions
   (`design/forms/extract/i1040gi--2025.txt:3927-3941`) are, verbatim: (1) more than $2,700 unearned
@@ -5807,7 +5808,8 @@ understates tax with no refusal."*
   **Owning phase: BEFORE any first filing. This is a blocking defect, not a follow-up in the usual
   sense.**
 
-- **FR-30 ★★★ CRITICAL — Schedule 2 *additions to tax* fall outside every limb of the scope
+- **✅ CLOSED — FR-30 ★★★ CRITICAL — Schedule 2 *additions to tax* fall outside every limb of the scope
+  ★ **Header was STALE, marked — during the 2026-09-14 reconciliation.** Evidence: `crates/btctax-core/src/tax/questions.rs:3999` — *"ADDITIONS TO TAX, added 2026-09-05 (FR-30)"*.
   attestation.** `crates/btctax-core/src/tax/questions.rs:548` asks about (a) income received,
   (b) an ISO exercise, (c) an AMT item. An *addition to tax* is none of those. Verified instances a
   filer can hit while answering every question truthfully: excess advance-PTC repayment (Sch 2 line
@@ -5841,7 +5843,8 @@ them** (§G-9). Three Criticals were found. **Every one was independently re-ver
 controller against the code before filing.** Reports:
 `design/agent-reports/2026-09-05-crypto-audit-basis.md` and `-disposition.md`.
 
-- **FR-31 ★★★ CRITICAL — moving coins between your own wallets can book them TWICE, doubling basis.**
+- **✅ CLOSED — FR-31 ★★★ CRITICAL — moving coins between your own wallets can book them TWICE, doubling basis.**
+  ★ **Header was STALE, marked — during the 2026-09-14 reconciliation.** Evidence: **18** source sites, including the dedicated guard `crates/btctax-core/src/project/pairing.rs:8` (*"the FR-31 double-booking guard in `resolve` — REFUSES when a `TransferLink{Wallet(w)}` …"*) and a whole test file, `crates/btctax-core/tests/self_transfer_double_book.rs`, carrying BOTH directions (`a_link_to_an_untracked_wallet_is_clean`, `an_inbound_of_a_different_amount_is_not_flagged`) so it cannot pass by flagging everything.
   Three verified limbs: (1) `crates/btctax-core/src/project/resolve.rs:836` — the entire
   `consumed_ins` block is inside `if let TransferTarget::InEvent(in_id) = &tl.in_event_or_wallet`,
   so the `--to-wallet` form (`TransferTarget::Wallet`) NEVER marks the matching in-leg consumed.
@@ -5878,14 +5881,16 @@ controller against the code before filing.** Reports:
   with no in-event to name; the filer must void the link. No "these are distinct" confirmation
   decision exists. Fail-closed, and it cannot move a filed number.
 
-- **FR-32 ★★★ CRITICAL — §1015(a)'s loss cap is skipped when donor basis is RECONSTRUCTED.**
+- **✅ CLOSED — FR-32 ★★★ CRITICAL — §1015(a)'s loss cap is skipped when donor basis is RECONSTRUCTED.**
+  ★ **Header was STALE, marked — during the 2026-09-14 reconciliation.** Evidence: `crates/btctax-core/src/project/fold.rs:1244` — *"★★★ FR-32: the §1015(a) LOSS CAP applies here exactly as in Case 2"*.
   `crates/btctax-core/src/project/fold.rs:1085-1087` returns `None` for `dual_loss_basis` on the
   reconstructed-basis path, where the known-basis path at `:1080` returns `Some(fmv_at_gift)`.
   Identical facts, two paths: gain **$0** versus a **fabricated $27,000 loss**. The statute is
   archived in-repo and explicit. ★ The single KAT uses an APPRECIATED gift, where the cap is inert —
   so no test could ever have caught it. **Owning phase: before any first filing.**
 
-- **FR-33 ★★★ CRITICAL — a post-hoc `LotSelection` is applied with no made-date guard.**
+- **✅ CLOSED — FR-33 ★★★ CRITICAL — a post-hoc `LotSelection` is applied with no made-date guard.**
+  ★ **Header was STALE, marked — during the 2026-09-14 reconciliation.** Evidence: `crates/btctax-core/src/project/resolve.rs` §A.4 block now carries *"TIMELINESS (FR-33, §1.1012-1(j)(2)): an UNATTESTED selection whose made-date is AFTER the …"*.
   `crates/btctax-core/src/project/resolve.rs:1405-1445` (the §A.4 LotSelection block) contains no
   reference to a made-date. Forty lines above, the `MethodElection` block does exactly the opposite:
   `let made = tax_date(d.utc_timestamp, d.original_tz); if !method_election_is_forward(me, made)` →
@@ -6608,7 +6613,8 @@ build, each with an owning phase.
   forcing a rebuild does not tax the loop that FINDS defects in order to protect the run that CERTIFIES
   them. The Makefile comment carries the measurement and names the false-green risk. Standing rule
   alongside it: `touch` the file after every restore.
-- **FR-102 — ★★★ CRITICAL, SHIPPED, LIVE TODAY: a filer with an HSA cannot print ANY of their return.
+- **✅ CLOSED — FR-102 — ★★★ CRITICAL, SHIPPED, LIVE TODAY: a filer with an HSA cannot print ANY of their return.
+  ★ **Header was STALE, marked — during the 2026-09-14 reconciliation.** Evidence: `crates/btctax-forms/src/schedule23.rs:75-84` declares a column PER LINE and gives 17c/17d `COL_MID`; the comment records the old behaviour in the past tense. ★★ Controller-verified by **replanting the original defect**: `schedule_2_prints_the_hsa_block_in_the_indented_column_and_the_fill_succeeds` red with the exact error the entry documents — *"x-center 446.0 not in column 1 cluster (504.0, 576.0)"* — then green on restore. So BOTH halves closed: the one-line fix AND the fixture whose absence was 'the more important half'.
   Schedule 2 lines 17c/17d are pushed in the wrong COLUMN, and the geometric verifier fails the whole
   export closed. Found by the 2026-09-07 journey walk; mechanism CONFIRMED and the fix PROVEN by the
   controller. Owning phase: IMMEDIATE — before anything ships, and before the B3 whole-branch review.**
