@@ -8972,6 +8972,43 @@ build, each with an owning phase.
   not computed — the field would simply hold the unlimited total under the new number. **The refusal comes
   out only when the worksheet goes in.** Recorded because the tempting order is the wrong one.
 
+- **★★★ FR-234 — ⚠️ 21 of 107 golden households are RED, and the test that would say so has NEVER RUN. Important. Owning phase: NOW — before any filing, and it is PRE-EXISTING, not from 2026-09-13's range.**
+  Found by the B3 interaction review running the one instrument **no parcel worktree and no CI job can run**.
+  `check_mode_reconciles_every_line_of_every_admitted_golden_household` fails on **21 of 107** households —
+  all on `schedule_se.line12`, all by the **same $1** (btctax 16956 = OTS 16956, taxcalc 16955), all `se-over`.
+  ★★★ **It is the purest green-and-blind instrument found here yet, because the `#[ignore]` attribute itself
+  carries the false claim.** `crates/btctax-oracle-harness/tests/smoke.rs:203`:
+  `#[ignore = "full corpus (~104) … make-check sweeps the anchors + pinned cells; **run in CI** / on demand"]`
+  — and **`ci.yml` contains ZERO `run-ignored` mentions** (controller-verified). The gate-level twin filters
+  out every `ca_` household, so nothing anywhere executes it. The ignore reason promises a runner that does
+  not exist.
+  ★ **The figure is not in question — the instrument is.** btctax agrees with **OTS** on all 21, so the
+  two-oracle rule has a witness and taxcalc is the outlier; the $1 is almost certainly a rounding
+  methodology difference on Schedule SE line 12. **Adjudicate it against the form, never encode either
+  oracle** (the tenforty #278/#279 precedent: OTS was never wrong, the wrapper was).
+  **Two separate fixes, and the second is the one that matters:** adjudicate the $1; and **give the test a
+  runner**, or change the ignore reason to say what is true. ★★ Proven pre-existing — corpus, harness crate
+  and `se.rs` are untouched in `9f0298a3d..HEAD` — so on the reviewer's recommendation it does not hold that
+  range. **It absolutely holds a filing.**
+
+- **★★★ FR-235 — HARNESS RULE: a plant written in the CHECKER'S OWN VOCABULARY can only confirm what the checker already sees. No owning phase — it belongs in `design/HARNESS.md` beside B1, B1a and FR-230.**
+  **Measured 2026-09-13** by the B3 review, on `blockers::year_sites`. The scanner greps two string needles;
+  its B1 plant was a planted **`ri.tax_year > 0`** — *the scanner's own first needle*. So the plant was red
+  for the right reason and proved nothing about the sites the needles cannot reach, which is where the whole
+  blindness lived (a year read through a **function parameter**: `section_68_status(year)`).
+  ★★ **This is the third turn of the same screw and they now form a set.** B1: a checker does not exist until
+  observed RED on a planted defect. B1a: the FIXTURE and the PLANT are the other half of the checker.
+  FR-230: a kill whose expectation is derived from the thing it mutates measures nothing. **FR-235: a plant
+  phrased in the checker's own idiom measures only the idiom.**
+  ★ **The reviewable question, one sentence:** *"is the planted defect expressible in a form the checker was
+  never written to look for?"* If not, the kill is a tautology wearing a red result. For a string scanner
+  that means planting a **different syntactic shape**, not a different value.
+
+- **FR-236 — `Section68Gate::total_line = "18"` is printed to the filer and bound to no test. Minor. Owning phase: with the TY2026 port.**
+  B3's M-1. ★ Not unasserted in the tree — `ty2026_schedule_a.rs:351` does assert the same fact against the
+  extract, by a **different derivation** — so the exposure is narrow: the printed string and the asserted fact
+  could drift apart. Join them, or have the printed value read the asserted one.
+
 - **FR-152 — `census_join` anchors captions to ABSOLUTE line indices in a generated file. Minor. Owning phase: the port machine.**
   A4's 110 `# Regenerate:` header additions shifted every extract by a line, and `forms/2024/f1040s1.map.toml`'s
   `extract_line` anchors (11/15/58) had to move to 15/19/62 — an edit outside A4's ownership, reported rather
