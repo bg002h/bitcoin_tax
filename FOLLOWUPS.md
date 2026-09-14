@@ -8441,7 +8441,8 @@ build, each with an owning phase.
   paragraph of filer-facing text, two defects: a fact the IRS withdrew and a command that does not exist.
   Fix them together, and only after the owner rules on FR-177's scope question.
 
-- **FR-199 — `income clear` destroys a committed return's 46 answers with no guard, while a mere DRAFT requires `--discard-draft`. Important. Owning phase: NOW.**
+- **✅ CLOSED (fold ec2cb5c0b) — FR-199 — `income clear` destroyed a stored return's recorded answers with no guard, no prompt and exit 0. BOTH halves reproduced; it was **67** answer records, not 46. Report `7b97589bd`.**
+  ★ Fixed by `--discard-return`, whose decision is `input_form_store::draft_is_disposable` **called** — the same seed comparison the draft half uses, verified at `cmd/tax.rs:668` against `input_form_store.rs:242`/`:538` — so the two halves cannot diverge and a new `ReturnInputs` field is protected the day it is added. ★★ The destructive path was PRESCRIBED BY THE PRODUCT five times, including verbatim as the escape from an FR-200-shaped wall: that is how a data-loss path gets taken. ★★ And it was an unimplemented spec mandate — `SPEC_input_surface.md` §D-7 already required the confirmation, which is worse than an undesigned gap because everyone downstream could assume it existed. ★ Half (b) was machine-checked in the PDF (AcroForm `c1_5[0] /V=/1` → `/Off`) and is not a display bug: printing the deleted answer would FABRICATE §6065 testimony, so the fix had to be at the point of destruction.
   Reported and not yet controller-reproduced. Two halves:
   (a) **the weaker artifact is protected and the stronger is not** — a draft demands an explicit
   `--discard-draft`, a committed return does not;
@@ -9340,3 +9341,19 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   ★ Note what is NOT wrong here: the refusal itself. §170(f)(8)(A) genuinely denies a deduction with no
   contemporaneous written acknowledgment, so the fail-closed behaviour is correct and must survive this
   work.
+
+- **★★ FR-242 — two NEWER IRS EDITIONS exist and are not archived, so `xtask authority-refresh --check` exits 1 at HEAD. Important, and on the January critical path. Owning phase: NOW.**
+  Surfaced 2026-09-14 while archiving Pub 936; **pre-existing and unrelated to that commit** — the same
+  run reports *"0 note(s) drifted"*, so nothing in the tree moved.
+  ```
+  ★ A NEWER EDITION EXISTS: f5498sa--2026 (https://www.irs.gov/pub/irs-prior/f5498sa--2026.pdf)
+  ★ A NEWER EDITION EXISTS: i1099sa--2026 (https://www.irs.gov/pub/irs-prior/i1099sa--2026.pdf)
+  ```
+  ★ The tool already states the correct procedure and it must be followed rather than shortcut: *"A
+  different hash is not a corrupt download — it is the IRS REVISING the authority. Archive the new
+  revision IN ADDITION, give it a census entry per edition, and let `box_census::revision_in_force`
+  decide which tax year it governs. Never overwrite the old note in place."*
+  ★★ Both are **information returns** (HSA: Form 5498-SA and the 1099-SA instructions), i.e. documents a
+  filer receives for a 2026 return — which is exactly the year this product intends to file. A gate that
+  exits 1 at HEAD is also a gate whose next failure nobody will notice, so this is worth closing for the
+  instrument's sake as much as the forms'. ★ Note it is NOT part of `make check`, which is why it sat here.
