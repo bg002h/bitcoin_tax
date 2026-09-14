@@ -8,7 +8,7 @@ answer \- Answer the return\*(Aqs fail\-loud questions interactively — the yes
 .SH DESCRIPTION
 Answer the return\*(Aqs fail\-loud questions interactively — the yes/no boxes that have no safe default (can someone claim you as a dependent? Schedule B\*(Aqs foreign\-account and foreign\-trust lines) plus the optional dates of birth.
 .PP
-These questions REFUSE the return until they are answered: guessing "no" on your behalf would understate your tax and print an unchecked box you never affirmed. This is the only way to answer them without editing a TOML file. It never asks for a secret — SSNs and the IP PIN belong to `set\-pii`, which does not echo what you type.
+These questions REFUSE the return until they are answered: guessing "no" on your behalf would understate your tax and print an unchecked box you never affirmed. This is the only way to answer them without editing a TOML file. It never asks for a secret — SSNs and the IP PIN are not asked for here at all; they reach the vault through the `[header]` table of an `income import` file. (FR\-225: this used to name a `set\-pii` command, which has never existed.)
 .PP
 It ALSO asks for the payments you made that no W\-2 or 1099 reports: your estimated (Form 1040\-ES) payments, anything you sent with an extension request, and withholding from forms you did not transcribe. Those are not fail\-loud — nothing refuses a zero, because zero is the right answer for most filers — but nothing else in this command could ask for them either, so a filer who paid quarterly estimates and used only the interview filed without them and OVERSTATED their own tax. They are asked last, and a bare Enter keeps the figure shown.
 .PP

@@ -3455,12 +3455,65 @@ pub fn screen_absolute(
                 // ★ The cure differs by case, and offering the wrong one is worse than offering
                 //   none: "remove that gift from the deduction" is meaningless to a filer whose
                 //   return deducts nothing this year.
-                let cure = if cwa_claimed > Usd::ZERO {
-                    "If a charity will not provide one, remove that gift from the deduction"
+                //
+                // ★★★ **FR-225 — AND THE CLAIMED-THIS-YEAR CURE IS NOW DERIVED FROM *WHICH GIFT
+                //     ARMED THE GATE*, because the one sentence it used to print was performable for
+                //     one source and IMPOSSIBLE for the other.**
+                //
+                //     *"remove that gift from the deduction"* is a real act on a
+                //     `[[schedule_a.charitable]]` row — the filer owns that list. It is not an act at
+                //     all on a ledger donation: `Removal.claimed_deduction` is computed by
+                //     `project::fold` from the donation's legs and no CLI verb writes it, so a crypto
+                //     donor was told to do something the product cannot do. A correct refusal with an
+                //     unperformable cure is still a brick, and it is the same class FR-225 opened on
+                //     — the remedy, never the refusal.
+                //
+                // ★★ It reads [`cwa_gift_sources`], the SAME decider the gate above consulted, so the
+                //    cure cannot drift from the condition. And where there is no cure it SAYS so
+                //    rather than defaulting to the performable-sounding one: naming an impossible act
+                //    is worse than telling the filer nothing (`CLAUDE.md`'s journey-walk rule), and
+                //    btctax will not offer to void or re-classify the donation instead, because the
+                //    donation happened and forgoing a deduction is not denying the gift.
+                let cure: String = if cwa_claimed > Usd::ZERO {
+                    let src = cwa_gift_sources(ri, state, year);
+                    let mut c = String::new();
+                    if src.schedule_a_entry {
+                        c.push_str(
+                            "★ IF A CHARITY WILL NOT PROVIDE ONE, you may instead FORGO the \
+                             deduction for that gift. That is lawful, and it is NOT a statement that \
+                             the gift did not happen: delete its `[[schedule_a.charitable]]` entry \
+                             and re-run `btctax income import` — your recorded answers are kept, \
+                             btctax re-attaches them. This question is then put to you again about \
+                             the gifts that REMAIN, and answering yes is honest only if you hold an \
+                             acknowledgment for every one of those. ",
+                        );
+                    }
+                    if src.ledger_donation {
+                        c.push_str(
+                            "★ FOR A CRYPTO GIFT THERE IS NO SUCH ALTERNATIVE, and btctax says so \
+                             rather than name an act you cannot perform: it computes the §170(e) \
+                             deduction for a ledger donation from the donation event itself, and no \
+                             command un-claims it. Voiding the event, or re-classifying it as \
+                             something other than a charitable contribution, would record in your \
+                             ledger something other than what happened — and btctax will not rewrite \
+                             your ledger to get past a substantiation rule. For that gift the \
+                             acknowledgment is the only cure. ",
+                        );
+                    }
+                    if c.is_empty() {
+                        // Unreachable through the gate above, which required one of the two sources.
+                        // A fail-safe that offers NO cure beats one that defaults to an impossible.
+                        c.push_str(
+                            "★ The acknowledgment is the only cure btctax can offer for this \
+                             return. ",
+                        );
+                    }
+                    c
                 } else {
                     "If a charity will not provide one, that gift is not deductible in any year — \
                      §170(f)(8)(A) denies it outright — so it must not be carried forward either; \
                      `--write-carryover` will refuse to persist it"
+                        .to_string()
                 };
                 return refusal(
                     RefuseReason::CharitableCwaUnresolved,
@@ -3476,8 +3529,10 @@ pub fn screen_absolute(
                      it \"by the date you file your return or the due date (including extensions) \
                      for filing your return, whichever is earlier\". Ask each charity for one \
                      showing the amount of money and a description (but not the value) of any \
-                     property, and whether it gave you goods or services in return. Then answer \
-                     yes and re-run. {cure}"
+                     property, and whether it gave you goods or services in return. Then run \
+                     `btctax income answer` and answer yes. (It puts this question again even \
+                     though you have already answered it — a recorded answer that STOPS the return \
+                     is not a settled question. FR-225.) {cure}"
                     ),
                 );
             }
@@ -3824,13 +3879,68 @@ pub fn a_single_gift_reaches_the_cwa_threshold(
     state: &LedgerState,
     year: i32,
 ) -> bool {
-    let largest_gift = crate::forms::max_single_donation_contribution(state, year).max(
-        ri.schedule_a
+    cwa_gift_sources(ri, state, year).any()
+}
+
+/// ★★★ **WHICH SOURCE holds the ≥$250 gift that armed the §170(f)(8) gate — and therefore WHICH CURE
+///     BTCTAX CAN ACTUALLY OFFER FOR IT** (FR-225).
+///
+/// The `Some(false)` refusal's fallback cure read *"remove that gift from the deduction"*, printed
+/// unconditionally over both sources. It is performable for one of them and **impossible** for the
+/// other, and the sentence did not distinguish them:
+///
+/// - [`CwaGiftSources::schedule_a_entry`] — a `ScheduleAInputs::charitable` row. **The filer owns that
+///   list**, so forgoing is a real act: delete the `[[schedule_a.charitable]]` entry and re-run
+///   `btctax income import`. That is safe to name because the import re-attaches the **stored** answer
+///   log rather than the file's (`cmd/tax.rs`, seam review C1), so the interview survives it.
+/// - [`CwaGiftSources::ledger_donation`] — a `Removal { kind: Donation }`. `Removal.claimed_deduction`
+///   is **computed** by `project::fold` from the donation's own legs, unconditionally
+///   (`claimed_deduction: Some(claimed_deduction)`), and **no CLI verb writes it**. So there is no
+///   filer-facing way to un-claim a crypto gift, and *"remove that gift"* named an act the product
+///   cannot perform — a brick behind a correct refusal, the same shape FR-225 opened on.
+///
+/// ★★ **BTCTAX DOES NOT OFFER TO VOID OR RE-CLASSIFY THE DONATION EVENT INSTEAD, and that is a
+///    testimony judgement rather than a missing feature.** The donation happened. Forgoing a
+///    deduction and denying the gift are different acts (`CLAUDE.md`, *"an entry is testimony"*), and
+///    rewriting the ledger to escape a substantiation rule would replace a dead end with a false
+///    entry — strictly worse. So the refusal **states the boundary** instead: an honest boundary is
+///    reviewable, a silent one is the defect.
+///
+/// ★ **One decider, two readers.** [`a_single_gift_reaches_the_cwa_threshold`] is this collapsed to a
+///   bool, and the refusal's cure is this read field-by-field — so the sentence a filer reads cannot
+///   drift from the condition that produced it. Two copies of the threshold test is exactly the
+///   *"the thing that decides was not the thing that knows"* shape `CLAUDE.md` names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CwaGiftSources {
+    /// A `ScheduleAInputs::charitable` entry is at or above [`CWA_SUBSTANTIATION_THRESHOLD`].
+    ///
+    /// [`CWA_SUBSTANTIATION_THRESHOLD`]: crate::tax::tables::CWA_SUBSTANTIATION_THRESHOLD
+    pub schedule_a_entry: bool,
+    /// A ledger `Donation` contribution is at or above the threshold. Per
+    /// [`crate::forms::max_single_donation_contribution`] this is the **contribution** (FMV), not the
+    /// §170(e)-reduced claim, and only donations the return actually deducts count.
+    pub ledger_donation: bool,
+}
+
+impl CwaGiftSources {
+    /// Whether the §170(f)(8) gate is armed at all.
+    #[must_use]
+    pub fn any(&self) -> bool {
+        self.schedule_a_entry || self.ledger_donation
+    }
+}
+
+/// The sources arming the §170(f)(8) gate for `year`. See [`CwaGiftSources`].
+#[must_use]
+pub fn cwa_gift_sources(ri: &ReturnInputs, state: &LedgerState, year: i32) -> CwaGiftSources {
+    let threshold = crate::tax::tables::CWA_SUBSTANTIATION_THRESHOLD;
+    CwaGiftSources {
+        schedule_a_entry: ri
+            .schedule_a
             .as_ref()
-            .and_then(|a| a.charitable.iter().map(|g| g.amount).max())
-            .unwrap_or(Usd::ZERO),
-    );
-    largest_gift >= crate::tax::tables::CWA_SUBSTANTIATION_THRESHOLD
+            .is_some_and(|a| a.charitable.iter().any(|g| g.amount >= threshold)),
+        ledger_donation: crate::forms::max_single_donation_contribution(state, year) >= threshold,
+    }
 }
 
 /// ★★★ **THE STANDARD-DEDUCTION DEFERRAL DONOR** (final whole-branch review, finding 1).

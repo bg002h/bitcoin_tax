@@ -164,10 +164,17 @@ impl fmt::Display for HeaderError {
                 "the {id:?} question is unanswered, and an unanswered box must not reach a filed form — \
                  run `btctax income answer`"
             ),
+            // ★★★ **FR-225 — THIS NAMED `btctax set-pii`, WHICH HAS NEVER EXISTED.** Found by
+            //     `btctax-cli/tests/refusal_remedies.rs` on its first run: there is no `set-pii`
+            //     subcommand anywhere in the clap tree, and identity reaches the vault only through
+            //     the `[header]` table of an `income import` file (or the input-form screens). So an
+            //     MFJ filer whose spouse row was missing was refused at export and sent to a command
+            //     that does not exist — the FR-225 class exactly, in a second crate.
             Self::MfjWithoutSpouse => write!(
                 f,
                 "a married-filing-jointly return has no spouse on file — the joint name and SSN cannot be \
-                 printed; add the spouse's identity (`btctax set-pii`) or change the filing status"
+                 printed; add the spouse's identity under `[header.spouse]` and re-run \
+                 `btctax income import`, or change the filing status"
             ),
             Self::Bank(e) => write!(
                 f,

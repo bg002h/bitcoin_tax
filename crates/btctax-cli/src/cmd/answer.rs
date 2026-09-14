@@ -2,13 +2,21 @@
 //!
 //! **Why it must exist.** The D-8 migration's recovery story was "just re-import one TOML line" — which
 //! assumes the user still HAS the TOML. The spec tells them to delete it (plaintext hygiene), `income
-//! show` emits masked JSON and so cannot regenerate it, and `set-pii` prompts for secrets only. Without
+//! show` emits masked JSON and so cannot regenerate it. Without
 //! `answer`, a TOML-less user faces a permanently-refusing year and no way to answer a single boolean: a
 //! wall, landing hardest on the people who did exactly what the spec told them to.
 //!
-//! **What it deliberately does NOT own: secrets.** SSNs and the IP PIN belong to `set-pii`, which is
-//! no-echo. `answer` is an ordinary echoing prompt — routing a secret through it would print a crown jewel
-//! into terminal scrollback.
+//! **What it deliberately does NOT own: secrets.** `answer` is an ordinary echoing prompt — routing a
+//! secret through it would print a crown jewel into terminal scrollback. SSNs and the IP PIN
+//! (`header.ip_pin`, `header.spouse_ip_pin`) reach the vault through the `[header]` table of an
+//! `income import` file, or the input-form screens.
+//!
+//! ★ FR-225: this used to say those secrets "belong to `set-pii`, which is no-echo". Both halves were
+//!   false — there has never been a `set-pii` subcommand, and the only no-echo prompt in the binary is
+//!   the vault passphrase (`main.rs`, `rpassword`). The *conclusion* was right and stands: `answer`
+//!   must not carry secrets. Only the named owner was invented. The new
+//!   `btctax-cli/tests/refusal_remedies.rs` cannot see this line — it excludes doc comments by a
+//!   stated boundary — so it was fixed by hand rather than by the gate.
 use crate::{return_inputs, CliError, Session};
 use btctax_core::tax::dependent_gates::{
     gate_is_answered, DependentGateQuestion, GateKind, DEPENDENT_GATES,

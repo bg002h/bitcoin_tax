@@ -667,8 +667,9 @@ pub enum IncomeCmd {
     ///
     /// These questions REFUSE the return until they are answered: guessing "no" on your behalf would
     /// understate your tax and print an unchecked box you never affirmed. This is the only way to answer
-    /// them without editing a TOML file. It never asks for a secret — SSNs and the IP PIN belong to
-    /// `set-pii`, which does not echo what you type.
+    /// them without editing a TOML file. It never asks for a secret — SSNs and the IP PIN are not asked
+    /// for here at all; they reach the vault through the `[header]` table of an `income import` file.
+    /// (FR-225: this used to name a `set-pii` command, which has never existed.)
     ///
     /// It ALSO asks for the payments you made that no W-2 or 1099 reports: your estimated (Form
     /// 1040-ES) payments, anything you sent with an extension request, and withholding from forms you

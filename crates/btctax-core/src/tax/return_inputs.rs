@@ -874,7 +874,9 @@ pub struct Dependent {
 /// 1040 header / PII (vault-only). Fold into the per-year `ReturnInputs` blob (the 1040 is per-year).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct HouseholdHeader {
-    /// `#[serde(default)]` deliberately: the taxpayer's PII is captured LATER (`btctax set-pii`) and is
+    /// `#[serde(default)]` deliberately: the taxpayer's PII may be supplied LATER (the `[header]`
+    /// table of a re-`import`, or the input-form screens — FR-225: there is no `set-pii` verb, which
+    /// is what this comment used to name) and is
     /// only enforced at export (an SSN-less return refuses there, not at import). Without the default, any
     /// partial `[header]` table — e.g. one that answers only the dependent flag — failed with
     /// "missing field `taxpayer`", which D-8 turned from a curiosity into a wall, since `[header]` is now
