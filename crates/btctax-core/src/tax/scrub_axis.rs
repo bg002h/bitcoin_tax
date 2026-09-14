@@ -621,6 +621,26 @@ pub fn maximal_sentinel() -> ReturnInputs {
             points_not_on_1098: dec!(8),
             mortgage_all_used_to_buy_build_improve: Some(true),
             mortgage_within_debt_limit: Some(true),
+            // ★★★ FR-200a — Pub. 936 Table 1's block, REALIZED for `state_local_refund`'s reason: a
+            //     maximal fixture leaves no `Option` at `None`, or the `LEAF_SOURCE` KAT's
+            //     *"every prefix matches at least one money leaf"* direction has nothing to match.
+            //
+            // ★★ The four balances are chosen so the worksheet reaches its line-12 STOP (line 11 =
+            //    $201 ≥ line 12 = $201, since line 6 = 66 + 67 = $133 and line 10 = 133 + 68 =
+            //    $201), which is what makes the block sit BESIDE `mortgage_within_debt_limit:
+            //    Some(true)` without contradicting it: *"all of your interest is deductible"* is the
+            //    same answer as *"I was inside every limit"*. Make line 12 larger than line 11 on
+            //    this fixture and `MortgageDebtLimitContradicted` refuses, which would mask every
+            //    cell of the matrix.
+            pub936_table1: Some(crate::tax::pub936_table1::Table1Facts {
+                line1_grandfathered: dec!(66),
+                line2_acquisition_before_dec_16_2017: dec!(67),
+                line7_acquisition_after_dec_15_2017: dec!(68),
+                line12_all_mortgages: dec!(201),
+                mortgages_exceed_fair_market_value: false,
+                april_2018_binding_contract: false,
+                provenance: CarryProvenance::User,
+            }),
             mortgage_dwelling_is_amt_qualified: Some(true),
             investment_interest: dec!(9),
             charitable: vec![

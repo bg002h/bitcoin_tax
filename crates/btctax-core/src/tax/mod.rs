@@ -34,6 +34,11 @@ pub mod printed;
 /// ★★★ **R10 — provenance** (`design/SPEC_interview.md`): `LEAF_SOURCE`, the answer log and its one
 /// writer, the `prompt_hash` mismatch rule, and the dependent-identity key. See module doc.
 pub mod provenance;
+/// ★★★ **FR-200a — Pub. 936 TABLE 1**, *Worksheet To Figure Your Qualified Loan Limit and Deductible
+/// Home Mortgage Interest for the Current Year*, transcribed line by line (all sixteen lines, both
+/// Part I branch bullets and Part II's STOP) from the archived text layer. It is what replaces
+/// refusing the whole packet over an over-$750,000 mortgage. See module doc.
+pub mod pub936_table1;
 pub mod qbi;
 pub mod qbi_a;
 pub mod questions;

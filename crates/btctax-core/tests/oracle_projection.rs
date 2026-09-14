@@ -27,6 +27,7 @@ use btctax_core::tax::testonly::{
     normalize_leaf_path, oracle_invisible_entry, project_to_golden, ty2024_params, ty2024_table,
     GoldenCreditColumn, GoldenDependent, GoldenInputs, GOLDEN_FILING_STATUSES, ORACLE_INVISIBLE,
 };
+use rust_decimal_macros::dec;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -177,7 +178,38 @@ fn probe_fixtures() -> Vec<ReturnInputs> {
         .as_mut()
         .expect("the maximal sentinel carries a Schedule A")
         .salt_use_sales_tax = Some(true);
-    vec![base, sales_tax]
+    // ★★★ **FR-200a — A THIRD FIXTURE, for exactly the reason the second one exists.** Schedule A
+    //     line 8a is now apportioned by Pub. 936 Table 1 whenever the filer declares that a
+    //     §163(h)(3)(B) limit applies (`mortgage_within_debt_limit == Some(false)`) — so
+    //     `schedule_a.pub936_table1`'s four average balances reach the oracle row through the FILED
+    //     line 8a, which is what `mortgage_interest` projects. On the `Some(true)` fixtures above the
+    //     apportionment never runs and all four balances look invisible, which is precisely the
+    //     one-setting blindness the sales-tax fixture was added to fix.
+    //
+    // ★★ **The four balances are set COHERENTLY**, not left at the derived `1000 + 137 * i` probe
+    //    amounts: in field order those give line 12 the largest value but still below lines 1 + 2 + 7,
+    //    which trips `Line12BelowItsComponents` and makes the worksheet refuse rather than apportion.
+    //    A fixture that refuses is a fixture that measures nothing. These figures put line 11 at
+    //    $500,000 against a $1,000,000 line 12, so line 14 is 0.500 and every one of the four moves
+    //    it when perturbed.
+    let mut over_the_limit = base.clone();
+    {
+        let a = over_the_limit
+            .schedule_a
+            .as_mut()
+            .expect("the maximal sentinel carries a Schedule A");
+        a.mortgage_within_debt_limit = Some(false);
+        a.pub936_table1 = Some(btctax_core::tax::pub936_table1::Table1Facts {
+            line1_grandfathered: Usd::ZERO,
+            line2_acquisition_before_dec_16_2017: Usd::ZERO,
+            line7_acquisition_after_dec_15_2017: dec!(500000),
+            line12_all_mortgages: dec!(1000000),
+            mortgages_exceed_fair_market_value: false,
+            april_2018_binding_contract: false,
+            provenance: btctax_core::tax::return_inputs::CarryProvenance::User,
+        });
+    }
+    vec![base, sales_tax, over_the_limit]
 }
 
 /// Every money leaf whose FIGURE moves the projection on at least one probe fixture — measured by

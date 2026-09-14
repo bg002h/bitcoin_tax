@@ -3100,7 +3100,19 @@ pub fn screen(ri: &ReturnInputs) -> Option<Refusal> {
             .map(|p| p.trim_start_matches("RefuseReason::").to_string())
             .collect();
         assert_eq!(cen.variants, joined, "the two derivations disagree");
-        assert_eq!(cen.variants.len(), 135, "measured at HEAD 2026-09-14");
+        // ★★ 135 → 139 on 2026-09-14 when Pub 936 Table 1 landed (FR-200a), and this pin is the third
+        //    thing today to catch a variant appearing beneath it. The four are
+        //    MortgageApril2018TransitionRule, MortgageDebtLimitContradicted,
+        //    MortgageFairMarketValueLimit and Pub936Table1Line12BelowItsComponents — every one a
+        //    fail-closed refusal for a mortgage case the worksheet does NOT model, which is the
+        //    correct shape: transcribing two of four limits must not silently widen the other two.
+        //
+        // ★ None of them is classified as year-reading and none belongs in `year_payload`, checked
+        //   rather than assumed: all four are keyed on the FILER'S FACTS (a transition-rule date, a
+        //   contradiction between two answers, an FMV comparison, a line-12 cross-foot), not on the
+        //   tax year, and none carries a `year` in its payload. A condition-keyed refusal is not a
+        //   year wall, and counting it as one would overstate what `blockers <year>` knows.
+        assert_eq!(cen.variants.len(), 139, "measured at HEAD 2026-09-14");
         assert!(
             cen.sites.len() >= 95,
             "95 raise sites measured at HEAD; found {}",

@@ -747,6 +747,7 @@ $ btctax --vault v.pgp income show --year 2024
     "points_not_on_1098": "0",
     "mortgage_all_used_to_buy_build_improve": true,
     "mortgage_within_debt_limit": true,
+    "pub936_table1": null,
     "mortgage_dwelling_is_amt_qualified": true,
     "investment_interest": "0",
     "charitable": [

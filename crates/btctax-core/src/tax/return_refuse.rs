@@ -1021,11 +1021,52 @@ pub enum RefuseReason {
     /// amount for a filer the statute caps, which UNDERSTATES the tax on a **filed** figure that neither
     /// oracle can catch (both consume line 8a as an input — §G-9). Fail loud.
     MortgageDebtLimitUnanswered,
-    /// **§163(h)(3)(B)** — answered ADVERSELY ("one of the debt limits bites"). See
-    /// [`ScheduleAInputs::mortgage_within_debt_limit`] for why neither available number is filable.
+    /// **§163(h)(3)(B)** — answered ADVERSELY ("one of the debt limits bites") **and Pub. 936
+    /// Table 1's figures were never supplied.**
+    ///
+    /// ★★★ **NARROWED AT FR-200a, and the narrowing is the bug fix.** This rule used to refuse the
+    /// whole packet — Form 8949 and Schedule D included — for any itemizer who answered truthfully
+    /// that a limit applied, because btctax modelled none of Pub. 936. [`crate::tax::pub936_table1`]
+    /// now works the worksheet the instruction points at, so this survives only for the state the
+    /// worksheet itself reports as unworkable for want of input
+    /// ([`NotUsable::FactsNotCollected`]) — the state every existing vault is in, and the one whose
+    /// cure is typing four balances rather than abandoning the year.
     ///
     /// [`ScheduleAInputs::mortgage_within_debt_limit`]: crate::tax::return_inputs::ScheduleAInputs::mortgage_within_debt_limit
+    /// [`NotUsable::FactsNotCollected`]: crate::tax::pub936_table1::NotUsable::FactsNotCollected
     MortgageOverDebtLimit,
+    /// ★★★ **i1040sca's FOURTH home-mortgage limit — *"Limit when loans exceed the fair market value
+    /// of the home"*** (FR-200a), affirmed on a return that itemizes mortgage interest.
+    ///
+    /// Deliberately NOT a reuse of [`Self::MortgageOverDebtLimit`]: that one is cured by supplying
+    /// Table 1's figures, and this one cannot be cured by any figure, because **Pub. 936 (2025) prints
+    /// no worksheet for this limit and does not mention it.** i1040sca says *"see Pub. 936 to figure
+    /// your deduction"* and Pub. 936 does not figure it — a pre-TCJA instruction whose worksheet went
+    /// away with home-equity-debt deductibility. btctax will not invent one.
+    MortgageFairMarketValueLimit,
+    /// ★★★ **Figure A's footnote 3 — the April 2018 written-binding-contract transition rule**
+    /// (FR-200a), affirmed on a return that itemizes mortgage interest.
+    ///
+    /// The rule re-buckets a balance from Table 1 line 7 (the $750,000 ceiling) to line 2 (the
+    /// $1,000,000 one), which is the FILER-FAVOURABLE direction — so ignoring it would OVERSTATE the
+    /// tax, and applying it needs the loan and the amount, which btctax does not collect. It refuses
+    /// rather than pick a direction on the filer's behalf.
+    MortgageApril2018TransitionRule,
+    /// ★★★ **Pub. 936 Table 1 line 12 is below lines 1 + 2 + 7** (FR-200a). Line 12's own sentence is
+    /// *"Enter the total of the average balances of all mortgages from lines 1, 2, and 7 on all
+    /// qualified homes"*, so a smaller figure contradicts the form. Refused rather than clamped: a
+    /// clamp would print a deduction figured from a number the worksheet says cannot exist.
+    Pub936Table1Line12BelowItsComponents,
+    /// ★★★ **TWO TESTIMONIES about the §163(h)(3)(B) limit** (FR-200a). The filer answered *"yes, I am
+    /// inside every home-mortgage debt limit"* — which leaves Schedule A line 8a at the full Form 1098
+    /// amount — and also supplied Pub. 936 Table 1's figures, which work out to a QUALIFIED LOAN LIMIT
+    /// below their total mortgage balance, i.e. to a limit that bites.
+    ///
+    /// btctax cannot know which is the filer's real answer on a return they sign under §6065, so it
+    /// refuses rather than choose. ★ The reverse pairing is NOT a contradiction and does not refuse: a
+    /// filer inside every limit whose Table 1 reaches the line-12 STOP is simply being told by the
+    /// worksheet what they already said.
+    MortgageDebtLimitContradicted,
     /// **Schedule D line 20 / Schedule A line 9** — the Form 4952 declaration is unanswered. Line 20
     /// asserts *"you are not filing Form 4952"* on every both-gains return, and nothing on the return
     /// recorded it: btctax was signing that clause for the filer under §6065.
@@ -2568,10 +2609,52 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             points_not_on_1098,
             mortgage_all_used_to_buy_build_improve: _,
             mortgage_within_debt_limit: _, // a declaration, not money
+            // ★★★ FR-200a — Pub. 936 Table 1's four average balances. Screened just below: every one
+            //   of them is a balance magnitude, and a negative would move the deduction. See there.
+            pub936_table1,
             mortgage_dwelling_is_amt_qualified: _, // a declaration, not money
             investment_interest,
             charitable,
         } = a;
+        // ★★★ **FR-200a — Pub. 936 Table 1's average balances.** Destructured `_`-free for the same
+        //     reason every block here is: a line added to the worksheet's fact struct does not
+        //     compile until someone decides whether a negative is nonsense on it.
+        //
+        // ★★ A negative on ANY of the four moves the deduction, and lines 1 and 12 move it in the
+        //    UNDERSTATING direction, which is why this is a screen and not a clamp:
+        //    a negative line 1 lowers line 4's `max` floor and line 5, shrinking line 6 — but a
+        //    negative line 12 makes line 14's DENOMINATOR smaller, so the ratio (and the deduction)
+        //    grows without bound. A negative line 7 inflates nothing on its own but breaks the
+        //    line-12 bound; a negative line 2 shrinks line 5 and understates the limit.
+        if let Some(t1) = pub936_table1 {
+            let crate::tax::pub936_table1::Table1Facts {
+                line1_grandfathered,
+                line2_acquisition_before_dec_16_2017,
+                line7_acquisition_after_dec_15_2017,
+                line12_all_mortgages,
+                mortgages_exceed_fair_market_value: _, // a declaration, not money
+                april_2018_binding_contract: _,        // a declaration, not money
+                provenance: _,                         // ours, not a figure
+            } = t1;
+            if neg(*line1_grandfathered) {
+                return Some("Pub. 936 Table 1 line 1 (average balance of grandfathered debt)");
+            }
+            if neg(*line2_acquisition_before_dec_16_2017) {
+                return Some(
+                    "Pub. 936 Table 1 line 2 (average balance of pre-December-16-2017 home \
+                     acquisition debt)",
+                );
+            }
+            if neg(*line7_acquisition_after_dec_15_2017) {
+                return Some(
+                    "Pub. 936 Table 1 line 7 (average balance of post-December-15-2017 home \
+                     acquisition debt)",
+                );
+            }
+            if neg(*line12_all_mortgages) {
+                return Some("Pub. 936 Table 1 line 12 (average balances of all mortgages)");
+            }
+        }
         if neg(*medical) {
             return Some("Schedule A medical expenses");
         }
@@ -10172,11 +10255,23 @@ mod tests {
 
     /// ★★ **The over-limit refusal must carry BOTH failure directions and the cure.** A refusal that
     /// named only one direction would read as an invitation to take the other — and taking the "full
-    /// 1098" direction is the understatement this whole item exists to stop. The message is the entire
-    /// remedy here (nothing computes from the answer), so the message is what the test pins.
+    /// 1098" direction is the understatement this whole item exists to stop.
     ///
-    /// B1 mutation: drop any one of the pinned phrases from the `MortgageOverDebtLimit` detail and the
-    /// matching assertion reds by name.
+    /// ★★★ **UPDATED AT FR-200a, and the three pins that changed are the fix showing through.** The
+    /// old message was the entire remedy, because nothing computed from the answer; it therefore
+    /// pinned *"deductible home mortgage interest worksheet"*, the not-yet-existing
+    /// `mortgage_interest_deductible` input, and the *"fair market value"* limit all in one sentence.
+    /// Now [`crate::tax::pub936_table1`] WORKS that worksheet, so:
+    ///
+    /// - the worksheet is named by its real title (*"Worksheet To Figure Your Qualified Loan Limit
+    ///   and Deductible Home Mortgage Interest for the Current Year"*) rather than by a paraphrase;
+    /// - the cure is the `[schedule_a.pub936_table1]` table and the FOUR lines it wants, pinned line
+    ///   by line — a refusal whose exit a filer cannot act on is still a wall;
+    /// - the fair-market-value limit has moved to its OWN refusal, pinned in the second block below,
+    ///   because it is the one limit no supplied figure can cure.
+    ///
+    /// B1 mutation: drop any one of the pinned phrases from either detail and the matching assertion
+    /// reds by name.
     #[test]
     fn the_over_limit_refusal_states_both_directions_and_names_the_pub_936_worksheet() {
         use crate::tax::return_inputs::ScheduleAInputs;
@@ -10215,16 +10310,66 @@ mod tests {
             "understate", // deducting the full 1098 amount
             "overstate",  // zeroing line 8a
             "pub. 936",   // the cure the instructions prescribe
-            "deductible home mortgage interest worksheet",
-            "mortgage_interest_deductible", // the input that will close this branch
+            // The worksheet, by its own printed title rather than a paraphrase of it.
+            "worksheet to figure your qualified loan limit and deductible home mortgage interest",
+            // …and the CURE, which is now a table the filer can fill rather than a preparer.
+            "[schedule_a.pub936_table1]",
+            "docs/income-import-schema.md",
+            "average balance",
+            "(line 1)",
+            "(line 2)",
+            "(line 7)",
+            "(line 12)",
             "$750,000",
             "$1,000,000",
-            "fair market value",
         ] {
             assert!(
                 d.contains(phrase),
                 "the over-limit refusal must say {phrase:?}; got: {}",
                 refusal.detail
+            );
+        }
+
+        // ══ THE FAIR-MARKET-VALUE LIMIT'S OWN REFUSAL, which no figure cures. ══════════════════════
+        //
+        // ★★★ It carries the FINDING as its reason: Pub. 936 (2025) prints no worksheet for this
+        //     limit, so *"see Pub. 936 to figure your deduction"* points at nothing. A filer told only
+        //     *"supply Table 1's figures"* would supply them and be refused again.
+        {
+            let a = r.schedule_a.as_mut().expect("the fixture built one");
+            a.pub936_table1 = Some(crate::tax::pub936_table1::Table1Facts {
+                line1_grandfathered: Usd::ZERO,
+                line2_acquisition_before_dec_16_2017: Usd::ZERO,
+                line7_acquisition_after_dec_15_2017: dec!(2000000),
+                line12_all_mortgages: dec!(2000000),
+                mortgages_exceed_fair_market_value: true,
+                april_2018_binding_contract: false,
+                provenance: crate::tax::return_inputs::CarryProvenance::User,
+            });
+        }
+        let ar = assemble_absolute(&r, &st, &params(), &tbl(), 2024);
+        let fmv = crate::tax::return_1040::screen_absolute(
+            &r,
+            &ar,
+            &params(),
+            &st,
+            2024,
+            crate::forms::InformationReturnRegime::NONE,
+        )
+        .expect("the fair-market-value limit still refuses");
+        assert_eq!(fmv.reason, RefuseReason::MortgageFairMarketValueLimit);
+        let d = fmv.detail.to_ascii_lowercase();
+        for phrase in [
+            "fair market value",
+            "pub. 936",
+            "no worksheet",    // the finding: the publication does not figure it
+            "will not invent", // …and btctax will not supply one
+            "btctax report",   // the part of the product that still runs
+        ] {
+            assert!(
+                d.contains(phrase),
+                "the fair-market-value refusal must say {phrase:?}; got: {}",
+                fmv.detail
             );
         }
     }

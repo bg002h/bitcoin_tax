@@ -1346,10 +1346,18 @@ fn classify_schedule_a(c: &mut Census, a: &ScheduleAInputs) {
         points_not_on_1098: _,
         mortgage_all_used_to_buy_build_improve,
         mortgage_within_debt_limit,
+        // ★★★ FR-200a — Pub. 936 Table 1's own block. RECORDED (never `_`) and classified in
+        //   `classify_pub936_table1` below, for the same reason `state_local_refund` is: it carries
+        //   two `bool` conditions, and a `_` here would erase the distinction between *"this encodes
+        //   no decision"* and *"we forgot it"* — which is the one thing this census exists for.
+        pub936_table1,
         mortgage_dwelling_is_amt_qualified,
         investment_interest: _, // plain `Usd` — the `_` rule permits a money scalar
         charitable,
     } = a;
+    if let Some(t1) = pub936_table1 {
+        classify_pub936_table1(c, t1);
+    }
     c.exempt(
         salt_use_sales_tax,
         Class::BenefitClaim,
@@ -1371,6 +1379,52 @@ fn classify_schedule_a(c: &mut Census, a: &ScheduleAInputs) {
     for g in charitable {
         classify_charitable_gift(c, g);
     }
+}
+
+/// ★★★ **FR-200a — Pub. 936 Table 1's block.** Four average balances and two conditions the
+/// publication and i1040sca make the filer test.
+///
+/// ★★ **Class `SerdeRequired`, not class-(A) declarations, for `classify_state_local_refund`'s exact
+/// reason.** Answered-ness lives one level up, in whether
+/// [`ScheduleAInputs::pub936_table1`](crate::tax::return_inputs::ScheduleAInputs::pub936_table1) is
+/// `Some` at all: the block is absent until the filer works the worksheet, and the worksheet REFUSES
+/// while it is absent
+/// ([`NotUsable::FactsNotCollected`](crate::tax::pub936_table1::NotUsable::FactsNotCollected)). No
+/// field inside a present block carries `#[serde(default)]`, so a TOML that omits one refuses to
+/// parse and there is no `false` for an unanswered condition to hide in.
+///
+/// ★ Each exemption names the form sentence the leaf transcribes, so a reader can check the claim
+///   against `pub936_table1.rs` without leaving this file.
+fn classify_pub936_table1(c: &mut Census, t1: &crate::tax::pub936_table1::Table1Facts) {
+    use crate::tax::pub936_table1::Table1Facts;
+    let Table1Facts {
+        // The four average balances — worksheet lines 1, 2, 7 and 12. `Usd`, which the `_` rule
+        // permits, and every one is negative-screened in `return_refuse::first_negative_amount`.
+        line1_grandfathered: _,
+        line2_acquisition_before_dec_16_2017: _,
+        line7_acquisition_after_dec_15_2017: _,
+        line12_all_mortgages: _,
+        mortgages_exceed_fair_market_value,
+        april_2018_binding_contract,
+        provenance,
+    } = t1;
+    const WHY: &str = "§2.8 — no #[serde(default)] on this field, so a TOML without it refuses to \
+                       parse; answered-ness for the whole Pub. 936 Table 1 worksheet lives in whether \
+                       `ScheduleAInputs::pub936_table1` is `Some`, and the worksheet REFUSES while it \
+                       is `None`";
+    c.exempt(
+        mortgages_exceed_fair_market_value,
+        Class::SerdeRequired,
+        WHY,
+    );
+    c.exempt(april_2018_binding_contract, Class::SerdeRequired, WHY);
+    c.exempt(
+        provenance,
+        Class::DataDerived,
+        "the balances' origin — typed by the filer, or carried from a prior-year return btctax \
+         computed (§G-23's \"stated zero\"). DATA about the amounts, not a defaulted answer for the \
+         filer",
+    );
 }
 
 fn classify_charitable_gift(c: &mut Census, g: &CharitableGift) {

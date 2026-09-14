@@ -1671,15 +1671,33 @@ pub struct ScheduleAInputs {
     ///
     /// A class-(A) DECLARATION, phrased so `true` — "I am inside every limit" — is the neutral answer
     /// that leaves line 8a at the full Form 1098 amount. `None` = never asked ⇒ refuse
-    /// (`MortgageDebtLimitUnanswered`). `Some(false)` = "one of the limits bites" ⇒ ALSO refuse
-    /// (`MortgageOverDebtLimit`): i1040sca's Line 8a instruction is *"Only enter on line 8a the
-    /// deductible mortgage interest and points that were reported to you on Form 1098"*, a determinate
-    /// NONZERO output of Pub. 936's Deductible Home Mortgage Interest Worksheet that btctax does not
-    /// model. Deducting the full 1098 figure would UNDERSTATE the tax; printing $0 would OVERSTATE it by
-    /// the whole deductible portion, and — unlike the mixed-use zero, which the line-8 checkbox
-    /// discloses — Schedule A carries no box that could explain it.
+    /// (`MortgageDebtLimitUnanswered`).
+    ///
+    /// ★★★ **`Some(false)` NO LONGER REFUSES BY ITSELF (FR-200a).** It used to: *"one of the limits
+    /// bites"* raised `MortgageOverDebtLimit` and killed the whole packet — Form 8949 and Schedule D
+    /// included — because btctax had never transcribed the worksheet the instruction points at. It
+    /// now selects [`Self::pub936_table1`], whose line 15 is the deductible amount i1040sca's line-8a
+    /// instruction asks for (*"Only enter on line 8a the deductible mortgage interest and points that
+    /// were reported to you on Form 1098"*). `MortgageOverDebtLimit` survives NARROWED to the one
+    /// state the worksheet cannot answer for itself — the figures were never supplied — and the
+    /// limits Pub. 936 does not figure get their own refusals.
     #[serde(default)]
     pub mortgage_within_debt_limit: Option<bool>,
+    /// ★★★ **Pub. 936 TABLE 1's own figures** — *Worksheet To Figure Your Qualified Loan Limit and
+    /// Deductible Home Mortgage Interest for the Current Year* (FR-200a). Read when
+    /// [`Self::mortgage_within_debt_limit`] is `Some(false)`, i.e. when the filer declared that one of
+    /// the §163(h)(3)(B) limits applies and the deduction therefore has to be figured.
+    ///
+    /// ★★★ **`None` REFUSES, and that is the point** — *"an entry is testimony"*: the worksheet needs
+    /// average balances per origination bucket, and a `0` invented for an unasked balance would make
+    /// every dollar of interest deductible. See
+    /// [`crate::tax::pub936_table1::Table1Facts`] for what each leaf is and which line it is.
+    ///
+    /// ★ An empty block is NOT the lawful "none" here (contrast
+    /// [`Self::mortgage_interest_not_on_1098`]): a filer inside every limit answers
+    /// `mortgage_within_debt_limit = true` and never reaches this field at all.
+    #[serde(default)]
+    pub pub936_table1: Option<crate::tax::pub936_table1::Table1Facts>,
     /// **Form 6251 line 3 — the AMT qualified-dwelling declaration.** i6251 p.8: "If you deducted home
     /// mortgage interest on Schedule A for a dwelling that isn't a principal residence (within the
     /// meaning of section 121) or qualified dwelling for AMT, include that deducted interest on line 3.

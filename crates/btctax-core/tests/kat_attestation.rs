@@ -1296,3 +1296,316 @@ fn a_mixed_use_mortgage_that_is_also_over_the_debt_limit_files_a_disclosed_zero(
          and it is the return the over-limit filer now gets too"
     );
 }
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// FR-200a — THE OVER-LIMIT MORTGAGE NO LONGER REFUSES THE PACKET.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// ★★★ **THE BUG, AND THE FIX, IN ONE TEST.** An itemizer who answered truthfully that a
+/// §163(h)(3)(B) debt limit applied to them could not file **anything** — `MortgageOverDebtLimit`
+/// refused the whole packet, Form 8949 and Schedule D included, which is the part this product
+/// exists to produce. The cause was not a hard tax question: nobody had transcribed Pub. 936's
+/// Table 1, the worksheet i1040sca points at four separate times.
+///
+/// The three states this walks, on ONE household with a $1,000,000 mortgage:
+///
+///   1. the answer given, **no Table 1 figures** ⇒ still refuses `MortgageOverDebtLimit`, now with an
+///      exit that names the four balances to supply (every existing vault is here);
+///   2. the same answer **with** Table 1's figures ⇒ **FILES**, and Schedule A line 8a carries
+///      line 14's fraction of the Form 1098 amount rather than all of it;
+///   3. the fair-market-value limit affirmed ⇒ refuses under its OWN reason, because Pub. 936 (2025)
+///      prints no worksheet for that one.
+///
+/// **Plant:** delete the `t1::decide(ri)` match arm for `Ok(_)` (i.e. refuse unconditionally again)
+/// ⇒ state 2 reds. Make `schedule_a_parts` skip the apportionment ⇒ the line-8a assertion in state 2
+/// reds. Fold `MortgageFairMarketValueLimit` into `MortgageOverDebtLimit` ⇒ state 3 reds.
+#[test]
+fn fr200a_an_over_limit_mortgage_files_once_pub936_table_1_is_supplied() {
+    use btctax_core::tax::pub936_table1::Table1Facts;
+    use btctax_core::tax::return_inputs::CarryProvenance;
+
+    let params = ty2024_params();
+    let table = ty2024_table();
+    // $40,000 of Form 1098 interest on a $1,000,000 post-2017 mortgage. The interest alone clears the
+    // $14,600 single standard deduction, so this filer ITEMIZES — which is the population the rule is
+    // gated on.
+    let base = r#"{"filing_status":"Single","w2_income":300000,"mortgage_interest":40000}"#;
+
+    let build = |facts: Option<Table1Facts>| {
+        let (mut ri, state) = household(base);
+        {
+            let a = ri.schedule_a.as_mut().expect("the fixture itemizes");
+            a.mortgage_all_used_to_buy_build_improve = Some(true);
+            // The truthful answer: a $1,000,000 balance is over the $750,000 post-2017 ceiling.
+            a.mortgage_within_debt_limit = Some(false);
+            a.pub936_table1 = facts;
+        }
+        answer_all_live_declarations(&mut ri);
+        let ar = assemble_absolute(&ri, &state, &params, &table, 2024);
+        (ri, state, ar)
+    };
+    let refusal = |ri: &ReturnInputs, ar: &AbsoluteReturn, state: &LedgerState| {
+        screen_absolute(
+            ri,
+            ar,
+            &params,
+            state,
+            2024,
+            btctax_core::InformationReturnRegime::NONE,
+        )
+        .map(|r| format!("{:?}", r.reason))
+    };
+
+    // ── STATE 1: the answer, and no worksheet figures. Still refuses — and MUST. ──────────────────
+    let (ri, state, ar) = build(None);
+    assert!(
+        ar.deduction_is_itemized,
+        "the premise: this filer itemizes, or the rule is not even reached"
+    );
+    assert_eq!(
+        screen_inputs(&ri, &table, &params),
+        None,
+        "nothing refuses at the INPUT screen — the debt limit is a deduction-level rule"
+    );
+    assert_eq!(
+        refusal(&ri, &ar, &state).as_deref(),
+        Some("MortgageOverDebtLimit"),
+        "with no average balances there is no honest figure, so it still refuses"
+    );
+    let detail = screen_absolute(
+        &ri,
+        &ar,
+        &params,
+        &state,
+        2024,
+        btctax_core::InformationReturnRegime::NONE,
+    )
+    .expect("state 1 refuses")
+    .detail;
+    // ★ The exit must name the CURE. Before FR-200a it told the filer to abandon the year ("file
+    //   this year's Schedule A by hand"); now it names the table and the four lines.
+    for phrase in [
+        "[schedule_a.pub936_table1]",
+        "Qualified Loan Limit",
+        "line 1",
+        "line 2",
+        "line 7",
+        "line 12",
+    ] {
+        assert!(
+            detail.contains(phrase),
+            "the refusal's exit must name {phrase:?} — a filer who cannot reach the cure is still \
+             walled:\n{detail}"
+        );
+    }
+
+    // ── STATE 2: the same answer WITH Table 1's figures. THE WALL COMES DOWN. ─────────────────────
+    //
+    // $1,000,000 of post-2017 home acquisition debt, all of it the only mortgage. Table 1:
+    //   line 1 = 0, line 2 = 0, line 3 = $1,000,000, line 4 = $1,000,000, line 5 = 0, line 6 = 0,
+    //   line 7 = $1,000,000, line 8 = $750,000, line 9 = $750,000, line 10 = $1,000,000,
+    //   line 11 = $750,000, line 12 = $1,000,000, line 13 = $40,000, line 14 = 0.750,
+    //   line 15 = $30,000, line 16 = $10,000.
+    let facts = Table1Facts {
+        line1_grandfathered: Usd::ZERO,
+        line2_acquisition_before_dec_16_2017: Usd::ZERO,
+        line7_acquisition_after_dec_15_2017: dec!(1000000),
+        line12_all_mortgages: dec!(1000000),
+        mortgages_exceed_fair_market_value: false,
+        april_2018_binding_contract: false,
+        provenance: CarryProvenance::User,
+    };
+    let (ri2, state2, ar2) = build(Some(facts));
+    assert_eq!(
+        refusal(&ri2, &ar2, &state2),
+        None,
+        "★★★ THE FIX: an over-limit itemizer with Pub. 936 Table 1's figures FILES. Their Form 8949 \
+         and Schedule D — the part this product exists to produce — are no longer collateral damage \
+         of a worksheet nobody typed in."
+    );
+    let sa = ar2
+        .schedule_a
+        .as_ref()
+        .expect("an itemizing return has a Schedule A");
+    assert_eq!(
+        sa.mortgage_8a,
+        dec!(30000),
+        "★ line 8a carries line 14's fraction — 0.750 x $40,000 — and NOT the whole Form 1098 \
+         amount, which is what would have understated the tax"
+    );
+    assert!(
+        !sa.mortgage_mixed_use_box,
+        "the line-8 box belongs to the §163(h)(3)(F) mixed-use disclosure, not to this limit"
+    );
+    // ★ And the limit actually BINDS: the same household inside every limit deducts the full amount,
+    //   so the $10,000 difference is the worksheet doing work rather than a coincidence.
+    let (mut ri_in, state_in) = household(base);
+    {
+        let a = ri_in.schedule_a.as_mut().expect("the fixture itemizes");
+        a.mortgage_all_used_to_buy_build_improve = Some(true);
+        a.mortgage_within_debt_limit = Some(true);
+    }
+    answer_all_live_declarations(&mut ri_in);
+    let ar_in = assemble_absolute(&ri_in, &state_in, &params, &table, 2024);
+    assert_eq!(
+        ar_in.schedule_a.as_ref().expect("itemizing").mortgage_8a,
+        dec!(40000),
+        "the control: a filer inside every limit deducts all $40,000"
+    );
+    assert!(
+        ar2.taxable_income > ar_in.taxable_income,
+        "★ the over-limit filer's taxable income is HIGHER by the disallowed interest — the whole \
+         point of the limit, and a figure neither oracle can check (both take line 8a as an INPUT)"
+    );
+
+    // ── STATE 3: the limit Pub. 936 does not figure. Its own refusal, with its own remedy. ────────
+    let (ri3, state3, ar3) = build(Some(Table1Facts {
+        mortgages_exceed_fair_market_value: true,
+        ..facts
+    }));
+    assert_eq!(
+        refusal(&ri3, &ar3, &state3).as_deref(),
+        Some("MortgageFairMarketValueLimit"),
+        "★ \"widening an exemption is never the safe edit\" — the fourth limit is still a wall, and \
+         a DIFFERENT one, because no figure the filer supplies can cure it"
+    );
+    let (ri4, state4, ar4) = build(Some(Table1Facts {
+        april_2018_binding_contract: true,
+        ..facts
+    }));
+    assert_eq!(
+        refusal(&ri4, &ar4, &state4).as_deref(),
+        Some("MortgageApril2018TransitionRule"),
+        "★ and so is the transition rule, which moves a balance the filer-favourable way"
+    );
+
+    // ── STATE 4: two testimonies about one line. ──────────────────────────────────────────────────
+    let (mut ri5, state5) = household(base);
+    {
+        let a = ri5.schedule_a.as_mut().expect("the fixture itemizes");
+        a.mortgage_all_used_to_buy_build_improve = Some(true);
+        a.mortgage_within_debt_limit = Some(true); // "I was inside every limit"
+        a.pub936_table1 = Some(facts); // …and a worksheet that says otherwise
+    }
+    answer_all_live_declarations(&mut ri5);
+    let ar5 = assemble_absolute(&ri5, &state5, &params, &table, 2024);
+    assert_eq!(
+        refusal(&ri5, &ar5, &state5).as_deref(),
+        Some("MortgageDebtLimitContradicted"),
+        "★ one line, two answers, on a return signed under §6065 — btctax refuses rather than choose"
+    );
+
+    // ── STATE 5: the STANDARD-DEDUCTION twin is untouched, which is the phase-2 Critical's fix. ───
+    let (mut ri6, state6) =
+        household(r#"{"filing_status":"Single","w2_income":300000,"mortgage_interest":3000}"#);
+    {
+        let a = ri6.schedule_a.as_mut().expect("the fixture builds one");
+        a.mortgage_all_used_to_buy_build_improve = Some(true);
+        a.mortgage_within_debt_limit = Some(false);
+    }
+    answer_all_live_declarations(&mut ri6);
+    let ar6 = assemble_absolute(&ri6, &state6, &params, &table, 2024);
+    assert!(
+        !ar6.deduction_is_itemized,
+        "the premise: $3,000 of interest loses to the $14,600 standard deduction"
+    );
+    assert_eq!(
+        refusal(&ri6, &ar6, &state6),
+        None,
+        "a standard-deduction filer never prints line 8a, so the limit changes no figure and must \
+         not refuse — unchanged from before FR-200a"
+    );
+}
+
+/// ★★★ **FR-200a's SECOND unwalled filer: the apportionment can flip the §63(e) election.**
+///
+/// $16,000 of Form 1098 interest on a $1,000,000 post-2017 mortgage, single. The FULL figure beats the
+/// $14,600 standard deduction; Table 1's 0.750 fraction of it — $12,000 — does not. So the correct
+/// return for this household takes the **standard deduction** and files no Schedule A at all.
+///
+/// Before FR-200a `deduction_is_itemized` was computed from the uncapped $16,000, so this filer was
+/// itemizing as far as the screen could tell and `MortgageOverDebtLimit` refused the whole packet —
+/// over a Schedule A they were never going to file. The apportioned total is the right side of §63(e)'s
+/// comparison, and with it the election is determinate and the refusal is never reached.
+///
+/// **Plant:** make `schedule_a_parts` skip the apportionment ⇒ `deduction_is_itemized` goes true and
+/// the refusal assertion reds. Re-gate the refusal on `schedule_a.is_some()` instead of the election ⇒
+/// the same assertion reds.
+#[test]
+fn fr200a_apportionment_can_flip_the_63e_election_to_the_standard_deduction() {
+    use btctax_core::tax::pub936_table1::Table1Facts;
+    use btctax_core::tax::return_inputs::CarryProvenance;
+
+    let params = ty2024_params();
+    let table = ty2024_table();
+    let facts = Table1Facts {
+        line1_grandfathered: Usd::ZERO,
+        line2_acquisition_before_dec_16_2017: Usd::ZERO,
+        line7_acquisition_after_dec_15_2017: dec!(1000000),
+        line12_all_mortgages: dec!(1000000),
+        mortgages_exceed_fair_market_value: false,
+        april_2018_binding_contract: false,
+        provenance: CarryProvenance::User,
+    };
+    let base = r#"{"filing_status":"Single","w2_income":300000,"mortgage_interest":16000}"#;
+
+    let build = |t1: Option<Table1Facts>| {
+        let (mut ri, state) = household(base);
+        {
+            let a = ri.schedule_a.as_mut().expect("the fixture builds one");
+            a.mortgage_all_used_to_buy_build_improve = Some(true);
+            a.mortgage_within_debt_limit = Some(false);
+            a.pub936_table1 = t1;
+        }
+        answer_all_live_declarations(&mut ri);
+        let ar = assemble_absolute(&ri, &state, &params, &table, 2024);
+        (ri, state, ar)
+    };
+
+    // ── The premise: WITHOUT Table 1's figures this filer itemizes, and is refused. ────────────────
+    let (ri_a, state_a, ar_a) = build(None);
+    assert!(
+        ar_a.deduction_is_itemized,
+        "the premise: $16,000 of uncapped interest beats the $14,600 standard deduction"
+    );
+    assert_eq!(
+        screen_absolute(
+            &ri_a,
+            &ar_a,
+            &params,
+            &state_a,
+            2024,
+            btctax_core::InformationReturnRegime::NONE
+        )
+        .map(|r| format!("{:?}", r.reason))
+        .as_deref(),
+        Some("MortgageOverDebtLimit"),
+        "…and with no figures to work the worksheet with, it still refuses"
+    );
+
+    // ── WITH them, the election flips and the refusal is never reached. ───────────────────────────
+    let (ri_b, state_b, ar_b) = build(Some(facts));
+    assert!(
+        !ar_b.deduction_is_itemized,
+        "★ 0.750 x $16,000 = $12,000 LOSES to the $14,600 standard deduction, so §63(e) elects the \
+         standard deduction — the apportioned total is the right side of that comparison"
+    );
+    assert_eq!(
+        screen_absolute(
+            &ri_b,
+            &ar_b,
+            &params,
+            &state_b,
+            2024,
+            btctax_core::InformationReturnRegime::NONE
+        ),
+        None,
+        "★★ AND THE RETURN FILES, on the standard deduction, with no Schedule A — which is the \
+         correct return for this household and the one btctax refused to produce"
+    );
+    assert_eq!(
+        ar_b.deduction,
+        dec!(14600),
+        "the standard deduction, not the $12,000 apportioned itemized total"
+    );
+}

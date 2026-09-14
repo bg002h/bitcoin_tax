@@ -789,6 +789,29 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
         //     and FR-196b is now the task on the critical path rather than a tidy-up.
         //     REMOVE THIS ENTRY when the form section lands.
         "state_local_refund",
+        // ★★★ **FR-200a — Pub. 936 Table 1's figures, EXEMPT DELIBERATELY AND NARROWLY, with the
+        //     task that removes the exemption named.**
+        //
+        //     A LEAF entry for `state_local_refund`'s two reasons: the prefix ratchet above is AT its
+        //     ceiling, and a leaf is narrower on purpose — it covers the block only while the fixture
+        //     leaves it `None`. The day the fixture populates it, seven leaf paths appear and this
+        //     census demands a Field for every one of them.
+        //
+        //     ★ Same shape and same held-back reason: four average balances plus two DECLARATIONS
+        //     whose prompts are the deliverable, not the plumbing. *"Did the total of all your
+        //     mortgages exceed the home's fair market value?"* and the April-2018 written-binding-
+        //     contract condition each have to state exactly what permits a YES, and a wrong prompt
+        //     here turns a required refusal into a computed deduction.
+        //
+        //     ★★★ **The "nothing is reachable" half of this exemption does not exist**, and the
+        //     exemption is weaker for it — deliberately, so nobody mistakes it for safe. A return
+        //     carrying this block COMMITS and its line 15 PRINTS on Schedule A lines 8a/8b/8c; the
+        //     only thing between a filer and these figures is that they must be typed into an
+        //     `income import` TOML (`docs/income-import-schema.md` publishes every key) rather than
+        //     answered in the editor. That is a usability gap, not a safety one — and FR-200b is the
+        //     task on the critical path rather than a tidy-up.
+        //     REMOVE THIS ENTRY when the form section lands.
+        "schedule_a.pub936_table1",
     ];
     let is_exempt = |path: &str| {
         EXEMPT_LEAVES.contains(&path)

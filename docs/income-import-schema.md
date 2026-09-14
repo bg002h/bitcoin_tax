@@ -14,7 +14,7 @@ cargo run -p xtask -- toml-schema > docs/income-import-schema.md
 
 Start from [the worked example](#a-complete-worked-example) below and delete what does not apply to you.
 
-**Almost every key is optional to the PARSER** — `ReturnInputs` carries `#[serde(default)]` on nearly every field — so a short file parses. **63 are not**, and they are measured rather than remembered — each one was deleted from a complete file and handed back to the deserializer:
+**Almost every key is optional to the PARSER** — `ReturnInputs` carries `#[serde(default)]` on nearly every field — so a short file parses. **69 are not**, and they are measured rather than remembered — each one was deleted from a complete file and handed back to the deserializer:
 
 - `b_1099[].payer`
 - `capital_loss_carryforward_in.long`
@@ -49,6 +49,12 @@ Start from [the worked example](#a-complete-worked-example) below and delete wha
 - `schedule_a.charitable[].class`
 - `schedule_a.mortgage_interest_not_on_1098[].amount`
 - `schedule_a.mortgage_interest_not_on_1098[].recipient_name`
+- `schedule_a.pub936_table1.april_2018_binding_contract`
+- `schedule_a.pub936_table1.line12_all_mortgages`
+- `schedule_a.pub936_table1.line1_grandfathered`
+- `schedule_a.pub936_table1.line2_acquisition_before_dec_16_2017`
+- `schedule_a.pub936_table1.line7_acquisition_after_dec_15_2017`
+- `schedule_a.pub936_table1.mortgages_exceed_fair_market_value`
 - `schedule_b_filer_records[].payer_name`
 - `schedule_c.owner`
 - `state_local_refund.exception_could_be_claimed_as_dependent`
@@ -125,7 +131,7 @@ Two key groups are read and then **normalised away**, with a note on stderr rath
 
 ## Every key `income import` honours
 
-**389 paths, 352 of them leaves that take a value.** Derived from the serialized shape of `ReturnInputs` over `btctax_core::tax::scrub_axis::maximal_sentinel()` — the fixture whose every `Option` is `Some`, every `Vec` non-empty and every nested struct present, written as an exhaustive `..`-free struct literal so a new field is a compile error before it can be an unpublished key.
+**397 paths, 359 of them leaves that take a value.** Derived from the serialized shape of `ReturnInputs` over `btctax_core::tax::scrub_axis::maximal_sentinel()` — the fixture whose every `Option` is `Some`, every `Vec` non-empty and every nested struct present, written as an exhaustive `..`-free struct literal so a new field is a compile error before it can be an unpublished key.
 
 **Reading the paths.** `a.b` is the key `b` under `[a]`. `a[]` is a repeated table, written `[[a]]` once per row, and `a[].b` is a key inside one of those rows. A `<placeholder>` segment is a key YOU choose, not a literal:
 
@@ -455,6 +461,14 @@ Two key groups are read and then **normalised away**, with a note on stderr rath
 | `schedule_a.mortgage_interest_not_on_1098[].recipient_tin` | string |  |
 | `schedule_a.mortgage_within_debt_limit` | boolean |  |
 | `schedule_a.points_not_on_1098` | string |  |
+| `schedule_a.pub936_table1` | table |  |
+| `schedule_a.pub936_table1.april_2018_binding_contract` | boolean | **required** |
+| `schedule_a.pub936_table1.line12_all_mortgages` | string | **required** |
+| `schedule_a.pub936_table1.line1_grandfathered` | string | **required** |
+| `schedule_a.pub936_table1.line2_acquisition_before_dec_16_2017` | string | **required** |
+| `schedule_a.pub936_table1.line7_acquisition_after_dec_15_2017` | string | **required** |
+| `schedule_a.pub936_table1.mortgages_exceed_fair_market_value` | boolean | **required** |
+| `schedule_a.pub936_table1.provenance` | string | forced to `user` |
 | `schedule_a.salt_personal_property` | string |  |
 | `schedule_a.salt_prior_year_balance_paid` | string |  |
 | `schedule_a.salt_real_estate` | string |  |

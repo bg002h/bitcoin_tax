@@ -332,6 +332,17 @@ fn force_carry_provenance_to_user(ri: &mut ReturnInputs) {
     if let Some(w) = &mut ri.state_local_refund {
         w.provenance = CarryProvenance::User;
     }
+    // ★ FR-200a's seventh site — Pub. 936 Table 1's block. Same reasoning, and **the test found it**
+    //   rather than a reviewer: `every_provenance_key_the_schema_says_is_forced_actually_is` redded
+    //   the moment the leaf existed, naming `schedule_a.pub936_table1.provenance` verbatim. That is
+    //   FR-196a's instrument doing exactly the job it was built for.
+    if let Some(t1) = ri
+        .schedule_a
+        .as_mut()
+        .and_then(|a| a.pub936_table1.as_mut())
+    {
+        t1.provenance = CarryProvenance::User;
+    }
 }
 
 /// Parse a `ReturnInputs` from TOML text (split out for testing).

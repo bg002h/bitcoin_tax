@@ -544,6 +544,37 @@ pub fn schedule_a_parts(
     //     line 8a, which is the only line the §163(h)(3)(F) allocation would have to split.
     let mortgage_8b = ri.mortgage_interest_not_on_1098_total();
     let mortgage_8c = a.points_not_on_1098;
+    // ★★★ **FR-200a — Pub. 936 TABLE 1, APPLIED.** When the filer declared that one of the
+    //     §163(h)(3)(B) limits applies, lines 8a/8b/8c carry only line 14's fraction of what they
+    //     would otherwise print. This is where the refusal used to be instead of a figure.
+    //
+    // ★★ **`ok()` is safe here and only because `screen_absolute` stands in front of it.** Every
+    //    `Err` from the worksheet is a refusal there — no Table 1 figures, an affirmed
+    //    fair-market-value limit, an affirmed April-2018 contract, a line 12 below its own
+    //    components — so a return that reaches print with `Err` is one the gate already stopped. The
+    //    fall-through is the pre-FR-200a behaviour (the full 1098 amount), which is what a return
+    //    that cannot reach this worksheet has always printed.
+    //
+    // ★ **The mixed-use zero WINS over the apportionment, and must**: §163(h)(3)(F) forgoes the
+    //   whole of line 8a and checks the line-8 box, and `ratio × 0` is `0` either way — but 8b and 8c
+    //   are NOT zeroed by that box (T9), so they are still apportioned. Multiplying a zero changes
+    //   nothing, which is why this needs no special case.
+    let (mortgage_8a, mortgage_8b, mortgage_8c) =
+        match crate::tax::pub936_table1::limit_is_declared(ri)
+            .then(|| crate::tax::pub936_table1::decide(ri).ok())
+            .flatten()
+        {
+            Some(worked) => {
+                let ap = crate::tax::pub936_table1::apportion(
+                    &worked,
+                    mortgage_8a,
+                    mortgage_8b,
+                    mortgage_8c,
+                );
+                (ap.line8a, ap.line8b, ap.line8c)
+            }
+            None => (mortgage_8a, mortgage_8b, mortgage_8c),
+        };
     // ★ The dotted-line block, in the instruction's own order. `recipient_tin` cannot be empty on a
     //   return that screens (`NonForm1098InterestRecipientUnidentified`), so no row can reach the
     //   printed form as a name with no number.
@@ -3234,7 +3265,8 @@ pub fn screen_absolute(
     //    here, and `Some(true)` would have been false testimony under §6065.
     //
     // ★★★ WHY `deduction_is_itemized` IS EXACTLY THE RIGHT PREDICATE, and not merely a convenient one.
-    //     It is computed against the FULL (uncapped) Schedule A amounts. So:
+    //     When Table 1's figures are ABSENT it is computed against the FULL (uncapped) Schedule A
+    //     amounts, exactly as before FR-200a. So:
     //       - itemized-with-full-amount < standard  ⇒ the election is STANDARD under both hypotheses
     //         (the true capped figure is smaller, which only widens the gap). Determinate ⇒ safe to
     //         compute, and refusing would be wrong.
@@ -3242,6 +3274,21 @@ pub fn screen_absolute(
     //         cannot know the election either. Indeterminate ⇒ refuse, which is what happens.
     //     The predicate answers the question "is the election determinate without the number btctax
     //     is missing?" — which is the actual question, and it answers it exactly.
+    //
+    // ★★★ **FR-200a — AND WHERE THE FIGURES ARE PRESENT, THE PREDICATE READS THE CAPPED TOTAL, which
+    //     is both correct and a SECOND filer this unwalls.** `deduction_is_itemized` is
+    //     `itemized_was_chosen(ri, standard, schedule_a_parts(..).total_17)`, and `total_17` now
+    //     carries the APPORTIONED lines 8a/8b/8c. §63(e) compares the standard deduction against the
+    //     itemized total the filer would actually claim, so the capped figure is the right side of
+    //     that comparison — the uncapped one was only ever a conservative stand-in for a number
+    //     btctax did not have.
+    //
+    //     The filer it unwalls is the one whose Schedule A wins on the full 1098 figure and LOSES on
+    //     the apportioned one: $16,000 of interest on a $1,000,000 post-2017 loan beats the $14,600
+    //     single standard deduction, and 0.750 x $16,000 = $12,000 does not. Before FR-200a they were
+    //     `deduction_is_itemized` and refused; now the election is STANDARD, this block is never
+    //     entered, and the correct return goes out with no Schedule A at all. Pinned by
+    //     `kat_attestation.rs::fr200a_apportionment_can_flip_the_63e_election_to_the_standard_deduction`.
     //
     // ★★★ …EXCEPT WHERE LINE 8a IS ALREADY A DISCLOSED ZERO (final whole-branch review, finding 3).
     //
@@ -3271,6 +3318,135 @@ pub fn screen_absolute(
     //    the full 1098 figure with nothing on the form to disclose it, which is the case its text
     //    describes and the case it exists for. Scoping it here also makes that text TRUE of everyone
     //    who now sees it.
+    // ★★★ **FR-200a — THE WALL IS GONE. `screen_absolute` now consults the WORKSHEET** instead of
+    //     refusing on the answer. `crate::tax::pub936_table1::decide` is the ONE definition, and
+    //     `schedule_a_parts` reads the same function for the figure, so the refusal and the printed
+    //     line 8a cannot disagree about whether a limit is workable.
+    //
+    // ★★ Everything the old rule's placement bought is preserved verbatim: it is still gated on
+    //    `deduction_is_itemized` (the phase-2 review Critical — a December-closing jumbo homebuyer
+    //    whose Schedule A loses to the standard deduction has no line 8a to be wrong) and still
+    //    scoped away from the mixed-use filer, whose 8a is ALREADY a disclosed $0 with the line-8 box
+    //    checked (the final whole-branch review's finding 3). Both are unchanged conditions on an
+    //    unchanged predicate.
+    if ar.deduction_is_itemized
+        && mixed_use_mortgage_forgone(ri).is_none()
+        && crate::tax::pub936_table1::limit_is_declared(ri)
+    {
+        use crate::tax::pub936_table1::{self as t1, NotUsable};
+        match t1::decide(ri) {
+            // ★★★ **WORKED, SO NO REFUSAL.** Table 1 produced a qualified loan limit and either the
+            //     line-12 STOP (all the interest is deductible) or a line 15. This is the wall coming
+            //     down: the filer with a $1.2M mortgage now files their Form 8949 and Schedule D.
+            Ok(_) => {}
+            Err(NotUsable::FactsNotCollected) => {
+                return refusal(
+                    RefuseReason::MortgageOverDebtLimit,
+                    "you declared that one of the §163(h)(3)(B) home-mortgage limits applies to you \
+                     — the $750,000 ($375,000 married filing separately) ceiling on qualifying debt \
+                     taken out after December 15, 2017, or the $1,000,000 ($500,000 MFS) ceiling on \
+                     debt taken out on or before that date. i1040sca's own instruction for line 8a \
+                     is \"Only enter on line 8a the deductible mortgage interest and points that \
+                     were reported to you on Form 1098\", and the amount it means is figured by \
+                     Pub. 936's Table 1, \"Worksheet To Figure Your Qualified Loan Limit and \
+                     Deductible Home Mortgage Interest for the Current Year\". btctax WORKS that \
+                     worksheet — but it needs the four figures Table 1 reads, and this return does \
+                     not carry them: the average balance of your grandfathered debt (line 1), of \
+                     your home acquisition debt taken out after October 13, 1987 and before \
+                     December 16, 2017 (line 2), of your home acquisition debt taken out after \
+                     December 15, 2017 (line 7), and of ALL your mortgages together (line 12). \
+                     Pub. 936's \"Average Mortgage Balance\" section gives three ways to figure an \
+                     average balance, including simply averaging your first and last balance of the \
+                     year. Supply them in the `[schedule_a.pub936_table1]` table of an \
+                     `income import` file (`docs/income-import-schema.md` lists every key). btctax \
+                     refuses rather than guess: deducting the full Form 1098 figure would \
+                     UNDERSTATE your tax, and entering $0 would OVERSTATE it by the whole \
+                     deductible portion. `btctax report` still runs.",
+                );
+            }
+            // ★★★ i1040sca's FOURTH limit, which Pub. 936 (2025) does not figure. A different fact
+            //     with a different remedy ⇒ its own reason: no figure the filer could supply cures it.
+            Err(NotUsable::FairMarketValueLimit) => {
+                return refusal(
+                    RefuseReason::MortgageFairMarketValueLimit,
+                    "you declared that the total of all your mortgages is more than the fair market \
+                     value of the home. i1040sca lists that as one of the four limits on the \
+                     home-mortgage interest deduction and says \"see Pub. 936 to figure your \
+                     deduction\" — and Pub. 936 (2025) prints NO worksheet for it and does not \
+                     mention it at all; its Table 1 figures the two dollar ceilings and the \
+                     grandfathered-debt interaction, and nothing else. That instruction predates the \
+                     2017 Act, whose suspension of the home-equity-debt deduction is what the \
+                     fair-market-value limit used to police. btctax will not invent a worksheet the \
+                     publication no longer prints, and it will not deduct the full Form 1098 amount \
+                     against a limit it has not applied. File this year's Schedule A with a \
+                     preparer. `btctax report` still runs, and every other part of your return \
+                     computes.",
+                );
+            }
+            // ★★★ Figure A's footnote 3. It moves a balance INTO the more generous bucket, so the
+            //     direction of the error is opposite in each case — which is why btctax picks
+            //     neither.
+            Err(NotUsable::April2018TransitionRule) => {
+                return refusal(
+                    RefuseReason::MortgageApril2018TransitionRule,
+                    "you declared the Pub. 936 transition rule: a written binding contract entered \
+                     into before December 15, 2017 to close on the purchase of a principal \
+                     residence before January 1, 2018, with the purchase completed before April 1, \
+                     2018. Pub. 936's Figure A, footnote 3 says such debt \"is considered to have \
+                     been incurred prior to December 16, 2017, and may use the 2017 threshold \
+                     amounts of $1,000,000 ($500,000 for married filing separately)\" — so part of \
+                     what you would otherwise enter on Table 1 line 7 belongs on line 2 instead, and \
+                     btctax does not collect which loan or how much. Putting it on line 7 anyway \
+                     would OVERSTATE your tax by denying you the older, larger ceiling; moving it \
+                     for you would UNDERSTATE it if the rule does not in fact reach the whole \
+                     balance. btctax will not choose a direction on your behalf: work Table 1 by \
+                     hand with the balance on line 2 and file this year's Schedule A with a \
+                     preparer. `btctax report` still runs.",
+                );
+            }
+            // ★★ The input contradiction. Refused rather than clamped — see the variant's doc.
+            Err(NotUsable::Line12BelowItsComponents { line12, components }) => {
+                return refusal(
+                    RefuseReason::Pub936Table1Line12BelowItsComponents,
+                    &format!(
+                        "Pub. 936 Table 1 line 12 reads \"Enter the total of the average balances of \
+                         all mortgages from lines 1, 2, and 7 on all qualified homes\", and this \
+                         return states ${line12} on line 12 against ${components} on lines 1, 2 and \
+                         7 added together. Line 12 cannot be less than the lines it is the total of. \
+                         btctax will not clamp it — line 12 is line 14's DENOMINATOR, so a figure \
+                         that is too small makes the fraction too large and your deduction too big. \
+                         Check the four balances: line 12 is every outstanding home mortgage, which \
+                         INCLUDES any home equity debt that is in none of lines 1, 2 and 7, so it is \
+                         normally larger than their total, never smaller."
+                    ),
+                );
+            }
+            // ★ Unreachable: line 12 = 0 forces the line-12 STOP before line 14 exists. A refusal
+            //   rather than a no-op, because the fail-open direction here prints an unapportioned
+            //   line 8a on a return whose limit btctax failed to apply.
+            Err(NotUsable::Line14DivisionFailed { line11, line12 }) => {
+                return refusal(
+                    RefuseReason::Pub936Table1Line12BelowItsComponents,
+                    &format!(
+                        "Pub. 936 Table 1 line 14 divides line 11 (${line11}) by line 12 \
+                         (${line12}) and the division did not evaluate. That should not be \
+                         reachable — a line 12 of zero makes line 11 at least as large, which the \
+                         worksheet answers with \"stop here, all of your interest is deductible\" \
+                         before line 14 exists — so this is a defect rather than something you can \
+                         fix by editing an input. Please report it. `btctax report` still runs."
+                    ),
+                );
+            }
+        }
+    }
+    // ★★★ **FR-200a — TWO TESTIMONIES about the §163(h)(3)(B) limit.** The filer said they are
+    //     INSIDE every limit (which leaves line 8a at the full Form 1098 amount) and also supplied
+    //     Table 1's figures, and the worksheet says a limit BITES. One line, two answers, on a return
+    //     signed under §6065 — so it refuses rather than choose, exactly as
+    //     `TwoTestimoniesAboutStateRefund` does one schedule over.
+    //
+    // ★ The other pairing is deliberately silent: a "yes, inside every limit" whose Table 1 reaches
+    //   the line-12 STOP agrees with the filer, and there is nothing to refuse.
     if ar.deduction_is_itemized
         && mixed_use_mortgage_forgone(ri).is_none()
         && crate::tax::questions::question_is_live(
@@ -3280,27 +3456,29 @@ pub fn screen_absolute(
         && ri
             .schedule_a
             .as_ref()
-            .is_some_and(|a| a.mortgage_within_debt_limit == Some(false))
+            .is_some_and(|a| a.mortgage_within_debt_limit == Some(true))
     {
-        return refusal(
-            RefuseReason::MortgageOverDebtLimit,
-            "you declared that one of the §163(h)(3)(B) home-mortgage limits applies to you — the \
-             $750,000 ($375,000 married filing separately) ceiling on qualifying debt taken out after \
-             December 15, 2017, the $1,000,000 ($500,000 MFS) ceiling on debt taken out on or before \
-             that date, or the limit where the mortgages exceed the home's fair market value. \
-             i1040sca's own instruction for line 8a is \"Only enter on line 8a the deductible mortgage \
-             interest and points that were reported to you on Form 1098\", and btctax cannot figure \
-             that amount. NEITHER number it could print is your return: deducting the full Form 1098 \
-             figure would UNDERSTATE your tax, and entering $0 would OVERSTATE it by the whole \
-             deductible portion — and Schedule A has no box that would disclose such a zero (the \
-             line-8 checkbox is the mixed-use disclosure, not this one). The cure is the one the \
-             instructions prescribe: work Pub. 936's Deductible Home Mortgage Interest Worksheet, \
-             which produces the deductible amount for line 8a. btctax does not yet have a place to \
-             enter that result — the `mortgage_interest_deductible` input is filed as FOLLOWUPS P9(a)/S2 \
-             — so until it lands, file this year's Schedule A by hand. `btctax report` still runs. \
-             (This return itemizes; a return that takes the standard deduction is unaffected and \
-             computes normally, because line 8a never prints on it.)",
-        );
+        if let Ok(worked) = crate::tax::pub936_table1::decide(ri) {
+            if let crate::tax::pub936_table1::Outcome::Limited { .. } = worked.outcome {
+                return refusal(
+                    RefuseReason::MortgageDebtLimitContradicted,
+                    &format!(
+                        "this return answers \"yes, I was inside every home-mortgage debt limit\", \
+                         which leaves Schedule A line 8a at the full Form 1098 amount — and it also \
+                         carries Pub. 936 Table 1's figures, which work out to a qualified loan \
+                         limit of ${limit} on line 11 against ${balance} of mortgage balances on \
+                         line 12. A line 11 below line 12 IS a limit biting, so the worksheet and \
+                         your answer say opposite things about one line you sign for under §6065. \
+                         btctax cannot know which is your real answer, so it refuses rather than \
+                         choose: answer \"no\" to the debt-limit question and let Table 1 figure \
+                         line 8a, or remove the `[schedule_a.pub936_table1]` figures if you are \
+                         inside every limit after all.",
+                        limit = worked.sheet.line11,
+                        balance = worked.sheet.line12
+                    ),
+                );
+            }
+        }
     }
 
     // ★★★ i4952's NO-FILING EXCEPTION — the Schedule A line-9 BOUND (P7).

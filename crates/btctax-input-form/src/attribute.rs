@@ -216,10 +216,35 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::DependentSpouseUnsupported => vec![decl(QuestionId::DependentSpouse)],
         // Form 6251's two ADVERSE answers: v1 models neither add-back, so each refuses at the same
         // field its unanswered twin anchors.
-        // ★ §163(h)(3)(B) answered ADVERSELY. It anchors at the same leaf as its unanswered twin —
-        //   the answer IS the input, and the return becomes fileable only by correcting it (or, once
-        //   FOLLOWUPS P9(a)/S2 lands, by entering the Pub. 936 worksheet result).
-        R::MortgageOverDebtLimit => vec![decl(QuestionId::MortgageWithinDebtLimit)],
+        // ★ §163(h)(3)(B) answered ADVERSELY with Pub. 936 Table 1's figures not supplied. It anchors
+        //   at the same leaf as its unanswered twin — answering "yes, inside every limit" is one
+        //   honest cure — and names the deferred TOML section that is the other.
+        R::MortgageOverDebtLimit => vec![
+            decl(QuestionId::MortgageWithinDebtLimit),
+            Anchor::NotInForm {
+                note: "Pub. 936 Table 1's four average balances (`[schedule_a.pub936_table1]`) are a \
+                       deferred (non-v1-form) section entered via TOML import — FR-200b is the task \
+                       that gives them a form section",
+            },
+        ],
+        // ★★★ FR-200a — the two limits Pub. 936 (2025) does NOT figure, plus the line-12 contradiction.
+        //     All three are `NotInForm` for the same reason the §111(a) block's are: the figures and
+        //     conditions live in `[schedule_a.pub936_table1]`, which the v1 form has no section for.
+        //     ★ Pointing them at the debt-limit declaration instead would be worse than saying
+        //       nothing — answering it "yes" does not un-affirm a fair-market-value limit, does not
+        //       retract a written binding contract, and does not correct a line-12 balance.
+        R::MortgageFairMarketValueLimit
+        | R::MortgageApril2018TransitionRule
+        | R::Pub936Table1Line12BelowItsComponents => vec![Anchor::NotInForm {
+            note: "Pub. 936 Table 1's figures and its two unmodelled-limit conditions \
+                   (`[schedule_a.pub936_table1]`) are a deferred (non-v1-form) section entered via \
+                   TOML import — FR-200b is the task that gives them a form section",
+        }],
+        // ★ The two-testimonies refusal HAS a form anchor for one of its two exits: answering the
+        //   debt-limit declaration "no" lets Table 1 figure line 8a, which is the cure a filer can
+        //   reach from the editor. The other cure — removing the worksheet figures — is the TOML
+        //   section above.
+        R::MortgageDebtLimitContradicted => vec![decl(QuestionId::MortgageWithinDebtLimit)],
         // ★ §163(d) / Form 4952. Both routes to this refusal are correctable in the form — either the
         //   declaration itself, or the Schedule A line-9 amount that broke i4952's exception.
         R::Form4952Required => vec![
@@ -948,13 +973,25 @@ mod tests {
         //    anchor would be the §G-28/B1b falsehood. Its two exits are a worksheet worked by hand and
         //    a paid preparer, and neither is in the form.
         const ADDED_BY_CHARITABLE_FLOOR: usize = 1;
+        // ★★ FR-200a added the seventh and eighth — Pub. 936 Table 1's block, in TWO arms because the
+        //    two populations have different cures. `MortgageOverDebtLimit` keeps its DECLARATION
+        //    anchor (answering "yes, inside every limit" is a cure the form can offer) and gains a
+        //    `NotInForm` beside it naming `[schedule_a.pub936_table1]`, so the filer who really is
+        //    over the limit is told where the figures go. The other three —
+        //    `MortgageFairMarketValueLimit`, `MortgageApril2018TransitionRule` and
+        //    `Pub936Table1Line12BelowItsComponents` — share one `NotInForm` arm with no declaration
+        //    beside it: pointing them at the debt-limit question would be the §G-28/B1b falsehood,
+        //    since answering it "yes" un-affirms neither unmodelled limit and corrects no balance.
+        //    ★ FR-200b is the task that gives the block a form section and removes both.
+        const ADDED_BY_FR200A: usize = 2;
         let expect = BEFORE_T5 - 5
             + ADDED_BY_I4
             + ADDED_BY_FR103
             + ADDED_BY_B3_C1
             + ADDED_BY_FR196
             + ADDED_BY_SECTION_68
-            + ADDED_BY_CHARITABLE_FLOOR;
+            + ADDED_BY_CHARITABLE_FLOOR
+            + ADDED_BY_FR200A;
         let now = src[start..end].matches("Anchor::NotInForm {").count();
         assert_eq!(
             now, expect,
@@ -964,9 +1001,10 @@ mod tests {
              added one (Schedule1aNotOnThisYearsReturn), B3's C-1 added one \
              (ReturnInputsYearNotStated), FR-196 added one (the §111(a) worksheet's three \
              TOML-only refusals, sharing one arm), §68 added one \
-             (ItemizedDeductionLimitationNotComputed) and §170(b)(1)(I) added one \
-             (CharitableFloorNotComputed); the source now has {now} `NotInForm` \
-             anchors, not {expect}"
+             (ItemizedDeductionLimitationNotComputed), §170(b)(1)(I) added one \
+             (CharitableFloorNotComputed) and FR-200a added two (Pub. 936 Table 1's block — one \
+             beside `MortgageOverDebtLimit`'s declaration anchor, one shared by the three refusals \
+             no field can clear); the source now has {now} `NotInForm` anchors, not {expect}"
         );
 
         // The five, and every anchor each yields must be a real Field or Section of `form_spec()`.
