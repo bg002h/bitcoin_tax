@@ -13,7 +13,7 @@
 //! `table`, `params`, `forms_bundled`, `prices_max_date`, and `problems()`. This consumes that type
 //! rather than re-deriving those five facts (see [`year_package`]); every other axis is new.
 //!
-//! ## The six axes, and where each row's evidence comes from
+//! ## The seven axes, and where each row's evidence comes from
 //!
 //! | axis | derived from |
 //! |---|---|
@@ -22,6 +22,7 @@
 //! | [`archive_rows`] | `design/forms/extract/` × every family the Rust source cites by path |
 //! | [`revision_pin_rows`] | the same citations, split into per-revision PREFIXES and pinned LITERALS |
 //! | [`gate_rows`] | live calls to every year-keyed gate, at every bundled year |
+//! | [`abort_rows`] | every year-keyed ABORT site in shipped source — the class a `RefuseReason` census cannot see |
 //! | [`owner_rows`] | `design/ROADMAP_STATUS.md`'s own pending-decision table |
 //!
 //! ## ★★ BLOCKED is not UNMEASURED, and the vocabulary is the work list's
@@ -44,6 +45,12 @@
 //!   it; what it knows is whether this repo has **archived** one.
 //! * `when` is copied verbatim out of `forms/<year>/YEAR.toml`'s own reason text where one exists.
 //!   It is the declaration's claim, not this tool's prediction.
+//! * **The abort axis is a SOURCE SCAN, not a reachability proof.** [`abort_census`] says which
+//!   shipped-code sites leave by abort *with the year in the deciding expression*; it does not say
+//!   that TY&lt;year&gt; reaches any of them from the CLI. Every abort row is therefore
+//!   [`State::Unmeasured`] by construction — see [`abort_rows`], and FR-227 §Q1 in
+//!   `design/agent-reports/REPORT-fr227-panic-class.md` for the one site that was chased to a
+//!   verdict by hand.
 
 use btctax_forms::bundled::{self, Stem};
 use std::collections::{BTreeMap, BTreeSet};
@@ -1808,7 +1815,561 @@ pub fn gate_rows(year: i32, rep: &mut Report) -> Result<(), String> {
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════
-// Axis 6 — the OWNER's own pending-decision table
+// Axis 6 — the ABORT census (FR-227): the class a RefuseReason-derived prediction cannot see
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// Abort operators whose **deciding expression is the operator's own argument list** — the condition
+/// or the message. Written `assert!` rather than `debug_assert!` on purpose: the substring match
+/// catches both, and the `debug_` prefix is reported in the site's text so a reader can see which.
+pub const ABORT_MACROS: &[&str] = &[
+    "panic!",
+    "unreachable!",
+    "todo!",
+    "unimplemented!",
+    "assert!",
+    "assert_eq!",
+    "assert_ne!",
+];
+
+/// Abort operators whose **deciding expression is the RECEIVER**, not the argument.
+///
+/// ★★ This split is the whole precision of the census, and dropping it cost 11 false positives on
+/// the first measurement: `edit::persist::form_save_draft(app.session.as_mut().unwrap(), year, &ri)`
+/// puts a `.unwrap()` and the word `year` on one line, and a window that reads the whole line calls
+/// that a year-keyed abort. It is not — the `Option` being unwrapped is a *session*. What decides
+/// whether an `.unwrap()` aborts is the expression it is applied TO, so that is what gets scanned.
+/// `.unwrap_or(` and `.unwrap_or_else(` are absent because they do not abort; an
+/// `unwrap_or_else(|| panic!(…))` is caught by [`ABORT_MACROS`] instead, and `year_record.rs:121` is
+/// the live case proving it.
+pub const ABORT_ACCESSORS: &[&str] = &[".expect(", ".unwrap()"];
+
+/// **How tightly the tax year grips an abort site.** The four cases are exhaustive over one site and
+/// matched `_`-free, so a fifth reading is a build error rather than a silent bucket.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum YearGrip {
+    /// The deciding expression names a year **variable** (`year` / `tax_year`). The site aborts on
+    /// whatever year it is handed — **this year included**. This is the FR-227 class.
+    Variable,
+    /// The deciding expression names only a year **literal**. A new year cannot reach it at all; it
+    /// is a year PIN (`CLAUDE.md` T8 — the list that keeps reading the old document), not an abort.
+    Literal,
+    /// The deciding expression names no year, but the enclosing `fn`'s signature takes one.
+    /// UNCLASSIFIED: this census cannot say whether the year decides. Not the same as year-agnostic.
+    FnSignature,
+    /// No year anywhere in the deciding expression or the enclosing signature.
+    None,
+}
+
+impl YearGrip {
+    /// Every grip, in report order. Held exhaustive by [`YearGrip::label`]'s `_`-free match.
+    pub const ALL: &'static [YearGrip] = &[
+        YearGrip::Variable,
+        YearGrip::Literal,
+        YearGrip::FnSignature,
+        YearGrip::None,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            YearGrip::Variable => "VARIABLE",
+            YearGrip::Literal => "LITERAL",
+            YearGrip::FnSignature => "FN-SIGNATURE (UNCLASSIFIED)",
+            YearGrip::None => "no year",
+        }
+    }
+}
+
+/// One abort site.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct AbortSite {
+    pub file: String,
+    /// 1-based, in the ORIGINAL file. This is why [`crate::r15_stop_list::production_mask`] exists:
+    /// the `String`-returning twin renumbers everything after a `#[cfg(test)]` item.
+    pub line: usize,
+    pub op: &'static str,
+    pub grip: YearGrip,
+    /// The year literals the deciding expression names, if any.
+    pub years: BTreeSet<i32>,
+    /// The site's own source line, trimmed — evidence a reader can check without trusting this list.
+    pub text: String,
+}
+
+/// ★★★ **Which lines of `src` are shipped code — the INTERSECTION of two independent test-span
+/// trackers, because one of them is documented to under-exclude and the census cannot afford it.**
+///
+/// * [`crate::r15_stop_list::production_mask`] counts braces. Its own doc states the weakness: *"a
+///   `{` inside a string literal inside a test module could end the skip early. That errs toward
+///   scanning MORE, which is the fail-closed direction here."* For R15 — hunting a forbidden idiom —
+///   scanning more IS fail-closed. For this census the same error is a **false blocker row**, and it
+///   is not hypothetical: brace counting alone ends the skip early inside
+///   `btctax-tui-edit/src/main.rs`'s 18 000-line test module and admits 1 888 test-only abort sites
+///   as shipped code.
+/// * The second tracker is INDENTATION-anchored: a braced `#[cfg(test)]` item ends at the `}` at the
+///   attribute's own indentation. That is the rule `btctax-tui-edit`'s own N-R1 clock-seam checker
+///   records (*"a BRACED `#[cfg(test)] mod … { }` span is bounded by its DEDENTED close"*), and it is
+///   sound HERE because `cargo fmt --all --check` is a gate in this repo — rustfmt guarantees the
+///   closing brace's column, so the anchor is machine-enforced rather than assumed.
+///
+/// A line is shipped only if **both** say so. Neither tracker is edited to suit the other: R15's
+/// fail-closed direction stays fail-closed for R15.
+#[must_use]
+pub fn shipped_mask(src: &str) -> Vec<bool> {
+    let mut keep = crate::r15_stop_list::production_mask(src);
+    let lines: Vec<&str> = src.lines().collect();
+    let mut i = 0usize;
+    while i < lines.len() {
+        let t = lines[i].trim_start();
+        if !t.starts_with("#[cfg(test)]") {
+            i += 1;
+            continue;
+        }
+        let indent = lines[i].len() - t.len();
+        // Skip any further attributes stacked on the same item.
+        let mut j = i + 1;
+        while j < lines.len() && lines[j].trim_start().starts_with("#[") {
+            j += 1;
+        }
+        if j < lines.len() && lines[j].contains('{') {
+            // A braced item: it ends at the `}` sitting at the attribute's own indentation.
+            let close = format!("{}}}", " ".repeat(indent));
+            let mut k = j + 1;
+            while k < lines.len() && lines[k].trim_end() != close {
+                k += 1;
+            }
+            keep[i..=k.min(lines.len() - 1)].fill(false);
+            i = k + 1;
+        } else {
+            // An unbraced `#[cfg(test)]` item (`mod X;`, `use …;`): only its own lines.
+            keep[i..=j.min(lines.len() - 1)].fill(false);
+            i = j + 1;
+        }
+    }
+    keep
+}
+
+/// Does `s` name a year VARIABLE?
+fn names_year_variable(s: &str) -> bool {
+    word_present(s, "year") || word_present(s, "tax_year")
+}
+
+/// A whole-word search that does not fire inside `year_record` or `by_year`.
+fn word_present(hay: &str, needle: &str) -> bool {
+    let bytes = hay.as_bytes();
+    let mut from = 0usize;
+    while let Some(i) = hay[from..].find(needle) {
+        let at = from + i;
+        from = at + 1;
+        let before_ok = at == 0 || !is_ident_byte(bytes[at - 1]);
+        let end = at + needle.len();
+        let after_ok = end >= bytes.len() || !is_ident_byte(bytes[end]);
+        if before_ok && after_ok {
+            return true;
+        }
+    }
+    false
+}
+
+fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+/// Every plausible tax-year literal in `s`: a bare `20NN`, or the `Y20NN` variant spelling the
+/// per-year rule types use (`Form6251Line1::Y2025`).
+fn year_literals(s: &str) -> BTreeSet<i32> {
+    let mut out = BTreeSet::new();
+    let b = s.as_bytes();
+    let mut i = 0usize;
+    while i + 4 <= b.len() {
+        if b[i] == b'2'
+            && b[i + 1] == b'0'
+            && b[i + 2].is_ascii_digit()
+            && b[i + 3].is_ascii_digit()
+        {
+            let lead_ok = i == 0 || !b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'Y';
+            let tail_ok = i + 4 >= b.len() || !is_ident_byte(b[i + 4]);
+            if lead_ok && tail_ok {
+                if let Ok(y) = s[i..i + 4].parse::<i32>() {
+                    out.insert(y);
+                }
+                i += 4;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
+/// The deciding expression for a macro abort: the operator's own delimiter-balanced argument list.
+/// Capped at 40 lines, which is longer than any abort message in the tree — a longer one is
+/// truncated rather than read to the end of the file, and a truncation can only LOSE a year
+/// reference, i.e. it under-reports rather than inventing a row.
+fn forward_window(lines: &[&str], idx: usize, col: usize) -> String {
+    let mut buf = Vec::new();
+    let mut depth: i32 = 0;
+    let mut opened = false;
+    for (k, line) in lines.iter().enumerate().skip(idx).take(40) {
+        let s = if k == idx { &line[col..] } else { *line };
+        buf.push(s);
+        for c in s.chars() {
+            match c {
+                '(' | '[' | '{' => {
+                    depth += 1;
+                    opened = true;
+                }
+                ')' | ']' | '}' => depth -= 1,
+                _ => {}
+            }
+        }
+        if opened && depth <= 0 {
+            break;
+        }
+    }
+    buf.join("\n")
+}
+
+/// The deciding expression for an accessor abort: the RECEIVER — from the start of the enclosing
+/// statement up to the operator. The statement start is the first line after the nearest preceding
+/// line that ends a statement or opens a block (`;`, `{`, `}`) or is blank; capped at 20 lines.
+///
+/// ★ The backward walk is what catches a chained receiver written across lines — `year_readiness.rs`
+/// puts `.expect("the build bundles at least one year")` on a line of its own, and a receiver window
+/// scoped to that line alone would read nothing at all.
+///
+/// ★★ It runs **only when the operator's own line is a continuation** — everything before the
+/// operator is whitespace, or the line begins with `.`. That condition is the signal that the
+/// receiver really is on earlier lines, and without it the walk pulls in a *neighbouring statement*:
+/// `edit::persist::form_save_draft(app.session.as_mut().unwrap(), year, &ri)` has its receiver
+/// (`app.session.as_mut()`) complete on its own line, and reading the line above it turned an
+/// unrelated `.unwrap()` into a claimed year-keyed abort row.
+fn receiver_window(lines: &[&str], idx: usize, col: usize) -> String {
+    let head = &lines[idx][..col];
+    let continuation = head.trim().is_empty() || lines[idx].trim_start().starts_with('.');
+    let mut start = idx;
+    if continuation {
+        let floor = idx.saturating_sub(20);
+        let mut k = idx;
+        while k > floor {
+            k -= 1;
+            let t = lines[k].trim_end();
+            if t.is_empty() || t.ends_with(';') || t.ends_with('{') || t.ends_with('}') {
+                break;
+            }
+            start = k;
+        }
+    }
+    let mut buf: Vec<&str> = lines[start..idx].to_vec();
+    buf.push(head);
+    buf.join("\n")
+}
+
+/// The signature of the `fn` enclosing line `idx` — the nearest preceding `fn` at strictly shallower
+/// indentation, through the line that opens its body.
+fn enclosing_fn_signature(lines: &[&str], idx: usize) -> String {
+    let ind = lines[idx].len() - lines[idx].trim_start().len();
+    for k in (0..=idx).rev() {
+        let t = lines[k].trim_start();
+        let this_ind = lines[k].len() - t.len();
+        let is_fn = t.starts_with("fn ")
+            || t.starts_with("pub fn ")
+            || t.starts_with("async fn ")
+            || t.starts_with("const fn ")
+            || t.starts_with("unsafe fn ")
+            || (t.starts_with("pub(") && t.contains(") fn "));
+        if is_fn && this_ind < ind {
+            let mut sig = Vec::new();
+            for line in lines.iter().skip(k).take(25) {
+                sig.push(*line);
+                if line.contains('{') {
+                    break;
+                }
+            }
+            return sig.join("\n");
+        }
+    }
+    String::new()
+}
+
+/// **The crates that SHIP, derived from the manifests.** A workspace member is shipped unless its
+/// own `Cargo.toml` says `publish = false` — which is the repo's own definition of shipping, not a
+/// second one typed here. `xtask` and `btctax-oracle-harness` are the two that opt out today, and
+/// a third arriving (or one of these opting back in) moves this set with no edit.
+///
+/// Pure over `(crate directory name, manifest text)` so a plant can reach it.
+#[must_use]
+pub fn shipped_crates(manifests: &[(String, String)]) -> BTreeSet<String> {
+    manifests
+        .iter()
+        .filter(|(_, toml)| {
+            !toml.lines().any(|l| {
+                let t = l.trim();
+                t.starts_with("publish") && t.contains("false")
+            })
+        })
+        .map(|(dir, _)| dir.clone())
+        .collect()
+}
+
+/// Read every workspace member's manifest as `(crate directory name, text)`.
+fn workspace_manifests() -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let crates = root().join("crates");
+    for e in std::fs::read_dir(&crates).into_iter().flatten().flatten() {
+        let p = e.path();
+        if !p.is_dir() {
+            continue;
+        }
+        if let Ok(t) = std::fs::read_to_string(p.join("Cargo.toml")) {
+            out.push((e.file_name().to_string_lossy().to_string(), t));
+        }
+    }
+    out.sort();
+    out
+}
+
+/// **Files that are entirely test-only because a sibling declares them so** — an UNBRACED
+/// `#[cfg(test)] mod X;`, whose body lives in `X.rs` or `X/mod.rs` and carries no `#[cfg(test)]` of
+/// its own.
+///
+/// ★ Derived from the declaration, never a name list: `r15_stop_list::test_only_modules` records why
+/// (*"an exclusion list naming `coverage.rs` … would go silently wrong the day the module stopped
+/// being test-only"*). This variant is PATH-keyed rather than stem-keyed and pure over the file
+/// list, so a plant can reach it. Without it `btctax-tui/src/tabs/tests.rs` — 235 abort sites —
+/// reads as shipped code.
+#[must_use]
+pub fn test_only_files(files: &[(String, String)]) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    for (path, src) in files {
+        let dir = match path.rfind('/') {
+            Some(i) => &path[..i],
+            None => "",
+        };
+        let lines: Vec<&str> = src.lines().collect();
+        for (i, l) in lines.iter().enumerate() {
+            if l.trim() != "#[cfg(test)]" {
+                continue;
+            }
+            let Some(next) = lines.get(i + 1) else {
+                continue;
+            };
+            let t = next.trim().trim_start_matches("pub ");
+            if let Some(rest) = t.strip_prefix("mod ") {
+                if let Some(name) = rest.strip_suffix(';') {
+                    let name = name.trim();
+                    out.insert(format!("{dir}/{name}.rs"));
+                    out.insert(format!("{dir}/{name}/mod.rs"));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// ★★★ **FR-227 — every year-keyed ABORT site in shipped code.**
+///
+/// **Why this axis exists.** [`gate_rows`] derives the year walls from `RefuseReason` construction
+/// sites and from year-keyed gates. A `panic!` is neither, so the entire class *"handed a year it has
+/// no arm for, this build ABORTS instead of refusing"* was invisible to the instrument — found by
+/// the stage-2 rehearsal the instrument was built to be compared against (`REPORT-stage2-B.md` §4
+/// F1). The live case is `return_1040.rs`'s Form 6251 Part I `panic!`, reached on the rehearsal
+/// branch the moment TY2026 `FullReturnParams` were substituted in.
+///
+/// **What a site is.** An occurrence of one of [`ABORT_MACROS`] or [`ABORT_ACCESSORS`] on a
+/// non-comment line of a `.rs` file under `crates/<shipped crate>/src/`, outside every
+/// `#[cfg(test)]` item ([`shipped_mask`]) and outside every file a sibling declares test-only
+/// ([`test_only_files`]).
+///
+/// **What the grip is.** The **deciding expression** — the macro's own argument list, or the
+/// accessor's receiver — decides [`YearGrip`]. Nothing else is consulted except, for
+/// [`YearGrip::FnSignature`], the enclosing signature.
+///
+/// ★★ **Neither published count was pinned, and neither was right.** Tier B measured 9 *"typed
+/// per-year lists with no TY2026 arm"*; the controller measured 4 *"year-ish abort macros outside
+/// `#[cfg(test)]`"* — and three of that four (`form6251.rs:845`, `form6251.rs:1114`,
+/// `btctax-tui-edit/src/main.rs:24399`) are inside a braced `#[cfg(test)] mod tests`, proved by
+/// `cargo build -p btctax-core --lib` compiling with a syntax error planted at `form6251.rs:845`
+/// while `--lib --tests` failed on it. The number here is whatever the definition yields.
+///
+/// Pure over `(repo-relative path, source)` pairs so a planted defect can reach it.
+#[must_use]
+pub fn abort_census(files: &[(String, String)], shipped: &BTreeSet<String>) -> Vec<AbortSite> {
+    let skip = test_only_files(files);
+    let mut out = Vec::new();
+    for (path, src) in files {
+        // `crates/<crate>/src/…` only: `tests/`, `benches/`, `examples/` and `build.rs` are not
+        // shipped runtime code, and a non-published crate is not shipped at all.
+        let Some(rest) = path.strip_prefix("crates/") else {
+            continue;
+        };
+        let Some((crate_dir, inner)) = rest.split_once('/') else {
+            continue;
+        };
+        if !shipped.contains(crate_dir) || !inner.starts_with("src/") {
+            continue;
+        }
+        if skip.contains(path.as_str()) {
+            continue;
+        }
+        let lines: Vec<&str> = src.lines().collect();
+        let keep = shipped_mask(src);
+        for (i, line) in lines.iter().enumerate() {
+            if !keep.get(i).copied().unwrap_or(false) {
+                continue;
+            }
+            let t = line.trim_start();
+            if t.starts_with("//") || t.starts_with('*') || t.starts_with("/*") {
+                continue;
+            }
+            // The EARLIEST operator on the line wins, so one line yields one site. A line bearing
+            // both (`x.expect("…").unwrap()`) is one abort decision to a reader and one row here.
+            let mut pick: Option<(usize, &'static str, bool)> = None;
+            for (ops, is_macro) in [(ABORT_MACROS, true), (ABORT_ACCESSORS, false)] {
+                for op in ops {
+                    if let Some(c) = line.find(op) {
+                        if pick.is_none_or(|(best, _, _)| c < best) {
+                            pick = Some((c, op, is_macro));
+                        }
+                    }
+                }
+            }
+            let Some((col, op, is_macro)) = pick else {
+                continue;
+            };
+            let deciding = if is_macro {
+                forward_window(&lines, i, col)
+            } else {
+                receiver_window(&lines, i, col)
+            };
+            let years = year_literals(&deciding);
+            let grip = if names_year_variable(&deciding) {
+                YearGrip::Variable
+            } else if !years.is_empty() {
+                YearGrip::Literal
+            } else {
+                let sig = enclosing_fn_signature(&lines, i);
+                if names_year_variable(&sig) || !year_literals(&sig).is_empty() {
+                    YearGrip::FnSignature
+                } else {
+                    YearGrip::None
+                }
+            };
+            out.push(AbortSite {
+                file: path.clone(),
+                line: i + 1,
+                op,
+                grip,
+                years,
+                text: line.trim().to_string(),
+            });
+        }
+    }
+    out.sort();
+    out
+}
+
+/// **Which shipped-code sites ABORT on a year instead of refusing.**
+///
+/// One row per [`YearGrip::Variable`] site — the sites a year *variable* can drive into an abort, so
+/// TY&lt;year&gt; reaches them if control does. Every row is [`State::Unmeasured`] **by
+/// construction**: this is a source scan and it does not prove reachability from the CLI. Calling
+/// one BLOCKED would be the *"green and blind instrument"* shape — a claim the measurement cannot
+/// support.
+///
+/// The other three grips are counted in the notes, with the [`YearGrip::FnSignature`] group NAMED
+/// rather than dropped, exactly as [`gate_rows`] names its UNCLASSIFIED refusal groups.
+pub fn abort_rows(year: i32, files: &[(String, String)], rep: &mut Report) {
+    let shipped = shipped_crates(&workspace_manifests());
+    let sites = abort_census(files, &shipped);
+    let of = |g: YearGrip| -> Vec<&AbortSite> { sites.iter().filter(|s| s.grip == g).collect() };
+
+    for s in of(YearGrip::Variable) {
+        rep.push(
+            Who::Build,
+            State::Unmeasured,
+            format!(
+                "`{}:{}` ABORTS (`{}`) with the tax year in its deciding expression, so TY{year} \
+                 reaches it if control does — and an abort is not a `RefuseReason`, so the refusal \
+                 census cannot see it: `{}`",
+                s.file,
+                s.line,
+                s.op,
+                s.text.replace('|', "\\|")
+            ),
+            "now",
+            format!(
+                "{}:{} (blockers::abort_census, grip={})",
+                s.file,
+                s.line,
+                s.grip.label()
+            ),
+        );
+    }
+
+    let pinned: BTreeSet<i32> = of(YearGrip::Literal)
+        .iter()
+        .flat_map(|s| s.years.iter().copied())
+        .collect();
+    rep.notes.push(format!(
+        "aborts: a site is one of [{}] (deciding expression = the macro's own argument list) or [{}] \
+         (deciding expression = the RECEIVER) on a non-comment line of `crates/<shipped>/src/**.rs`, \
+         outside every `#[cfg(test)]` item and every sibling-declared test-only file. Shipped crates \
+         are the workspace members whose manifest does not say `publish = false` ({} of them). {} \
+         sites, by grip — {} — where VARIABLE means a year variable decides (the rows above), LITERAL \
+         means a year pin a new year cannot reach, and FN-SIGNATURE means this census could not say. \
+         The LITERAL sites pin {:?} and {} TY{year}.",
+        ABORT_MACROS.join(", "),
+        ABORT_ACCESSORS.join(", "),
+        shipped.len(),
+        sites.len(),
+        // ★ Derived from `YearGrip::ALL`, not four typed calls: a fifth grip prints itself.
+        YearGrip::ALL
+            .iter()
+            .map(|g| format!("{}: {}", g.label(), of(*g).len()))
+            .collect::<Vec<_>>()
+            .join(", "),
+        pinned,
+        if pinned.contains(&year) {
+            "DO name"
+        } else {
+            "name NONE of them"
+        },
+    ));
+    let unclassified = of(YearGrip::FnSignature);
+    if !unclassified.is_empty() {
+        rep.notes.push(format!(
+            "abort sites this census could NOT classify — the enclosing `fn` takes a year but the \
+             deciding expression names none, which is not the same as year-agnostic: {}",
+            unclassified
+                .iter()
+                .map(|s| format!("{}:{} ({})", s.file, s.line, s.op))
+                .collect::<Vec<_>>()
+                .join("; ")
+        ));
+    }
+    let in_testonly = sites
+        .iter()
+        .filter(|s| s.file.contains("testonly") && s.grip != YearGrip::None)
+        .count();
+    rep.notes.push(format!(
+        "★ WHAT THE ABORT CENSUS DOES NOT CLAIM. (1) It is a SOURCE SCAN: it does not prove TY{year} \
+         reaches any site — the one site chased to a verdict by hand \
+         (`crates/btctax-core/src/tax/return_1040.rs`, Form 6251 Part I) is shielded at HEAD because \
+         `full_return_for({year})` is `None`, and the rehearsal reached it only after substituting \
+         TY{year} `FullReturnParams` in. (2) `debug_assert*` sites are counted and compile OUT in \
+         release, so they abort in a debug build only. (3) A `testonly` module is shipped code by the \
+         compiler's reckoning and IS counted — {in_testonly} year-referencing sites sit in one. (4) \
+         `tests/`, `benches/`, `build.rs` and the non-published crates are outside the scan, so an \
+         abort there is invisible here by design. (5) A year reached through an alias the scan cannot \
+         see — a struct field, a const, a closure argument renamed — reads as no year. (6) An abort \
+         inside a dependency is invisible. (7) An `assert!` inside a `const _: () = {{ … }}` guard is a \
+         BUILD error, not a runtime abort, and is counted here anyway — `f6251_revision.rs`'s \
+         Form6251ObbbaMap guard is that case at HEAD, and it is the over-inclusive direction: a row \
+         that cannot fire costs a reader a glance, a missing one costs a filer a crash."
+    ));
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// Axis 7 — the OWNER's own pending-decision table
 // ════════════════════════════════════════════════════════════════════════════════════════════════
 
 /// The pending owner decisions, parsed out of `design/ROADMAP_STATUS.md`'s own table, so the set
@@ -1915,6 +2476,8 @@ pub fn collect(year: i32) -> Result<Report, String> {
     archive_rows(year, &cit, &arch, rec.as_ref(), &mut rep);
     revision_pin_rows(year, &cit, &mut rep);
     gate_rows(year, &mut rep)?;
+    // FR-227 — the abort class, over the SAME file list the citation axis already read.
+    abort_rows(year, &files, &mut rep);
 
     let rs = root().join("design/ROADMAP_STATUS.md");
     match std::fs::read_to_string(&rs) {
@@ -2821,6 +3384,291 @@ pub fn screen(ri: &ReturnInputs) -> Option<Refusal> {
                     .rows
                     .iter()
                     .any(|r| r.what.contains("not a bundled year"))
+        );
+        // FR-227 — the abort axis reached the report, with its definition and its boundary.
+        assert!(
+            all.contains("deciding expression = the RECEIVER"),
+            "the abort census must print its own class DEFINITION, not just a count"
+        );
+        assert!(
+            all.contains("WHAT THE ABORT CENSUS DOES NOT CLAIM"),
+            "an honest boundary is reviewable; a silent one is the defect (FR-227)"
+        );
+        assert!(
+            all.contains("grip=VARIABLE"),
+            "no abort row reached the report"
+        );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    // FR-227 — the abort census's kills
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+
+    /// A one-crate shipped set, for the planted-text kills below.
+    fn only(c: &str) -> BTreeSet<String> {
+        [c.to_string()].into_iter().collect()
+    }
+
+    /// ★★★ **B1 — the abort census reds on a planted year-keyed abort, and on NONE of its near
+    /// misses.**
+    ///
+    /// ★ Per FR-235 the plant is deliberately **not** written in the checker's own loudest
+    /// vocabulary. The live site that motivated this axis is a `panic!`; planting another `panic!`
+    /// would measure only the `panic!` grep. The plant is an `.expect(` on a year-parameterised
+    /// receiver — a different operator, scanned through a different window (the receiver, not the
+    /// argument list), and therefore a real test of the class rather than of one needle.
+    ///
+    /// The six near misses are what make the kill a kill: each is ONE property away from the plant.
+    #[test]
+    fn the_abort_census_reds_on_a_planted_year_keyed_abort_and_not_on_its_near_misses() {
+        const PLANT: &str =
+            "pub fn f(year: i32) -> Rule {\n    rule_for(year).expect(\"no rule for that year\")\n}\n";
+
+        // THE PLANT — reported, and classified VARIABLE.
+        let files = vec![(
+            "crates/btctax-core/src/planted.rs".to_string(),
+            PLANT.into(),
+        )];
+        let got = abort_census(&files, &only("btctax-core"));
+        let var: Vec<&AbortSite> = got
+            .iter()
+            .filter(|s| s.grip == YearGrip::Variable)
+            .collect();
+        assert_eq!(
+            var.len(),
+            1,
+            "the plant must be reported exactly once: {got:?}"
+        );
+        assert_eq!(var[0].op, ".expect(");
+        assert_eq!(var[0].file, "crates/btctax-core/src/planted.rs");
+        assert!(var[0].text.contains("rule_for(year)"), "{:?}", var[0]);
+
+        // NEAR MISS 1 — a year LITERAL, not a variable. Reported, but as a PIN, not a wall a new
+        // year can hit. This is the half the two published counts confused with each other.
+        let lit = vec![(
+            "crates/btctax-core/src/planted.rs".to_string(),
+            "pub fn f() -> Rule {\n    rule_for(2024).expect(\"no rule for 2024\")\n}\n"
+                .to_string(),
+        )];
+        let got = abort_census(&lit, &only("btctax-core"));
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert_eq!(got[0].grip, YearGrip::Literal, "{:?}", got[0]);
+        assert_eq!(got[0].years, [2024].into_iter().collect::<BTreeSet<i32>>());
+
+        // NEAR MISS 2 — no year anywhere. An abort, but not a year-keyed one.
+        let plain = vec![(
+            "crates/btctax-core/src/planted.rs".to_string(),
+            "pub fn f(k: &str) -> Rule {\n    rule_for(k).expect(\"no rule\")\n}\n".to_string(),
+        )];
+        let got = abort_census(&plain, &only("btctax-core"));
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert_eq!(got[0].grip, YearGrip::None, "{:?}", got[0]);
+
+        // NEAR MISS 3 — the same plant inside a braced `#[cfg(test)] mod tests { }`. NOT shipped
+        // code, and therefore not a row. Three of the four sites an earlier hand measurement
+        // reported as "outside `#[cfg(test)]`" were this case.
+        let in_test = vec![(
+            "crates/btctax-core/src/planted.rs".to_string(),
+            format!("pub fn g() {{}}\n#[cfg(test)]\nmod tests {{\n{PLANT}}}\n"),
+        )];
+        assert!(
+            abort_census(&in_test, &only("btctax-core")).is_empty(),
+            "a `#[cfg(test)]` item is not shipped code"
+        );
+
+        // NEAR MISS 3b — and a plant AFTER that test module must still be seen. The truncating
+        // version of this scan reported everything past the first `#[cfg(test)]` as absent.
+        let after = vec![(
+            "crates/btctax-core/src/planted.rs".to_string(),
+            format!("#[cfg(test)]\nmod tests {{\n    fn t() {{ let _ = 1; }}\n}}\n{PLANT}"),
+        )];
+        assert_eq!(
+            abort_census(&after, &only("btctax-core"))
+                .iter()
+                .filter(|s| s.grip == YearGrip::Variable)
+                .count(),
+            1,
+            "a plant after a test module must not be swallowed by it"
+        );
+
+        // NEAR MISS 4 — a file a SIBLING declares test-only with an unbraced `#[cfg(test)] mod X;`.
+        // The file carries no `#[cfg(test)]` of its own, so only the declaration can reveal it.
+        let declared = vec![
+            (
+                "crates/btctax-core/src/mod.rs".to_string(),
+                "mod real;\n#[cfg(test)]\nmod planted;\n".to_string(),
+            ),
+            (
+                "crates/btctax-core/src/planted.rs".to_string(),
+                PLANT.into(),
+            ),
+        ];
+        assert!(
+            abort_census(&declared, &only("btctax-core")).is_empty(),
+            "`#[cfg(test)] mod planted;` makes the whole file test-only"
+        );
+
+        // NEAR MISS 5 — a crate that does not ship. `xtask`'s own aborts are not a filer's problem.
+        let not_shipped = vec![("crates/xtask/src/planted.rs".to_string(), PLANT.into())];
+        assert!(
+            abort_census(&not_shipped, &only("btctax-core")).is_empty(),
+            "a non-published crate is outside the scan"
+        );
+
+        // NEAR MISS 6 — the same plant under `tests/` rather than `src/`.
+        let integration = vec![(
+            "crates/btctax-core/tests/planted.rs".to_string(),
+            PLANT.into(),
+        )];
+        assert!(
+            abort_census(&integration, &only("btctax-core")).is_empty(),
+            "`tests/` is not shipped runtime code"
+        );
+    }
+
+    /// ★ **The shipped-crate set is READ, not typed** — and a plant proves the manifest decides.
+    #[test]
+    fn shipped_crates_is_derived_from_the_manifests_and_publish_false_opts_out() {
+        let planted = vec![
+            (
+                "a-ships".to_string(),
+                "[package]\nname = \"a\"\n".to_string(),
+            ),
+            (
+                "b-tooling".to_string(),
+                "[package]\nname = \"b\"\npublish = false\n".to_string(),
+            ),
+        ];
+        let got = shipped_crates(&planted);
+        assert!(got.contains("a-ships"), "{got:?}");
+        assert!(
+            !got.contains("b-tooling"),
+            "`publish = false` is the repo's own statement that a crate does not ship: {got:?}"
+        );
+        // And at HEAD the real manifests say the same about the two tooling crates.
+        let real = shipped_crates(&workspace_manifests());
+        assert!(
+            real.contains("btctax-core") && real.contains("btctax-cli"),
+            "{real:?}"
+        );
+        for tooling in ["xtask", "btctax-oracle-harness"] {
+            assert!(
+                !real.contains(tooling),
+                "{tooling} must not read as shipped: {real:?}"
+            );
+        }
+    }
+
+    /// ★★★ **B1 for the SECOND tracker — watched going red on exactly what brace counting leaks.**
+    ///
+    /// `r15_stop_list::production_mask` counts braces and says so: a `{` inside a string literal
+    /// inside a test module ends its skip early, which errs toward scanning MORE. That is R15's
+    /// fail-closed direction and it is left alone. For this census the same slip is a **false blocker
+    /// row**, and it was measured, not imagined: brace counting alone admitted **1 888** test-only
+    /// abort sites from `btctax-tui-edit/src/main.rs` as shipped code (2 093 sites reported, 204
+    /// real). [`shipped_mask`] intersects it with an indentation-anchored tracker.
+    ///
+    /// This test plants that exact shape and watches the two masks DISAGREE. If [`shipped_mask`] is
+    /// reduced to `production_mask`, it reds here — that is the one-sentence answer to *"which test
+    /// reds when this is removed?"*
+    #[test]
+    fn the_indentation_anchored_tracker_excludes_what_brace_counting_leaks() {
+        // A `{` inside a string literal inside the test module unbalances the brace count, so the
+        // skip ends early and the LAST line is reported as shipped by `production_mask`.
+        let src = "pub fn g() {}\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() {\n        let s = \"}}}}\";\n        let _ = s.len();\n    }\n    fn helper(year: i32) -> u8 {\n        rule_for(year).expect(\"no rule for that year\")\n    }\n}\n";
+        let brace = crate::r15_stop_list::production_mask(src);
+        let shipped = shipped_mask(src);
+        let leak: Vec<usize> = src
+            .lines()
+            .enumerate()
+            .filter(|(i, l)| brace[*i] && !shipped[*i] && l.contains("rule_for(year)"))
+            .map(|(i, _)| i + 1)
+            .collect();
+        assert_eq!(
+            leak.len(),
+            1,
+            "brace counting must leak the planted in-test abort and the indentation anchor must \
+             catch it; brace={brace:?} shipped={shipped:?}"
+        );
+        // And end to end: the census must report nothing for this file.
+        let files = vec![(
+            "crates/btctax-core/src/planted.rs".to_string(),
+            src.to_string(),
+        )];
+        assert!(
+            abort_census(&files, &only("btctax-core")).is_empty(),
+            "a test module whose string literal carries braces is still a test module"
+        );
+    }
+
+    /// ★★★ **The real tree's abort census still sees the Form 6251 Part I `panic!`** — the site the
+    /// stage-2 rehearsal reached (`REPORT-stage2-B.md` §4 F1) and the reason this axis exists.
+    ///
+    /// ★ Per FR-230 the expectation is a **literal phrase from the abort's own message**, not a value
+    /// derived from the scanner. Delete the site, move it into a test module, or blind the classifier
+    /// to a `panic!` whose message names `{year}`, and this reds.
+    #[test]
+    fn the_real_trees_abort_census_still_sees_the_form_6251_part_i_panic() {
+        const ANCHOR: &str = "crates/btctax-core/src/tax/return_1040.rs";
+        const PHRASE: &str = "Form 6251 Part I has never been transcribed for TY";
+        let src = std::fs::read_to_string(root().join(ANCHOR)).expect("return_1040.rs");
+        assert!(
+            src.contains(PHRASE),
+            "the anchor phrase has moved; re-point this test at the site, do not delete it"
+        );
+        let files = workspace_rust();
+        let sites = abort_census(&files, &shipped_crates(&workspace_manifests()));
+        let hit: Vec<&AbortSite> = sites
+            .iter()
+            .filter(|s| s.file == ANCHOR && s.op == "panic!" && s.grip == YearGrip::Variable)
+            .collect();
+        assert!(
+            !hit.is_empty(),
+            "the census no longer sees a year-keyed `panic!` in {ANCHOR} — either the site is gone \
+             or the classifier went blind; found {} sites in that file",
+            sites.iter().filter(|s| s.file == ANCHOR).count()
+        );
+        // ★★ This site's message names BOTH `TY{year}` and the literals 2024/2025 (*"line 1 (2024)
+        //    and line 1b (2025) are different quantities"*), so it is the case that decides the
+        //    precedence: VARIABLE must WIN. A classifier that let a literal shadow the variable
+        //    would file the one live site in this class as a year PIN — a row saying "no new year can
+        //    reach this", about the exact abort a new year reached.
+        assert!(
+            hit.iter().any(|s| s.years.contains(&2024)),
+            "expected the live site to carry literals as well as the variable: {hit:?}"
+        );
+        let mixed = vec![(
+            "crates/btctax-core/src/planted.rs".to_string(),
+            "pub fn f(year: i32) {\n    panic!(\"no rule for TY{year}; 2024 and 2025 differ\")\n}\n"
+                .to_string(),
+        )];
+        let got = abort_census(&mixed, &only("btctax-core"));
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert_eq!(
+            got[0].grip,
+            YearGrip::Variable,
+            "a variable and a literal in one deciding expression must classify VARIABLE — the \
+             literal is commentary, the variable is the wall: {:?}",
+            got[0]
+        );
+    }
+
+    /// ★ The word-boundary rule, planted both ways: `by_year` and `year_record` must NOT read as a
+    /// year variable, because a census that fires on every identifier containing "year" reports the
+    /// whole tree and is therefore ignored.
+    #[test]
+    fn a_year_shaped_identifier_is_not_a_year_variable() {
+        assert!(names_year_variable("rule_for(year)"));
+        assert!(names_year_variable("ri.tax_year > 0"));
+        assert!(!names_year_variable("self.by_year.get(k)"));
+        assert!(!names_year_variable("year_record::parse(s)"));
+        assert_eq!(
+            year_literals("Form6251Line1::Y2025 { .. } => x"),
+            [2025].into_iter().collect::<BTreeSet<i32>>()
+        );
+        assert!(
+            year_literals("let x = 20240;").is_empty(),
+            "a five-digit number is not a tax year"
         );
     }
 }

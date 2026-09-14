@@ -73,7 +73,31 @@ fn rs_files(dir: &Path) -> Vec<PathBuf> {
 /// the skip early. That errs toward scanning MORE, which is the fail-closed direction here.
 #[must_use]
 pub fn production_source(src: &str) -> String {
-    let mut out: Vec<&str> = Vec::new();
+    let keep = production_mask(src);
+    src.lines()
+        .zip(keep)
+        .filter(|(_, k)| *k)
+        .map(|(line, _)| match line.find("//") {
+            Some(i) => &line[..i],
+            None => line,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// ★ **The line-numbered twin of [`production_source`]: one `bool` per source line, `true` when that
+/// line is shipped code.** Same algorithm, and deliberately the *only* copy of it —
+/// [`production_source`] is written in terms of this, so the two cannot drift.
+///
+/// It exists because [`production_source`] **drops** the skipped lines and therefore renumbers
+/// everything after a `#[cfg(test)]` item. A census that must cite `file:line` — `blockers`'
+/// [`crate::blockers::abort_census`] — cannot use a renumbered body: it would print a line number
+/// pointing at the wrong statement, which is the *"plausible wrong answer"* shape this file's own
+/// header is about. Comments are NOT stripped here (a mask cannot express a partial line); a caller
+/// that cares strips them per line, as [`production_source`] does.
+#[must_use]
+pub fn production_mask(src: &str) -> Vec<bool> {
+    let mut out = Vec::new();
     let mut skipping = false;
     let mut depth: i32 = 0;
     let mut opened = false;
@@ -82,6 +106,7 @@ pub fn production_source(src: &str) -> String {
             skipping = true;
             depth = 0;
             opened = false;
+            out.push(false);
             continue;
         }
         if skipping {
@@ -103,14 +128,12 @@ pub fn production_source(src: &str) -> String {
             if declaration_ended || block_ended {
                 skipping = false;
             }
+            out.push(false);
             continue;
         }
-        out.push(match line.find("//") {
-            Some(i) => &line[..i],
-            None => line,
-        });
+        out.push(true);
     }
-    out.join("\n")
+    out
 }
 
 /// ★★★ **R15 — no `serde_json::Value` reflection in `btctax-input-form`.**

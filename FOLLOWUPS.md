@@ -8920,6 +8920,33 @@ build, each with an owning phase.
   panicking/unhandled-year class too, or state in its own output that it does not cover it. An honest
   boundary is reviewable; a silent one is the defect.
 
+  ★★★ **AMENDED 2026-09-14 — the HEADLINE IS WRONG, and recorded rather than quietly rewritten. A user
+  cannot reach that panic at HEAD.** `report --tax-year 2026` was driven to a verdict on a real vault:
+  with no profile it prints `NOT COMPUTABLE [TaxProfileMissing]` and exits 1; with a `tax-profile` it
+  prints the crypto delta and exits **0**; with full-return inputs stored for 2026 it refuses in prose
+  (*"full-return computation is not available for it in this build … The inputs are KEPT"*) and exits 2.
+  `income project`, `export-irs-pdf`, `extension` and `open-next-year` all refuse cleanly too. **No
+  panic on any of them.** The bare command's `error: io: No such device or address (os error 6)` is
+  `rpassword` on a non-TTY, not a year defect — `BTCTAX_PASSPHRASE` gets past it.
+  ★ The panic is **real but shielded**: `return_1040.rs`'s `form6251_inputs_from_parts` does
+  `form6251_line1_rule(year, …).unwrap_or_else(|| panic!("Form 6251 Part I has never been transcribed
+  for TY{year} …"))`, and `REPORT-stage2-B.md` §3 step 7 reached it **only after substitution 1** —
+  `by_year.insert(2026, ty2026_full_return())` on a throwaway branch. At HEAD `full_return_for(2026)`
+  is `None` and two gates red on that insert, so the abort sits behind the compute gate.
+  ★★ **It becomes user-reachable the day TY2026 `FullReturnParams` are bundled**, which is the January
+  port — so the conversion to a `RefuseReason` is **owned by the TY2026 port phase**, not by NOW, and it
+  is not optional there: bundling the params without it ships a panic on the filer's first `report`.
+  ★ Also corrected: three of the four *"year-ish abort macros outside `#[cfg(test)]`"* in the controller's
+  own brace-tracked measurement are **inside** a braced `#[cfg(test)] mod tests` — `form6251.rs:845`,
+  `form6251.rs:1114`, `btctax-tui-edit/src/main.rs:24399`. Proved with the compiler, not a scanner:
+  `cargo build -p btctax-core --lib` compiles clean with a syntax error planted at `form6251.rs:845`,
+  while `--lib --tests` fails on it. Only `year_record.rs:121` of that four is shipped code.
+  **The Q2 half is DONE:** `xtask blockers` now carries an abort census (`blockers::abort_census`) that
+  derives the class from a stated definition, prints the definition and its blind spots beside the count,
+  and classifies each site by how tightly the year grips it (VARIABLE / LITERAL / FN-SIGNATURE
+  UNCLASSIFIED / none). Neither published count was pinned; at HEAD the definition yields 204 shipped
+  abort sites, 20 of them year-VARIABLE. Report: `design/agent-reports/REPORT-fr227-panic-class.md`.
+
 - **FR-228 — the January port crosses TWO revisions of field-name churn, not one. Important scoping fact. Owning phase: the TY2026 port plan.**
   `forms/2025/` **cannot fill a full return**: its `f1040` map is a **98-line crypto-slice stub** against
   TY2024's **406**. So **TY2024 is the only complete map set**, and porting to TY2026 means crossing
