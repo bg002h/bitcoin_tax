@@ -9220,3 +9220,30 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   the engine name and its value structurally inseparable rather than route a value into one of two
   hardcoded fields. Same family as *"the thing that decides was not the thing that knows."*
   B1: the kill is a taxcalc-engine row asserting its value does **not** appear under `ots`.
+
+- **★★★ FR-239 — B2 COROLLARY: a worktree agent sees HEAD, not your working tree, so an UNCOMMITTED brief is invisible to the agent you just dispatched. Important process defect. Owning phase: NOW — it applies to every future dispatch. Belongs in `design/HARNESS.md` beside B2.**
+  Happened twice in a row on 2026-09-14, to both agents dispatched that hour. The sequence is the
+  trap, and it is the *natural* order to work in:
+  1. write `design/agent-reports/BRIEF-x.md`
+  2. dispatch the agent with `isolation: "worktree"` — **`git worktree add` branches from HEAD**, so
+     the new worktree contains the repo *as committed*, and the brief is not in it
+  3. commit the brief — too late; the agent's filesystem was fixed at step 2
+  Verified rather than assumed: `test -f <worktree>/design/agent-reports/BRIEF-*.md` returned NO for
+  **both** briefs in **both** live worktrees. Recovered by `cp`-ing each brief into each worktree and
+  sending both agents a `SendMessage` naming the absolute main-tree path as a fallback.
+  ★★★ **This is not a new rule, it is the failure MODE of B2**, and that is why it deserves recording
+  rather than a mental note. B2 says inter-agent payloads move as file paths the receiver reads, and
+  it is right — but it is silent on the one precondition that makes a path resolvable: **the payload
+  must be reachable in the RECEIVER's view of the filesystem, not merely in the sender's.** An
+  inlined payload cannot go missing this way; a path can, and it fails *silently* — the agent simply
+  finds no file and proceeds on the dispatch prompt alone, which is the under-specified artifact that
+  `CLAUDE.md` warns agents amplify into confident divergent readings.
+  ★ **The fix is ordering, and it is free:** commit the brief **before** dispatching, always. A brief
+  carries no executable content, so `--no-verify` is appropriate and the commit costs seconds. ★ The
+  cheap machine-check, worth doing until the ordering is habit:
+  `test -f <worktree>/<brief path>` immediately after dispatch — it is one command and it caught this.
+  ★★ And note which instrument did NOT catch it: nothing did. There is no gate on "the agent can read
+  its own brief", the agents did not report a missing file, and both would have produced *something* —
+  work against my dispatch prompt, graded against a brief they never saw. **The controller would have
+  reviewed a fold against acceptance criteria the implementer was never given.** Same family as
+  *"the thing that decides was not the thing that knows."*
