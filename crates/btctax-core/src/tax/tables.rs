@@ -885,12 +885,22 @@ pub(crate) mod section_68_tests {
 /// > (`design/forms/extract/f1040sa--2026-DRAFT.txt:116-117`), with the carryover moved to line 14
 /// > and *"15 Add lines 13 and 14"* as the subtotal.
 ///
-/// ★★★ **THE NAMING CORRECTION, BECAUSE FIVE PLACES IN THIS REPO GET IT BACKWARDS.**
-/// `design/direction/filing-readiness-lens-itemized.md:182`,
-/// `design/direction/filing-readiness-lens-charity.md:9`,
-/// `design/agent-reports/RECON-drive-to-filable-return.md:383`,
-/// `design/agent-reports/REPORT-wave5-schedule-a.md:87` and
-/// `crates/btctax-cli/tests/ty2026_schedule_a.rs` all call this floor **"§170(p)"**. It is not.
+/// ★★★ **THE NAMING CORRECTION. §170(p) IS A DIFFERENT PROVISION FOR THE OPPOSITE POPULATION.**
+///
+/// ★★ This comment used to carry a hand-typed list of the five places in the repo that got it
+///    backwards — and by 2026-09-14 three of the five had been corrected, so the list was telling a
+///    reader to go look at text that no longer said it. That is `CLAUDE.md`'s *"Derive the list, or make
+///    the compiler hold it — never type one beside a set that grows"*, in the doc comment written to fix
+///    a citation error. The derived form already exists: `crates/btctax-cli/tests/ty2026_schedule_a.rs`
+///    scans every `.rs` under `crates/` for the string `170(p)`, so the SOURCE side cannot regress
+///    silently and needs no list here.
+///
+/// ★ What the scan does not cover, stated rather than enumerated: prose under `design/`. Two persisted
+///   agent reports still call the floor §170(p) and **always will** — a persisted report is immutable
+///   evidence of what was found, so correcting one would destroy the record rather than fix a defect.
+///   The two `design/direction/` lens docs carry an inline correction instead. Neither is a live defect;
+///   the live surface is source, and source is scanned.
+///
 /// Reading Pub. L. 119-21 out of `legal/text/statute-irc/PLAW-119publ21_OBBBA.txt`:
 ///
 /// | provision | what it actually is | archived at |

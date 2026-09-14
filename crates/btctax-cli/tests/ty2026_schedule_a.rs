@@ -1034,9 +1034,10 @@ fn collision_16_is_a_label_move_on_this_household_but_the_rule_widened() {
 /// those two sums are the SAME quantity **if and only if** the *Charitable Contribution Limitation
 /// Worksheet*'s line 6 equals the §170(b)-limited current-year total `charitable.rs` computes.
 ///
-/// ★★ It does not, and the reason is statute rather than layout: Pub. L. 119-21 §70425 adds **§170(p)**,
-/// a **0.5%-of-AGI floor** on an itemizer's charitable contributions for tax years beginning after
-/// 2025 — already recorded in this repo at `design/OWNER_DECISIONS_2026-09-04.md:212`,
+/// ★★ It does not, and the reason is statute rather than layout: Pub. L. 119-21 **§70425** adds
+/// **§170(b)(1)(I)**, a **0.5%-of-CONTRIBUTION-BASE floor** on an itemizer's charitable contributions
+/// for tax years beginning after 2025 — already recorded in this repo at
+/// `design/OWNER_DECISIONS_2026-09-04.md:212`,
 /// `design/direction/filing-readiness-lens-itemized.md:182` and
 /// `design/agent-reports/RECON-schedule-a-ty2026.md:385`. A limitation worksheet appearing in the same
 /// revision that stops summing gifts straight into the subtotal is where such a floor lands.
@@ -1057,13 +1058,23 @@ fn the_renumber_leaves_the_total_alone_but_the_new_charitable_floor_does_not() {
     assert_eq!(l.line14, l.line11 + l.line12 + l.line13);
 
     // The floor's size on this household — 0.5% of the engine's own AGI.
+    // ★★ FR-237 — the floor is 0.5% of the **contribution base**, not of AGI (archived statute:
+    //    `legal/text/statute-irc/PLAW-119publ21_OBBBA.txt:9409`, *"0.5 percent of the taxpayer's
+    //    contribution base"*). §170(b)(1)(H) defines the contribution base as AGI computed **without
+    //    regard to any net operating loss carryback**, so for THIS vector — which has none — the two
+    //    are the same number and `0.005 * agi` is the right arithmetic.
+    //
+    // ★ Naming the branch where it would NOT be, because that is the point of writing this down: a
+    //   filer with an NOL carryback has contribution base > AGI, so a floor computed from AGI would be
+    //   too SMALL, and too small a floor OVERSTATES the deduction and understates the tax. Whoever
+    //   implements the floor must take the contribution base, not `ar.agi`.
     let floor = dec!(0.005) * ar.agi;
     assert_eq!(ar.agi, dec!(273200));
     assert_eq!(floor, dec!(1366));
     assert!(
         floor < l.line14,
         "the floor bites: it is smaller than the charitable total it would reduce, so the whole \
-         $1,366 is deduction btctax claims and §170(p) does not allow"
+         $1,366 is deduction btctax claims and §170(b)(1)(I) does not allow"
     );
 }
 
