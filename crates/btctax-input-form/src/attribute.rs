@@ -565,6 +565,15 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::AmtScreenTriggered => vec![Anchor::NotInForm {
             note: "the Form 6251 AMT screen is computed at `report`, not a v1 form field",
         }],
+        // ★★★ §68 — `NotInForm`, and it will NEVER become a field. The cure is not an answer at all:
+        //     the *Itemized Deductions Worksheet* the TY2026 Schedule A sends a YES to has not been
+        //     published, so there is nothing for btctax to ask and nothing for it to compute. Any
+        //     `Field` anchor here would be a falsehood — it would send the filer to a control that
+        //     cannot clear the refusal, which is exactly what §G-28/B1b found above. The note names
+        //     the two exits that actually exist, the same two the refusal's own detail names.
+        R::ItemizedDeductionLimitationNotComputed { .. } => vec![Anchor::NotInForm {
+            note: "§68 limits the itemized deductions on this year's return and the Itemized Deductions Worksheet that figures the limit has not been published — work that worksheet by hand and file on paper, or take the return to a paid preparer",
+        }],
     }
 }
 
@@ -916,7 +925,19 @@ mod tests {
         //    v1 form has no field to point at, and FR-196b is the task that changes that. ★ The count
         //    is of `NotInForm` ANCHORS in the source, so three reasons sharing one arm add ONE.
         const ADDED_BY_FR196: usize = 1;
-        let expect = BEFORE_T5 - 5 + ADDED_BY_I4 + ADDED_BY_FR103 + ADDED_BY_B3_C1 + ADDED_BY_FR196;
+        // ★★ §68 added the fifth — `ItemizedDeductionLimitationNotComputed`. It is the clearest
+        //    `NotInForm` in the file and the one least likely ever to become a field: the TY2026
+        //    Schedule A sends a YES on its line-18 gate to an *Itemized Deductions Worksheet* that
+        //    the IRS has not published, so there is no question to ask the filer and no figure to
+        //    compute. A `Field` anchor here would be the §G-28/B1b falsehood — a cursor placed on a
+        //    control that cannot clear the refusal. The two exits are outside the software entirely.
+        const ADDED_BY_SECTION_68: usize = 1;
+        let expect = BEFORE_T5 - 5
+            + ADDED_BY_I4
+            + ADDED_BY_FR103
+            + ADDED_BY_B3_C1
+            + ADDED_BY_FR196
+            + ADDED_BY_SECTION_68;
         let now = src[start..end].matches("Anchor::NotInForm {").count();
         assert_eq!(
             now, expect,
@@ -924,9 +945,10 @@ mod tests {
              UnrecapturedOrSpecialRateGain, InconsistentDividendSubset, ForeignTaxOverCeiling, \
              Form1099BNeedsForm8949), the I-4 fold added one (QualifiedTipsCautionNotMet), FR-103 \
              added one (Schedule1aNotOnThisYearsReturn), B3's C-1 added one \
-             (ReturnInputsYearNotStated) and FR-196 added one (the §111(a) worksheet's three \
-             TOML-only refusals, sharing one arm); the source now has {now} `NotInForm` anchors, \
-             not {expect}"
+             (ReturnInputsYearNotStated), FR-196 added one (the §111(a) worksheet's three \
+             TOML-only refusals, sharing one arm) and §68 added one \
+             (ItemizedDeductionLimitationNotComputed); the source now has {now} `NotInForm` \
+             anchors, not {expect}"
         );
 
         // The five, and every anchor each yields must be a real Field or Section of `form_spec()`.

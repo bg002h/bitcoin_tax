@@ -1910,6 +1910,40 @@ pub enum RefuseReason {
         /// *"a gift or donation"*).
         kind: &'static str,
     },
+    // ── ★★★ §68 — THE OVERALL LIMITATION ON ITEMIZED DEDUCTIONS (TY2026 on). ────────────────────
+    /// ★★★ **This return itemizes, §68 limits itemized deductions this year, and btctax cannot
+    /// compute the limitation — so it refuses rather than file the unlimited total.**
+    ///
+    /// TY2026 Schedule A moves the itemized total to **line 18** and puts a gate in front of it:
+    /// *"Is the amount on Form 1040 or 1040-SR, line 11b, minus the amounts on lines 13a and 13b of
+    /// that form, more than $384,350?"* — *"Yes. Your deductions may be limited. See the Itemized
+    /// Deductions Worksheet in the instructions to figure the amount to enter"*
+    /// (`design/forms/extract/f1040sa--2026-DRAFT.txt:158-163`).
+    ///
+    /// ★★★ **The refusal IS the anti-fabrication move, and that is the whole reason it exists.** The
+    /// worksheet the *Yes* branch names lives in `i1040gi--2026` / `i1040sca--2026`, **neither of
+    /// which is archived** — the documents have not been published. There is nothing to transcribe,
+    /// and `CLAUDE.md` forbids deriving a closed form in its place without an equivalence proof and a
+    /// KAT. Filing the **unlimited** total instead would deduct more than §68 allows, i.e. UNDERSTATE
+    /// the tax, which is the direction this project treats as worse. So the branch refuses and the
+    /// detail tells the filer to work the worksheet by hand or use a preparer — the two things that
+    /// actually exist. **No btctax command clears this**, and the message says so rather than naming
+    /// a cure that does not exist.
+    ///
+    /// ★★ Raised from [`section_68_gate`], which is keyed on a **semantic** quantity — AGI less the
+    /// §199A deduction less the Schedule 1-A deduction — and never on `11b`/`13a`/`13b`, because the
+    /// TY2026 Form 1040 is not archived either (`FOLLOWUPS.md` FR-214: Form 6251's own text is the
+    /// single indirect witness that the 1040 renumbers its lines at all).
+    ///
+    /// ★ One variant covers both of [`crate::tax::tables::Section68Status`]'s refusing arms — the
+    ///   filer over a **known** threshold, and a §68 year whose Schedule A has never been transcribed
+    ///   so the threshold is **unknown**. The cause is the same (btctax will not file an itemized
+    ///   total it cannot bound) and the `detail` distinguishes them; the arms themselves are held
+    ///   exhaustively by the `match` in [`section_68_gate`].
+    ItemizedDeductionLimitationNotComputed {
+        /// The tax year whose Schedule A carries the gate.
+        year: i32,
+    },
 }
 
 /// A fail-closed refusal: the reason + a human-readable detail (surfaced to the user).
@@ -2723,6 +2757,121 @@ pub fn donation_restriction_gate(
         return Some(DonationRestrictionGate::UnansweredSectionB);
     }
     None
+}
+
+/// ★★★ **§68 — THE ITEMIZED-DEDUCTION LIMITATION GATE. REFUSE WHAT CANNOT BE COMPUTED.**
+///
+/// The TY2026 Schedule A asks one question in front of its itemized total and sends a *Yes* to a
+/// worksheet that **does not exist yet** (`i1040gi--2026` / `i1040sca--2026` are not archived). btctax
+/// therefore screens, and refuses the *Yes* — it does not attempt the limitation. See
+/// [`crate::tax::tables::Section68Gate`] for the form's own words, the statute, and why the threshold
+/// is transcribed rather than read off the §1(j)(2) bracket table.
+///
+/// ★★★ **THE QUANTITY IS SEMANTIC, AND THE CHOICE IS FORCED, NOT STYLISTIC.** The gate's text cites
+/// *"Form 1040 or 1040-SR, line 11b, minus the amounts on lines 13a and 13b"*, and the TY2026 Form
+/// 1040 is **NOT ARCHIVED**: `FOLLOWUPS.md` **FR-214** records that the sole evidence in this tree
+/// that the TY2026 1040 renumbers anything is Form 6251's own text citing *"line 7a"* — one indirect
+/// witness, a *referencing* form testifying about a *referenced* one. Keying this gate on `11b` would
+/// be an assertion about a document nobody has read. What those three lines MEAN is not in doubt, and
+/// btctax already computes each of them:
+///
+/// | the gate's citation | the meaning | where btctax has it |
+/// |---|---|---|
+/// | 1040 line 11b | adjusted gross income | `AbsoluteReturn::agi` |
+/// | 1040 line 13a | the §199A qualified-business-income deduction | `AbsoluteReturn::qbi_deduction` |
+/// | 1040 line 13b | Schedule 1-A additional deductions | `AbsoluteReturn::schedule_1a_additional` |
+///
+/// ★★ **`deduction_is_itemized`, not "has a Schedule A".** §68(a) reduces *"the amount of the itemized
+/// deductions otherwise allowable"*; a filer whose standard deduction is larger takes no itemized
+/// deduction, so nothing of theirs can be reduced and they file normally. Passing the **§63(e)
+/// election as computed on the UNLIMITED figure** is also the fail-closed direction: §68 can only make
+/// the itemized total smaller, so a return whose standard deduction already won cannot be flipped into
+/// itemizing by the limitation — while a return that itemizes unlimited and would fall back to the
+/// standard once limited is exactly a return whose bottom line btctax cannot compute, and it refuses.
+/// (`ar.deduction_is_itemized` is the real election, which is why this gate runs from
+/// `screen_absolute` and not from `screen_inputs` — the same reason the §170(f)(8) and Form 4952 gates
+/// live there.)
+///
+/// ★ **The screen is deliberately OVER-INCLUSIVE and the form makes it so.** $384,350 is the *lowest*
+/// of the four statuses' 37% bracket starts and the gate prints it for everyone, so a Single filer
+/// between $384,350 and $640,600 is screened in although §68(a)(2) would reduce nothing for them. The
+/// form says *"may be limited"*; refusing there declines to file a return, which is recoverable, while
+/// the other direction files a deduction that is too large, which is not.
+#[must_use]
+pub fn section_68_gate(
+    year: i32,
+    deduction_is_itemized: bool,
+    agi: Usd,
+    qbi_deduction: Usd,
+    schedule_1a_deduction: Usd,
+) -> Option<Refusal> {
+    use crate::tax::advisories::fmt_usd;
+    use crate::tax::tables::Section68Status;
+
+    // §68(a) reduces itemized deductions. A standard-deduction return has none to reduce.
+    if !deduction_is_itemized {
+        return None;
+    }
+    // The gate's *"line 11b, minus the amounts on lines 13a and 13b"*, by meaning. See the doc table.
+    let tested = agi - qbi_deduction - schedule_1a_deduction;
+
+    // ★ No `_` arm: a fourth `Section68Status` is a compile error here, which is the point of the enum.
+    match crate::tax::tables::section_68_status(year) {
+        // §68 was suspended by TCJA §11046 through TY2025 and this year's Schedule A prints no gate.
+        Section68Status::NotApplicable => None,
+        Section68Status::Gated(g) => {
+            if tested <= g.threshold {
+                // The form's own *No*: "Your deductions are not limited." Nothing to refuse.
+                return None;
+            }
+            refuse(
+                RefuseReason::ItemizedDeductionLimitationNotComputed { year },
+                format!(
+                    "this return is for tax year {year}, it ITEMIZES, and §68 — the overall \
+                     limitation on itemized deductions — applies to it. Schedule A line {line} asks, \
+                     in the form's own words: \"{question}\" For this return that amount is {tested} \
+                     (your adjusted gross income, less your qualified-business-income deduction, \
+                     less your Schedule 1-A additional deductions), which is MORE. The form's answer \
+                     to a Yes is \"Your deductions may be limited. See the {worksheet} in the \
+                     instructions to figure the amount to enter\" — and btctax does not have that \
+                     worksheet. The tax year {year} Form 1040 and Schedule A instructions have not \
+                     been published, so there is no document to transcribe it from, and btctax will \
+                     not invent one. Printing the unlimited total on line {line} instead would deduct \
+                     more than §68 allows and UNDERSTATE your tax. What to do: work the {worksheet} \
+                     in the tax year {year} Schedule A instructions by hand, enter its result on \
+                     Schedule A line {line}, and file on paper — or take this return to a paid \
+                     preparer. No btctax command clears this and no further answer will change it. A \
+                     return that takes the standard deduction is unaffected and computes normally, \
+                     because §68 reduces only itemized deductions.",
+                    line = g.total_line,
+                    question = g.gate_sentence,
+                    worksheet = g.worksheet,
+                    tested = fmt_usd(tested),
+                ),
+            )
+        }
+        // ★★★ THE FAIL-CLOSED ARM. §68 applies and no Schedule A for this year has been transcribed,
+        //     so the threshold — an indexed figure that moves every year — is unknown. Refuse for
+        //     EVERY itemizing return, not only a large one: without the threshold there is no way to
+        //     know which side of it the filer is on, and guessing the favourable side understates tax.
+        Section68Status::ThresholdNotTranscribed => refuse(
+            RefuseReason::ItemizedDeductionLimitationNotComputed { year },
+            format!(
+                "this return is for tax year {year} and it ITEMIZES. §68 — the overall limitation on \
+                 itemized deductions — applies to every tax year beginning after December 31, 2025 \
+                 (Pub. L. 119-21 §70111), and no Schedule A for tax year {year} has been transcribed \
+                 into btctax, so it does not know the threshold that year's form prints. That \
+                 threshold is the dollar amount at which the 37% bracket begins, which is re-indexed \
+                 every year, so it cannot be carried forward from an earlier form. btctax therefore \
+                 cannot tell whether your deductions are limited, and it will not file an unlimited \
+                 itemized total on a year §68 limits — that would deduct more than allowed and \
+                 UNDERSTATE your tax. What to do: work Schedule A and its Itemized Deductions \
+                 Worksheet for tax year {year} by hand and file on paper, or take this return to a \
+                 paid preparer. A return that takes the standard deduction is unaffected and computes \
+                 normally, because §68 reduces only itemized deductions."
+            ),
+        ),
+    }
 }
 
 /// ★ spec 1099-DA R1 — the Form 1099-DA screen, at the site that holds the LEDGER (called from
@@ -11786,6 +11935,322 @@ mod param_free_tier {
             None,
             "`income import` is the only path that CREATES the row `income answer` fills — it must \
              not demand the answers"
+        );
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// ★★★ §68 — THE ITEMIZED-DEDUCTION LIMITATION GATE.
+//
+// The unit is deliberately the PURE decider: `section_68_gate` takes the year, the §63(e) election and
+// the three computed amounts, so every arm is reachable without assembling a return for a year whose
+// Form 6251 Part I has never been transcribed (`assemble_absolute` panics on TY2026 today — see
+// `return_1040.rs::form6251_line1_rule`). The end-to-end row through `screen_absolute` lives beside the
+// call site in `return_1040.rs`.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+#[cfg(test)]
+mod section_68_gate_tests {
+    use super::*;
+    use crate::tax::tables::{section_68_status, Section68Status};
+
+    /// The TY2026 threshold, taken from the one place that holds it — never retyped here, which is
+    /// what makes the ±$1 rows below measure the FORM's figure rather than a copy of it.
+    fn threshold(year: i32) -> Usd {
+        match section_68_status(year) {
+            Section68Status::Gated(g) => g.threshold,
+            other => panic!("TY{year} must be gated, got {other:?}"),
+        }
+    }
+
+    fn reason(r: Option<Refusal>) -> Option<RefuseReason> {
+        r.map(|x| x.reason)
+    }
+
+    /// ★★★ **B1's first half — an itemizing TY2026 return over the threshold refuses BY NAME, and one
+    /// a dollar under it files unchanged.**
+    ///
+    /// The pair is the point: a gate that refused both would be indistinguishable from "TY2026 cannot
+    /// file at all", and a gate that refused neither is the silent understatement this exists to stop.
+    #[test]
+    fn a_ty2026_itemizer_over_the_threshold_refuses_and_one_a_dollar_under_it_does_not() {
+        let t = threshold(2026);
+        assert_eq!(
+            reason(section_68_gate(
+                2026,
+                true,
+                t + dec!(1),
+                Usd::ZERO,
+                Usd::ZERO
+            )),
+            Some(RefuseReason::ItemizedDeductionLimitationNotComputed { year: 2026 }),
+            "a dollar over the threshold the form prints must refuse"
+        );
+        assert_eq!(
+            reason(section_68_gate(2026, true, t, Usd::ZERO, Usd::ZERO)),
+            None,
+            "the form's test is \"MORE than\" — exactly AT the threshold is the No branch, and \
+             \"Your deductions are not limited\""
+        );
+        assert_eq!(
+            reason(section_68_gate(
+                2026,
+                true,
+                t - dec!(1),
+                Usd::ZERO,
+                Usd::ZERO
+            )),
+            None,
+            "a dollar under it files unchanged"
+        );
+    }
+
+    /// ★★★ **THE QUANTITY IS AGI LESS BOTH DEDUCTIONS — asserted by a return that the wrong quantity
+    /// would refuse and the right one files.**
+    ///
+    /// Keying the gate on AGI alone is the compression this whole parcel exists to avoid, and it is
+    /// invisible to any test whose fixture has no QBI and no Schedule 1-A. Here AGI is $60,000 OVER the
+    /// threshold and the two deductions remove $60,001 of it, so the form's own *"line 11b, minus the
+    /// amounts on lines 13a and 13b"* lands one dollar UNDER — the No branch. A gate reading `agi`
+    /// refuses this return; a gate that forgot either subtrahend refuses it too.
+    #[test]
+    fn the_gate_reads_agi_less_the_qbi_and_schedule_1a_deductions_not_agi_alone() {
+        let t = threshold(2026);
+        let agi = t + dec!(60000);
+        let qbi = dec!(40000);
+        let sch1a = dec!(20001);
+        assert_eq!(
+            reason(section_68_gate(2026, true, agi, qbi, sch1a)),
+            None,
+            "AGI − QBI − Schedule 1-A is a dollar under the threshold, so this return FILES"
+        );
+        // The three ways to get the quantity wrong, each of which refuses this same return.
+        assert_eq!(
+            reason(section_68_gate(2026, true, agi, Usd::ZERO, Usd::ZERO)),
+            Some(RefuseReason::ItemizedDeductionLimitationNotComputed { year: 2026 }),
+            "a gate keyed on AGI alone would refuse it"
+        );
+        assert_eq!(
+            reason(section_68_gate(2026, true, agi, qbi, Usd::ZERO)),
+            Some(RefuseReason::ItemizedDeductionLimitationNotComputed { year: 2026 }),
+            "a gate that dropped line 13b (Schedule 1-A) would refuse it — the exact term the \
+             pre-T3 Form 6251 line-1 rule dropped"
+        );
+        assert_eq!(
+            reason(section_68_gate(2026, true, agi, Usd::ZERO, sch1a)),
+            Some(RefuseReason::ItemizedDeductionLimitationNotComputed { year: 2026 }),
+            "a gate that dropped line 13a (QBI) would refuse it"
+        );
+    }
+
+    /// §68(a) reduces *"the amount of the itemized deductions otherwise allowable"*. A return whose
+    /// standard deduction won has none, so it computes and files however large its income is.
+    #[test]
+    fn a_standard_deduction_return_is_untouched_at_any_income() {
+        let t = threshold(2026);
+        for agi in [t + dec!(1), t * dec!(10)] {
+            assert_eq!(
+                reason(section_68_gate(2026, false, agi, Usd::ZERO, Usd::ZERO)),
+                None,
+                "§68 limits ITEMIZED deductions; a standard-deduction return has none to limit"
+            );
+        }
+        // And the same is true on a year with no transcribed form at all.
+        assert_eq!(
+            reason(section_68_gate(
+                2027,
+                false,
+                t * dec!(10),
+                Usd::ZERO,
+                Usd::ZERO
+            )),
+            None
+        );
+    }
+
+    /// ★★ **TCJA §11046 suspended §68 through TY2025, so the years that actually file are untouched.**
+    ///    A regression here is not a refusal that is merely early — it would refuse every large
+    ///    itemizing TY2024 return, the only year this product files today.
+    ///
+    /// ★★★ **THE YEARS COME FROM THE ARCHIVED FORMS, NEVER FROM `SECTION_68_FIRST_YEAR`.** The first
+    /// draft of this test looped `[2017, 2024, SECTION_68_FIRST_YEAR - 1]`, and a plant that moved the
+    /// constant to 2025 **survived it** — because the third element moved with the mutation to `2024`
+    /// and TY2025 was never tested at all. A fixture derived from the thing under test cannot measure a
+    /// change to it (`CLAUDE.md`: *"the thing that decides was not the thing that knows"*), so the
+    /// ungated set is read off `design/forms/extract/` by the same one reading the classification test
+    /// uses.
+    #[test]
+    fn a_pre_2026_itemizer_over_the_threshold_files_unchanged() {
+        use crate::tax::tables::section_68_tests::{archived_schedule_a, prints_section_68_gate};
+        let t = threshold(2026);
+        let mut ungated: Vec<i32> = archived_schedule_a()
+            .into_iter()
+            .filter(|(_, text)| !prints_section_68_gate(text))
+            .map(|(year, _)| year)
+            .collect();
+        assert!(
+            ungated.len() >= 2,
+            "at least TY2024 and TY2025 print no §68 gate; got {ungated:?} — if this shrank, the \
+             loop below is measuring almost nothing"
+        );
+        assert!(
+            ungated.contains(&2024),
+            "TY2024 is the year that actually files and MUST be in this set: {ungated:?}"
+        );
+        // A year with no Schedule A in the tree at all, for the same reason.
+        ungated.push(2017);
+        for year in ungated {
+            assert_eq!(
+                section_68_status(year),
+                Section68Status::NotApplicable,
+                "TY{year} Schedule A prints no §68 gate, so §68 must not apply to it in ANY form — \
+                 `ThresholdNotTranscribed` here would refuse every itemizer of a year the IRS \
+                 accepts unlimited"
+            );
+            assert_eq!(
+                reason(section_68_gate(
+                    year,
+                    true,
+                    t * dec!(10),
+                    Usd::ZERO,
+                    Usd::ZERO
+                )),
+                None,
+                "a TY{year} itemizer is not limited by §68 at any income"
+            );
+        }
+    }
+
+    /// ★★★ **THE FAIL-CLOSED ARM: a §68 year with no transcribed Schedule A refuses EVERY itemizer,
+    /// however small.**
+    ///
+    /// The threshold is the 37% bracket start, re-indexed annually, so carrying TY2026's forward would
+    /// be inventing a figure. Falling through to "unlimited" instead would file a deduction larger than
+    /// §68 allows — silently, in the understating direction — which is precisely the shape that makes a
+    /// typed year list a defect rather than a tidiness question.
+    #[test]
+    fn a_section_68_year_with_no_transcribed_schedule_a_refuses_every_itemizer() {
+        for year in [2027, 2030, 2099] {
+            assert_eq!(
+                section_68_status(year),
+                Section68Status::ThresholdNotTranscribed,
+                "TY{year} has no archived Schedule A"
+            );
+            assert_eq!(
+                reason(section_68_gate(year, true, dec!(1), Usd::ZERO, Usd::ZERO)),
+                Some(RefuseReason::ItemizedDeductionLimitationNotComputed { year }),
+                "with no threshold there is no way to know which side of it the filer is on, so a \
+                 $1 AGI refuses too — guessing the favourable side understates tax"
+            );
+        }
+    }
+
+    /// ★★★ **B1's last clause — THE REFUSAL NAMES WHAT THE FILER MUST ACTUALLY DO, AND OFFERS NO
+    /// REMEDY THAT DOES NOT EXIST.**
+    ///
+    /// This is an assertion about the message because the message is the whole deliverable on this
+    /// branch: btctax cannot compute the limitation, so the only value it can add over silence is
+    /// telling the filer, in the form's own words, what is wrong and where the answer lives. The
+    /// *negative* half is the load-bearing one — `income answer`, `--re-answer` and every other btctax
+    /// verb are useless here, and a refusal that named one would send the filer round a loop that
+    /// cannot terminate (parcel M's defect 2, in this parcel's file).
+    #[test]
+    fn the_refusal_quotes_the_form_and_names_only_remedies_that_exist() {
+        let t = threshold(2026);
+        let d = section_68_gate(2026, true, t + dec!(1), Usd::ZERO, Usd::ZERO)
+            .expect("over the threshold must refuse")
+            .detail;
+        let Section68Status::Gated(g) = section_68_status(2026) else {
+            panic!("TY2026 must be gated")
+        };
+        // The form's own sentence, verbatim, from the one place that holds it.
+        assert!(
+            d.contains(g.gate_sentence),
+            "the refusal must quote the gate's own question; it reads: {d}"
+        );
+        for needle in [
+            "$384,350",                      // the threshold, as the form prints it
+            "Itemized Deductions Worksheet", // where the answer actually lives
+            "by hand",                       // the first real exit
+            "paid preparer",                 // the second real exit
+            "file on paper",
+            "UNDERSTATE", // which direction the silent alternative errs in
+            "line 18",    // the line the total moved to
+            "$384,351",   // the tested quantity, so the filer can check it
+        ] {
+            assert!(d.contains(needle), "the refusal must say {needle:?}: {d}");
+        }
+        // ★ THE NEGATIVE HALF. No btctax verb clears this, and the message must not imply one.
+        for forbidden in [
+            "btctax income",
+            "--re-answer",
+            "Run `",
+            "answer the question",
+        ] {
+            assert!(
+                !d.contains(forbidden),
+                "the refusal must not offer {forbidden:?} — no btctax command computes this \
+                 worksheet, and naming one sends the filer round a loop that cannot terminate: {d}"
+            );
+        }
+        assert!(
+            d.contains("No btctax command clears this"),
+            "and it must say so explicitly: {d}"
+        );
+        // The same two exits on the fail-closed arm, which a filer can also reach.
+        let d2 = section_68_gate(2027, true, dec!(1), Usd::ZERO, Usd::ZERO)
+            .expect("an untranscribed §68 year must refuse")
+            .detail;
+        for needle in [
+            "Itemized Deductions Worksheet",
+            "by hand",
+            "paid preparer",
+            "§70111",
+        ] {
+            assert!(
+                d2.contains(needle),
+                "the fail-closed arm must say {needle:?}: {d2}"
+            );
+        }
+    }
+
+    /// ★ There is no `FilingStatus` anywhere in this gate — the form prints one threshold — so the
+    ///   FR-186 trap is unrepresentable rather than merely discouraged. Held by the signature; this
+    ///   records the reasoning where a future reader of the tests will meet it.
+    ///
+    /// The arithmetic that makes the single figure SAFE: $384,350 is the LOWEST of TY2026's four 37%
+    /// bracket starts, so the printed screen is over-inclusive. A Single filer at $500,000 is screened
+    /// in although §68(a)(2) would reduce nothing for them, and that over-refusal is the recoverable
+    /// direction; substituting their own $640,600 would screen them OUT of a limitation the form
+    /// screens them IN to, and file too large a deduction.
+    #[test]
+    fn the_threshold_is_the_lowest_37_percent_start_not_the_filers_own() {
+        let t = threshold(2026);
+        let table = crate::tax::testonly::ty2026_table();
+        let starts: Vec<Usd> = [
+            FilingStatus::Single,
+            FilingStatus::Mfj,
+            FilingStatus::HoH,
+            FilingStatus::Mfs,
+        ]
+        .into_iter()
+        .map(|s| {
+            table
+                .ordinary_for(s)
+                .brackets
+                .last()
+                .expect("the 37% bracket is last")
+                .lower
+        })
+        .collect();
+        assert_eq!(
+            starts.iter().copied().min(),
+            Some(t),
+            "the gate's threshold is the MINIMUM 37% bracket start over the four statuses ({starts:?})"
+        );
+        assert!(
+            starts.iter().any(|s| *s > t),
+            "and at least one status starts HIGHER, which is why reading the threshold per-status \
+             would screen that filer OUT of a limitation the form screens them IN to (FR-186)"
         );
     }
 }

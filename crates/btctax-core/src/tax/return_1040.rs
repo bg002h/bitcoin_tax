@@ -3746,6 +3746,33 @@ pub fn screen_absolute(
     //
     // ★ It was the LAST check in this function, so nothing below it was shadowed and nothing above it
     //   moved.
+
+    // ★★★ §68 — THE OVERALL LIMITATION ON ITEMIZED DEDUCTIONS (TY2026 on), AND IT IS LAST ON PURPOSE.
+    //
+    // TY2026 Schedule A puts a gate in front of its itemized total and sends a *Yes* to an *Itemized
+    // Deductions Worksheet* that lives in `i1040gi--2026` / `i1040sca--2026` — neither archived. btctax
+    // cannot compute the limitation, so it refuses rather than print the unlimited total, which would
+    // deduct more than §68 allows and UNDERSTATE the tax. The decision, the threshold's provenance and
+    // the whole argument live in `return_refuse::section_68_gate`; only the three computed quantities
+    // are local, because only `assemble_absolute` has them.
+    //
+    // ★★ **LAST among the Schedule A gates, deliberately.** Every refusal above it names something the
+    //    filer can go and DO inside btctax — answer a question, correct a line, obtain an
+    //    acknowledgment. This one has no software exit at all: its cure is a worksheet worked by hand
+    //    or a paid preparer. Meeting it first would hide an answerable question behind an unanswerable
+    //    one, and a filer who cleared it would still meet the others afterwards.
+    //
+    // ★ It is keyed on a SEMANTIC quantity, never on 1040 line 11b/13a/13b — the TY2026 1040 is not
+    //   archived and its numbering rests on one indirect witness (`FOLLOWUPS.md` FR-214).
+    if let Some(r) = crate::tax::return_refuse::section_68_gate(
+        year,
+        ar.deduction_is_itemized,
+        ar.agi,
+        ar.qbi_deduction,
+        ar.schedule_1a_additional,
+    ) {
+        return Some(r);
+    }
     None
 }
 
@@ -8989,6 +9016,115 @@ mod tests {
                 crate::forms::InformationReturnRegime::NONE
             ),
             None
+        );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+    // ★★★ §68 — THE END-TO-END ROW, through `screen_absolute`, beside the call site.
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// ★★★ **B1 — A TY2026 ITEMIZER OVER THE THRESHOLD IS REFUSED BY `screen_absolute` ITSELF, AND ONE
+    /// UNDER IT FILES CLEAN.** One fixture, two incomes, so the pair cannot both be explained by
+    /// "TY2026 refuses everything".
+    ///
+    /// ★★ **WHY THE RETURN IS ASSEMBLED AT 2024 AND SCREENED AT 2026, WHICH IS NOT A FUDGE — IT IS THE
+    ///    MEASUREMENT OF HOW DORMANT THIS DEFECT IS.** `assemble_absolute` PANICS on TY2026:
+    ///    [`form6251_line1_rule`] has arms for 2024 and 2025 only, and the `unwrap_or_else` in
+    ///    [`form6251_inputs_from_parts`] refuses rather than file TY2024's Part I under a TY2026
+    ///    heading. That is asserted below, not claimed. So no TY2026 return can be assembled at all
+    ///    today, `BundledFullReturnTables::load` inserts 2024 alone, and the §68 gap is **dormant**
+    ///    (`design/TY2026_PORT_REPORT.md:454`, *"DORMANT / IMPORTANT"*) rather than live — it becomes a
+    ///    live understatement the moment the TY2026 port transcribes Form 6251 Part I and bundles the
+    ///    package, which is exactly why the guard is built BEFORE that happens.
+    ///
+    ///    `screen_absolute` takes `year` as its own parameter, so screening at 2026 is the real code
+    ///    path with the real year. The gate reads only that year and three quantities — AGI, the QBI
+    ///    deduction and the Schedule 1-A deduction — each of which means the same thing in every year,
+    ///    so nothing in the TY2024 package can change its verdict.
+    #[test]
+    fn a_ty2026_itemizer_over_the_section_68_threshold_is_refused_and_one_under_it_files() {
+        // The dormancy, measured: TY2026 has no Form 6251 Part I, so it cannot be assembled.
+        assert!(
+            form6251_line1_rule(2026, dec!(0), dec!(0), None).is_none(),
+            "if TY2026 gained a Form 6251 line-1 rule, assemble it directly here instead of \
+             screening a 2024-assembled return at 2026"
+        );
+        assert!(form6251_line1_rule(2024, dec!(0), dec!(0), None).is_some());
+
+        let threshold = match crate::tax::tables::section_68_status(2026) {
+            crate::tax::tables::Section68Status::Gated(g) => g.threshold,
+            other => panic!("TY2026 must be gated, got {other:?}"),
+        };
+
+        let screen = |wages: Usd| {
+            let p = ty2024_params();
+            let table = real_2024_table();
+            let ri = ReturnInputs {
+                filing_status: FilingStatus::Mfj,
+                header: crate::tax::testonly::not_a_dependent(),
+                w2s: vec![w2(Owner::Taxpayer, wages, dec!(168600), wages)],
+                form_1098: vec![crate::tax::testonly::form_1098_with_interest(dec!(40000))],
+                schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
+                    salt_real_estate: dec!(10000),
+                    mortgage_all_used_to_buy_build_improve: Some(true),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
+            assert!(
+                ar.deduction_is_itemized,
+                "the fixture must itemize ($50,000 > the $29,200 MFJ standard) or it exercises the \
+                 wrong branch"
+            );
+            assert_eq!(ar.agi, wages, "fixture: AGI is the wages");
+            assert_eq!(ar.qbi_deduction, Usd::ZERO);
+            assert_eq!(ar.schedule_1a_additional, Usd::ZERO);
+            let at = |year: i32| {
+                screen_absolute(
+                    &ri,
+                    &ar,
+                    &p,
+                    &empty_ledger(),
+                    year,
+                    crate::forms::InformationReturnRegime::NONE,
+                )
+            };
+            (at(2024), at(2026))
+        };
+
+        // (1) OVER the threshold — TY2026 refuses BY NAME, quoting the form; TY2024 is untouched.
+        let (ty2024, ty2026) = screen(threshold + dec!(50000));
+        assert_eq!(
+            ty2024, None,
+            "TY2024 Schedule A prints no §68 gate — the year that actually files must not change"
+        );
+        let r = ty2026.expect("a TY2026 itemizer over $384,350 must be refused");
+        assert_eq!(
+            r.reason,
+            RefuseReason::ItemizedDeductionLimitationNotComputed { year: 2026 }
+        );
+        assert!(
+            r.detail.contains(
+                "Is the amount on Form 1040 or 1040-SR, line 11b, minus the amounts on lines 13a \
+                 and 13b of that form, more than $384,350?"
+            ),
+            "the refusal must quote Schedule A line 18's own question: {}",
+            r.detail
+        );
+        assert!(
+            r.detail.contains("Itemized Deductions Worksheet") && r.detail.contains("by hand"),
+            "and it must name the worksheet the filer has to work: {}",
+            r.detail
+        );
+
+        // (2) UNDER the threshold — the same fixture files clean on BOTH years.
+        let (ty2024, ty2026) = screen(threshold - dec!(50000));
+        assert_eq!(ty2024, None);
+        assert_eq!(
+            ty2026, None,
+            "an itemizer under the threshold meets the form's No branch — \"Your deductions are not \
+             limited\" — and must file unchanged"
         );
     }
 

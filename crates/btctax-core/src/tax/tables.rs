@@ -453,6 +453,429 @@ impl SaltLimitation {
     }
 }
 
+/// ★★★ **§68 — THE OVERALL LIMITATION ON ITEMIZED DEDUCTIONS, AS SCHEDULE A PRINTS ITS GATE.**
+///
+/// Pub. L. 119-21 (OBBBA) **§70111(a)** rewrote §68 entirely, and **§70111(c)** applies it *"to
+/// taxable years beginning after December 31, 2025"* — no sunset
+/// (`legal/text/statute-irc/PLAW-119publ21_OBBBA.txt:5303-5332`). The TY2026 Schedule A carries it as
+/// a **gate in front of the itemized total**, which that revision also moves from line 17 to **line
+/// 18**:
+///
+/// > *"Is the amount on Form 1040 or 1040-SR, line 11b, minus the amounts on lines 13a and 13b of
+/// > that form, more than $384,350?"*
+/// > *"No. Your deductions are not limited. Add the amounts in far-right column for lines 4 through
+/// > 17z. Also enter this amount on Form 1040 or 1040-SR, line 12e."*
+/// > *"Yes. Your deductions may be limited. See the Itemized Deductions Worksheet in the
+/// > instructions to figure the amount to enter"*
+/// > (`design/forms/extract/f1040sa--2026-DRAFT.txt:158-163`.)
+///
+/// ★★★ **THIS TYPE CARRIES THE SCREEN AND NOTHING ELSE. btctax DOES NOT COMPUTE THE LIMITATION,
+/// DELIBERATELY.** The *Yes* branch's answer lives in the **Itemized Deductions Worksheet** in the
+/// TY2026 Form 1040 / Schedule A instructions, and **neither `i1040gi--2026` nor `i1040sca--2026` is
+/// archived** — the documents do not exist yet. Transcribing a worksheet we cannot read would mean
+/// inventing its lines; computing §68(a)'s `2/37` arithmetic from the statute instead would be the
+/// closed form `CLAUDE.md` forbids, on the one branch where getting it wrong OVERSTATES the
+/// deduction and therefore UNDERSTATES the tax. So the *Yes* branch **refuses**
+/// ([`crate::tax::return_refuse::section_68_gate`]). Refusing is how a tool avoids making up values.
+///
+/// ★★★ **WHY THERE IS NO 1040 LINE NUMBER IN THIS TYPE, AND WHY THE CALLER TESTS A *SEMANTIC*
+/// QUANTITY.** The gate's own text cites *"Form 1040 or 1040-SR, line 11b"* minus *"lines 13a and
+/// 13b"* — and **the TY2026 Form 1040 is NOT ARCHIVED.** `FOLLOWUPS.md` **FR-214** records that the
+/// only evidence in this tree that the TY2026 1040 renumbers its lines at all is Form 6251's own
+/// text citing *"line 7a"*: a *referencing* form is the single indirect witness to a change in the
+/// *referenced* one. Keying anything on `11b`/`13a`/`13b` would therefore be an assertion about a
+/// document nobody here has read. What those lines MEAN is not in doubt — AGI, less the §199A QBI
+/// deduction, less the Schedule 1-A additional deductions — and btctax already computes all three
+/// (`AbsoluteReturn::agi`, `::qbi_deduction`, `::schedule_1a_additional`). The gate is keyed on the
+/// meaning; [`Self::gate_sentence`] carries the form's numbering as the quotation it is.
+///
+/// ★★★ **$384,350 IS TRANSCRIBED FROM THE FORM AND IS *NOT* THE FILER'S OWN 37% BRACKET START.**
+/// §68(a)(2) measures against *"the dollar amount at which the 37 percent rate bracket under section
+/// 1 begins with respect to the taxpayer"* — a per-status figure, which for TY2026 is Single
+/// **$640,600**, MFJ **$768,700**, HoH **$640,600**, MFS **$384,350**. The form's gate prints **one**
+/// number, **$384,350**, **with no filing-status parenthetical** — unlike line 5e directly above it,
+/// which does carry one (*"$40,400 ($20,200 if married filing separately)"*). That single number is
+/// the **minimum** over the four statuses, so the printed screen is deliberately **over-inclusive**:
+/// it screens in every filer who *could* be limited and leaves the worksheet to apply the taxpayer's
+/// own bracket start. The form says *"may be limited"*, and this type says exactly that much.
+///
+/// ★★ **`FOLLOWUPS.md` FR-186 names the trap, so it is spelled out here rather than left to care:**
+/// `dec!(384350)` already exists in this workspace as the TY2026 **MFS 37% bracket start**
+/// (`btctax-adapters::tax_tables::ty2026`, `ty2026_mfs_37_pct_starts_at_384350`). Reading the
+/// threshold off the bracket table "for the filer's status" therefore looks like a tidy-up and is a
+/// **defect in the understating direction**: a Single filer would be measured against $640,600 and
+/// screened **OUT** of a limitation the form screens them **IN** to. There is no `FilingStatus`
+/// parameter anywhere in this type or in [`section_68_status`], which is what makes that edit
+/// impossible rather than merely discouraged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Section68Gate {
+    /// The tax year whose Schedule A this gate was transcribed from.
+    pub year: i32,
+    /// The threshold the gate PRINTS — `$384,350` on TY2026 — status-independent, see the type doc.
+    pub threshold: Usd,
+    /// The Schedule A line the itemized total sits on behind this gate (`"18"` on TY2026; it was
+    /// line 17 through TY2025). Carried so a refusal can name the line without a second copy.
+    pub total_line: &'static str,
+    /// The worksheet the *Yes* branch sends the filer to, in the form's own words.
+    pub worksheet: &'static str,
+    /// The gate's question, **verbatim from the text layer**, with the extract's mid-sentence wrap
+    /// closed up. One copy: the refusal quotes this, and
+    /// `the_gate_sentence_and_threshold_are_the_forms_own` asserts it against the extract, so the
+    /// sentence btctax shows a filer cannot drift from the sentence on the paper.
+    pub gate_sentence: &'static str,
+}
+
+/// ★★★ **THE FIRST TAX YEAR §68 APPLIES TO — the ONE place that boundary is written.**
+///
+/// Pub. L. 119-21 (OBBBA) §70111(c): *"The amendments made by this section shall apply to taxable
+/// years beginning after December 31, 2025."* Statute, with **no** sunset — unlike
+/// [`SCHEDULE_1A_YEARS`], this window has a start and no end, and writing it as a closed range would
+/// be inventing an expiry Congress did not enact.
+///
+/// TCJA §11046 had suspended the old §68 for TY2018-TY2025, which is why TY2024 and TY2025 Schedule
+/// A print no such gate — asserted from the extracts by
+/// `the_gated_years_are_read_off_the_archived_schedule_a_extracts`, not assumed here.
+pub const SECTION_68_FIRST_YEAR: i32 = 2026;
+
+/// What §68 does to `year`'s return. Returned by [`section_68_status`].
+///
+/// ★★★ **Three arms, and the third is the load-bearing one.** Matched with no `_` at the one call
+/// site ([`crate::tax::return_refuse::section_68_gate`]), so a fourth arm is a compile error there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Section68Status {
+    /// `year < SECTION_68_FIRST_YEAR` — §68 was suspended by TCJA §11046 and this year's Schedule A
+    /// prints no gate. The itemized total is unlimited, which is the **correct** return.
+    NotApplicable,
+    /// §68 applies and the year's Schedule A has been transcribed, so the printed threshold is known.
+    Gated(Section68Gate),
+    /// ★★★ **§68 applies and NO Schedule A revision for this year has been transcribed, so the
+    /// threshold is UNKNOWN — and this refuses unconditionally.**
+    ///
+    /// This arm is why [`section_68_status`] is not "a list of years that print the gate". The
+    /// threshold is the 37% bracket start, an **indexed** figure that moves every year, so a single
+    /// transcribed constant can never cover a later year — and a year that fell through to
+    /// *"unlimited"* would file a deduction larger than allowed, silently, in the understating
+    /// direction. A year this code has no document for therefore fails **closed**: adding TY2027
+    /// support is archiving `f1040sa--2027` and transcribing its threshold, and forgetting to is a
+    /// refusal rather than a wrong figure (`CLAUDE.md`, *"Derive the list, or make the compiler hold
+    /// it"* — here the unknown year is held by the `match`'s own fall-through, not by a list).
+    ThresholdNotTranscribed,
+}
+
+/// What §68 does to `year`'s return. See [`Section68Status`].
+///
+/// ★ **What this covers, stated plainly** (`CLAUDE.md` rule (3)): exactly the Schedule A revisions
+/// whose text layer is committed under `design/forms/extract/` AND prints the gate — today, **TY2026
+/// alone**. Every later year is [`Section68Status::ThresholdNotTranscribed`] and refuses; every
+/// earlier year is [`Section68Status::NotApplicable`] and files unchanged. The year set is not
+/// asserted here: `the_gated_years_are_read_off_the_archived_schedule_a_extracts` derives it from
+/// the extract directory and reds if this function and the archived forms disagree in either
+/// direction.
+#[must_use]
+pub fn section_68_status(year: i32) -> Section68Status {
+    if year < SECTION_68_FIRST_YEAR {
+        return Section68Status::NotApplicable;
+    }
+    match year {
+        // `f1040sa--2026-DRAFT.txt:158-163`. The threshold is read off the FORM, never off the
+        // §1(j)(2) bracket table that carries the same numeral for MFS — see `Section68Gate`.
+        2026 => Section68Status::Gated(Section68Gate {
+            year: 2026,
+            threshold: dec!(384350),
+            total_line: "18",
+            worksheet: "Itemized Deductions Worksheet",
+            gate_sentence: "Is the amount on Form 1040 or 1040-SR, line 11b, minus the amounts on \
+                            lines 13a and 13b of that form, more than $384,350?",
+        }),
+        _ => Section68Status::ThresholdNotTranscribed,
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod section_68_tests {
+    use super::*;
+
+    /// The workspace root, from this crate's manifest directory.
+    fn repo_root() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(|p| p.parent())
+            .expect("crates/btctax-core -> workspace root")
+            .to_path_buf()
+    }
+
+    /// Collapse runs of whitespace so a sentence the PDF text layer wrapped mid-line — and
+    /// interleaved with the stub column's *"Total / Itemized / Deductions"* caption — can be
+    /// compared with the sentence as a human reads it off the page.
+    fn squash(s: &str) -> String {
+        s.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    /// Every archived Schedule A revision, as `(year, squashed text)`, oldest first.
+    ///
+    /// ★ **Read out of the extract DIRECTORY, never from a list of years typed here** (the FR-197
+    ///   shape, `return_refuse.rs::archived_w2_instructions`). Archiving `f1040sa--2027.txt` pulls a
+    ///   new revision into every assertion below with no edit to this file — which is the entire
+    ///   point, because the thing being guarded against is a year list that did not know its set
+    ///   had grown.
+    pub(crate) fn archived_schedule_a() -> Vec<(i32, String)> {
+        let dir = repo_root().join("design/forms/extract");
+        let mut out: Vec<(i32, String)> = std::fs::read_dir(&dir)
+            .unwrap_or_else(|e| panic!("{} must be readable: {e}", dir.display()))
+            .map(|e| e.expect("a readable directory entry").path())
+            .filter_map(|p| {
+                let name = p.file_name()?.to_str()?.to_string();
+                // `f1040sa--2024.txt` and `f1040sa--2026-DRAFT.txt` are both revisions of the year
+                // they name; a draft is the only document that exists for a year before finals.
+                let year: i32 = name
+                    .strip_prefix("f1040sa--")?
+                    .strip_suffix(".txt")?
+                    .trim_end_matches("-DRAFT")
+                    .parse()
+                    .ok()?;
+                let text = std::fs::read_to_string(&p)
+                    .unwrap_or_else(|e| panic!("{} must be readable: {e}", p.display()));
+                Some((year, squash(&text)))
+            })
+            .collect();
+        out.sort_by_key(|(y, _)| *y);
+        // ★ A BROKEN GLOB MUST BE LOUD. An empty vector makes every loop below pass on nothing, which
+        //   is the exact failure `design/HARNESS.md` B1 exists to refuse.
+        assert!(
+            out.len() >= 3,
+            "the archived Schedule A extracts have moved or vanished — {} found under {}, and \
+             everything below would then be measuring nothing",
+            out.len(),
+            dir.display()
+        );
+        out
+    }
+
+    /// Whether a Schedule A revision's text prints the §68 gate.
+    ///
+    /// ★ Two of the gate's phrases, so a re-extract that re-flows one of them still measures. Shared
+    ///   rather than re-written per test: this is the ONE reading of the archived forms that every
+    ///   §68 assertion in the crate keys off, including
+    ///   `return_refuse::section_68_gate_tests::a_pre_2026_itemizer_over_the_threshold_files_unchanged`.
+    pub(crate) fn prints_section_68_gate(text: &str) -> bool {
+        text.contains("Your deductions may be limited")
+            && text.contains("Itemized Deductions Worksheet")
+    }
+
+    /// ★★★ **THE YEAR SET IS THE FORMS' — in both directions.**
+    ///
+    /// A revision that prints the gate and is NOT [`Section68Status::Gated`] would file an unlimited
+    /// itemized total, i.e. understate tax; a revision that does NOT print it and IS gated would
+    /// refuse a return the IRS accepts. Both are asserted, per archived revision, so neither
+    /// direction can drift silently.
+    #[test]
+    fn the_gated_years_are_read_off_the_archived_schedule_a_extracts() {
+        let mut gated_by_form: Vec<i32> = Vec::new();
+        for (year, text) in &archived_schedule_a() {
+            let by_form = prints_section_68_gate(text);
+            // ★★★ THE FULL THREE-WAY CLASSIFICATION, not `is Gated` vs `is not`. A plant that moved
+            //     `SECTION_68_FIRST_YEAR` back to 2025 SURVIVED the two-way version of this check:
+            //     TY2025 became `ThresholdNotTranscribed`, which is "not Gated" and passed — while
+            //     REFUSING every TY2025 itemizer. A year whose form prints no gate must be
+            //     `NotApplicable` and nothing else.
+            let expected = if by_form { "Gated" } else { "NotApplicable" };
+            let actual = match section_68_status(*year) {
+                Section68Status::Gated(_) => "Gated",
+                Section68Status::NotApplicable => "NotApplicable",
+                Section68Status::ThresholdNotTranscribed => "ThresholdNotTranscribed",
+            };
+            assert_eq!(
+                actual,
+                expected,
+                "f1040sa--{year}: the form {} print the §68 gate, so `section_68_status` must be \
+                 {expected} and it is {actual}. `NotApplicable` on a gated year files an UNLIMITED \
+                 itemized total and understates tax; `Gated` or `ThresholdNotTranscribed` on an \
+                 ungated year REFUSES a return the IRS accepts",
+                if by_form { "DOES" } else { "does NOT" },
+            );
+            if by_form {
+                gated_by_form.push(*year);
+            }
+        }
+        assert_eq!(
+            gated_by_form,
+            vec![2026],
+            "TY2026 is the only archived Schedule A printing the §68 gate; if this moved, the \
+             threshold for the new year must be transcribed from ITS form"
+        );
+        // Every year at or after the statutory start with no transcribed form fails CLOSED.
+        assert_eq!(
+            section_68_status(2027),
+            Section68Status::ThresholdNotTranscribed,
+            "a §68 year with no archived Schedule A must refuse, not file unlimited"
+        );
+        // ★ The statutory boundary, against the STATUTE's own date rather than against itself —
+        //   `SECTION_68_FIRST_YEAR - 1` would move with the constant and measure nothing.
+        assert_eq!(
+            SECTION_68_FIRST_YEAR, 2026,
+            "Pub. L. 119-21 §70111(c): \"taxable years beginning after December 31, 2025\""
+        );
+    }
+
+    /// Where `sentence` stops matching `text`, or `Ok(pieces)` — the number of contiguous runs the
+    /// sentence had to be broken into to be found.
+    ///
+    /// ★★★ **The extract does NOT carry this sentence contiguously, and pretending otherwise is how a
+    /// citation check comes to check nothing.** `pdftotext -layout` renders Schedule A's stub column
+    /// beside the cell, so the gate's two printed lines arrive with the caption *"Itemized"* wedged
+    /// between *"…lines 13a and"* and *"13b of that form…"*. A `contains` over the squashed page
+    /// therefore fails on a sentence that IS on the paper — and the tempting repair, dropping to
+    /// "check a short fragment", is exactly the blindness `design/HARNESS.md` B1 was written about.
+    ///
+    /// So the match is COMPUTED: walk the sentence taking the longest run of words that appears
+    /// contiguously from the current position, advance, repeat. The caller pins how many runs are
+    /// allowed, which is what makes this an assertion about the form's layout rather than an ordered
+    /// subsequence over the whole page (a subsequence would match almost anything).
+    ///
+    /// ★ Every word is load-bearing: the walk stops at the FIRST word that does not continue the run,
+    ///   so a changed line number, a changed threshold or a paraphrased verb all report their own
+    ///   position. `a_paraphrase_and_a_wrong_threshold_are_both_rejected` is the kill.
+    fn appears_as_printed(text: &str, sentence: &str) -> Result<usize, String> {
+        let words: Vec<&str> = sentence.split_whitespace().collect();
+        let mut cursor = 0usize;
+        let mut from = 0usize;
+        let mut pieces = 0usize;
+        while cursor < words.len() {
+            let mut run = 0usize;
+            let mut next_from = from;
+            for end in (cursor + 1)..=words.len() {
+                let candidate = words[cursor..end].join(" ");
+                match text[from..].find(&candidate) {
+                    Some(at) => {
+                        run = end - cursor;
+                        next_from = from + at + candidate.len();
+                    }
+                    None => break,
+                }
+            }
+            if run == 0 {
+                return Err(format!(
+                    "stops matching at word {cursor} ({:?}); matched {:?} so far",
+                    words[cursor],
+                    words[..cursor].join(" ")
+                ));
+            }
+            cursor += run;
+            from = next_from;
+            pieces += 1;
+        }
+        Ok(pieces)
+    }
+
+    /// ★★★ **THE THRESHOLD AND THE SENTENCE ARE THE FORM'S OWN — and the sentence carries NO
+    /// filing-status parenthetical, which is the FR-186 kill.**
+    ///
+    /// This is the assertion that makes reading `$384,350` off the §1(j)(2) MFS bracket table
+    /// impossible to pass off as an equivalent: the numeral must appear inside the gate's own sentence
+    /// in the extract, and the sentence must not carry the *"if married filing separately"* clause
+    /// that line 5e directly above it DOES carry. The 5e half is checked too — a matcher that cannot
+    /// see the parenthetical where it exists proves nothing by not seeing it where it does not.
+    #[test]
+    fn the_gate_sentence_and_threshold_are_the_forms_own() {
+        use crate::tax::advisories::fmt_usd;
+        let mut checked = 0usize;
+        for (year, text) in &archived_schedule_a() {
+            let Section68Status::Gated(g) = section_68_status(*year) else {
+                continue;
+            };
+            checked += 1;
+            let pieces = appears_as_printed(text, g.gate_sentence).unwrap_or_else(|e| {
+                panic!(
+                    "f1040sa--{year} must print the gate sentence verbatim, and it {e}. \
+                     `Section68Gate::gate_sentence` reads {:?}",
+                    g.gate_sentence
+                )
+            });
+            assert_eq!(
+                pieces, 2,
+                "the gate prints on exactly two lines of f1040sa--{year}, interrupted once by the \
+                 stub caption. A different count means the text layer was re-extracted with a \
+                 different layout and this citation needs re-reading against the new one"
+            );
+            // The threshold, formatted the way the form prints it, INSIDE the gate's own sentence —
+            // not merely somewhere on the page, where the bracket table's numeral could satisfy it.
+            let printed = fmt_usd(g.threshold);
+            assert!(
+                squash(g.gate_sentence).contains(&printed),
+                "the gate sentence must carry the threshold {printed}"
+            );
+            assert_eq!(
+                text.matches(&printed).count(),
+                1,
+                "f1040sa--{year} prints {printed} exactly once — the gate. A second occurrence means \
+                 the numeral now means two things on one form and this test can no longer tell them \
+                 apart"
+            );
+            // ★ THE FR-186 KILL: no per-status split in the gate, and there IS one on 5e.
+            assert!(
+                !squash(g.gate_sentence).contains("married filing separately"),
+                "the §68 gate prints ONE threshold for every filing status; a parenthetical here \
+                 would mean the form had become status-aware and this type must grow a \
+                 `FilingStatus` parameter"
+            );
+            assert!(
+                text.contains("$40,400 ($20,200 if married filing"),
+                "f1040sa--{year} line 5e DOES carry a filing-status parenthetical — asserted so the \
+                 check above is known to be able to see one"
+            );
+        }
+        assert_eq!(checked, 1, "exactly one archived Schedule A is gated today");
+    }
+
+    /// ★★★ **B1 — THE KILL. The citation checker above is watched distinguishing a true sentence from
+    /// four false ones**, so *"which test reds when this checker is removed?"* has an answer.
+    ///
+    /// Each plant is a defect this project has actually made or nearly made:
+    /// - the **threshold swapped for the Single 37% bracket start** ($640,600) — FR-186's trap, the
+    ///   one that screens a filer OUT of a limitation the form screens them IN to;
+    /// - the **threshold with a digit lost** — the Form 6251 line-33 class (a rendered `12` for `22`);
+    /// - a **changed line number** (`11b` → `11`) — asserting a 1040 numbering FR-214 says rests on
+    ///   one indirect witness;
+    /// - a **paraphrase** presented as the form's words (*"greater than"* for *"more than"*).
+    #[test]
+    fn a_paraphrase_and_a_wrong_threshold_are_both_rejected() {
+        let sa26 = archived_schedule_a()
+            .into_iter()
+            .find(|(y, _)| *y == 2026)
+            .expect("f1040sa--2026-DRAFT must be archived")
+            .1;
+        let real = match section_68_status(2026) {
+            Section68Status::Gated(g) => g.gate_sentence,
+            other => panic!("TY2026 must be gated, got {other:?}"),
+        };
+        assert_eq!(
+            appears_as_printed(&sa26, real),
+            Ok(2),
+            "the real sentence must be accepted, or every rejection below proves nothing"
+        );
+        for (plant, what) in [
+            (
+                real.replace("$384,350", "$640,600"),
+                "the Single 37% bracket start (FR-186's trap)",
+            ),
+            (real.replace("$384,350", "$38,435"), "a lost digit"),
+            (
+                real.replace("line 11b", "line 11"),
+                "a changed 1040 line number",
+            ),
+            (
+                real.replace("more than", "greater than"),
+                "a paraphrase of the form's own verb",
+            ),
+        ] {
+            assert!(
+                appears_as_printed(&sa26, &plant).is_err(),
+                "{what} must be REJECTED — the checker accepted {plant:?}"
+            );
+        }
+    }
+}
+
 /// ★★★ **§163(h)(3)(B) — THE HOME ACQUISITION-DEBT CEILINGS**, transcribed from the four figures
 /// the Schedule A instructions print under *Limits on home mortgage interest* (R8 / T9).
 ///
