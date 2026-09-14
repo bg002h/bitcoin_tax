@@ -8877,7 +8877,8 @@ build, each with an owning phase.
   `cargo clean -p <crate>`; this one is **memory**, presenting as SIGKILL, cured by serialising. A SIGKILL is
   not a stale rlib and a link error is not OOM.
 
-- **★★★ FR-225 — ⛔ BLOCKING, and LIVE IN A SHIPPED BUILD on TY2024. `income answer` says "return: computable" while the return is NOT computable, and the refusal's named exit cannot reach the question. Owning phase: NOW.**
+- **✅ CLOSED — FR-225 — a false "return: computable" claim, and a refusal naming two cures that did not work. Was ⛔ BLOCKING and LIVE IN A SHIPPED BUILD on TY2024.**
+  ★ Closed in three parts across three folds: the false verdict claim and the ask-scope escalation in `a48edd2db`, and the dead-end remedy in `0ac3f17b2` (report `65d6fd707`). ★★ The last fold's general instrument, `crates/btctax-cli/tests/refusal_remedies.rs`, found a **live second dead end on its first run** in another crate — the product printed `btctax set-pii`, a subcommand that has never existed, in a filer-facing MFJ export refusal and in `income answer --help`. That is the argument for the general gate over a one-gift fix, and it is why this entry closes with a checker rather than an edit.
   **Found by the stage-2 Tier B run; the two refusal sites verified by the controller.** On **TY2024** —
   fully bundled, stock code, no substitutions — with a charitable gift whose §170(f)(8)(A) acknowledgment is
   unresolved:
@@ -9315,3 +9316,24 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   note marked as the controller's and restoring `<`, `>`, `&` where the notification channel had
   HTML-escaped them — worth recording because controller transcription has demonstrably introduced
   misquotes here before (an em dash into a quote of ASCII source, a wrong path carried through two folds).
+
+- **★★ FR-241 — there is no way to FORGO a crypto charitable deduction, and building one is not a small change: the only reachable mutations convert a forgo into a DENIAL, and a forgone gift must generate no §170(d)(1) carryover. Important. Owning phase: with the next charitable-deduction work.**
+  Recommended by the FR-225 implementer (report `65d6fd707`) and deliberately **not** built there, which
+  was the right call. `crates/btctax-cli/tests/refusal_remedies.rs`'s
+  `the_crypto_arm_offers_no_forgo_because_btctax_cannot_un_claim_a_ledger_donation` now pins the current
+  honest state: a `[[schedule_a.charitable]]` gift can be forgone through `income import`, and a
+  **crypto** gift cannot, because `claimed_deduction` is computed by `project::fold` unconditionally and
+  no verb writes it. The refusal says so plainly instead of naming an act the product cannot perform.
+  ★★★ **Why a verb is not the obvious fix.** Per `CLAUDE.md`'s *"an entry is testimony"*, the only
+  reachable crypto mutations — `reconcile void`, reclassify — do not forgo the deduction, they **deny
+  the gift was charitable**. Those are different acts, and the second is testimony the filer never gave.
+  A verb that quietly substituted one for the other would be worse than the dead end it replaced, which
+  is the same trap as [widening an exemption].
+  ★★ **And the carryover trap, which is the part most likely to be missed:** a forgone gift must
+  generate **no §170(d)(1) carryover**. If it does, the forgo is not a forgo at all — it is a silent
+  **deferral** to a later year, and the filer who chose to give up the deduction has instead been
+  enrolled in claiming it later. Any implementation must assert the carryover is zero, and that
+  assertion needs a test that reds when it is removed.
+  ★ Note what is NOT wrong here: the refusal itself. §170(f)(8)(A) genuinely denies a deduction with no
+  contemporaneous written acknowledgment, so the fail-closed behaviour is correct and must survive this
+  work.
