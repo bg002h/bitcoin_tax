@@ -269,6 +269,33 @@ pub fn year_package(year: i32, rep: &mut Report) {
             format!("`forms/{year}/YEAR.toml` `status`"),
         );
     }
+    // ★★ THE FILABLE-YEAR GATE, REPORTED as well as asserted. `no_bundled_params_year_has_unreadable_forms`
+    //    is the test that keeps a rehearsal branch from merging; this makes an operator running the command
+    //    see the same contradiction, because an invariant with only a test for a reader is a figure with no
+    //    reader. The predicate is shared, so the row and the gate can never disagree.
+    {
+        let arch = archived();
+        // ★ ONLY years whose params are actually bundled. The predicate's contract is "given a year this
+        //   build declares computable, can its forms be read?" — feeding it the reported year
+        //   unconditionally states a contradiction that does not exist, and makes this row disagree with
+        //   `no_bundled_params_year_has_unreadable_forms`, which filters correctly. Caught by checking the
+        //   post-restore count instead of trusting the plant.
+        let bundled_params: Vec<i32> = if r.params { vec![year] } else { Vec::new() };
+        for msg in params_years_whose_forms_cannot_be_read(&bundled_params, &arch, &|y| {
+            btctax_core::tax::state_local_refund::revision_for(y).is_some()
+        }) {
+            rep.push(
+                Who::Build,
+                State::Blocked,
+                msg,
+                "now",
+                "`blockers::params_years_whose_forms_cannot_be_read`, asserted by \
+                 `no_bundled_params_year_has_unreadable_forms`"
+                    .to_string(),
+            );
+        }
+    }
+
     if !r.params {
         rep.push(
             Who::Build,
@@ -1443,8 +1470,106 @@ pub fn run(year: i32) -> Result<(), String> {
     Ok(())
 }
 
+/// ★★★ **THE FILABLE-YEAR GATE (stage-2 design §2).** Which bundled-params years cannot have their forms
+/// READ — i.e. a year this build declares computable while the documents it was transcribed from are
+/// absent, or the per-revision worksheet for it was never transcribed.
+///
+/// **Why a CONDITION rather than a state assertion.** A flag can be flipped, a branch can be merged and an
+/// intention can be forgotten; this says *why* a year may be bundled, so it permits the bundling the day
+/// the condition holds and needs no later deletion. The repo owns the idiom twice already —
+/// `ty2025_full_return_must_stay_fail_closed_until_complete` and `state_local_refund`'s own
+/// archive-dependent refusal.
+///
+/// ★ **`transcribed` is NOT `archived`, and a plant proved it** (stage 1, plant B): copying a prior
+/// extract into a new year's filename cleared the archive gap and left the §111(a) gate SHUT, because
+/// `state_local_refund::revision_for` reads a TRANSCRIPTION while the directory only decides what the
+/// suite demands. A document arriving is not a document being read, so both conditions are required.
+///
+/// Split out and pure so the kill below can watch it discriminate in BOTH directions on planted input.
+#[must_use]
+pub fn params_years_whose_forms_cannot_be_read(
+    params_years: &[i32],
+    archived: &std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
+    transcribed: &dyn Fn(i32) -> bool,
+) -> Vec<String> {
+    let mut bad = Vec::new();
+    for &y in params_years {
+        for fam in ["f1040", "i1040gi"] {
+            if !has_any(archived, fam, y) {
+                bad.push(format!(
+                    "TY{y}: FullReturnParams are bundled but `{fam}--{y}` is NOT ARCHIVED — the year is \
+                     declared computable while a document it must be transcribed from is absent"
+                ));
+            }
+        }
+        if !transcribed(y) {
+            bad.push(format!(
+                "TY{y}: FullReturnParams are bundled but the §111(a) worksheet revision for {y} is NOT \
+                 TRANSCRIBED — archiving the document does not transcribe it (stage 1, plant B)"
+            ));
+        }
+    }
+    bad
+}
+
 #[cfg(test)]
 mod tests {
+    /// ★★★ **The filable-year gate.** No year may have `FullReturnParams` bundled unless its Form 1040 and
+    /// its instructions are archived AND its §111(a) revision is transcribed.
+    ///
+    /// **This is what makes the stage-2 TY2026 rehearsal a throwaway by CONSTRUCTION.** The rehearsal's
+    /// core is one line — `by_year.insert(2026, ty2026_full_return())` — and with `f1040--2026` and
+    /// `i1040gi--2026` unarchived, that line reds THIS test. So the branch cannot merge silently, and no
+    /// flag, tripwire or promise is involved. In January, when the documents land and the revision is
+    /// transcribed, the gate permits the bundling and stops blocking without being edited.
+    ///
+    /// ★ Generic over years on purpose: a gate hardcoded to 2026 would be a typed list beside a growing
+    /// set, which is the defect this repo finds most often.
+    #[test]
+    fn no_bundled_params_year_has_unreadable_forms() {
+        let arch = archived();
+        let params_years: Vec<i32> = btctax_forms::bundled::bundled_years()
+            .iter()
+            .copied()
+            .filter(|y| btctax_cli::year_readiness::YearReadiness::bundled(*y).params)
+            .collect();
+        assert!(
+            !params_years.is_empty(),
+            "no year has params bundled at all — this gate would then be vacuous, which is itself the bug"
+        );
+        let bad = params_years_whose_forms_cannot_be_read(&params_years, &arch, &|y| {
+            btctax_core::tax::state_local_refund::revision_for(y).is_some()
+        });
+        assert!(bad.is_empty(), "{}", bad.join("\n"));
+
+        // ★ THE KILL, both directions on planted input — a year bundled with nothing archived must be
+        //   named, and the archived-but-untranscribed state must be named SEPARATELY, because stage 1's
+        //   plant B showed those are different facts with different remedies.
+        let planted = params_years_whose_forms_cannot_be_read(&[2099], &arch, &|_| true);
+        assert_eq!(
+            planted.len(),
+            2,
+            "a wholly unarchived year must name BOTH documents: {planted:?}"
+        );
+        assert!(
+            planted.iter().all(|m| m.contains("NOT ARCHIVED")),
+            "{planted:?}"
+        );
+
+        let untranscribed =
+            params_years_whose_forms_cannot_be_read(&params_years, &arch, &|_| false);
+        assert_eq!(
+            untranscribed.len(),
+            params_years.len(),
+            "every bundled year with no transcription must be named: {untranscribed:?}"
+        );
+        assert!(
+            untranscribed.iter().all(|m| m.contains("NOT TRANSCRIBED")),
+            "the untranscribed message must say TRANSCRIBED, not archived — that distinction is the \
+             whole finding: {untranscribed:?}"
+        );
+    }
+
     use super::*;
 
     /// The extract-directory prefix, ASSEMBLED at runtime.
