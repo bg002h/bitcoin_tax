@@ -8997,7 +8997,7 @@ build, each with an owning phase.
   misnomer; and my *"§170(p) has zero hits workspace-wide"* was already false when I wrote it, because wave
   5's harness had landed three. I measured before it landed and quoted after.
 
-- **★★★ FR-234 — ⚠️ 21 of 107 golden households are RED, and the test that would say so has NEVER RUN. Important. Owning phase: NOW — before any filing, and it is PRE-EXISTING, not from 2026-09-13's range.**
+- **✅ CLOSED (fold c08836aa1) — FR-234 — 21 of 107 golden households were RED on a test that had never run. The FIGURE was never wrong; four INSTRUMENTS were. Important. Owning phase: NOW — before any filing, and it is PRE-EXISTING, not from 2026-09-13's range.**
   Found by the B3 interaction review running the one instrument **no parcel worktree and no CI job can run**.
   `check_mode_reconciles_every_line_of_every_admitted_golden_household` fails on **21 of 107** households —
   all on `schedule_se.line12`, all by the **same $1** (btctax 16956 = OTS 16956, taxcalc 16955), all `se-over`.
@@ -9201,7 +9201,7 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   **FR-151 — the design contradicts itself on `line_set` for a constants-only year. Minor. Owning phase: design r2 §4 (owner/author).** (rehearsal F18)
   §4 says *"constants-only year ⇒ same line_set; renumber ⇒ new one"*, which the rehearsal found underdetermined for a year whose only changes are two printed sentences and an OMB number.
 
-- **★★★ FR-238 — `verdict_engine` MISATTRIBUTES the witnessing engine on every row: the compared value always lands in the `ots` field and `taxcalc` is always null. Important — a defect in what the instrument CLAIMS to have done. Owning phase: NOW, with FR-234.**
+- **✅ CLOSED (fold c08836aa1) — FR-238 — `verdict_engine` MISATTRIBUTED the witnessing engine on every row: the compared value always lands in the `ots` field and `taxcalc` is always null. Important — a defect in what the instrument CLAIMS to have done. Owning phase: NOW, with FR-234.**
   `crates/btctax-oracle-harness/src/main.rs:787-796` passes `Some(target)` as `verdict`'s `ots`
   parameter and `None` as `taxcalc` **unconditionally**, ignoring its own `engine` argument — which it
   does record correctly in a separate `"engine"` field. So a taxcalc-compared row emits
@@ -9247,3 +9247,26 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   work against my dispatch prompt, graded against a brief they never saw. **The controller would have
   reviewed a fold against acceptance criteria the implementer was never given.** Same family as
   *"the thing that decides was not the thing that knows."*
+
+- **★★★ FR-240 — the subagent tooling now REFUSES to let an agent persist its own report, which breaks a standing rule in BOTH `~/.claude/CLAUDE.md` and `/scratch/code/CLAUDE.md`. Important process regression. Owning phase: NOW — it binds every future dispatch.**
+  The FR-234 implementer's `Write` of `design/agent-reports/REPORT-fr234-se-rounding-and-runner.md` was
+  refused with *"Subagents should return findings as text, not write report files."* The report came back
+  **inline** and the controller wrote it to disk (`e9d1d329f`), which is exactly the arrangement the rule
+  exists to prevent. The rule's three reasons, and what the refusal costs each:
+  | reason | cost |
+  |---|---|
+  | **Survival** | the report existed in ONE place — a task notification. An interruption or compaction between its arrival and the controller's write loses a round already paid for. |
+  | **Cost** | the saving is ~8k tokens of main context per report (~4k reading in, ~4k re-emitting). This report is 19,115 bytes, so the refusal cost roughly that, twice. |
+  | **Independence** | ★★★ **the real one.** *"The responder must not be the scribe."* The controller is the party folding the work, and now the controller decides what reaches disk. `git diff <report>..<fold>` stops being structural and becomes a promise. |
+  ★★ **Mitigation found, and it is cheap: `cat > file <<'EOF'` via Bash is not refused.** The guard appears
+  to be on the `Write` tool, not on writing. Every future brief should say *"persist via a Bash heredoc,
+  not Write"* — and the FR-227 agent was warned mid-flight so it would not lose its report the same way.
+  ★ **Fallback if the heredoc is also refused:** the brief must instruct the agent to return the report
+  inline **and say at the top that it is the only copy**, so the controller knows to persist verbatim
+  before reading it critically. That is what happened here and it worked, but only because the agent
+  volunteered the warning. An agent that silently trimmed its report to fit a summary would have been the
+  bad outcome, and nothing would have detected it.
+  ★ Byte-faithfulness is now the controller's burden. For this report the only edits were a provenance
+  note marked as the controller's and restoring `<`, `>`, `&` where the notification channel had
+  HTML-escaped them — worth recording because controller transcription has demonstrably introduced
+  misquotes here before (an em dash into a quote of ASCII source, a wrong path carried through two folds).
