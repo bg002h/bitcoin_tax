@@ -35,6 +35,30 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y lld
       - run: cargo test --workspace --locked
 
+  # ★★★ FR-234 D4 — the RUNNER for the whole-corpus oracle reconciliation.
+  #
+  # `check_mode_reconciles_every_line_of_every_admitted_golden_household` is `#[ignore]`d (one harness
+  # subprocess per household, too slow for `make check`), and its ignore reason said "run in CI" while
+  # NO job ran it — so the reconciliation of all 107 golden households against both oracles had never
+  # executed anywhere. When it was finally run it failed on 21 of them.
+  #
+  # `-- --ignored` runs the ignored tests of that target, so a NEW `#[ignore]`d test in the same file is
+  # picked up with no edit here; `tests/smoke.rs`'s
+  # `every_ignored_test_in_this_file_is_actually_run_by_a_ci_job` asserts this job exists and that each
+  # ignore reason names it, so the promise and the runner cannot drift apart again.
+  corpus-sweep:
+    name: corpus-sweep
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9  # v1
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      - name: Install lld (.cargo/config forces -fuse-ld=lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
+      - run: cargo test -p btctax-oracle-harness --test smoke --locked -- --ignored
+
   clippy:
     name: clippy
     runs-on: ubuntu-latest

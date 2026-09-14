@@ -33,9 +33,18 @@
 //! { "refused": false, "all_reconciled": true,
 //!   "reproduced_ops": { "status": "Single", "ti": "47400", "qd_l3a": "0", "net_ltcg_qd_excl": "0" },
 //!   "verdicts": [ { "line": "1040.line11", "label": "AGI (1040 L11)", "on_paper": "62000",
-//!                  "internal": "62000", "ots": "62000", "taxcalc": "62000",
+//!                  "internal": "62000", "oracles": { "OTS": "62000", "taxcalc": "62000" },
+//!                  "ots": "62000", "taxcalc": "62000",
 //!                  "reconciled": true, "class": "agree-both" } ] }
 //! ```
+//!
+//! ★ **`oracles` is the authoritative witness field** (FR-234 D1): one entry per engine that actually
+//! spoke about that line, keyed by engine name. A single-engine row carries exactly one entry and an
+//! `engine` field naming it. The flat `ots` / `taxcalc` columns are a projection of that map kept for
+//! `gen_goldens.py` and `sweep.py`; they cannot describe a third engine, and before FR-234 the `ots`
+//! column carried EVERY single-engine figure regardless of which engine had spoken. A row whose
+//! divergence was absorbed by the lawful Σround≠roundΣ methodology also carries
+//! `rounding_order_residual` with the residual's exact size.
 //!
 //! ## Key convention (documented once, applied everywhere)
 //!
@@ -57,6 +66,10 @@ use btctax_core::tax::return_1040::{
     assemble_absolute, screen_absolute, screen_compute_dependent, AbsoluteReturn,
 };
 use btctax_core::tax::return_refuse::screen_inputs;
+// The §1401(b)(2) 0.9% rate — the harness reproduces Form 8959's printed lines 7 and 13 from it
+// (`other_taxes.rs:170,174`) so the line-18 cross-foot residual comes from the same constant the
+// form does, not from a number retyped here.
+use btctax_core::tax::tables::SE_RATE_ADDL_MEDICARE;
 use btctax_core::tax::testonly::{
     build_golden_return, ty2024_params, ty2024_table, GoldenHousehold, GoldenInputs,
 };
@@ -339,13 +352,48 @@ fn run_check(stdin: &str, known_defect: Option<&KnownDefect>) -> Value {
 
     // ── The C1 cross-foot reproductions, hoisted so L24 INHERITS them (pre-T11 the legs are `None`, so
     //    each falls back to `round_leaf` of the baked per-line total). ─────────────────────────────────
-    let se_l12_ots = match (e.se_l10_oasdi, e.se_l11_medicare) {
-        (Some(l10), Some(l11)) => sum_round(&[l10, l11]),
-        _ => round_leaf(e.se_tax),
+    // ★★★ FR-234 D3 — btctax's OWN exact-cents legs for the two cross-footed lines, so the
+    //     rounding-order residual is computed from the mechanism rather than tolerated. Each
+    //     constructor PROVES its reproduction against the figure btctax actually printed
+    //     (`Crossfoot::reproducing` panics otherwise), so a leg list that drifts from the printed
+    //     chain cannot quietly license an excuse.
+    //   · Schedule SE L12 = "Add lines 10 and 11" over the PRINTED boxes, whose exact legs are
+    //     `se.ss` (L10, §1401(a)) and `se.medicare` (L11, §1401(b)(1)) — `printed.rs:327-329`.
+    //   · Form 8959 L18 = "add PRINTED 7 + 13", whose exact legs are 0.9% × the printed line 6 and
+    //     0.9% × the printed line 12 — `other_taxes.rs:170,174`. Both operands are already whole
+    //     dollars on the paper; the products are not.
+    let se_crossfoot = ar.se.as_ref().map(|se| {
+        Crossfoot::reproducing(
+            &[se.ss, se.medicare],
+            pr.forms
+                .sch_se
+                .as_ref()
+                .expect("an SE-tax return prints a Schedule SE")
+                .line12,
+        )
+    });
+    let f8959 = &pr.forms.f8959;
+    let f8959_crossfoot = Crossfoot::reproducing(
+        &[
+            SE_RATE_ADDL_MEDICARE * f8959.line6,
+            SE_RATE_ADDL_MEDICARE * f8959.line12,
+        ],
+        f8959.line18,
+    );
+
+    // ★ The residual applies to a target built from an engine's exact TOTAL (necessarily roundΣ). Where
+    //   the engine publishes its own printed LEGS the comparison is paper-to-paper — both sides Σround
+    //   — so there is nothing to absorb and it stays STRICT (`Crossfoot::NONE`).
+    let (se_l12_ots, se_l12_ots_xf) = match (e.se_l10_oasdi, e.se_l11_medicare) {
+        (Some(l10), Some(l11)) => (sum_round(&[l10, l11]), Crossfoot::NONE),
+        _ => (
+            round_leaf(e.se_tax),
+            se_crossfoot.unwrap_or(Crossfoot::NONE),
+        ),
     };
-    let f8959_l18_ots = match (e.f8959_l7, e.f8959_l13) {
-        (Some(l7), Some(l13)) => sum_round(&[l7, l13]),
-        _ => round_leaf(e.additional_medicare_tax),
+    let (f8959_l18_ots, f8959_l18_ots_xf) = match (e.f8959_l7, e.f8959_l13) {
+        (Some(l7), Some(l13)) => (sum_round(&[l7, l13]), Crossfoot::NONE),
+        _ => (round_leaf(e.additional_medicare_tax), f8959_crossfoot),
     };
 
     // ── TOTAL TAX L24 — OTS single-witness cross-foot that inherits SE-L12 / 8959-L18:
@@ -358,10 +406,13 @@ fn run_check(stdin: &str, known_defect: Option<&KnownDefect>) -> Value {
     let mut l24 = verdict_engine(
         "1040.line24",
         "TOTAL TAX (L24)",
-        "OTS",
+        Engine::Ots,
         paper("1040.line24"),
         pr.forms.f1040.line24,
         l24_target,
+        // The target already SUMS printed whole-dollar legs (L16 + SE-L12 + 8959-L18 + NIIT), so both
+        // sides are Σround and no rounding-order residual exists here.
+        Crossfoot::NONE,
     );
     if let Value::Object(m) = &mut l24 {
         m.insert(
@@ -401,18 +452,24 @@ fn run_check(stdin: &str, known_defect: Option<&KnownDefect>) -> Value {
             verdicts.push(verdict_engine(
                 "schedule_se.line12",
                 "Sch SE L12 (SE tax) [OTS]",
-                "OTS",
+                Engine::Ots,
                 Some(p),
                 internal,
                 se_l12_ots,
+                se_l12_ots_xf,
             ));
             verdicts.push(verdict_engine(
                 "schedule_se.line12",
                 "Sch SE L12 (SE tax) [taxcalc]",
-                "taxcalc",
+                Engine::Taxcalc,
                 Some(p),
                 internal,
                 round_leaf(t.se_tax),
+                // ★★★ FR-234 — taxcalc publishes only the exact TOTAL (`setax`), so its figure is
+                //     roundΣ while the filed L12 adds the printed L10/L11 boxes. On 21 of the 107
+                //     corpus households those differ by exactly $1 and BOTH are right; this is the
+                //     computed mechanism that says so, with no tolerance and no household list.
+                se_crossfoot.unwrap_or(Crossfoot::NONE),
             ));
         }
     }
@@ -421,18 +478,23 @@ fn run_check(stdin: &str, known_defect: Option<&KnownDefect>) -> Value {
         verdicts.push(verdict_engine(
             "8959.line18",
             "8959 L18 (Add'l Medicare) [OTS]",
-            "OTS",
+            Engine::Ots,
             Some(p),
             pr.forms.f8959.line18,
             f8959_l18_ots,
+            f8959_l18_ots_xf,
         ));
         verdicts.push(verdict_engine(
             "8959.line18",
             "8959 L18 (Add'l Medicare) [taxcalc]",
-            "taxcalc",
+            Engine::Taxcalc,
             Some(p),
             pr.forms.f8959.line18,
             round_leaf(t.additional_medicare_tax),
+            // Identical two-leg structure to Schedule SE L12: `ptax_amc` is taxcalc's exact total, the
+            // filed L18 adds the printed 7 and 13. No corpus household hits the residual there today —
+            // which is exactly why it gets the mechanism now rather than after it bites.
+            f8959_crossfoot,
         ));
     }
 
@@ -446,18 +508,22 @@ fn run_check(stdin: &str, known_defect: Option<&KnownDefect>) -> Value {
         verdicts.push(verdict_engine(
             "8960.line17",
             "8960 L17 (NIIT) [OTS]",
-            "OTS",
+            Engine::Ots,
             Some(p),
             internal,
             round_leaf(e.niit),
+            // Form 8960 L17 is `round_dollar(3.8% x printed operands)` — ONE printed figure, no legs
+            // summed on the paper, so no rounding-order residual exists and this stays STRICT.
+            Crossfoot::NONE,
         ));
         verdicts.push(verdict_engine(
             "8960.line17",
             "8960 L17 (NIIT) [taxcalc]",
-            "taxcalc",
+            Engine::Taxcalc,
             Some(p),
             internal,
             round_leaf(t.niit),
+            Crossfoot::NONE,
         ));
     }
 
@@ -470,20 +536,26 @@ fn run_check(stdin: &str, known_defect: Option<&KnownDefect>) -> Value {
             verdicts.push(verdict_engine(
                 "1040.line12",
                 "deduction (L12) [OTS]",
-                "OTS",
+                Engine::Ots,
                 Some(p),
                 internal,
                 round_leaf(o),
+                // A single printed figure (`round_dollar` of one amount), not a sum of printed
+                // legs — there is no rounding-order residual to absorb, so this stays STRICT.
+                Crossfoot::NONE,
             ));
         }
         if let Some(tc) = t.deduction_taken {
             verdicts.push(verdict_engine(
                 "1040.line12",
                 "deduction (L12) [taxcalc]",
-                "taxcalc",
+                Engine::Taxcalc,
                 Some(p),
                 internal,
                 round_leaf(tc),
+                // A single printed figure (`round_dollar` of one amount), not a sum of printed
+                // legs — there is no rounding-order residual to absorb, so this stays STRICT.
+                Crossfoot::NONE,
             ));
         }
     }
@@ -499,20 +571,26 @@ fn run_check(stdin: &str, known_defect: Option<&KnownDefect>) -> Value {
             verdicts.push(verdict_engine(
                 "1040sa.line5e",
                 "SALT (Sch A L5e) [OTS]",
-                "OTS",
+                Engine::Ots,
                 Some(p),
                 internal,
                 round_leaf(o),
+                // A single printed figure (`round_dollar` of one amount), not a sum of printed
+                // legs — there is no rounding-order residual to absorb, so this stays STRICT.
+                Crossfoot::NONE,
             ));
         }
         if let Some(tc) = t.salt_capped {
             verdicts.push(verdict_engine(
                 "1040sa.line5e",
                 "SALT (Sch A L5e) [taxcalc]",
-                "taxcalc",
+                Engine::Taxcalc,
                 Some(p),
                 internal,
                 round_leaf(tc),
+                // A single printed figure (`round_dollar` of one amount), not a sum of printed
+                // legs — there is no rounding-order residual to absorb, so this stays STRICT.
+                Crossfoot::NONE,
             ));
         }
     }
@@ -523,20 +601,26 @@ fn run_check(stdin: &str, known_defect: Option<&KnownDefect>) -> Value {
             verdicts.push(verdict_engine(
                 "1040.line7a",
                 "Sch D -> L7 [OTS]",
-                "OTS",
+                Engine::Ots,
                 Some(p),
                 internal,
                 round_leaf(o),
+                // A single printed figure (`round_dollar` of one amount), not a sum of printed
+                // legs — there is no rounding-order residual to absorb, so this stays STRICT.
+                Crossfoot::NONE,
             ));
         }
         if let Some(tc) = t.sch_d_to_l7 {
             verdicts.push(verdict_engine(
                 "1040.line7a",
                 "Sch D -> L7 [taxcalc]",
-                "taxcalc",
+                Engine::Taxcalc,
                 Some(p),
                 internal,
                 round_leaf(tc),
+                // A single printed figure (`round_dollar` of one amount), not a sum of printed
+                // legs — there is no rounding-order residual to absorb, so this stays STRICT.
+                Crossfoot::NONE,
             ));
         }
     }
@@ -552,10 +636,13 @@ fn run_check(stdin: &str, known_defect: Option<&KnownDefect>) -> Value {
             verdicts.push(verdict_engine(
                 "8995.line12",
                 "8995 L12 net-cap-gain (WEAK)",
-                "OTS",
+                Engine::Ots,
                 Some(p),
                 internal,
                 round_leaf(o),
+                // A single printed figure (`round_dollar` of one amount), not a sum of printed
+                // legs — there is no rounding-order residual to absorb, so this stays STRICT.
+                Crossfoot::NONE,
             ));
         }
     }
@@ -578,6 +665,156 @@ fn run_check(stdin: &str, known_defect: Option<&KnownDefect>) -> Value {
     })
 }
 
+/// ★★★ **FR-234 D1 — the engine a verdict was compared against, as a TYPE.**
+///
+/// `verdict_engine` used to take the engine as a `&str` and then route its figure into the `ots`
+/// JSON column **unconditionally**, ignoring that argument — so a taxcalc-compared row published
+/// `"ots": <taxcalc's number>, "taxcalc": null, "engine": "taxcalc"`. That is a defect in what the
+/// instrument *claims to have done*, and it is not theoretical: it misled this cycle's controller
+/// into briefly concluding OTS was the outlier on Schedule SE line 12, when OTS in fact agrees with
+/// btctax and taxcalc is the dissenter.
+///
+/// ★ **Why an enum and a MAP rather than two fixed columns.** Two hardcoded columns are the
+/// [`CLAUDE.md`](../../../CLAUDE.md) *"derive the list, or make the compiler hold it"* shape: the
+/// set of engines grows, the columns do not, and a third engine reintroduces exactly this bug. The
+/// authoritative field is now `oracles` — a map keyed by the engine that actually spoke, so a third
+/// engine appears in it with no further edit and the witness census counts it automatically. The
+/// historical `ots` / `taxcalc` columns survive as a PROJECTION of that map through an `_`-free
+/// match ([`legacy_columns`]), so they can never disagree with it and a third engine is a build
+/// error at the projection rather than a silent omission.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+enum Engine {
+    /// OpenTaxSolver (oracle 1).
+    Ots,
+    /// Tax-Calculator (oracle 2).
+    Taxcalc,
+}
+
+impl Engine {
+    /// The engine's WITNESS name — the spelling the `engine` field carries, the key it takes in the
+    /// `oracles` map, and therefore the name `check_return.py`'s per-line witness census counts.
+    ///
+    /// ★ Deliberately NOT the same spelling as the legacy `ots` column (see [`legacy_columns`]):
+    /// the column names are a frozen wire format from before the census existed, and renaming them
+    /// would be churn in `gen_goldens.py` / `sweep.py` for no gain.
+    fn name(self) -> &'static str {
+        match self {
+            Engine::Ots => "OTS",
+            Engine::Taxcalc => "taxcalc",
+        }
+    }
+
+    /// The `agree-*` class this engine's single-witness agreement is labelled with. `_`-free, so a
+    /// third engine cannot silently inherit `agree-ots` the way the old `if engine == "taxcalc"`
+    /// string test did.
+    fn agree_class(self) -> &'static str {
+        match self {
+            Engine::Ots => "agree-ots",
+            Engine::Taxcalc => "agree-taxcalc",
+        }
+    }
+}
+
+/// The oracle figures behind ONE verdict, keyed by the engine that spoke. An engine ABSENT from the
+/// map did not speak about this line — which is never the same as $0 (the [`verdict_amt`] rule,
+/// generalized to every row).
+type Oracles = BTreeMap<Engine, Usd>;
+
+/// The historical two fixed columns (`ots`, `taxcalc`), PROJECTED from the authoritative `oracles`
+/// map through an `_`-free match. Adding an `Engine` variant is a build error here, which forces a
+/// deliberate decision about the legacy shape instead of dropping the new engine on the floor.
+///
+/// ★ **What this does NOT cover, stated rather than left silent:** a third engine has no column of
+/// its own and would appear only in `oracles`. That is exactly why `oracles` is the authoritative
+/// field and these two are a compatibility projection.
+fn legacy_columns(oracles: &Oracles) -> (Option<Usd>, Option<Usd>) {
+    let mut ots = None;
+    let mut taxcalc = None;
+    for (engine, value) in oracles {
+        match engine {
+            Engine::Ots => ots = Some(*value),
+            Engine::Taxcalc => taxcalc = Some(*value),
+        }
+    }
+    (ots, taxcalc)
+}
+
+/// ★★★ **FR-234 D3 — the Σround ≠ roundΣ residual, COMPUTED from the mechanism.**
+///
+/// A printed TOTAL whose form says *"add lines 10 and 11"* is `Σ round_dollar(exact leg)`: the IRS
+/// whole-dollar rule (`design/forms/extract/f4868--2024.txt:217-223`, verbatim — *"If you do round
+/// to whole dollars, you must round all amounts"*) puts whole dollars in the LEG boxes, and the
+/// total adds the boxes. An engine that publishes only the exact TOTAL for that line necessarily
+/// produces `round_dollar(Σ exact leg)` instead. Both are lawful; they differ by
+/// `Σ round(leg) − round(Σ leg)`, which is at most a dollar per leg.
+///
+/// `CLAUDE.md` forbids the two shortcuts that would also make the corpus green: *"An excuse list
+/// keyed by VECTOR NAME is a liability"* and *"state the mechanism, let it decide, never enumerate
+/// the outcomes you happened to see."* So there is **no tolerance and no household list** here. The
+/// residual is computed from btctax's own exact legs, and a divergence is absorbed **iff it equals
+/// that residual exactly** — which reduces to *"the engine's rounded exact total equals btctax's
+/// rounded exact total"*, a strict equality on a different lawful methodology.
+///
+/// [`Crossfoot::NONE`] is the honest statement for a line with **no leg structure**: its residual is
+/// zero by construction, so [`Crossfoot::absorbs`] can never fire and the comparison stays STRICT
+/// with no special case to remember.
+#[derive(Clone, Copy, Debug)]
+struct Crossfoot {
+    /// `Σ round_dollar(leg)` — what the form prints, and therefore what is in the box on the paper.
+    sigma_round: Usd,
+    /// `round_dollar(Σ leg)` — what an engine publishing only the exact total necessarily produces.
+    round_sigma: Usd,
+}
+
+impl Crossfoot {
+    /// A line with no cross-foot: one printed figure, no legs, zero residual, strict comparison.
+    const NONE: Crossfoot = Crossfoot {
+        sigma_round: Usd::ZERO,
+        round_sigma: Usd::ZERO,
+    };
+
+    /// Build the residual from btctax's own EXACT-cents legs, and prove the reproduction by
+    /// requiring `Σ round(leg)` to equal the whole-dollar total btctax actually printed.
+    ///
+    /// ★ The panic is the point: a residual computed from legs that do not reproduce the filed line
+    /// is an instrument reporting something other than what it measured, and it would be free to
+    /// absorb a real defect. Fail loudly instead — the harness's caller (`smoke.rs`) asserts a
+    /// zero exit status, so this cannot pass unnoticed.
+    fn reproducing(legs: &[Usd], printed_total: Usd) -> Crossfoot {
+        let xf = Crossfoot {
+            sigma_round: legs.iter().copied().map(round_dollar).sum(),
+            round_sigma: round_dollar(legs.iter().copied().sum()),
+        };
+        assert_eq!(
+            xf.sigma_round, printed_total,
+            "oracle_harness --check: the cross-foot legs {legs:?} sum-round to {} but btctax printed \
+             {printed_total} — the leg reproduction has drifted from the printed chain, so its \
+             rounding-order residual cannot be trusted",
+            xf.sigma_round
+        );
+        xf
+    }
+
+    /// `Σ round(leg) − round(Σ leg)`. Zero whenever the line does not cross-foot.
+    fn residual(self) -> Usd {
+        self.sigma_round - self.round_sigma
+    }
+
+    /// Whether this line's rounding-order residual — and **nothing else** — explains the gap
+    /// between the paper and a single-total engine's figure.
+    ///
+    /// Three conjuncts, each load-bearing:
+    /// 1. `residual != 0` — a line with no cross-foot (or one whose legs happen to round cleanly)
+    ///    absorbs nothing at all, so [`Crossfoot::NONE`] is inert.
+    /// 2. `paper == sigma_round` — the FILED figure must be the form's own cross-foot. A filler bug
+    ///    that dropped a dollar on the way to the PDF is therefore never absorbed.
+    /// 3. `target == round_sigma` — the engine must land exactly on btctax's rounded exact total.
+    ///    A divergence of any OTHER size fails, which is what keeps this from being a tolerance.
+    fn absorbs(self, paper: Usd, target: Usd) -> bool {
+        self.residual() != Usd::ZERO && paper == self.sigma_round && target == self.round_sigma
+    }
+}
+
 /// A line held against BOTH oracles (`round_leaf` both sides) — AGI / QBI deduction. Reconciled iff the
 /// on-paper whole dollars equal each oracle's `round_leaf`. No class absorbs a dissent here.
 fn verdict_both(
@@ -597,8 +834,7 @@ fn verdict_both(
         label,
         on_paper,
         internal,
-        Some(o),
-        Some(tc),
+        &Oracles::from([(Engine::Ots, o), (Engine::Taxcalc, tc)]),
         reconciled,
         if reconciled { "agree-both" } else { "diverge" },
     )
@@ -621,8 +857,7 @@ fn verdict_both_targets(
         label,
         on_paper,
         internal,
-        Some(ots),
-        Some(taxcalc),
+        &Oracles::from([(Engine::Ots, ots), (Engine::Taxcalc, taxcalc)]),
         reconciled,
         if reconciled { "agree-both" } else { "diverge" },
     )
@@ -677,17 +912,9 @@ fn verdict_l16(
 ) -> Value {
     let o = round_leaf(ots16);
     let tc = round_leaf(tc16);
+    let both = Oracles::from([(Engine::Ots, o), (Engine::Taxcalc, tc)]);
     let Some(pi) = on_paper else {
-        return verdict(
-            line,
-            label,
-            on_paper,
-            internal,
-            Some(o),
-            Some(tc),
-            false,
-            "absent",
-        );
+        return verdict(line, label, on_paper, internal, &both, false, "absent");
     };
     let p = Usd::from(pi);
     // T7-m2: `known_defect` is threaded through (was hardwired `None`) — a declared §10 pin is
@@ -714,16 +941,7 @@ fn verdict_l16(
     } else {
         "diverge"
     };
-    verdict(
-        line,
-        label,
-        on_paper,
-        internal,
-        Some(o),
-        Some(tc),
-        reconciled,
-        class,
-    )
+    verdict(line, label, on_paper, internal, &both, reconciled, class)
 }
 
 /// The AMT verdict — both witnesses optional, and their absence is MEANINGFUL.
@@ -753,7 +971,15 @@ fn verdict_amt(
         _ => "diverge",
     };
     let reconciled = matches!(class, "agree-both" | "agree-ots" | "agree-taxcalc");
-    verdict(line, label, on_paper, internal, o, tc, reconciled, class)
+    // A witness that did not speak is ABSENT from the map, never a fabricated $0.
+    let mut oracles = Oracles::new();
+    if let Some(v) = o {
+        oracles.insert(Engine::Ots, v);
+    }
+    if let Some(v) = tc {
+        oracles.insert(Engine::Taxcalc, v);
+    }
+    verdict(line, label, on_paper, internal, &oracles, reconciled, class)
 }
 
 /// A line held against ONE named engine — a cross-foot, a WEAK/NIIT leaf, or one leg of a twin-row
@@ -765,22 +991,35 @@ fn verdict_amt(
 ///   thing saying which engine had spoken was a substring of the human label. The verdict now
 ///   carries an `engine` field, and `check_return.py`'s witness census reads THAT rather than
 ///   parsing `[taxcalc]` out of a display string.
+///
+/// ★★★ **FR-234 D1 — the engine is now an [`Engine`], and its figure goes into the column named by
+///   it.** The `engine` argument was a `&str` that only ever reached the `class` and the `engine`
+///   field: the figure itself was published as `ots` unconditionally, so a taxcalc row read
+///   `"ots": <taxcalc's number>, "taxcalc": null`. Fourteen call sites emitted that, and it cost a
+///   controller a wrong conclusion about which oracle dissented on Schedule SE line 12.
+///
+/// ★★★ **FR-234 D3 — `crossfoot` is REQUIRED, not defaulted.** Every call site must state whether
+///   its line cross-foots printed legs against an engine that publishes only the exact total, so a
+///   NEW compared line cannot inherit either behaviour by silence — adding one without a decision
+///   does not compile. [`Crossfoot::NONE`] is the explicit "no leg structure, stay strict".
 fn verdict_engine(
     line: &str,
     label: &str,
-    engine: &str,
+    engine: Engine,
     on_paper: Option<i64>,
     internal: Usd,
     target: Usd,
+    crossfoot: Crossfoot,
 ) -> Value {
     let p = on_paper.map(Usd::from);
-    let reconciled = p == Some(target);
-    let class = if reconciled {
-        if engine == "taxcalc" {
-            "agree-taxcalc"
-        } else {
-            "agree-ots"
-        }
+    let exact = p == Some(target);
+    // Only a gap that IS this line's rounding-order residual, to the dollar, is absorbed (D3).
+    let absorbed = !exact && p.is_some_and(|paper| crossfoot.absorbs(paper, target));
+    let reconciled = exact || absorbed;
+    let class = if absorbed {
+        "methodology-rounding-order"
+    } else if reconciled {
+        engine.agree_class()
     } else {
         "diverge"
     };
@@ -789,35 +1028,52 @@ fn verdict_engine(
         label,
         on_paper,
         internal,
-        Some(target),
-        None,
+        &Oracles::from([(engine, target)]),
         reconciled,
         class,
     );
     if let Value::Object(m) = &mut v {
-        m.insert("engine".into(), json!(engine));
+        m.insert("engine".into(), json!(engine.name()));
+        // ★ Name the residual's exact SIZE, not just the fact of an excuse (`CLAUDE.md`: taxcalc's
+        //   computed excuses each name their omission's size, so a divergence of the wrong shape is
+        //   unexpected even on a line expected to diverge).
+        if absorbed {
+            m.insert(
+                "rounding_order_residual".into(),
+                json!(money(crossfoot.residual())),
+            );
+        }
     }
     v
 }
 
 /// Assemble one verdict object. Money is emitted as exact whole-dollar TEXT (never a float), so the
 /// Python sweep compares strings and never re-rounds.
-#[allow(clippy::too_many_arguments)]
+///
+/// `oracles` is the AUTHORITATIVE carrier: one entry per engine that actually spoke about this line,
+/// keyed by [`Engine::name`]. The `ots` / `taxcalc` columns beside it are [`legacy_columns`]'
+/// projection of that map — emitted for `gen_goldens.py` (which reads `l16["ots"]` / `["taxcalc"]`)
+/// and `sweep.py`'s divergence report, and structurally incapable of disagreeing with it.
 fn verdict(
     line: &str,
     label: &str,
     on_paper: Option<i64>,
     internal: Usd,
-    ots: Option<Usd>,
-    taxcalc: Option<Usd>,
+    oracles: &Oracles,
     reconciled: bool,
     class: &str,
 ) -> Value {
+    let (ots, taxcalc) = legacy_columns(oracles);
+    let mut witnesses = Map::new();
+    for (engine, value) in oracles {
+        witnesses.insert(engine.name().into(), json!(money(*value)));
+    }
     json!({
         "line": line,
         "label": label,
         "on_paper": on_paper.map(|n| Usd::from(n).to_string()),
         "internal": money(internal),
+        "oracles": Value::Object(witnesses),
         "ots": ots.map(money),
         "taxcalc": taxcalc.map(money),
         "reconciled": reconciled,

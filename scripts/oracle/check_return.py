@@ -421,22 +421,26 @@ def main() -> None:
 
     for v in check["verdicts"]:
         label = v.get("label", v["line"])
-        # `verdict_both` rows carry BOTH engines; a single-oracle row puts its figure in `ots` and
-        # says which engine it came from in the label (`[OTS]` / `[taxcalc]`).
-        if v.get("ots") is not None and v.get("taxcalc") is not None:
-            witness(v["line"], "OTS")
-            witness(v["line"], "taxcalc")
-            oracle = f"{v['ots']}/{v['taxcalc']}"
-        elif v.get("ots") is not None:
-            # ★ N-1/I-3 — the ENGINE comes off the verdict itself. It used to be recovered by
-            #   looking for the substring "[taxcalc]" in the human label, because every
-            #   single-engine row was built by a function hardwired to OTS (which also made a
-            #   taxcalc row print `class: agree-ots`). A census that reads a display string is one
-            #   relabelling away from miscounting the thing it exists to count.
-            witness(v["line"], v.get("engine", "OTS"))
-            oracle = str(v["ots"])
-        else:
-            oracle = "none"
+        # ★★★ FR-234 D1 — the census reads the verdict's OWN `oracles` map: one entry per engine that
+        #     actually spoke about this line, keyed by engine name. Two things were wrong with reading
+        #     the `ots` / `taxcalc` columns instead, and they compounded:
+        #       · `verdict_engine` published EVERY single-engine figure in the `ots` column whatever
+        #         engine it had compared against, so a taxcalc row read as an OTS opinion — which is
+        #         how a $1 taxcalc dissent on Schedule SE L12 was briefly read as OTS dissenting.
+        #       · two fixed columns cannot describe a third engine, so the census would silently stop
+        #         counting the day one is added.
+        #     The map has no such ceiling: whatever engines are in it are the witnesses, counted.
+        #     (`v.get("engine")` remains the single-engine row's own statement of who spoke, and the
+        #     Rust side asserts the two agree — `every_single_engine_verdict_publishes_its_figure_…`.)
+        oracles = v.get("oracles")
+        if oracles is None:  # pragma: no cover — a harness predating FR-234
+            sys.exit(
+                f"{HARNESS_BIN} is STALE — its --check verdicts carry no `oracles` map "
+                "(built before FR-234). Rebuild it: `cargo build -p btctax-oracle-harness`."
+            )
+        for who in oracles:
+            witness(v["line"], who)
+        oracle = "/".join(str(oracles[who]) for who in oracles) if oracles else "none"
         ok = v["reconciled"]
         note = v.get("class", "")
         print(
