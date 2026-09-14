@@ -1575,6 +1575,15 @@
     "extract": "legal/text/irs-publications/Pub561_Value_of_Donated_Property.txt"
   },
   {
+    "path": "legal/primary-sources/irs-publications/Pub936_Home_Mortgage_Interest_Deduction.pdf",
+    "kind": "publication",
+    "storage": "committed",
+    "sha256": "a4ef802b92ddd40ce2d00331b5012834dd274fd6ce74624586a1ea7dc31c32de",
+    "bytes": 1353191,
+    "url": "https://www.irs.gov/pub/irs-pdf/p936.pdf",
+    "extract": "legal/text/irs-publications/Pub936_Home_Mortgage_Interest_Deduction.txt"
+  },
+  {
     "path": "legal/primary-sources/regulations-cfr/26CFR_1.1012-1_basis.xml",
     "kind": "regulation",
     "storage": "committed",
