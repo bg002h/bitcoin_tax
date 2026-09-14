@@ -523,6 +523,7 @@ fn ty2024_itemizer_with_an_unresolved_cwa(
             charitable: vec![CharitableGift {
                 class: CharitableClass::Cash60,
                 amount: rust_decimal_macros::dec!(40000),
+                noncash: None,
             }],
             ..Default::default()
         }),

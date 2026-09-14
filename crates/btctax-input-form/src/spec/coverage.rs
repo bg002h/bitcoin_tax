@@ -143,6 +143,7 @@ fn maximal_fixture() -> ReturnInputs {
         charitable: vec![CharitableGift {
             class: CharitableClass::Cash60,
             amount: dec!(0),
+            noncash: None,
         }],
         ..Default::default()
     });
@@ -691,6 +692,32 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
         //   the prefix, so `answer_log` does NOT cover `answer_log_history`. Spelling it out is what
         //   keeps the exemption honest rather than accidental.
         "answer_log_history",
+        // ★★★ **FR-200(b) — Form 8283 Section A's property block: EXEMPTED DELIBERATELY, AND IT IS A
+        //     KNOWN GAP, not a judgement that it does not belong in the form.** Same class as
+        //     `schedule_1a` above, and held back for the same stated reason.
+        //
+        //     What it is: nine columns of Form 8283 Section A per noncash gift — a donee name and
+        //     address, a description and condition, two dates, a how-acquired, two money columns, an
+        //     FMV method, and a property-KIND question whose wrong answer is a wrong return. The
+        //     kind question is the one that makes this prompt-wording work rather than plumbing:
+        //     *"is this clothing or a household item in good used condition or better?"* decides
+        //     whether §170(f)(16)(A) allows the deduction at all, and a prompt that invites a
+        //     careless YES is an overstatement every test would pass.
+        //
+        //     ★ Nothing is reachable through the gap, and the fail-closed direction is the one that
+        //       holds: a noncash gift with no property block REFUSES the year above the $500 filing
+        //       threshold (`NoncashGiftRefusal::DetailsNotCollected`) rather than filing an
+        //       under-reported Form 8283 — so the form cannot produce a wrong return here, only an
+        //       honest refusal that points the filer at `income import`. The TOML import surface
+        //       carries every column (`docs/income-import-schema.md`).
+        //     REMOVE THIS PREFIX when the section lands — the coverage KAT will then police it.
+        //
+        //     ★ The prefix is INDEX-LITERAL (`[0]`) because the matcher is: it compares `path == p`,
+        //       `path.starts_with("{p}.")` or `starts_with("{p}[")` with no `[]` normalisation, and the
+        //       fixture realises one charitable gift. That is the safe direction — a fixture that grows
+        //       a SECOND noncash gift reds here rather than being silently exempted, which is exactly
+        //       the loudness this census exists for.
+        "schedule_a.charitable[0].noncash",
     ];
     const EXEMPT_LEAVES: &[&str] = &[
         // ★★★ **R10.4 / T4b — WHICH YEAR THIS RETURN WAS OPENED FROM.** Provenance, in the same class
@@ -848,7 +875,15 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     // A count, not a list, and asserted `<=` rather than `==`: a later task that drops an entry
     // passes, and one that ADDS an exemption back — the only direction that can hide a leaf nobody
     // collects — reds. Moving the pin up must be a deliberate edit with a reason beside it.
-    const EXEMPT_PREFIX_CEILING: usize = 5;
+    // ★ RAISED 5 → 6 on 2026-09-14 (FR-200(b)) for `schedule_a.charitable[0].noncash` — Form 8283
+    //   Section A's nine property columns, whose entry above carries the reason. It is the one
+    //   direction this ratchet is meant to make expensive, so: the gap is fail-CLOSED (a noncash gift
+    //   with no property block refuses the year above the $500 filing threshold rather than filing an
+    //   under-reported Form 8283), the TOML import surface carries every column, and the section is
+    //   held back because its property-KIND prompt decides §170(f)(16)(A) allowability and a careless
+    //   YES there is an overstatement no test would catch. Measured, not estimated: the run reported
+    //   the single uncovered leaf `schedule_a.charitable[0].noncash`, so the delta is exactly one.
+    const EXEMPT_PREFIX_CEILING: usize = 6;
     assert!(
         EXEMPT_PREFIXES.len() <= EXEMPT_PREFIX_CEILING,
         "EXEMPT_PREFIXES is a RATCHET and may only shrink: {} entries, ceiling {EXEMPT_PREFIX_CEILING}. \

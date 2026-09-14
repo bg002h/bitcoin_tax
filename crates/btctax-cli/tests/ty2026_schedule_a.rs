@@ -692,6 +692,7 @@ fn owner_shape_household(carryover: Usd) -> (ReturnInputs, LedgerState) {
             charitable: vec![CharitableGift {
                 class: CharitableClass::Cash60,
                 amount: dec!(6000),
+                noncash: None,
             }],
             ..Default::default()
         }),
@@ -1168,6 +1169,7 @@ fn no_charitable_floor_and_no_itemized_limitation_is_applied_anywhere() {
     let gifts = [CharitableGift {
         class: CharitableClass::Cash60,
         amount: dec!(10000),
+        noncash: None,
     }];
     let r = apply_170b(dec!(273200), &gifts, &[], 2026);
     assert_eq!(

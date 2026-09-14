@@ -192,7 +192,13 @@ mod tests {
     use super::*;
 
     fn gift(class: CharitableClass, amount: Usd) -> CharitableGift {
-        CharitableGift { class, amount }
+        CharitableGift {
+            class,
+            amount,
+            // These ceiling tests are about §170(b) percentage limits, which do not read the Form
+            // 8283 Section A block at all.
+            noncash: None,
+        }
     }
     fn carry(class: CharitableClass, amount: Usd, origin_year: i32) -> CharitableCarryItem {
         CharitableCarryItem {

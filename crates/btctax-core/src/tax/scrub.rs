@@ -1182,6 +1182,53 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
                 format!("RecipientAddress{}", i + 1),
             );
         }
+        // ★★★ FR-200(b) — Schedule A line 12's NONCASH gifts each carry a Form 8283 Section A block,
+        //     and four of its columns are free text the filer writes in their own words. Column (a) is
+        //     a charity's name AND street address — the `recipient_name`/`recipient_address` identity
+        //     class directly above. Columns (c), (f) and (i) describe PROPERTY rather than a person,
+        //     but they are replaced for the same reason `schedule_1a.vehicles[].description` and
+        //     `form_1098[].box10_other` are: free text the filer typed can carry anything, and
+        //     replacement costs the reproducer nothing because no predicate reads a validity class off
+        //     them. Trim-emptiness is preserved throughout, so a scrubbed copy cannot differ from the
+        //     original in whether `section_a_row` refuses.
+        //
+        //     The `..`-free destructure is what makes a future column a compile error here rather than
+        //     a silent carry: the `kind`, the two dates and the two money columns are KEPT because
+        //     each one MOVES A FIGURE or the routing (`kind` picks the refusal, `amount`/(h) decide
+        //     the section and the carve-out), and a reproducer that scrubbed them would reproduce a
+        //     different return.
+        for (i, g) in a.charitable.iter_mut().enumerate() {
+            let Some(p) = g.noncash.as_mut() else {
+                continue;
+            };
+            let crate::tax::form8283_section_a::NoncashGiftProperty {
+                kind: _,                         // KEPT — routes the refusal; carries no identity
+                donee_name_and_address: _,       // replaced below
+                description_and_condition: _,    // replaced below
+                date_of_contribution: _, // KEPT — decides the tax year, like `transcribed_on`
+                date_acquired_by_donor: _, // KEPT — column (e); decides the holding period
+                how_acquired_by_donor: _, // replaced below
+                cost_or_adjusted_basis: _, // KEPT — column (g) money
+                fair_market_value: _,    // KEPT — column (h) money; compared against the claim
+                method_used_to_determine_fmv: _, // replaced below
+            } = p;
+            p.donee_name_and_address =
+                replace_preserving_emptiness(&p.donee_name_and_address, format!("Donee{}", i + 1));
+            p.description_and_condition = replace_preserving_emptiness(
+                &p.description_and_condition,
+                format!("DonatedProperty{}", i + 1),
+            );
+            if let Some(h) = p.how_acquired_by_donor.as_ref() {
+                p.how_acquired_by_donor = Some(replace_preserving_emptiness(
+                    h,
+                    format!("HowAcquired{}", i + 1),
+                ));
+            }
+            p.method_used_to_determine_fmv = replace_preserving_emptiness(
+                &p.method_used_to_determine_fmv,
+                format!("FmvMethod{}", i + 1),
+            );
+        }
     }
     // ★ R4 / T5 — Form 1098-E: a lender NAME and a lender TIN, the 1099-payer identity class.
     for (i, f) in out.form_1098e.iter_mut().enumerate() {

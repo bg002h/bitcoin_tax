@@ -14,7 +14,7 @@ cargo run -p xtask -- toml-schema > docs/income-import-schema.md
 
 Start from [the worked example](#a-complete-worked-example) below and delete what does not apply to you.
 
-**Almost every key is optional to the PARSER** — `ReturnInputs` carries `#[serde(default)]` on nearly every field — so a short file parses. **69 are not**, and they are measured rather than remembered — each one was deleted from a complete file and handed back to the deserializer:
+**Almost every key is optional to the PARSER** — `ReturnInputs` carries `#[serde(default)]` on nearly every field — so a short file parses. **78 are not**, and they are measured rather than remembered — each one was deleted from a complete file and handed back to the deserializer:
 
 - `b_1099[].payer`
 - `capital_loss_carryforward_in.long`
@@ -47,6 +47,15 @@ Start from [the worked example](#a-complete-worked-example) below and delete wha
 - `sa_5498[].trustee`
 - `schedule_a.charitable[].amount`
 - `schedule_a.charitable[].class`
+- `schedule_a.charitable[].noncash.date_acquired_by_donor.on`
+- `schedule_a.charitable[].noncash.date_of_contribution`
+- `schedule_a.charitable[].noncash.description_and_condition`
+- `schedule_a.charitable[].noncash.donee_name_and_address`
+- `schedule_a.charitable[].noncash.fair_market_value`
+- `schedule_a.charitable[].noncash.kind`
+- `schedule_a.charitable[].noncash.kind.clothing_or_household_item`
+- `schedule_a.charitable[].noncash.kind.clothing_or_household_item.good_used_condition_or_better`
+- `schedule_a.charitable[].noncash.method_used_to_determine_fmv`
 - `schedule_a.mortgage_interest_not_on_1098[].amount`
 - `schedule_a.mortgage_interest_not_on_1098[].recipient_name`
 - `schedule_a.pub936_table1.april_2018_binding_contract`
@@ -131,7 +140,7 @@ Two key groups are read and then **normalised away**, with a note on stderr rath
 
 ## Every key `income import` honours
 
-**397 paths, 359 of them leaves that take a value.** Derived from the serialized shape of `ReturnInputs` over `btctax_core::tax::scrub_axis::maximal_sentinel()` — the fixture whose every `Option` is `Some`, every `Vec` non-empty and every nested struct present, written as an exhaustive `..`-free struct literal so a new field is a compile error before it can be an unpublished key.
+**410 paths, 368 of them leaves that take a value.** Derived from the serialized shape of `ReturnInputs` over `btctax_core::tax::scrub_axis::maximal_sentinel()` — the fixture whose every `Option` is `Some`, every `Vec` non-empty and every nested struct present, written as an exhaustive `..`-free struct literal so a new field is a compile error before it can be an unpublished key.
 
 **Reading the paths.** `a.b` is the key `b` under `[a]`. `a[]` is a repeated table, written `[[a]]` once per row, and `a[].b` is a key inside one of those rows. A `<placeholder>` segment is a key YOU choose, not a literal:
 
@@ -140,7 +149,7 @@ Two key groups are read and then **normalised away**, with a note on stderr rath
 
 **Money is a string.** Every dollar figure is a decimal serialized as a quoted string — `"12400"`, `"1234.56"` — never a bare number, because a TOML float cannot carry a cent exactly.
 
-**A DATE takes EITHER spelling, and the 14 `date` leaves below were found by trying one.** Write `date_of_birth = "2012-04-15"` — that is what the deserializer accepts and what you should type. btctax's own `income scrub` writes the same value as `time`'s compact `[2012, 106]` (year, ordinal day), which also reads back, so a scrubbed file round-trips without editing. Each of those leaves was identified by substituting an ISO date string at the path and re-parsing the whole file. A leaf still shown below as `array of integers` was NOT confirmed that way — every one of them is under `answer_log*`, which the import discards anyway, and the generator fails if such a leaf ever turns up anywhere else.
+**A DATE takes EITHER spelling, and the 16 `date` leaves below were found by trying one.** Write `date_of_birth = "2012-04-15"` — that is what the deserializer accepts and what you should type. btctax's own `income scrub` writes the same value as `time`'s compact `[2012, 106]` (year, ordinal day), which also reads back, so a scrubbed file round-trips without editing. Each of those leaves was identified by substituting an ISO date string at the path and re-parsing the whole file. A leaf still shown below as `array of integers` was NOT confirmed that way — every one of them is under `answer_log*`, which the import discards anyway, and the generator fails if such a leaf ever turns up anywhere else.
 
 **The last column** is `required` when omitting the key breaks the parse (measured, see above), plus what the import does with it BEYOND storing it (derived from the path). Blank means optional and stored as given.
 
@@ -449,6 +458,19 @@ Two key groups are read and then **normalised away**, with a note on stderr rath
 | `schedule_a.charitable[]` | table |  |
 | `schedule_a.charitable[].amount` | string | **required** |
 | `schedule_a.charitable[].class` | string | **required** |
+| `schedule_a.charitable[].noncash` | table |  |
+| `schedule_a.charitable[].noncash.cost_or_adjusted_basis` | string |  |
+| `schedule_a.charitable[].noncash.date_acquired_by_donor` | table |  |
+| `schedule_a.charitable[].noncash.date_acquired_by_donor.on` | date | **required** |
+| `schedule_a.charitable[].noncash.date_of_contribution` | date | **required** |
+| `schedule_a.charitable[].noncash.description_and_condition` | string | **required** |
+| `schedule_a.charitable[].noncash.donee_name_and_address` | string | **required** |
+| `schedule_a.charitable[].noncash.fair_market_value` | string | **required** |
+| `schedule_a.charitable[].noncash.how_acquired_by_donor` | string |  |
+| `schedule_a.charitable[].noncash.kind` | table | **required** |
+| `schedule_a.charitable[].noncash.kind.clothing_or_household_item` | table | **required** |
+| `schedule_a.charitable[].noncash.kind.clothing_or_household_item.good_used_condition_or_better` | boolean | **required** |
+| `schedule_a.charitable[].noncash.method_used_to_determine_fmv` | string | **required** |
 | `schedule_a.investment_interest` | string |  |
 | `schedule_a.medical` | string |  |
 | `schedule_a.mortgage_all_used_to_buy_build_improve` | boolean |  |

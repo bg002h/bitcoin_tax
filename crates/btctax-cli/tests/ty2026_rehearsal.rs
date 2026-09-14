@@ -146,6 +146,7 @@ fn owner_shape_household(
             charitable: vec![CharitableGift {
                 class: CharitableClass::Cash60,
                 amount: dec!(6000),
+                noncash: None,
             }],
             ..Default::default()
         }),

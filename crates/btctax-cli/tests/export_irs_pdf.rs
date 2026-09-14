@@ -1507,8 +1507,12 @@ fn the_export_path_refuses_on_the_compute_screen_and_writes_no_bytes() {
     let (_d, vault, out) = full_return_vault(&real_events_2024(), |ri| {
         ri.schedule_a = Some(ScheduleAInputs {
             charitable: vec![CharitableGift {
-                class: CharitableClass::CapGainProp30, // NON-crypto noncash — btctax has no rows for it
+                class: CharitableClass::CapGainProp30, // NON-crypto noncash
                 amount: dec!(600),                     // over the $500 Schedule A line 12 trigger
+                // ★ FR-200(b) — deliberately NO property details, which is what still refuses: the
+                //   8283 btctax would attach cannot list a property it holds nothing about. With the
+                //   details present this same gift now FILES (see `f8283_section_a.rs`).
+                noncash: None,
             }],
             ..Default::default()
         });
@@ -1531,6 +1535,119 @@ fn the_export_path_refuses_on_the_compute_screen_and_writes_no_bytes() {
     assert!(
         wrote_nothing(out.path()),
         "no bytes on a compute-screen refusal"
+    );
+}
+
+/// ★★★ **FR-200(b), END TO END — and the MIRROR of the test directly above.**
+///
+/// The same $600 bag of used clothing, with the Form 8283 Section A property details the columns ask
+/// for, now exports a packet. The assertion is on the FILES, because the loss was never Form 8283: a
+/// thrift-store donation suppressed the **Form 8949 and Schedule D that are the reason this product
+/// exists**.
+///
+/// **Planted-defect check (B1), observed RED:** flip `good_used_condition_or_better` to `false` — one
+/// bool, the §170(f)(16)(A) gate — and this reds at the `expect` with
+/// *"[NonCryptoNoncashGift(NotGoodUsedConditionNeedsSectionBAppraisal)] … noncash charitable gift #1:
+/// a single article of clothing or a household item that is NOT in good used condition or better …
+/// no forms were written"*. Two things are measured at once: the routing decision reaches the CLI, and
+/// it reaches it **named**, so the filer is told which condition refused.
+///
+/// ★ The other half of the gate is the test directly ABOVE, which is this fixture with `noncash: None`
+/// and asserts the refusal plus an empty output directory. The details are what moved; the gate did not.
+#[test]
+fn a_six_hundred_dollar_bag_of_clothes_exports_a_packet_with_its_form_8283() {
+    use btctax_core::tax::form8283_section_a::{
+        DateAcquiredByDonor, NoncashGiftProperty, NoncashPropertyKind,
+    };
+    use btctax_core::tax::return_inputs::{
+        CharitableClass, CharitableGift, Owner, ScheduleAInputs, W2,
+    };
+
+    let (_d, vault, out) = full_return_vault(&real_events_2024(), |ri| {
+        // ★ A wage so the §170(b)(1)(C) 30%-of-AGI ceiling does not bind the gift below $500 — this
+        //   fixture's ledger alone leaves too little AGI, and a ceiling-limited line 12 would take the
+        //   Form 8283 off the packet for a reason that has nothing to do with FR-200(b).
+        ri.w2s = vec![W2 {
+            owner: Owner::Taxpayer,
+            employer: "Acme".into(),
+            box1_wages: dec!(90000),
+            box3_ss_wages: dec!(90000),
+            box5_medicare_wages: dec!(90000),
+            ..Default::default()
+        }];
+        ri.schedule_a = Some(ScheduleAInputs {
+            charitable: vec![CharitableGift {
+                class: CharitableClass::CapGainProp30,
+                amount: dec!(600),
+                noncash: Some(NoncashGiftProperty {
+                    kind: NoncashPropertyKind::ClothingOrHouseholdItem {
+                        // §170(f)(16)(A)'s gate, answered YES — the only answer that files.
+                        good_used_condition_or_better: true,
+                    },
+                    donee_name_and_address: "Goodwill Industries, 1 Main St, Springfield IL".into(),
+                    description_and_condition: "Bag of used adult clothing (12 shirts, 4 pairs of \
+                                                trousers), good used condition"
+                        .into(),
+                    date_of_contribution: time::macros::date!(2024 - 11 - 30),
+                    // i8283 column (e)'s own word for a group of similar items acquired on various
+                    // dates and all held over 12 months.
+                    date_acquired_by_donor: Some(DateAcquiredByDonor::Various),
+                    how_acquired_by_donor: Some("Purchase".into()),
+                    cost_or_adjusted_basis: Some(dec!(2400)),
+                    fair_market_value: dec!(600),
+                    // i8283 column (i)'s own example for clothing and household items; Pub. 561 is the
+                    // authority behind it.
+                    method_used_to_determine_fmv: "Thrift shop value".into(),
+                }),
+            }],
+            // ★ Enough itemized deduction that the return ITEMIZES, so Schedule A — and therefore
+            //   line 12, and therefore the Form 8283 — actually prints rather than losing to the
+            //   §63(c) standard deduction. SALT alone cannot do it: §164(b)(6) caps it at $10,000,
+            //   which with the $600 gift is under TY2024 Single's $14,600. Medical carries the rest
+            //   (the §213 7.5%-of-AGI floor is comfortably cleared at this size).
+            salt_real_estate: dec!(10000),
+            medical: dec!(100000),
+            ..Default::default()
+        });
+        // ★ §170(f)(8) — a $600 gift is a single contribution of $250 or more, so the
+        //   contemporaneous-written-acknowledgment question goes LIVE the moment this shape runs
+        //   (which is after `answer_all_live_declarations`, when it was not yet live). Answered YES:
+        //   this test is about Form 8283, and leaving the CWA unanswered would refuse the year on a
+        //   different gate entirely — `CharitableCwaUnresolved` — masking the one under test.
+        ri.charitable_cwa_obtained = Some(true);
+    });
+
+    cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        &[],
+        None,
+        Default::default(),
+    )
+    .expect("a $600 bag of used clothing in good used condition is a filable Section A row");
+
+    let files: Vec<String> = std::fs::read_dir(out.path())
+        .expect("the output directory")
+        .filter_map(Result::ok)
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .collect();
+    let has = |stem: &str| files.iter().any(|f| f.contains(stem));
+    assert!(has("f1040"), "the 1040 itself: {files:?}");
+    assert!(
+        has("f8949"),
+        "★ Form 8949 — a bag of clothes used to suppress it entirely: {files:?}"
+    );
+    assert!(has("schedule_d"), "…and Schedule D with it: {files:?}");
+    assert!(
+        has("f1040sa"),
+        "the return itemizes, so Schedule A prints: {files:?}"
+    );
+    assert!(
+        has("f8283"),
+        "…and the Form 8283 the gift REQUIRES is attached, rather than the year being refused: \
+         {files:?}"
     );
 }
 
@@ -1738,6 +1855,7 @@ fn full_return_vault_with_a_gift_over_its_ceiling(
             charitable: vec![CharitableGift {
                 class: CharitableClass::Cash60,
                 amount: dec!(40000),
+                noncash: None,
             }],
             ..Default::default()
         });

@@ -2484,6 +2484,7 @@ fn the_writeback_summary_names_every_carryover_it_wrote() {
                 charitable: vec![btctax_core::tax::return_inputs::CharitableGift {
                     class: btctax_core::tax::return_inputs::CharitableClass::Cash60,
                     amount: dec!(40000),
+                    noncash: None,
                 }],
                 ..Default::default()
             }),
@@ -2615,6 +2616,7 @@ fn the_summary_does_not_claim_a_capital_loss_write_the_gate_skipped() {
                         charitable: vec![CharitableGift {
                             class: CharitableClass::Cash60,
                             amount: dec!(40000),
+                            noncash: None,
                         }],
                         ..Default::default()
                     }),
@@ -2721,6 +2723,7 @@ fn carryover_write_back_round_trips_and_respects_user_precedence() {
                         charitable: vec![CharitableGift {
                             class: CharitableClass::Cash60,
                             amount: dec!(40000),
+                            noncash: None,
                         }],
                         ..Default::default()
                     }),
@@ -3000,6 +3003,7 @@ fn import_preserves_a_computed_carryover() {
                         charitable: vec![CharitableGift {
                             class: CharitableClass::Cash60,
                             amount: dec!(40000),
+                            noncash: None,
                         }],
                         ..Default::default()
                     }),
@@ -4306,6 +4310,7 @@ fn the_full_remedy_chain_restores_a_computed_carryover() {
                         charitable: vec![CharitableGift {
                             class: CharitableClass::Cash60,
                             amount: dec!(40000),
+                            noncash: None,
                         }],
                         ..Default::default()
                     }),
@@ -4386,6 +4391,7 @@ fn the_full_remedy_chain_restores_a_computed_carryover() {
                         charitable: vec![CharitableGift {
                             class: CharitableClass::Cash60,
                             amount: dec!(40000),
+                            noncash: None,
                         }],
                         ..Default::default()
                     }),
@@ -4447,6 +4453,7 @@ fn fr2024_writeback_vault_with_pseudo_trigger() -> (tempfile::TempDir, PathBuf) 
                     charitable: vec![CharitableGift {
                         class: CharitableClass::Cash60,
                         amount: dec!(40000),
+                        noncash: None,
                     }],
                     ..Default::default()
                 }),
@@ -4598,6 +4605,7 @@ fn vault_with_a_gift_over_its_ceiling() -> (tempfile::TempDir, PathBuf) {
                         charitable: vec![CharitableGift {
                             class: CharitableClass::Cash60,
                             amount: dec!(40000),
+                            noncash: None,
                         }],
                         ..Default::default()
                     }),
@@ -4685,6 +4693,7 @@ fn a_gift_within_its_ceiling_prints_no_charitable_carryover_line() {
                         charitable: vec![CharitableGift {
                             class: CharitableClass::Cash60,
                             amount: dec!(1000),
+                            noncash: None,
                         }],
                         ..Default::default()
                     }),

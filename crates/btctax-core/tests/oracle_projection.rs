@@ -758,6 +758,7 @@ fn a_non_cash_gift_is_dropped_by_the_projection_and_reported_as_such() {
         .push(CharitableGift {
             class: CharitableClass::CapGainProp30,
             amount: Usd::from(5_000i64),
+            noncash: None,
         });
     // The premise: btctax really does deduct the gift, so the description is short by it.
     let with = assemble(&ri, &state).deduction;

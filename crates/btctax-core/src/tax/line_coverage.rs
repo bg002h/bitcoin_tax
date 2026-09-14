@@ -2916,6 +2916,88 @@ pub fn cover_scheduledrouting(r: &crate::tax::printed::ScheduleDRouting) -> Cove
     c
 }
 
+/// ★★★ **FR-200(b) — Form 8283 Section A, line 1**: the two money COLUMNS a transcribed row prints.
+///
+/// Section A's line 1 is a table, so the `line` is `"1"` for every row and the `field` carries the
+/// column letter — the same shape `cover_printed8949row` uses for a lettered table.
+///
+/// ★★ **Column (g) lives on [`crate::tax::form8283_section_a::SectionAColumnsEfg`], not on the row**,
+/// because the per-item carve-out makes it *absent* rather than zero. So it is covered inside its own
+/// `cover_*` (the `..`-free `match` below), and the `NotRequired…` arm pushes NO row: the census records
+/// a line's production, and *"the form does not require this column for this item"* is a provenance the
+/// type carries rather than a figure.
+pub fn cover_sectionarow(r: &crate::tax::form8283_section_a::SectionARow) -> Coverage {
+    let crate::tax::form8283_section_a::SectionARow {
+        // ★ The five NON-money columns are named by the `..`-free destructure and push no row: this
+        //   table is the money census. Retyping any of them as `Usd` fails to compile HERE, which is
+        //   what stops a money column slipping in behind a `_`.
+        col_a_donee_name_and_address: donee,
+        col_c_description_and_condition: desc,
+        col_d_date_of_contribution: date_contrib,
+        cols_efg,
+        col_h_fair_market_value,
+        col_i_method_used_to_determine_fmv: method,
+    } = r;
+    let _non_money_columns: (&String, &String, &crate::conventions::TaxDate, &String) =
+        (donee, desc, date_contrib, method);
+    let mut c = Coverage::quoting("2024");
+    // ★★★ `Exception`, with the reason naming EXACTLY what is missing — not a shrug.
+    //
+    //     This is a `Collected` line in substance: i8283 (`i8283--2024.txt:936-937`) says *"Enter the
+    //     FMV of the property on the date you donated it."* But `Production::filer_records` verifies
+    //     the sentence inside the `Line <N>` block of the row's own booklet, resolved through
+    //     `xtask::line_coverage_check::booklet_for` — and that join has no `f8283 → i8283` arm, so a
+    //     `FilerRecords` row here reds with *"knows no instructions document"*. The booklet IS
+    //     archived (`design/forms/extract/i8283--2024.txt`), so the fix is one arm in that join; it
+    //     lives in `xtask`, and this row says so rather than pretending the column fits `Carry`.
+    c.exception(
+        *col_h_fair_market_value,
+        "f8283",
+        "1(h)",
+        "SectionARow.col_h_fair_market_value",
+        "(h) Fair market value",
+        "a filer-supplied Section A column. It is `Collected`/`FilerRecords` in substance — i8283 \
+         says \"Enter the FMV of the property on the date you donated it.\" — but \
+         `booklet_for(\"f8283\")` has no arm, so the FilerRecords check has nowhere to resolve. \
+         Add `f8283 => i8283` to that join and this becomes `filer_records`",
+    );
+    c.0.extend(cover_sectionacolumnsefg(cols_efg).0);
+    c
+}
+
+/// ★ Column **(g)** — *"Donor's cost or adjusted basis"*, whose ABSENCE is a recorded decision.
+///
+/// i8283 column (g) (`i8283--2024.txt:926`): *"For items over $500, enter your cost or adjusted
+/// basis."* — which is why the `NotRequired…` arm pushes nothing: at $500 or less the form does not ask
+/// for the column at all, and a census row claiming a production for a column the form does not require
+/// would assert something the page does not say.
+pub fn cover_sectionacolumnsefg(
+    e: &crate::tax::form8283_section_a::SectionAColumnsEfg,
+) -> Coverage {
+    use crate::tax::form8283_section_a::SectionAColumnsEfg as E;
+    let mut c = Coverage::quoting("2024");
+    match e {
+        E::Completed {
+            // (e) and (f) are text columns; named, not `..`-ignored, so a new column here is a compile
+            // error rather than a silent omission.
+            col_e_date_acquired_by_donor: _,
+            col_f_how_acquired_by_donor: _,
+            col_g_cost_or_adjusted_basis,
+        } => c.exception(
+            *col_g_cost_or_adjusted_basis,
+            "f8283",
+            "1(g)",
+            "SectionAColumnsEfg.col_g_cost_or_adjusted_basis",
+            "(g) Donor\u{2019}s cost",
+            "a filer-supplied Section A column; see `cover_sectionarow`'s column (h) row for why it \
+             is an Exception rather than `filer_records`. i8283 column (g): \"For items over $500, \
+             enter your cost or adjusted basis.\"",
+        ),
+        E::NotRequiredDeductionAtOrUnderFiveHundred => {}
+    }
+    c
+}
+
 /// **Form1040Lines** — the main form. Destructured with no `..`.
 ///
 /// ★ Field keys are STRUCT-QUALIFIED (`Form1040Lines.lineN`) because `Form1040Income` re-declares eleven of
@@ -4145,6 +4227,25 @@ pub fn all() -> Coverage {
         &crate::tax::printed::ScheduleDRouting::NetLoss {
             line21: Usd::ZERO,
             line22_yes: false,
+        },
+    )));
+    // ★★★ FR-200(b) — Form 8283 Section A line 1. The **`Completed`** shape is registered, for the
+    //     same reason `cover_scheduledrouting` registers `NetLoss` and `cover_form6251line1` registers
+    //     `Y2025`: one type, more than one shape, and only the shapes named here are extracted. The
+    //     carve-out shape carries no money, so registering it would add nothing to extract.
+    rows.extend(dated(cover_sectionarow(
+        &crate::tax::form8283_section_a::SectionARow {
+            col_a_donee_name_and_address: String::new(),
+            col_c_description_and_condition: String::new(),
+            col_d_date_of_contribution: time::macros::date!(2024 - 01 - 01),
+            cols_efg: crate::tax::form8283_section_a::SectionAColumnsEfg::Completed {
+                col_e_date_acquired_by_donor:
+                    crate::tax::form8283_section_a::DateAcquiredByDonor::Various,
+                col_f_how_acquired_by_donor: String::new(),
+                col_g_cost_or_adjusted_basis: Usd::ZERO,
+            },
+            col_h_fair_market_value: Usd::ZERO,
+            col_i_method_used_to_determine_fmv: String::new(),
         },
     )));
     Coverage(rows, RowYear::Undecided, false)

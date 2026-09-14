@@ -1428,12 +1428,28 @@ fn classify_pub936_table1(c: &mut Census, t1: &crate::tax::pub936_table1::Table1
 }
 
 fn classify_charitable_gift(c: &mut Census, g: &CharitableGift) {
-    let CharitableGift { class, amount: _ } = g;
+    let CharitableGift {
+        class,
+        amount: _,
+        noncash,
+    } = g;
     c.exempt(
         class,
         Class::DataDerived,
         "the gift's CONTRIBUTION CLASS is data (which property was given), not a defaulted answer for the \
          filer",
+    );
+    // ★★★ FR-200(b) — the Form 8283 Section A property details. DATA, not a defaulted answer: every
+    //     field is a column the form asks the filer to fill, and an absent block is not a silent "no"
+    //     — it is `NoncashGiftRefusal::DetailsNotCollected`, which refuses the year above the filing
+    //     threshold. Nothing here can answer for the filer, which is the whole test this census runs.
+    c.exempt(
+        noncash,
+        Class::DataDerived,
+        "the Form 8283 Section A property details are DATA transcribed off the form's own columns (a) \
+         through (i). Absent is not a defaulted answer: it REFUSES \
+         (`NoncashGiftRefusal::DetailsNotCollected`) once total noncash gifts clear the $500 filing \
+         threshold",
     );
 }
 

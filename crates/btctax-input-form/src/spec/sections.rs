@@ -1552,6 +1552,12 @@ pub(crate) const SCHEDULE_A_CHARITABLE: Section = Section {
             sa.charitable.push(CharitableGift {
                 class: CharitableClass::Cash60,
                 amount: Usd::ZERO,
+                // ★ FR-200(b) — a new row starts as a CASH gift, and Form 8283 says nothing about
+                //   cash, so there is no Section A block to seed. `None` is "never collected", which
+                //   is the honest state for a row the filer has not filled in yet: it refuses above
+                //   the $500 filing threshold rather than defaulting a property description. The
+                //   noncash block is authored through `income import` (v1 has no form fields for it).
+                noncash: None,
             });
             Ok(())
         },

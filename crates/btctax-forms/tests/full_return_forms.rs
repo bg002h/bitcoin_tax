@@ -3504,8 +3504,8 @@ fn the_8283_restriction_boxes_are_written_only_when_the_filer_answered_no() {
     ];
 
     // (1) ANSWERED NO ⇒ all three No boxes carry their dumped on-state "2".
-    let printed =
-        form_8283_printed(std::slice::from_ref(&row), Some(false)).expect("there is a donation");
+    let printed = form_8283_printed(std::slice::from_ref(&row), Some(false), &[])
+        .expect("there is a donation");
     let pdf = btctax_forms::fill_form_8283_full(&printed, &kitchen_sink_header(), 2024)
         .unwrap()
         .expect("a donation ⇒ an 8283");
@@ -3530,7 +3530,7 @@ fn the_8283_restriction_boxes_are_written_only_when_the_filer_answered_no() {
     let mut sec_a = row.clone();
     sec_a.section = Some(Form8283Section::A);
     sec_a.claimed_deduction = Some(dec!(3000));
-    let printed = form_8283_printed(&[sec_a], Some(false)).expect("there is a donation");
+    let printed = form_8283_printed(&[sec_a], Some(false), &[]).expect("there is a donation");
     let pdf = btctax_forms::fill_form_8283_full(&printed, &kitchen_sink_header(), 2024)
         .unwrap()
         .expect("a donation ⇒ an 8283");
@@ -3543,7 +3543,7 @@ fn the_8283_restriction_boxes_are_written_only_when_the_filer_answered_no() {
     }
 
     // (3) UNANSWERED ⇒ six blank widgets. btctax does not testify for the filer.
-    let printed = form_8283_printed(&[row], None).expect("there is a donation");
+    let printed = form_8283_printed(&[row], None, &[]).expect("there is a donation");
     let pdf = btctax_forms::fill_form_8283_full(&printed, &kitchen_sink_header(), 2024)
         .unwrap()
         .expect("a donation ⇒ an 8283");
@@ -3600,8 +3600,12 @@ fn the_8283_section_b_column_i_is_blank_for_an_individual_filer() {
         needs_review: false,
         details: None,
     };
-    let printed = form_8283_printed(&[row(1, true), row(2, false), row(3, false)], Some(false))
-        .expect("there are donations");
+    let printed = form_8283_printed(
+        &[row(1, true), row(2, false), row(3, false)],
+        Some(false),
+        &[],
+    )
+    .expect("there are donations");
     let pdf = btctax_forms::fill_form_8283_full(&printed, &kitchen_sink_header(), 2024)
         .unwrap()
         .expect("a donation ⇒ an 8283");
@@ -3673,7 +3677,7 @@ fn the_full_return_8283_names_the_filer_and_prints_whole_dollars() {
         needs_review: false,
         details: None,
     };
-    let printed = form_8283_printed(&[row], Some(false)).expect("there is a donation");
+    let printed = form_8283_printed(&[row], Some(false), &[]).expect("there is a donation");
     let pdf = btctax_forms::fill_form_8283_full(&printed, &kitchen_sink_header(), 2024)
         .unwrap()
         .expect("a donation ⇒ an 8283");
@@ -3741,7 +3745,7 @@ fn a_full_return_8283_map_without_page2_identity_fails_closed() {
         needs_review: false,
         details: None,
     };
-    let printed = form_8283_printed(&[row], Some(false)).expect("there is a donation");
+    let printed = form_8283_printed(&[row], Some(false), &[]).expect("there is a donation");
 
     let mut map = Form8283Map::for_year(2024).unwrap();
     map.identity_page2 = None; // the exact omission

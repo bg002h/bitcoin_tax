@@ -1013,12 +1013,18 @@ fn crypto_charitable_gifts(state: &LedgerState, year: i32) -> Vec<CharitableGift
         gifts.push(CharitableGift {
             class: CharitableClass::CapGainProp30,
             amount: long_fmv,
+            // ★ FR-200(b) — a LEDGER donation's Form 8283 rows come from `forms::form_8283`, which reads
+            //   the removal legs; this synthesized gift exists only to feed the §170(b) ceiling engine,
+            //   so it carries no Section A property block and none is read for it.
+            noncash: None,
         });
     }
     if short_basis > Usd::ZERO {
         gifts.push(CharitableGift {
             class: CharitableClass::OrdinaryProp50,
             amount: short_basis,
+            // ★ FR-200(b) — see the long-term arm above: ceiling-engine input only.
+            noncash: None,
         });
     }
     gifts
@@ -1233,6 +1239,57 @@ pub fn digital_asset_yes_is_off_ledger(ri: &ReturnInputs, state: &LedgerState, y
     ri.digital_asset_activity == Some(true) && !digital_asset_activity(state, year)
 }
 
+/// ★★★ **FR-200(b) — the Form 8283 Section A rows for the return's NON-crypto noncash gifts, or the
+/// first refusal.**
+///
+/// **ONE definition, two readers**, which is the whole reason it is a named function: `screen_compute_
+/// dependent` reads it to REFUSE, and `packet::assemble_printed_forms` reads it to PRINT. A second copy
+/// of the walk at the printing site is precisely the drift that lets a return pass the screen and then
+/// attach a Form 8283 missing a row — the §170(f)(11) risk the refusal exists to prevent.
+///
+/// ## Which $500 this is
+///
+/// **The FILING threshold**, measured over the TOTAL: every non-crypto noncash gift plus the ledger's
+/// crypto donations. It decides [`NoncashGate`], i.e. how much of the form's completeness may be
+/// demanded — not whether any individual column is required. The per-item $500 (columns (e)(f)(g)) is a
+/// different threshold and is read inside
+/// [`crate::tax::form8283_section_a::section_a_row`]; see that module's two-row table.
+///
+/// ★ Keying it on the total is Fable P6 r1 I6: keying on the user-entered gifts alone let a MIXED year
+/// through — $300 of user noncash (under the threshold) plus $400 of crypto donations from the ledger
+/// ⇒ an 8283 IS required, and the one btctax attached listed only the crypto rows. It needs the LEDGER,
+/// which is why this screens here rather than in `screen_inputs`.
+///
+/// ★ **The measure is PRE-ceiling, deliberately**, and i8283 says so (`i8283--2024.txt:51-53`): *"For
+/// this purpose, “amount of your deduction” means your deduction before applying any income limits that
+/// could"* reduce it. So a year whose §170(b) ceilings push the printed Schedule A line 12 under $500
+/// is still asked for the details — an over-ask in the conservative direction, never an under-report.
+pub fn noncash_section_a(
+    a: &crate::tax::return_inputs::ScheduleAInputs,
+    state: &LedgerState,
+    year: i32,
+) -> Result<Vec<crate::tax::form8283_section_a::SectionARow>, Refusal> {
+    use crate::tax::form8283_section_a::{screen_noncash_gifts, NoncashGate};
+    let user_noncash: Usd = a
+        .charitable
+        .iter()
+        .filter(|g| !g.class.is_cash())
+        .map(|g| g.amount)
+        .sum();
+    let crypto_noncash = crate::forms::year_donation_deduction(state, year);
+    let gate = if user_noncash + crypto_noncash > crate::tax::printed::FORM_8283_THRESHOLD {
+        NoncashGate::FormIsFiled
+    } else {
+        NoncashGate::AllowabilityOnly
+    };
+    screen_noncash_gifts(&a.charitable, gate).map_err(|(i, why)| Refusal {
+        reason: RefuseReason::NonCryptoNoncashGift(why),
+        // The gift's ordinal is 1-based because that is how a filer counts the entries in their own
+        // `income import` file, and the message has to be actionable without a debugger.
+        detail: format!("noncash charitable gift #{}: {}", i + 1, why.detail()),
+    })
+}
+
 /// Screen the **compute-dependent** refuse rows (SPEC §4.10) — those that need the assembled income /
 /// ledger, not just `ReturnInputs`. Returns the FIRST [`Refusal`], or `None`. Complements
 /// [`crate::tax::return_refuse::screen_inputs`] (the input-screenable rows); both must pass before a
@@ -1260,34 +1317,12 @@ pub fn screen_compute_dependent(
         return Some(r);
     }
 
-    // ★ Non-crypto NONCASH gifts, keyed on the TOTAL noncash the return claims (Fable P6 r1 I6). The
-    // $500 trigger printed on Schedule A line 12 — and Form 8283's own "…if you claimed a total deduction
-    // of over $500 for ALL contributed property" — is an AGGREGATE over every noncash gift. Keying the
-    // refusal on the user-entered gifts alone let a MIXED year through: $300 of user noncash (under the
-    // threshold) + $400 of crypto donations from the ledger ⇒ L12 = $700, an 8283 IS required, and the one
-    // btctax attaches lists only the crypto rows — an incomplete required attachment, and the §170(f)(11)
-    // denial risk the guard exists to prevent. This needs the LEDGER, so it screens here, not in
-    // `screen_inputs`.
+    // ★ FR-200(b) — non-crypto NONCASH gifts. The routing, the rows and this refusal are ONE walk
+    //   ([`noncash_section_a`]); what used to be a blanket refusal now files whatever Section A can
+    //   carry and names the condition for whatever it cannot.
     if let Some(a) = &ri.schedule_a {
-        let user_noncash: Usd = a
-            .charitable
-            .iter()
-            .filter(|g| !matches!(g.class, CharitableClass::Cash60 | CharitableClass::Cash30))
-            .map(|g| g.amount)
-            .sum();
-        let crypto_noncash = crate::forms::year_donation_deduction(state, year);
-        if user_noncash > Usd::ZERO
-            && user_noncash + crypto_noncash > crate::tax::printed::FORM_8283_THRESHOLD
-        {
-            return Some(Refusal {
-                reason: RefuseReason::NonCryptoNoncashGift,
-                detail:
-                    "a non-crypto NONCASH charitable gift pushes total noncash gifts over $500, which \
-                     requires a Form 8283 listing ALL of the contributed property — and btctax holds no \
-                     details for property that did not come from your ledger (description, acquisition \
-                     date, appraiser). Complete Form 8283 by hand, or remove the gift."
-                        .to_string(),
-            });
+        if let Err(r) = noncash_section_a(a, state, year) {
+            return Some(r);
         }
     }
 
@@ -4880,6 +4915,7 @@ mod tests {
             charitable: vec![CharitableGift {
                 class: CharitableClass::CapGainProp30, // non-crypto NONCASH — no 8283 rows exist for it
                 amount: dec!(300),                     // under $500 ON ITS OWN…
+                noncash: None,
             }],
             ..Default::default()
         });
@@ -4887,8 +4923,11 @@ mod tests {
         // …but $300 + $400 = $700 of noncash ⇒ Schedule A L12 > $500 ⇒ an 8283 is required.
         assert_eq!(
             screened(&ri, &st),
-            Some(RefuseReason::NonCryptoNoncashGift),
-            "the aggregate crosses the threshold, so the incomplete 8283 must not be attached"
+            Some(RefuseReason::NonCryptoNoncashGift(
+                crate::tax::form8283_section_a::NoncashGiftRefusal::DetailsNotCollected
+            )),
+            "the aggregate crosses the threshold, so the incomplete 8283 must not be attached — and \
+             with NO property details recorded the condition is `DetailsNotCollected`, named"
         );
 
         // Crypto-only donations over the threshold are FINE — btctax has every row for those.
@@ -9508,6 +9547,7 @@ mod tests {
                         vec![crate::tax::return_inputs::CharitableGift {
                             class: crate::tax::return_inputs::CharitableClass::Cash60,
                             amount: charity,
+                            noncash: None,
                         }]
                     } else {
                         vec![]
@@ -9627,6 +9667,7 @@ mod tests {
                         vec![crate::tax::return_inputs::CharitableGift {
                             class: crate::tax::return_inputs::CharitableClass::Cash60,
                             amount: charity,
+                            noncash: None,
                         }]
                     } else {
                         vec![]
@@ -9717,6 +9758,7 @@ mod tests {
                 charitable: vec![crate::tax::return_inputs::CharitableGift {
                     class: crate::tax::return_inputs::CharitableClass::Cash60,
                     amount: dec!(30000), // AMT-ALLOWED, must NOT be added back
+                    noncash: None,
                 }],
                 ..Default::default()
             }),
@@ -9813,6 +9855,7 @@ mod tests {
                             charitable: vec![crate::tax::return_inputs::CharitableGift {
                                 class: crate::tax::return_inputs::CharitableClass::Cash60,
                                 amount: dec!(30000),
+                                noncash: None,
                             }],
                             ..Default::default()
                         });
@@ -10931,6 +10974,7 @@ mod tests {
             charitable: vec![CharitableGift {
                 class: CharitableClass::Cash60,
                 amount: dec!(5000),
+                noncash: None,
             }],
             ..Default::default()
         };
@@ -10954,10 +10998,12 @@ mod tests {
                 CharitableGift {
                     class: CharitableClass::Cash60,
                     amount: dec!(200),
+                    noncash: None,
                 },
                 CharitableGift {
                     class: CharitableClass::Cash60,
                     amount: dec!(200),
+                    noncash: None,
                 },
             ],
             ..Default::default()

@@ -169,6 +169,16 @@ pub fn form_8949_printed(rows: &[crate::forms::Form8949Row]) -> Option<Printed89
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Printed8283Rows {
     rows: Vec<crate::forms::Form8283Row>,
+    /// ★★★ **FR-200(b) — the NON-crypto Section A rows**, one per noncash
+    /// [`crate::tax::return_inputs::CharitableGift`] that
+    /// [`crate::tax::form8283_section_a::section_a_row`] admitted. They do not come from the ledger and
+    /// have no `Form8283Row` shape, because a `Form8283Row` cannot express a BLANK column (e)/(f)/(g) —
+    /// all three of its fields are non-optional, which is exactly §G-11's *"the emitter cannot express
+    /// blank"*. The transcription carries the per-item carve-out in its type instead.
+    ///
+    /// ★ They are **not** merged into `rows`: a ledger leg and a Section A transcription are different
+    /// things, and the CSV writer and the crypto slice must keep seeing only the ledger's.
+    section_a_noncash: Vec<crate::tax::form8283_section_a::SectionARow>,
     /// ★★★ §G-21 — the filer's answer to Form 8283 Section B lines **5a / 5b / 5c**, asked as one
     /// return-level universal. `Some(false)` = "no donation had strings attached" ⇒ all three boxes
     /// print **No**. `None` = never answered ⇒ all three stay BLANK.
@@ -181,9 +191,14 @@ pub struct Printed8283Rows {
 }
 
 impl Printed8283Rows {
-    /// The rows, whole-dollar.
+    /// The LEDGER rows, whole-dollar. Non-crypto noncash gifts are **not** here — see
+    /// [`Self::section_a_noncash`].
     pub fn rows(&self) -> &[crate::forms::Form8283Row] {
         &self.rows
+    }
+    /// ★ FR-200(b) — the transcribed Section A rows for non-crypto noncash gifts, whole-dollar.
+    pub fn section_a_noncash(&self) -> &[crate::tax::form8283_section_a::SectionARow] {
+        &self.section_a_noncash
     }
     /// The filer's own answer to lines 5a/5b/5c — `Some(false)` ⇒ print all three as **No**.
     pub fn restrictions_answer(&self) -> Option<bool> {
@@ -209,8 +224,15 @@ pub fn form_8283_printed(
     // present and unread, and printed the 8283 at full fair market value — this comment asserting an
     // invariant the code no longer held (R6 build review C-1).
     no_donation_restrictions: Option<bool>,
+    // ★★★ FR-200(b) — the transcribed Section A rows for NON-crypto noncash gifts, already routed by
+    // `form8283_section_a::section_a_row` (anything it refused never gets here: the year refused).
+    // Rounded here, at the line, exactly like the ledger's money columns.
+    section_a_noncash: &[crate::tax::form8283_section_a::SectionARow],
 ) -> Option<Printed8283Rows> {
-    if rows.is_empty() {
+    // ★ BOTH halves, because a return can now file an 8283 with no ledger donation at all — that is
+    //   the FR-200(b) case: a $600 bag of clothes and not a satoshi given away. Testing only `rows`
+    //   here would drop the whole form and print a Schedule A line 12 with no attachment.
+    if rows.is_empty() && section_a_noncash.is_empty() {
         return None;
     }
     Some(Printed8283Rows {
@@ -222,6 +244,35 @@ pub fn form_8283_printed(
                 fmv: round_dollar(r.fmv),
                 claimed_deduction: r.claimed_deduction.map(round_dollar),
                 ..r.clone()
+            })
+            .collect(),
+        section_a_noncash: section_a_noncash
+            .iter()
+            .map(|r| {
+                use crate::tax::form8283_section_a::SectionAColumnsEfg;
+                crate::tax::form8283_section_a::SectionARow {
+                    col_h_fair_market_value: round_dollar(r.col_h_fair_market_value),
+                    // ★ The carve-out variant carries NO money, so rounding is scoped to the completed
+                    //   arm — and the `match` is `_`-free, so a third variant would have to decide here
+                    //   rather than silently keeping cents.
+                    cols_efg: match &r.cols_efg {
+                        SectionAColumnsEfg::Completed {
+                            col_e_date_acquired_by_donor,
+                            col_f_how_acquired_by_donor,
+                            col_g_cost_or_adjusted_basis,
+                        } => SectionAColumnsEfg::Completed {
+                            col_e_date_acquired_by_donor: *col_e_date_acquired_by_donor,
+                            col_f_how_acquired_by_donor: col_f_how_acquired_by_donor.clone(),
+                            col_g_cost_or_adjusted_basis: round_dollar(
+                                *col_g_cost_or_adjusted_basis,
+                            ),
+                        },
+                        SectionAColumnsEfg::NotRequiredDeductionAtOrUnderFiveHundred => {
+                            SectionAColumnsEfg::NotRequiredDeductionAtOrUnderFiveHundred
+                        }
+                    },
+                    ..r.clone()
+                }
             })
             .collect(),
     })

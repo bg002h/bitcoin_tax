@@ -303,7 +303,10 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::CharitableCwaUnresolved => {
             vec![skip(btctax_core::tax::questions::SkippableId::CharitableCwaObtained)]
         }
-        R::NonCryptoNoncashGift => vec![Anchor::Section(SectionId::ScheduleACharitable)],
+        // ★ FR-200(b) — the variant now carries WHICH condition refused, and the anchor is the same
+        //   for all of them: the gift is edited in the charitable section. The payload is ignored
+        //   deliberately, not by omission — every condition's fix is a field on the same row.
+        R::NonCryptoNoncashGift(_) => vec![Anchor::Section(SectionId::ScheduleACharitable)],
 
         // ── W-2 sections (§7 lines 515-517). `SingleEmployerExcessSs` is an in-form field, so W2s (I-4). ──
         R::UnsupportedBox12Code(_) => vec![Anchor::Section(SectionId::W2Box12)],
@@ -711,7 +714,9 @@ mod tests {
     #[test]
     fn non_crypto_noncash_gift_anchors_the_charitable_section_only() {
         assert_eq!(
-            attribute(&RefuseReason::NonCryptoNoncashGift),
+            attribute(&RefuseReason::NonCryptoNoncashGift(
+                btctax_core::tax::form8283_section_a::NoncashGiftRefusal::DetailsNotCollected
+            )),
             vec![Section(SectionId::ScheduleACharitable)],
         );
     }
@@ -1099,7 +1104,9 @@ mod tests {
             RefuseReason::SingleEmployerExcessSs,
             RefuseReason::PrivateActivityBondAmt,
             RefuseReason::NonPublicCharityContribution,
-            RefuseReason::NonCryptoNoncashGift,
+            RefuseReason::NonCryptoNoncashGift(
+                btctax_core::tax::form8283_section_a::NoncashGiftRefusal::Vehicle,
+            ),
             RefuseReason::SalesTaxElectionWithoutAmount,
             RefuseReason::SaltSalesTaxWithoutElection,
             RefuseReason::MixedUseMortgageUnanswered,

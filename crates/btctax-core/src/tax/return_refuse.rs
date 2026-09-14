@@ -15,6 +15,7 @@
 //! across the reconcile system) — additive, per SPEC §2. A `Refusal` maps to
 //! `TaxOutcome::NotComputable(..)` at the report boundary (Phase 4).
 use crate::conventions::Usd;
+use crate::tax::form8283_section_a::NoncashGiftRefusal;
 use crate::tax::return_inputs::{
     Box12Entry, CharitableCarryItem, CharitableClass, CharitableGift, Form1099Div, Form1099G,
     Form1099Int, Owner, Payments, QbiInputs, ReturnInputs, Schedule1Inputs, Schedule1aInputs,
@@ -975,13 +976,23 @@ pub enum RefuseReason {
     /// Raised only by `screen_absolute`, which has the ledger AND the computed §63(e) election — the
     /// `DonationRestrictionsUnresolved` pattern exactly.
     CharitableCwaUnresolved,
-    /// A **non-crypto NONCASH** charitable gift whose total exceeds the $500 Form 8283 threshold. Those
-    /// amounts reach Schedule A line 12, but btctax holds no property details for them (no description,
-    /// no acquisition date, no appraiser), so it can produce no 8283 rows — the packet would attach a
-    /// Form 8283 that UNDER-REPORTS its own property list. An incomplete required attachment is a
-    /// §170(f)(11) denial risk, and §3.4's conservative-omission carve-out does not apply: the omission
-    /// is not taxpayer-favorable, it jeopardizes a deduction the filer is claiming (ARCH-P6.3a Q6).
-    NonCryptoNoncashGift,
+    /// A **non-crypto NONCASH** charitable gift btctax still cannot file, and **which condition it is**.
+    ///
+    /// ★★★ **FR-200(b) — this used to be the whole class, and it was a real software defect.** A $600
+    /// bag of used clothing given to a thrift store refused the ENTIRE packet, Form 8949 and Schedule D
+    /// included, because btctax held no property details for a gift that did not come from the ledger
+    /// and so could produce no Form 8283 rows. The reasoning was sound — an incomplete required
+    /// attachment is a §170(f)(11) denial risk, and §3.4's conservative-omission carve-out does not
+    /// apply because the omission is not taxpayer-favorable (ARCH-P6.3a Q6) — but the fix was to hold
+    /// the details, not to loosen the gate. Section A is now transcribed
+    /// ([`crate::tax::form8283_section_a`]) and the gift's columns are collected, so that bag **files**.
+    ///
+    /// What still refuses is what Section A genuinely cannot carry, and the payload names it:
+    /// details never collected, a vehicle, intellectual property, inventory, over $5,000 and not a
+    /// publicly traded security, a clothing item not in good used condition, an empty required column,
+    /// a reduced FMV needing an attached statement. See [`NoncashGiftRefusal`] — the enum is `_`-free
+    /// everywhere it is read, so a new condition cannot ship anonymous.
+    NonCryptoNoncashGift(NoncashGiftRefusal),
     /// A `Owner::Spouse`-tagged item (W-2 / Schedule C) on a non-joint return — no spouse's income is on
     /// a Single/HoH/MFS/QSS return, and trusting the tag would split one person's per-owner limits into
     /// two buckets, evading the §402(g) cap (R2-I2).
@@ -2691,9 +2702,24 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             return Some("Schedule A investment interest");
         }
         for gift in charitable {
-            let CharitableGift { class: _, amount } = gift;
+            let CharitableGift {
+                class: _,
+                amount,
+                noncash,
+            } = gift;
             if neg(*amount) {
                 return Some("Schedule A charitable gift amount");
+            }
+            // ★ FR-200(b) — Form 8283 Section A carries two money COLUMNS, and both are form-box
+            //   magnitudes (≥ 0) like every other input here. A negative column (h) would be compared
+            //   against the claimed deduction by `section_a_row`; a negative column (g) would print a
+            //   negative basis on a substantiation form sworn to under §6065.
+            let Some(p) = noncash else { continue };
+            if neg(p.fair_market_value) {
+                return Some("Form 8283 Section A column (h) fair market value");
+            }
+            if p.cost_or_adjusted_basis.is_some_and(neg) {
+                return Some("Form 8283 Section A column (g) donor's cost or adjusted basis");
             }
         }
     }
@@ -10658,10 +10684,12 @@ mod tests {
                 CharitableGift {
                     class: CharitableClass::Cash60,
                     amount: dec!(50000),
+                    noncash: None,
                 },
                 CharitableGift {
                     class: CharitableClass::Cash30,
                     amount: dec!(30000),
+                    noncash: None,
                 },
             ],
             ..Default::default()
@@ -10682,10 +10710,12 @@ mod tests {
                 CharitableGift {
                     class: CharitableClass::CapGainProp30,
                     amount: dec!(30000),
+                    noncash: None,
                 },
                 CharitableGift {
                     class: CharitableClass::CapGainProp20,
                     amount: dec!(20000),
+                    noncash: None,
                 },
             ],
             ..Default::default()
@@ -11568,6 +11598,7 @@ mod param_free_tier {
                 charitable: vec![CharitableGift {
                     class: CharitableClass::Cash30,
                     amount: dec!(500),
+                    noncash: None,
                 }],
                 ..Default::default()
             });
@@ -12677,6 +12708,7 @@ mod charitable_floor_gate_tests {
         let gifts = [crate::tax::return_inputs::CharitableGift {
             class: crate::tax::return_inputs::CharitableClass::Cash60,
             amount: dec!(10000),
+            noncash: None,
         }];
         let r = crate::tax::charitable::apply_170b(Usd::ZERO, &gifts, &[], 2026);
         assert_eq!(

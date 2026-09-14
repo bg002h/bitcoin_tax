@@ -163,6 +163,9 @@ pub fn replaced_paths(ri: &ReturnInputs) -> BTreeSet<String> {
 /// what is claimed is exactly what this module exists to stamp out.
 #[must_use]
 pub fn maximal_sentinel() -> ReturnInputs {
+    use crate::tax::form8283_section_a::{
+        DateAcquiredByDonor, NoncashGiftProperty, NoncashPropertyKind,
+    };
     use crate::tax::provenance::{
         current_prompt, prompt_hash, AnswerKey, AnswerRecord, AnswerState,
     };
@@ -647,10 +650,45 @@ pub fn maximal_sentinel() -> ReturnInputs {
                 CharitableGift {
                     class: CharitableClass::Cash60,
                     amount: dec!(7),
+                    // ★ A CASH gift files no Form 8283 at all (i8283: *"do not use Form 8283 to
+                    //   report … amounts you gave by check or credit card"*), so `None` here is the
+                    //   only coherent value — and the maximality clause is satisfied by the noncash
+                    //   gift below, which carries every `Option` as `Some`.
+                    noncash: None,
                 },
                 CharitableGift {
                     class: CharitableClass::Cash60,
                     amount: dec!(8),
+                    noncash: None,
+                },
+                // ★★★ FR-200(b) — a NONCASH gift carrying the full Form 8283 Section A block, because
+                //     `maximal_sentinel` means every `Option` is `Some`: a `None` produces no
+                //     raw-vs-scrubbed difference and drops out of the derived axis entirely, which is
+                //     precisely how six structs once went unguarded. Amount is over the per-item $500
+                //     so columns (e)(f)(g) are REQUIRED and therefore present — the maximal state.
+                CharitableGift {
+                    class: CharitableClass::CapGainProp30,
+                    amount: dec!(600),
+                    noncash: Some(NoncashGiftProperty {
+                        kind: NoncashPropertyKind::ClothingOrHouseholdItem {
+                            good_used_condition_or_better: true,
+                        },
+                        // ★ SENTINEL-marked: a donee's name and street address are the §8b
+                        //   `recipient_name`/`recipient_address` identity class, so scrub must
+                        //   replace them and `the_surviving_sentinels_are_exactly_the_deliberately_
+                        //   kept_fields` is what proves it does.
+                        donee_name_and_address: "SENTINEL_donee_name_and_address".into(),
+                        description_and_condition: "SENTINEL_description_and_condition".into(),
+                        date_of_contribution: date!(2024 - 11 - 30),
+                        date_acquired_by_donor: Some(DateAcquiredByDonor::On(date!(
+                            2019 - 05 - 04
+                        ))),
+                        how_acquired_by_donor: Some("SENTINEL_how_acquired_by_donor".into()),
+                        cost_or_adjusted_basis: Some(dec!(2400)),
+                        fair_market_value: dec!(600),
+                        method_used_to_determine_fmv: "SENTINEL_method_used_to_determine_fmv"
+                            .into(),
+                    }),
                 },
             ],
         }),
@@ -1687,7 +1725,77 @@ mod matrix {
                 Fixture(|r| r.foreign_country_names = String::new()),
                 NoSuchState(NO_READER),
             ),
+            // ★★★ FR-200(b) — Form 8283 Section A's four free-text columns. Column (a) is a charity's
+            //     name AND street address, the `recipient_name`/`recipient_address` class; (c), (f) and
+            //     (i) are property descriptions the filer writes in their own words, the
+            //     `schedule_1a.vehicles[].description` class. All four are replaced with trim-emptiness
+            //     preserved, so a scrubbed copy cannot differ from the original in whether
+            //     `form8283_section_a::section_a_row` refuses on an empty required column.
+            //
+            //     ★ `absent` is the `Vec` being empty for all four — the gifts live in
+            //       `schedule_a.charitable[]`, so clearing it removes the path. `malformed` has NO
+            //       reader on any of them: `section_a_row` reads only trim-emptiness, never a validity
+            //       class, which is the §3.2 discriminator and not the type.
+            (
+                "schedule_a.charitable[].noncash.donee_name_and_address",
+                Fixture(clear_charitable),
+                Fixture(|r| {
+                    for p in noncash_blocks(r) {
+                        p.donee_name_and_address = "   ".into();
+                    }
+                }),
+                NoSuchState(NO_READER),
+            ),
+            (
+                "schedule_a.charitable[].noncash.description_and_condition",
+                Fixture(clear_charitable),
+                Fixture(|r| {
+                    for p in noncash_blocks(r) {
+                        p.description_and_condition = "   ".into();
+                    }
+                }),
+                NoSuchState(NO_READER),
+            ),
+            (
+                "schedule_a.charitable[].noncash.how_acquired_by_donor",
+                Fixture(clear_charitable),
+                Fixture(|r| {
+                    for p in noncash_blocks(r) {
+                        p.how_acquired_by_donor = Some("   ".into());
+                    }
+                }),
+                NoSuchState(NO_READER),
+            ),
+            (
+                "schedule_a.charitable[].noncash.method_used_to_determine_fmv",
+                Fixture(clear_charitable),
+                Fixture(|r| {
+                    for p in noncash_blocks(r) {
+                        p.method_used_to_determine_fmv = "   ".into();
+                    }
+                }),
+                NoSuchState(NO_READER),
+            ),
         ]
+    }
+
+    /// The `absent` fixture for every Section A column: no charitable gifts at all, so no
+    /// `noncash` block and no path.
+    fn clear_charitable(r: &mut ReturnInputs) {
+        if let Some(a) = r.schedule_a.as_mut() {
+            a.charitable.clear();
+        }
+    }
+
+    /// Every noncash gift's Section A block on a return — derived from the `Vec`, never indexed, so a
+    /// fixture that grows a second noncash gift is still fully mutated.
+    fn noncash_blocks(
+        r: &mut ReturnInputs,
+    ) -> impl Iterator<Item = &mut crate::tax::form8283_section_a::NoncashGiftProperty> {
+        r.schedule_a
+            .iter_mut()
+            .flat_map(|a| a.charitable.iter_mut())
+            .filter_map(|g| g.noncash.as_mut())
     }
 
     /// §3.3 test 1 — the same `RefuseReason` VARIANT on both sides.

@@ -87,6 +87,7 @@ fn niit_household(gift: Option<Usd>) -> (ReturnInputs, LedgerState) {
         a.charitable.push(CharitableGift {
             class: CharitableClass::Cash60,
             amount,
+            noncash: None,
         });
         // §170(f)(8): a gift of $250 or more needs a contemporaneous written acknowledgment, and P4
         // refuses an itemizing return that has not said whether it holds one. This household holds

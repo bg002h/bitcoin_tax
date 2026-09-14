@@ -753,7 +753,8 @@ $ btctax --vault v.pgp income show --year 2024
     "charitable": [
       {
         "class": "cash60",
-        "amount": "5000"
+        "amount": "5000",
+        "noncash": null
       }
     ]
   },

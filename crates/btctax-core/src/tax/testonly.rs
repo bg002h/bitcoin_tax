@@ -654,6 +654,9 @@ pub fn kitchen_sink_household() -> (ReturnInputs, LedgerState) {
             charitable: vec![CharitableGift {
                 class: CharitableClass::Cash60,
                 amount: dec!(5000),
+                // A CASH gift files no Form 8283 (i8283 Purpose of Form), so it carries no Section A
+                // property block and nothing reads one for it.
+                noncash: None,
             }],
             ..Default::default()
         }),
@@ -904,6 +907,25 @@ pub fn every_money_leaf_household() -> (ReturnInputs, LedgerState) {
     //    know that two of its leaves are on opposite sides of one subtraction; the anti-vacuity
     //    guard in `packet::tests::two_chain_households` is what forces it to be said here.
     ri.hsa.line16_amount_meeting_an_exception = Usd::ONE;
+    // ★★ A SECOND ORDERING CONSTRAINT, stated for the same reason (FR-200(b)). Form 8283 Section A's
+    //    column (h) is *"Fair market value"* and the gift's `amount` is the deduction CLAIMED for the
+    //    same property, so `section_a_row` compares them and refuses in BOTH directions: larger ⇒ the
+    //    FMV was reduced and i8283 wants an attached statement; smaller ⇒ the claim exceeds what the
+    //    property was worth. The derived pass above cannot know two of its leaves are the two sides of
+    //    one comparison, so it is said here — and the amount is brought back under the $5,000 per-item
+    //    Section B line, because over it the gift needs a qualified appraiser btctax does not hold.
+    //    `4_999` is not congruent to the `1_000 + 137 * i` series, so both leaves stay distinct from
+    //    every other money leaf, which is what the household exists to guarantee.
+    for g in ri
+        .schedule_a
+        .iter_mut()
+        .flat_map(|a| a.charitable.iter_mut())
+    {
+        if let Some(p) = g.noncash.as_mut() {
+            g.amount = Usd::from(4_999);
+            p.fair_market_value = g.amount;
+        }
+    }
     answer_all_live_declarations(&mut ri);
     (ri, LedgerState::default())
 }
@@ -1589,6 +1611,8 @@ pub fn build_golden_return(i: &GoldenInputs) -> (ReturnInputs, LedgerState) {
                 vec![CharitableGift {
                     class: CharitableClass::Cash60,
                     amount: golden_usd(i.charitable_cash),
+                    // CASH — no Form 8283, no Section A block.
+                    noncash: None,
                 }]
             } else {
                 Vec::new()
@@ -2462,6 +2486,30 @@ pub const ORACLE_INVISIBLE: &[OracleInvisibleLeaf] = &[
                OpenTaxSolver a deduction btctax caps and OTS does not — a false divergence on a \
                correct return. `charitable_gift_projects` is the one predicate that decides, and \
                `unprojected_nonzero_leaves` reports the dropped gift's amount under this entry",
+    },
+    // ★★★ FR-200(b) — Form 8283 Section A's two money COLUMNS. The corpus row models a household by
+    //     its FIGURES; neither oracle has any input for a substantiation form's per-property columns,
+    //     because neither engine attaches a Form 8283 at all. What DOES reach both is the gift's
+    //     deduction, through `schedule_a.charitable[].amount` — and column (h) is that same figure by
+    //     construction (`section_a_row` refuses when the two differ, in both directions), so the
+    //     projection loses nothing about the amount. Column (g) is the donor's basis, which never enters
+    //     a §170 computation for property deducted at fair market value.
+    //     ★ Filed under the AMOUNT variant, not `RoutingFactNotCarried`: both are `Usd`.
+    OracleInvisibleLeaf {
+        prefix: "schedule_a.charitable[].noncash.fair_market_value",
+        because: InvisibleBecause::NotInTheOracleRow,
+        note: "Form 8283 Section A column (h). Neither engine attaches a Form 8283, so neither has a \
+               variable for it — and it cannot differ from the gift's `amount` (which DOES reach both \
+               oracles, as taxcalc `e19800`/`e20100` and OTS `A11`/`A12`): `section_a_row` refuses \
+               `FmvReducedNeedsAttachedStatement` when (h) is larger and `ClaimExceedsFairMarketValue` \
+               when it is smaller",
+    },
+    OracleInvisibleLeaf {
+        prefix: "schedule_a.charitable[].noncash.cost_or_adjusted_basis",
+        because: InvisibleBecause::NotInTheOracleRow,
+        note: "Form 8283 Section A column (g), the donor's cost or adjusted basis. Neither engine \
+               attaches a Form 8283, and no §170 computation reads a basis for property deducted at \
+               fair market value — it is substantiation the IRS reads, not an operand",
     },
     OracleInvisibleLeaf {
         prefix: "schedule_c.qbi_ubia",

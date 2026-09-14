@@ -1207,6 +1207,24 @@ pub fn assemble_printed_forms(
     );
     let sch_3 = schedule_3_lines(ar);
 
+    // ★★★ FR-200(b) — the NON-crypto noncash gifts' Section A rows, from the SAME walk
+    //     `screen_compute_dependent` refuses on. That screen is the gate and must run first; this is
+    //     the backstop, and it is loud rather than a silent under-reported property list — the
+    //     `route_8949_boxes` pattern directly above.
+    let noncash_a = ri
+        .schedule_a
+        .as_ref()
+        .map(|a| {
+            crate::tax::return_1040::noncash_section_a(a, state, year).unwrap_or_else(|r| {
+                panic!(
+                    "assemble_printed_forms reached an unfileable non-crypto noncash gift — \
+                     screen_compute_dependent is the gate and must run first: {:?} / {}",
+                    r.reason, r.detail
+                )
+            })
+        })
+        .unwrap_or_default();
+
     // Form 8283 files only when the return ITEMIZES and its printed noncash gifts clear the $500
     // threshold printed on Schedule A line 12 — a standard-deduction year with donations files none.
     let f8283 = sch_a
@@ -1218,6 +1236,7 @@ pub fn assemble_printed_forms(
                 // ★ §G-21 — the filer's answer to lines 5a/5b/5c, carried straight through. A
                 // `Some(true)` never gets here: `screen_absolute` refuses the year.
                 ri.donations_had_restrictions,
+                &noncash_a,
             )
         });
 

@@ -18,6 +18,10 @@ pub mod document_census;
 /// (the filer's stored narrative) + the BG-D10 penalty-risk copy. See module doc.
 pub mod form6251;
 pub mod form8275;
+/// FR-200(b) — **Form 8283 Section A**: the line-1 column transcription, what a filer must be asked so
+/// those columns can be filled, and the single decision that turns one non-crypto noncash gift into
+/// either a printable row or a NAMED refusal. See module doc.
+pub mod form8283_section_a;
 pub mod form8889;
 pub mod frozen_guard;
 pub mod interview_state;

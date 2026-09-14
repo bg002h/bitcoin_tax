@@ -435,6 +435,11 @@ fn itemizer_with_an_unresolved_cwa(
         schedule_a: Some(ScheduleAInputs {
             charitable: vec![CharitableGift {
                 class: CharitableClass::Cash60,
+                // ★ FR-200b merge seam: a CASH gift has no Form 8283 property, so `None` here is the
+                //   determinate answer rather than a placeholder to satisfy E0063. This literal
+                //   predates the `noncash` field — it arrived with FR-225, whose author could not
+                //   have seen it, and the compiler caught the seam exactly as intended.
+                noncash: None,
                 amount: rust_decimal_macros::dec!(40000),
             }],
             ..Default::default()

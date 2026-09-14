@@ -1533,11 +1533,56 @@ pub enum CharitableClass {
     OrdinaryProp30,
 }
 
+impl CharitableClass {
+    /// **Is this gift CASH?** — the predicate that decides whether a gift is *noncash*, and therefore
+    /// whether Form 8283 has anything to say about it. i8283 *Purpose of Form*
+    /// (`i8283--2024.txt:40-43`): *"do not use Form 8283 to report out-of-pocket expenses for
+    /// volunteer work or amounts you gave by check or credit card. Treat these items as cash
+    /// contributions."*
+    ///
+    /// ★★★ **ONE definition, an `_`-free `match`, and that is the point** (`CLAUDE.md`: *"derive the
+    /// list, or make the compiler hold it"*). The noncash predicate used to be typed out as
+    /// `!matches!(g.class, Cash60 | Cash30)` at the refusal site; a seventh §170(b) class added later
+    /// would have been silently treated as noncash-or-cash by whichever literal it landed nearest. Now
+    /// adding a variant is a build error here, in the one place that knows the answer.
+    #[must_use]
+    pub fn is_cash(self) -> bool {
+        match self {
+            Self::Cash60 | Self::Cash30 => true,
+            Self::CapGainProp30
+            | Self::CapGainProp20
+            | Self::OrdinaryProp50
+            | Self::OrdinaryProp30 => false,
+        }
+    }
+}
+
 /// A current-year non-crypto charitable gift (SPEC §4.6).
+///
+/// ★★★ **FR-200(b) — one entry is one item OR one group of similar items**, because that is what one
+/// Form 8283 Section A row is (`i8283--2024.txt:314-323`, *Similar Items of Property*). Both $500
+/// thresholds are measured against this unit: the per-item carve-out for columns (e)(f)(g) reads
+/// `amount` directly, and the *filing* threshold reads the SUM over every noncash gift plus the
+/// ledger's crypto donations.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CharitableGift {
     pub class: CharitableClass,
     pub amount: Usd,
+    /// ★★★ **FR-200(b) — the Form 8283 Section A property details**, for a NONCASH gift.
+    ///
+    /// A noncash gift used to refuse the whole packet because btctax held nothing the form's columns
+    /// ask for; this is where those answers live. See
+    /// [`crate::tax::form8283_section_a::NoncashGiftProperty`], whose every field is named for the
+    /// column it fills.
+    ///
+    /// `None` means **never collected**, and it still refuses
+    /// ([`crate::tax::form8283_section_a::NoncashGiftRefusal::DetailsNotCollected`]) above the filing
+    /// threshold — fail-closed, because an incomplete Form 8283 is a §170(f)(11) denial risk. A CASH
+    /// gift ([`CharitableClass::Cash60`] / [`CharitableClass::Cash30`]) leaves it `None` and nothing
+    /// reads it: Form 8283 is not filed for cash (`i8283--2024.txt:40-43` — *"do not use Form 8283 to
+    /// report out-of-pocket expenses for volunteer work or amounts you gave by check or credit card"*).
+    #[serde(default)]
+    pub noncash: Option<crate::tax::form8283_section_a::NoncashGiftProperty>,
 }
 
 /// Whether a carryover-IN value was entered by the user (`income import`) or computed by a prior report's

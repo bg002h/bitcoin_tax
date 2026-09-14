@@ -200,7 +200,11 @@ const CEIL_IDIOMS: &[(&str, &str)] = &[
 /// a line that is never printed anywhere. They are covered all the same, because a worksheet whose
 /// arithmetic nothing checks is the blank-with-no-provenance this whole census exists to prevent —
 /// and its OUTPUT is line 9, which is fully checked.
-const MAX_EXCEPTIONS: usize = 31;
+// ★ 31 → 33 (FR-200b, 2026-09-14). The two new lines are Form 8283 Section A's money figures,
+// `SectionARow.col_h_fair_market_value` and `SectionAColumnsEfg.col_g_cost_or_adjusted_basis`. They
+// fit no production because the form asks the FILER for them — a fair market value and a cost basis
+// are the filer's own records, not a figure btctax computes from anything it holds.
+const MAX_EXCEPTIONS: usize = 33;
 // ★ RAISED 11 → 12 for Form 8995-A **line 38** (§G-28/B1a). The DPAD line is a CONDITIONAL entry with
 //   no "-0-" clause — "DPAD under section 199A(g) allocated from an agricultural or horticultural
 //   cooperative. Don't enter more than line 33 minus line 37" presumes an allocation from a Schedule D
@@ -213,7 +217,13 @@ const MAX_EXCEPTIONS: usize = 31;
 /// ★ **RAISED 12 → 17 on 2026-09-07 (T16)** for the same five Employer Contribution Worksheet rows
 /// [`MAX_EXCEPTIONS`] names: a `(none)` row is by construction unlocatable in a form's text, because
 /// it denies being a line of one. Measured — the run named exactly those five and no other new row.
-const MAX_UNLOCATABLE: usize = 17;
+// ★ 17 → 19 (FR-200b, 2026-09-14). The same two Form 8283 rows, and the reason is structural rather
+// than an oversight: Section A presents its figures as table COLUMNS — `(g)` and `(h)` beneath the
+// lettered rows A–D — not as `Line 1(g)` headings, so `line_region` has no heading to find whatever
+// booklet is bound. ★★ MEASURED: adding the `f8283 => i8283` arm to `booklet_for` in this same commit
+// changes neither this count nor MAX_EXCEPTIONS; the FR-200b report suggested it would retire both,
+// and running `xtask line-coverage` with and without the arm gives identical counts.
+const MAX_UNLOCATABLE: usize = 19;
 // ★ RAISED 8 → 12 on 2026-09-05 (B3/T2) for Schedule 1-A line 22's four money COLUMNS —
 //   `f1040s1a:22a(ii)`, `22a(iii)`, `22b(ii)`, `22b(iii)`. Measured, not estimated: the run named
 //   exactly those four and no other new row. Line 22 is a heading whose entry rows print a bare `a`
@@ -627,6 +637,17 @@ fn booklet_for(form: &str) -> Option<&'static str> {
         "f8995a" => "i8995a",
         // ★ T16 — Form 8889's booklet follows the identically-numbered convention too.
         "f8889" => "i8889",
+        // ★ FR-200b — Form 8283's booklet, by the identically-numbered convention this match already
+        //   states. `i8283--2024`/`--2025` are archived, so the mapping is correct and belongs here.
+        //
+        // ★★ BUT IT DOES NOT RETIRE ANY RATCHET, and the claim that it would was MEASURED AND
+        //    REFUTED rather than assumed. The FR-200b report suggested this arm as a one-line
+        //    alternative to raising MAX_EXCEPTIONS and MAX_UNLOCATABLE. Running `xtask line-coverage`
+        //    with the arm and without it gives the IDENTICAL counts — 33 exceptions, 19 unlocatable —
+        //    because Section A's money figures are table COLUMNS `(g)`/`(h)` under row 1, not `Line`
+        //    headings, so `line_region` cannot locate them whatever booklet is bound. The ratchets
+        //    were raised on their own merits, with reasons, in the same commit as this.
+        "f8283" => "i8283",
         _ => return None,
     })
 }
@@ -1566,7 +1587,12 @@ fn unquoted_bundled_years(
 /// per-year transcription for each form, which is the revision-aware refactor FR-135 names as its
 /// full fix. It closes the part that was silent: bundling `f6251/2026` now raises this number and
 /// REDS, where before it moved nothing and 377 money lines went on being checked against TY2024.
-const MAX_UNQUOTED_BUNDLED_YEARS: usize = 12;
+// ★ 12 → 13 (FR-200b, 2026-09-14). `f8283--2025` joins the twelve already here: it is bundled, its
+// coverage rows quote the 2024 booklet, and `Coverage::quoting("…")` is a literal in each collector
+// so bundling a year does not move it. ★ Same class as f1040--2025, f1040sa--2025 and the rest — a
+// single-year quote standing for a bundled pair — and it is tracked by this ratchet rather than fixed
+// here precisely so the residue stays countable instead of dissolving into the table.
+const MAX_UNQUOTED_BUNDLED_YEARS: usize = 13;
 
 pub fn check(cov: &line_coverage::Coverage) -> Result<String, String> {
     let root = repo_root();
