@@ -3747,6 +3747,40 @@ pub fn screen_absolute(
     // ★ It was the LAST check in this function, so nothing below it was shadowed and nothing above it
     //   moved.
 
+    // ★★★ §170(b)(1)(I) — THE 0.5% CHARITABLE FLOOR (TY2026 ON), AND IT RUNS BEFORE THE §68 GATE.
+    //
+    // TY2026 Schedule A line 13 stops adding gifts up and reads *"Enter the amount from line 6 of the
+    // Charitable Contribution Limitation Worksheet"*, which lives in `i1040gi--2026` / `i1040sca--2026`
+    // — neither archived. `charitable::apply_170b` applies the §170(b) CEILINGS and no floor, so
+    // filing its total would deduct more than §170 allows and UNDERSTATE the tax ($1,366 on the
+    // owner's own profile, `design/agent-reports/REPORT-wave5-schedule-a.md` §3). The decision, the
+    // archived statute and the §170(p) naming correction live in `return_refuse::charitable_floor_gate`
+    // and `tables::CharitableFloorGate`; only the two computed quantities are local.
+    //
+    // ★★ **BEFORE §68, AND THE FORM'S OWN DATA FLOW DECIDES THAT.** Both gates are no-software-exit
+    //    refusals, so neither can be cleared inside btctax and the only question is which one a filer
+    //    working by hand meets first. The worksheet this gate names produces Schedule A line 13, which
+    //    feeds line 15, which feeds the itemized total that §68 then limits — so the charitable
+    //    worksheet is strictly UPSTREAM of the Itemized Deductions Worksheet. Reporting them in the
+    //    order the filer must work them is the useful order, and
+    //    `the_charitable_floor_is_reported_before_the_section_68_limitation` pins it.
+    //
+    // ★ It bites where §68 cannot: §68's screen fires only above the $384,350 its Schedule A prints,
+    //   while §170(b)(1)(I) floors contributions at EVERY income. A TY2026 itemizer under that
+    //   threshold claiming charity was previously assembled and silently over-deducted.
+    if let Some(r) = crate::tax::return_refuse::charitable_floor_gate(
+        year,
+        ar.deduction_is_itemized,
+        ar.schedule_a.as_ref().map_or(Usd::ZERO, |a| {
+            a.charitable_cash_11 + a.charitable_noncash_12
+        }),
+        ar.schedule_a
+            .as_ref()
+            .map_or(Usd::ZERO, |a| a.charitable_carryover_13),
+    ) {
+        return Some(r);
+    }
+
     // ★★★ §68 — THE OVERALL LIMITATION ON ITEMIZED DEDUCTIONS (TY2026 on), AND IT IS LAST ON PURPOSE.
     //
     // TY2026 Schedule A puts a gate in front of its itemized total and sends a *Yes* to an *Itemized
@@ -9125,6 +9159,221 @@ mod tests {
             ty2026, None,
             "an itemizer under the threshold meets the form's No branch — \"Your deductions are not \
              limited\" — and must file unchanged"
+        );
+    }
+    /// ★★★ **END TO END: a TY2026 itemizing return claiming charity is REFUSED BY NAME through
+    /// `screen_absolute`, and the identical return files clean on TY2024 — including BELOW the §68
+    /// threshold, which is the gap this gate exists to close.**
+    ///
+    /// ★★ **WHY THE RETURN IS ASSEMBLED AT 2024 AND SCREENED AT 2026 — the same measurement the §68
+    ///    row above makes, and it is not a fudge.** `assemble_absolute` PANICS on TY2026:
+    ///    [`form6251_line1_rule`] has arms for 2024 and 2025 only, and `BundledFullReturnTables::load`
+    ///    inserts 2024 alone. That is asserted below rather than claimed, so the **dormancy is a
+    ///    measurement**: no TY2026 return can be assembled today, which is exactly why this guard is
+    ///    placed AHEAD of the TY2026 port. It becomes a live understatement the moment the port
+    ///    transcribes Form 6251 Part I and bundles the package.
+    ///
+    ///    `screen_absolute` takes `year` as its own parameter, so screening at 2026 is the real code
+    ///    path with the real year, and the gate reads only that year plus two quantities — the
+    ///    current-year charitable allowed and the carryover allowed — which mean the same thing in
+    ///    every year.
+    ///
+    /// ★ The fixture's AGI is the owner's own ($273,200, `REPORT-wave5-schedule-a.md` §3) and is UNDER
+    ///   §68's printed threshold, asserted below. So the refusal that arrives is this gate's, on a
+    ///   return §68 has nothing to say about — which is the whole finding.
+    #[test]
+    fn a_ty2026_itemizer_claiming_charity_is_refused_and_ty2024_files_unchanged() {
+        // The dormancy, measured: TY2026 has no Form 6251 Part I, so it cannot be assembled.
+        assert!(
+            form6251_line1_rule(2026, dec!(0), dec!(0), None).is_none(),
+            "if TY2026 gained a Form 6251 line-1 rule, assemble it directly here instead of \
+             screening a 2024-assembled return at 2026"
+        );
+        assert!(form6251_line1_rule(2024, dec!(0), dec!(0), None).is_some());
+
+        let wages = dec!(273200); // the owner's own AGI (REPORT-wave5-schedule-a.md §3)
+        let section_68_threshold = match crate::tax::tables::section_68_status(2026) {
+            crate::tax::tables::Section68Status::Gated(g) => g.threshold,
+            other => panic!("TY2026 must be §68-gated, got {other:?}"),
+        };
+        assert!(
+            wages < section_68_threshold,
+            "the fixture AGI {wages} must be UNDER §68's printed threshold {section_68_threshold}, \
+             or this test is not measuring the population this gate adds"
+        );
+
+        let screen = |charity: Usd| {
+            let p = ty2024_params();
+            let table = real_2024_table();
+            let ri = ReturnInputs {
+                filing_status: FilingStatus::Mfj,
+                header: crate::tax::testonly::not_a_dependent(),
+                w2s: vec![w2(Owner::Taxpayer, wages, dec!(168600), wages)],
+                form_1098: vec![crate::tax::testonly::form_1098_with_interest(dec!(40000))],
+                // §170(f)(8) is a DIFFERENT gate and would otherwise fire first on a $250+ gift;
+                // satisfying it is what makes this row measure the charitable FLOOR.
+                charitable_cwa_obtained: Some(true),
+                schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
+                    salt_real_estate: dec!(10000),
+                    mortgage_all_used_to_buy_build_improve: Some(true),
+                    charitable: if charity > Usd::ZERO {
+                        vec![crate::tax::return_inputs::CharitableGift {
+                            class: crate::tax::return_inputs::CharitableClass::Cash60,
+                            amount: charity,
+                        }]
+                    } else {
+                        vec![]
+                    },
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
+            assert!(
+                ar.deduction_is_itemized,
+                "the fixture must itemize or it exercises the wrong branch"
+            );
+            assert_eq!(ar.agi, wages, "fixture: AGI is the wages");
+            let at = |year: i32| {
+                screen_absolute(
+                    &ri,
+                    &ar,
+                    &p,
+                    &empty_ledger(),
+                    year,
+                    crate::forms::InformationReturnRegime::NONE,
+                )
+            };
+            (
+                ar.schedule_a.as_ref().map(|s| s.charitable_14),
+                at(2024),
+                at(2026),
+            )
+        };
+
+        // (1) WITH charity — TY2026 refuses BY NAME, quoting the form; TY2024 is untouched.
+        let (claimed, ty2024, ty2026) = screen(dec!(10000));
+        assert_eq!(
+            claimed,
+            Some(dec!(10000)),
+            "fixture: the §170(b) ceilings must allow the whole $10,000 at this AGI, or the amount \
+             the refusal prints is not the amount under discussion"
+        );
+        assert_eq!(
+            ty2024, None,
+            "TY2024 Schedule A sums its gifts directly — the year that actually files must not change"
+        );
+        let r = ty2026.expect("a TY2026 itemizer claiming charity must be refused");
+        assert_eq!(
+            r.reason,
+            RefuseReason::CharitableFloorNotComputed { year: 2026 }
+        );
+        assert!(
+            r.detail.contains(
+                "Enter the amount from line 6 of the Charitable Contribution Limitation \
+                           Worksheet"
+            ),
+            "it must quote Schedule A line 13's own caption: {}",
+            r.detail
+        );
+        for needle in [
+            "§170(b)(1)(I)",
+            "$10,000",
+            "by hand",
+            "paid preparer",
+            "UNDERSTATE",
+        ] {
+            assert!(
+                r.detail.contains(needle),
+                "must say {needle:?}: {}",
+                r.detail
+            );
+        }
+        assert!(
+            !r.detail.contains("§170(p)"),
+            "§170(p) is the deduction for filers who do NOT itemize: {}",
+            r.detail
+        );
+
+        // (2) WITHOUT charity — the same fixture files clean on BOTH years. This is the row that
+        //     proves the gate is keyed on the charitable claim and not on the year alone.
+        let (claimed, ty2024, ty2026) = screen(Usd::ZERO);
+        assert_eq!(claimed, Some(Usd::ZERO));
+        assert_eq!(ty2024, None);
+        assert_eq!(
+            ty2026, None,
+            "a TY2026 itemizer claiming NO charity has nothing for §170(b)(1)(I) to floor and must \
+             file unchanged — and §68 is silent too at this AGI"
+        );
+    }
+
+    /// ★★★ **THE CHARITABLE FLOOR IS REPORTED BEFORE THE §68 LIMITATION, and the form's own data flow
+    /// is why.** Both are no-software-exit refusals, so the only question is which one a filer working
+    /// by hand meets first. The *Charitable Contribution Limitation Worksheet* produces Schedule A line
+    /// 13 → line 15 → the itemized total that the *Itemized Deductions Worksheet* then limits, so the
+    /// charitable worksheet is strictly UPSTREAM. This pins the order against a reordering edit.
+    ///
+    /// ★ A return over the §68 threshold WITH charity meets both conditions; it must report the
+    ///   charitable one. Without charity, the same income reports §68 — so this is a contrast, not a
+    ///   claim about one return.
+    #[test]
+    fn the_charitable_floor_is_reported_before_the_section_68_limitation() {
+        let threshold = match crate::tax::tables::section_68_status(2026) {
+            crate::tax::tables::Section68Status::Gated(g) => g.threshold,
+            other => panic!("TY2026 must be §68-gated, got {other:?}"),
+        };
+        let screen = |charity: Usd| {
+            let p = ty2024_params();
+            let table = real_2024_table();
+            let wages = threshold + dec!(50000);
+            let ri = ReturnInputs {
+                filing_status: FilingStatus::Mfj,
+                header: crate::tax::testonly::not_a_dependent(),
+                w2s: vec![w2(Owner::Taxpayer, wages, dec!(168600), wages)],
+                form_1098: vec![crate::tax::testonly::form_1098_with_interest(dec!(40000))],
+                charitable_cwa_obtained: Some(true),
+                schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
+                    salt_real_estate: dec!(10000),
+                    mortgage_all_used_to_buy_build_improve: Some(true),
+                    charitable: if charity > Usd::ZERO {
+                        vec![crate::tax::return_inputs::CharitableGift {
+                            class: crate::tax::return_inputs::CharitableClass::Cash60,
+                            amount: charity,
+                        }]
+                    } else {
+                        vec![]
+                    },
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
+            assert!(ar.deduction_is_itemized);
+            assert!(
+                ar.agi - ar.qbi_deduction - ar.schedule_1a_additional > threshold,
+                "the fixture must be OVER §68's threshold so both conditions are met at once"
+            );
+            screen_absolute(
+                &ri,
+                &ar,
+                &p,
+                &empty_ledger(),
+                2026,
+                crate::forms::InformationReturnRegime::NONE,
+            )
+            .expect("a TY2026 itemizer over the §68 threshold must be refused")
+            .reason
+        };
+        assert_eq!(
+            screen(dec!(10000)),
+            RefuseReason::CharitableFloorNotComputed { year: 2026 },
+            "with charity, BOTH gates apply and the UPSTREAM worksheet must be the one reported"
+        );
+        assert_eq!(
+            screen(Usd::ZERO),
+            RefuseReason::ItemizedDeductionLimitationNotComputed { year: 2026 },
+            "without charity only §68 applies — so the row above really is an ordering measurement \
+             and not merely the only refusal available"
         );
     }
 

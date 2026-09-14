@@ -1944,6 +1944,39 @@ pub enum RefuseReason {
         /// The tax year whose Schedule A carries the gate.
         year: i32,
     },
+    /// ★★★ **§170(b)(1)(I) — the 0.5% CHARITABLE FLOOR is not computed, so a return claiming a
+    /// charitable deduction on a floored year REFUSES rather than deduct an unfloored total.**
+    ///
+    /// TY2026 Schedule A line 13 stops summing gifts and instead reads *"Enter the amount from line 6
+    /// of the Charitable Contribution Limitation Worksheet"*. That worksheet applies the floor added
+    /// by Pub. L. 119-21 §70425(a)(1), and **neither `i1040gi--2026` nor `i1040sca--2026` is
+    /// archived**. [`crate::tax::charitable::apply_170b`] applies the §170(b) *ceilings* and no floor
+    /// at all, so filing its total would deduct more than §170 allows and UNDERSTATE the tax — the
+    /// direction this project treats as worse. Measured on the owner's own profile:
+    /// `design/agent-reports/REPORT-wave5-schedule-a.md` §3, MFJ, AGI $273,200, $10,000 of charity,
+    /// **$1,366** over-claimed.
+    ///
+    /// ★★★ **IT IS §170(b)(1)(I), NOT §170(p)** — see [`crate::tax::tables::CharitableFloorGate`] for
+    /// the archived statute and the table separating the two. §170(p) is the deduction for individuals
+    /// who do **not** elect to itemize, which is the opposite population.
+    ///
+    /// ★★ **IT BITES WHERE `ItemizedDeductionLimitationNotComputed` DOES NOT.** §68's screen fires
+    /// only above the threshold its Schedule A prints ($384,350 on TY2026); §170(b)(1)(I) floors
+    /// contributions at **every** income. A TY2026 itemizer *below* that threshold claiming charity
+    /// was therefore unguarded, and this variant is why that gap is closed.
+    ///
+    /// ★ One variant covers both refusing arms of [`crate::tax::tables::CharitableFloorStatus`] — a
+    ///   floored year whose Schedule A is archived (so the refusal quotes the form) and one whose is
+    ///   not (so it quotes the statute alone). The cause is the same and the `detail` distinguishes
+    ///   them; the arms are held exhaustively by the `match` in [`charitable_floor_gate`].
+    ///
+    /// ★ **No btctax command clears this**, and the message says so. In particular it does **not**
+    ///   offer "remove the gift": FR-225 established that there is no CLI verb for it, and printing a
+    ///   remedy a filer cannot take is the defect that parcel existed to fix.
+    CharitableFloorNotComputed {
+        /// The tax year whose Schedule A routes the charitable line through the worksheet.
+        year: i32,
+    },
 }
 
 /// A fail-closed refusal: the reason + a human-readable detail (surfaced to the user).
@@ -2869,6 +2902,145 @@ pub fn section_68_gate(
                  Worksheet for tax year {year} by hand and file on paper, or take this return to a \
                  paid preparer. A return that takes the standard deduction is unaffected and computes \
                  normally, because §68 reduces only itemized deductions."
+            ),
+        ),
+    }
+}
+
+/// ★★★ **§170(b)(1)(I) — THE 0.5% CHARITABLE FLOOR GATE. REFUSE WHAT CANNOT BE COMPUTED.**
+///
+/// TY2026 Schedule A stops summing gifts into its charitable subtotal and sends line 13 to a
+/// *Charitable Contribution Limitation Worksheet* that **does not exist yet** (`i1040gi--2026` /
+/// `i1040sca--2026` are not archived). [`crate::tax::charitable::apply_170b`] applies the §170(b)
+/// *ceilings* and **no floor**, so btctax refuses rather than deduct its unfloored total. See
+/// [`crate::tax::tables::CharitableFloorGate`] for the archived statute, the §170(p) naming
+/// correction, and the three statutory branches that make `0.005 × agi` the wrong answer rather
+/// than merely an unverified one.
+///
+/// ★★★ **WHY THIS GATE EXISTS BESIDE [`section_68_gate`], AND WHY ONE DOES NOT COVER THE OTHER.**
+/// §68's Schedule A gate carries a printed **threshold** and fires only above it — $384,350 on
+/// TY2026. §170(b)(1)(I) prints no screen at all: it floors *"any charitable contribution otherwise
+/// allowable"* at **every** income. So the population this gate adds is precisely **a TY2026 itemizer
+/// BELOW the §68 threshold who claims charity**, and that return was previously assembled, filed and
+/// silently over-deducted. `a_ty2026_itemizer_below_the_section_68_threshold_still_refuses` is the
+/// assertion; it is the reason this function is not a special case of the other.
+///
+/// ★★ **`deduction_is_itemized`, not "has gifts".** §170(b)(1)(I) floors contributions *"otherwise
+/// allowable ... as a deduction under this section"*, and btctax only deducts charity on Schedule A:
+/// a return whose standard deduction won deducts none, so there is nothing of its to floor and it
+/// files normally. (btctax models no §170(p) nonitemizer deduction at all — a grep for one returns
+/// nothing — so that population is not merely exempt here, it is unimplemented, which is the
+/// conservative direction: tax overstated, never under.)
+///
+/// ★★ **WHY A CARRYOVER-ONLY RETURN ALSO REFUSES, AND THIS IS THE FAIL-CLOSED CHOICE.** §70425(a)(2)
+/// adds §170(d)(1)(C), which governs carryforward *of amounts the floor disallowed*; whether a
+/// carryover arising in a **pre-floor** year is itself re-floored when deducted in a floored year is
+/// a question only the worksheet answers. Guessing *"carryover is exempt"* is the understating
+/// direction, so any nonzero charitable deduction refuses and the detail names which component is
+/// present. Guessing the other way would merely over-refuse, which is recoverable.
+///
+/// ★ **The trigger is the CLAIMED deduction, not the gifts.** A return whose §170(b) ceilings allowed
+/// `0` claims nothing on the charitable lines, so there is nothing for the floor to reduce and nothing
+/// to over-deduct; it files. `a_year_whose_ceilings_allowed_nothing_is_not_refused` holds that, so the
+/// gate cannot drift into refusing every return that merely mentions a gift.
+#[must_use]
+pub fn charitable_floor_gate(
+    year: i32,
+    deduction_is_itemized: bool,
+    charitable_current_year: Usd,
+    charitable_carryover: Usd,
+) -> Option<Refusal> {
+    use crate::tax::advisories::fmt_usd;
+    use crate::tax::tables::{CharitableFloorStatus, CHARITABLE_FLOOR_STATUTE};
+
+    // btctax deducts charity only on Schedule A. A standard-deduction return claims none.
+    if !deduction_is_itemized {
+        return None;
+    }
+    let claimed = charitable_current_year + charitable_carryover;
+    if claimed <= Usd::ZERO {
+        // Nothing is claimed on the charitable lines, so the floor has nothing to reduce.
+        return None;
+    }
+    // Which component is present, so the detail can say so without a second computation.
+    let composition = match (
+        charitable_current_year > Usd::ZERO,
+        charitable_carryover > Usd::ZERO,
+    ) {
+        (true, true) => "this year's gifts plus a carryover from a prior year",
+        (true, false) => "this year's gifts",
+        // ★ The carryover-only case, and the statute is genuinely unsettled here — see the fn doc.
+        (false, true) => {
+            "a carryover from a prior year, with no gifts this year — and whether a carryover that \
+             arose BEFORE the floor existed is itself floored when you deduct it is one of the \
+             questions the worksheet settles and btctax cannot"
+        }
+        (false, false) => unreachable!("claimed > 0 requires one component to be > 0"),
+    };
+    // The three branches a naive `0.5% × AGI` gets wrong, named so the message is an argument rather
+    // than an assertion. Identical wording in both arms because the reason is identical.
+    let why = "the statute floors at 0.5 percent of your CONTRIBUTION BASE, which \u{a7}170(b)(1)(H) \
+               defines as adjusted gross income computed without regard to any net operating loss \
+               carryback \u{2014} not at 0.5 percent of your adjusted gross income; it applies the \
+               floor across the \u{a7}170(b)(1) contribution classes in a six-step order that decides \
+               which class carries forward; and \u{a7}170(d)(1)(C) then re-writes the carryover rule \
+               for amounts the floor disallowed, which changes a FUTURE year's return too. Those are \
+               three questions a worksheet nobody has read would have to settle, so btctax will not \
+               guess them";
+    let exits = "work the Charitable Contribution Limitation Worksheet in that year's Schedule A \
+                 instructions by hand, enter its line 6 on Schedule A, and file on paper \u{2014} or \
+                 take this return to a paid preparer. No btctax command clears this and no further \
+                 answer will change it";
+    // ★ Stated in BOTH arms: this is not the §68 gate and clearing that one does not clear this.
+    let not_section_68 = "This is separate from the \u{a7}68 limitation on itemized deductions: \
+                          \u{a7}170(b)(1)(I) applies at EVERY income, so a return under \u{a7}68's \
+                          printed threshold still meets this. A return that takes the standard \
+                          deduction is unaffected, because btctax deducts charitable contributions \
+                          only on Schedule A.";
+
+    // ★ No `_` arm: a fourth `CharitableFloorStatus` is a compile error here, which is the point.
+    match crate::tax::tables::charitable_floor_status(year) {
+        // §170(b)(1)(I) did not exist; this year's Schedule A sums its gifts directly. Correct return.
+        CharitableFloorStatus::NotApplicable => None,
+        CharitableFloorStatus::Gated(g) => refuse(
+            RefuseReason::CharitableFloorNotComputed { year },
+            format!(
+                "this return is for tax year {year}, it ITEMIZES, and it claims {claimed} of \
+                 charitable contributions ({composition}). Tax year {year} Schedule A line {wsl} no \
+                 longer adds your gifts up. It reads, in the form's own words: \"{caption}\" \u{2014} \
+                 with the carryover moved to line 14 and \"Add lines 13 and 14\" as the subtotal on \
+                 line {sub}. That worksheet applies \u{a7}170(b)(1)(I), added by Pub. L. 119-21 \
+                 \u{a7}70425(a)(1) for tax years beginning after December 31, 2025: \"{statute}\" \
+                 btctax does not have that worksheet. The tax year {year} Form 1040 and Schedule A \
+                 instructions have not been published, so there is no document to transcribe it from, \
+                 and btctax will not invent one \u{2014} {why}. Printing your unfloored charitable \
+                 total on line {wsl} instead would deduct more than \u{a7}170 allows and UNDERSTATE \
+                 your tax. What to do: {exits}. {not_section_68}",
+                claimed = fmt_usd(claimed),
+                wsl = g.worksheet_line,
+                sub = g.subtotal_line,
+                caption = g.caption,
+                statute = CHARITABLE_FLOOR_STATUTE,
+            ),
+        ),
+        // ★★★ THE FAIL-CLOSED ARM. The floor applies and no Schedule A for this year has been
+        //     transcribed, so the refusal quotes the statute alone. It still refuses: §170(b)(1)(I)
+        //     has no sunset, and a year that fell through to "unfloored" would deduct more than §170
+        //     allows, silently, in the understating direction.
+        CharitableFloorStatus::ScheduleANotTranscribed => refuse(
+            RefuseReason::CharitableFloorNotComputed { year },
+            format!(
+                "this return is for tax year {year}, it ITEMIZES, and it claims {claimed} of \
+                 charitable contributions ({composition}). \u{a7}170(b)(1)(I) floors an itemizer's \
+                 charitable deduction for every tax year beginning after December 31, 2025 (Pub. L. \
+                 119-21 \u{a7}70425), with no expiry: \"{statute}\" No Schedule A for tax year \
+                 {year} has been transcribed into btctax, so it does not even know which line that \
+                 year's form routes through the Charitable Contribution Limitation Worksheet \u{2014} \
+                 and it does not have the worksheet either, because {why}. btctax will not deduct an \
+                 unfloored charitable total on a year \u{a7}170(b)(1)(I) floors; that would deduct \
+                 more than allowed and UNDERSTATE your tax. What to do: {exits}. {not_section_68}",
+                claimed = fmt_usd(claimed),
+                statute = CHARITABLE_FLOOR_STATUTE,
             ),
         ),
     }
@@ -12252,5 +12424,333 @@ mod section_68_gate_tests {
             "and at least one status starts HIGHER, which is why reading the threshold per-status \
              would screen that filer OUT of a limitation the form screens them IN to (FR-186)"
         );
+    }
+}
+/// ★★★ B1 for the §170(b)(1)(I) charitable-floor gate. The answer to *"which test reds when this
+/// gate is removed?"* is `a_ty2026_itemizer_claiming_charity_is_refused_at_every_income` — and the one
+/// that reds when the gate is narrowed to §68's population is
+/// `a_ty2026_itemizer_below_the_section_68_threshold_still_refuses`, which is the gap this parcel
+/// exists to close.
+#[cfg(test)]
+mod charitable_floor_gate_tests {
+    use super::*;
+    use crate::tax::tables::{
+        charitable_floor_status, charitable_floor_tests::routes_through_the_limitation_worksheet,
+        section_68_status, section_68_tests::archived_schedule_a, CharitableFloorStatus,
+        Section68Status,
+    };
+
+    fn reason(r: Option<Refusal>) -> Option<RefuseReason> {
+        r.map(|x| x.reason)
+    }
+    const FLOORED: RefuseReason = RefuseReason::CharitableFloorNotComputed { year: 2026 };
+
+    /// ★★★ **THE CORE ROW: a TY2026 itemizer claiming charity refuses, and it refuses at EVERY income
+    /// — which is the whole point of this gate existing beside the §68 one.**
+    ///
+    /// ★★ FR-230: the incomes here are LITERALS, not arithmetic on the §68 threshold, so they cannot
+    ///    move with a mutation of the constant they are chosen relative to. The relationship each one
+    ///    has to that threshold is asserted separately, against the threshold read from its own home —
+    ///    so if the form's figure ever changes, the *assertion* reds rather than the literals silently
+    ///    re-meaning something else.
+    #[test]
+    fn a_ty2026_itemizer_claiming_charity_is_refused_at_every_income() {
+        // $1 of charity is enough: the floor applies to "any charitable contribution otherwise
+        // allowable", with no de minimis.
+        for gifts in [dec!(1), dec!(10000), dec!(1000000)] {
+            assert_eq!(
+                reason(charitable_floor_gate(2026, true, gifts, Usd::ZERO)),
+                Some(FLOORED),
+                "a TY2026 itemizer claiming {gifts} of charity must refuse"
+            );
+        }
+        // And nothing about the gate's signature can see income at all — there is no AGI parameter,
+        // which is what makes "at every income" structural rather than a property of these rows.
+        assert_eq!(
+            reason(charitable_floor_gate(2026, true, dec!(10000), Usd::ZERO)),
+            reason(charitable_floor_gate(2026, true, dec!(10000), Usd::ZERO)),
+        );
+    }
+
+    /// ★★★ **THE GAP THIS PARCEL EXISTS TO CLOSE: §68's screen fires only above the threshold its
+    /// Schedule A prints; the charitable floor fires below it too.**
+    ///
+    /// Both gates are exercised on the SAME two returns, so the claim is a measured contrast rather
+    /// than an assertion about one of them. Under the threshold, §68 is silent and this gate refuses —
+    /// that return was previously assembled and filed with an unfloored charitable total.
+    #[test]
+    fn a_ty2026_itemizer_below_the_section_68_threshold_still_refuses() {
+        let t = match section_68_status(2026) {
+            Section68Status::Gated(g) => g.threshold,
+            other => panic!("TY2026 must be §68-gated, got {other:?}"),
+        };
+        // ★ FR-230 — a literal, then its relationship to the form's figure asserted separately.
+        let modest = dec!(273200); // the owner's own AGI (REPORT-wave5-schedule-a.md §3)
+        assert!(
+            modest < t,
+            "the fixture AGI {modest} must be UNDER §68's printed threshold {t}, or this test is \
+             not measuring the gap it exists to measure"
+        );
+
+        // §68, on that return: SILENT. Nothing about it is refused today.
+        assert_eq!(
+            reason(section_68_gate(2026, true, modest, Usd::ZERO, Usd::ZERO)),
+            None,
+            "§68 must be silent under its threshold — that is exactly why this gate is needed"
+        );
+        // The charitable floor, on the same return: REFUSES.
+        assert_eq!(
+            reason(charitable_floor_gate(2026, true, dec!(10000), Usd::ZERO)),
+            Some(FLOORED),
+            "§170(b)(1)(I) applies at every income, so a modest-AGI itemizer with charity refuses"
+        );
+        // And above the threshold BOTH have something to say, so this gate is not merely §68 again.
+        let large = dec!(1000000);
+        assert!(large > t);
+        assert!(section_68_gate(2026, true, large, Usd::ZERO, Usd::ZERO).is_some());
+        assert!(charitable_floor_gate(2026, true, dec!(10000), Usd::ZERO).is_some());
+    }
+
+    /// A TY2026 itemizer claiming NO charity files unchanged — the floor has nothing to floor.
+    #[test]
+    fn a_ty2026_itemizer_with_no_charity_files_unchanged() {
+        assert_eq!(
+            reason(charitable_floor_gate(2026, true, Usd::ZERO, Usd::ZERO)),
+            None,
+            "a return claiming no charitable deduction must not be refused by a charitable gate"
+        );
+    }
+
+    /// ★★ **A return whose §170(b) CEILINGS allowed nothing files too.** The trigger is the CLAIMED
+    /// deduction, not the gifts: if `apply_170b` allowed `0` (a zero-AGI year, an over-ceiling year),
+    /// nothing sits on the charitable lines, so there is nothing for the floor to reduce and nothing
+    /// over-deducted. Without this row the gate could drift into refusing every return that merely
+    /// mentions a gift, which over-refuses a correct return.
+    #[test]
+    fn a_year_whose_ceilings_allowed_nothing_is_not_refused() {
+        // The real engine, on a zero-AGI year: every ceiling is zero, so nothing is allowed.
+        let gifts = [crate::tax::return_inputs::CharitableGift {
+            class: crate::tax::return_inputs::CharitableClass::Cash60,
+            amount: dec!(10000),
+        }];
+        let r = crate::tax::charitable::apply_170b(Usd::ZERO, &gifts, &[], 2026);
+        assert_eq!(
+            r.allowed,
+            Usd::ZERO,
+            "fixture: the ceilings must allow nothing at zero AGI"
+        );
+        assert_eq!(
+            reason(charitable_floor_gate(
+                2026,
+                true,
+                r.allowed_cash + r.allowed_noncash,
+                r.allowed_carryover
+            )),
+            None,
+            "a return that claims no charitable deduction must file, even though a gift exists"
+        );
+    }
+
+    /// ★★ **A CARRYOVER-ONLY return also refuses, and the detail says why it is unsettled.**
+    /// §70425(a)(2)'s new §170(d)(1)(C) governs carryforward of amounts the floor disallowed; whether
+    /// a carryover that arose in a PRE-floor year is itself floored on deduction is a question only
+    /// the worksheet answers. Guessing "exempt" understates tax, so it refuses.
+    #[test]
+    fn a_carryover_only_ty2026_itemizer_refuses_and_the_detail_names_the_unsettled_question() {
+        let r = charitable_floor_gate(2026, true, Usd::ZERO, dec!(4000))
+            .expect("a carryover-only TY2026 itemizer must refuse");
+        assert_eq!(r.reason, FLOORED);
+        for needle in [
+            "a carryover from a prior year, with no gifts this year",
+            "BEFORE the floor existed",
+            "$4,000",
+        ] {
+            assert!(
+                r.detail.contains(needle),
+                "the carryover-only detail must say {needle:?}: {}",
+                r.detail
+            );
+        }
+        // And the composition really does distinguish the three cases, so the branch is not dead.
+        let both = charitable_floor_gate(2026, true, dec!(1000), dec!(4000))
+            .expect("gifts plus carryover must refuse")
+            .detail;
+        assert!(both.contains("this year's gifts plus a carryover from a prior year"));
+        assert!(
+            both.contains("$5,000"),
+            "the CLAIMED total is 1000 + 4000: {both}"
+        );
+        let current_only = charitable_floor_gate(2026, true, dec!(1000), Usd::ZERO)
+            .expect("gifts alone must refuse")
+            .detail;
+        assert!(
+            current_only.contains("claims $1,000 of charitable contributions (this year's gifts)")
+        );
+        assert!(
+            !current_only.contains("carryover from a prior year"),
+            "a return with no carryover must not be told about one: {current_only}"
+        );
+    }
+
+    /// A standard-deduction return is untouched at any charitable amount — btctax deducts charity only
+    /// on Schedule A, so such a return claims none and §170(b)(1)(I) has nothing of its to floor.
+    #[test]
+    fn a_standard_deduction_return_is_untouched_at_any_charitable_amount() {
+        for gifts in [dec!(1), dec!(10000), dec!(1000000)] {
+            assert_eq!(
+                reason(charitable_floor_gate(2026, false, gifts, dec!(9999))),
+                None,
+                "a standard-deduction return must never be refused by this gate ({gifts})"
+            );
+        }
+    }
+
+    /// ★★★ **PRE-2026 IS UNTOUCHED, and the ungated year set is READ OFF THE EXTRACTS** rather than
+    /// typed here — the FR-197 / FR-230 shape. `[2017, 2024, CHARITABLE_FLOOR_FIRST_YEAR - 1]` would
+    /// move with a mutation of the constant and stop testing the boundary year at all, which is
+    /// precisely how the §68 parcel's first draft let a plant survive.
+    #[test]
+    fn a_pre_2026_itemizer_with_charity_files_unchanged() {
+        let mut ungated: Vec<i32> = Vec::new();
+        for (year, text) in &archived_schedule_a() {
+            if !routes_through_the_limitation_worksheet(text) {
+                ungated.push(*year);
+            }
+        }
+        assert!(
+            ungated.contains(&2024) && ungated.len() >= 2,
+            "TY2024 must be among the unfloored archived revisions and there must be at least two \
+             of them, or a shrinking set would quietly stop measuring: {ungated:?}"
+        );
+        for year in ungated {
+            assert_eq!(
+                reason(charitable_floor_gate(year, true, dec!(10000), dec!(4000))),
+                None,
+                "TY{year} Schedule A sums its gifts directly, so the year that actually files must \
+                 not change"
+            );
+            assert_eq!(
+                charitable_floor_status(year),
+                CharitableFloorStatus::NotApplicable
+            );
+        }
+        // ★ The statutory boundary itself, against the statute's own date.
+        assert_eq!(
+            reason(charitable_floor_gate(2025, true, dec!(10000), Usd::ZERO)),
+            None,
+            "Pub. L. 119-21 §70425(c): the floor applies to years beginning AFTER December 31, 2025"
+        );
+    }
+
+    /// ★★★ **THE FAIL-CLOSED ARM: a floored year with no archived Schedule A refuses every itemizer
+    /// claiming charity.** §170(b)(1)(I) has no sunset, so TY2027 is floored whether or not this tree
+    /// has the form. A year falling through to "unfloored" would deduct more than §170 allows.
+    #[test]
+    fn a_floored_year_with_no_transcribed_schedule_a_refuses_every_itemizer_with_charity() {
+        for year in [2027, 2030, 2099] {
+            assert_eq!(
+                charitable_floor_status(year),
+                CharitableFloorStatus::ScheduleANotTranscribed
+            );
+            assert_eq!(
+                reason(charitable_floor_gate(year, true, dec!(1), Usd::ZERO)),
+                Some(RefuseReason::CharitableFloorNotComputed { year }),
+                "TY{year} is floored by statute and has no archived form — it must refuse"
+            );
+            // Still only for itemizers claiming something.
+            assert_eq!(
+                reason(charitable_floor_gate(year, false, dec!(1), Usd::ZERO)),
+                None
+            );
+            assert_eq!(
+                reason(charitable_floor_gate(year, true, Usd::ZERO, Usd::ZERO)),
+                None
+            );
+        }
+    }
+
+    /// ★★★ **THE REFUSAL QUOTES THE FORM AND THE STATUTE, AND NAMES ONLY REMEDIES THAT EXIST.**
+    ///
+    /// ★★ The negative half is the FR-225 lesson: a printed remedy the filer cannot take is worse than
+    ///    telling them nothing. In particular **"remove the gift" is forbidden** — there is no CLI verb
+    ///    for it — and so is any `btctax` command, because none computes this worksheet.
+    #[test]
+    fn the_refusal_quotes_the_form_and_the_statute_and_names_only_remedies_that_exist() {
+        let d = charitable_floor_gate(2026, true, dec!(10000), Usd::ZERO)
+            .expect("a TY2026 itemizer with charity must refuse")
+            .detail;
+        let CharitableFloorStatus::Gated(g) = charitable_floor_status(2026) else {
+            panic!("TY2026 must be gated")
+        };
+        // The form's own caption and the statute's own sentence, each from the ONE place that holds it.
+        assert!(
+            d.contains(g.caption),
+            "the refusal must quote Schedule A line 13's own caption; it reads: {d}"
+        );
+        assert!(
+            d.contains(crate::tax::tables::CHARITABLE_FLOOR_STATUTE),
+            "the refusal must quote §170(b)(1)(I) verbatim; it reads: {d}"
+        );
+        for needle in [
+            "§170(b)(1)(I)",                                // the RIGHT statute, named
+            "Charitable Contribution Limitation Worksheet", // where the answer actually lives
+            "§70425",                                       // the Public Law section that added it
+            "CONTRIBUTION BASE",                            // why 0.5% × AGI is not the answer
+            "six-step order",                               // the second reason
+            "§170(d)(1)(C)", // the third — it moves a FUTURE year too
+            "by hand",       // the first real exit
+            "paid preparer", // the second real exit
+            "file on paper",
+            "UNDERSTATE", // which direction the silent alternative errs in
+            "line 13",    // the line that now reads the worksheet
+            "line 15",    // the subtotal behind it
+            "$10,000",    // what the return claims, so the filer can check it
+            "No btctax command clears this",
+            "applies at EVERY income", // and that clearing §68 does not clear this
+        ] {
+            assert!(d.contains(needle), "the refusal must say {needle:?}: {d}");
+        }
+        // ★★★ THE NEGATIVE HALF — FR-225. No remedy that does not exist.
+        for forbidden in [
+            "remove the gift",
+            "delete the gift",
+            "remove the donation",
+            "btctax income",
+            "Run `",
+            "--re-answer",
+            "answer the question",
+            // ★ And NEVER the wrong statute: §170(p) is the NONITEMIZER deduction, so citing it
+            //   would send an itemizing filer to the one provision that does not apply to them.
+            "§170(p)",
+        ] {
+            assert!(
+                !d.contains(forbidden),
+                "the refusal must not say {forbidden:?} — {}: {d}",
+                if forbidden == "§170(p)" {
+                    "that is the deduction for filers who do NOT itemize"
+                } else {
+                    "no such remedy exists and naming one sends the filer round a loop"
+                }
+            );
+        }
+        // The same statute and the same two exits on the fail-closed arm, which a filer can reach too.
+        let d2 = charitable_floor_gate(2027, true, dec!(10000), Usd::ZERO)
+            .expect("an untranscribed floored year must refuse")
+            .detail;
+        for needle in [
+            "§170(b)(1)(I)",
+            "§70425",
+            "Charitable Contribution Limitation Worksheet",
+            "by hand",
+            "paid preparer",
+            "CONTRIBUTION BASE",
+            "UNDERSTATE",
+        ] {
+            assert!(
+                d2.contains(needle),
+                "the fail-closed arm must say {needle:?}: {d2}"
+            );
+        }
+        assert!(!d2.contains("§170(p)"));
     }
 }

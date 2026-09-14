@@ -1118,24 +1118,86 @@ fn the_source_scanner_actually_reads_files() {
     );
 }
 
-/// ★★ **WALL PIN: nothing in the workspace applies a charitable floor or a §68-style itemized
-/// limitation.** Measured over the source rather than asserted from a doc — and it REDS the day either
-/// lands, which is when every figure above must be re-run.
+/// ★★ **WALL PIN: nothing in the workspace APPLIES a charitable floor or a §68-style itemized
+/// limitation, so every figure in `design/agent-reports/REPORT-wave5-schedule-a.md` still stands.**
+///
+/// ★★★ **REFORMULATED (FR-234 parcel) — AND THE REFORMULATION IS THE POINT.** This test used to scan
+/// `crates/` for the strings `170(p)`, `charitable_floor`, `itemized_limit`, `sec_68` and `pease`. Two
+/// of those needles have since landed as **refusals** rather than computations:
+/// `tax::return_refuse::section_68_gate` and `tax::return_refuse::charitable_floor_gate` REFUSE a
+/// TY2026 itemizing return instead of filing an unlimited or unfloored total. A string scan cannot
+/// tell those two cases apart, and the difference is the whole question this pin exists to answer:
+///
+/// | what landed | does it move a figure above? |
+/// |---|---|
+/// | a gate that **refuses** because the worksheet is unarchived | **no** — the figures describe what `apply_170b` computes, and it is unchanged |
+/// | a gate that **computes** a floor or a limitation | **yes** — every figure above must be re-run |
+///
+/// So the pin now measures the **behaviour** the figures depend on, directly: [`apply_170b`] must still
+/// return the *unfloored* §170(b)-limited total on the owner's own profile. That reds the day a floor
+/// is actually applied — which is the event the old pin was reaching for — and does not red merely
+/// because a refusal names the statute. A string scan is kept for the three needles that would still
+/// indicate a *computation* nobody has audited.
+///
+/// ★★ **AND §170(p) WAS THE WRONG STATUTE ALL ALONG.** Reading Pub. L. 119-21 out of
+/// `legal/text/statute-irc/PLAW-119publ21_OBBBA.txt`: the 0.5% floor on an **itemizer's**
+/// contributions is **§170(b)(1)(I)**, added by §70425(a)(1) at line 9400. **§170(p)** is the partial
+/// deduction for individuals who do **not** elect to itemize — $1,000/$2,000, raised by §70424(a) at
+/// line 9391 — i.e. the opposite population. §70425(a)(3) touches §170(p) only to *coordinate* with
+/// it. The doc comment on
+/// [`btctax_core::tax::tables::CharitableFloorGate`](../../btctax-core/src/tax/tables.rs) carries the
+/// table; this test keeps the old spelling only in the needle list below, so a *computation* named
+/// after the misnomer would still be caught.
 #[test]
-fn no_charitable_floor_and_no_itemized_limitation_exists_anywhere() {
-    let hits = scan_crates(&[
-        "170(p)",
-        "charitable_floor",
-        "itemized_limit",
-        "sec_68",
-        "pease",
-    ]);
+fn no_charitable_floor_and_no_itemized_limitation_is_applied_anywhere() {
+    // ── (1) THE BEHAVIOURAL HALF: the charitable total is still UNFLOORED. ──────────────────────
+    //    The owner's own profile, from REPORT-wave5-schedule-a.md §3: MFJ, AGI $273,200, $10,000 of
+    //    cash charity. Under §170(b) alone the whole $10,000 is allowed (0.5%·AGI = $1,366 would be
+    //    disallowed if §170(b)(1)(I) were applied, leaving $8,634).
+    let gifts = [CharitableGift {
+        class: CharitableClass::Cash60,
+        amount: dec!(10000),
+    }];
+    let r = apply_170b(dec!(273200), &gifts, &[], 2026);
+    assert_eq!(
+        r.allowed,
+        dec!(10000),
+        "`apply_170b` now allows something other than the unfloored §170(b) total — if the \
+         Charitable Contribution Limitation Worksheet has been transcribed, RE-RUN every figure in \
+         `design/agent-reports/REPORT-wave5-schedule-a.md` and delete \
+         `return_refuse::charitable_floor_gate` in the same change (FR-233)"
+    );
+    // ★ And the floor's size on this profile, so the pin states what it is holding back. This is an
+    //   assertion about the REPORT's arithmetic, not a computation btctax performs anywhere.
+    assert_eq!(dec!(0.005) * dec!(273200), dec!(1366));
+    assert_eq!(r.allowed - dec!(1366), dec!(8634));
+
+    // ── (2) THE STRING HALF, for the needles that would still mean a COMPUTATION. ───────────────
+    //    `charitable_floor` and `170(p)` are deliberately NOT here any more: the first is now the
+    //    refusal's own module path, and the second is a statute this tree cites only to correct.
+    let hits = scan_crates(&["itemized_limit", "pease", "charitable_floor_rate"]);
     assert!(
         hits.is_empty(),
-        "a floor or §68-style limitation now exists — re-run every figure in \
+        "a §68-style limitation or a floor RATE is now computed — re-run every figure in \
          `design/agent-reports/REPORT-wave5-schedule-a.md`:\n{}",
         hits.join("\n")
     );
+
+    // ── (3) AND THE REFUSALS EXIST, so this pin cannot pass by both gates having been DELETED. ──
+    //    ★★ This is the half the old string pin could not express at all. Without it, ripping out
+    //       both guards would leave every assertion above green while the understatement went live.
+    assert!(
+        !scan_crates(&["fn charitable_floor_gate", "fn section_68_gate"]).is_empty(),
+        "both guards must still exist in the source"
+    );
+    for needle in ["fn charitable_floor_gate", "fn section_68_gate"] {
+        assert!(
+            !scan_crates(&[needle]).is_empty(),
+            "{needle} has been DELETED — an unfloored/unlimited TY2026 itemized return would now \
+             be filed, which is the understatement `REPORT-wave5-schedule-a.md` measured at $1,366 \
+             on the owner's own profile (FR-233: the gate goes only when the worksheet arrives)"
+        );
+    }
 }
 
 /// ★★ **The label census for Schedule A is quoted at ONE year, and it is 2024.** So the census cannot

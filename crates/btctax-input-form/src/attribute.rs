@@ -574,6 +574,16 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::ItemizedDeductionLimitationNotComputed { .. } => vec![Anchor::NotInForm {
             note: "§68 limits the itemized deductions on this year's return and the Itemized Deductions Worksheet that figures the limit has not been published — work that worksheet by hand and file on paper, or take the return to a paid preparer",
         }],
+        // ★★★ §170(b)(1)(I) — `NotInForm` for the SAME reason as §68 above, and it will NEVER become
+        //     a field either. The *Charitable Contribution Limitation Worksheet* the TY2026 Schedule A
+        //     line 13 reads has not been published, so there is no question to ask the filer and no
+        //     figure to compute. ★ The note deliberately does NOT say "remove the gift": FR-225
+        //     established that has no CLI verb, and a cursor placed on a control that cannot clear the
+        //     refusal is the §G-28/B1b falsehood. The two exits are outside the software entirely,
+        //     the same two the refusal's own detail names.
+        R::CharitableFloorNotComputed { .. } => vec![Anchor::NotInForm {
+            note: "§170(b)(1)(I) floors the charitable deduction on this year's return by 0.5% of your contribution base and the Charitable Contribution Limitation Worksheet that figures the floor has not been published — work that worksheet by hand and file on paper, or take the return to a paid preparer",
+        }],
     }
 }
 
@@ -932,12 +942,19 @@ mod tests {
         //    compute. A `Field` anchor here would be the §G-28/B1b falsehood — a cursor placed on a
         //    control that cannot clear the refusal. The two exits are outside the software entirely.
         const ADDED_BY_SECTION_68: usize = 1;
+        // ★★ §170(b)(1)(I) added the sixth — `CharitableFloorNotComputed`. Same shape as §68 directly
+        //    above: the *Charitable Contribution Limitation Worksheet* that TY2026 Schedule A line 13
+        //    reads has not been published, so there is no field that could clear it and a `Field`
+        //    anchor would be the §G-28/B1b falsehood. Its two exits are a worksheet worked by hand and
+        //    a paid preparer, and neither is in the form.
+        const ADDED_BY_CHARITABLE_FLOOR: usize = 1;
         let expect = BEFORE_T5 - 5
             + ADDED_BY_I4
             + ADDED_BY_FR103
             + ADDED_BY_B3_C1
             + ADDED_BY_FR196
-            + ADDED_BY_SECTION_68;
+            + ADDED_BY_SECTION_68
+            + ADDED_BY_CHARITABLE_FLOOR;
         let now = src[start..end].matches("Anchor::NotInForm {").count();
         assert_eq!(
             now, expect,
@@ -946,8 +963,9 @@ mod tests {
              Form1099BNeedsForm8949), the I-4 fold added one (QualifiedTipsCautionNotMet), FR-103 \
              added one (Schedule1aNotOnThisYearsReturn), B3's C-1 added one \
              (ReturnInputsYearNotStated), FR-196 added one (the §111(a) worksheet's three \
-             TOML-only refusals, sharing one arm) and §68 added one \
-             (ItemizedDeductionLimitationNotComputed); the source now has {now} `NotInForm` \
+             TOML-only refusals, sharing one arm), §68 added one \
+             (ItemizedDeductionLimitationNotComputed) and §170(b)(1)(I) added one \
+             (CharitableFloorNotComputed); the source now has {now} `NotInForm` \
              anchors, not {expect}"
         );
 

@@ -596,7 +596,7 @@ pub(crate) mod section_68_tests {
     use super::*;
 
     /// The workspace root, from this crate's manifest directory.
-    fn repo_root() -> std::path::PathBuf {
+    pub(crate) fn repo_root() -> std::path::PathBuf {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .and_then(|p| p.parent())
@@ -607,7 +607,7 @@ pub(crate) mod section_68_tests {
     /// Collapse runs of whitespace so a sentence the PDF text layer wrapped mid-line — and
     /// interleaved with the stub column's *"Total / Itemized / Deductions"* caption — can be
     /// compared with the sentence as a human reads it off the page.
-    fn squash(s: &str) -> String {
+    pub(crate) fn squash(s: &str) -> String {
         s.split_whitespace().collect::<Vec<_>>().join(" ")
     }
 
@@ -735,7 +735,7 @@ pub(crate) mod section_68_tests {
     /// ★ Every word is load-bearing: the walk stops at the FIRST word that does not continue the run,
     ///   so a changed line number, a changed threshold or a paraphrased verb all report their own
     ///   position. `a_paraphrase_and_a_wrong_threshold_are_both_rejected` is the kill.
-    fn appears_as_printed(text: &str, sentence: &str) -> Result<usize, String> {
+    pub(crate) fn appears_as_printed(text: &str, sentence: &str) -> Result<usize, String> {
         let words: Vec<&str> = sentence.split_whitespace().collect();
         let mut cursor = 0usize;
         let mut from = 0usize;
@@ -873,6 +873,474 @@ pub(crate) mod section_68_tests {
                 "{what} must be REJECTED — the checker accepted {plant:?}"
             );
         }
+    }
+}
+/// ★★★ **THE 0.5% CHARITABLE FLOOR — AND ITS STATUTE IS §170(b)(1)(I), *NOT* §170(p).**
+///
+/// TY2026 Schedule A stops adding gifts straight into its charitable subtotal. Where TY2024 and
+/// TY2025 print *"13 Carryover from prior year"* and *"14 Add lines 11 through 13"*, the TY2026
+/// revision prints, on **line 13**:
+///
+/// > *"Enter the amount from line 6 of the Charitable Contribution Limitation Worksheet"*
+/// > (`design/forms/extract/f1040sa--2026-DRAFT.txt:116-117`), with the carryover moved to line 14
+/// > and *"15 Add lines 13 and 14"* as the subtotal.
+///
+/// ★★★ **THE NAMING CORRECTION, BECAUSE FIVE PLACES IN THIS REPO GET IT BACKWARDS.**
+/// `design/direction/filing-readiness-lens-itemized.md:182`,
+/// `design/direction/filing-readiness-lens-charity.md:9`,
+/// `design/agent-reports/RECON-drive-to-filable-return.md:383`,
+/// `design/agent-reports/REPORT-wave5-schedule-a.md:87` and
+/// `crates/btctax-cli/tests/ty2026_schedule_a.rs` all call this floor **"§170(p)"**. It is not.
+/// Reading Pub. L. 119-21 out of `legal/text/statute-irc/PLAW-119publ21_OBBBA.txt`:
+///
+/// | provision | what it actually is | archived at |
+/// |---|---|---|
+/// | **§170(b)(1)(I)** | **the 0.5% floor on an ITEMIZER's contributions** — added by OBBBA §70425(a)(1) | `PLAW-119publ21_OBBBA.txt:9400-9420` |
+/// | §170(p) | the partial deduction for individuals who **do NOT elect to itemize** — $1,000/$2,000, raised by OBBBA §70424(a) | `PLAW-119publ21_OBBBA.txt:9391-9399` |
+///
+/// §70425(a)(3) touches §170(p) only to *coordinate* with it, *"by inserting `, (b)(1)(I),` after
+/// `subsections (b)(1)(G)(ii)`"* — which is how a floor whose real home is `(b)(1)(I)` came to be
+/// filed under `(p)` in this repo's prose. **The distinction is not pedantry: §170(p) is the
+/// provision that applies precisely when the filer does NOT itemize, i.e. exactly the returns this
+/// gate must leave alone.** A refusal citing it would hand a filer the wrong statute to look up.
+///
+/// ★★★ **THIS TYPE CARRIES THE FORM'S ROUTING AND NOTHING ELSE. btctax DOES NOT COMPUTE THE FLOOR,
+/// DELIBERATELY — AND THERE IS NO RATE CONSTANT IN THIS FILE ON PURPOSE.** The floor's answer lives
+/// in the **Charitable Contribution Limitation Worksheet** in the TY2026 Form 1040 / Schedule A
+/// instructions, and **neither `i1040gi--2026` nor `i1040sca--2026` is archived** — the documents do
+/// not exist yet. The statute *is* archived and the *rate* is therefore known, which makes the
+/// temptation concrete and worth naming: `0.5% × AGI` is **not** the floor, for three reasons the
+/// statute itself states.
+///
+/// 1. **The base is the *contribution base*, not AGI.** §170(b)(1)(I) floors at *"0.5 percent of the
+///    taxpayer's contribution base"*, and §170(b)(1)(H) defines that as AGI computed **without regard
+///    to any net operating loss carryback**. `REPORT-wave5-schedule-a.md`'s `0.005 × agi` is an
+///    approximation that is exact only when no NOL carryback exists.
+/// 2. **The floor is applied in a SIX-STEP ORDER ACROSS the §170(b)(1) subparagraphs** —
+///    §170(b)(1)(I) clauses (i)-(vi) consume, in order, the contributions governed by subparagraphs
+///    (D), (C), (B), (E), (A) and then (G). Which class absorbs the floor changes which class carries
+///    forward, so the floor is **not** a subtraction from the total that
+///    [`crate::tax::charitable::apply_170b`] already computes; it interleaves with the ceilings that
+///    function applies.
+/// 3. **It re-writes the carryforward rule.** §70425(a)(2) adds §170(d)(1)(C), under which an amount
+///    disallowed *by the floor* increases the carryover — and only *"from years in which the
+///    limitation is exceeded"*. So a floor applied naively would also emit a wrong
+///    `CharitableResult::carryover_out`, i.e. a wrong figure on a **future** year's return.
+///
+/// Each of the three is a branch `CLAUDE.md` demands a written equivalence proof and a KAT for, and
+/// none can be written from a worksheet nobody has read. So the branch **refuses**
+/// ([`crate::tax::return_refuse::charitable_floor_gate`]), and this file stores **no** `0.005`: the
+/// rate appears only inside [`CHARITABLE_FLOOR_STATUTE`], as the quotation it is. That absence is the
+/// same structural move as [`Section68Gate`] having no `FilingStatus` field — there is nothing here
+/// for a future editor to multiply by, and `no_floor_rate_constant_exists_in_this_crate` holds it.
+///
+/// ★★ **FR-233 — THE SEQUENCING TRAP, AT THE SITE.** This refusal must **not** be removed until the
+/// floor is actually computed. Removing it re-exposes an understatement whose size on the owner's own
+/// profile is already measured (`REPORT-wave5-schedule-a.md` §3: MFJ, AGI $273,200, $10,000 of
+/// charity, **$1,366** of deduction §170(b)(1)(I) does not allow). The order is: archive
+/// `i1040sca--2026`, transcribe the *Charitable Contribution Limitation Worksheet* line by line, pin
+/// it against both oracles, **then** delete this gate — never the reverse.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CharitableFloorGate {
+    /// The tax year whose Schedule A this routing was transcribed from.
+    pub year: i32,
+    /// The Schedule A line that reads the worksheet's result (`"13"` on TY2026).
+    pub worksheet_line: &'static str,
+    /// The Schedule A line the charitable subtotal sits on behind this routing (`"15"` on TY2026;
+    /// it was line 14 through TY2025, when it summed the gifts directly).
+    pub subtotal_line: &'static str,
+    /// The worksheet the line sends the filer to, in the form's own words.
+    pub worksheet: &'static str,
+    /// The line's caption, **verbatim from the text layer**, whitespace-squashed. One copy: the
+    /// refusal quotes this and `the_floor_caption_and_worksheet_are_the_forms_own` asserts it against
+    /// the extract, so the sentence btctax shows a filer cannot drift from the sentence on the paper.
+    pub caption: &'static str,
+}
+
+/// ★★★ **§170(b)(1)(I) ITSELF, verbatim from the archived statute** —
+/// `legal/text/statute-irc/PLAW-119publ21_OBBBA.txt:9405-9412`, as added by Pub. L. 119-21
+/// §70425(a)(1).
+///
+/// ★ The typographic apostrophe in *taxpayer’s* is the statute's own (U+2019); the archive is a GPO
+///   text render, and normalising it would make the citation test compare against something the
+///   primary source does not say. `the_floor_statute_is_the_statutes_own_and_a_paraphrase_is_rejected`
+///   matches this against the archive with the page-break artifact (*"139 STAT. 236 … Applicability."*)
+///   that interrupts it mid-sentence accounted for, rather than by shortening the quotation until it
+///   fits.
+pub const CHARITABLE_FLOOR_STATUTE: &str =
+    "Any charitable contribution otherwise allowable (without regard to this subparagraph) as a \
+     deduction under this section shall be allowed only to the extent that the aggregate of such \
+     contributions exceeds 0.5 percent of the taxpayer’s contribution base for the taxable year.";
+
+/// ★★★ **THE FIRST TAX YEAR THE CHARITABLE FLOOR APPLIES TO — the ONE place that boundary is
+/// written.**
+///
+/// Pub. L. 119-21 (OBBBA) §70425(c): *"The amendments made by this section shall apply to taxable
+/// years beginning after December 31, 2025."* (`PLAW-119publ21_OBBBA.txt:9432-9434`, marginal note
+/// *26 USC 170 note*.) Statute, with **no** sunset — writing it as a closed range would invent an
+/// expiry Congress did not enact.
+///
+/// ★★ It is the identical date as [`SECTION_68_FIRST_YEAR`] (§70111(c)) and the two are **independent
+/// constants on purpose**: they are different sections of OBBBA, and a future Congress moving one
+/// must not silently move the other.
+///
+/// ★ That TY2024 and TY2025 Schedule A print no worksheet routing is asserted from the extracts by
+/// `the_floored_years_are_read_off_the_archived_schedule_a_extracts`, not assumed here.
+pub const CHARITABLE_FLOOR_FIRST_YEAR: i32 = 2026;
+
+/// What §170(b)(1)(I) does to `year`'s return. Returned by [`charitable_floor_status`].
+///
+/// ★★★ **Three arms, and BOTH of the last two refuse.** Matched with no `_` at the one call site
+/// ([`crate::tax::return_refuse::charitable_floor_gate`]), so a fourth arm is a compile error there.
+///
+/// ★★ **Unlike [`Section68Status`], there is no "computable" arm and there will not be one while the
+/// worksheet is unarchived.** §68's gate at least prints a threshold that decides whether the
+/// limitation binds; the charitable floor prints no screen at all, because it applies to **every**
+/// itemizer who claims a contribution, at **every** income. That is the whole reason this gate exists
+/// beside the §68 one: §68's screen fires only above $384,350, so a TY2026 itemizer *below* that with
+/// charity was unguarded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CharitableFloorStatus {
+    /// `year < CHARITABLE_FLOOR_FIRST_YEAR` — §170(b)(1)(I) did not exist and this year's Schedule A
+    /// sums its gifts directly into the subtotal. The unfloored total is the **correct** return.
+    NotApplicable,
+    /// The floor applies and this year's Schedule A has been transcribed, so the refusal can quote
+    /// the form's own line, caption and worksheet name.
+    Gated(CharitableFloorGate),
+    /// ★★★ **The floor applies and NO Schedule A revision for this year has been transcribed — so
+    /// the refusal quotes the statute alone. It still refuses.**
+    ///
+    /// This arm is why [`charitable_floor_status`] is not "a list of years that print the routing".
+    /// §170(b)(1)(I) has no sunset, so every year after 2025 is floored whether or not this tree has
+    /// the form; a year that fell through to *"unfloored"* would deduct more than §170 allows,
+    /// silently, in the understating direction. Adding TY2027 support is archiving `f1040sa--2027`
+    /// **and** the worksheet, and forgetting to is a refusal rather than a wrong figure (`CLAUDE.md`,
+    /// *"Derive the list, or make the compiler hold it"* — here the unknown year is held by the
+    /// `match`'s own fall-through, not by a list).
+    ScheduleANotTranscribed,
+}
+
+/// What §170(b)(1)(I) does to `year`'s return. See [`CharitableFloorStatus`].
+///
+/// ★ **What this covers, stated plainly** (`CLAUDE.md` rule (3)): exactly the Schedule A revisions
+/// whose text layer is committed under `design/forms/extract/` AND route their charitable line
+/// through the *Charitable Contribution Limitation Worksheet* — today, **TY2026 alone**. Every later
+/// year is [`CharitableFloorStatus::ScheduleANotTranscribed`] and refuses; every earlier year is
+/// [`CharitableFloorStatus::NotApplicable`] and files unchanged. The year set is not asserted here:
+/// `the_floored_years_are_read_off_the_archived_schedule_a_extracts` derives it from the extract
+/// directory and reds if this function and the archived forms disagree in either direction.
+#[must_use]
+pub fn charitable_floor_status(year: i32) -> CharitableFloorStatus {
+    if year < CHARITABLE_FLOOR_FIRST_YEAR {
+        return CharitableFloorStatus::NotApplicable;
+    }
+    match year {
+        // `f1040sa--2026-DRAFT.txt:116-120`. Nothing numeric is transcribed here — see the
+        // `CharitableFloorGate` doc on why this file stores no `0.005`.
+        2026 => CharitableFloorStatus::Gated(CharitableFloorGate {
+            year: 2026,
+            worksheet_line: "13",
+            subtotal_line: "15",
+            worksheet: "Charitable Contribution Limitation Worksheet",
+            caption: "Enter the amount from line 6 of the Charitable Contribution Limitation \
+                      Worksheet",
+        }),
+        _ => CharitableFloorStatus::ScheduleANotTranscribed,
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod charitable_floor_tests {
+    use super::section_68_tests::{appears_as_printed, archived_schedule_a, repo_root, squash};
+    use super::*;
+
+    /// Whether a Schedule A revision routes its charitable line through the limitation worksheet.
+    ///
+    /// ★ Two phrases, so a re-extract that re-flows one of them still measures. Shared rather than
+    ///   re-written per test: this is the ONE reading of the archived forms that every floor
+    ///   assertion in the crate keys off, including
+    ///   `return_refuse::charitable_floor_gate_tests::a_pre_2026_itemizer_with_charity_files_unchanged`.
+    pub(crate) fn routes_through_the_limitation_worksheet(text: &str) -> bool {
+        text.contains("Charitable Contribution Limitation Worksheet")
+            && text.contains("Enter the amount from line 6")
+    }
+
+    /// ★★★ **THE YEAR SET IS THE FORMS' — in both directions.**
+    ///
+    /// A revision that routes through the worksheet and is NOT [`CharitableFloorStatus::Gated`] would
+    /// file an unfloored charitable total, i.e. understate tax; a revision that does NOT route through
+    /// it and IS gated would refuse a return the IRS accepts. Both are asserted, per archived
+    /// revision, so neither direction can drift silently.
+    ///
+    /// ★★ The full THREE-WAY classification, not "is Gated" vs "is not" — the two-way form of this
+    ///    check is what let a plant on [`SECTION_68_FIRST_YEAR`] survive in the §68 parcel (a year
+    ///    that became `ThresholdNotTranscribed` is "not Gated" and passed, while refusing every
+    ///    return of that year).
+    #[test]
+    fn the_floored_years_are_read_off_the_archived_schedule_a_extracts() {
+        let mut floored_by_form: Vec<i32> = Vec::new();
+        for (year, text) in &archived_schedule_a() {
+            let by_form = routes_through_the_limitation_worksheet(text);
+            let expected = if by_form { "Gated" } else { "NotApplicable" };
+            let actual = match charitable_floor_status(*year) {
+                CharitableFloorStatus::Gated(_) => "Gated",
+                CharitableFloorStatus::NotApplicable => "NotApplicable",
+                CharitableFloorStatus::ScheduleANotTranscribed => "ScheduleANotTranscribed",
+            };
+            assert_eq!(
+                actual,
+                expected,
+                "f1040sa--{year}: the form {} route its charitable line through the limitation \
+                 worksheet, so `charitable_floor_status` must be {expected} and it is {actual}. \
+                 `NotApplicable` on a floored year files an UNFLOORED charitable total and \
+                 understates tax; `Gated` or `ScheduleANotTranscribed` on an unfloored year REFUSES \
+                 a return the IRS accepts",
+                if by_form { "DOES" } else { "does NOT" },
+            );
+            if by_form {
+                floored_by_form.push(*year);
+            }
+        }
+        assert_eq!(
+            floored_by_form,
+            vec![2026],
+            "TY2026 is the only archived Schedule A routing its charitable line through the \
+             Charitable Contribution Limitation Worksheet; if this moved, the new year's form must \
+             be read too"
+        );
+        // Every year at or after the statutory start with no transcribed form fails CLOSED.
+        assert_eq!(
+            charitable_floor_status(2027),
+            CharitableFloorStatus::ScheduleANotTranscribed,
+            "a floored year with no archived Schedule A must refuse, not file unfloored"
+        );
+        // ★ FR-230 — the boundary against the STATUTE's own date, never against itself.
+        //   `CHARITABLE_FLOOR_FIRST_YEAR - 1` would move with the constant and measure nothing.
+        assert_eq!(
+            CHARITABLE_FLOOR_FIRST_YEAR, 2026,
+            "Pub. L. 119-21 §70425(c): \"taxable years beginning after December 31, 2025\""
+        );
+        // ★★ The two OBBBA sections are independent constants, each pinned to the same date by its
+        //    OWN citation — `CHARITABLE_FLOOR_FIRST_YEAR == SECTION_68_FIRST_YEAR` would pass if
+        //    BOTH were wrong, which is the FR-230 shape one assertion up.
+        assert_eq!(
+            SECTION_68_FIRST_YEAR, 2026,
+            "Pub. L. 119-21 §70111(c): \"taxable years beginning after December 31, 2025\""
+        );
+    }
+
+    /// ★★★ **THE CAPTION IS THE FORM'S OWN, AND THE PRE-2026 FORMS DO NOT CARRY IT.**
+    ///
+    /// Both halves matter. A matcher that cannot see the caption where it exists proves nothing by
+    /// not seeing it where it does not — so TY2024/TY2025 are checked to print *"Carryover from prior
+    /// year"* on line 13 and *"Add lines 11 through 13"* as the subtotal, which is the routing the
+    /// 2026 revision replaced.
+    #[test]
+    fn the_floor_caption_and_worksheet_are_the_forms_own() {
+        let mut checked = 0usize;
+        for (year, text) in &archived_schedule_a() {
+            match charitable_floor_status(*year) {
+                CharitableFloorStatus::Gated(g) => {
+                    checked += 1;
+                    let pieces = appears_as_printed(text, g.caption).unwrap_or_else(|e| {
+                        panic!(
+                            "f1040sa--{year} must print the line-{} caption verbatim, and it {e}. \
+                             `CharitableFloorGate::caption` reads {:?}",
+                            g.worksheet_line, g.caption,
+                        )
+                    });
+                    assert_eq!(
+                        pieces, 1,
+                        "the caption is contiguous in the squashed extract; {pieces} runs means the \
+                         layout moved and this assertion is no longer reading one sentence"
+                    );
+                    assert!(
+                        text.contains(g.worksheet),
+                        "f1040sa--{year} must name {:?}",
+                        g.worksheet
+                    );
+                    // ★★ THE LINE NUMBERS THE REFUSAL PRINTS, each bound to the caption beside it
+                    //    in the extract — so a renumber cannot leave the refusal citing a line that
+                    //    moved. `worksheet_line` must carry the caption; the carryover must have
+                    //    moved DOWN one; the subtotal must add the two.
+                    assert!(
+                        text.contains(&format!(
+                            "{} Enter the amount from line 6",
+                            g.worksheet_line
+                        )),
+                        "f1040sa--{year}: the caption must sit on line {}, which is the number the \
+                         refusal tells the filer to enter the worksheet's result on",
+                        g.worksheet_line,
+                    );
+                    assert!(
+                        text.contains("14 Carryover from prior year"),
+                        "f1040sa--{year}: the carryover must have moved DOWN to line 14 — the \
+                         refusal says so, and the pre-2026 arm below asserts it was on 13"
+                    );
+                    assert!(
+                        text.contains(&format!("{} Add lines 13 and 14", g.subtotal_line)),
+                        "f1040sa--{year} must print \"{} Add lines 13 and 14\"",
+                        g.subtotal_line
+                    );
+                }
+                CharitableFloorStatus::NotApplicable => {
+                    // The routing the 2026 revision replaced — so the matcher is watched on a form
+                    // that genuinely lacks the caption, not merely on one it fails to parse.
+                    assert!(
+                        text.contains("13 Carryover from prior year")
+                            && text.contains("14 Add lines 11 through 13"),
+                        "f1040sa--{year} is not floored, so it must still sum gifts directly: \
+                         line 13 the carryover, line 14 \"Add lines 11 through 13\""
+                    );
+                    assert!(
+                        !text.contains("Charitable Contribution Limitation Worksheet"),
+                        "f1040sa--{year} must NOT name the limitation worksheet"
+                    );
+                }
+                CharitableFloorStatus::ScheduleANotTranscribed => panic!(
+                    "f1040sa--{year} IS archived but `charitable_floor_status` has no arm for it — \
+                     transcribe that revision's charitable routing before this can pass"
+                ),
+            }
+        }
+        assert_eq!(
+            checked, 1,
+            "exactly one archived revision is floored today; if that changed, the new one's caption \
+             must be transcribed from ITS form"
+        );
+    }
+
+    /// ★★★ **THE STATUTE QUOTED TO THE FILER IS THE STATUTE'S OWN — matched against the archived
+    /// Public Law, and the KILL is in the loop.**
+    ///
+    /// ★★ The GPO render breaks this sentence across a page boundary: *"…exceeds 0.5 percent of the
+    ///    taxpayer's contribution base"* / *"139 STAT. 236 PUBLIC LAW 119-21—JULY 4, 2025"* /
+    ///    *"Applicability."* / *"for the taxable year."* A `contains` over the squashed page therefore
+    ///    fails on a sentence that IS in the law, and the tempting repair — shortening the quotation
+    ///    until it fits — is exactly the blindness `design/HARNESS.md` B1 was written about. So the
+    ///    number of contiguous runs is COMPUTED and pinned.
+    #[test]
+    fn the_floor_statute_is_the_statutes_own_and_a_paraphrase_is_rejected() {
+        let path = repo_root().join("legal/text/statute-irc/PLAW-119publ21_OBBBA.txt");
+        let law = squash(
+            &std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("{} must be readable: {e}", path.display())),
+        );
+        // ★ A POSITIVE CONTROL FIRST: a test reading the wrong file would reject every plant below
+        //   and look exactly like five successful kills. §70425's own heading is unquestionably there.
+        assert!(
+            law.contains("0.5 PERCENT FLOOR ON DEDUCTION OF CONTRIBUTIONS"),
+            "{} is not the OBBBA text this test needs",
+            path.display()
+        );
+
+        let pieces = appears_as_printed(&law, CHARITABLE_FLOOR_STATUTE).unwrap_or_else(|e| {
+            panic!("§170(b)(1)(I) must appear verbatim in the archived Public Law, and it {e}")
+        });
+        assert_eq!(
+            pieces, 2,
+            "the statute is interrupted once by the 139 STAT. 236 page break; {pieces} runs means \
+             the archive was re-rendered and this quotation must be re-read against it"
+        );
+
+        // ★★★ THE KILL — AND THE BUDGET IS PART OF IT, which the first draft of this test got
+        //     wrong and the plant pass caught. `is_err()` alone is NOT a rejection here: the walk
+        //     in `appears_as_printed` may break a sentence into more runs, and *"5 percent"* is a
+        //     SUBSTRING of the law's own *"0.5 percent"*, so the lost-decimal-point plant was
+        //     ACCEPTED — in 3 runs instead of 2 — and the kill silently passed nothing. A plant is
+        //     rejected only if it cannot be found at the REAL sentence's fragmentation.
+        let rejected_within_budget = |plant: &str| match appears_as_printed(&law, plant) {
+            Err(_) => true,
+            Ok(p) => p > pieces,
+        };
+        for (plant, what) in [
+            (
+                CHARITABLE_FLOOR_STATUTE.replace("0.5 percent", "5 percent"),
+                "a lost decimal point — the Form 6251 line-33 class",
+            ),
+            (
+                CHARITABLE_FLOOR_STATUTE.replace("contribution base", "adjusted gross income"),
+                "AGI substituted for the contribution base (§170(b)(1)(H))",
+            ),
+            (
+                CHARITABLE_FLOOR_STATUTE.replace("exceeds", "does not exceed"),
+                "the floor inverted into a ceiling",
+            ),
+            (
+                CHARITABLE_FLOOR_STATUTE.replace("aggregate of such", "aggregate of all"),
+                "a paraphrase of the statute's own scope",
+            ),
+            (
+                CHARITABLE_FLOOR_STATUTE.replace("otherwise allowable", "otherwise allowed"),
+                "a paraphrase of the statute's own term of art",
+            ),
+        ] {
+            assert!(
+                rejected_within_budget(&plant),
+                "{what} must be REJECTED — the checker found it within {pieces} runs, the real \
+                 sentence's own fragmentation: {plant:?}"
+            );
+        }
+        // ★ AND THE CONTROL, so a predicate that rejected everything could not pass as five kills.
+        assert!(
+            !rejected_within_budget(CHARITABLE_FLOOR_STATUTE),
+            "the unmutated sentence must still be ACCEPTED within its own budget"
+        );
+    }
+
+    /// ★★ **THE FLOOR IS NOT MODELLED, AND THAT IS ASSERTED RATHER THAN CLAIMED — the FR-233
+    /// sequencing guard, as a test.** No 0.5% rate constant lives in this crate's source: the only
+    /// *"0.5 percent"* a grep can find is inside [`CHARITABLE_FLOOR_STATUTE`]'s prose, as the
+    /// quotation it is. If a future editor adds one, this reds and sends them to the
+    /// [`CharitableFloorGate`] doc, which names the three statutory branches a naive `0.005 × agi`
+    /// gets wrong.
+    #[test]
+    fn no_floor_rate_constant_exists_in_this_crate() {
+        let src = repo_root().join("crates/btctax-core/src");
+        let mut stack = vec![src.clone()];
+        let mut hits: Vec<String> = Vec::new();
+        let mut files = 0usize;
+        while let Some(dir) = stack.pop() {
+            for e in std::fs::read_dir(&dir).expect("the crate source is readable") {
+                let p = e.expect("a readable dir entry").path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else if p.extension().is_some_and(|x| x == "rs") {
+                    files += 1;
+                    let t = std::fs::read_to_string(&p).unwrap_or_default();
+                    // ★★★ ASSEMBLED, NEVER SPELLED. A literal needle here makes this file its
+                    //     own hit — measured: the first draft of this test reported `tables.rs` as
+                    //     a defect, and so did `ty2026_schedule_a.rs`'s wall pin, because the only
+                    //     occurrence in the workspace was the needle list itself. `concat!` is
+                    //     const-folded, so the literal never exists in the source.
+                    for needle in [
+                        concat!("dec!(0", ".005)"),
+                        concat!("half", "_percent"),
+                        concat!("charitable_floor", "_rate"),
+                    ] {
+                        if t.contains(needle) {
+                            hits.push(format!("{}: {needle}", p.display()));
+                        }
+                    }
+                }
+            }
+        }
+        // ★ POSITIVE CONTROL: the walk must actually be reading files, or "no hits" is vacuous —
+        //   and it must be reading the file that would carry such a constant.
+        assert!(files >= 10, "the walk read only {files} source files");
+        assert!(
+            std::fs::read_to_string(src.join("tax/charitable.rs"))
+                .expect("charitable.rs is readable")
+                .contains("dec!(0.50)"),
+            "the §170(b) ceilings must still be in charitable.rs, or this walk is reading nothing"
+        );
+        assert!(
+            hits.is_empty(),
+            "a 0.5% rate constant now exists — if the Charitable Contribution Limitation Worksheet \
+             has been archived and transcribed, delete `charitable_floor_gate` in the SAME change \
+             (FR-233); if not, this is the closed form `CLAUDE.md` forbids:\n{}",
+            hits.join("\n")
+        );
     }
 }
 
