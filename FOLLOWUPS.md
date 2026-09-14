@@ -9016,6 +9016,35 @@ build, each with an owning phase.
   and `se.rs` are untouched in `9f0298a3d..HEAD` — so on the reviewer's recommendation it does not hold that
   range. **It absolutely holds a filing.**
 
+  ★★★ **ADJUDICATED 2026-09-14 — AGAINST THE FORM, and btctax is RIGHT. Half (a) of this entry is
+  CLOSED; the figure is not the defect and never was.** For `ca_A_single_int-none_se-over_ltcg-0_qd-0`,
+  OTS prints the legs L10 = 13741.68 and L11 = 3213.78. Schedule SE
+  (`design/forms/extract/f1040sse--2024.txt:45-47`) makes L10 and L11 *entry lines* and says L12 is
+  *"Self-employment tax. **Add lines 10 and 11**."* The IRS rounding rule, verbatim from
+  `design/forms/extract/f4868--2024.txt:217-223`: *"If you do round to whole dollars, you must round
+  all amounts."* So the L10 and L11 **boxes** hold 13742 and 3214, and L12 adds the boxes → **16956**.
+  taxcalc keeps cents and rounds the total once (16955.46 → 16955): a lawful *different* methodology,
+  the Σround ≠ roundΣ residual, not an error. `se.rs` is correct and keeps exact cents throughout.
+  ★ The OTS leg is a legitimate witness, not a manufactured one: `se_l12_ots = sum_round(&[l10, l11])`
+  reconstructs OTS's **paper** L12 from OTS's **paper** legs, which is the correct paper-to-paper
+  comparison for a product that prints a paper return.
+
+  ★★ **The controller got this wrong once, mid-investigation, and the reason is FR-238 below.** The
+  failing verdict row reads `"ots": "16955", "taxcalc": null, "engine": "taxcalc"` — so I concluded
+  OTS was the $1 outlier and btctax had no witness. That was false: the 16955 is **taxcalc's** number
+  sitting in a field labelled `ots`. The entry's original figures were right. **A misattributing
+  instrument cost a full adjudication cycle and nearly produced a "fix" to a correct SE computation** —
+  which is the sharpest available argument that FR-238 is blocking rather than cosmetic.
+
+  ★ **Half (b) — the runner — is still OPEN**, and two further instrument defects were found while
+  adjudicating: **D2**, the sweep `assert_eq!`s *inside* the per-household loop
+  (`crates/btctax-oracle-harness/tests/smoke.rs:146`), so it aborts on the FIRST failing household and
+  reported exactly one to me, never the 21 this entry cites — it cannot distinguish one lawful residual
+  from a systemic wrong figure; and **D3**, the taxcalc leg needs its expected residual **computed from
+  the mechanism** (`sum_round(legs) − round_leaf(total)`), never a $1 tolerance and never a household
+  name-list, per *"state the mechanism, let it decide."* Dispatched with brief
+  `design/agent-reports/BRIEF-fr234-se-rounding-and-runner.md` (D1–D4).
+
 - **★★★ FR-235 — HARNESS RULE: a plant written in the CHECKER'S OWN VOCABULARY can only confirm what the checker already sees. No owning phase — it belongs in `design/HARNESS.md` beside B1, B1a and FR-230.**
   **Measured 2026-09-13** by the B3 review, on `blockers::year_sites`. The scanner greps two string needles;
   its B1 plant was a planted **`ri.tax_year > 0`** — *the scanner's own first needle*. So the plant was red
@@ -9172,3 +9201,22 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   **FR-151 — the design contradicts itself on `line_set` for a constants-only year. Minor. Owning phase: design r2 §4 (owner/author).** (rehearsal F18)
   §4 says *"constants-only year ⇒ same line_set; renumber ⇒ new one"*, which the rehearsal found underdetermined for a year whose only changes are two printed sentences and an OMB number.
 
+- **★★★ FR-238 — `verdict_engine` MISATTRIBUTES the witnessing engine on every row: the compared value always lands in the `ots` field and `taxcalc` is always null. Important — a defect in what the instrument CLAIMS to have done. Owning phase: NOW, with FR-234.**
+  `crates/btctax-oracle-harness/src/main.rs:787-796` passes `Some(target)` as `verdict`'s `ots`
+  parameter and `None` as `taxcalc` **unconditionally**, ignoring its own `engine` argument — which it
+  does record correctly in a separate `"engine"` field. So a taxcalc-compared row emits
+  `"ots": <taxcalc's number>, "taxcalc": null, "engine": "taxcalc"`. **14 call sites** are affected, so
+  this is every engine-scoped verdict the harness has ever emitted, on every line — not an SE quirk.
+  ★★★ **This is not a cosmetic labelling slip, and the evidence is that it actually fired.** While
+  adjudicating FR-234 the controller read exactly such a row and concluded OTS was the $1 outlier and
+  btctax had no witness at all — the inverse of the truth. The next step would have been "fix" a
+  Schedule SE computation that is correct. **An instrument that reports the wrong witness converts a
+  lawful methodology residual into a phantom funds defect**, and the two-oracle rule is built entirely
+  on knowing *which* engine witnessed *what*: `CLAUDE.md` already records that two disqualified oracles
+  can align and that the witness census exists to count independent witnesses per vector. A census fed
+  misattributed rows counts the wrong thing.
+  ★ **Not a `verdict_engine`-only fix.** Two fixed columns named `ots` and `taxcalc` is the wrong shape
+  for a single-engine verdict — a third engine reintroduces the identical bug — so the fix should make
+  the engine name and its value structurally inseparable rather than route a value into one of two
+  hardcoded fields. Same family as *"the thing that decides was not the thing that knows."*
+  B1: the kill is a taxcalc-engine row asserting its value does **not** appear under `ots`.
