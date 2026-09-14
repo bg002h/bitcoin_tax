@@ -179,7 +179,7 @@ is `FlatCap { 10000, 5000 }` at `tax_tables.rs:130-133`, and `BundledFullReturnT
 **Consequence for the plan (not a defect — a scope fact the plan must state):** this vector is a
 **TY2024** vector or it does not file. Corollary: `IncomeExclusionUnanswered` cannot fire (the
 `HasIncomeExclusion` question is `live: |ri| ri.tax_year >= 2025`, `questions.rs:504`), and TY2026's
-OBBBA itemized rules (the new §68 2/37 haircut, the §170(p) 0.5%-of-AGI charitable floor) are
+OBBBA itemized rules (the new §68 2/37 haircut, the §170(b)(1)(I) 0.5%-of-CONTRIBUTION-BASE charitable floor [corrected 2026-09-14, FR-237: it is NOT §170(p), which is the NON-itemizer deduction, and the base is not AGI]) are
 unmodeled anywhere in `btctax-core` — which is safe only because 2026 fails closed.
 
 ### 7. Structurally unreachable Schedule A lines — all accounted for, none silent

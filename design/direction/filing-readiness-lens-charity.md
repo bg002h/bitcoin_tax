@@ -6,7 +6,7 @@ Repo: `/scratch/code/bitcoin_tax` @ `f5ba41a1`. All citations are `file:line` ag
 registers **TY2024 only** — `crates/btctax-adapters/src/tax_tables.rs:99-101`
 (`by_year.insert(2024, ty2024_full_return())`, one entry). TY2025/TY2026 exist in
 `BundledTaxTables` (`:75-79`) but only for the crypto slice. So this vector is a **TY2024 return**,
-and the OBBBA §170(p) 0.5%-of-AGI floor and the §68 2/37 haircut (effective for tax years beginning
+and the OBBBA §170(b)(1)(I) 0.5%-of-CONTRIBUTION-BASE floor [corrected 2026-09-14, FR-237: it is NOT §170(p) — that is §70424's NON-itemizer deduction — and the base is the contribution base, not AGI, per §170(b)(1)(H)] and the §68 2/37 haircut (effective for tax years beginning
 after 2025) are **out of scope by construction** — do not let a synthesis pass spend budget there.
 
 Arithmetic for the vector (AGI = $1,000,000 wages + $1,000,000 LTCG = **$2,000,000**; the
