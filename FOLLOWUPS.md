@@ -8911,7 +8911,7 @@ build, each with an owning phase.
   available before January**, because the window in which it is needed is exactly the window in which the
   current accidental protection disappears.
 
-- **FR-227 — `report --tax-year 2026` PANICS rather than refusing, and panics are invisible to a RefuseReason-derived prediction. Important. Owning phase: NOW.**
+- **✅ CLOSED (fold 6209a69fa) — FR-227 — panics are invisible to a RefuseReason-derived prediction, and `blockers` now derives the abort class. ⚠️ THE ORIGINAL HEADLINE — *"`report --tax-year 2026` PANICS rather than refusing"* — WAS FALSE, and is kept here rather than deleted because a ledger that silently rewrites its own claims cannot be audited. See the AMENDED note in the body. ★ One piece is NOT closed and was re-owned: converting `return_1040.rs:3078` to a `RefuseReason` is owning phase *the TY2026 port*, not deferrable past it, because bundling TY2026 params makes that site reachable.**
   A `panic!` is not a `RefuseReason`, so `xtask blockers` — which derives year-specific walls from refusal
   sites and year-keyed gates — **cannot see this class at all.** Tier B generalised it and measured **9
   instances** of *"a typed per-year list inside a shipped crate with no TY2026 arm"*, including the
@@ -9000,7 +9000,8 @@ build, each with an owning phase.
   not computed — the field would simply hold the unlimited total under the new number. **The refusal comes
   out only when the worksheet goes in.** Recorded because the tempting order is the wrong one.
 
-- **★★★ FR-237 — MY STATUTE CITATION WAS WRONG: the 0.5% charitable floor is §170(b)(1)(I), NOT §170(p). Important for anything filer-facing. Owning phase: NOW — four design docs still carry it.**
+- **✅ CLOSED (folds cc29bb30e + c04d1d410) — FR-237 — MY STATUTE CITATION WAS WRONG: the 0.5% charitable floor is §170(b)(1)(I), NOT §170(p).**
+  ★★ Closing found a second error nobody had reported: the floor is 0.5% of the **contribution base**, not of AGI (archived statute `PLAW-119publ21_OBBBA.txt:9409`; §170(b)(1)(H) defines the base as AGI without regard to any NOL carryback). `ty2026_schedule_a.rs` computed it from `ar.agi` — correct for that vector, which has no carryback, and the divergent branch is now NAMED in source because it runs the dangerous way: contribution base > AGI ⇒ a floor from AGI is too SMALL ⇒ the deduction is OVERSTATED. ★★★ And `tables.rs`'s own naming-correction comment carried a hand-typed list of "the five places that get it backwards", three of which had since been fixed — the *"derive the list"* rule violated inside the comment written to fix a citation error. Replaced by a pointer to the scan that already derives it. ★ Two persisted agent reports still say §170(p) and **always will**: a persisted report is immutable evidence, so correcting one would destroy the record. Residue: none live. Originally: Owning phase: NOW — four design docs still carry it.**
   **Refuted by the charitable-floor agent from the archived primary source, then verified by the controller.**
   `legal/text/statute-irc/PLAW-119publ21_OBBBA.txt:9400`:
   > *"SEC. 70425. 0.5 PERCENT FLOOR ON DEDUCTION OF CONTRIBUTIONS MADE BY INDIVIDUALS. (a) … Paragraph (1) of
