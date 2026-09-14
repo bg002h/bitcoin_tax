@@ -3117,10 +3117,19 @@ pub fn render_verify(r: &VerifyReport) -> String {
 /// ★ `params` is the year's package where there is one. Without it the panel's sizes are blank and
 ///   a params-quoting gate is listed as *waiting* rather than *blocking* — R12's rule, unchanged
 ///   here.
+///
+/// ★★★ **FR-225 — `verdict` is the RETURN'S own, and this block is where it mattered most.** This is
+/// printed on `report`'s REFUSAL branch (`cmd/tax.rs`: *"a return that will not compute is exactly
+/// when a filer needs the panel"*) — and the panel was built by `interview_state_with_params`, which
+/// cannot see `screen_absolute`. So the §170(f)(8)(A) question sat under *"FORGOING — lawful to skip"*
+/// **three lines below** `NOT COMPUTABLE [CharitableCwaUnresolved]`, in one block, on one screen. The
+/// verdict `report` has already computed is now handed in, so the panel and the line above it cannot
+/// describe one return two ways.
 #[must_use]
 pub fn render_interview_block(
     ri: &btctax_core::tax::return_inputs::ReturnInputs,
     params: Option<&btctax_core::tax::tables::FullReturnParams>,
+    verdict: btctax_core::tax::interview_state::ReturnVerdict,
 ) -> String {
     use btctax_core::tax::document_census::{declared_rows, DocumentRow};
     use btctax_core::tax::provenance::Source;
@@ -3153,10 +3162,9 @@ pub fn render_interview_block(
     }
 
     // ── 2. The answer panel (R12), rendered by the SAME function `income answer` prints ────────
-    let st = match params {
-        Some(p) => btctax_core::tax::interview_state::interview_state_with_params(ri, p),
-        None => btctax_core::tax::interview_state::interview_state(ri),
-    };
+    // ★ FR-225 — through the verdict-aware entry point, so the panel knows what the caller already
+    //   decided about this return instead of re-deriving a weaker answer beside it.
+    let st = btctax_core::tax::interview_state::interview_state_with_verdict(ri, params, verdict);
     for line in crate::panel_lines(&st, &format!("tax year {year}")) {
         let _ = writeln!(s, "  {line}");
     }
@@ -3321,7 +3329,11 @@ mod interview_block_tests {
     fn the_report_block_prints_the_census_and_masks_every_payer_tin() {
         let ri = ri();
         let p = btctax_core::tax::testonly::ty2024_params();
-        let out = render_interview_block(&ri, Some(&p));
+        let out = render_interview_block(
+            &ri,
+            Some(&p),
+            btctax_core::tax::interview_state::ReturnVerdict::NotRun,
+        );
 
         // ★★★ **SCOPED TO THE CENSUS SECTION, and the scoping is the finding.** The first version
         //     of this assertion searched the WHOLE block — and dropping `DocumentRow::W2` from the
@@ -3407,7 +3419,11 @@ mod interview_block_tests {
         let mut no_sale = ri();
         no_sale.home_sale.sold_main_home = Some(false);
         assert_eq!(home_sale_decision(&no_sale), HomeSaleDecision::NoSale);
-        let out = render_interview_block(&no_sale, Some(&p));
+        let out = render_interview_block(
+            &no_sale,
+            Some(&p),
+            btctax_core::tax::interview_state::ReturnVerdict::NotRun,
+        );
         assert!(out.contains("DECISION: no sale to report"), "{out}");
 
         // (b) Sold, all three tests met, no 1099-S — the ONE blank branch.
@@ -3420,7 +3436,11 @@ mod interview_block_tests {
         };
         blank.documents.set(DocumentRow::S1099, Some(false));
         assert_eq!(home_sale_decision(&blank), HomeSaleDecision::NotReported);
-        let out = render_interview_block(&blank, Some(&p));
+        let out = render_interview_block(
+            &blank,
+            Some(&p),
+            btctax_core::tax::interview_state::ReturnVerdict::NotRun,
+        );
         assert!(out.contains("the sale is NOT reported"), "{out}");
         // Every answer behind the blank is printed — the blank is a DECISION with four answers, and
         // a surface that showed only the verdict would make it look like an absence.
@@ -3437,7 +3457,11 @@ mod interview_block_tests {
             home_sale_decision(&reported),
             HomeSaleDecision::Reported(_)
         ));
-        let out = render_interview_block(&reported, Some(&p));
+        let out = render_interview_block(
+            &reported,
+            Some(&p),
+            btctax_core::tax::interview_state::ReturnVerdict::NotRun,
+        );
         assert!(
             out.contains("BELONGS ON FORM 8949 (code H)")
                 && out.contains("cannot exclude all of your gain"),
@@ -3465,7 +3489,11 @@ mod interview_block_tests {
             btctax_core::tax::dependent_gates::CreditColumn::ChildTaxCredit,
             "the fixture's row really does earn a box, or the assertion below is vacuous"
         );
-        let out = render_interview_block(&ri, Some(&btctax_core::tax::testonly::ty2024_params()));
+        let out = render_interview_block(
+            &ri,
+            Some(&btctax_core::tax::testonly::ty2024_params()),
+            btctax_core::tax::interview_state::ReturnVerdict::NotRun,
+        );
         assert!(
             out.contains("(1) Kid Example") && out.contains("Child tax credit"),
             "row (7) is printed per dependent: {out}"
@@ -3477,8 +3505,11 @@ mod interview_block_tests {
             btctax_core::tax::dependent_gates::credit_column(&neither, 0),
             btctax_core::tax::dependent_gates::CreditColumn::Neither
         );
-        let out =
-            render_interview_block(&neither, Some(&btctax_core::tax::testonly::ty2024_params()));
+        let out = render_interview_block(
+            &neither,
+            Some(&btctax_core::tax::testonly::ty2024_params()),
+            btctax_core::tax::interview_state::ReturnVerdict::NotRun,
+        );
         assert!(out.contains("neither box"), "{out}");
     }
 }

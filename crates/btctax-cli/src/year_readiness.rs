@@ -10,6 +10,10 @@
 //! adds is the declared/actual COMPARISON, with kills: a year declared `filable` whose params are not
 //! bundled, or whose price dataset stops before `prices_through`, reds.
 use btctax_adapters::price::BundledPrices;
+// ★★★ FR-225 — ONE verdict type, defined beside the walk that also consumes it
+// (`btctax_core::tax::interview_state`). A second enum here would be a second thing to keep in step,
+// and the whole finding is two surfaces disagreeing about one return.
+pub use btctax_core::tax::interview_state::ReturnVerdict;
 use btctax_core::tax::tables::{FullReturnTables, TaxTables};
 use btctax_forms::bundled::{bundled_years, BUNDLED};
 use btctax_forms::year_record::{YearRecord, YearStatus};
@@ -163,7 +167,30 @@ impl YearReadiness {
     }
 }
 
-/// ★★★ **T4 / `SPEC_interview.md` R11 — THE TWO STATES A YEAR IS IN AT ENTRY.**
+/// ★★★ **FR-225 / FR-63 — a refusal's VARIANT NAME, without its `Debug` payload.**
+///
+/// `btctax report` prints `NOT COMPUTABLE [{reason:?}]` on a surface that scrolls, so it can afford the
+/// whole payload. [`EntryStates::lines`] cannot: its lines are drawn into a fixed 118-column pane that
+/// does not wrap, and `DigitalAssetAnswerContradictsLedger { date: …, venue: …, kind: … }` measured
+/// **164 columns** — it would have been clipped mid-payload, which is FR-63.
+///
+/// ★★ **So the two surfaces agree on the refusal's IDENTITY rather than on its rendering**, which is
+/// the thing a filer matches between them and the thing
+/// `tests::the_printed_claim_agrees_with_the_return_verdict` asserts. The payload is not dropped from
+/// the product — it rides the `detail`, which the answer panel and `report` both print in full.
+///
+/// ★ Taken from `Debug` rather than from a hand-written `RefuseReason → &str` map, and that is the
+///   FR-99 rule: a map would be a list of 126 names beside an enum that grows, and it would go stale
+///   silently. `Debug`'s first token IS the variant name, for every shape a derive can produce.
+fn refuse_reason_name(r: &btctax_core::tax::return_refuse::RefuseReason) -> String {
+    let d = format!("{r:?}");
+    d.split([' ', '{', '('])
+        .next()
+        .unwrap_or(d.as_str())
+        .to_string()
+}
+
+/// ★★★ **T4 / `SPEC_interview.md` R11 — THE STATES A YEAR IS IN AT ENTRY.**
 ///
 /// They are independent, and conflating them is the defect R11 exists to fix. A filer opening
 /// TY2026 in September 2026 can finish the whole interview and still not be able to file, because
@@ -173,8 +200,22 @@ impl YearReadiness {
 ///
 /// - **interview-complete** — [`btctax_core::tax::interview_state::interview_state`] (T3/R12) has
 ///   nothing blocking. Derivable with no package at all: it is a fact about the ANSWERS.
-/// - **return-computable** — [`YearReadiness::params`]: this build bundles the year's
-///   `FullReturnParams`. A fact about the BUILD, and the compute gate everywhere else.
+/// - **package-computes** — [`YearReadiness::params`]: this build bundles the year's
+///   `FullReturnParams`. A fact about the BUILD.
+/// - **the return's verdict** — [`ReturnVerdict`]: did the refusal chain, run on THIS return, refuse?
+///   A fact about the RETURN, and the only one of the three that licenses the word *computable*.
+///
+/// ★★★ **FR-225 — THE THIRD STATE IS NEW, AND ITS ABSENCE WAS A LIVE DEFECT ON TY2024.** R11 named
+/// two states and the second was rendered as `return: computable` — but `YearReadiness::params` says
+/// *this build can compute the year*, which is not *this return computes*. A charitable gift whose
+/// §170(f)(8)(A) acknowledgment is unresolved refuses at `screen_absolute`, so `btctax income answer`
+/// printed **`interview: complete · return: computable`** and exited 0 while `btctax report` printed
+/// **`NOT COMPUTABLE [CharitableCwaUnresolved]`** and `export-irs-pdf` wrote nothing. Two instruments
+/// in one binary, over one stored return, disagreeing about whether it can be filed.
+///
+/// ★★ **The two questions are now answered by two fields, and the word `computable` is derived from
+/// the verdict alone** — so the claim and the return's own answer cannot diverge by construction, not
+/// merely by care. [`Self::claims_computable`] exposes the claim for the agreement kill.
 ///
 /// ★ `interview_complete` is `None` when there is no return to ask about (a year the filer has not
 ///   started), so the sentence says *"not started"* rather than asserting either state of a return
@@ -187,8 +228,16 @@ pub struct EntryStates {
     /// How many class-(A) items still block, when there is a return. Named so the sentence can say
     /// what is left instead of only that something is.
     pub blocking: Option<usize>,
-    /// `YearReadiness::params` — the compute gate.
-    pub return_computable: bool,
+    /// ★★★ FR-225 — [`YearReadiness::params`]: does THIS BUILD bundle the year's `FullReturnParams`?
+    ///
+    /// **Renamed from `return_computable`, which is what the defect was.** This is a fact about the
+    /// build, it is the compute gate everywhere else, and it says nothing whatever about whether one
+    /// particular return computes — for that, and for the printed word, see [`Self::verdict`].
+    pub package_computes: bool,
+    /// ★★★ FR-225 — the RETURN'S own verdict, where the caller ran the chain
+    /// ([`Self::with_return_verdict`]). [`ReturnVerdict::NotRun`] by default: a surface that has not
+    /// computed the return says so rather than claiming it computes.
+    pub verdict: ReturnVerdict,
     /// The readiness line for the year, for the second clause.
     readiness: String,
 }
@@ -214,9 +263,24 @@ impl EntryStates {
             year,
             interview_complete: None,
             blocking: None,
-            return_computable: r.params,
+            package_computes: r.params,
+            verdict: ReturnVerdict::NotRun,
             readiness: r.sentence(),
         }
+    }
+
+    /// ★★★ **FR-225 — hand in the RETURN'S OWN VERDICT, from a caller that computed it.**
+    ///
+    /// The chain is `screen_inputs` → `screen_compute_dependent` → `assemble_absolute` +
+    /// `screen_absolute`, exactly as `btctax report` composes it (`cmd/tax.rs`), and only a caller
+    /// holding the year's `TaxTable`, the ledger `LedgerState` and the year's information-return regime
+    /// can run it. `btctax income answer` does ([`crate::cmd::answer::return_verdict`]); the TUI's
+    /// tax-inputs pane does not — it holds no ledger — so it stays on [`ReturnVerdict::NotRun`] and its
+    /// line says so instead of over-claiming.
+    #[must_use]
+    pub fn with_return_verdict(mut self, verdict: ReturnVerdict) -> Self {
+        self.verdict = verdict;
+        self
     }
 
     /// Fill the interview half over the working return (`None` = the year has no return yet).
@@ -255,17 +319,83 @@ impl EntryStates {
             (Some(false), Some(n)) => format!("interview: {n} question(s) still to answer"),
             (Some(false), None) => "interview: incomplete".to_string(),
         };
-        if self.return_computable {
-            return vec![format!("{interview} · return: computable")];
+        // ★★★ **FR-225 — THE PACKAGE HALF FIRST, because it is a different sentence.** A year with no
+        //     `FullReturnParams` cannot compute for ANY return, so there is no return-level verdict to
+        //     report and R11's own three lines stand unchanged (byte-identical: this is the dominant
+        //     TY2026 case, and its wording was adjudicated at T4).
+        if !self.package_computes {
+            return vec![
+                format!("{interview} · return: NOT computable"),
+                format!(
+                    "authoring and saving work; computing and committing wait for the TY{} package",
+                    self.year
+                ),
+                self.readiness.clone(),
+            ];
         }
-        vec![
-            format!("{interview} · return: NOT computable"),
-            format!(
-                "authoring and saving work; computing and committing wait for the TY{} package",
-                self.year
-            ),
-            self.readiness.clone(),
-        ]
+        // ★★★ **FR-225 — AND THEN THE RETURN'S OWN VERDICT, which is the only thing that may print the
+        //     word `computable`.** Derived from [`ReturnVerdict`] and from nothing else, so the claim
+        //     cannot drift from the answer `btctax report` gives over the same stored return — the
+        //     divergence FR-225 recorded, live, on the year that files.
+        match &self.verdict {
+            ReturnVerdict::Computes => vec![format!("{interview} · return: computable")],
+            // ★★ The refusal is NAMED — the same reason code `btctax report` prints, so a filer can
+            //    match the two surfaces — and pointed at the surfaces that carry its own exit
+            //    sentence verbatim.
+            //
+            // ★ **The detail is deliberately NOT inlined here, and that is FR-63's rule rather than
+            //   brevity.** These are DISPLAY LINES for a fixed 118-column pane that does not wrap
+            //   (`draw_edit.rs` draws each one as a single `Line`), and the §170(f)(8)(A) detail is
+            //   ~1,400 characters — it would be silently clipped, which is exactly the *"a fact that
+            //   will not fit is added BESIDE it rather than by lengthening it"* defect. The panel
+            //   (`refusing_lines`) and `report` both print it in full, on surfaces that scroll.
+            ReturnVerdict::Refuses { reason, detail: _ } => vec![
+                format!(
+                    "{interview} · return: NOT computable [{}]",
+                    refuse_reason_name(reason)
+                ),
+                format!(
+                    "the answer panel and `btctax report --tax-year {year}` print it in full, \
+                     with its cure",
+                    year = self.year
+                ),
+            ],
+            // ★★★ **THE HONEST BOUNDARY, and it is the third rule of "derive the list or state what it
+            //     covers".** The TUI's tax-inputs pane holds no `LedgerState`, so it cannot run
+            //     `screen_compute_dependent` or `screen_absolute` and genuinely does not know whether
+            //     this return computes. Before FR-225 it said `return: computable` anyway. It now says
+            //     that it has not looked, and names the command that has — a weaker claim, and a true
+            //     one. (That the BUILD can compute the year is already implied: the `!package_computes`
+            //     branch above owns the other case, in R11's own three lines.)
+            //
+            // ★★ **ONE line, and the WIDTH is the reason.** A two-line version of this shipped for
+            //    exactly one test run: `docs/examples-tui-walkthrough/j6/01` came back with the second
+            //    line CLIPPED at the pane's 118th column — *"…, which run"* — and one section row
+            //    pushed off the list to make room. That is FR-63 verbatim, committed on the very
+            //    function whose own doc cites it, and the GOLDEN is what caught it. See
+            //    [`tests::the_entry_lines_fit_the_fixed_pane`], which now holds the budget for every
+            //    arm so the next edit here cannot reintroduce it silently.
+            ReturnVerdict::NotRun => vec![format!(
+                "{interview} · return: not checked here (`btctax report --tax-year {year}` \
+                 decides it)",
+                year = self.year
+            )],
+        }
+    }
+
+    /// ★★★ **FR-225 — DOES THIS SURFACE CLAIM THE RETURN COMPUTES?** Read off the RENDERED lines, not
+    /// off the predicate, because the defect was that a filer read the word.
+    ///
+    /// ★★ It exists so the agreement can be ASSERTED rather than reasoned about:
+    /// `claims_computable() == verdict.computes()` must hold for every combination of package state,
+    /// interview state and verdict — which is the invariant
+    /// `the_printed_claim_agrees_with_the_return_verdict` pins, and it reds wherever a future edit
+    /// re-derives the word from anything but the verdict.
+    #[must_use]
+    pub fn claims_computable(&self) -> bool {
+        self.lines()
+            .iter()
+            .any(|l| l.contains("return: computable"))
     }
 
     /// [`Self::lines`] as one sentence, for a surface that is not column-bound.
@@ -776,5 +906,218 @@ mod tests {
     fn the_default_year_is_the_newest_bundled_one() {
         assert_eq!(default_year(), 2026); // TY2026's record is bundled (preparing) — the year being filed
         assert_eq!(default_year(), *bundled_years().last().unwrap());
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════════════════════
+    // FR-225 — the printed claim IS the return's verdict, over the whole matrix.
+    // ════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// ★★★ **FR-225 KILL — THE CLAIM AND THE VERDICT AGREE, ON EVERY COMBINATION.**
+    ///
+    /// **The defect.** `lines()` printed `return: computable` from [`YearReadiness::params`] — *does
+    /// this BUILD bundle the year* — while `btctax report`, over the same stored return, printed
+    /// `NOT COMPUTABLE [CharitableCwaUnresolved]`. Two instruments in one binary disagreeing about
+    /// whether one return can be filed, with the filer-facing one wrong.
+    ///
+    /// ★★ **This asserts the AGREEMENT, not a string.** The brief's requirement: *"do not settle for
+    /// asserting the string — assert that the claim and the return's actual verdict agree, so a future
+    /// divergence reds wherever it appears."* So the property is
+    /// `claims_computable() == verdict.computes()`, quantified over every package state × interview
+    /// state × verdict — 24 cells, enumerated from the sets rather than sampled. Any future edit that
+    /// re-derives the printed word from anything other than the verdict reds here, whatever it derives
+    /// it from.
+    ///
+    /// **Plants that red it:**
+    /// - restore `if self.package_computes { return vec![… "return: computable"] }` — every
+    ///   `NotRun`/`Refuses` cell on a bundled year fails;
+    /// - make `ReturnVerdict::computes()` true for `NotRun` — the `NotRun` cells fail;
+    /// - drop the `[{reason:?}]` from the refusing arm — the last two assertions fail.
+    #[test]
+    fn the_printed_claim_agrees_with_the_return_verdict() {
+        use btctax_core::tax::return_refuse::RefuseReason;
+        // A year WITH its package and a year WITHOUT, both read off the build rather than typed: the
+        // FR-99 shape is a year literal beside a bundle that moves.
+        let with_package = *bundled_years()
+            .iter()
+            .find(|y| YearReadiness::bundled(**y).params)
+            .expect("this build bundles at least one filable year's params");
+        let without_package = *bundled_years()
+            .iter()
+            .find(|y| !YearReadiness::bundled(**y).params)
+            .expect("this build bundles at least one year with no params (TY2026 is preparing)");
+
+        let refuses = ReturnVerdict::Refuses {
+            reason: RefuseReason::CharitableCwaUnresolved,
+            detail: "the §170(f)(8)(A) acknowledgment is unresolved".to_string(),
+        };
+        let verdicts = [
+            ReturnVerdict::NotRun,
+            ReturnVerdict::Computes,
+            refuses.clone(),
+        ];
+        // The four interview states `lines()` can render, as (complete, blocking) pairs.
+        let interviews = [
+            (None, None),
+            (Some(true), Some(0)),
+            (Some(false), Some(3)),
+            (Some(false), None),
+        ];
+
+        let mut cells = 0usize;
+        let mut claimed = 0usize;
+        for year in [with_package, without_package] {
+            for (complete, blocking) in interviews {
+                for verdict in &verdicts {
+                    let st = EntryStates {
+                        interview_complete: complete,
+                        blocking,
+                        ..EntryStates::package_only(year)
+                    }
+                    .with_return_verdict(verdict.clone());
+                    let lines = st.lines().join(" · ");
+                    cells += 1;
+                    // ★ THE INVARIANT. The printed word is the RETURN's verdict and nothing else —
+                    //   not the package, not the interview.
+                    assert_eq!(
+                        st.claims_computable(),
+                        verdict.computes() && st.package_computes,
+                        "TY{year} / interview {complete:?} / {verdict:?} — the printed claim and the \
+                         return's verdict must agree: {lines}"
+                    );
+                    if st.claims_computable() {
+                        claimed += 1;
+                    }
+                    // ★ …and the interview half is still stated independently, which is R11's rule.
+                    assert!(
+                        lines.contains("interview: "),
+                        "both states are always stated: {lines}"
+                    );
+                }
+            }
+        }
+        assert_eq!(cells, 24, "every cell of the matrix was visited");
+        assert_eq!(
+            claimed, 4,
+            "exactly the four `Computes` cells on the bundled year may print `computable`"
+        );
+
+        // ★★ And the refusing line NAMES the refusal — the same VARIANT `report` names — and points
+        //    at the surfaces that carry its exit sentence in full. It must inline neither the detail
+        //    nor the reason's `Debug` payload: these are display lines for a pane that does not wrap
+        //    (FR-63), and a payload-carrying reason measured 164 columns.
+        let refusing_st = EntryStates::package_only(with_package).with_return_verdict(refuses);
+        let refusing = refusing_st.sentence();
+        assert!(
+            refusing.contains("return: NOT computable [CharitableCwaUnresolved]"),
+            "the refusal is named: {refusing}"
+        );
+        assert!(
+            !refusing.contains("the §170(f)(8)(A) acknowledgment is unresolved"),
+            "…and the detail is NOT inlined into a non-wrapping display line (FR-63): {refusing}"
+        );
+        assert!(
+            refusing.contains("print it in full"),
+            "…but the filer is sent somewhere that DOES print it: {refusing}"
+        );
+        assert!(
+            refusing_st
+                .verdict
+                .refusal()
+                .is_some_and(|(_, d)| d.contains("the §170(f)(8)(A) acknowledgment is unresolved")),
+            "and the detail is still CARRIED, for the surfaces that can show it"
+        );
+    }
+
+    /// ★★★ **FR-225 — A SURFACE THAT CANNOT COMPUTE THE RETURN SAYS SO, AND NAMES WHO CAN.**
+    ///
+    /// The TUI's tax-inputs pane holds no `LedgerState`, so it cannot run `screen_compute_dependent`
+    /// or `screen_absolute` and genuinely does not know this return's verdict. Before FR-225 it
+    /// printed `return: computable` regardless. The replacement must be a weaker TRUE claim with an
+    /// exit, not merely a removal — an unexplained gap is the other half of the same defect.
+    ///
+    /// **Plant:** drop the command from the `NotRun` line — the "names the command" assertion reds.
+    #[test]
+    fn a_surface_with_no_verdict_states_the_boundary_and_names_the_command() {
+        let year = *bundled_years()
+            .iter()
+            .find(|y| YearReadiness::bundled(**y).params)
+            .expect("a bundled filable year");
+        let st = EntryStates::package_only(year);
+        assert_eq!(
+            st.verdict,
+            ReturnVerdict::NotRun,
+            "no verdict was handed in"
+        );
+        let lines = st.lines();
+        assert!(!st.claims_computable(), "so it claims nothing: {lines:?}");
+        assert!(
+            lines[0].contains("return: not checked here"),
+            "it says which question it has not asked: {lines:?}"
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains(&format!("btctax report --tax-year {year}"))),
+            "…and names the command that decides it: {lines:?}"
+        );
+    }
+
+    /// ★★★ **FR-225 / FR-63 — EVERY LINE FITS THE FIXED PANE, ON EVERY VERDICT.**
+    ///
+    /// [`EntryStates::lines`] returns *lines* rather than one sentence precisely because the TUI's
+    /// status pane is a fixed 118 columns and does not wrap (`draw_edit.rs` draws each as one
+    /// `Line`). FR-63: *"a fact that will not fit is added BESIDE it rather than by lengthening it."*
+    ///
+    /// **And it is written from a measurement, not a worry.** FR-225's first `NotRun` wording was two
+    /// lines, and `docs/examples-tui-walkthrough/j6/01` came back with the second one clipped at the
+    /// 118th column — *"…, which run"* — plus a section row pushed off the list to make room. The
+    /// golden caught it; nothing in this module could. This holds the budget for every arm so that the
+    /// next edit here cannot reintroduce it silently.
+    ///
+    /// **Plant:** lengthen any arm's text past the budget — this reds, before a golden has to.
+    #[test]
+    fn the_entry_lines_fit_the_fixed_pane() {
+        use btctax_core::tax::return_refuse::RefuseReason;
+        // The pane is 118 columns of border-to-border content and `draw_edit.rs` prefixes each line
+        // with two spaces, so this is what one line may occupy.
+        const BUDGET: usize = 118 - 2;
+        let verdicts = [
+            ReturnVerdict::NotRun,
+            ReturnVerdict::Computes,
+            // ★ A LONG reason name and an enormous detail: the detail must not reach the line at all,
+            //   and the reason must fit beside the longest interview clause.
+            ReturnVerdict::Refuses {
+                reason: RefuseReason::DigitalAssetAnswerContradictsLedger {
+                    date: "2024-05-01".into(),
+                    venue: "exchange:river:default".into(),
+                    kind: "a disposition",
+                },
+                detail: "x".repeat(2000),
+            },
+        ];
+        for year in bundled_years() {
+            for (complete, blocking) in [
+                (None, None),
+                (Some(true), Some(0)),
+                (Some(false), Some(999)),
+            ] {
+                for verdict in &verdicts {
+                    let st = EntryStates {
+                        interview_complete: complete,
+                        blocking,
+                        ..EntryStates::package_only(*year)
+                    }
+                    .with_return_verdict(verdict.clone());
+                    for l in st.lines() {
+                        assert!(
+                            l.chars().count() <= BUDGET,
+                            "TY{year} / {verdict:?}: {} columns exceeds the pane's {BUDGET}, so it \
+                             would be CLIPPED (FR-63): {l}",
+                            l.chars().count()
+                        );
+                    }
+                }
+            }
+        }
     }
 }

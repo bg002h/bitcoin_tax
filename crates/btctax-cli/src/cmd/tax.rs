@@ -870,7 +870,17 @@ pub fn report_tax_year(
                         crate::render::provenance_label(provenance),
                         refusal.reason,
                         refusal.detail,
-                        crate::render::render_interview_block(&ri, Some(params)),
+                        // ★★★ FR-225 — the refusal `screen_absolute` just raised goes INTO the
+                        //     panel. It used to be printed three lines above a *"FORGOING — lawful
+                        //     to skip"* list that contained the very answer refusing the return.
+                        crate::render::render_interview_block(
+                            &ri,
+                            Some(params),
+                            btctax_core::tax::interview_state::ReturnVerdict::Refuses {
+                                reason: refusal.reason.clone(),
+                                detail: refusal.detail.clone(),
+                            },
+                        ),
                     )),
                     None => {
                         // P5: the full-return block carries the §3.4 conservative-omission advisories
@@ -918,7 +928,14 @@ pub fn report_tax_year(
                         //     LAST, *"after the existing chains"*, because it is about the INPUTS
                         //     rather than the figures — the filer reads it having just seen what
                         //     was computed from them.
-                        block.push_str(&crate::render::render_interview_block(&ri, Some(params)));
+                        // ★ FR-225 — this arm IS `screen_absolute` returning `None`, downstream of
+                        //   `resolve_and_screen`'s input and compute-dependent tiers: the whole chain
+                        //   ran and raised nothing, so the panel may make the strong claim.
+                        block.push_str(&crate::render::render_interview_block(
+                            &ri,
+                            Some(params),
+                            btctax_core::tax::interview_state::ReturnVerdict::Computes,
+                        ));
                         Some(block)
                     }
                 }

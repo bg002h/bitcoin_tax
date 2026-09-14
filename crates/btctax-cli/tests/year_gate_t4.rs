@@ -441,8 +441,8 @@ fn a_params_less_year_can_be_interview_complete_while_the_return_is_not_computab
         "every live declaration is answered, so the INTERVIEW is complete"
     );
     assert!(
-        !st.return_computable,
-        "and the RETURN is still not computable — that is the point"
+        !st.package_computes,
+        "and the year's PACKAGE is still not bundled — that is the point"
     );
     let sentence = st.sentence();
     assert!(
@@ -454,17 +454,369 @@ fn a_params_less_year_can_be_interview_complete_while_the_return_is_not_computab
 
     // The paired half: a year WITH its package says so, and drops the waiting clause.
     let st24 = EntryStates::for_year(2024, Some(&ri));
-    assert!(st24.return_computable);
+    assert!(st24.package_computes);
     assert!(
         !st24.sentence().contains("wait for the TY2024 package"),
         "a year whose package is here must not tell the filer to wait: {}",
         st24.sentence()
+    );
+    // ★★★ FR-225 — and it does NOT therefore claim the RETURN computes. `for_year` runs no refusal
+    //     chain, so its verdict is `NotRun`, and a surface that has not computed the return may not say
+    //     it computes. (The claim/verdict agreement itself is killed in `year_readiness`'s own tests.)
+    assert!(
+        !st24.claims_computable(),
+        "a bundled package is not a computed return: {}",
+        st24.sentence()
+    );
+    assert!(
+        st24.sentence().contains("return: not checked here"),
+        "…and it says which question it has not asked: {}",
+        st24.sentence()
+    );
+    assert!(
+        btctax_cli::year_readiness::EntryStates::for_year(2024, Some(&ri))
+            .with_return_verdict(btctax_cli::year_readiness::ReturnVerdict::Computes)
+            .claims_computable(),
+        "and a caller that DID run the chain gets the strong claim"
     );
 
     // A year the filer has not started asserts NEITHER state of a return that does not exist.
     let none = EntryStates::for_year(NO_PACKAGE_YEAR, None);
     assert_eq!(none.interview_complete, None);
     assert!(none.sentence().contains("interview: not started"));
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// 1b. FR-225 — the entry line is the RETURN'S verdict, and the exit it names reaches the question.
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// A TY2024 return that ITEMIZES because of one $40,000 cash gift, with the §170(f)(8)(A)
+/// acknowledgment question **unanswered** — FR-225's reproduction, verbatim.
+///
+/// ★ $50,000 of W-2 wages so the §170(b) 60%-of-AGI ceiling admits $30,000 of the gift: that clears
+///   TY2024's $14,600 standard deduction, so `ar.deduction_is_itemized` is TRUE, which is the first
+///   conjunct of the `screen_absolute` gate. A gift on a $0-AGI return would defer entirely and take
+///   the standard deduction, and the gate would not fire — the fixture has to earn the refusal.
+/// `answered`: `None` leaves the leaf empty and records `Declined` (a bare Enter at the prompt);
+/// `Some(false)` stores the explicit *no* and records `Given`. **Both refuse**, which is the half the
+/// panel mislabelled as *FORGOING*.
+fn ty2024_itemizer_with_an_unresolved_cwa(
+    answered: Option<bool>,
+) -> btctax_core::tax::return_inputs::ReturnInputs {
+    use btctax_core::tax::return_inputs::{
+        CharitableClass, CharitableGift, Owner, ReturnInputs, ScheduleAInputs, W2,
+    };
+    let mut h = btctax_core::tax::testonly::not_a_dependent();
+    h.taxpayer.date_of_birth = Some(time::macros::date!(1980 - 05 - 05));
+    let mut ri = ReturnInputs {
+        tax_year: 2024,
+        filing_status: btctax_core::FilingStatus::Single,
+        header: h,
+        w2s: vec![W2 {
+            owner: Owner::Taxpayer,
+            box1_wages: rust_decimal_macros::dec!(50000),
+            box3_ss_wages: rust_decimal_macros::dec!(50000),
+            box5_medicare_wages: rust_decimal_macros::dec!(50000),
+            ..Default::default()
+        }],
+        schedule_a: Some(ScheduleAInputs {
+            charitable: vec![CharitableGift {
+                class: CharitableClass::Cash60,
+                amount: rust_decimal_macros::dec!(40000),
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+    // ★★★ **THE §170(f)(8) ANSWER, AND IT MUST BE *RECORDED*, or the test does not reproduce FR-225.**
+    //
+    //     Both legs of the gate refuse — `return_1040.rs` has a `None` arm and a `Some(false)` arm —
+    //     but the BRICK is not the value, it is the RECORD. `income answer` skips a question whose
+    //     `answer_status` is `Given` or `Declined` (FR-109's `needs_asking`); a question with no
+    //     record at all is `NeverAsked` and is asked anyway. So a fixture that merely left the leaf
+    //     `None` would be asked the question by the *unfixed* command too, and the kill would be
+    //     vacuous. `record_answer` is what a bare Enter at the prompt writes, and `Declined` is the
+    //     state it writes — *asked, and passed over* — which is precisely the shipped state a filer
+    //     reaches by running this command once.
+    let sk = btctax_core::tax::questions::SKIPPABLE_QUESTIONS
+        .iter()
+        .find(|s| s.id == btctax_core::tax::questions::SkippableId::CharitableCwaObtained)
+        .expect("the §170(f)(8) skippable is in the registry");
+    if let Some(v) = answered {
+        (sk.set_bool)(&mut ri, v);
+    }
+    btctax_core::tax::provenance::record_answer(
+        &mut ri,
+        btctax_core::tax::provenance::AnswerKey::Skippable(sk.id),
+        sk.prompt,
+        time::macros::date!(2026 - 08 - 01),
+        if answered.is_some() {
+            btctax_core::tax::provenance::AnswerState::Given
+        } else {
+            btctax_core::tax::provenance::AnswerState::Declined
+        },
+    );
+    ri
+}
+
+/// One bare Enter per ask: for a declaration already on file that KEEPS the answer
+/// (`parse_yes_no("", Some(v)) == Some(v)`), for a skippable it skips, for a money figure it keeps.
+/// `cwa` is what the §170(f)(8) prompt gets — `None` for a bare Enter (still unresolved), `Some("y")`
+/// to cure it.
+fn enters_with_cwa(asks: &[cmd::answer::Ask], cwa: Option<&str>) -> String {
+    use btctax_core::tax::questions::SkippableId;
+    asks.iter()
+        .map(|a| match (a, cwa) {
+            (cmd::answer::Ask::Skippable(sk), Some(reply))
+                if sk.id == SkippableId::CharitableCwaObtained =>
+            {
+                format!("{reply}\n")
+            }
+            _ => "\n".to_string(),
+        })
+        .collect()
+}
+
+/// ★★★ **FR-225 — ⛔ THE LIVE DEFECT, DRIVEN THROUGH THE REAL COMMAND ON THE YEAR THAT FILES.**
+///
+/// Shipped behaviour, TY2024, stock code, no substitutions: `income answer` printed
+/// **`interview: complete · return: computable`** and exited 0, while `report` printed
+/// **`NOT COMPUTABLE [CharitableCwaUnresolved]`** and `export-irs-pdf` wrote nothing. The false clause
+/// was rendered from `YearReadiness::params` — *does this BUILD bundle the year* — which is not
+/// *does THIS RETURN compute*.
+///
+/// **All three of FR-225's defects are killed here, on one run:**
+/// 1. **the false claim** — the printed line must be the RETURN's verdict, and it is asserted
+///    *against `report`'s own dual-report block over the same vault*, so the two surfaces cannot
+///    drift apart again without this reddening;
+/// 2. **the exit that could not exit** — the refusal says *"Run `btctax income answer`"*, and that
+///    command must ASK the question. Before FR-225 it asked it zero times, because an answer was on
+///    file and FR-109's `needs_asking` skipped it; only the unmentioned `--re-answer` reached it;
+/// 3. **the misclassification** — a refusal firing on both `None` and `Some(false)` is not
+///    *FORGOING*, so the panel must list it as REFUSING and must not leave *"lawful to skip"*
+///    standing unqualified.
+///
+/// **Plants, each reddening its own assertion:**
+/// - `EntryStates::lines()` printing `computable` from `package_computes` ⇒ (1) reds;
+/// - `return_verdict` skipping the `screen_absolute` leg ⇒ (1) and (3) red;
+/// - deleting the scope escalation in `answer_return_inputs` ⇒ (2) reds — the CWA prompt never appears;
+/// - deleting section 7 of `interview_state_with` ⇒ (3) reds.
+#[test]
+fn fr225_income_answer_states_the_returns_own_verdict_and_reaches_the_refusing_question() {
+    use btctax_core::tax::questions::{SkippableId, SKIPPABLE_QUESTIONS};
+    let (_dir, vault) = fresh_vault();
+    let ri = ty2024_itemizer_with_an_unresolved_cwa(None);
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::set(s.conn(), 2024, &ri).unwrap();
+        s.save().unwrap();
+    }
+
+    // ── THE PREMISE, measured rather than assumed: `report` refuses this return by name. ─────────
+    let dual_of = |v: &std::path::PathBuf| -> String {
+        cmd::tax::report_tax_year(v, &pp(), 2024, rust_decimal_macros::dec!(0))
+            .unwrap()
+            .dual_report
+            .unwrap_or_default()
+    };
+    let dual = dual_of(&vault);
+    assert!(
+        dual.contains("NOT COMPUTABLE [CharitableCwaUnresolved]"),
+        "premise: `report` must refuse this return by name — if this fails the fixture stopped \
+         reproducing FR-225 and every assertion below is vacuous:\n{dual}"
+    );
+    // ── AND THE SAME CLASS ON `report`'S OWN BLOCK. §4.4 prints the answer panel on the refusal
+    //    branch precisely because *"a return that will not compute is exactly when a filer needs the
+    //    panel"* — and that panel was built by `interview_state_with_params`, which cannot see
+    //    `screen_absolute`. So the §170(f)(8) question was listed under *"FORGOING — lawful to skip"*
+    //    a few lines BELOW `NOT COMPUTABLE [CharitableCwaUnresolved]`, in one block, on one screen.
+    //
+    // ★ Plant: hand `ReturnVerdict::NotRun` to `render_interview_block` at `cmd/tax.rs`'s refusal
+    //   branch — both of these red.
+    assert!(
+        dual.contains("— an answer already given that stops the return"),
+        "FR-225: `report`'s own panel must LIST the refusal printed directly above it:\n{dual}"
+    );
+    assert!(
+        dual.contains("`lawful to skip` assumes a return that FILES"),
+        "…and must not leave `FORGOING — lawful to skip` standing over the answer that is refusing \
+         the return:\n{dual}"
+    );
+
+    // ── RUN 1: the filer's FIRST session. Every question is `NeverAsked`, so all of them are put and
+    //    a bare Enter at the §170(f)(8) prompt records `Declined`. This is not scaffolding — it is
+    //    how the shipped brick is REACHED, and building the record by hand instead would be a
+    //    fixture asserting its own premise. ────────────────────────────────────────────────────────
+    let run = |ri: &btctax_core::tax::return_inputs::ReturnInputs, cwa: Option<&str>, day| {
+        let script = enters_with_cwa(&btctax_cli::cmd::answer::live_questions(ri), cwa);
+        let mut keystrokes = script.as_bytes();
+        let mut screen: Vec<u8> = Vec::new();
+        cmd::answer::answer_return_inputs(
+            &vault,
+            &pp(),
+            2024,
+            day,
+            &mut keystrokes,
+            &mut screen,
+            cmd::answer::AnswerOptions::default(), // the DEFAULT scope — never `--re-answer`
+        )
+        .unwrap();
+        String::from_utf8(screen).unwrap()
+    };
+    let stored = || {
+        let s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::get(s.conn(), 2024)
+            .unwrap()
+            .unwrap()
+    };
+    let first = run(&ri, None, time::macros::date!(2026 - 09 - 01));
+    assert!(
+        first.contains("return: NOT computable [CharitableCwaUnresolved]"),
+        "even the first session must state the RETURN's verdict:\n{first}"
+    );
+
+    // ── THE BRICK, MEASURED. This is the whole of defect 2: after that session every question has a
+    //    record, so FR-109's `needs_asking` skips them all — and `btctax income answer`, the command
+    //    the refusal itself names, asked the question ZERO times. ─────────────────────────────────
+    let bricked = stored();
+    assert_eq!(
+        btctax_core::tax::provenance::answer_status(
+            &bricked,
+            &btctax_core::tax::provenance::AnswerKey::Skippable(SkippableId::CharitableCwaObtained),
+        ),
+        btctax_core::tax::provenance::AnswerStatus::Declined,
+        "premise: the bare Enter recorded `Declined` — asked, and passed over"
+    );
+    assert!(
+        btctax_cli::cmd::answer::live_questions(&bricked)
+            .iter()
+            .all(|a| !btctax_cli::cmd::answer::needs_asking(&bricked, a)),
+        "premise: nothing is left for the DEFAULT scope to ask — that is the brick FR-225 names"
+    );
+    assert!(
+        dual_of(&vault).contains("NOT COMPUTABLE [CharitableCwaUnresolved]"),
+        "…while the return still does not compute"
+    );
+
+    // ── RUN 2: the session a filer reaches by obeying the refusal's own instruction. ─────────────
+    let screen = run(&bricked, None, time::macros::date!(2026 - 09 - 02));
+
+    // ── DEFECT 1: the false claim. ───────────────────────────────────────────────────────────────
+    assert!(
+        !screen.contains("return: computable"),
+        "FR-225: a return `report` refuses must NEVER be announced as computable:\n{screen}"
+    );
+    assert!(
+        screen.contains("interview: complete"),
+        "premise: the INTERVIEW really is complete — the two states are independent, and the defect \
+         was answering the second question with the first:\n{screen}"
+    );
+    // ★★ THE AGREEMENT, asserted between the two surfaces rather than against a string either of
+    //    them happens to print today: whichever reason `report` gives, `income answer` gives it too.
+    let reason_from_report = dual
+        .split("NOT COMPUTABLE [")
+        .nth(1)
+        .and_then(|t| t.split(']').next())
+        .expect("the premise assertion above proves this parse");
+    assert!(
+        screen.contains(&format!("return: NOT computable [{reason_from_report}]")),
+        "the two surfaces must name the SAME refusal; report said [{reason_from_report}]:\n{screen}"
+    );
+
+    // ── DEFECT 2: the exit that could not exit. ──────────────────────────────────────────────────
+    let cwa_prompt = SKIPPABLE_QUESTIONS
+        .iter()
+        .find(|s| s.id == SkippableId::CharitableCwaObtained)
+        .expect("the §170(f)(8) skippable is in the registry")
+        .prompt;
+    assert!(
+        screen.contains(&cwa_prompt[..60]),
+        "FR-225: the refusal names `btctax income answer`, so THAT command must put the question \
+         again — with the answer on file it asked it ZERO times:\n{screen}"
+    );
+    assert!(
+        screen.contains("not your flag"),
+        "…and it must say WHY every question is being put again, rather than silently changing \
+         scope under the filer:\n{screen}"
+    );
+
+    // ── DEFECT 3: the misclassification. ─────────────────────────────────────────────────────────
+    // ★ The assertion is on the REFUSING **heading**, not on the bare word. Planting away section 7
+    //   of `interview_state_with` left this test green on `screen.contains("REFUSING")`, because the
+    //   FORGOING qualification line directly below says *"(see REFUSING above)"* — the test was
+    //   reading its own other fix. Found by running that plant, which is what plants are for.
+    assert!(
+        screen.contains("— an answer already given that stops the return"),
+        "a refusal firing on both `None` and `Some(false)` belongs under the REFUSING heading, with \
+         its own exit sentence:\n{screen}"
+    );
+    assert!(
+        screen.contains("contemporaneous written acknowledgment from the charitable organization"),
+        "…and the panel carries the refusal's OWN words, which hold the §170(f)(8)(A) cite and the \
+         cure:\n{screen}"
+    );
+    assert!(
+        !screen.contains("no answer refuses"),
+        "and the panel must not print a clean bill of health beside it:\n{screen}"
+    );
+    assert!(
+        screen.contains("`lawful to skip` assumes a return that FILES"),
+        "`FORGOING — lawful to skip` must not stand unqualified over a refusing return:\n{screen}"
+    );
+
+    // ── THE OTHER LEG, which is why *FORGOING* was the wrong label rather than merely an incomplete
+    //    one: an explicit, recorded *NO* refuses identically. `Some(false)` was counted as plainly
+    //    `answered` — not even listed — while the return would not compute. ──────────────────────
+    {
+        let no = ty2024_itemizer_with_an_unresolved_cwa(Some(false));
+        assert_eq!(
+            no.charitable_cwa_obtained,
+            Some(false),
+            "premise: the leaf holds an explicit NO"
+        );
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::set(s.conn(), 2024, &no).unwrap();
+        s.save().unwrap();
+        drop(s);
+        assert!(
+            dual_of(&vault).contains("NOT COMPUTABLE [CharitableCwaUnresolved]"),
+            "§170(f)(8)(A) refuses a stated NO exactly as it refuses silence"
+        );
+        let explicit_no = run(&no, None, time::macros::date!(2026 - 09 - 03));
+        assert!(
+            explicit_no.contains("return: NOT computable [CharitableCwaUnresolved]")
+                && explicit_no.contains("— an answer already given that stops the return"),
+            "…and the surface says so on the `Some(false)` leg too:\n{explicit_no}"
+        );
+    }
+
+    // ── AND THE PAIRED HALF: answering YES cures it, so none of the above is a gate that always
+    //    fires. Without this, an implementation that printed the refusal unconditionally would pass.
+    let screen2 = run(&stored(), Some("y"), time::macros::date!(2026 - 09 - 04));
+    // ★ Scoped to the AFTER panel, and that is not a convenience: the entry line and the BEFORE
+    //   panel of this session correctly still carry the refusal — the return was refusing when the
+    //   session opened. What the cure must change is the state the session LEFT.
+    let (before2, after2) = screen2
+        .split_once("The answer panel (after)")
+        .expect("the after panel is always printed");
+    assert!(
+        before2.contains("CharitableCwaUnresolved"),
+        "premise: the session still OPENED on a refusing return:\n{before2}"
+    );
+    assert!(
+        !after2.contains("REFUSING") && !after2.contains("CharitableCwaUnresolved"),
+        "answering YES must clear it — the `after` panel is recomputed over the answers just \
+         given:\n{after2}"
+    );
+    assert!(
+        !after2.contains("`lawful to skip` assumes a return that FILES"),
+        "…and the FORGOING heading's claim is no longer contradicted:\n{after2}"
+    );
+    assert!(
+        !dual_of(&vault).contains("NOT COMPUTABLE"),
+        "…and `report` agrees, which is the whole point of one decider"
+    );
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════

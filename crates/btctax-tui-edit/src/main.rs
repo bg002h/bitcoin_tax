@@ -13438,9 +13438,19 @@ mod tests {
     /// ★★★ **T4 / `SPEC_interview.md` R11 — THE TWO ENTRY STATES ARE ON THE ENTRY SCREEN, and a
     ///     year whose package has not arrived says so in R11's own words.**
     ///
-    /// The kill is the PAIR: the same return, complete either way, renders *"return: computable"* on
-    /// TY2024 and *"return: NOT computable"* plus R11's sentence on TY2026. A test that only checked
-    /// the params-less year would pass on a screen that always said the interview was blocked.
+    /// The kill is the PAIR: the same return, complete either way, renders one second clause on TY2024
+    /// and *"return: NOT computable"* plus R11's sentence on TY2026. A test that only checked the
+    /// params-less year would pass on a screen that always said the interview was blocked.
+    ///
+    /// ★★★ **FR-225 — THE TY2024 CLAUSE CHANGED, and the change is the finding.** This used to assert
+    /// *"interview: complete · return: computable"*. That sentence was rendered from
+    /// `YearReadiness::params` — *does this BUILD bundle the year* — and was therefore **not a claim
+    /// about the return**: a TY2024 return whose §170(f)(8)(A) acknowledgment is unresolved refuses at
+    /// `screen_absolute`, and this screen announced it as computable anyway. **This pane cannot know**:
+    /// it holds no `LedgerState`, so it can run neither `screen_compute_dependent` nor
+    /// `screen_absolute`. So it now states the build fact it DOES know and names the command that
+    /// decides the rest — a weaker claim, and a true one. The strong word is reachable only through
+    /// `EntryStates::with_return_verdict`, which `btctax income answer` supplies.
     #[test]
     fn the_tax_inputs_entry_screen_states_both_year_gate_states() {
         use btctax_core::tax::return_inputs::ReturnInputs;
@@ -13488,8 +13498,18 @@ mod tests {
 
         let ready = screen_for(2024, false);
         assert!(
-            ready.contains("interview: complete · return: computable"),
-            "a year WITH its package states both, and the second is yes:\n{ready}"
+            ready.contains("interview: complete · return: not checked here"),
+            "a year WITH its package states both, and the second is what this pane can actually \
+             know (FR-225):\n{ready}"
+        );
+        assert!(
+            !ready.contains("return: computable"),
+            "FR-225: a pane that holds no ledger may not announce that the RETURN computes — it \
+             cannot run the screens that decide it:\n{ready}"
+        );
+        assert!(
+            ready.contains("btctax report --tax-year 2024"),
+            "…and it names the command that does decide it, rather than leaving a bare gap:\n{ready}"
         );
         assert!(
             !ready.contains("wait for the TY2024 package"),

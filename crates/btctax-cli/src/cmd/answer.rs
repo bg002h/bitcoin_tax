@@ -13,6 +13,7 @@ use crate::{return_inputs, CliError, Session};
 use btctax_core::tax::dependent_gates::{
     gate_is_answered, DependentGateQuestion, GateKind, DEPENDENT_GATES,
 };
+use btctax_core::tax::interview_state::ReturnVerdict;
 use btctax_core::tax::provenance::{
     answer_status, dependent_ssn_hash, record_answer, AnswerKey, AnswerState, AnswerStatus,
     DependentGate,
@@ -476,16 +477,42 @@ pub fn panel_lines(
         // ★★★ **AND THE BOUNDARY, STATED** (T12 fold, seam review I-1). `interview_state` now ends
         //     by running the commit screen's VALUE tier, so the sentence above is true of every
         //     `RefuseReason` that tier raises rather than of the five the registries happened to
-        //     model. What it still cannot run is the tier that needs the year's TAX TABLE — the
-        //     walk holds `FullReturnParams` at most, never a `TaxTable` — so those rules are met at
-        //     commit and nowhere earlier. A surface that asserted completeness it does not have is
-        //     the finding; saying which half it has is the fix, and the sentence rides WITH the
-        //     claim so neither can be edited away without the other.
-        out.push(
-            "  (the commit screen runs a few further checks that compare an amount against a \
-             figure in the year's tax table; those run at commit, and only there.)"
-                .to_string(),
-        );
+        //     model. A surface that asserted completeness it does not have is the finding; saying
+        //     which half it has is the fix, and the sentence rides WITH the claim so neither can be
+        //     edited away without the other.
+        //
+        // ★★★ **FR-225 — AND THE BOUNDARY WAS WRONG, WHICH IS WHY THE CLAIM WAS BELIEVED.** It named
+        //     only the tier needing the year's TAX TABLE. Two more tiers are outside this walk and
+        //     neither is a table rule: `screen_compute_dependent` needs the LEDGER, and
+        //     `screen_absolute` needs the ASSEMBLED return (`ar.deduction_is_itemized`, the computed
+        //     §63(e) election). `CharitableCwaUnresolved` lives in the last of those — so *"no answer
+        //     refuses"* was printed, in full, over a TY2024 return `btctax report` would not compute.
+        //     A boundary that names the wrong blind spot is worse than none: it reads as a complete
+        //     accounting of what is missing.
+        //
+        // ★★ So the sentence is now DERIVED from what the walk was actually given
+        //    ([`ReturnVerdict`]). A caller that ran the whole chain has earned the strong claim; one
+        //    that did not says so, and names the command that decides it.
+        out.push(match st.verdict {
+            btctax_core::tax::interview_state::ReturnVerdict::Computes => {
+                "  (and the return itself computes: the input, ledger and assembled-return refusal \
+                 screens were all run, and none refused.)"
+                    .to_string()
+            }
+            // Unreachable while `open_items() == 0` — a refusing verdict is pushed into `refusing`
+            // by section 7 of the walk — and stated rather than merged into the arm below, because
+            // silently treating "it refused" as "we did not look" is the FR-225 defect itself.
+            btctax_core::tax::interview_state::ReturnVerdict::Refuses { .. } => {
+                "  (the return itself does NOT compute — see REFUSING above.)".to_string()
+            }
+            btctax_core::tax::interview_state::ReturnVerdict::NotRun => {
+                "  (this is what the ANSWERS say. Three further refusal screens are not run here: \
+                 the ones comparing an amount against a figure in the year's tax table, the ones \
+                 reading the crypto ledger, and the ones reading the assembled return — including \
+                 §170(f)(8)(A)'s. `btctax report --tax-year <year>` runs all three.)"
+                    .to_string()
+            }
+        });
     }
     if !st.blocking.is_empty() {
         out.push(format!(
@@ -601,6 +628,20 @@ pub fn forgoing_lines(st: &btctax_core::tax::interview_state::InterviewState) ->
         "  FORGOING ({}) — lawful to skip; each one costs YOU, not the Treasury:",
         st.forgoing.len()
     )];
+    // ★★★ **FR-225 DEFECT 3 — *lawful to skip* IS A CLAIM, AND BESIDE A REFUSING RETURN IT IS FALSE.**
+    //
+    //     The §170(f)(8)(A) question is a class-(B) skippable, correctly: its `live` sees neither the
+    //     ledger nor the computed §63(e) election, so a class-(A) declaration would refuse every
+    //     standard-deduction filer. But `CharitableCwaUnresolved` fires on **both** `None` and
+    //     `Some(false)` — so where the gate does fire, the silence this heading calls lawful is exactly
+    //     what stops the return, and FOLLOWUPS FR-225 filed the *"FORGOING — lawful to skip"* label as
+    //     simply wrong. The class was never the error; the error was that no surface on the `income
+    //     answer` path ran the screen that decides when the label stops applying.
+    //
+    // ★ Keyed to a REFUSING verdict, not to `!refusing.is_empty()` and not to `NotRun`: a
+    //   registry-modelled refusal already names its own answer, and the packet manifest and commit
+    //   modal render these same lines holding no verdict at all — qualifying their heading would
+    //   annotate a check nobody asked them to run.
     for f in &st.forgoing {
         let mark = if f.declined { " (declined)" } else { "" };
         // ★ Plain `$N` rather than `advisories::fmt_usd`, which is `pub(crate)` to core.
@@ -609,22 +650,95 @@ pub fn forgoing_lines(st: &btctax_core::tax::interview_state::InterviewState) ->
             .map_or_else(String::new, |s| format!(" — up to ${s}"));
         out.push(format!("    • {}{mark}{size}", f.prompt));
     }
+    // ★ Placed after the list, like BLOCKING's own `↑` note: the arrow refers back to the heading's
+    //   claim, and a qualification wedged between a heading and its items reads as an item.
+    if st.forgo_label_is_contradicted() {
+        out.push(
+            "  ↑ `lawful to skip` assumes a return that FILES, and this one does NOT compute (see \
+             REFUSING above). Some of these are mandatory only once the computed return shows they \
+             bite — §170(f)(8)(A)'s acknowledgment is the standing case."
+                .to_string(),
+        );
+    }
     out
 }
 
-/// The R12 panel for `ri`, with the year's package where there is one.
+/// ★★★ **FR-225 — THE RETURN'S OWN VERDICT, composed exactly as `btctax report` composes it.**
+///
+/// **The defect this exists to close.** `income answer` printed `interview: complete · return:
+/// computable` and exited 0 on a stored TY2024 return that `btctax report` refused
+/// (`CharitableCwaUnresolved`) and `export-irs-pdf` would not write. The second clause was being
+/// rendered from `YearReadiness::params` — *does this BUILD bundle the year* — which is a different
+/// question from *does THIS RETURN compute*, and no surface on this path ever asked the second one.
+///
+/// ★★ **The chain is `report`'s, verbatim and in its order** (`cmd/tax.rs`: input-screenable →
+/// compute-dependent → assembled), because two orders would be two answers. `screen_absolute` is the
+/// tier that matters here: its rules turn on `ar.deduction_is_itemized`, the COMPUTED §63(e) election,
+/// and the §170(f)(8)(A) gate refuses on **both** `None` and `Some(false)` — so nothing a predicate
+/// over `ReturnInputs` can see would ever have found it.
+///
+/// ★★ **Every missing input yields [`ReturnVerdict::NotRun`], never `Computes`.** Authoring must work
+/// on a year with no package, no year record and an unprojectable vault (this command already tolerates
+/// all three — R9's *"authoring proceeds in parallel with an unresolved ledger"*), and the one outcome
+/// that must be unreachable is claiming a return computes because we could not check it. Fail closed on
+/// the CLAIM, fail open on the interview.
+fn return_verdict(
+    s: &Session,
+    ri: &ReturnInputs,
+    year: i32,
+    params: Option<&FullReturnParams>,
+) -> ReturnVerdict {
+    use btctax_core::tax::tables::TaxTables as _;
+    // The package half. `params` is already resolved by the caller; the TaxTable is this tier's own.
+    let Some(params) = params else {
+        return ReturnVerdict::NotRun;
+    };
+    let tables = btctax_adapters::BundledTaxTables::load();
+    let Some(table) = tables.table_for(year) else {
+        return ReturnVerdict::NotRun;
+    };
+    // ★ `regime_for`, not `regime_or_refuse`: a year with no bundled record is an honest unknown on an
+    //   AUTHORING command, exactly as the Step 0 panel above treats it — and `screen_absolute` needs a
+    //   concrete regime, so without one there is no verdict to state.
+    let Some(regime) = crate::year_readiness::regime_for(year) else {
+        return ReturnVerdict::NotRun;
+    };
+    // ★ A projection failure is not fatal here either. It costs the verdict, not the session.
+    let Ok((state, _)) = s.project() else {
+        return ReturnVerdict::NotRun;
+    };
+    let refusal = btctax_core::tax::return_refuse::screen_inputs(ri, table, params)
+        .or_else(|| {
+            btctax_core::tax::return_1040::screen_compute_dependent(ri, &state, year, params)
+        })
+        .or_else(|| {
+            let ar = btctax_core::assemble_absolute(ri, &state, params, table, year);
+            btctax_core::screen_absolute(ri, &ar, params, &state, year, regime)
+        });
+    match refusal {
+        Some(r) => ReturnVerdict::Refuses {
+            reason: r.reason,
+            detail: r.detail,
+        },
+        None => ReturnVerdict::Computes,
+    }
+}
+
+/// The R12 panel for `ri`, with the year's package where there is one AND the return's own verdict.
 ///
 /// ★ Two entry points in core (`interview_state` / `interview_state_with_params`) exist precisely so
 ///   the *waiting* / *blocking* split is decided by whether the caller HOLDS the package — and this
 ///   is the one production caller that knows.
+///
+/// ★★★ **FR-225 — and it is also the one production caller that can COMPUTE the return**, so it uses
+///   the third entry point: the panel's *refusing* list now covers the tiers a `&ReturnInputs` cannot
+///   reach, and `panel_lines`' completeness sentence is earned rather than assumed.
 fn panel_state(
     ri: &ReturnInputs,
     params: Option<&FullReturnParams>,
+    verdict: ReturnVerdict,
 ) -> btctax_core::tax::interview_state::InterviewState {
-    match params {
-        Some(p) => btctax_core::tax::interview_state::interview_state_with_params(ri, p),
-        None => btctax_core::tax::interview_state::interview_state(ri),
-    }
+    btctax_core::tax::interview_state::interview_state_with_verdict(ri, params, verdict)
 }
 
 /// ★★★ **T4 / `SPEC_interview.md` R11 — WHERE `income answer` WRITES.**
@@ -770,6 +884,59 @@ pub fn answer_return_inputs(
             .cloned()
     };
 
+    // ★★★ **FR-225 — THE RETURN'S OWN VERDICT, BEFORE THE FIRST QUESTION.**
+    //
+    //     Computed once here (and again after the last answer) because two different things are built
+    //     from it: the entry line's second clause, which used to assert `return: computable` off a
+    //     BUILD fact, and the answer panel's *refusing* list, which could not see any tier needing the
+    //     ledger or the assembled return. See [`return_verdict`].
+    let verdict = return_verdict(&s, &ri, year, params.as_ref());
+
+    // ★★★ **FR-225 DEFECT 2 — THE EXIT THAT COULD NOT EXIT, closed by making the named command DO
+    //     what it says.**
+    //
+    //     `screen_absolute`'s §170(f)(8)(A) refusal tells the filer to *"Run `btctax income answer`"*.
+    //     Once an answer is on file — and both `None`-then-declined and a plain `Some(false)` put one
+    //     there — FR-109's `needs_asking` skips the question, so that command asked it **zero times**.
+    //     The only thing that reached it was `--re-answer`, a flag named nowhere but in `cli.rs`'s help
+    //     text. The remedy the product printed did not work and the one that did was not printed: a
+    //     brick, and the same class as the refusal that does not refuse.
+    //
+    // ★★ **So a refusing return escalates the scope**, and the filer is TOLD that is what happened.
+    //    This is the fix at the end that the refusal names, rather than a re-wording of the refusal:
+    //    `btctax income answer` now reaches the question, so every printed copy of that remedy —
+    //    including the two in `return_1040.rs` that this parcel does not own — becomes true at once.
+    //
+    // ★★★ **AND IT IS GATED ON THE BRICK ITSELF, not on the refusal.** The escalation condition is
+    //     *the return refuses AND the default scope would ask NOTHING* — which is the defect,
+    //     stated. A first draft escalated on any refusal and broke FR-109's own contract, because
+    //     `screen_inputs` at the commit tier refuses an unanswered or reworded class-(A) declaration
+    //     too: every ordinary incomplete return would have been put through the whole registry, and
+    //     `a_reworded_question_is_asked_again_without_the_flag` — *"the flag is what changes the
+    //     behaviour"* — red on it. An unanswered declaration is already `blocking`, already asked and
+    //     already printed with its own prompt; there is no brick there to break.
+    //
+    // ★ **It then asks EVERY question rather than the one at fault, and that is a stated boundary,
+    //   not an oversight.** Attributing a computed refusal back to one registry answer needs a
+    //   `RefuseReason → PanelItem` map; the total one is `btctax-input-form`'s `attribute()`, which
+    //   sits in a crate above this one and is a DEV-only dependency here. In the state this fires in
+    //   the alternative is asking nothing at all, so asking too much costs the filer keystrokes and
+    //   asking too little leaves the brick. The direction is not a close call.
+    let default_scope_asks_nothing = !live_questions_with(&ri, params.as_ref())
+        .iter()
+        .any(|a| needs_asking(&ri, a));
+    let escalated_by = match (scope, verdict.refusal()) {
+        (AskScope::StillNeeded, Some((reason, _))) if default_scope_asks_nothing => {
+            Some(format!("{reason:?}"))
+        }
+        (AskScope::StillNeeded | AskScope::Every, _) => None,
+    };
+    let scope = if escalated_by.is_some() {
+        AskScope::Every
+    } else {
+        scope
+    };
+
     // ★ r3 NIT-2 — the questions say "in this tax year" but the registry prompts are `&'static str` and
     // cannot interpolate the year; a one-line banner anchors them so the filer need not hold it in their head.
     writeln!(out, "Answering full-return questions for tax year {year}:")?;
@@ -799,13 +966,25 @@ pub fn answer_return_inputs(
                  including the ones already answered. Press Enter to keep the answer shown.)",
         }
     )?;
+    // ★★★ FR-225 — and WHY the scope is `Every` when the filer did not ask for it. Printed here, beside
+    //     the sentence describing the scope, so the two cannot be read as contradicting each other.
+    if let Some(reason) = &escalated_by {
+        writeln!(
+            out,
+            "  ↑ not your flag: the {year} return does NOT compute [{reason}] and the answer that \
+             refuses is already on file, so skipping the answered questions would skip the one you \
+             came here to change."
+        )?;
+    }
     // ★★★ T4/R11 — THE YEAR GATE, stated before the first question: which of the two states this
     //     year has, in R11's own words, so a filer on a params-less year knows that authoring and
     //     saving work while computing and committing wait for the package.
     writeln!(
         out,
         "{}",
-        crate::year_readiness::EntryStates::for_year(year, Some(&ri)).sentence()
+        crate::year_readiness::EntryStates::for_year(year, Some(&ri))
+            .with_return_verdict(verdict.clone())
+            .sentence()
     )?;
     if into_draft {
         writeln!(
@@ -863,7 +1042,7 @@ pub fn answer_return_inputs(
     // ★★★ R12 / §4.2 — THE PANEL, BEFORE the first question.
     // ★ T7 — with the year's package where there is one, so a params-quoting gate is listed as
     //   BLOCKING (its words can be stated) rather than as *waiting* on a year that has arrived.
-    write_panel(out, &panel_state(&ri, params.as_ref()), "before")?;
+    write_panel(out, &panel_state(&ri, params.as_ref(), verdict), "before")?;
 
     // ★★★ **R3 / T5 — ASKING IS A SWEEP, NOT A SNAPSHOT.**
     //
@@ -1355,7 +1534,14 @@ pub fn answer_return_inputs(
 
     // ★★★ R12 / §4.2 — THE PANEL, AFTER the last question. Printed BEFORE the write, so a filer
     //     whose session ends in a refusing answer sees it while they are still at the keyboard.
-    write_panel(out, &panel_state(&ri, params.as_ref()), "after")?;
+    // ★★★ FR-225 — RE-COMPUTED over the answers just given, so a session that CURED the refusal shows
+    //     a clean panel and one that did not still shows it. The `before` verdict would freeze either.
+    let verdict_after = return_verdict(&s, &ri, year, params.as_ref());
+    write_panel(
+        out,
+        &panel_state(&ri, params.as_ref(), verdict_after),
+        "after",
+    )?;
 
     if into_draft {
         // ★★★ R11 — the draft, never `return_inputs::set`. The draft is invisible to `resolve.rs`
@@ -2728,7 +2914,12 @@ mod tests {
         let p = btctax_core::tax::testonly::ty2024_params();
 
         let mut screen: Vec<u8> = Vec::new();
-        write_panel(&mut screen, &panel_state(&ri, Some(&p)), "before").unwrap();
+        write_panel(
+            &mut screen,
+            &panel_state(&ri, Some(&p), ReturnVerdict::NotRun),
+            "before",
+        )
+        .unwrap();
         let with_package = String::from_utf8(screen).unwrap();
         assert!(with_package.contains("NOT COMPUTED"), "{with_package}");
         assert!(with_package.contains("child tax credit"), "{with_package}");
@@ -2742,7 +2933,12 @@ mod tests {
         );
 
         let mut screen: Vec<u8> = Vec::new();
-        write_panel(&mut screen, &panel_state(&ri, None), "before").unwrap();
+        write_panel(
+            &mut screen,
+            &panel_state(&ri, None, ReturnVerdict::NotRun),
+            "before",
+        )
+        .unwrap();
         let no_package = String::from_utf8(screen).unwrap();
         assert!(no_package.contains("NOT COMPUTED"), "{no_package}");
         assert!(
@@ -2758,7 +2954,12 @@ mod tests {
         let mut plain = single();
         btctax_core::tax::testonly::answer_all_live_declarations(&mut plain);
         let mut screen: Vec<u8> = Vec::new();
-        write_panel(&mut screen, &panel_state(&plain, Some(&p)), "before").unwrap();
+        write_panel(
+            &mut screen,
+            &panel_state(&plain, Some(&p), ReturnVerdict::NotRun),
+            "before",
+        )
+        .unwrap();
         assert!(!String::from_utf8(screen).unwrap().contains("NOT COMPUTED"));
     }
 

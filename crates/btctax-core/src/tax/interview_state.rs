@@ -27,12 +27,38 @@
 //! | live, answered, **and the answer refuses** | **refusing**, with the refusal's own exit sentence |
 //! | live, class (B), `Declined` | **forgoing, marked *(declined)*** |
 //! | live but **unstatable** — the prompt must quote a year-package figure that has not arrived | **waiting** |
+//! | the COMPUTED return refuses, for a reason no walk over `ReturnInputs` can reach | **refusing**, from [`ReturnVerdict`] |
+//!
+//! ★★★ **FR-225 — AND THE EIGHTH STATE, because seven were not enough.** The walk plus
+//! `screen_param_free` still sees only what `ReturnInputs` (and at most the year's
+//! `FullReturnParams`) can decide. Three refusal tiers need more: `screen_inputs`' table tier needs
+//! the year's `TaxTable`, `screen_compute_dependent` needs the LEDGER, and
+//! [`crate::tax::return_1040::screen_absolute`] needs the ASSEMBLED return — the computed §63(e)
+//! itemize election among it. A refusal raised in those tiers was invisible here, and on the year
+//! that actually files that cost a false claim: a TY2024 charitable gift whose §170(f)(8)(A)
+//! acknowledgment is unresolved refuses at `screen_absolute` while this walk returned an EMPTY panel,
+//! `panel_lines` printed *"no answer refuses"*, and the entry line printed `return: computable`.
+//! [`ReturnVerdict`] is how a caller that HAS computed the return hands that verdict in — and its
+//! `NotRun` default is a statement about the INSTRUMENT, so a surface that has not computed the
+//! return no longer describes its own blindness as a clean bill of health.
 //!
 //! ★★ **`Declined` finally has its production reader.** `provenance.rs` records that
 //! [`AnswerState::Declined`] was *"WRITTEN here and READ by nothing in production yet … Its reader is
 //! T3 — `interview_state()`"*. It is [`InterviewState::forgoing`], marked, and never
 //! [`InterviewState::blocking`]: declining is provenance (asked, refused), and dropping the item from
 //! the list exactly when the forgo becomes FINAL is backwards.
+//!
+//! ★★★ **FR-225 — BUT *FORGOING* IS A CLAIM, AND FOR SOME CLASS-(B) ENTRIES IT IS FALSE.** A `Forgo`
+//! says *"lawful to skip; it costs YOU, not the Treasury"*. For [`SkippableId::CharitableCwaObtained`]
+//! that is only true where the §170(f)(8)(A) gate does not fire: `return_1040.rs` refuses
+//! `CharitableCwaUnresolved` on **both** `None` **and** `Some(false)`, so nothing but a `Some(true)`
+//! lets such a return compute — silence there forgoes nothing, it REFUSES, and `Some(false)` was
+//! being counted as plainly `answered`. The registry is nonetheless RIGHT to carry the question as
+//! class (B): its `live` sees neither the ledger nor the computed §63(e) election, so a class-(A)
+//! declaration would refuse every standard-deduction filer at every income level. The missing half
+//! was never the class — it was that no surface on the `income answer` path ever ran the screen that
+//! decides when the class-(B) label stops applying. [`ReturnVerdict`] runs it, and
+//! [`InterviewState::forgo_label_is_contradicted`] is what a renderer asks before printing the claim.
 //!
 //! ★ **No progress bar and no persisted "remaining"** (R15, `FIELD_PROVENANCE.md:123-125`). The panel
 //! is computed on demand from the registries and the return; nothing about it is stored.
@@ -170,6 +196,69 @@ impl NotComputed {
     }
 }
 
+/// ★★★ **FR-225 — THE COMPUTED RETURN'S OWN VERDICT: what the walk cannot reach.**
+///
+/// The walk decides everything `ReturnInputs` can decide, and [`interview_state_with`] ends by running
+/// [`crate::tax::return_refuse::screen_param_free`] so it also covers every rule that tier raises.
+/// **Three tiers are still outside it**, and each needs something a `&ReturnInputs` is not:
+///
+/// | tier | needs | example refusal it owns |
+/// |---|---|---|
+/// | [`crate::tax::return_refuse::screen_inputs`]' table rules | the year's `TaxTable` | the §63(f)/bracket comparisons |
+/// | `screen_compute_dependent` | the LEDGER (`LedgerState`) | a ledger-derived figure the inputs contradict |
+/// | [`crate::tax::return_1040::screen_absolute`] | the ASSEMBLED return | `CharitableCwaUnresolved` — it turns on `ar.deduction_is_itemized`, the COMPUTED §63(e) election |
+///
+/// So a caller holding a `TaxTable`, a `LedgerState` and the assembled return — `btctax income answer`
+/// and `btctax report` both do — composes the chain and hands the answer in here, rather than each
+/// surface re-deciding what "computable" means. **One decider, every reader**, which is the same move
+/// T12 made for the home sale and section 6 below made for the commit screen.
+///
+/// ★★ **`NotRun` is the default, and it is a claim about the INSTRUMENT rather than about the return.**
+/// FR-225's defect was a surface reporting *"no answer refuses"* and `return: computable` because it
+/// had not looked — blindness rendered as a clean bill of health. A walk that was handed no verdict now
+/// says so, and every sentence that would otherwise over-claim is weakened to what it can actually see.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum ReturnVerdict {
+    /// **Nobody computed the return on this surface.** The walk's own findings stand; nothing is
+    /// claimed about the tiers it cannot run.
+    #[default]
+    NotRun,
+    /// The whole refusal chain ran, and raised nothing.
+    Computes,
+    /// The chain refused. Listed as [`Refusing`], so [`InterviewState::is_committable`] is false.
+    Refuses {
+        /// The refusal's own reason — never re-decided here.
+        reason: RefuseReason,
+        /// The refusal's own exit sentence, **verbatim**: it carries the statutory cite and the cure,
+        /// neither of which a re-wording here could reproduce.
+        detail: String,
+    },
+}
+
+impl ReturnVerdict {
+    /// Was the chain run at all? `false` for [`Self::NotRun`] — the honest-boundary case.
+    #[must_use]
+    pub fn ran(&self) -> bool {
+        !matches!(self, Self::NotRun)
+    }
+    /// The refusal, where there is one.
+    #[must_use]
+    pub fn refusal(&self) -> Option<(&RefuseReason, &str)> {
+        match self {
+            Self::Refuses { reason, detail } => Some((reason, detail.as_str())),
+            Self::NotRun | Self::Computes => None,
+        }
+    }
+    /// ★★★ **FR-225's own invariant, in one place: may a surface print `computable`?**
+    ///
+    /// Only a verdict that RAN and did not refuse. `NotRun` is `false` — a surface that has not
+    /// computed the return may not claim it computes, which is the whole finding.
+    #[must_use]
+    pub fn computes(&self) -> bool {
+        matches!(self, Self::Computes)
+    }
+}
+
 /// Every open item on the return, in one call (R12).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InterviewState {
@@ -183,6 +272,9 @@ pub struct InterviewState {
     pub answered: usize,
     /// Not live on this return — counted, silent.
     pub not_live: usize,
+    /// ★★★ FR-225 — the COMPUTED return's verdict, where the caller had one. [`ReturnVerdict::NotRun`]
+    /// on the two entry points that take no verdict, which is what weakens every claim built on it.
+    pub verdict: ReturnVerdict,
 }
 
 impl InterviewState {
@@ -191,6 +283,29 @@ impl InterviewState {
     #[must_use]
     pub fn is_committable(&self) -> bool {
         self.blocking.is_empty() && self.refusing.is_empty()
+    }
+    /// ★★★ **FR-225 — IS THE *FORGOING* HEADING'S "LAWFUL TO SKIP" CLAIM CONTRADICTED?**
+    ///
+    /// A `Forgo` asserts *"lawful to skip; each one costs YOU, not the Treasury"*. Beside a return the
+    /// refusal chain STOPS, that sentence is false of at least one of the items in the list, and the
+    /// standing case is the one FR-225 was filed on: `CharitableCwaUnresolved` fires on **both** `None`
+    /// and `Some(false)`, so for [`crate::tax::questions::SkippableId::CharitableCwaObtained`] the
+    /// silence the list calls lawful is exactly what refuses the return.
+    ///
+    /// ★★ **Deliberately keyed to [`ReturnVerdict::Refuses`] and NOT to `!refusing.is_empty()`.** A
+    /// registry-modelled refusal already carries its own panel ITEM and its own prompt, so the filer is
+    /// told which answer to change; and `NotRun` must not weaken the heading either, or the packet
+    /// manifest and the commit modal — which render these same lines and hold no verdict — would print
+    /// a qualification about a check nobody asked them to run. This fires in exactly the state where
+    /// the product's own words contradict its own gate.
+    ///
+    /// ★ It deliberately does NOT name WHICH forgo is contradicted. Attributing a computed refusal back
+    /// to one registry answer needs a `RefuseReason → PanelItem` map that this crate does not have
+    /// (`btctax-input-form`'s `attribute()` is the total one, and it sits ABOVE core), so the honest
+    /// choice is the boundary rather than a guess — see `REPORT-wave4-M.md`.
+    #[must_use]
+    pub fn forgo_label_is_contradicted(&self) -> bool {
+        matches!(self.verdict, ReturnVerdict::Refuses { .. })
     }
     /// How many items the panel would print.
     #[must_use]
@@ -234,7 +349,7 @@ pub const YEAR_PACKAGE: &str = "the tax year's parameter package (FullReturnPara
 /// [`interview_state_with_params`] where the package is in hand.
 #[must_use]
 pub fn interview_state(ri: &ReturnInputs) -> InterviewState {
-    interview_state_with(ri, None, PARAMS_GATED_PROMPTS)
+    interview_state_with(ri, None, PARAMS_GATED_PROMPTS, ReturnVerdict::NotRun)
 }
 
 /// [`interview_state`] on a year whose package HAS arrived — the forgo sizes are then filled in.
@@ -243,7 +358,23 @@ pub fn interview_state(ri: &ReturnInputs) -> InterviewState {
 /// exactly the pair: *"the forgo size present when params exist and absent when they do not"*.
 #[must_use]
 pub fn interview_state_with_params(ri: &ReturnInputs, p: &FullReturnParams) -> InterviewState {
-    interview_state_with(ri, Some(p), PARAMS_GATED_PROMPTS)
+    interview_state_with(ri, Some(p), PARAMS_GATED_PROMPTS, ReturnVerdict::NotRun)
+}
+
+/// ★★★ **FR-225 — the walk on a surface that HAS computed the return.** See [`ReturnVerdict`] for what
+/// the other two entry points cannot see and why handing the verdict in beats re-deciding it here.
+///
+/// `params` is an `Option` rather than a third entry point: a caller that computed the return
+/// necessarily HAS the year's package, but a caller that merely ran the param-free screens may not, and
+/// splitting this into `…_with_verdict` / `…_with_params_and_verdict` would be two functions whose only
+/// difference is an `Option` the body already branches on.
+#[must_use]
+pub fn interview_state_with_verdict(
+    ri: &ReturnInputs,
+    params: Option<&FullReturnParams>,
+    verdict: ReturnVerdict,
+) -> InterviewState {
+    interview_state_with(ri, params, PARAMS_GATED_PROMPTS, verdict)
 }
 
 /// The walk, with both variables exposed so a test can drive them.
@@ -251,8 +382,12 @@ fn interview_state_with(
     ri: &ReturnInputs,
     params: Option<&FullReturnParams>,
     params_gated: &[(QuestionId, &'static str)],
+    verdict: ReturnVerdict,
 ) -> InterviewState {
-    let mut st = InterviewState::default();
+    let mut st = InterviewState {
+        verdict: verdict.clone(),
+        ..InterviewState::default()
+    };
 
     // ── 1. FORM_QUESTIONS — class (A), and the census rows live here too (R3 makes each census row
     //       a registry entry, so this is ONE walk and not two). ────────────────────────────────────
@@ -351,6 +486,12 @@ fn interview_state_with(
                 declined: false,
             }),
             // ★★★ ASKED AND PASSED OVER. Listed, marked, and never blocking. Only `Given` removes it.
+            //
+            // ★★ FR-225 — *never blocking* is right, and *lawful* is a claim the CALLER must check:
+            //    for `CharitableCwaObtained` a `Declined` is exactly what refuses the return at
+            //    `screen_absolute`. Section 7 lists that refusal where a verdict was handed in, and
+            //    [`InterviewState::forgo_label_is_contradicted`] is what a renderer asks before
+            //    printing *"lawful to skip"* over this list.
             AnswerStatus::Declined => st.forgoing.push(Forgo {
                 item,
                 prompt: std::borrow::Cow::Borrowed(s.prompt),
@@ -555,6 +696,35 @@ fn interview_state_with(
                 prompt: std::borrow::Cow::Borrowed(""),
                 reason: r.reason,
                 exit: r.detail,
+            });
+        }
+    }
+
+    // ── 7. ★★★ **FR-225 — THE COMPUTED RETURN'S OWN REFUSAL, from the caller that ran it.** ──────
+    //
+    //    Section 6 closed the gap between the walk and the screen tier a `&ReturnInputs` can run.
+    //    This closes the gap between THAT and the return: `screen_absolute`'s rules turn on the
+    //    ASSEMBLED return (`ar.deduction_is_itemized` — the computed §63(e) election), and no
+    //    predicate over `ReturnInputs` can see one. The §170(f)(8)(A) gate is the standing case, and
+    //    it is why FR-225 was ⛔ blocking on TY2024: `CharitableCwaUnresolved` refuses on **both**
+    //    `None` and `Some(false)`, so the CWA answer sat in `forgoing` (or, at `Some(false)`, in the
+    //    plain `answered` count) while `btctax report` would not compute the return at all.
+    //
+    // ★★ **Same dedup rule as section 6, and the same reason**: a refusal the walk already modelled
+    //    carries a panel ITEM — the answer to go and change — which a computed refusal does not, so
+    //    the registry's version wins and this adds nothing on top of it.
+    //
+    // ★ Pushed with `item: None`, which is [`Refusing::item`]'s documented meaning: *"a refusal … that
+    //   no single registry answer owns"*. Attributing a computed refusal back to one answer would need
+    //   a `RefuseReason → PanelItem` map, and the total one (`btctax-input-form`'s `attribute()`) lives
+    //   in a crate ABOVE core. An honest `None` beats a guessed cursor target.
+    if let ReturnVerdict::Refuses { reason, detail } = verdict {
+        if !st.refusing.iter().any(|x| x.reason == reason) {
+            st.refusing.push(Refusing {
+                item: None,
+                prompt: std::borrow::Cow::Borrowed(""),
+                reason,
+                exit: detail,
             });
         }
     }
@@ -803,6 +973,13 @@ mod tests {
     ///
     /// This is the reader `provenance.rs` promised for `AnswerState::Declined` — until now it was
     /// written by `income answer` and read by nothing in production.
+    ///
+    /// ★★ **FR-225 — and the boundary this test does NOT establish.** It uses `BlindTaxpayer`, whose
+    /// silence really is lawful, so *"forgoing, never blocking"* is the whole truth for it. It is NOT
+    /// the whole truth for every class-(B) entry: `CharitableCwaObtained`'s silence refuses the return
+    /// at `screen_absolute` (`CharitableCwaUnresolved` fires on both `None` and `Some(false)`), and
+    /// this walk cannot see that. What carries it is [`ReturnVerdict`] —
+    /// `a_computed_refusal_is_listed_as_refusing_and_contradicts_the_forgo_label` below is the pair.
     #[test]
     fn a_declined_skippable_forgoes_marked_and_never_blocks_and_given_removes_it() {
         let mut ri = answered_single();
@@ -1043,7 +1220,7 @@ mod tests {
 
         let waiting_table: &[(QuestionId, &str)] =
             &[(QuestionId::ForeignAccounts, "the TY2026 year package")];
-        let st = interview_state_with(&ri, None, waiting_table);
+        let st = interview_state_with(&ri, None, waiting_table, ReturnVerdict::NotRun);
         assert!(
             st.waiting.iter().any(
                 |w| w.item == AnswerKey::Question(QuestionId::ForeignAccounts)
@@ -1059,7 +1236,7 @@ mod tests {
         );
 
         // The package lands (the entry leaves the table) ⇒ the same unanswered question blocks.
-        let st2 = interview_state_with(&ri, None, &[]);
+        let st2 = interview_state_with(&ri, None, &[], ReturnVerdict::NotRun);
         assert!(st2.waiting.is_empty());
         assert!(
             st2.blocking
@@ -1098,6 +1275,144 @@ mod tests {
             total,
             FORM_QUESTIONS.len() + SKIPPABLE_QUESTIONS.len(),
             "every registry entry must be counted exactly once"
+        );
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════════════════════
+    // FR-225 — the COMPUTED return's verdict. Three kills, one per defect the brief names.
+    // ════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// ★★★ **FR-225 KILL 1 — a refusal the walk CANNOT SEE is listed, and it contradicts the forgo.**
+    ///
+    /// The live defect: on TY2024, `charitable_cwa_obtained = None` with a ≥$250 gift on an itemizing
+    /// return refuses `CharitableCwaUnresolved` at `screen_absolute`, which turns on the COMPUTED
+    /// §63(e) election and is therefore invisible to every predicate over `ReturnInputs`. So the panel
+    /// listed the CWA question under *"FORGOING — lawful to skip"* (and, at `Some(false)`, counted it
+    /// as plainly `answered`) while `btctax report` would not compute the return at all.
+    ///
+    /// ★ **The verdict is INJECTED, not computed here**, and that is deliberate: this crate holds no
+    ///   `TaxTable` and no `LedgerState`, so a test that tried to compute one would be testing the
+    ///   fixture. The composition is `btctax-cli`'s and is killed there
+    ///   (`year_readiness::tests::the_printed_claim_agrees_with_the_return_verdict`).
+    ///
+    /// **Plant to watch it red:** delete section 7 of [`interview_state_with`] — every assertion below
+    /// fails, because the refusal simply is not there.
+    #[test]
+    fn a_computed_refusal_is_listed_as_refusing_and_contradicts_the_forgo_label() {
+        let mut ri = answered_single();
+        // The §170(f)(8) question DECLINED — the state `income answer` writes on a bare Enter, and
+        // the one `return_1040.rs` refuses on. (A test may name a `ReturnInputs` leaf; the flow
+        // never does.)
+        ri.charitable_cwa_obtained = None;
+        let detail = "you have not told btctax whether you hold a contemporaneous written \
+                      acknowledgment. Run `btctax income answer`";
+        let st = interview_state_with_verdict(
+            &ri,
+            None,
+            ReturnVerdict::Refuses {
+                reason: RefuseReason::CharitableCwaUnresolved,
+                detail: detail.to_string(),
+            },
+        );
+        let r = st
+            .refusing
+            .iter()
+            .find(|r| r.reason == RefuseReason::CharitableCwaUnresolved)
+            .expect("the COMPUTED return's refusal must be listed as refusing");
+        assert_eq!(
+            r.exit, detail,
+            "and its exit sentence is carried VERBATIM — it holds the §170(f)(8)(A) cite and the cure"
+        );
+        assert!(
+            !st.is_committable(),
+            "a return the refusal chain stops is not committable, whatever the walk found"
+        );
+        assert!(
+            st.forgo_label_is_contradicted(),
+            "…and `FORGOING — lawful to skip` must not be printed unqualified beside it"
+        );
+    }
+
+    /// ★★★ **FR-225 KILL 2 — the DEFAULT verdict claims NOTHING.** `NotRun` is a statement about the
+    /// instrument: a surface that has not computed the return may not report that it computes, which is
+    /// the false-claim half of FR-225. Both other surfaces (the TUI pane, the packet manifest) keep
+    /// their wording, which is why `forgo_label_is_contradicted` is keyed to `Refuses` and not to
+    /// `!ran()`.
+    ///
+    /// **Plant:** make `ReturnVerdict::computes` return `true` for `NotRun` — the first assertion reds.
+    #[test]
+    fn the_default_verdict_neither_claims_computable_nor_qualifies_the_forgo_heading() {
+        let ri = answered_single();
+        let st = interview_state(&ri);
+        assert_eq!(st.verdict, ReturnVerdict::NotRun, "the default is NotRun");
+        assert!(
+            !st.verdict.computes(),
+            "a walk that never ran the chain must not report that the return computes"
+        );
+        assert!(!st.verdict.ran(), "…and it says so");
+        assert!(
+            !st.forgo_label_is_contradicted(),
+            "but it does not qualify the forgo heading either — nothing refused"
+        );
+        assert!(
+            ReturnVerdict::Computes.computes() && ReturnVerdict::Computes.ran(),
+            "only a chain that RAN and raised nothing may claim the return computes"
+        );
+        assert_eq!(
+            ReturnVerdict::Refuses {
+                reason: RefuseReason::CharitableCwaUnresolved,
+                detail: String::new(),
+            }
+            .refusal()
+            .map(|(r, _)| r.clone()),
+            Some(RefuseReason::CharitableCwaUnresolved),
+            "and a refusing verdict hands back its reason for the surfaces that print it"
+        );
+    }
+
+    /// ★★★ **FR-225 KILL 3 — a refusal the WALK already modelled is not listed twice.** Section 6's
+    /// dedup rule, extended to section 7 for the same reason: the registry's version carries the panel
+    /// ITEM — the answer to go and change — and a computed refusal does not, so a second row would
+    /// print the same refusal with no cursor target beside the one that has one.
+    ///
+    /// **Plant:** drop the `!st.refusing.iter().any(…)` guard in section 7 — the count becomes 2.
+    #[test]
+    fn a_computed_refusal_the_walk_already_modelled_is_not_listed_twice() {
+        let mut ri = answered_single();
+        // Declare a K-1 received: the census makes this `DocumentTypeUnsupported`, which the WALK
+        // models (section 1, `refusal_of_answer`) complete with its panel item.
+        ri.documents.set(DocumentRow::K1, Some(true));
+        let walked = interview_state(&ri);
+        let modelled = walked
+            .refusing
+            .first()
+            .expect("the census answer refuses in the walk itself")
+            .reason
+            .clone();
+        assert!(
+            walked.refusing.iter().any(|r| r.item.is_some()),
+            "the walk's version carries a panel ITEM"
+        );
+        let st = interview_state_with_verdict(
+            &ri,
+            None,
+            ReturnVerdict::Refuses {
+                reason: modelled.clone(),
+                detail: "the same refusal, arriving from the computed chain".to_string(),
+            },
+        );
+        assert_eq!(
+            st.refusing.iter().filter(|r| r.reason == modelled).count(),
+            1,
+            "one row, and it is the registry's: {:#?}",
+            st.refusing
+        );
+        assert!(
+            st.refusing
+                .iter()
+                .find(|r| r.reason == modelled)
+                .is_some_and(|r| r.item.is_some()),
+            "…the one that can move the filer's cursor"
         );
     }
 }

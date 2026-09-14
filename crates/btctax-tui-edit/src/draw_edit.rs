@@ -2530,7 +2530,7 @@ fn draw_tax_inputs_status(
     //   count falls as the filer answers; the package half was cached at open (it re-reads the
     //   bundled price dataset, which a per-keystroke redraw must not).
     let gate_lines = form.year_gate_lines();
-    let gate_style = if form.year_gate.return_computable {
+    let gate_style = if form.year_gate.package_computes {
         Style::default().fg(Color::DarkGray)
     } else {
         Style::default().fg(Color::Yellow)
