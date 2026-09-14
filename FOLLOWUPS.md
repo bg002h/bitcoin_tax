@@ -9362,7 +9362,8 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   contemporaneous written acknowledgment, so the fail-closed behaviour is correct and must survive this
   work.
 
-- **★★ FR-242 — two NEWER IRS EDITIONS exist and are not archived, so `xtask authority-refresh --check` exits 1 at HEAD. Important, and on the January critical path. Owning phase: NOW.**
+- **✅ CLOSED (archive 60ee7ae68) — FR-242 — two newer IRS editions were served and unarchived, so `xtask authority-refresh --check` exited 1 at HEAD. It now exits 0.**
+  ★★ Closing it found that the IRS has converted **Form 5498-SA from ANNUAL to CONTINUOUS-USE** at Rev. 12-2026 — box 2 moved from *"made in 2025"* to *"made in the calendar year"* — which the census's own comment contradicted, and the new booklet names a **cross-year pair** (*"Use with the April 2025 revision of Form 1099-SA and the December 2026 revision"*). Both filer-facing prompts now tell the filer which wording to look for. ★ And [[FR-181]]'s work gave the command its first **runner** (`.github/workflows/authority-watch.yml`) — its absence is why this sat unnoticed.
   Surfaced 2026-09-14 while archiving Pub 936; **pre-existing and unrelated to that commit** — the same
   run reports *"0 note(s) drifted"*, so nothing in the tree moved.
   ```
