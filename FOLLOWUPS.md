@@ -8877,6 +8877,61 @@ build, each with an owning phase.
   `cargo clean -p <crate>`; this one is **memory**, presenting as SIGKILL, cured by serialising. A SIGKILL is
   not a stale rlib and a link error is not OOM.
 
+- **★★★ FR-225 — ⛔ BLOCKING, and LIVE IN A SHIPPED BUILD on TY2024. `income answer` says "return: computable" while the return is NOT computable, and the refusal's named exit cannot reach the question. Owning phase: NOW.**
+  **Found by the stage-2 Tier B run; the two refusal sites verified by the controller.** On **TY2024** —
+  fully bundled, stock code, no substitutions — with a charitable gift whose §170(f)(8)(A) acknowledgment is
+  unresolved:
+  - `income answer` prints **`interview: complete · return: computable`** and **exits 0**;
+  - `report` prints **`NOT COMPUTABLE [CharitableCwaUnresolved]`**;
+  - `export-irs-pdf` writes **nothing**.
+  ★★ **The refusal's named exit is `btctax income answer`, and it asks the question ZERO times**, because an
+  answer is already recorded. Only the **unmentioned `--re-answer`** reaches it. So the remedy the product
+  prints does not work, and the one that does is not printed.
+  ★ **The panel files it under *"FORGOING — lawful to skip"*, and that is wrong.** Verified at
+  `return_1040.rs:3434` and `:3466`: **both `None` and `Some(false)` refuse.** Nothing but `Some(true)` lets
+  the return compute, so it is not skippable in any sense. Its other stated cure — *"remove that gift from
+  the deduction"* — has **no CLI verb**.
+  This is the *"defects in what a tool CLAIMS to have done"* class, which `STANDARD_WORKFLOW.md` treats as
+  blocking: a gate that cannot fail, a refusal that does not refuse, **a completeness claim that is false**.
+
+- **★★★ FR-226 — ⚠️ A JANUARY TIME BOMB: nothing asserts a bundled template's PRINTED REVISION equals its DIRECTORY YEAR, and the guards that incidentally catch it EXPIRE when the 2026 extracts land. Important. Owning phase: NOW, before January.**
+  Tier B got a **TY2026 packet and a Form 4868 to write at exit 0 with `2024` printed on every face** —
+  including Schedule A line 5e reading *"smaller of line 5d or **$10,000**"* while carrying **31,000**, and
+  an f4868 in which the string `2026` never appears.
+  ★ **Controller-verified by absence:** a grep over `btctax-forms` for any assertion tying a template's
+  printed revision to its directory year finds **nothing**.
+  ★★★ **The protection today is INCIDENTAL, not structural.** The 45 tests that currently fail on such a
+  tree are all keyed to the **missing 2026 extracts** — so the day those extracts are archived (January,
+  which is the plan), **those guards stop firing** and a packet printing the wrong year's form emits at
+  exit 0. And `label_reader` resolves the template by **sha256**, so it *knows* it is the 2024 document and
+  reports 364 joins / 0 wrong labels regardless.
+  *Fix:* assert it structurally — a bundled template's own printed revision must equal the year directory it
+  sits in — and plant a cross-year template to watch it red. **This is the cheapest high-value guard
+  available before January**, because the window in which it is needed is exactly the window in which the
+  current accidental protection disappears.
+
+- **FR-227 — `report --tax-year 2026` PANICS rather than refusing, and panics are invisible to a RefuseReason-derived prediction. Important. Owning phase: NOW.**
+  A `panic!` is not a `RefuseReason`, so `xtask blockers` — which derives year-specific walls from refusal
+  sites and year-keyed gates — **cannot see this class at all.** Tier B generalised it and measured **9
+  instances** of *"a typed per-year list inside a shipped crate with no TY2026 arm"*, including the
+  acquisition-era presets ending 2025-12-31 — and ★ **the word "era" appears nowhere in the prediction file.**
+  ★★ So this is a blind spot in the instrument I landed hours ago, found by the run it was built to be
+  compared against — which is exactly what stage 2 was for. *Fix:* have `blockers` derive the
+  panicking/unhandled-year class too, or state in its own output that it does not cover it. An honest
+  boundary is reviewable; a silent one is the defect.
+
+- **FR-228 — the January port crosses TWO revisions of field-name churn, not one. Important scoping fact. Owning phase: the TY2026 port plan.**
+  `forms/2025/` **cannot fill a full return**: its `f1040` map is a **98-line crypto-slice stub** against
+  TY2024's **406**. So **TY2024 is the only complete map set**, and porting to TY2026 means crossing
+  2024→2025→2026 rather than 2025→2026. ★ Every estimate that priced the port as a single-revision diff —
+  including the runbook's 24 steps — is priced against the wrong distance. Re-derive the port's size from
+  the complete map set, not the newest one.
+
+- **FR-229 — six misleading exits, citations and docs from the Tier B walk. Minor. Owning phase: with FR-225.**
+  Tier B's F3/F5/F6/F9/F10/F11. The sharpest: **the price gate's exit points a filer at `scripts/`, while
+  the gate cannot see the local price cache that `btctax-update-prices` fills** — so the instruction sends
+  the filer to do something the gate will not notice. Same family as FR-225: an exit that does not exit.
+
 - **FR-152 — `census_join` anchors captions to ABSOLUTE line indices in a generated file. Minor. Owning phase: the port machine.**
   A4's 110 `# Regenerate:` header additions shifted every extract by a line, and `forms/2024/f1040s1.map.toml`'s
   `extract_line` anchors (11/15/58) had to move to 15/19/62 — an edit outside A4's ownership, reported rather

@@ -22,7 +22,15 @@ Measured before designing:
 | the price dataset | ends **2026-06-03** |
 
 So the TY2026 params are **not unknowable — they are unwired.** The rehearsal's core is **one line**:
-`by_year.insert(2026, ty2026_full_return())`. That is a very different risk profile from inventing
+`by_year.insert(2026, ty2026_full_return())`.
+
+★★ **CORRECTED 2026-09-13 by the Tier B run: it is FOUR items, not one.** Measured by necessity rather than
+estimated: (1) the unwired TY2026 params; (2) `form6251_line1_rule(2026)` borrowing TY2025's Part I;
+(3) the year record's `prices_through`; (4) **all 20 form maps + PDFs**, byte-copied from **`forms/2024/`**
+— not 2025, because `forms/2025/`'s `f1040` map is a 98-line crypto-slice stub (FR-228). ★ And Tier B
+**declined a fifth fake this document asked for**: §1 lists "the price dataset's tail", but a daily close is
+a **figure**, and the brief's inviolable rule forbids inventing one. It shortened the *declaration* instead.
+The agent held this design to its own rule and was right. That is a very different risk profile from inventing
 figures, and it means the contamination surface is one insert rather than a table of fabrications.
 
 ★ What genuinely must be faked is smaller and sharply bounded: the **1040 template** (unarchived), the
