@@ -42,7 +42,17 @@ owns the right idiom twice over — `ty2025_full_return_must_stay_fail_closed_un
 
 - **Today:** `f1040--2026` and `i1040gi--2026` are absent ⇒ the params must not be bundled ⇒ **the rehearsal
   branch reds this test**, so it cannot merge silently.
-- **In January:** the documents land ⇒ the gate permits the bundling and **stops blocking on its own.**
+- **In January:** the documents land ⇒ the gate permits the bundling.
+
+★★★ **CORRECTED 2026-09-13, and by a PLANT rather than a review.** This section originally said the gate
+*"stops blocking on its own"* once the documents land. **That is false, and stage 1's plant B proved it:**
+copying the 2025 extract into a 2026 filename cleared the archive gap **and left the §111(a) gate shut**,
+because `slr::revision_for` reads a **TRANSCRIPTION** while the directory only decides what the *suite*
+demands. **Archiving is necessary and not sufficient — someone must transcribe.** So the gate's condition is
+`TRANSCRIBED`, not `archived`, and January creates a *new* state rather than clearing one:
+**"ARCHIVED but not TRANSCRIBED"**, which `xtask blockers` now derives as its own row and correctly moves
+from `January` to `we must build`. ★ The lesson is the one this whole day has been about: *a document
+arriving is not the same as a document being read*, and I had written the optimistic version.
 
 ★★ That is better than a tripwire in two ways: **nothing has to be deleted later** (a gate you must remember
 to remove is a gate that gets removed early), and it encodes *why* the year is not filable rather than
