@@ -222,9 +222,16 @@ pub fn resolve_and_screen(
 /// NO answers was being told the slice prints "from the stored answers" it does not have.
 fn uncomputable_detail(year: i32, refusal: Option<&Refusal>, answers_stored: bool) -> String {
     match refusal {
+        // ★★★ FR-199 — the flag is part of the remedy, because `income clear` now REFUSES a stored
+        //     return that holds an interview. This sentence was the reproduced route INTO the data
+        //     loss: a filer walled off by a Schedule A detail reads it, runs the command it names,
+        //     and (before the guard) silently lost every recorded answer on the return. Naming the
+        //     flag keeps the escape actionable; the refusal it now meets is what states the cost.
         Some(r) => format!(
             "tax year {year} cannot be computed from its full-return inputs: {}; run \
-             `income clear --year {year}` to remove them and use a raw `tax-profile`",
+             `income clear --year {year} --discard-return` to DELETE them and use a raw \
+             `tax-profile` — or keep the return and park it instead (the tax-inputs form for {year}, \
+             `btctax-tui-edit`, then 't')",
             r.detail
         ),
         // ★ FR-48: built from the year's READINESS, never a year literal; keeps the inputs; names

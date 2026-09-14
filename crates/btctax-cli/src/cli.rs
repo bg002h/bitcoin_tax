@@ -603,6 +603,12 @@ pub enum IncomeCmd {
         out: Option<std::path::PathBuf>,
     },
     /// Remove the stored full-return inputs for a tax year (fall back to a raw `tax-profile`).
+    ///
+    /// This DELETES the year's return. A stored return holding an interview — recorded answers,
+    /// transcribed documents, dependents or a Schedule A — is REFUSED without `--discard-return`,
+    /// and the refusal names what would be lost. To fall back to your tax-profile and KEEP the
+    /// return, park it instead: open the tax-inputs form for the year (`btctax-tui-edit`) and press
+    /// 't'.
     Clear {
         /// The tax year (e.g. 2024).
         #[arg(long)]
@@ -616,6 +622,21 @@ pub enum IncomeCmd {
         /// draft holding none of that is superseded silently, as before.
         #[arg(long)]
         discard_draft: bool,
+        /// DELETE this year's stored full RETURN when it holds an interview — recorded answers,
+        /// transcribed documents, dependents or a Schedule A.
+        ///
+        /// Without this, the clear is REFUSED and nothing is deleted. The committed return holds
+        /// the same answer log a draft does, and the same sentence applies to it: btctax records
+        /// when, and in what words, it asked you, so re-importing the same TOML brings the figures
+        /// back and NOT the record — and a return whose Digital Asset answer is gone prints that
+        /// mandatory question with neither box marked. A return holding none of that is deleted
+        /// silently, as before.
+        ///
+        /// This is separate from --discard-draft: they name different artifacts, a year can hold
+        /// both, and authorising the discard of a scratch draft is not authorising the deletion of
+        /// a screened return.
+        #[arg(long)]
+        discard_return: bool,
     },
     /// Open NEXT year from this one: seed year N+1's draft with year N's identities — each W-2
     /// employer, each 1099 payer, each dependent, each exchange — every box blank, every question

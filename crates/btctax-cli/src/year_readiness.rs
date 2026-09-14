@@ -469,8 +469,10 @@ pub fn uncomputable_sentence(year: i32, answers_stored: bool) -> String {
     format!(
         "tax year {year} has full-return inputs, but full-return computation is not available for it \
          in this build — {}. The inputs are KEPT and will compute when the year's package is bundled. \
-         {}To fall back to a raw `tax-profile` for {year} instead, run `income clear --year {year}` \
-         (this DISCARDS the stored inputs, including any computed carryover on them).",
+         {}To fall back to a raw `tax-profile` for {year} instead, run `income clear --year {year} \
+         --discard-return` (this DELETES the stored inputs, including any computed carryover on them \
+         and every recorded answer, which no re-import restores) — or keep the return and park it: \
+         the tax-inputs form for {year} (`btctax-tui-edit`), then 't'.",
         r.sentence(),
         slice_clause(year, answers_stored)
     )

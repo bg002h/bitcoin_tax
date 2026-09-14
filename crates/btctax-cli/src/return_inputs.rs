@@ -478,7 +478,11 @@ mod p9_stale_row_refuses {
             expected: 2,
         }
         .to_string();
-        assert!(msg.contains("income clear 2024"), "names clear");
+        // ★ FR-199 — the form it names must PARSE. `income clear` takes `--year`, so the message's
+        //   old `income clear 2024` exited 2 with "unexpected argument '2024'" (reproduced): the one
+        //   escape from a stale row named a command line that does not run. Asserting the flag, not
+        //   just the verb, is what makes that a test rather than a proofread.
+        assert!(msg.contains("income clear --year 2024"), "names clear");
         assert!(msg.contains("income import"), "names import");
         assert!(
             msg.contains("--write-carryover"),

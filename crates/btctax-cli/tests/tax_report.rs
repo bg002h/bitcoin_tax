@@ -902,7 +902,9 @@ fn report_tax_year_with_return_inputs_for_unsupported_year_refuses_with_income_c
     }
 
     // Recovery works: after `income clear`, the same year is no longer blocked (falls back to no-profile).
-    assert!(cmd::tax::clear_return_inputs(&vault, &pp(), 2025, false).unwrap());
+    // ★ FR-199 — and the sentence asserted above now names `--discard-return`, so the recovery this
+    //   test pins is the one the message actually prescribes, flag included.
+    assert!(cmd::tax::clear_return_inputs(&vault, &pp(), 2025, false, true).unwrap());
     let TaxYearReport { outcome, .. } =
         cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     // No profile, no events ⇒ TaxProfileMissing (NOT the unsupported-year Usage error).
@@ -4249,8 +4251,13 @@ fn clear_then_import_recovers_a_stale_row_to_the_current_schema_version() {
     cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false, false).unwrap();
     stale_the_row(&vault, 2024);
 
+    // ★★★ FR-199 — `discard_return = false` ON PURPOSE. This is the new guard's STALE-ROW BOUNDARY:
+    //     a row this build cannot deserialize cannot be described or parked, and
+    //     `CliError::StaleReturnInputs`'s own remedy is clear → import → `--write-carryover`, so the
+    //     guard falls through rather than bricking the only exit. Make the guard `?` on
+    //     `return_inputs::get` instead of matching `StaleReturnInputs` and this line reds.
     assert!(
-        cmd::tax::clear_return_inputs(&vault, &pp(), 2024, false).unwrap(),
+        cmd::tax::clear_return_inputs(&vault, &pp(), 2024, false, false).unwrap(),
         "clear works on a stale row (it never deserializes)"
     );
     cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false, false).unwrap(); // no existing row now ⇒ succeeds
@@ -4348,7 +4355,9 @@ fn the_full_remedy_chain_restores_a_computed_carryover() {
     let toml_dir = tempfile::tempdir().unwrap();
     let toml = answered_toml(toml_dir.path());
     for year in [2024, 2025] {
-        cmd::tax::clear_return_inputs(&vault, &pp(), year, false).unwrap();
+        // ★ FR-199: both rows were just staled above, so this is the same stale-row boundary — no
+        //   `--discard-return`, exactly as `StaleReturnInputs`'s own remedy prescribes.
+        cmd::tax::clear_return_inputs(&vault, &pp(), year, false, false).unwrap();
         cmd::tax::import_return_inputs(&vault, &pp(), year, &toml, false, false).unwrap();
     }
     // NOTE: the re-imported 2024 has no charitable gift (the minimal TOML), so to reproduce the carryover
@@ -5025,7 +5034,9 @@ fn a_computed_capital_loss_stamp_survives_every_command_that_should_retract_it()
     );
 
     // ── THE ONE ESCAPE `LIMITATIONS.md` NAMES must actually work: clear, then import. ─────────────
-    cmd::tax::clear_return_inputs(&vault, &pp(), 2025, false).unwrap();
+    // ★ FR-199 — a readable row holding a return, so the escape is `--discard-return`, and
+    //   `LIMITATIONS.md` was updated to name the flag rather than leave the escape unrunnable.
+    cmd::tax::clear_return_inputs(&vault, &pp(), 2025, false, true).unwrap();
     cmd::tax::import_return_inputs(&vault, &pp(), 2025, &zeros, false, false).unwrap();
     assert_eq!(
         read_2025().capital_loss_carryforward_in,

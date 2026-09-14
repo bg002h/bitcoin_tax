@@ -1212,7 +1212,10 @@ fn income_clear_over_a_broker_answers_draft_refuses_and_the_draft_survives_byte_
     seed_draft(&vault, &broker_and_schedule_c_draft());
     let before = raw_draft_json(&vault, NO_PACKAGE_YEAR);
 
-    let err = cmd::tax::clear_return_inputs(&vault, &pp(), NO_PACKAGE_YEAR, false)
+    // ★ FR-199 — this year holds only a DRAFT, no committed row, so the new committed-row guard falls
+    //   through and the DRAFT refusal is still the one raised. That ordering matters: the guard must
+    //   not shadow the parked/WIP-draft refusals it sits in front of.
+    let err = cmd::tax::clear_return_inputs(&vault, &pp(), NO_PACKAGE_YEAR, false, false)
         .expect_err("`income clear` must not destroy the 1099-DA answers on a note");
     assert!(err.to_string().contains("--discard-draft"), "{err}");
     assert_eq!(raw_draft_json(&vault, NO_PACKAGE_YEAR), before);

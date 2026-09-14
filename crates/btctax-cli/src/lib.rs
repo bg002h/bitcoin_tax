@@ -139,7 +139,7 @@ pub enum CliError {
     /// gate.)
     #[error(
         "the stored inputs for {year} predate the form-question registry (schema v{found}; this build reads \
-         v{expected}). Run `btctax income clear {year}` — which DISCARDS any carryover this row's prior \
+         v{expected}). Run `btctax income clear --year {year}` — which DISCARDS any carryover this row's prior \
          reports computed onto it — then `btctax income import` for {year}; then, if this row carried a \
          computed carryover, `btctax report --tax-year {prior} --write-carryover` to rebuild it.",
         prior = year - 1
@@ -200,6 +200,42 @@ pub enum CliError {
          once the year's package has arrived)."
     )]
     NonTrivialDraftBlocksWrite { year: i32, holdings: String },
+    /// ★★★ **FR-199 — THE COMMITTED RETURN IS THE STRONGER ARTIFACT, AND IT WAS THE UNPROTECTED ONE.**
+    ///
+    /// [`Self::NonTrivialDraftBlocksWrite`] above refuses to destroy a **draft** holding an
+    /// interview, for a reason that is printed on `--discard-draft` itself: *"its recorded answers
+    /// cannot be re-created by re-typing (btctax records when and in what words it asked)."* Every
+    /// word of that is true of the **committed** row, which holds the same `answer_log` — and
+    /// `income clear` deleted it on nothing at all. Reproduced end to end: 67 `AnswerRecord`s, one
+    /// of them the Digital Assets declaration answered *Yes* against a hashed prompt, gone on
+    /// `income clear --year 2024` with stdin closed, exit 0, one line of output.
+    ///
+    /// ★★ **And the deletion inverts the answered-ness invariant.** After the clear the next
+    ///    `export-irs-pdf` prints the mandatory Form 1040 Digital Asset question with NEITHER box
+    ///    marked and states *"this return does not record an answer to it"* — a sentence made true
+    ///    by the destruction. A `0` on an unasked line fabricates testimony; this fabricates its
+    ///    ABSENCE, on a return that gave it.
+    ///
+    /// ★★ **The decision is [`crate::input_form_store::draft_is_disposable`], called** — the same
+    ///    seed comparison the draft half keys on, not a second list. So a field added to
+    ///    `ReturnInputs` tomorrow is protected the day it is added, and the two halves cannot
+    ///    diverge. `holdings` is [`crate::input_form_store::describe_draft`]'s clause, including its
+    ///    *"work not otherwise itemised"* fallback.
+    ///
+    /// ★ `--discard-return` is a SEPARATE flag from `--discard-draft`: they name different
+    ///   artifacts, a year can hold both, and a filer who authorises discarding a scratch draft has
+    ///   not thereby authorised deleting a screened return.
+    #[error(
+        "year {year} has a stored full return holding {holdings}, and `income clear` DELETES it. \
+         Nothing was deleted. The recorded answers are the part no re-import restores: btctax \
+         records when, and in what words, it asked you, so re-importing the same TOML brings the \
+         figures back and not the record — and a return whose Digital Asset answer is gone prints \
+         that mandatory question with neither box marked. To fall back to your tax-profile and KEEP \
+         this return, open the tax-inputs form for {year} (`btctax-tui-edit`) and press 't' — that \
+         parks the return instead of deleting it, and 't' reinstates it. To delete it, re-run with \
+         --discard-return."
+    )]
+    CommittedReturnBlocksClear { year: i32, holdings: String },
     /// ★★★ **T4 / R11 — the §6.3 stale-WIP DISCARD, refused when the draft holds an interview.**
     ///
     /// §6.3 discards a stale-version WIP draft silently *"because it is regenerable, so refusing

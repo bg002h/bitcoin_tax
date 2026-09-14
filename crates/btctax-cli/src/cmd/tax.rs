@@ -625,13 +625,57 @@ pub fn project_return_inputs(
 
 /// `income clear` — remove the stored full-return inputs for `year` (recovery path so a year with
 /// `ReturnInputs` isn't a dead end while derivation is pending — review I3). Returns whether a row existed.
+///
+/// ★★★ **FR-199 — the COMMITTED row now needs `--discard-return`, for the reason the draft needed
+///     `--discard-draft`.** Both artifacts carry the same `answer_log`, and the committed one is
+///     strictly the stronger: it is a return that has been screened and stored. Until this guard,
+///     `income clear` deleted it on nothing — no flag, no prompt, no stash, exit 0 — while a mere
+///     crash-scratch draft holding one answer was refused. The decision is
+///     [`crate::input_form_store::draft_is_disposable`], the SAME seed comparison the draft half
+///     keys on, so the two cannot diverge and a `ReturnInputs` field added tomorrow is protected the
+///     day it is added.
+///
+/// ★★ **Ordering: the committed guard runs BEFORE the draft coherence half, deliberately.** The
+///    M-1 rule that `coherence_clear_or_refuse` must precede any committed-row read exists so a
+///    writer that EARLY-RETURNS on an absent committed row cannot shadow the parked-draft refusal.
+///    This guard never early-returns: an absent or disposable row falls through to
+///    `coherence_clear_or_refuse` unchanged, so a parked year (which has no committed row at all)
+///    still raises [`CliError::ParkedDraftBlocksWrite`] exactly as before. Running it first means
+///    the refusal path touches nothing whatsoever — not even the in-memory draft delete.
 pub fn clear_return_inputs(
     vault: &Path,
     pp: &Passphrase,
     year: i32,
     discard_draft: bool,
+    discard_return: bool,
 ) -> Result<bool, CliError> {
     let mut s = Session::open(vault, pp)?;
+    // ★★★ FR-199: refuse to delete a stored return that holds an interview unless told to.
+    //
+    // ★★ **THE BOUNDARY, STATED IN THE SOURCE** (rule 3 of *"derive the list, or make the compiler
+    //    hold it"*): this guard can only describe a row this build can READ. A row at a schema
+    //    version this build does not deserialize ([`CliError::StaleReturnInputs`]) falls THROUGH and
+    //    clears exactly as before — deliberately, and not an oversight:
+    //      · that error's own remedy IS `income clear` → `income import` → `--write-carryover`, and
+    //        it already warns that the clear discards the carryover its prior reports wrote;
+    //      · nothing can park, edit or export a row this build cannot deserialize (`park_to_profile`
+    //        reads it too), so a refusal here would leave the filer with no exit at all — FR-102's
+    //        shape, safe about the row and total about the outcome.
+    //    Held red by `tax_report`'s *"clear works on a stale row (it never deserializes)"*, which is
+    //    why this is a `match` and not a `?`.
+    if !discard_return {
+        match return_inputs::get(s.conn(), year) {
+            Ok(Some(ri)) if !crate::input_form_store::draft_is_disposable(&ri) => {
+                return Err(CliError::CommittedReturnBlocksClear {
+                    year,
+                    holdings: crate::input_form_store::describe_draft(&ri),
+                });
+            }
+            Ok(_) => {}
+            Err(CliError::StaleReturnInputs { .. }) => {}
+            Err(e) => return Err(e),
+        }
+    }
     // ★ §6.2 (M-1): a parked draft is the sole copy of a screened return — refuse rather than let this
     // clear leave it silently orphaned; a WIP draft holding an interview needs `--discard-draft`
     // (T4/R11); any other WIP draft is cleared alongside the committed-row delete.
@@ -1753,7 +1797,7 @@ mod tests {
             crate::input_form_store::set_draft_row(s.conn(), 2024, &ri, true).unwrap(); // parked
             s.save().unwrap();
         }
-        let err = clear_return_inputs(&path, &pp, 2024, false).unwrap_err();
+        let err = clear_return_inputs(&path, &pp, 2024, false, false).unwrap_err();
         assert!(
             matches!(err, CliError::ParkedDraftBlocksWrite { year: 2024 }),
             "income clear must refuse a parked-draft year, got {err:?}"
@@ -1763,6 +1807,143 @@ mod tests {
         assert!(
             crate::input_form_store::draft_exists(s.conn(), 2024).unwrap(),
             "a refused clear must leave the parked draft intact"
+        );
+    }
+
+    /// ★★★ **FR-199, THE KILL — `income clear` may not delete a stored return's recorded answers
+    ///     without `--discard-return`.**
+    ///
+    /// The plant is written in the FILER's vocabulary, not the guard's (FR-235): the answer is
+    /// stamped by `record_answer` — the one writer `income answer` itself reaches — and the
+    /// assertion is on the `AnswerRecord` still being READABLE FROM DISK afterwards, through a fresh
+    /// `Session`. Nothing here mentions `draft_is_disposable`, `describe_draft` or the error's
+    /// fields, so a guard that refuses for the wrong reason, or one that refuses and saves anyway,
+    /// still fails this.
+    ///
+    /// **Which test reds when this is reverted:** delete the `if !discard_return` block from
+    /// [`clear_return_inputs`] and this test reds on
+    /// *"income clear must REFUSE to delete a stored return holding recorded answers"* — the
+    /// `unwrap_err()` panics on the `Ok(true)` the shipped build returned.
+    ///
+    /// The three arms are deliberate: refuse-and-preserve (the defect), clear-WITH-the-flag (so the
+    /// guard is an acknowledgement and not a brick), and clear-a-bare-row-with-NO-flag (so the
+    /// recovery path five in-product messages prescribe still works unprompted).
+    #[test]
+    fn income_clear_refuses_to_destroy_a_stored_returns_recorded_answers() {
+        use btctax_core::tax::provenance::{record_answer, AnswerKey, AnswerState};
+        use btctax_core::tax::questions::QuestionId;
+
+        let (_dir, path, pp) = tmp_vault();
+        // A stored return a filer has actually answered: the Digital Assets declaration, given in
+        // the words btctax asked it in, recorded by the same function the interview calls.
+        let mut ri = ReturnInputs {
+            tax_year: 2024,
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        record_answer(
+            &mut ri,
+            AnswerKey::Question(QuestionId::DigitalAssetActivity),
+            "At any time during 2024, did you: (a) receive ... or (b) sell, exchange, or otherwise \
+             dispose of a digital asset ...?",
+            time::Date::from_calendar_date(2026, time::Month::April, 1).unwrap(),
+            AnswerState::Given,
+        );
+        ri.digital_asset_activity = Some(true);
+        let answers_planted = ri.answer_log.len();
+        assert_eq!(answers_planted, 1, "the plant must have recorded an answer");
+        {
+            let mut s = Session::open(&path, &pp).unwrap();
+            return_inputs::set(s.conn(), 2024, &ri).unwrap();
+            s.save().unwrap();
+        }
+
+        // (1) THE DEFECT. No acknowledgement ⇒ refuse, and the answer survives ON DISK.
+        let err = clear_return_inputs(&path, &pp, 2024, false, false).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("--discard-return"),
+            "the refusal must name what the filer has to type: {msg}"
+        );
+        assert!(
+            msg.contains("recorded answer"),
+            "the refusal must name what would be lost: {msg}"
+        );
+        {
+            let s = Session::open(&path, &pp).unwrap();
+            let kept = return_inputs::get(s.conn(), 2024).unwrap().expect(
+                "income clear must REFUSE to delete a stored return holding recorded answers",
+            );
+            assert_eq!(
+                kept.answer_log.len(),
+                answers_planted,
+                "the recorded answer must survive a refused clear"
+            );
+            assert_eq!(
+                kept.digital_asset_activity,
+                Some(true),
+                "…and so must the answer it is a record of — a cleared return prints that \
+                 mandatory question with neither box marked"
+            );
+        }
+
+        // (2) …and the flag is an acknowledgement, not a brick.
+        assert!(
+            clear_return_inputs(&path, &pp, 2024, false, true).unwrap(),
+            "--discard-return must actually delete the row"
+        );
+        {
+            let s = Session::open(&path, &pp).unwrap();
+            assert!(
+                return_inputs::get(s.conn(), 2024).unwrap().is_none(),
+                "--discard-return must reach disk"
+            );
+        }
+
+        // (3) ★★★ **`SPEC_input_surface.md` §D-7, WHICH SHIPPED UNIMPLEMENTED:** *"`income clear`
+        //     warns and requires confirmation when the header carries secrets … after Cycle 2 it
+        //     destroys SSNs that exist nowhere else."* A row whose ONLY content is the filer's SSN
+        //     holds not one recorded answer, not one document row, no dependent and no Schedule A —
+        //     so every itemised category `describe_draft` knows about is empty. It is still refused,
+        //     because the decision is the whole-struct seed comparison and not those categories.
+        //     Flip `draft_is_disposable` to `DraftHoldings::is_empty` and this arm alone reds.
+        {
+            let mut ssn_only = ReturnInputs {
+                tax_year: 2026,
+                filing_status: FilingStatus::Single,
+                ..Default::default()
+            };
+            ssn_only.header.taxpayer.ssn = "123-45-6789".to_string();
+            let mut s = Session::open(&path, &pp).unwrap();
+            return_inputs::set(s.conn(), 2026, &ssn_only).unwrap();
+            s.save().unwrap();
+        }
+        let err = clear_return_inputs(&path, &pp, 2026, false, false).unwrap_err();
+        assert!(
+            err.to_string().contains("work not otherwise itemised"),
+            "a row holding only an SSN is refused, and honestly described: {err}"
+        );
+
+        // (4) A row that is still the year's bare seed clears with NO flag, as it always did — five
+        //     in-product messages prescribe `income clear` as a recovery step and none of them
+        //     should start demanding a flag for a row holding nothing.
+        {
+            let mut s = Session::open(&path, &pp).unwrap();
+            return_inputs::set(
+                s.conn(),
+                2025,
+                &ReturnInputs {
+                    tax_year: 2025,
+                    filing_status: FilingStatus::Single,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            s.save().unwrap();
+        }
+        assert!(
+            clear_return_inputs(&path, &pp, 2025, false, false).unwrap(),
+            "a bare seed row must still clear unprompted"
         );
     }
 

@@ -214,9 +214,13 @@ pub fn open_next_year(
     //     filer has already screened and stored with a blank one.
     if return_inputs::get(sess.conn(), to)?.is_some() {
         return Err(CliError::Usage(format!(
+            // ★ FR-199 — the flag is part of the remedy. This refusal already recognised that a
+            //   committed row must not be replaced silently; the command it named then went on to
+            //   delete one silently, and only the word "discards" hinted at it.
             "year {to} already has a stored full return, so it is not opened from {from} — the \
-             opener starts a year, it does not reset one. Edit it in the tax-inputs form, or clear \
-             it first (`btctax income clear --year {to}`, which discards what it holds)."
+             opener starts a year, it does not reset one. Edit it in the tax-inputs form, or delete \
+             it first (`btctax income clear --year {to} --discard-return`, which DELETES what it \
+             holds, including every recorded answer)."
         )));
     }
 

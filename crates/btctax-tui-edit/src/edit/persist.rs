@@ -337,9 +337,14 @@ pub fn persist_tax_profile(
     // `--force`; the user must `income clear --year N` (or the CLI `tax-profile set --force`) first.
     if btctax_cli::return_inputs::exists(session.conn(), year)? {
         return Err(PersistError::NoChange(btctax_cli::CliError::Usage(format!(
+            // ★ FR-199 — `income clear` now REFUSES a stored return holding an interview, so the
+            //   flag is part of the remedy. And the NON-destructive exit is named FIRST, because it
+            //   is right here in this editor: 't' parks the return and the year resolves through the
+            //   tax-profile again, which is what this refusal is actually about.
             "tax year {year} has full-return inputs (`income import`); a raw tax-profile would be ignored \
-             (full-return inputs take precedence). Run `income clear --year {year}`, or the CLI \
-             `tax-profile set --force`, first."
+             (full-return inputs take precedence). Press 't' to park the full return (it is kept, and \
+             't' reinstates it), or use the CLI `tax-profile set --force` to store the profile anyway; \
+             `income clear --year {year} --discard-return` DELETES the return, recorded answers and all."
         ))));
     }
     let pre = session.snapshot()?;

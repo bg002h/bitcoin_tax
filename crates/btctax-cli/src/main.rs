@@ -408,9 +408,10 @@ fn run() -> Result<ExitCode, CliError> {
             IncomeCmd::Clear {
                 year,
                 discard_draft,
+                discard_return,
             } => {
                 let pp = passphrase(false)?;
-                if cmd::tax::clear_return_inputs(vault, &pp, year, discard_draft)? {
+                if cmd::tax::clear_return_inputs(vault, &pp, year, discard_draft, discard_return)? {
                     println!("Cleared full-return inputs for tax year {year}.");
                 } else {
                     println!("No full-return inputs set for tax year {year}.");

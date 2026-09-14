@@ -4,9 +4,11 @@
 .SH NAME
 clear \- Remove the stored full\-return inputs for a tax year (fall back to a raw `tax\-profile`)
 .SH SYNOPSIS
-\fBclear\fR <\fB\-\-year\fR> [\fB\-\-discard\-draft\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+\fBclear\fR <\fB\-\-year\fR> [\fB\-\-discard\-draft\fR] [\fB\-\-discard\-return\fR] [\fB\-h\fR|\fB\-\-help\fR] 
 .SH DESCRIPTION
-Remove the stored full\-return inputs for a tax year (fall back to a raw `tax\-profile`)
+Remove the stored full\-return inputs for a tax year (fall back to a raw `tax\-profile`).
+.PP
+This DELETES the year\*(Aqs return. A stored return holding an interview — recorded answers, transcribed documents, dependents or a Schedule A — is REFUSED without `\-\-discard\-return`, and the refusal names what would be lost. To fall back to your tax\-profile and KEEP the return, park it instead: open the tax\-inputs form for the year (`btctax\-tui\-edit`) and press \*(Aqt\*(Aq.
 .SH OPTIONS
 .TP
 \fB\-\-year\fR \fI<YEAR>\fR
@@ -16,6 +18,13 @@ The tax year (e.g. 2024)
 Discard a work\-in\-progress tax\-inputs DRAFT for this year that holds an interview — recorded answers, transcribed documents, dependents or a Schedule A.
 
 Without this, such a write is REFUSED and nothing is stored: on a year whose package has not arrived the draft is where the interview lives for months, and its recorded answers cannot be re\-created by re\-typing (btctax records when and in what words it asked). A draft holding none of that is superseded silently, as before.
+.TP
+\fB\-\-discard\-return\fR
+DELETE this year\*(Aqs stored full RETURN when it holds an interview — recorded answers, transcribed documents, dependents or a Schedule A.
+
+Without this, the clear is REFUSED and nothing is deleted. The committed return holds the same answer log a draft does, and the same sentence applies to it: btctax records when, and in what words, it asked you, so re\-importing the same TOML brings the figures back and NOT the record — and a return whose Digital Asset answer is gone prints that mandatory question with neither box marked. A return holding none of that is deleted silently, as before.
+
+This is separate from \-\-discard\-draft: they name different artifacts, a year can hold both, and authorising the discard of a scratch draft is not authorising the deletion of a screened return.
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help (see a summary with \*(Aq\-h\*(Aq)

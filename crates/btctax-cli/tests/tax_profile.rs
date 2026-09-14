@@ -166,8 +166,10 @@ fn set_profile_is_refused_while_return_inputs_exist_unless_forced() {
     );
 
     // `income clear` removes the inputs; afterward the un-forced path is allowed again.
-    assert!(cmd::tax::clear_return_inputs(&vault, &pp(), 2024, false).unwrap());
-    assert!(!cmd::tax::clear_return_inputs(&vault, &pp(), 2024, false).unwrap()); // idempotent
+    // ★ FR-199: this row holds a real full return, so the delete is ACKNOWLEDGED (`--discard-return`);
+    //   without the flag it is now refused, which `cmd::tax::tests` holds.
+    assert!(cmd::tax::clear_return_inputs(&vault, &pp(), 2024, false, true).unwrap());
+    assert!(!cmd::tax::clear_return_inputs(&vault, &pp(), 2024, false, true).unwrap()); // idempotent
     cmd::tax::set_profile(&vault, &pp(), 2024, prof_2025(), false).unwrap();
 }
 
