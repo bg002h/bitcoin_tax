@@ -11,6 +11,13 @@ mod archive_check;
 mod authority_conflicts;
 mod authority_manifest;
 mod authority_refresh;
+/// ★★★ **`blockers <year>` — what prevents a return for that tax year, DERIVED from the tree.**
+///
+/// The owner asked for *"a list of all the things that prevent us from completing 2026 return"*. A
+/// written list is the artifact that rots; this reads `YearReadiness`, `Stem::ALL`,
+/// `form_delta::port_status`, `design/forms/extract/`, every year-keyed gate and
+/// `ROADMAP_STATUS.md`'s own decision table, and groups what it finds by who clears it.
+mod blockers;
 mod box_census;
 /// N1 — asserts `btctax_core::tax::capital_loss_carryover` is verbatim and complete against the 2025
 /// Schedule D instructions' text layer.
@@ -88,6 +95,7 @@ mod wrapped_literal_check;
 const SUBCOMMANDS: &[(&str, &[&str], &str)] = &[
     ("archive-check", &[], ""),
     ("authority-conflicts", &[], ""),
+    ("blockers", &[], "[<year>]"),
     ("authority-manifest", &["--regen"], "[--regen]"),
     (
         "authority-refresh",
@@ -269,6 +277,28 @@ fn main() {
         Some("extract-schedule-1a") => {
             if let Err(e) = cite_check::extract() {
                 eprintln!("xtask extract-schedule-1a: {e}");
+                std::process::exit(1);
+            }
+        }
+        // ★★★ The TY-blocker instrument. The year DEFAULTS to `default_year()` — the newest bundled
+        //     record, derived from the glob — so the command name carries no year literal to go
+        //     stale, which is the whole point of it not being a document.
+        Some("blockers") => {
+            let year = match args.get(1) {
+                Some(y) => match y.parse::<i32>() {
+                    Ok(y) => y,
+                    Err(_) => {
+                        eprintln!(
+                            "usage: cargo run -p xtask -- blockers [<year>]   \
+                             (default: the newest bundled year)"
+                        );
+                        std::process::exit(2);
+                    }
+                },
+                None => btctax_cli::year_readiness::default_year(),
+            };
+            if let Err(e) = blockers::run(year) {
+                eprintln!("xtask blockers {year}: {e}");
                 std::process::exit(1);
             }
         }
