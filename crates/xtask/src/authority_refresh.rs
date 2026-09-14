@@ -139,6 +139,115 @@ fn newest_archived_edition(entries: &[Entry]) -> BTreeMap<String, u32> {
 }
 
 /// `xtask authority-refresh --check [--from-dir <dir>]`.
+/// A document this repo KNOWS it is missing and needs — the third question `authority-refresh` asks.
+///
+/// ★★★ **Why this exists at all.** The two probes above can only see documents that are ALREADY
+/// archived: `newest_archived_edition` is, in its own words, *"the probe's starting point"*, so a
+/// document that was never archived has no starting point and is invisible. FR-181 says *"archive both
+/// the moment the IRS posts them"* — an action with **no instrument**, depending on somebody
+/// remembering to check, which is the one thing this repo's doctrine says a guarantee may not rest on.
+/// This turns that remembered action into a command that fails on the day it becomes possible.
+///
+/// ★★ **And why [`Wanted::face`] is the load-bearing field rather than the URL.** A 200 is NOT arrival.
+/// Measured 2026-09-14: `https://www.irs.gov/pub/irs-dft/f1040--dft.pdf` answers **200** and is the
+/// **TY2025** draft — its own face reads *"1040 U.S. Individual Income Tax Return 2025"* and its footer
+/// *"Form 1040 (2025)"*. A probe keyed to the status code alone would have fired the day it was written,
+/// every run, forever — and the repair for an instrument that cries wolf is always to mute it. So this
+/// one reads the document's OWN printed year and only reports arrival when the page says the year we
+/// asked for.
+pub struct Wanted {
+    /// The archive stem the document would take, e.g. `f1040`.
+    pub stem: &'static str,
+    /// The tax year wanted.
+    pub year: u32,
+    /// Every URL worth trying, final first then draft. A draft counts as arrival — FR-181 says
+    /// *"drafts if that is what exists"* — but only if its face carries [`Wanted::year`].
+    pub urls: &'static [&'static str],
+    /// The string that must appear in the document's TEXT LAYER for it to be the wanted year. This is
+    /// the whole honesty of the probe; see the type note.
+    pub face: &'static str,
+    /// What is blocked while this is missing, so the failure explains itself.
+    pub blocks: &'static str,
+}
+
+/// ★ The list is SHORT and each row names what it blocks, because a wanted list that accumulates
+/// aspirations becomes noise and then gets muted. A row leaves this table the moment the document is
+/// archived — at which point the two probes above take over and this one stops being the thing that
+/// watches it.
+pub const WANTED: &[Wanted] = &[
+    Wanted {
+        stem: "f1040",
+        year: 2026,
+        urls: &[
+            "https://www.irs.gov/pub/irs-prior/f1040--2026.pdf",
+            "https://www.irs.gov/pub/irs-dft/f1040--dft.pdf",
+        ],
+        face: "U.S. Individual Income Tax Return 2026",
+        blocks: "FR-181 — the 1040 is the form the whole packet is built around, and TY2026 has \
+                 neither a final nor a draft; every TY2026 claim citing it is unverified",
+    },
+    Wanted {
+        stem: "i1040gi",
+        year: 2026,
+        urls: &[
+            "https://www.irs.gov/pub/irs-prior/i1040gi--2026.pdf",
+            "https://www.irs.gov/pub/irs-dft/i1040gi--dft.pdf",
+        ],
+        face: "2026 Returns",
+        blocks: "FR-181 — the Itemized Deductions Worksheet and the Social Security Benefits \
+                 Worksheet both live in i1040gi, so every quote from either is unverifiable for TY2026",
+    },
+];
+
+/// The text layer of `bytes`, via `pdftotext -layout`, or `None` if it cannot be read.
+///
+/// ★ Deliberately tolerant: a wanted-document probe that HARD-FAILS on a malformed download would turn
+/// a network hiccup into a red gate, and the whole point of this probe is that it is quiet until the
+/// day it matters.
+fn text_layer(bytes: &[u8]) -> Option<String> {
+    let dir = std::env::temp_dir().join(format!("btctax-wanted-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).ok()?;
+    let pdf = dir.join("probe.pdf");
+    std::fs::write(&pdf, bytes).ok()?;
+    let out = std::process::Command::new("pdftotext")
+        .arg("-layout")
+        .arg(&pdf)
+        .arg("-")
+        .output()
+        .ok()?;
+    let _ = std::fs::remove_dir_all(&dir);
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Whether a fetched text layer is the wanted year's document.
+///
+/// ★ Split out of [`wanted_has_arrived`] for one reason: it is the only part with a defect worth a
+/// test, and it is the only part that can be tested without the network. See
+/// `a_served_document_of_the_wrong_year_has_not_arrived`.
+#[must_use]
+pub fn face_matches(text: &str, w: &Wanted) -> bool {
+    text.contains(w.face)
+}
+
+/// Whether a wanted document is being served AND its own face carries the wanted year.
+///
+/// Returns the URL that satisfied it, or `None`.
+#[must_use]
+pub fn wanted_has_arrived(w: &Wanted) -> Option<String> {
+    for url in w.urls {
+        if curl_status(url) != Ok(200) {
+            continue;
+        }
+        let Ok(bytes) = curl_bytes(url) else { continue };
+        if text_layer(&bytes).is_some_and(|t| face_matches(&t, w)) {
+            return Some((*url).to_string());
+        }
+    }
+    None
+}
+
 pub fn run(from_dir: Option<PathBuf>) -> Result<(), String> {
     let root = crate::form_geometry::repo_root();
     let entries = authority_manifest::load(&root)?;
@@ -205,9 +314,35 @@ pub fn run(from_dir: Option<PathBuf>) -> Result<(), String> {
         println!("authority-refresh: --from-dir, so the newer-edition probe was skipped");
     }
 
-    if drift.is_empty() && newer.is_empty() {
-        println!("authority-refresh: OK — every note still matches irs.gov, and no newer edition is served");
+    // ── The third question: has a document we KNOW we are missing been posted? ──────────────────
+    let mut arrived = Vec::new();
+    if from_dir.is_none() {
+        for w in WANTED {
+            if let Some(url) = wanted_has_arrived(w) {
+                arrived.push(format!("{}--{} ({url}) — {}", w.stem, w.year, w.blocks));
+            }
+        }
+        println!(
+            "authority-refresh: probed {} WANTED document(s) not yet archived — {} have arrived",
+            WANTED.len(),
+            arrived.len()
+        );
+        for a in &arrived {
+            println!("  ★ A WANTED DOCUMENT HAS ARRIVED: {a}");
+        }
+    }
+
+    if drift.is_empty() && newer.is_empty() && arrived.is_empty() {
+        println!("authority-refresh: OK — every note still matches irs.gov, no newer edition is served, and no wanted document has been posted");
         Ok(())
+    } else if drift.is_empty() && newer.is_empty() {
+        Err(format!(
+            "{} WANTED document(s) have been posted and are not archived yet. ★ This is GOOD NEWS \
+             that must not be silent: archive each one (drafts included — FR-181 says \"drafts if \
+             that is what exists\"), give it a census entry per edition, then DELETE its row from \
+             `WANTED` so the ordinary drift and newer-edition probes take over watching it.",
+            arrived.len()
+        ))
     } else {
         Err(format!(
             "{} note(s) drifted and {} newer edition(s) exist. ★ A different hash is not a corrupt \
@@ -317,6 +452,110 @@ mod tests {
         assert!(
             !newest.contains_key("f6251"),
             "only the information-return series is probed: {newest:?}"
+        );
+    }
+    /// ★★★ **B1 — the probe observed DISCRIMINATING, on the real document that makes a status-only
+    /// probe wrong.**
+    ///
+    /// The plant is not synthetic and does not touch the network. `f1040--dft.pdf` answers **200**
+    /// today and is the **TY2025** draft; the two strings below are copied from its actual text layer
+    /// (measured 2026-09-14). So:
+    ///
+    /// * asked for 2026 — the year [`WANTED`] really asks for — it must say NOT arrived, even though a
+    ///   document is being served at that URL. **A status-only probe fails here**, which is the defect.
+    /// * asked for 2025 — the year that document really is — it must say arrived. Without this half the
+    ///   test would pass on a `face_matches` hard-wired to `false`, which is [B1a]: the fixture and the
+    ///   plant are the other half of the checker.
+    ///
+    /// ★ Per FR-235 the plant is not in the checker's vocabulary: it is a property of a real IRS
+    /// document, not a rephrasing of the predicate.
+    #[test]
+    fn a_served_document_of_the_wrong_year_has_not_arrived() {
+        // Verbatim from the text layer of https://www.irs.gov/pub/irs-dft/f1040--dft.pdf, 2026-09-14.
+        let served = "                             1040 U.S. Individual Income Tax Return 2025\n\
+                      Form 1040 (2025)\n";
+
+        let asked_2026 = Wanted {
+            stem: "f1040",
+            year: 2026,
+            urls: &[],
+            face: "U.S. Individual Income Tax Return 2026",
+            blocks: "test",
+        };
+        assert!(
+            !face_matches(served, &asked_2026),
+            "a document IS served at the wanted URL, but its face says 2025 — reporting this as \
+             arrival is the status-only defect, and it would fire on every run forever"
+        );
+
+        let asked_2025 = Wanted {
+            face: "U.S. Individual Income Tax Return 2025",
+            ..asked_2026
+        };
+        assert!(
+            face_matches(served, &asked_2025),
+            "the same text, asked for the year it really is, must count as arrival — otherwise this \
+             test passes on a predicate hard-wired to false and measures nothing"
+        );
+    }
+
+    /// ★ Every `WANTED` row must state what it blocks, or the failure cannot explain itself and the
+    /// next reader mutes it.
+    #[test]
+    fn every_wanted_row_names_what_it_blocks_and_where_to_look() {
+        assert!(
+            !WANTED.is_empty(),
+            "an empty wanted list makes the probe vacuous"
+        );
+        for w in WANTED {
+            assert!(
+                !w.blocks.trim().is_empty(),
+                "{}: no `blocks` reason",
+                w.stem
+            );
+            assert!(!w.urls.is_empty(), "{}: nowhere to look", w.stem);
+            assert!(
+                w.face.contains(&w.year.to_string()),
+                "{}: the face proof {:?} does not mention {} — then it cannot tell that year's \
+                 document from another year's, which is the whole point",
+                w.stem,
+                w.face,
+                w.year
+            );
+        }
+    }
+    /// ★★★ **B1 — this command must have a RUNNER, and the test exists because for its whole life it
+    /// did not.**
+    ///
+    /// Nothing invoked `authority-refresh --check`: no CI job, no `make` target. That is precisely how
+    /// FR-242 happened — two newer IRS editions were served, this command detects exactly that, and it
+    /// was simply never run. Adding a third probe (`WANTED`) into an uninvoked command would have made
+    /// it a better green-and-blind instrument, which is the dominant defect shape in this repo's ledger.
+    ///
+    /// ★ The assertion is on the WORKFLOW FILES, derived rather than hand-listed: any workflow that
+    /// invokes the subcommand satisfies it, so the runner can be renamed or moved without a false red.
+    /// ★★ What it deliberately does NOT claim: that GitHub actually ran the job, that the schedule
+    /// fired, or that the job is a required check. A test cannot observe CI, and pretending otherwise
+    /// would be the same false promise one level up — the `#[ignore]` reason that said *"run in CI"*
+    /// while no job existed.
+    #[test]
+    fn some_workflow_actually_runs_this_command() {
+        let dir = repo_root().join(".github/workflows");
+        let mut invokers = Vec::new();
+        for e in std::fs::read_dir(&dir).expect("the workflows directory exists") {
+            let path = e.expect("a readable dir entry").path();
+            if path.extension().is_some_and(|x| x == "yml" || x == "yaml") {
+                let body = std::fs::read_to_string(&path).expect("a readable workflow");
+                if body.contains("authority-refresh --check") {
+                    invokers.push(path.file_name().unwrap().to_string_lossy().into_owned());
+                }
+            }
+        }
+        assert!(
+            !invokers.is_empty(),
+            "no workflow in .github/workflows invokes `authority-refresh --check`, so nothing asks \
+             whether an archived note drifted, a newer edition appeared, or a WANTED document was \
+             posted. FR-242 is what that costs: the command worked and was never run."
         );
     }
 }

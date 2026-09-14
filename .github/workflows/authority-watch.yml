@@ -1,0 +1,47 @@
+# ★★★ THE RUNNER FOR `xtask authority-refresh --check`, WHICH HAD NONE.
+#
+# Until 2026-09-14 nothing in this repo ran it — no CI job, no `make` target. That is exactly how
+# FR-242 happened: two newer IRS editions (`f5498sa--2026`, `i1099sa--2026`) were being served for an
+# unknown period, the command that detects them worked perfectly, and it was simply never invoked. A
+# checker with no runner is the dominant defect shape in this repo's own ledger, and building a third
+# probe into that command without giving it a runner would have shipped a green-and-blind instrument.
+#
+# ★★ WHY SCHEDULED AND NOT PER-PUSH. The three questions it asks — has an archived note drifted, has a
+# newer edition appeared, has a WANTED document been posted — change on the scale of weeks, never per
+# commit. Running it on every push would re-fetch 144 documents from irs.gov each time and make every
+# pull request depend on irs.gov being up, which is how a probe earns a reputation for flakiness and
+# then gets muted. Weekly is the cadence the question actually has.
+#
+# ★ It is deliberately NOT part of `make check`: that gate must stay offline and fast, and a
+# network-dependent step in it would make a local red indistinguishable from a bad connection.
+#
+# ★ A red here is not necessarily bad news. "A WANTED DOCUMENT HAS ARRIVED" means the IRS posted
+# something this repo is blocked on — see FR-181 — and the correct response is to archive it, give it a
+# census entry per edition, and DELETE its row from `authority_refresh::WANTED`.
+name: authority-watch
+
+on:
+  schedule:
+    # Mondays, 07:00 UTC. Cron on GitHub is best-effort and may be skipped under load, which is fine
+    # for a weekly question; `workflow_dispatch` is here so it can always be forced.
+    - cron: '0 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  authority-refresh:
+    name: authority-refresh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9  # v1
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      - name: Install lld (.cargo/config forces -fuse-ld=lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
+      - name: Install poppler-utils (the WANTED probe reads a fetched PDF's own face year)
+        run: sudo apt-get install -y poppler-utils
+      - run: cargo run -p xtask --locked -- authority-refresh --check
