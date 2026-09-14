@@ -9250,7 +9250,8 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   hardcoded fields. Same family as *"the thing that decides was not the thing that knows."*
   B1: the kill is a taxcalc-engine row asserting its value does **not** appear under `ots`.
 
-- **★★★ FR-239 — B2 COROLLARY: a worktree agent sees HEAD, not your working tree, so an UNCOMMITTED brief is invisible to the agent you just dispatched. Important process defect. Owning phase: NOW — it applies to every future dispatch. Belongs in `design/HARNESS.md` beside B2.**
+- **✅ RECORDED + MITIGATED — FR-239 — B2 COROLLARY: a worktree agent sees NEITHER your working tree NOR `HEAD`. It branches from a FIXED OLDER BASE, so a brief must be copied in AFTER dispatch and every integration is a 3-way merge. Belongs in `design/HARNESS.md` beside B2.**
+  ⚠️ **This headline originally read *"a worktree agent sees HEAD, not your working tree"*, and that was wrong — kept visible here, because the wrong version is what made me prescribe a fix that could not work.** The corrected mechanism and the working mitigation are in the body below. Measured since: four consecutive agents all based on the same commit, the last **17** behind main. Mitigation applied on every dispatch since, and verified each time by one command.
   Happened twice in a row on 2026-09-14, to both agents dispatched that hour. The sequence is the
   trap, and it is the *natural* order to work in:
   1. write `design/agent-reports/BRIEF-x.md`
@@ -9295,7 +9296,8 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   reviewed a fold against acceptance criteria the implementer was never given.** Same family as
   *"the thing that decides was not the thing that knows."*
 
-- **★★★ FR-240 — the subagent tooling now REFUSES to let an agent persist its own report, which breaks a standing rule in BOTH `~/.claude/CLAUDE.md` and `/scratch/code/CLAUDE.md`. Important process regression. Owning phase: NOW — it binds every future dispatch.**
+- **✅ RECORDED + MITIGATED — FR-240 — the subagent tooling REFUSES to let an agent persist its own report, breaking a standing rule in BOTH `~/.claude/CLAUDE.md` and `/scratch/code/CLAUDE.md`. Mitigation: brief the agent to use a Bash heredoc, not `Write`.**
+  ★ Verified working on the two dispatches after it was found: both agents wrote their own reports via heredoc and reported their own byte counts, and the controller's persist commit became a COURIER action — `cmp` against the agent's copy confirming byte-identity — rather than a transcription. That restores the property the rule exists for: *the responder is not the scribe.*
   The FR-234 implementer's `Write` of `design/agent-reports/REPORT-fr234-se-rounding-and-runner.md` was
   refused with *"Subagents should return findings as text, not write report files."* The report came back
   **inline** and the controller wrote it to disk (`e9d1d329f`), which is exactly the arrangement the rule
