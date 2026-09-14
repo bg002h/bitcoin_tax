@@ -1,0 +1,26 @@
+https://www.irs.gov/pub/irs-prior/i1099sa--2026.pdf
+
+# i1099sa--2026.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  68cca68a937532ba900c4f1d091ed9ebd56317923b3b9620a04cf5287b56e215
+# bytes   157004
+#
+# Fetch:    curl -sL -o i1099sa--2026.pdf https://www.irs.gov/pub/irs-prior/i1099sa--2026.pdf
+# Verify:   sha256sum i1099sa--2026.pdf   # must equal the sha256 above
+#
+# ★ A DIFFERENT hash does not mean a corrupt download — it means the IRS REVISED this
+# document. That is a change to the authority: review it, never silently absorb it.
+#
+# The committed text layer is design/forms/extract/i1099sa--2026.txt — that is what the
+# conformance tests read, so they run with no PDF and no network.
+#
+# Archived 2026-09-14 for FR-242, alongside f5498sa--2026.
+# REVISION, READ OFF THE DOCUMENT'S OWN TEXT:
+#   (Rev. December 2026)  (extract:7).
+#   ★★★ IT NAMES THE TWO FORM REVISIONS IT GOVERNS, AND THEY ARE NOT THE SAME YEAR (extract:9):
+#     "Use with the April 2025 revision of Form 1099-SA and the December 2026 revision"
+#   Both are on disk and the archive is consistent with that pairing:
+#     Form 1099-SA  Rev. April 2025     design/forms/extract/f1099sa--2025.txt
+#     Form 5498-SA  Rev. December 2026  design/forms/extract/f5498sa--2026.txt
+#   ★★ This is FR-226's hazard in the concrete: a directory YEAR and a printed REVISION are
+#   different axes, and this booklet pairs editions ACROSS years by design. Anything that infers
+#   an edition from its directory will get this pair wrong.

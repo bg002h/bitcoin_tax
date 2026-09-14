@@ -557,13 +557,31 @@ pub struct Form5498Sa {
     /// \<year+1\> for \<year\>*.** ★ A refuse-guard: an Archer MSA is Form 8853's, never Form 8889's.
     #[serde(default)]
     pub box1_archer_msa_contributions: Usd,
-    /// **Box 2 — *Total contributions made in \<year\>*.** Employer AND employee, by CALENDAR year.
-    /// See the struct note: it is not Form 8889 line 2 and is deliberately not summed into it.
+    /// **Box 2 — *Total contributions made in \<year\>* (the ANNUAL editions, TY2024 and TY2025) or
+    /// *Total contributions made in the calendar year* (the CONTINUOUS-USE Rev. 12-2026 edition).**
+    /// Employer AND employee, by CALENDAR year. See the struct note: it is not Form 8889 line 2 and is
+    /// deliberately not summed into it.
+    ///
+    /// ★★ FR-242 — both captions are named because both editions are archived and each governs some
+    /// tax year. The IRS converted this form from annual to continuous use at Rev. 12-2026: the 2024
+    /// and 2025 faces print *"made in 2024"* / *"made in 2025"*, the 12-2026 face prints *"made in the
+    /// calendar year"*. ★ The figure is the same quantity either way; what moved is whether the FORM
+    /// tells you which period it covers. On the continuous-use edition it does not, so the period comes
+    /// from the tax year under computation rather than off the page.
     #[serde(default)]
     pub box2_total_contributions: Usd,
-    /// **Box 3 — *Total HSA or Archer MSA contributions made in \<year+1\> for \<year\>*.** The
-    /// carry-back window Form 8889 line 2's instruction describes (*"amounts contributed for 2024
-    /// made in 2025 by the unextended deadline"*). Transcribed, not summed — see the struct note.
+    /// **Box 3 — *Total HSA or Archer MSA contributions made in \<year+1\> for \<year\>* (the ANNUAL
+    /// editions) or *Total HSA or Archer MSA contributions made in the* … (the CONTINUOUS-USE
+    /// Rev. 12-2026 edition, whose caption stops at that word on the printed face).** The carry-back
+    /// window Form 8889 line 2's instruction describes (*"amounts contributed for 2024 made in 2025 by
+    /// the unextended deadline"*). Transcribed, not summed — see the struct note.
+    ///
+    /// ★★★ FR-242 — this is the caption change that MATTERS, and more than box 2's. The annual faces
+    /// spelled the carry-back window out as a year PAIR — *"made in 2025 for 2024"* — so a filer and a
+    /// reviewer could both read the window off the document. The continuous-use face does not, so the
+    /// pair is no longer on the page and must come from the tax year under computation. ★ Anything that
+    /// inferred the window by parsing this caption worked on the 2024/2025 editions and returns nothing
+    /// on the 12-2026 one.
     #[serde(default)]
     pub box3_contributions_next_year_for_this_year: Usd,
     /// **Box 4 — *Rollover contributions*.** ★ Explicitly EXCLUDED from Form 8889 line 2 by its own

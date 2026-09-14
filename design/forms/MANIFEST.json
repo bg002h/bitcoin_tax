@@ -1278,6 +1278,24 @@
     "extract": "design/forms/extract/iw2w3--2026.txt"
   },
   {
+    "path": "design/forms/2026/f5498sa--2026.pdf",
+    "kind": "form",
+    "storage": "note",
+    "sha256": "aaf55e3c61e8fc6913e00ff3eb5ffb0c9a780f3e39339aa8d2ac1810b2657994",
+    "bytes": 82834,
+    "url": "https://www.irs.gov/pub/irs-prior/f5498sa--2026.pdf",
+    "extract": "design/forms/extract/f5498sa--2026.txt"
+  },
+  {
+    "path": "design/forms/2026/i1099sa--2026.pdf",
+    "kind": "instructions",
+    "storage": "note",
+    "sha256": "68cca68a937532ba900c4f1d091ed9ebd56317923b3b9620a04cf5287b56e215",
+    "bytes": 157004,
+    "url": "https://www.irs.gov/pub/irs-prior/i1099sa--2026.pdf",
+    "extract": "design/forms/extract/i1099sa--2026.txt"
+  },
+  {
     "path": "legal/primary-sources/federal-register/SSA_COLA_Determinations_2017.pdf",
     "kind": "guidance",
     "storage": "committed",

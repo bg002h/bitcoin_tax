@@ -1,0 +1,28 @@
+https://www.irs.gov/pub/irs-prior/f5498sa--2026.pdf
+
+# f5498sa--2026.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  aaf55e3c61e8fc6913e00ff3eb5ffb0c9a780f3e39339aa8d2ac1810b2657994
+# bytes   82834
+#
+# Fetch:    curl -sL -o f5498sa--2026.pdf https://www.irs.gov/pub/irs-prior/f5498sa--2026.pdf
+# Verify:   sha256sum f5498sa--2026.pdf   # must equal the sha256 above
+#
+# ★ A DIFFERENT hash does not mean a corrupt download — it means the IRS REVISED this
+# document. That is a change to the authority: review it, never silently absorb it.
+#
+# The committed text layer is design/forms/extract/f5498sa--2026.txt — that is what the
+# conformance tests read, so they run with no PDF and no network.
+#
+# Archived 2026-09-14 for FR-242: `xtask authority-refresh --check` reported a NEWER EDITION and was
+# exiting 1 at HEAD. Archived IN ADDITION to --2024/--2025, never over them, per the tool's own
+# instruction and design/forms/README.md.
+# REVISION, READ OFF THE DOCUMENT'S OWN TEXT:
+#   Form 5498-SA (Rev. 12-2026) Created 9/18/25  (extract:31).
+#   REVISION-DATED, **not annual** — and that is a CHANGE FROM THE 2025 EDITION, whose note in
+#   design/forms/2025/ records "ANNUAL — no 'Rev.' appears anywhere in the document". This one
+#   prints `Rev.` four times. Box 2 reads "Total contributions made in the …" (extract:15) rather
+#   than naming a year, which is what a revision-dated form does instead of a year-stamped one.
+#   ★ So the `--2026` in this filename is the IRS's own URL year-stamp, NOT a claim that this is
+#   the TY2026 edition. Which tax year it governs is `box_census::revision_in_force`'s decision.
+# Its instructions are the COMBINED booklet i1099sa--2026, archived in the same commit, which
+# names this exact revision (see that note).

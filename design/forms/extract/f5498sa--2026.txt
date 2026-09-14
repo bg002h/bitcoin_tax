@@ -1,0 +1,87 @@
+# GENERATED — do not hand-edit. Text layer of design/forms/2026/f5498sa--2026.pdf
+# sha256:aaf55e3c61e8fc69…  |  pdftotext -layout
+# Regenerate: cargo run -p xtask -- forms extract f5498sa--2026
+#
+                     2727                   VOID                 CORRECTED
+ TRUSTEE’S name                                                          1 Employee’s or self-        OMB No. 1545-1518
+                                                                           employed person’s Archer
+                                                                           MSA contributions made in   Form 5498-SA               HSA, Archer MSA, or
+ Street address                                       Room/suite no.       the calendar year and the
+                                                                           subsequent year for the                                Medicare Advantage
+                                                                                                     (Rev. December 2026)
+                                                                           calendar year                                             MSA Information
+ City/town                 State/province   Country   ZIP/foreign code                                 For calendar year
+                                                                         $
+ Telephone number:                                                       2 Total contributions made in the calendar year                              Copy A
+ TRUSTEE’S TIN                        PARTICIPANT’S TIN                  $
+                                                                         3 Total HSA or Archer MSA contributions made in the
+                                                                                                                                                        For
+                                                                           subsequent year for the calendar year                           Internal Revenue
+ PARTICIPANT’S name
+                                                                                                                                             Service Center
+                                                                         $
+ Street address                                       Apt. no.           4 Rollover contributions        5 Fair market value of HSA,      For filing information,
+                                                                                                           Archer MSA, or MA MSA               Privacy Act, and
+                                                                                                                                         Paperwork Reduction
+ City/town                 State/province   Country   ZIP/foreign code   $                              $                                   Act Notice, see the
+                                                                                                                                          General Instructions
+                                                                         6 HSA                                                                        for Certain
+ Account number (see instructions)                                           Archer MSA                                                  Information Returns.
+                                                                             MA MSA                                                      www.irs.gov/Form1099
+Form 5498-SA (Rev. 12-2026) Created 9/18/25           Cat. No. 38467V         www.irs.gov/Form5498SA        Department of the Treasury - Internal Revenue Service
+Do Not Cut or Separate Forms on This Page — Do Not Cut or Separate Forms on This Page
+                                                                      CORRECTED (if checked)
+ TRUSTEE’S name                                                               1 Employee’s or self-        OMB No. 1545-1518
+                                                                                employed person’s Archer
+                                                                                MSA contributions made in   Form 5498-SA                 HSA, Archer MSA, or
+ Street address                                            Room/suite no.       the calendar year and the
+                                                                                subsequent year for the                                  Medicare Advantage
+                                                                                                          (Rev. December 2026)
+                                                                                calendar year                                               MSA Information
+ City/town                 State/province      Country     ZIP/foreign code                                 For calendar year
+                                                                              $
+ Telephone number:                                                            2 Total contributions made in the calendar year                                Copy B
+ TRUSTEE’S TIN                        PARTICIPANT’S TIN                       $
+                                                                              3 Total HSA or Archer MSA contributions made in the
+                                                                                                                                                                 For
+                                                                                subsequent year for the calendar year
+ PARTICIPANT’S name                                                                                                                                      Participant
+                                                                              $
+ Street address                                            Apt. no.           4 Rollover contributions         5 Fair market value of HSA,            This information
+                                                                                                                 Archer MSA, or MA MSA              is being furnished
+                                                                                                                                                            to the IRS.
+ City/town                 State/province      Country     ZIP/foreign code   $                                $
+                                                                              6 HSA
+ Account number (see instructions)                                                Archer MSA
+                                                                                  MA MSA
+Form 5498-SA (Rev. 12-2026)                 (keep for your records)               www.irs.gov/Form5498SA           Department of the Treasury - Internal Revenue Service
+Instructions for Participant
+This information is submitted to the IRS by the trustee of your health savings account   Box 1. Shows contributions you made in the calendar year and through April 15 of the
+(HSA), Archer medical savings account (MSA), or Medicare Advantage MSA (MA MSA).         subsequent year to your Archer MSA. You may be able to deduct this amount on your
+   Generally, contributions you make to your Archer MSA are deductible. Employer         Form 1040 or 1040-SR. See the Instructions for Form 1040.
+contributions are excluded from your income and aren’t deductible by you. If your        Note: The information in boxes 2 and 3 is provided for IRS use only.
+employer makes a contribution to one of your Archer MSAs, you can’t contribute to        Box 2. Shows the total contributions made to your HSA or Archer MSA in the calendar
+any Archer MSA for that year. If you made a contribution to your Archer MSA when         year shown on this form. See Pub. 969 for who can make contributions. This includes
+your employer has contributed, you can’t deduct your contribution, and you will have     qualified HSA funding distributions (trustee-to-trustee transfers) from your IRA to fund
+an excess contribution. If your spouse’s employer makes a contribution to your           your HSA. The trustee of your MA MSA isn’t required to but may show contributions to
+spouse’s Archer MSA, you can’t make a contribution to your Archer MSA if your            your MA MSA.
+spouse is covered under a high deductible health plan that also covers you.              Box 3. Shows the total HSA or Archer MSA contributions made in the subsequent year
+   Contributions that the Social Security Administration makes to your MA MSA aren’t     for the calendar year shown on this form.
+includible in your gross income nor are they deductible. Neither you nor your employer   Box 4. Shows any rollover contribution from an Archer MSA to this Archer MSA in the
+can make contributions to your MA MSA.                                                   calendar year shown on this form or any rollover from an HSA or Archer MSA to this
+   Generally, contributions you or someone other than your employer makes to your        HSA. See Form 8853 or Form 8889 and their instructions for information about how to
+HSA are deductible on your tax return. Employer contributions to your HSA may be         report distributions. This amount isn’t included in box 1, 2, or 3.
+excluded from your income and aren’t deductible by you. You and your employer can        Box 5. Shows the fair market value of your HSA, Archer MSA, or MA MSA at the end
+make contributions to your HSA in the same year.                                         of the calendar year shown on this form.
+   See Form 8853 and its instructions or Form 8889 and its instructions. Any employer    Box 6. Shows the type of account that is reported on this Form 5498-SA.
+contributions made to an Archer MSA are shown on your Form W-2 in box 12 (code
+R); employer contributions made to an HSA are shown in box 12 (code W). For more         Other information. The trustee of your HSA, Archer MSA, or MA MSA may provide
+information, see Pub. 969.                                                               other information about your account on this form.
+Participant’s taxpayer identification number (TIN). For your protection, this form       Note: Don’t attach Form 5498-SA to your income tax return. Instead, keep it for your
+may show only the last four digits of your social security number (SSN), individual      records.
+taxpayer identification number (ITIN), adoption taxpayer identification number (ATIN),   Future developments. For the latest information about developments related to Form
+or employer identification number (EIN). However, the issuer has reported your           5498-SA and its instructions, such as legislation enacted after they were published, go
+complete TIN to the IRS.                                                                 to www.irs.gov/Form5498SA.
+Account number. May show an account or other unique number the trustee assigned          Free File Program. Go to www.irs.gov/FreeFile to see if you qualify for no-cost online
+to distinguish your account.                                                             federal tax preparation, e-filing, and direct deposit or payment options.
+

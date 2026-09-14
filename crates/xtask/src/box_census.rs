@@ -378,6 +378,29 @@ pub const DOCUMENTS: &[DocumentAuthority] = &[
         instructions: "i1099sa",
         preamble_end: CONTROL_2727,
     },
+    // ★★★ FR-242 — THE 5498-SA CHANGED CADENCE AT THIS EDITION, and it is `Periodic` here while the
+    //     two above are `Annual` for that reason, not by oversight. The comment at the head of this
+    //     block says *"the 5498-SA prints its tax year on the face"*; from the 12-2026 revision it
+    //     does not. Read off the extracts rather than inferred:
+    //
+    //       edition | `Rev.` string      | box 2
+    //       2024    | none               | "Total contributions made in 2024"
+    //       2025    | none               | "Total contributions made in 2025"
+    //       2026    | (Rev. 12-2026)     | "Total contributions made in the …"   ← no year named
+    //
+    //     A form that stops printing its tax year and starts printing a revision date has become
+    //     continuous-use, which is exactly what `Cadence::Periodic` means here — the same cadence
+    //     `f1099sa` has carried all along. ★ So the head-of-block comment is now true only of the
+    //     2024/2025 editions, and `revision_in_force` resolving per STEM AND edition is what keeps
+    //     that from mattering.
+    DocumentAuthority {
+        stem: "f5498sa",
+        edition: "2026",
+        revision_year: 2026,
+        cadence: Cadence::Periodic,
+        instructions: "i1099sa",
+        preamble_end: CONTROL_2727,
+    },
 ];
 
 /// ★★ **The 16 archived BOOKLET editions**, asserted against `MANIFEST.json` `kind: instructions`
@@ -492,6 +515,21 @@ pub const BOOKLETS: &[BookletEdition] = &[
         edition: "2025",
         revision_year: 2025,
         cadence: Cadence::Annual,
+    },
+    // ★★ FR-242 — the booklet converted at the same edition as the form it covers: `(Rev. December
+    //    2026)` at `i1099sa--2026.txt:7`, where the 2024 and 2025 booklets carry no `Rev.` string at
+    //    all. Hence `Periodic`.
+    //
+    // ★★★ AND IT NAMES THE TWO FORM REVISIONS IT GOVERNS, WHICH ARE NOT THE SAME YEAR
+    //     (`i1099sa--2026.txt:9`): *"Use with the April 2025 revision of Form 1099-SA and the
+    //     December 2026 revision"*. Both are archived and the pairing holds —
+    //     `f1099sa--2025` prints `(Rev. April 2025)`, `f5498sa--2026` prints `(Rev. 12-2026)`.
+    //     This is why a booklet edition may never be inferred from a form's year, or vice versa.
+    BookletEdition {
+        stem: "i1099sa",
+        edition: "2026",
+        revision_year: 2026,
+        cadence: Cadence::Periodic,
     },
 ];
 
@@ -956,7 +994,7 @@ pub const BOXES: &[BoxEntry] = &[
     // ── ★★★ T16 — Form 5498-SA, 2024 and 2025 (6 boxes each). ANNUAL, so boxes 2 and 3 print the
     //    tax year IN THEIR CAPTIONS and split per edition — which is exactly the visible-split
     //    property the per-edition census exists for. ─────────────────────────────────────────────
-    BoxEntry { stem: "f5498sa", editions: &["2024", "2025"], label: "1", caption: "1 Employee’s or self-",
+    BoxEntry { stem: "f5498sa", editions: &["2024", "2025", "2026"], label: "1", caption: "1 Employee’s or self-",
         decision: BoxDecision::Collected { fields: &[FieldId::Sa5498Box1ArcherContributions],
             note: "Form5498Sa.box1_archer_msa_contributions — 'Employee's or self-employed person's Archer MSA contributions made in <year> and <year+1> for <year>', quoted to its first printed line because the layout wraps it. An Archer MSA is FORM 8853's, never Form 8889's, and box 6 is what refuses the row; this field holds the figure so the filer's transcription is complete" } },
     BoxEntry { stem: "f5498sa", editions: &["2024"], label: "2", caption: "2 Total contributions made in 2024",
@@ -971,13 +1009,30 @@ pub const BOXES: &[BoxEntry] = &[
     BoxEntry { stem: "f5498sa", editions: &["2025"], label: "3", caption: "3 Total HSA or Archer MSA contributions made in 2026 for 2025",
         decision: BoxDecision::Collected { fields: &[FieldId::Sa5498Box3NextYearForThisYear],
             note: "the 2025 grid's own year pair for the same box" } },
-    BoxEntry { stem: "f5498sa", editions: &["2024", "2025"], label: "4", caption: "4 Rollover contributions",
+    // ★★★ FR-242 — THE CONTINUOUS-USE (Rev. 12-2026) CAPTIONS, and they are the reason boxes 2 and 3
+    //     are split per edition while 1, 4, 5 and 6 simply gained "2026". An ANNUAL form's captions
+    //     name their own tax year and move every edition; a CONTINUOUS-USE form's say "the calendar
+    //     year" and stop moving. Both captions below are quoted verbatim from
+    //     design/forms/extract/f5498sa--2026.txt (box 2 at :16, box 3 at :17, each to its first
+    //     printed line because the layout wraps).
+    //
+    // ★★ This split is the census EARNING ITS KEEP rather than bookkeeping: had the 2026 edition been
+    //    folded into the 2024/2025 entries, a caption change that redefines WHICH PERIOD the figure
+    //    covers — from a named year to "the calendar year" — would have been absorbed silently, and
+    //    box 3's year pair is the carry-back window Form 8889 line 2 depends on.
+    BoxEntry { stem: "f5498sa", editions: &["2026"], label: "2", caption: "2 Total contributions made in the calendar year",
+        decision: BoxDecision::Collected { fields: &[FieldId::Sa5498Box2TotalContributions],
+            note: "the same box as the 2024/2025 grids', now on a continuous-use form: the caption no longer names a tax year, so the PERIOD it covers comes from the edition in force rather than from the caption. Still not Form 8889 line 2, for the 2024 entry's reason" } },
+    BoxEntry { stem: "f5498sa", editions: &["2026"], label: "3", caption: "3 Total HSA or Archer MSA contributions made in the",
+        decision: BoxDecision::Collected { fields: &[FieldId::Sa5498Box3NextYearForThisYear],
+            note: "the same carry-back box, quoted to its first printed line. ★ The 2024 and 2025 captions spelled the window out as a year PAIR ('made in 2025 for 2024'); the continuous-use caption does not, so the pair is no longer readable off the form and must come from the tax year under computation" } },
+    BoxEntry { stem: "f5498sa", editions: &["2024", "2025", "2026"], label: "4", caption: "4 Rollover contributions",
         decision: BoxDecision::Collected { fields: &[FieldId::Sa5498Box4Rollover],
             note: "Form5498Sa.box4_rollover_contributions — money moved from another HSA or Archer MSA. Form 8889 line 2's instruction EXCLUDES it by name ('do not include … amounts rolled over from another HSA or Archer MSA'), so it reaches no line; the field holds it so the filer's transcription of the document is complete" } },
-    BoxEntry { stem: "f5498sa", editions: &["2024", "2025"], label: "5", caption: "5 Fair market value of HSA,",
+    BoxEntry { stem: "f5498sa", editions: &["2024", "2025", "2026"], label: "5", caption: "5 Fair market value of HSA,",
         decision: BoxDecision::Collected { fields: &[FieldId::Sa5498Box5Fmv],
             note: "Form5498Sa.box5_fair_market_value — 'Fair market value of HSA, Archer MSA, or MA MSA', quoted to its first printed line (the layout wraps it). The account's year-end value; no line of Form 8889 or the Form 1040 chain reads it, and it is not income, so there is nothing to refuse" } },
-    BoxEntry { stem: "f5498sa", editions: &["2024", "2025"], label: "6", caption: "6 HSA",
+    BoxEntry { stem: "f5498sa", editions: &["2024", "2025", "2026"], label: "6", caption: "6 HSA",
         decision: BoxDecision::Collected { fields: &[FieldId::Sa5498Box6AccountType],
             note: "Form5498Sa.box6_account_type — the same three-way checkbox the Form 1099-SA prints as box 5, and the same rule: HSA → Form 8889, Archer MSA or MA MSA → Form 8853 (refuses), unanswered → refuses rather than defaulting" } },
 ];
