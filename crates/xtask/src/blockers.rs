@@ -993,6 +993,11 @@ pub struct Gate {
     /// raises, or `None` when the gate refuses outside that screen. The instrument reds if the
     /// anchor is gone.
     pub anchor: Option<&'static str>,
+    /// ★★ **The symbol a refusal site NAMES when this gate governs it** — the census's attribution
+    /// key, so [`year_keyed_markers`] is derived from this list instead of typed beside it. `None`
+    /// says out loud that no `return_refuse.rs` site can name this gate, which is a fact about the
+    /// gate rather than an omission; the compiler makes the author decide which.
+    pub keyed_by: Option<&'static str>,
     /// Where the gate itself lives.
     pub source: &'static str,
 }
@@ -1020,6 +1025,7 @@ pub fn gates() -> Vec<Gate> {
                 )
             },
             anchor: None,
+            keyed_by: None,
             source: "btctax-cli/src/year_readiness.rs regime_or_refuse",
         },
         Gate {
@@ -1031,6 +1037,7 @@ pub fn gates() -> Vec<Gate> {
                 )
             },
             anchor: None,
+            keyed_by: None,
             source: "btctax-adapters/src/tax_tables.rs BundledTaxTables::table_for",
         },
         Gate {
@@ -1042,6 +1049,7 @@ pub fn gates() -> Vec<Gate> {
                 )
             },
             anchor: None,
+            keyed_by: None,
             source: "btctax-adapters/src/tax_tables.rs full_return_for",
         },
         Gate {
@@ -1054,6 +1062,7 @@ pub fn gates() -> Vec<Gate> {
                 )
             },
             anchor: None,
+            keyed_by: None,
             source: "btctax-cli/src/year_readiness.rs slice_can_print",
         },
         Gate {
@@ -1062,6 +1071,7 @@ pub fn gates() -> Vec<Gate> {
                 btctax_cli::year_readiness::price_coverage_or_refuse(y).map_err(|e| e.to_string())
             },
             anchor: None,
+            keyed_by: None,
             source: "btctax-cli/src/year_readiness.rs price_coverage_or_refuse",
         },
         Gate {
@@ -1073,6 +1083,7 @@ pub fn gates() -> Vec<Gate> {
                 )
             },
             anchor: Some("crate::tax::tables::schedule_1a_params(ri.tax_year).is_none()"),
+            keyed_by: Some("schedule_1a_params"),
             source: "btctax-core/src/tax/tables.rs schedule_1a_params",
         },
         Gate {
@@ -1088,7 +1099,82 @@ pub fn gates() -> Vec<Gate> {
                 )
             },
             anchor: Some("Err(NotUsable::NoArchivedRevision { tax_year }) =>"),
+            keyed_by: Some("NotUsable::"),
             source: "btctax-core/src/tax/state_local_refund.rs revision_for",
+        },
+        // ★★★ **§68 — THE ITEMIZED-DEDUCTION LIMITATION GATE (B3 I-1).** The most
+        //     year-specific refusal in `return_refuse.rs`, and it was in NO list: the site census
+        //     could not see it (it reads the year through a parameter, `section_68_status(year)`) and
+        //     this gate set did not carry it, so the derived TY2026 blocker list omitted the fact that
+        //     **every itemizing TY2026 return over the printed threshold refuses** — and will still
+        //     refuse the day January's `FullReturnParams` land, because what is missing is a
+        //     *worksheet transcription*, not a parameter table.
+        Gate {
+            name: "the §68 ITEMIZED DEDUCTIONS WORKSHEET is available for the year (the overall \
+                   limitation can be computed)",
+            probe: |y| {
+                use btctax_core::tax::tables::Section68Status as S;
+                // ★ No `_` arm: a fourth `Section68Status` is a build error here too, so a new status
+                //   cannot enter the tree while this instrument keeps reporting the old three.
+                match btctax_core::tax::tables::section_68_status(y) {
+                    S::NotApplicable => Ok(()),
+                    S::Gated(g) => Err(format!(
+                        "§68 applies to TY{y} and its Schedule A line {line} prints the gate, but the \
+                         {ws} it sends a Yes to lives in Form 1040 / Schedule A instructions the IRS \
+                         has not published — so EVERY return that itemizes with adjusted gross \
+                         income less the qualified-business-income deduction less Schedule 1-A \
+                         additional deductions over ${thr} is refused. ★ January's package does not \
+                         clear this by arriving: the worksheet must be TRANSCRIBED",
+                        line = g.total_line,
+                        ws = g.worksheet,
+                        thr = g.threshold,
+                    )),
+                    S::ThresholdNotTranscribed => Err(format!(
+                        "§68 applies to TY{y} (Pub. L. 119-21 §70111) and no Schedule A for TY{y} has \
+                         been transcribed, so btctax does not know the threshold that year's form \
+                         prints — it refuses EVERY itemizing return, not only a large one"
+                    )),
+                }
+            },
+            anchor: Some("crate::tax::tables::section_68_status(year) {"),
+            keyed_by: Some("section_68_status"),
+            source: "btctax-core/src/tax/tables.rs section_68_status",
+        },
+        // ★★★ B3 I-1's own assertion predicted this: "a THIRD one appearing still reds here." One did,
+        //     within hours — `CharitableFloorNotComputed`, from the §170(b)(1)(I) guard that landed
+        //     between the I-1 agent starting and the controller integrating it. The census correctly
+        //     called it year-reading and UNCLASSIFIED, because no `Gate` probed it.
+        //
+        // ★★ UNCLASSIFIED was the honest answer and it is not the RIGHT one: a year-keyed gate DOES
+        //    govern this refusal — `charitable_floor_status` — so the fix is to declare it, exactly as
+        //    I-1 declared §68, not to widen the pinned UNCLASSIFIED set. Widening would have recorded a
+        //    known attribution as unknowable.
+        //
+        // ★ And it matters to a reader rather than only to the census: the owner ITEMIZES and GIVES, so
+        //   this is a real January blocker on their own return. As UNCLASSIFIED it printed as UNMEASURED;
+        //   as a gate it prints as BLOCKED with the year it clears and what clearing it requires.
+        Gate {
+            name: "the §170(b)(1)(I) CHARITABLE CONTRIBUTION LIMITATION WORKSHEET is available for the \
+                   year (the 0.5%-of-contribution-base floor)",
+            probe: |y| {
+                use btctax_core::tax::tables::CharitableFloorStatus as C;
+                match btctax_core::tax::tables::charitable_floor_status(y) {
+                    C::NotApplicable => Ok(()),
+                    C::Gated(_) => Err(String::from(
+                        "§170(b)(1)(I) floors this year's charitable deduction and btctax does not \
+                         compute the Charitable Contribution Limitation Worksheet — the return refuses \
+                         rather than deduct an unfloored total (which would understate tax)",
+                    )),
+                    C::ScheduleANotTranscribed => Err(String::from(
+                        "§170(b)(1)(I) floors this year's charitable deduction and no Schedule A \
+                         revision for the year is transcribed, so the refusal quotes the statute alone. \
+                         ★ Archiving the form does not clear this: the WORKSHEET must be transcribed too",
+                    )),
+                }
+            },
+            anchor: Some("crate::tax::tables::charitable_floor_status(year) {"),
+            keyed_by: Some("charitable_floor_status"),
+            source: "btctax-core/src/tax/tables.rs charitable_floor_status",
         },
     ]
 }
@@ -1117,95 +1203,430 @@ pub fn non_test(src: &str) -> &str {
     }
 }
 
-/// The year-keyed names a site may cite. ★ Declared, and each one is also a [`Gate`] anchor or a
-/// comparison against the year itself, so a site citing none of them is UNCLASSIFIED and says so.
-const YEAR_KEYED: &[&str] = &[
-    "schedule_1a_params",
-    "revision_for",
-    "NotUsable::",
-    "tax_year ==",
-    "tax_year !=",
-];
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// The refusal census — the DENOMINATOR is every RAISE SITE, not the year reads a needle list finds
+// ════════════════════════════════════════════════════════════════════════════════════════════════
 
-/// Every site in `body` that reads the tax year, attributed to the `RefuseReason` it raises.
+/// **A refusal that compares the tax year to a literal.** ★ A stated boundary (`CLAUDE.md` rule (3)):
+/// every *other* attribution key is derived from [`Gate::keyed_by`], but a rule that reads the year
+/// *itself* — `if ri.tax_year == 0` — is governed by no gate and never will be.
+const BARE_YEAR_COMPARISON: &[&str] = &["tax_year ==", "tax_year !="];
+
+/// Identifiers that mean *"this line reads the tax year"*. `tax_year` covers `ri.tax_year` and a
+/// `tax_year` binding; a bare `year` is the **parameter** idiom — the one the pre-fix census could
+/// not see, which is why all four `section_68_gate(year, …)` and `screen_broker_reporting(…, year, …)`
+/// sites were invisible to it. Matched as whole identifiers, so `years` and `tax_year` never collide.
+const YEAR_READ: &[&str] = &["tax_year", "year"];
+
+/// The attribution keys the census recognises: DERIVED from [`gates`], plus [`BARE_YEAR_COMPARISON`].
 ///
-/// ★★ **This is the denominator that makes the refusal question answerable.** `RefuseReason` has 130+
-/// variants and classifying each one by hand is precisely the list this file exists not to write.
-/// What IS enumerable is the set of places the screen reads the YEAR — and a refusal that never
-/// reads the year cannot fire *because* the year is 2026. So the sites are enumerated, each is
-/// attributed, and any site naming no known year-keyed function is reported as UNCLASSIFIED rather
-/// than dropped.
-pub fn year_sites(body: &str) -> Vec<(usize, String, String)> {
-    let lines: Vec<&str> = body.lines().collect();
-    let mut offs = Vec::with_capacity(lines.len());
-    let mut o = 0usize;
-    for l in &lines {
-        offs.push(o);
-        o += l.len() + 1;
+/// ★★ This replaces a hand-typed `YEAR_KEYED` const that sat beside `gates()` knowing nothing about
+/// it. A gate now carries its own attribution symbol in [`Gate::keyed_by`], so the recognised set
+/// widens the day a gate lands — and a gate with nothing for a site to name must write `None`, which
+/// the compiler asks for rather than letting the author forget.
+#[must_use]
+pub fn year_keyed_markers() -> Vec<&'static str> {
+    let mut v: Vec<&'static str> = gates().into_iter().filter_map(|g| g.keyed_by).collect();
+    v.extend_from_slice(BARE_YEAR_COMPARISON);
+    v.sort_unstable();
+    v.dedup();
+    v
+}
+
+/// `src` with every comment and the **contents** of every string literal blanked, one output line per
+/// input line, so a line number this census reports is the real one.
+///
+/// ★★ **Why the instrument cannot skip this.** A refusal's *message* names the year in nearly every
+/// case — `format!("TY{year} has no disposition …")` — so a scan that reads prose calls **34 of the
+/// 95** raise sites year-reading (measured) and the census degenerates into noise. Only a year read in
+/// CODE decides anything.
+#[must_use]
+pub fn code_lines(src: &str) -> Vec<String> {
+    enum Lex {
+        Code,
+        Block,
+        Str { raw: Option<usize> },
     }
-    let lineno = |off: usize| offs.partition_point(|s| *s <= off);
-    let is_code = |ln: usize| {
-        let t = lines[ln - 1].trim_start();
-        !(t.starts_with("//") || t.starts_with('*'))
-    };
-    // Construction sites — code lines only. A doc comment naming a variant is not a raise.
-    let mut cons: Vec<(usize, String)> = Vec::new();
-    let mut from = 0usize;
-    while let Some(i) = body[from..].find("RefuseReason::") {
-        let at = from + i;
-        from = at + "RefuseReason::".len();
-        let tail = &body[from..];
-        let n = tail
-            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
-            .unwrap_or(tail.len());
-        if n > 0 && is_code(lineno(at)) {
-            cons.push((at, tail[..n].to_string()));
-        }
-    }
-    let mut out: Vec<(usize, String, String)> = Vec::new();
-    for needle in ["ri.tax_year", "NotUsable::"] {
-        let mut from = 0usize;
-        while let Some(i) = body[from..].find(needle) {
-            let at = from + i;
-            from = at + needle.len();
-            let ln = lineno(at);
-            if !is_code(ln) {
-                continue;
+    let mut st = Lex::Code;
+    let mut out = Vec::new();
+    for line in src.lines() {
+        let b: Vec<char> = line.chars().collect();
+        let mut keep = String::with_capacity(line.len());
+        let mut i = 0usize;
+        while i < b.len() {
+            match st {
+                Lex::Code => {
+                    if b[i] == '/' && b.get(i + 1) == Some(&'/') {
+                        break; // a line comment ends the line
+                    }
+                    if b[i] == '/' && b.get(i + 1) == Some(&'*') {
+                        st = Lex::Block;
+                        i += 2;
+                        continue;
+                    }
+                    // `r"…"` / `r#"…"#`. ★ The identifier guard is load-bearing: without it the `r"`
+                    //   ending `"… with a preparer",` opens a raw string and swallows the code after.
+                    if b[i] == 'r'
+                        && i.checked_sub(1)
+                            .is_none_or(|p| !(b[p].is_alphanumeric() || b[p] == '_'))
+                    {
+                        let mut h = 0usize;
+                        while b.get(i + 1 + h) == Some(&'#') {
+                            h += 1;
+                        }
+                        if b.get(i + 1 + h) == Some(&'"') {
+                            st = Lex::Str { raw: Some(h) };
+                            i += 2 + h;
+                            continue;
+                        }
+                    }
+                    if b[i] == '"' {
+                        st = Lex::Str { raw: None };
+                        i += 1;
+                        continue;
+                    }
+                    keep.push(b[i]);
+                    i += 1;
+                }
+                Lex::Block => {
+                    if b[i] == '*' && b.get(i + 1) == Some(&'/') {
+                        st = Lex::Code;
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+                Lex::Str { raw: None } => {
+                    if b[i] == '\\' {
+                        i += 2;
+                    } else if b[i] == '"' {
+                        st = Lex::Code;
+                        i += 1;
+                    } else {
+                        i += 1;
+                    }
+                }
+                Lex::Str { raw: Some(h) } => {
+                    if b[i] == '"' && (1..=h).all(|k| b.get(i + k) == Some(&'#')) {
+                        st = Lex::Code;
+                        i += 1 + h;
+                    } else {
+                        i += 1;
+                    }
+                }
             }
-            let text = lines[ln - 1].trim().to_string();
-            // A site naming a year-keyed call, or comparing the year, attributes FORWARD to the
-            // refusal it guards. A continuation (a `format!` argument) attributes BACKWARD to the
-            // refusal it is already inside.
-            let names_call =
-                YEAR_KEYED.iter().any(|k| text.contains(k)) || text.contains("RefuseReason::");
-            // ★ The forward search starts at the site's own LINE, not at the site's character
-            //   offset. `RefuseReason::Schedule1aNotOnThisYearsReturn { year: ri.tax_year }` puts
-            //   the construction BEFORE the year read on one line, and searching from the character
-            //   offset skipped past it onto the NEXT rule's variant — attributing a refusal to a
-            //   rule that has nothing to do with it.
-            let line_start = offs[ln - 1];
-            // ★ A continuation with NO preceding construction falls back to the forward search
-            //   rather than being dropped: an unattributable site silently disappearing is exactly
-            //   the gap this census exists to close, and a planted `ri.tax_year > 0` above the only
-            //   refusal in a file is that case.
-            let pick = if names_call {
-                cons.iter()
-                    .find(|(o, _)| *o >= line_start)
-                    .or_else(|| cons.last())
-            } else {
-                cons.iter()
-                    .rev()
-                    .find(|(o, _)| *o <= at)
-                    .or_else(|| cons.iter().find(|(o, _)| *o >= line_start))
-            };
-            if let Some((_, var)) = pick {
-                out.push((ln, text, var.clone()));
-            }
         }
+        out.push(keep);
     }
-    out.sort();
-    out.dedup();
     out
+}
+
+/// Is `needle` present in `hay` as a whole identifier? (`year` matches `year` and `(year,` — never
+/// `tax_year`, `years` or `year_keyed`.)
+fn word_in(hay: &str, needle: &str) -> bool {
+    let ident = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    let mut from = 0usize;
+    while let Some(p) = hay[from..].find(needle) {
+        let at = from + p;
+        from = at + needle.len();
+        if hay[..at].chars().next_back().is_none_or(|c| !ident(c))
+            && hay[from..].chars().next().is_none_or(|c| !ident(c))
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// One `RefuseReason::…` construction in the scanned body — **the census's unit, and its denominator.**
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RaiseSite {
+    /// 1-based line in the scanned file.
+    pub line: usize,
+    /// The variant raised, read off the construction itself.
+    pub variant: String,
+    /// The CODE this site's decision is taken in: from the end of the previous refusal statement (or
+    /// the enclosing `fn`, whichever is later) through this site's own construction.
+    pub decides_in: String,
+    /// Why this site reads the tax year, in the instrument's own words. Empty ⇒ no year read in code.
+    pub year_read: Vec<String>,
+    /// The year-keyed markers the decision names — the gate(s) that could govern it.
+    pub keyed: Vec<String>,
+}
+
+impl RaiseSite {
+    #[must_use]
+    pub fn reads_year(&self) -> bool {
+        !self.year_read.is_empty() || !self.keyed.is_empty()
+    }
+}
+
+/// **Every refusal this file can raise, and which of them read the tax year.**
+///
+/// ★★★ **The denominator WAS the defect.** (B3 I-1,
+/// `design/agent-reports/REPORT-b3-2026-09-13.md` — the one citation for every `B3 I-1` below.)
+/// The census this replaces scanned two
+/// needles — `ri.tax_year` and `NotUsable::` — and then computed its UNCLASSIFIED set *over the sites
+/// those needles had already found*. A site reading the year through a **function parameter** was
+/// therefore neither counted nor reported: it could not even become an UNCLASSIFIED row, because it
+/// did not exist. Four variants carry a `year` payload — they cannot be raised without reading the
+/// year — and the old census attributed exactly one, while the command printed *"every other variant
+/// never reads the year"* over all 134.
+///
+/// So the direction is inverted. **Every** `RefuseReason::…` construction is enumerated first, and
+/// each is then classified. Nothing can fall between needles because there are none: a site the
+/// instrument cannot attribute is a row, and a `year`-payload variant it cannot locate is a row.
+#[derive(Debug, Default, Clone)]
+pub struct RefusalCensus {
+    /// Every variant the `RefuseReason` enum declares.
+    pub variants: BTreeSet<String>,
+    /// ★ Variants whose PAYLOAD declares a `year` field — read off the **type**, so they cannot be
+    /// raised without reading the year, and a fifth one enters the census with no edit here.
+    pub year_payload: BTreeSet<String>,
+    /// Every raise site, in line order.
+    pub sites: Vec<RaiseSite>,
+}
+
+impl RefusalCensus {
+    pub fn reading(&self) -> Vec<&RaiseSite> {
+        self.sites.iter().filter(|s| s.reads_year()).collect()
+    }
+    pub fn blind(&self) -> Vec<&RaiseSite> {
+        self.sites.iter().filter(|s| !s.reads_year()).collect()
+    }
+    /// The year-reading sites, grouped by the variant they raise.
+    pub fn by_variant(&self) -> BTreeMap<String, Vec<&RaiseSite>> {
+        let mut m: BTreeMap<String, Vec<&RaiseSite>> = BTreeMap::new();
+        for s in self.reading() {
+            m.entry(s.variant.clone()).or_default().push(s);
+        }
+        m
+    }
+    pub fn raised(&self) -> BTreeSet<String> {
+        self.sites.iter().map(|s| s.variant.clone()).collect()
+    }
+    /// Declared variants with no raise site in the scanned file. **Not** thereby year-agnostic — they
+    /// are out of this census's reach, and the note reports the count instead of claiming them.
+    pub fn not_raised_here(&self) -> BTreeSet<String> {
+        let raised = self.raised();
+        self.variants.difference(&raised).cloned().collect()
+    }
+    /// Year-reading variants naming no year-keyed marker at ANY of their sites: the census sees them
+    /// read the year and cannot say which gate governs it. **UNCLASSIFIED, never dropped.**
+    pub fn unclassified(&self) -> BTreeSet<String> {
+        self.by_variant()
+            .into_iter()
+            .filter(|(_, ss)| ss.iter().all(|s| s.keyed.is_empty()))
+            .map(|(v, _)| v)
+            .collect()
+    }
+    /// ★★ Variants that CANNOT be raised without a year — their payload says so — for which the census
+    /// found no year-reading site at all. **This is the hole §68 fell through, made loud.** Non-empty
+    /// means the instrument is scanning the wrong file or the raise has moved out of it.
+    pub fn unlocated_year_payload(&self) -> BTreeSet<String> {
+        let seen: BTreeSet<String> = self.by_variant().keys().cloned().collect();
+        self.year_payload.difference(&seen).cloned().collect()
+    }
+}
+
+/// The `pub enum RefuseReason` body in `code`, as inclusive line indices.
+fn enum_span(code: &[String]) -> Option<(usize, usize)> {
+    let start = code
+        .iter()
+        .position(|l| l.contains("pub enum RefuseReason {"))?;
+    let mut depth = 0usize;
+    for (i, l) in code.iter().enumerate().skip(start) {
+        for c in l.chars() {
+            match c {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some((start, i));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
+/// Split an enum body into one string per variant, at top-level commas.
+fn split_variants(body: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut depth = 0i32;
+    for c in body.chars() {
+        match c {
+            '{' | '(' | '[' => depth += 1,
+            '}' | ')' | ']' => depth -= 1,
+            _ => {}
+        }
+        if c == ',' && depth == 0 {
+            out.push(std::mem::take(&mut cur));
+        } else {
+            cur.push(c);
+        }
+    }
+    if !cur.trim().is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+/// The variant name a declaration opens with, if it is one.
+fn variant_name(decl: &str) -> Option<String> {
+    let t = decl.trim_start();
+    let n: String = t.chars().take_while(char::is_ascii_alphanumeric).collect();
+    if n.is_empty() || !n.starts_with(|c: char| c.is_ascii_uppercase()) {
+        return None;
+    }
+    let rest = t[n.len()..].trim_start();
+    (rest.is_empty() || rest.starts_with([',', '{', '('])).then_some(n)
+}
+
+/// Does this line open a function?
+fn opens_fn(line: &str) -> bool {
+    let t = line.trim_start();
+    t.starts_with("fn ") || t.contains(" fn ")
+}
+
+/// Walk out from a construction at `(line, col)`; returns `(text, last line index touched)`.
+///
+/// `Reach::Payload` stops at the close of the variant's own `{ … }` / `( … )`. `Reach::Statement`
+/// walks to the end of the whole refusal **statement** — the first `;` at depth ≤ 0, or the closer of
+/// the enclosing call, whichever comes first — which is the span a following window must start after.
+enum Reach {
+    Payload,
+    Statement,
+}
+
+fn extent(code: &[String], line: usize, col: usize, reach: &Reach) -> (String, usize) {
+    let payload = matches!(reach, Reach::Payload);
+    let mut text = String::new();
+    let mut depth = 0i32;
+    let mut opened = false;
+    let mut last = line;
+    for (i, l) in code.iter().enumerate().skip(line) {
+        let from = if i == line { col.min(l.len()) } else { 0 };
+        for c in l[from..].chars() {
+            if payload {
+                text.push(c);
+            }
+            match c {
+                '{' | '(' | '[' => {
+                    depth += 1;
+                    opened = true;
+                }
+                '}' | ')' | ']' => {
+                    depth -= 1;
+                    if payload && opened && depth == 0 {
+                        return (text, i);
+                    }
+                    if !payload && depth < 0 {
+                        return (text, i);
+                    }
+                }
+                ';' if !payload && depth <= 0 => return (text, i),
+                _ => {}
+            }
+        }
+        // A unit variant (`RefuseReason::Foo,`) opens no delimiter and is one line long.
+        if payload && !opened {
+            return (text, line);
+        }
+        last = i;
+    }
+    (text, last)
+}
+
+/// **The census.** `src` is a whole source file; the `#[cfg(test)]` half is dropped *here* rather than
+/// by the caller, so a planted string can be handed straight in and classified exactly as HEAD is.
+#[must_use]
+pub fn refusal_census(src: &str) -> RefusalCensus {
+    let code = code_lines(non_test(src));
+    let mut cen = RefusalCensus::default();
+
+    // ── the TYPE: every variant, and the ones whose payload declares a year ─────────────────────
+    let span = enum_span(&code);
+    if let Some((a, b)) = span {
+        let joined = code[a..=b].join("\n");
+        let open = joined.find('{').map_or(0, |i| i + 1);
+        let close = joined.rfind('}').unwrap_or(joined.len());
+        for decl in split_variants(&joined[open..close]) {
+            if let Some(name) = variant_name(&decl) {
+                let one = decl.split_whitespace().collect::<Vec<_>>().join(" ");
+                if word_in(&one, "year") {
+                    cen.year_payload.insert(name.clone());
+                }
+                cen.variants.insert(name);
+            }
+        }
+    }
+
+    // ── the SITES: every construction, in line order ────────────────────────────────────────────
+    let mut raw: Vec<(usize, usize, String)> = Vec::new(); // (line index, col after the name, variant)
+    for (i, l) in code.iter().enumerate() {
+        if span.is_some_and(|(a, b)| i >= a && i <= b) {
+            continue;
+        }
+        let mut from = 0usize;
+        while let Some(p) = l[from..].find("RefuseReason::") {
+            let at = from + p + "RefuseReason::".len();
+            from = at;
+            let name: String = l[at..]
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .collect();
+            if !name.is_empty() {
+                raw.push((i, at + name.len(), name));
+            }
+        }
+    }
+
+    let markers = year_keyed_markers();
+    let mut prev_end = 0usize; // the first line index a new window may start at
+    for (li, col, var) in &raw {
+        // The enclosing fn, so a window never reaches back past the function's own signature.
+        let fn_at = code[..=*li].iter().rposition(|l| opens_fn(l)).unwrap_or(0);
+        let lo = fn_at.max(prev_end).min(*li);
+        let mut decides = code[lo..=*li].join("\n");
+        // …plus this site's own construction, which may carry the year as a payload field on a LATER
+        // line than the one the variant is named on.
+        let (payload, payload_end) = extent(&code, *li, *col, &Reach::Payload);
+        decides.push('\n');
+        decides.push_str(&payload);
+        // The NEXT window starts after this refusal's whole statement. ★ Measured, and the reason
+        // this is delimiter-matched rather than line-counted: a refusal's own `format!` carries
+        // `year = ri.tax_year,` as a message argument, and letting that bleed forward made two
+        // year-blind rules (`BrokerReportingMixed`, `Schedule1aTipsFromTradeOrBusiness`) look
+        // year-conditional. A message that names the year decides nothing.
+        let (_, stmt_end) = extent(&code, *li, *col, &Reach::Statement);
+        prev_end = stmt_end.max(payload_end).max(*li) + 1;
+
+        let mut year_read: Vec<String> = YEAR_READ
+            .iter()
+            .filter(|k| word_in(&decides, k))
+            .map(|k| format!("`{k}`"))
+            .collect();
+        if cen.year_payload.contains(var) {
+            year_read.push("the variant's PAYLOAD declares `year`".into());
+        }
+        let keyed: Vec<String> = markers
+            .iter()
+            .filter(|k| decides.contains(**k))
+            .map(|k| (*k).to_string())
+            .collect();
+        cen.sites.push(RaiseSite {
+            line: li + 1,
+            variant: var.clone(),
+            decides_in: decides,
+            year_read,
+            keyed,
+        });
+    }
+    cen
 }
 
 /// **Which refusals fire BECAUSE the year is &lt;year&gt;, separated from the ones that fire on any
@@ -1268,71 +1689,117 @@ pub fn gate_rows(year: i32, rep: &mut Report) -> Result<(), String> {
         }
     }
 
-    // The refusal census: the sites that read the year, each attributed.
-    let sites = year_sites(body);
-    let mut by_var: BTreeMap<String, Vec<(usize, String)>> = BTreeMap::new();
-    for (ln, text, var) in &sites {
-        by_var
-            .entry(var.clone())
-            .or_default()
-            .push((*ln, text.clone()));
+    // ── The refusal census. Every raise site is enumerated, then classified; see [`refusal_census`].
+    let cen = refusal_census(&src);
+    let by_var = cen.by_variant();
+    let reading = cen.reading().len();
+    let blind = cen.blind().len();
+    let unclassified = cen.unclassified();
+    let unlocated = cen.unlocated_year_payload();
+    // ★ Two independent derivations of the same set, cross-checked at run time rather than in a test
+    //   only: `census_join` reads the declaration lines, this census parses the enum body.
+    let joined = crate::census_join::variant_paths(&src, "RefuseReason");
+    if joined.len() != cen.variants.len() {
+        return Err(format!(
+            "the two variant derivations disagree: census_join sees {} and refusal_census sees {} — \
+             one of them is misreading `pub enum RefuseReason`",
+            joined.len(),
+            cen.variants.len()
+        ));
     }
-    let total = crate::census_join::variant_paths(&src, "RefuseReason").len();
-    let mut unclassified = Vec::new();
-    for (var, ss) in &by_var {
-        let joined = ss
+
+    for var in &unclassified {
+        let at = by_var[var]
             .iter()
-            .map(|(_, t)| t.as_str())
+            .map(|s| s.line.to_string())
             .collect::<Vec<_>>()
-            .join(" ");
-        if !YEAR_KEYED.iter().any(|k| joined.contains(k)) {
-            unclassified.push(format!(
-                "`RefuseReason::{var}` at line(s) {}",
-                ss.iter()
-                    .map(|(l, _)| l.to_string())
-                    .collect::<Vec<_>>()
-                    .join(",")
-            ));
-        }
-    }
-    for u in &unclassified {
+            .join(",");
         rep.push(
             Who::Build,
             State::Unmeasured,
             format!(
-                "{u} reads the tax year and this instrument cannot say which year-keyed gate governs \
-                 it — UNCLASSIFIED, which is not the same as year-agnostic"
+                "`RefuseReason::{var}` at line(s) {at} reads the tax year and this instrument cannot \
+                 say which year-keyed gate governs it — UNCLASSIFIED, which is not the same as \
+                 year-agnostic"
             ),
             "now",
-            "crates/btctax-core/src/tax/return_refuse.rs (blockers::year_sites)".into(),
+            "crates/btctax-core/src/tax/return_refuse.rs (blockers::refusal_census)".into(),
         );
     }
+    // ★★ A variant that cannot be raised without a year, whose raise site this census could not find
+    //    at all. Exactly the hole `ItemizedDeductionLimitationNotComputed` fell through — silent then,
+    //    a row now.
+    for var in &unlocated {
+        rep.push(
+            Who::Build,
+            State::Unmeasured,
+            format!(
+                "`RefuseReason::{var}` carries a `year` payload — it CANNOT be raised without reading \
+                 the tax year — and this census found no raise site for it in the file it scans, so \
+                 nothing here can say whether it fires because the year is {year}"
+            ),
+            "now",
+            "crates/btctax-core/src/tax/return_refuse.rs (blockers::refusal_census)".into(),
+        );
+    }
+
     rep.notes.push(format!(
-        "refusals: `RefuseReason` has {total} variants. {} distinct variants are raised at a site \
-         that READS the tax year ({} sites); every other variant never reads the year, so it cannot \
-         fire because the year is {year}. Year-keyed gates: {} shut for TY{year} while OPEN for \
-         another bundled year [{}]; {} shut for every bundled year [{}]; {} open [{}]. {} \
-         UNCLASSIFIED site group(s).",
+        "refusals: `RefuseReason` declares {} variants. This census enumerates EVERY raise site in \
+         `return_refuse.rs` — {} sites raising {} distinct variants — and classifies each: {} site(s) \
+         read the tax year in CODE ({} distinct variants), {} do not. {} UNCLASSIFIED variant(s) \
+         [{}]; {} `year`-payload variant(s) with no located raise site [{}]. Year-keyed gates: {} shut \
+         for TY{year} while OPEN for another bundled year [{}]; {} shut for every bundled year [{}]; \
+         {} open [{}].",
+        cen.variants.len(),
+        cen.sites.len(),
+        cen.raised().len(),
+        reading,
         by_var.len(),
-        sites.len(),
+        blind,
+        unclassified.len(),
+        unclassified.iter().cloned().collect::<Vec<_>>().join(", "),
+        unlocated.len(),
+        unlocated.iter().cloned().collect::<Vec<_>>().join(", "),
         year_specific.len(),
         year_specific.join(", "),
         everywhere.len(),
         everywhere.join(", "),
         open.len(),
         open.join(", "),
-        unclassified.len()
     ));
+    // ★★★ **THE BOUNDARY, STATED (`CLAUDE.md` rule (3)).** The sentence this replaces was *"every
+    //     other variant never reads the year, so it cannot fire because the year is <year>"* — a
+    //     universal over all 134 variants, and false for the most year-specific refusal in the file.
+    //     What this instrument can actually support is written out instead, including the two things
+    //     it cannot see.
     rep.notes.push(format!(
-        "refusal sites that read the year, attributed: {}",
+        "refusal census — WHAT IT DOES NOT CLAIM: (a) it reads ONE file, \
+         `btctax-core/src/tax/return_refuse.rs`, and {} declared variant(s) are raised nowhere in it, \
+         so nothing here says those cannot fire because the year is {year}; (b) for the {blind} \
+         site(s) it calls year-blind the finding is \"no year read appears in the code between this \
+         refusal and the previous one\" — NOT \"this refusal never reads the year\"; a year consulted \
+         further up its function is outside the window. A `year`-payload variant is exempt from (b): \
+         it is read off the TYPE, so it cannot be missed. Year-reading sites, attributed: {}",
+        cen.not_raised_here().len(),
         by_var
             .iter()
             .map(|(v, ss)| format!(
-                "{v} @ {}",
+                "{v} @ {} [{}]",
                 ss.iter()
-                    .map(|(l, _)| l.to_string())
+                    .map(|s| s.line.to_string())
                     .collect::<Vec<_>>()
-                    .join("/")
+                    .join("/"),
+                {
+                    let mut k: Vec<&str> =
+                        ss.iter().flat_map(|s| s.keyed.iter().map(String::as_str)).collect();
+                    k.sort_unstable();
+                    k.dedup();
+                    if k.is_empty() {
+                        "UNCLASSIFIED".to_string()
+                    } else {
+                        k.join("+")
+                    }
+                }
             ))
             .collect::<Vec<_>>()
             .join("; ")
@@ -1858,48 +2325,350 @@ mod tests {
         );
     }
 
-    /// ★★ The year-site census reaches the real sites, and a site reading no year-keyed name is
-    /// reported rather than dropped.
+    fn refuse_src() -> String {
+        std::fs::read_to_string(root().join("crates/btctax-core/src/tax/return_refuse.rs"))
+            .expect("return_refuse.rs")
+    }
+
+    fn names(v: &[&str]) -> BTreeSet<String> {
+        v.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    /// ★★★ **THE B1 KILL, WRITTEN OUTSIDE THE SCANNER'S OWN VOCABULARY (B3 I-1).**
+    ///
+    /// The plant this replaces read the year as `ri.tax_year > 0` — **the needle the old scanner
+    /// already searched for** — so it could only ever confirm what that scanner already saw, and the
+    /// blindness it existed to kill survived it untouched. `HARNESS.md` B1's ★★ clause is that an
+    /// honest kill *"cannot be written without discovering the blindness"*. This one reads the year
+    /// the way the three invisible sites do — **through a function parameter** — and asserts against
+    /// literal copies of the two old needles that the old scanner could not have seen it at all.
     #[test]
-    fn the_year_site_census_attributes_the_real_sites() {
-        let src =
-            std::fs::read_to_string(root().join("crates/btctax-core/src/tax/return_refuse.rs"))
-                .expect("return_refuse.rs");
-        let sites = year_sites(non_test(&src));
+    fn a_year_read_through_a_parameter_is_found_and_the_old_needles_could_not_see_it() {
+        /// The scan this replaces, verbatim: `for needle in ["ri.tax_year", "NotUsable::"]`.
+        const OLD_NEEDLES: [&str; 2] = ["ri.tax_year", "NotUsable::"];
+        let planted = r#"
+pub fn section_68_ish(year: i32, itemizes: bool) -> Option<Refusal> {
+    if !itemizes {
+        return None;
+    }
+    match crate::tax::tables::section_68_status(year) {
+        Section68Status::NotApplicable => None,
+        Section68Status::Gated(g) => refuse(
+            RefuseReason::ItemizedDeductionLimitationNotComputed { year },
+            format!("this return is for tax year {year}, it ITEMIZES, over {}", g.threshold),
+        ),
+    }
+}
+"#;
+        for n in OLD_NEEDLES {
+            assert!(
+                !planted.contains(n),
+                "a plant that speaks the checker's language is not a kill, and this one names {n}"
+            );
+        }
+        let cen = refusal_census(planted);
+        assert_eq!(cen.sites.len(), 1, "{:?}", cen.sites);
+        let s = &cen.sites[0];
+        assert_eq!(s.variant, "ItemizedDeductionLimitationNotComputed");
         assert!(
-            sites.len() >= 6,
-            "the screen reads the year in at least six places, found {}",
-            sites.len()
+            s.reads_year(),
+            "the parameter idiom is invisible again: {s:?}"
         );
-        let vars: BTreeSet<&str> = sites.iter().map(|(_, _, v)| v.as_str()).collect();
+        assert_eq!(
+            s.keyed,
+            vec!["section_68_status".to_string()],
+            "the site names a gate, so it must be ATTRIBUTED rather than UNCLASSIFIED: {s:?}"
+        );
+        assert!(cen.unclassified().is_empty(), "{:?}", cen.unclassified());
+
+        // ★★★ **And the kill must bind to the PARAMETER READ, not to the gate's name.** Measured while
+        //     writing this: dropping `year` from [`YEAR_READ`] — reinstating the exact old blindness —
+        //     left every assertion above GREEN, because the site was still reached through
+        //     `section_68_status` and through the payload. A kill that can pass for another reason is
+        //     not a kill. So the same plant is re-run with the year-keyed call made opaque: the bare
+        //     `year` is then the only signal there is.
+        let opaque = planted.replace(
+            "crate::tax::tables::section_68_status(year)",
+            "an_unknown_helper(year)",
+        );
+        let o = refusal_census(&opaque);
+        assert_eq!(o.sites.len(), 1, "{:?}", o.sites);
+        assert!(
+            o.sites[0].keyed.is_empty(),
+            "the opaque plant must name no gate, or it proves nothing: {:?}",
+            o.sites[0]
+        );
+        assert!(
+            o.sites[0].reads_year(),
+            "a tax year read through a function PARAMETER is invisible — the defect B3 I-1 found: {:?}",
+            o.sites[0]
+        );
+
+        // ★★ …and the read must be the site's OWN. A refusal whose `format!` names the year must not
+        //    make the NEXT rule look year-conditional: letting a message bleed forward called 34 of
+        //    the 95 real sites year-reading (measured), `BrokerReportingMixed` and
+        //    `Schedule1aTipsFromTradeOrBusiness` among them — each inheriting the year from the
+        //    refusal above it. A message that names the year decides nothing.
+        let bleed = r#"
+pub fn two_rules(ri: &ReturnInputs) -> Option<Refusal> {
+    if ri.wages > 0 {
+        return refuse(
+            RefuseReason::First { year: ri.tax_year },
+            format!(
+                "this return is for tax year {year}",
+                year = ri.tax_year,
+            ),
+        );
+    }
+    if ri.tips > 0 {
+        return refuse(RefuseReason::Second, "nothing in this rule reads the year");
+    }
+    None
+}
+"#;
+        let two = refusal_census(bleed);
+        assert_eq!(two.sites.len(), 2, "{:?}", two.sites);
+        assert!(two.sites[0].reads_year(), "{:?}", two.sites[0]);
+        assert!(
+            !two.sites[1].reads_year(),
+            "the previous refusal's MESSAGE bled forward into this rule: {:?}",
+            two.sites[1]
+        );
+    }
+
+    /// ★★★ **A site the census cannot attribute becomes a ROW — it does not disappear.**
+    ///
+    /// The old census computed its UNCLASSIFIED set *over the sites its two needles had already
+    /// found*, so the only sites that could be reported were the ones already counted: **the
+    /// denominator was the defect.** Here both raise sites are enumerated first — one year-reading
+    /// with no gate to name, one year-blind — and each lands in its own bucket.
+    #[test]
+    fn a_year_reading_site_naming_no_gate_is_unclassified_and_never_vanishes() {
+        let planted = r#"
+pub fn screen_invented(ri: &ReturnInputs, year: i32) -> Option<Refusal> {
+    if year >= 2030 {
+        return refuse(RefuseReason::Invented, "no year-keyed gate governs this one");
+    }
+    if ri.wages > 0 {
+        return refuse(RefuseReason::YearBlind, "nothing in this rule reads the year");
+    }
+    None
+}
+"#;
+        let cen = refusal_census(planted);
+        assert_eq!(cen.sites.len(), 2, "{:?}", cen.sites);
+        assert_eq!(cen.unclassified(), names(&["Invented"]));
+        assert_eq!(
+            cen.blind()
+                .iter()
+                .map(|s| s.variant.as_str())
+                .collect::<Vec<_>>(),
+            vec!["YearBlind"],
+            "the blind site must still be COUNTED — it is the denominator"
+        );
+        // And the row the report prints for it says UNCLASSIFIED, not "fine".
+        let mut rep = Report::default();
+        for var in &cen.unclassified() {
+            rep.push(
+                Who::Build,
+                State::Unmeasured,
+                format!("`RefuseReason::{var}`"),
+                "now",
+                "plant".into(),
+            );
+        }
+        assert_eq!(rep.unmeasured(), 1);
+    }
+
+    /// ★★★ **B1 — the completeness check is EXHAUSTIVE against the TYPE, in both directions.**
+    ///
+    /// What this replaces required only that three hand-typed variant names appear
+    /// (`vars.contains(want)`), beside a `RefuseReason` set that grew by six in one day. Containment
+    /// is the weaker direction: it cannot notice a missing fourth — and three of the four variants
+    /// that carry a `year` payload were missing. The check now reads the payload off the enum, so a
+    /// fifth one joins the census with no edit, and one with no located raise site is a ROW.
+    #[test]
+    fn a_year_payload_variant_with_no_raise_site_is_reported_not_assumed_year_agnostic() {
+        let planted = r#"
+pub enum RefuseReason {
+    /// A refusal that cannot be raised without reading the tax year.
+    NeverRaisedHere { year: i32 },
+    /// A refusal with no year anywhere in it.
+    Plain,
+}
+
+pub fn screen(ri: &ReturnInputs) -> Option<Refusal> {
+    if ri.wages > 0 {
+        return refuse(RefuseReason::Plain, "x");
+    }
+    None
+}
+"#;
+        let cen = refusal_census(planted);
+        assert_eq!(cen.variants, names(&["NeverRaisedHere", "Plain"]));
+        assert_eq!(cen.year_payload, names(&["NeverRaisedHere"]));
+        assert_eq!(
+            cen.unlocated_year_payload(),
+            names(&["NeverRaisedHere"]),
+            "a variant that cannot be raised without the year, and no raise site found, must be \
+             REPORTED — it is the §68 hole"
+        );
+        // The other direction, so the check is watched discriminating: drop the payload and the same
+        // text raises no complaint. The signal is the TYPE, not the variant's name.
+        let no_payload = planted.replace("NeverRaisedHere { year: i32 }", "NeverRaisedHere");
+        let cen2 = refusal_census(&no_payload);
+        assert_eq!(cen2.variants, names(&["NeverRaisedHere", "Plain"]));
+        assert!(cen2.year_payload.is_empty());
+        assert!(cen2.unlocated_year_payload().is_empty());
+    }
+
+    /// ★★ **The census at HEAD.** Every number here was MEASURED and is pinned to a literal before any
+    /// derived claim is made from it (FR-230: an expectation derived from the thing it checks measures
+    /// nothing).
+    #[test]
+    fn the_refusal_census_enumerates_every_raise_site_at_head() {
+        let src = refuse_src();
+        let cen = refusal_census(&src);
+
+        // Two independent derivations of the variant set must agree: `census_join` reads declaration
+        // lines, `refusal_census` parses the enum body.
+        let joined: BTreeSet<String> = crate::census_join::variant_paths(&src, "RefuseReason")
+            .iter()
+            .map(|p| p.trim_start_matches("RefuseReason::").to_string())
+            .collect();
+        assert_eq!(cen.variants, joined, "the two derivations disagree");
+        assert_eq!(cen.variants.len(), 135, "measured at HEAD 2026-09-14");
+        assert!(
+            cen.sites.len() >= 95,
+            "95 raise sites measured at HEAD; found {}",
+            cen.sites.len()
+        );
+        assert!(
+            cen.reading().len() >= 11,
+            "11 year-reading sites measured at HEAD; found {} — {:?}",
+            cen.reading().len(),
+            cen.by_variant().keys().collect::<Vec<_>>()
+        );
+
+        // ★★★ The five variants that CANNOT be raised without the year, by name, and every one
+        //     located. The old census attributed ONE of them.
+        //
+        // ★★ `CharitableFloorNotComputed` is the fifth, and it is here as EVIDENCE rather than as
+        //    maintenance: it landed between the I-1 agent starting and this fold, and BOTH halves of
+        //    the new instrument moved for it without anyone going looking. The classification test
+        //    reported it UNCLASSIFIED (answered by declaring its gate in `gates()`, since
+        //    `charitable_floor_status` really does govern it), and this derivation picked its
+        //    `year: i32` payload up on its own. The old containment-based scanner would have stayed
+        //    green on both — which is the whole reason the exhaustive form replaced it.
+        //
+        // ★ So this literal is a PIN, not a list that decides anything: the set comes from the enum
+        //   body. Widening it is the deliberate act of recording that a new year-carrying refusal
+        //   exists; a variant appearing here unexpectedly is the signal, not the failure.
+        assert_eq!(
+            cen.year_payload,
+            names(&[
+                "BrokerAnswerUnread",
+                "BrokerReportingUnanswered",
+                "CharitableFloorNotComputed",
+                "ItemizedDeductionLimitationNotComputed",
+                "Schedule1aNotOnThisYearsReturn",
+            ])
+        );
+        assert!(
+            cen.unlocated_year_payload().is_empty(),
+            "a `year`-payload variant has no located raise site: {:?}",
+            cen.unlocated_year_payload()
+        );
+
+        let by = cen.by_variant();
+        // The five the old scanner did find, still found…
         for want in [
             "ReturnInputsYearNotStated",
             "Schedule1aNotOnThisYearsReturn",
             "StateAndLocalRefundWorksheetNotComputed",
+            "Pub525ItemizedDeductionRecovery",
+            "StateLocalRefundFactsWithoutARefund",
         ] {
-            assert!(vars.contains(want), "{want} not attributed: {vars:?}");
+            assert!(by.contains_key(want), "regression: {want} lost");
         }
-        // ★★★ At HEAD every attributed variant names a year-keyed call — so the report carries no
-        //     UNCLASSIFIED row. It DID carry one, because a site sharing its line with its own
-        //     construction attributed forward PAST it onto the next rule's variant. The plant below
-        //     is that exact shape.
-        let same_line = "fn f() {\n    if ri.tax_year != 0 && crate::tax::tables::schedule_1a_params(ri.tax_year).is_none() {\n        return refuse(\n            RefuseReason::Right { year: ri.tax_year },\n            \"x\",\n        );\n    }\n    return refuse(RefuseReason::Wrong, \"y\");\n}\n";
-        let s = year_sites(same_line);
+        // …and the three it could not see, the §68 one being the reason this exists.
+        for want in [
+            "ItemizedDeductionLimitationNotComputed",
+            "BrokerReportingUnanswered",
+            "BrokerAnswerUnread",
+        ] {
+            assert!(by.contains_key(want), "{want} is invisible again");
+        }
         assert!(
-            s.iter().all(|(_, _, v)| v == "Right"),
-            "a year read on the SAME LINE as its own construction must attribute to it, not to the \
-             next rule: {s:?}"
+            by["ItemizedDeductionLimitationNotComputed"]
+                .iter()
+                .any(|s| s.keyed.iter().any(|k| k == "section_68_status")),
+            "§68 must be ATTRIBUTED to its gate, not merely noticed: {:?}",
+            by["ItemizedDeductionLimitationNotComputed"]
         );
+        // ★ And the precision half: `BrokerReportingMixed` sits between two year-payload refusals and
+        //   its own message says `TY{year}`, while its decision reads no year. It must stay BLIND, or
+        //   the instrument is counting prose and bleed.
+        assert!(
+            !by.contains_key("BrokerReportingMixed"),
+            "a refusal whose decision reads no year must not be called year-reading"
+        );
+    }
 
-        // PLANT: a year-reading site that names nothing known must be attributed and REPORTED.
-        let planted = "fn f() {\n    if ri.tax_year > 0 {\n        return refuse(RefuseReason::Invented, \"x\");\n    }\n}\n";
-        let s = year_sites(planted);
-        assert_eq!(s.len(), 1, "{s:?}");
-        assert_eq!(s[0].2, "Invented");
+    /// ★★ The attribution keys are DERIVED from `gates()`, and the §68 gate is a real probe.
+    #[test]
+    fn the_year_keyed_markers_come_from_the_gates_and_section_68_is_one_of_them() {
+        let m = year_keyed_markers();
+        for g in gates() {
+            if let Some(k) = g.keyed_by {
+                assert!(
+                    m.contains(&k),
+                    "{k} is declared by a gate and not recognised"
+                );
+            }
+        }
+        assert!(m.contains(&"section_68_status"), "{m:?}");
+        // Pinned literals (FR-230), then the derivation: the §68 gate is SHUT for TY2026 and OPEN for
+        // both earlier bundled years, so `gate_rows` files it as year-specific rather than universal.
+        let g68 = gates()
+            .into_iter()
+            .find(|g| g.name.contains("§68"))
+            .expect("the §68 gate");
+        assert!((g68.probe)(2024).is_ok(), "§68 does not apply before 2026");
+        assert!((g68.probe)(2025).is_ok());
+        let why = (g68.probe)(2026).expect_err("§68 applies to TY2026");
         assert!(
-            !YEAR_KEYED.iter().any(|k| s[0].1.contains(k)),
-            "the planted site names no year-keyed call, so `gate_rows` must call it UNCLASSIFIED"
+            why.contains("384350") && why.contains("TRANSCRIBED"),
+            "the row must name the threshold and say January does not clear it: {why}"
         );
+        assert!(
+            (g68.probe)(2027).is_err(),
+            "a year with no transcribed Schedule A must fail CLOSED"
+        );
+        assert_eq!(
+            reason_after(
+                non_test(&refuse_src()),
+                "crate::tax::tables::section_68_status(year) {"
+            )
+            .unwrap(),
+            "ItemizedDeductionLimitationNotComputed"
+        );
+    }
+
+    /// ★ The lexer: a year in a comment or a string decides nothing, and `"… a preparer",` does not
+    /// open a raw string and swallow the code after it.
+    #[test]
+    fn code_lines_blanks_prose_and_survives_an_r_before_a_quote() {
+        let src = "// year\nlet a = \"tax_year 2026\"; // year\nlet b = \"a preparer\", year;\n";
+        let got = code_lines(src);
+        assert_eq!(got[0].trim(), "");
+        assert_eq!(got[1].trim(), "let a = ;");
+        assert!(
+            got[2].contains("year"),
+            "the code after `preparer\",` was swallowed: {:?}",
+            got[2]
+        );
+        assert!(!word_in(&got.join("\n"), "tax_year"));
     }
 
     /// ★★★ **B1 — the tags come out of the work list's own command, MARKDOWN AND ALL.**
@@ -2011,11 +2780,38 @@ mod tests {
         );
         // ★ Asserted on the COUNT in the notes, not on the absence of the word: the notes line
         //   always prints the word, so `!contains("UNCLASSIFIED")` was a test that could never pass.
+        //
+        // ★★★ It read `0 UNCLASSIFIED site group(s)` until B3 I-1, and that zero was the symptom: the
+        //     census could only classify sites its two needles had already found, so the three
+        //     year-reading refusals it could not see were not UNCLASSIFIED — they were absent. With
+        //     every raise site enumerated the real count is **two**, both in `screen_broker_reporting`,
+        //     which reads the year through a parameter and a `regime` no `Gate` probes. Pinned to the
+        //     names rather than relaxed to a floor: a THIRD one appearing still reds here.
         assert!(
-            all.contains("0 UNCLASSIFIED site group(s)"),
-            "every year-reading site is attributed at HEAD; an UNCLASSIFIED group means the \
-             attribution moved and must be looked at"
+            all.contains(
+                "2 UNCLASSIFIED variant(s) [BrokerAnswerUnread, BrokerReportingUnanswered]"
+            ),
+            "the UNCLASSIFIED set moved — look at it, do not widen this assertion"
         );
+        assert!(
+            all.contains("0 `year`-payload variant(s) with no located raise site"),
+            "a refusal that cannot be raised without the tax year has no raise site this census can \
+             find — the §68 hole, reopened"
+        );
+        // ★★★ §68 REACHES THE TY2026 ANSWER. It appeared nowhere in the 58-row prediction frozen as
+        //     stage 2's: not as a row, not in `gates()`, and the notes line asserted the opposite of
+        //     it. This is the integration-level check that the year's most year-specific refusal is
+        //     in the list the operator reads.
+        for want in [
+            "§68 ITEMIZED DEDUCTIONS WORKSHEET",
+            "ItemizedDeductionLimitationNotComputed",
+            "the worksheet must be TRANSCRIBED",
+        ] {
+            assert!(
+                all.contains(want),
+                "the TY2026 answer never mentions {want:?}"
+            );
+        }
         // A year this build does not bundle is answered, not panicked on.
         let far = collect(2031);
         assert!(
