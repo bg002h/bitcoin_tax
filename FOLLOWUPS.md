@@ -8972,6 +8972,31 @@ build, each with an owning phase.
   not computed — the field would simply hold the unlimited total under the new number. **The refusal comes
   out only when the worksheet goes in.** Recorded because the tempting order is the wrong one.
 
+- **★★★ FR-237 — MY STATUTE CITATION WAS WRONG: the 0.5% charitable floor is §170(b)(1)(I), NOT §170(p). Important for anything filer-facing. Owning phase: NOW — four design docs still carry it.**
+  **Refuted by the charitable-floor agent from the archived primary source, then verified by the controller.**
+  `legal/text/statute-irc/PLAW-119publ21_OBBBA.txt:9400`:
+  > *"SEC. 70425. 0.5 PERCENT FLOOR ON DEDUCTION OF CONTRIBUTIONS MADE BY INDIVIDUALS. (a) … Paragraph (1) of
+  > section 170(b) is amended by adding at the end the following new subparagraph: **'(I) 0.5-PERCENT
+  > FLOOR**.—Any charitable contribution otherwise allowable … shall be allowed only to the extent that the
+  > aggregate of such contributions exceeds 0.5 percent of the taxpayer's **contribution base** for the
+  > taxable year."*
+  **§170(p) is the section immediately above — §70424, the partial deduction for individuals who do NOT elect
+  to itemize**, amended to strike `"$300 ($600"` for `"$1,000 ($2,000"`. §70425(a)(3) touches §170(p) only to
+  *coordinate* with the new floor, which is plausibly how the misnomer entered.
+  ★★ **Why it is Important rather than a typo:** the refusal carrying it is read by a filer being told to go
+  work a worksheet by hand. Citing §170(p) points an **itemizing** filer at the one provision that by its own
+  terms applies only when they do **not** itemize — the Form 6251 line-33 class, in filer-facing text.
+  **Corrected already:** the two source files the agent owned. **Still carrying it:** four design documents
+  (two lens docs, `RECON-drive-to-filable-return.md`, `REPORT-wave5-schedule-a.md`) — and, unfixably,
+  several of my own commit messages from 2026-09-13/14, which is why this entry exists rather than a silent
+  rewrite. ★ Note also `0.5 percent of the taxpayer's CONTRIBUTION BASE`, which is **not** AGI
+  (§170(b)(1)(H)) — my "$1,366 = 0.5% of AGI" arithmetic was therefore the right order of magnitude by
+  coincidence, not by rule.
+  ★ **And two collateral corrections of mine, both from the same brief:** I told that agent *"no statutory
+  text is archived in this repo"* — the file above is **1,246,852 bytes** and is exactly how it found the
+  misnomer; and my *"§170(p) has zero hits workspace-wide"* was already false when I wrote it, because wave
+  5's harness had landed three. I measured before it landed and quoted after.
+
 - **★★★ FR-234 — ⚠️ 21 of 107 golden households are RED, and the test that would say so has NEVER RUN. Important. Owning phase: NOW — before any filing, and it is PRE-EXISTING, not from 2026-09-13's range.**
   Found by the B3 interaction review running the one instrument **no parcel worktree and no CI job can run**.
   `check_mode_reconciles_every_line_of_every_admitted_golden_household` fails on **21 of 107** households —
