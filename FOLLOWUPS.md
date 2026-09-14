@@ -8932,6 +8932,46 @@ build, each with an owning phase.
   the gate cannot see the local price cache that `btctax-update-prices` fills** — so the instruction sends
   the filer to do something the gate will not notice. Same family as FR-225: an exit that does not exit.
 
+- **★★★ FR-230 — HARNESS RULE: a kill whose expectation is DERIVED FROM THE THING IT MUTATES is not a kill. No owning phase — it belongs in `design/HARNESS.md` beside B1.**
+  **Measured 2026-09-13** by the §68 agent's own plants, on its own first attempt. Its pre-2026 test looped
+  `SECTION_68_FIRST_YEAR - 1`, so planting `SECTION_68_FIRST_YEAR = 2025` **moved the test's expectation with
+  the mutation** and the kill measured nothing. A second survivor came from a two-way classification check
+  that read `ThresholdNotTranscribed` as *"not gated"* while it was in fact refusing every TY2025 itemizer.
+  ★★ **This is B1 turned one level inward.** B1 says a checker does not exist until it has been observed red
+  on a planted defect. FR-230 says: **and the observation is void if the expected value is a function of the
+  planted constant.** A derived expectation is normally the *right* choice in this repo — it is the whole
+  "derive the list" doctrine — which is exactly why this is counter-intuitive and why a careful agent walked
+  into it.
+  **The fix, which is the rule:** pin the constant to a **literal** first (`assert_eq!(SECTION_68_FIRST_YEAR,
+  2026)`, now at `tables.rs:715`), then derive everything else from it. The literal is the anchor the mutation
+  cannot move. ★ And the tell to grep for: any test arithmetic on a constant the same test is meant to
+  protect (`CONST - 1`, `CONST + 1`, `..CONST`).
+
+- **FR-231 — recorded, NOT a defect: the §68 screen is deliberately over-inclusive, because the FORM is. No owning phase.**
+  §68(a)(2) measures against the 37% bracket start *"with respect to the taxpayer"* — **Single $640,600**
+  (`SPEC_tax_tables_2026.md:24`), **MFS $384,350** — while `f1040sa--2026-DRAFT` prints **one number, the
+  minimum, exactly once, with no filing-status parenthetical** (controller-verified). So the form itself is
+  over-inclusive relative to the statute, and btctax's screen inherits that: a **Single** filer between
+  $384,350 and $640,600 is refused although §68 would reduce nothing for them.
+  ★ **Deliberate, asserted, and the recoverable direction** — an over-refusal costs a filer a preparer's fee;
+  the opposite costs them an understated return. ★★ And this is the statutory reason **FR-186** is a trap:
+  reading the threshold from the bracket table *per status* gives Single $640,600 and screens them **out** of
+  the gate the form screens them **into**. FR-186 is amended by this entry rather than superseded.
+  **Revisit only if the final TY2026 Schedule A adds a status parenthetical** — that is the one fact that
+  would change the answer, and it is one `form-delta` run away in January.
+
+- **FR-232 — the import tier cannot see the §68 gate. Minor. Owning phase: with the TY2026 port.**
+  Reported by the §68 agent and **deliberately not widened**: `income import` does not evaluate computed-
+  quantity gates, so a filer can store inputs that will refuse at export. ★ That is consistent with every
+  other computed-quantity gate in the product, so fixing it here alone would make this one gate special
+  without making the surface honest. Either teach the import tier the whole class or state the boundary once.
+
+- **FR-233 — `printed.rs` still has no Schedule A line 18, so the §68 refusal MUST NOT be removed before it exists. Minor, but a sequencing trap. Owning phase: the TY2026 port.**
+  The refusal is what currently stands between a TY2026 itemizing return and an **unlimited** itemized total.
+  ★ If someone lands the line-18 field first and clears the refusal as "now handled", the limitation still is
+  not computed — the field would simply hold the unlimited total under the new number. **The refusal comes
+  out only when the worksheet goes in.** Recorded because the tempting order is the wrong one.
+
 - **FR-152 — `census_join` anchors captions to ABSOLUTE line indices in a generated file. Minor. Owning phase: the port machine.**
   A4's 110 `# Regenerate:` header additions shifted every extract by a line, and `forms/2024/f1040s1.map.toml`'s
   `extract_line` anchors (11/15/58) had to move to 15/19/62 — an edit outside A4's ownership, reported rather
