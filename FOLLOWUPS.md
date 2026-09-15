@@ -9524,7 +9524,11 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   14 as an **input** rather than computing it, their agreement proves nothing (§G-9) and the coverage must
   be honest about being a *reproduction* check instead. State which it is per line rather than assuming.
 
-- **★★★ FR-251 — FALSE REFUSAL: a STANDARD-DEDUCTION filer with Schedule A inputs and over $5,000 of crypto donations cannot file, for a Form 8283 that is never filed. Important, PRE-EXISTING. Owning phase: NOW.**
+- **✅ CLOSED — FR-251 — FALSE REFUSAL: a STANDARD-DEDUCTION filer with Schedule A inputs and over $5,000 of crypto donations could not file, for a Form 8283 that is never filed. Was Important, PRE-EXISTING.**
+  ★★★ **The audit this entry demanded found the omission in TWO premises, not the one reported.** `claimed_noncash` *and* `noncash_gifts_before_limits` are both computed off the gift set with no election term. So the fix guards the **whole gate** on `ar.deduction_is_itemized` once, rather than conjoining a term into each premise — a per-premise conjunction is the typed-list shape, and a fourth premise added later would inherit nothing. ★ Every refusal that gate raises is a Form 8283 *substantiation* requirement, and a standard-deduction return files no Form 8283, so the scope is the gate and not the premises.
+  ★ It does **not** re-open the r3 finding recorded in that block: r3 is about WHICH MEASURE premise 2 uses (claimed, not pre-ceiling) and is untouched. That comment already says the premise is *"keyed on the DEDUCTION, not on the paperwork"* — on a standard-deduction return there is no deduction, so this completes its intent rather than contradicting it.
+  ★★ Held by `a_standard_deduction_filer_who_donates_is_not_blocked_by_an_8283_it_never_files`, which asserts its own premise (`!itemized`) so it cannot pass by accidentally itemizing — the fixture it mirrors deliberately FORCES the election — and covers both arms. Mutation-verified: removing the guard turns the `None` row into `Some(DonationRestrictionsUnresolved)`.
+
   Recommended as FU-1 by the [[FR-244]] implementer and **verified by the controller against source**, not
   taken from the report — the fold had moved one of the premises, so the report's wording described a
   pre-fold tree while the defect itself is real and elsewhere.

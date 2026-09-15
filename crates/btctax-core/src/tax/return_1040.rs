@@ -3293,12 +3293,41 @@ pub fn screen_absolute(
     //    restriction moves no figure on it. That is the r3 finding recorded above — keying this on the
     //    ledger hard-blocked a filer whose only escape was a false answer under §6065 — and re-widening
     //    it to the pre-ceiling measure would reinstate exactly that block.
-    match crate::tax::return_refuse::donation_restriction_gate(
-        ri.donations_had_restrictions,
-        claimed_noncash > Usd::ZERO,
-        ar.noncash_gifts_before_limits > crate::tax::printed::FORM_8283_THRESHOLD
-            && donated > crate::tax::tables::QUALIFIED_APPRAISAL_THRESHOLD,
-    ) {
+    // ★★★ **FR-251 — THE WHOLE GATE IS ITEMIZING-SCOPED, and it was not.** Every refusal below is a
+    //     Form 8283 SUBSTANTIATION requirement, and a standard-deduction return files no Form 8283 at
+    //     all — it claims no charitable deduction, so there is nothing for a restriction to reduce and
+    //     nothing to substantiate. Before this, a standard-deduction filer with Schedule A inputs and
+    //     over $5,000 of crypto donations could not file their return, for a form that would never be
+    //     printed.
+    //
+    // ★★ The cause is that `ScheduleAParts` is built whenever Schedule A INPUTS exist, regardless of
+    //    the §63(e) election — so `ar.schedule_a.is_some()` is true on a standard-deduction return and
+    //    `charitable_noncash_12` carries the figure anyway. `cmd::admin` learned this and wrote it down
+    //    (*"`deduction_is_itemized` is REQUIRED here … so testing line 12 alone put the ATT line on a
+    //    standard-deduction packet that claims nothing"*), and `interview_state` records the principle a
+    //    second time. The rule was written twice and this site tested line 12 alone anyway — B3's field
+    //    of view, not ignorance.
+    //
+    // ★ **Guarded once, over the whole gate, rather than conjoined into each premise.** The audit that
+    //   found this found the omission in TWO premises, not the one first reported: `claimed_noncash` and
+    //   `noncash_gifts_before_limits` are both computed off the gift set with no election term. A
+    //   per-premise conjunction is the typed-list shape — a fourth premise added later would inherit
+    //   nothing. This way it inherits the scope.
+    //
+    // ★★ And this does NOT re-open the r3 finding recorded above. That finding is about WHICH MEASURE
+    //    premise 2 uses (claimed, not pre-ceiling) and is untouched; the comment there already says the
+    //    premise is *"keyed on the DEDUCTION, not on the paperwork"* — on a standard-deduction return
+    //    there is no deduction, so this completes that intent instead of contradicting it.
+    match if ar.deduction_is_itemized {
+        crate::tax::return_refuse::donation_restriction_gate(
+            ri.donations_had_restrictions,
+            claimed_noncash > Usd::ZERO,
+            ar.noncash_gifts_before_limits > crate::tax::printed::FORM_8283_THRESHOLD
+                && donated > crate::tax::tables::QUALIFIED_APPRAISAL_THRESHOLD,
+        )
+    } else {
+        None
+    } {
         Some(crate::tax::return_refuse::DonationRestrictionGate::Declared) => {
             return refusal(
                 RefuseReason::DonationRestrictionsUnresolved,
@@ -4748,6 +4777,88 @@ mod tests {
             crate::forms::InformationReturnRegime::NONE,
         )
         .map(|r| r.reason)
+    }
+
+    /// ★★★ **FR-251 — A STANDARD-DEDUCTION FILER WHO DONATES MUST BE ABLE TO FILE.**
+    ///
+    /// The mirror of [`screened_restriction_at`], whose fixture deliberately FORCES the itemized
+    /// election. Here Schedule A inputs exist — so `ar.schedule_a` is `Some` and
+    /// `charitable_noncash_12` carries the figure, because `ScheduleAParts` is built whenever the inputs
+    /// exist regardless of the §63(e) election — but they total far under the §63 standard deduction, so
+    /// the return takes the standard deduction and claims **no** charitable deduction at all.
+    ///
+    /// Every refusal the donation-restriction gate can raise is a Form 8283 SUBSTANTIATION requirement,
+    /// and this return files no Form 8283. So the year must file. Before FR-251 it could not: with over
+    /// $5,000 donated and the Section B question unanswered, a filer claiming nothing was blocked for a
+    /// form that would never be printed.
+    ///
+    /// ★ The two rows below are the two arms, and the UNANSWERED one is the one that was broken — it is
+    ///   the arm keyed on the $5,000 Section B split, which a standard-deduction return still trips.
+    /// ★★ **Mutation:** drop the `ar.deduction_is_itemized` guard from the gate and the `None` row
+    ///   becomes `Some(DonationRestrictionsUnresolved)`.
+    #[test]
+    fn a_standard_deduction_filer_who_donates_is_not_blocked_by_an_8283_it_never_files() {
+        let screened = |claimed: Usd, answer: Option<bool>| -> (bool, Option<RefuseReason>) {
+            let p = ty2024_params();
+            let table = synthetic_table(2024);
+            let ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                donations_had_restrictions: answer,
+                charitable_cwa_obtained: Some(true),
+                // ★ Schedule A INPUTS exist, but $1,000 of SALT is nowhere near the $14,600 standard
+                //   deduction — so `ar.schedule_a` is `Some` while the election is STANDARD. That gap
+                //   between "inputs exist" and "the deduction is claimed" is the whole defect.
+                schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
+                    salt_state_estimated_payments: dec!(1000),
+                    ..Default::default()
+                }),
+                w2s: vec![w2(
+                    Owner::Taxpayer,
+                    dec!(200000),
+                    dec!(168600),
+                    dec!(200000),
+                )],
+                ..Default::default()
+            };
+            let st = donation_state(claimed);
+            let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+            (
+                ar.deduction_is_itemized,
+                screen_absolute(
+                    &ri,
+                    &ar,
+                    &p,
+                    &st,
+                    2024,
+                    crate::forms::InformationReturnRegime::NONE,
+                )
+                .map(|r| r.reason),
+            )
+        };
+
+        // ★★ B1a — the premise, asserted so this test cannot pass by accidentally itemizing. If the
+        //    fixture ever itemizes, every row below is testing the wrong thing and this line says so.
+        let (itemized, verdict) = screened(dec!(9000), None);
+        assert!(
+            !itemized,
+            "premise: $1,000 of SALT must lose to the standard deduction — otherwise this test is a \
+             duplicate of the itemizing fixture and proves nothing about FR-251"
+        );
+        assert_eq!(
+            verdict, None,
+            "FR-251: a STANDARD-DEDUCTION return files no Form 8283, so an unanswered Section B \
+             question substantiates nothing and must not block the year. This filer claims no \
+             charitable deduction at all"
+        );
+
+        // ★ And the DECLARED arm too: a restriction reduces a CLAIM, and this return claims nothing.
+        let (itemized, verdict) = screened(dec!(9000), Some(true));
+        assert!(!itemized, "premise: still the standard deduction");
+        assert_eq!(
+            verdict, None,
+            "Reg §1.170A-7 reduces a deduction; there is no deduction to reduce on a \
+             standard-deduction return"
+        );
     }
 
     /// ★★★ **r3 I-2 — the gate was TOO NARROW, and the gap was an UNDERSTATEMENT.**
