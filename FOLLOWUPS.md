@@ -9463,3 +9463,28 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   and honest — a *noncash* gift's empty (i) now refuses, because that path has a filer to ask — but
   Reg. §1.170A-16(c)(3)(v)'s fully-complete requirement arguably reaches the ledger path too. ★ The
   authority here is the REG, which outranks the instructions ([[tax-authority-hierarchy]]).
+
+- **★★ FR-249 — `derive_tax_profile`'s `adjustments` is a TYPED LIST that omits the §164(f) half-SE and §223 HSA deductions, while its doc claims *"magi_excluding_crypto = AGI exactly"*. Important. Owning phase: NOW — it is a wrong figure with a live consumer.**
+  Found 2026-09-14 while verifying [[FR-183]], at a site FR-183 does not mention, and it is the same
+  *"BLOCK, not a list"* shape one function away from where that rule is already written down.
+  | site | `adjustments` = |
+  |---|---|
+  | `return_1040.rs:2442` (the real return) | `early_wd + half_se + student_loan + hsa_deduction_13` |
+  | `return_1040.rs:1809` (`derive_tax_profile`) | `early_wd + student_loan` |
+  Controller-measured: `derive_tax_profile` contains **zero** mentions of `half_se`/`deductible_half` and
+  **zero** of `hsa`/`8889` — so both are structurally absent, not merely unsummed. And the profile **does**
+  consume `schedule_c`, so SE income is in scope and §164(f) genuinely applies to it.
+  ★★ **The doc comment is the aggravating half.** It names the exclusions it knows about — *"Crypto is
+  excluded structurally"*, *"no §911/CFC/PFIC in the model"* — and then asserts
+  *"`magi_excluding_crypto` = AGI **exactly**"*. Two omitted adjustments make that claim false, and a
+  documented exclusion list that misses two items is worse than no list: it reads as completeness.
+  ★ **Direction and severity, stated precisely.** Omitting adjustments **raises** the derived AGI, which
+  can push the estimated marginal bracket too high. `TaxProfile` is consumed by
+  `btctax-cli/src/resolve.rs:105` and drives the optimizer, so this is a wrong **estimate** feeding
+  lot-selection advice — **not a filed line**, which is why it is Important rather than Critical. A filer
+  could be steered to a worse disposal than the one they would have chosen.
+  ★★★ *Fix:* the same one already written 600 lines away at `return_1040.rs:2425-2428` for the §221 MAGI —
+  *"It is a BLOCK, not a list: a future Schedule 1 lines 11–20 adjustment belongs here the day it is
+  added, and the worksheet's own sentence is the rule that says so."* ★ And the test must red when an
+  adjustment is dropped again, or this recurs the next time Schedule 1 grows — the profile should derive
+  its adjustments from the same place the return does, not restate them.
