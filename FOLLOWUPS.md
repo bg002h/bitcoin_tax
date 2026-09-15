@@ -9500,3 +9500,26 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   added, and the worksheet's own sentence is the rule that says so."* ★ And the test must red when an
   adjustment is dropped again, or this recurs the next time Schedule 1 grows — the profile should derive
   its adjustments from the same place the return does, not restate them.
+
+- **★★★ FR-250 — the 107-household GOLDEN CORPUS has essentially no charitable coverage: ONE household with cash gifts, ZERO with any noncash contribution. Important. Owning phase: NOW — it is the reason FR-244 shipped undetected.**
+  Controller-measured 2026-09-14 while folding [[FR-244]], over
+  `crates/btctax-core/tests/goldens/full_return_goldens.json`:
+  - the **only** charity-related input key anywhere in the corpus is `charitable_cash`;
+  - exactly **1** of 107 households carries a non-zero value in it;
+  - **0** households carry any noncash contribution of any kind.
+  ★★★ **So the double-oracle corpus — the primary validation surface — cannot catch a charitable defect
+  at all, and FR-244 is the proof: a required Form 8283 was omitted whenever a §170(b) ceiling bound, and
+  no golden moved when it was fixed** (verified, not assumed — that is why the regeneration trap had no
+  surface). Uncovered by the corpus today: Form 8283 Sections A **and** B, the §170(b)(1)(A)/(B)/(C)
+  percentage ceilings, the §170(b)(1)(I) 0.5% floor, the §170(f)(8) CWA path, §170(e) ordinary-income
+  property, the carryover, and [[FR-249]]'s adjustments.
+  ★★ **And it misses the owner's own return shape.** They itemize and give **Bitcoin over $5,000** — a
+  noncash crypto donation requiring Section B and a qualified appraisal. The corpus contains no household
+  like that, so every charitable figure on their return is validated by unit tests alone, never by the
+  two-oracle sweep. ★ [[a-figure-with-no-reader]] and §G-9 both apply: this is a whole FAMILY of figures
+  with no independent witness.
+  ★ *Fix:* add households that exercise the charitable surface — at minimum a cash-ceiling binder, a
+  noncash Section A filer, a crypto Section B filer, and a carryover year — and check each against BOTH
+  oracles. ★★ Before doing so, confirm the oracles model the line: if they consume Schedule A line 12 or
+  14 as an **input** rather than computing it, their agreement proves nothing (§G-9) and the coverage must
+  be honest about being a *reproduction* check instead. State which it is per line rather than assuming.
