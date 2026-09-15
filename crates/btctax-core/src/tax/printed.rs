@@ -166,6 +166,12 @@ pub fn form_8949_printed(rows: &[crate::forms::Form8949Row]) -> Option<Printed89
 /// $500" — an attachment requirement. Form 8283 has no grand-total line for L12 to equal, and the
 /// §170(b) ceilings legitimately make L12 *smaller* than the sum of the 8283's per-donation amounts (the
 /// excess becomes carryover). Forcing them equal would be wrong.
+///
+/// ★★★ **FR-244 — AND THAT GAP IS WHY THE ATTACHMENT DECISION DOES NOT READ L12 EITHER.** The sentence
+/// above is a *composition* rule: L12 does not re-derive from this form. The PRESENCE rule is a separate
+/// question, and it is measured on the noncash total **before** the ceilings — so the very households
+/// this paragraph describes (L12 clipped below the 8283's own rows) are the ones that used to lose a
+/// required attachment. See [`crate::tax::charitable::noncash_before_limits`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Printed8283Rows {
     rows: Vec<crate::forms::Form8283Row>,
@@ -209,7 +215,10 @@ impl Printed8283Rows {
 /// Round the ledger's Form 8283 rows for the filed packet. `None` when there are no donation rows.
 ///
 /// The PRESENCE rule (does an 8283 get attached at all?) is the packet's, not this function's: the form
-/// is required when the return itemizes AND the printed Schedule A line 12 exceeds $500.
+/// is required when the return ITEMIZES and the year's noncash contributions **before any §170(b) income
+/// limit** exceed $500 — [`crate::tax::return_1040::AbsoluteReturn::noncash_gifts_before_limits`], NOT
+/// the printed Schedule A line 12 (FR-244; the measure is defined by both instruction booklets on
+/// [`crate::tax::charitable::noncash_before_limits`]).
 pub fn form_8283_printed(
     rows: &[crate::forms::Form8283Row],
     // ★ §G-21 — the filer's own answer to lines 5a/5b/5c. `Some(false)` prints all three as No; `None`
@@ -278,8 +287,11 @@ pub fn form_8283_printed(
     })
 }
 
-/// Form 8283 is REQUIRED when the return itemizes and its printed noncash gifts exceed $500 — the
-/// threshold is printed on Schedule A line 12 itself ("You must attach Form 8283 if over $500").
+/// **$500 — the Form 8283 filing threshold.** Form 8283 is REQUIRED when the return itemizes and the
+/// year's noncash contributions exceed this, measured **before any §170(b) income limit** — see
+/// [`crate::tax::charitable::noncash_before_limits`] for the two instruction passages that define the
+/// measure, and for why Schedule A line 12's own terser pointer (*"You must attach Form 8283 if over
+/// $500"*) does not govern it (FR-244).
 pub const FORM_8283_THRESHOLD: Usd = rust_decimal_macros::dec!(500);
 
 // ── Form 8275 — the printed Part I amounts (Task 13, arch r1 I-5) ──────────────────────────────────
@@ -1992,6 +2004,7 @@ mod tests {
             total_deductions: z,
             taxable_income: z,
             net_ltcg: z,
+            noncash_gifts_before_limits: z,
             charitable_carryover_out: Vec::new(),
             qbi_reit_ptp_carryforward_out: z,
             qbi_carryforward_out: z,

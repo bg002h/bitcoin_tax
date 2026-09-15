@@ -38,6 +38,75 @@ pub struct CharitableResult {
     pub carryover_out: Vec<CharitableCarryItem>,
 }
 
+/// **Is this class NONCASH — "contributed property" — rather than cash?**
+///
+/// Schedule A splits the two on its own face: line 11 is *"Gifts by cash or check"*, line 12 is
+/// *"Other than by cash or check"*. Form 8283 exists for the second.
+///
+/// ★★ **An `_`-free match over [`CharitableClass`], deliberately** (FR-99, *"derive the list, or make
+/// the compiler hold it"*). Both call sites used to negate a typed pair —
+/// `!matches!(g.class, Cash60 | Cash30)` — which silently sorts a SEVENTH class into "noncash" the
+/// day one is added. Here a new variant is a build error instead.
+#[must_use]
+pub fn is_noncash(class: CharitableClass) -> bool {
+    use CharitableClass::{
+        CapGainProp20, CapGainProp30, Cash30, Cash60, OrdinaryProp30, OrdinaryProp50,
+    };
+    match class {
+        Cash60 | Cash30 => false,
+        CapGainProp30 | CapGainProp20 | OrdinaryProp50 | OrdinaryProp30 => true,
+    }
+}
+
+/// ★★★ **THE FORM 8283 FILING MEASURE: total noncash contributions BEFORE any §170(b) income
+/// limit** — i.e. the sum of this year's noncash `gifts` as given, not
+/// [`CharitableResult::allowed_noncash`] (Schedule A line 12) after the AGI-percentage ceilings have
+/// clipped it and sent the excess to §170(d) carryover.
+///
+/// **The measure is stated explicitly by both instruction booklets, and it is pre-ceiling.**
+///
+/// i8283, *"Charitable Contributions"* (`design/forms/extract/i8283--2024.txt:46-52`):
+///
+/// > You must file one or more Forms 8283 if the amount of
+/// > your deduction for each noncash contribution is more than
+/// > $500. You must also file Form 8283 if you have a group of
+/// > similar items for which a total deduction of over $500 is
+/// > claimed. See Similar Items of Property, later. For this
+/// > purpose, “amount of your deduction” means your
+/// > deduction before applying any income limits that could
+///
+/// i1040sca, *"Deduction more than $500"* (`design/forms/extract/i1040sca--2024.txt:1255-1259`):
+///
+/// > Deduction more than $500. If the amount of your deduction is
+/// > more than $500, you must complete and attach Form 8283. For
+/// > this purpose, the “amount of your deduction” means your
+/// > deduction before applying any income limits that could result in a
+/// > carryover of contributions.
+///
+/// ★★ **THE TENSION, AND HOW IT IS ADJUDICATED (FR-244).** Schedule A **line 12's own printed
+/// text** says *"You must attach Form 8283 if over $500"* — about line 12, which IS post-ceiling.
+/// Read literally that points the other way. The explicit definitions win: both booklets define
+/// *"amount of your deduction"* for this very purpose as the figure *before applying any income
+/// limits*, and a definition that exists to override a terse on-form pointer does exactly that.
+/// ★ The direction confirms it. Pre-ceiling ≥ post-ceiling always, so this measure attaches the form
+/// MORE often — and an 8283 attached when it was not strictly required costs nothing, while a missing
+/// one is a §170(f)(11) denial risk.
+///
+/// ★ **The TRIGGER is a total and stays a total.** Form 8283's own header
+/// (`design/forms/extract/f8283--2024.txt:11-12`) reads *"Attach one or more Forms 8283 to your tax
+/// return if you claimed a total deduction of over $500 for all contributed property."* i8283 phrases
+/// it additionally per contribution and per group of similar items, but that union still fires
+/// whenever the total clears $500, so the aggregate is the right trigger. FR-244 changed the MEASURE,
+/// not the trigger.
+#[must_use]
+pub fn noncash_before_limits(gifts: &[CharitableGift]) -> Usd {
+    gifts
+        .iter()
+        .filter(|g| is_noncash(g.class))
+        .map(|g| g.amount)
+        .sum()
+}
+
 /// §170(d)(1): a gift's excess carries forward up to 5 succeeding years. A carryover from `origin` is
 /// EXPIRED in tax `year` once `year − origin > 5` (dropped — never used, never carried further).
 fn is_expired(origin: i32, year: i32) -> bool {

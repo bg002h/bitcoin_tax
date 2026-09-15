@@ -1225,11 +1225,28 @@ pub fn assemble_printed_forms(
         })
         .unwrap_or_default();
 
-    // Form 8283 files only when the return ITEMIZES and its printed noncash gifts clear the $500
-    // threshold printed on Schedule A line 12 — a standard-deduction year with donations files none.
+    // ★★★ **FR-244 — THE MEASURE IS PRE-CEILING, AND THIS LINE USED TO READ THE POST-CEILING ONE.**
+    //
+    // Form 8283 files when the return ITEMIZES and the year's noncash contributions clear $500 — and
+    // the quantity that is tested is `ar.noncash_gifts_before_limits`, NOT the printed Schedule A
+    // line 12. Both instruction booklets define the threshold's measure for this very purpose and both
+    // say *"before applying any income limits that could result in a carryover of contributions"*
+    // (the passages are quoted in full on `crate::tax::charitable::noncash_before_limits`).
+    //
+    // Reading `a.line12` — which this filter did until FR-244 — omitted a REQUIRED attachment exactly
+    // when a §170(b) percentage ceiling bound: gross noncash over $500, printed line 12 at or under it,
+    // so the form was skipped on the return that most needs it. This module's own `Printed8283Rows` doc
+    // already said the §170(b) ceilings legitimately make L12 SMALLER than the sum of the 8283's
+    // per-donation amounts (the excess becomes carryover) — the two quantities were known to differ and
+    // the presence test read the wrong one. An omitted 8283 is a §170(f)(11) denial risk; an 8283
+    // attached where it was not strictly required is not.
+    //
+    // ★ `sch_a` is still the ITEMIZING term (it is `None` on a standard-deduction return), so a
+    //   standard-deduction year with donations files none — nothing is claimed, so nothing is
+    //   substantiated. Only the THRESHOLD's input moved.
     let f8283 = sch_a
         .as_ref()
-        .filter(|a| a.line12 > FORM_8283_THRESHOLD)
+        .filter(|_| ar.noncash_gifts_before_limits > FORM_8283_THRESHOLD)
         .and_then(|_| {
             form_8283_printed(
                 &crate::forms::form_8283(state, year, donation_details),
@@ -2202,6 +2219,242 @@ mod tests {
         assert_eq!(
             pr.forms.f8959.line1,
             crate::conventions::round_dollar(box5_sum)
+        );
+    }
+
+    // ── FR-244 — the Form 8283 attachment threshold is measured BEFORE the §170(b) ceiling ──────────
+
+    /// One LONG-term crypto donation of `fmv`, §170(e)-deducted at FMV (`CapGainProp30`).
+    ///
+    /// ★ B1a — this is what makes the checker's SUBJECT present: without a `Donation` removal in the
+    ///   year, `crate::forms::form_8283` returns no rows, `form_8283_printed` returns `None`, and a
+    ///   packet-presence assertion would pass for a reason that has nothing to do with the threshold.
+    ///   Every row below asserts the rows are non-empty before asserting anything about the form.
+    fn lt_crypto_donation(fmv: crate::conventions::Usd) -> crate::state::LedgerState {
+        use crate::event::BasisSource;
+        use crate::identity::LotId;
+        use crate::state::{Removal, RemovalKind, RemovalLeg, Term};
+        crate::state::LedgerState {
+            removals: vec![Removal {
+                event: EventId::decision(1),
+                kind: RemovalKind::Donation,
+                removed_at: date!(2024 - 06 - 01),
+                legs: vec![RemovalLeg {
+                    lot_id: LotId {
+                        origin_event_id: EventId::decision(1),
+                        split_sequence: 0,
+                    },
+                    sat: 100_000_000,
+                    basis: dec!(1000),
+                    fmv_at_transfer: fmv,
+                    term: Term::LongTerm,
+                    basis_source: BasisSource::ExchangeProvided,
+                    acquired_at: date!(2020 - 01 - 01),
+                    pseudo: false,
+                }],
+                appraisal_required: false,
+                donor_acquired_at: None,
+                // §170(e): a LONG-term leg deducts fair market value.
+                claimed_deduction: Some(fmv),
+                donee: None,
+            }],
+            ..Default::default()
+        }
+    }
+
+    /// ★★★ **FR-244 — THE $500 FORM 8283 THRESHOLD IS MEASURED ON THE NONCASH TOTAL *BEFORE* THE
+    ///     §170(b) CEILING, AND THIS PACKET USED TO MEASURE IT AFTER.**
+    ///
+    /// The defect: `assemble_printed_forms` filtered on the printed Schedule A **line 12**, which is
+    /// post-ceiling. Whenever a §170(b) percentage ceiling bound — gross noncash over $500, line 12 at
+    /// or under it — btctax attached **no Form 8283** to a return required to carry one, and an omitted
+    /// required attachment is a §170(f)(11) denial risk.
+    ///
+    /// **The measure is defined explicitly, twice, and both definitions are pre-ceiling.**
+    /// i8283 (`design/forms/extract/i8283--2024.txt:50-52`):
+    ///
+    /// > For this
+    /// > purpose, “amount of your deduction” means your
+    /// > deduction before applying any income limits that could
+    ///
+    /// i1040sca (`design/forms/extract/i1040sca--2024.txt:1255-1259`):
+    ///
+    /// > Deduction more than $500. If the amount of your deduction is
+    /// > more than $500, you must complete and attach Form 8283. For
+    /// > this purpose, the “amount of your deduction” means your
+    /// > deduction before applying any income limits that could result in a
+    /// > carryover of contributions.
+    ///
+    /// Schedule A line 12's own terser pointer (*"You must attach Form 8283 if over $500"*) reads the
+    /// other way; the explicit definitions govern, and the direction confirms the adjudication —
+    /// pre-ceiling ≥ post-ceiling, so this attaches the form MORE often, and a form attached where it
+    /// was not strictly required is not a denial risk.
+    ///
+    /// ★★ **THE KILL (B1), AND THE PLANT IS THE HOUSEHOLD'S CEILING POSITION — never the predicate**
+    ///    (FR-235). Row 1 crowds the §170(b) 50%-of-AGI room with a large CASH gift, which collapses
+    ///    the `CapGainProp30` ceiling to `min(30% × AGI, 50% × AGI − allowed cash)` = **$300** at
+    ///    $60,000 of AGI. Nothing in the fixture mentions $500 or the threshold: it moves where the
+    ///    ceiling lands, and the two measures then disagree by construction — asserted, not assumed.
+    ///    Reverting the filter to `a.line12 > FORM_8283_THRESHOLD` reds row 1.
+    ///
+    /// ★★ **AND THE NEAR-MISS, or the fix is "always attach" wearing a measure's clothes.** Rows 3 and
+    ///    4 keep the ceiling slack so the two measures AGREE, at exactly $500 (the form says *over*
+    ///    $500, so $500 attaches nothing) and below it. Row 2 is the agreeing-YES case, without which
+    ///    rows 3–4 would be satisfied by an emitter that attaches an 8283 for nobody. The three
+    ///    `saw_*` flags below fail the test if any of those shapes stops being exercised.
+    #[test]
+    fn form_8283_attaches_on_the_pre_ceiling_noncash_total_not_the_printed_line_12() {
+        use crate::conventions::Usd;
+        use crate::tax::return_inputs::{CharitableClass, CharitableGift, ScheduleAInputs};
+
+        let params = ty2024_params();
+        let table = ty2024_table();
+
+        let mut saw_measures_disagree = false;
+        let mut saw_agreeing_yes = false;
+        let mut saw_agreeing_no = false;
+
+        for (name, cash_gift, donated, expect_attached) in [
+            // The ceiling BINDS: $29,700 of cash leaves $300 of 50%-room, so line 12 prints $300 while
+            // $50,000 of property was contributed. The two measures disagree — this is the defect row.
+            (
+                "cash crowds the ceiling to $300",
+                dec!(29700),
+                dec!(50000),
+                true,
+            ),
+            // The ceiling is slack: both measures say "over $500".
+            ("slack ceiling, $6,000 donated", Usd::ZERO, dec!(6000), true),
+            // The form says "over $500". Exactly $500 is NOT over.
+            ("slack ceiling, exactly $500", Usd::ZERO, dec!(500), false),
+            ("slack ceiling, $400 donated", Usd::ZERO, dec!(400), false),
+        ] {
+            let mut charitable = Vec::new();
+            if cash_gift > Usd::ZERO {
+                charitable.push(CharitableGift {
+                    class: CharitableClass::Cash60,
+                    // ★ FR-244/FR-200(b) merge seam: a CASH gift has no Form 8283 property, so `None` is
+                    //   the determinate answer, not a placeholder to satisfy E0063. This literal arrived
+                    //   with FR-244, whose base predated the `noncash` field.
+                    noncash: None,
+                    amount: cash_gift,
+                });
+            }
+            let ri = crate::tax::testonly::answered(ReturnInputs {
+                tax_year: 2024,
+                filing_status: FilingStatus::Single,
+                // Both class-(B) charitable skippables answered, so every row FILES and the only thing
+                // varying across rows is where the §170(b) ceiling lands.
+                donations_had_restrictions: Some(false),
+                charitable_cwa_obtained: Some(true),
+                w2s: vec![W2 {
+                    owner: Owner::Taxpayer,
+                    employer: "Fixture Corp".into(),
+                    ein: Some("11-1111111".into()),
+                    box1_wages: dec!(60000),
+                    box3_ss_wages: dec!(60000),
+                    box5_medicare_wages: dec!(60000),
+                    ..Default::default()
+                }],
+                // $20,000 of mortgage interest beats the $14,600 standard deduction on its own, so the
+                // ITEMIZING term of the filter is live on every row and never the thing under test.
+                form_1098: vec![crate::tax::testonly::form_1098_with_interest(dec!(20000))],
+                schedule_a: Some(ScheduleAInputs {
+                    charitable,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            });
+            let state = lt_crypto_donation(donated);
+            let ar = assemble_absolute(&ri, &state, &params, &table, 2024);
+
+            // ── Premises. Each names something that must be TRUE for the assertion below to mean
+            //    anything, so a fixture that drifted would red HERE rather than pass vacuously.
+            assert!(
+                ar.deduction_is_itemized,
+                "{name}: the fixture must ITEMIZE — Schedule A is the other term of the filter"
+            );
+            assert!(
+                !crate::forms::form_8283(&state, 2024, &BTreeMap::new()).is_empty(),
+                "{name}: the ledger must yield Form 8283 ROWS, or the presence assertion below passes \
+                 for a reason that has nothing to do with the threshold (B1a)"
+            );
+            assert_eq!(
+                ar.noncash_gifts_before_limits, donated,
+                "{name}: the pre-ceiling measure is the contributed property itself — a LONG-term \
+                 crypto leg is deducted at fair market value under §170(e)"
+            );
+            assert_eq!(
+                crate::tax::return_1040::screen_absolute(
+                    &ri,
+                    &ar,
+                    &params,
+                    &state,
+                    2024,
+                    crate::forms::InformationReturnRegime::NONE,
+                )
+                .map(|r| r.reason),
+                None,
+                "{name}: the household must actually be fileable, or the kill is on a return btctax \
+                 refuses anyway"
+            );
+
+            let pr = assemble_printed_forms(
+                &ri,
+                &state,
+                &BTreeMap::new(),
+                &ar,
+                &table,
+                2024,
+                &[],
+                crate::forms::InformationReturnRegime::NONE,
+            );
+            let line12 = pr.sch_a.as_ref().map(|a| a.line12).expect("itemizing");
+
+            // ── Which SHAPE is this row? Read off the two measures, never off the expectation.
+            if ar.noncash_gifts_before_limits > FORM_8283_THRESHOLD {
+                if line12 > FORM_8283_THRESHOLD {
+                    saw_agreeing_yes = true;
+                } else {
+                    saw_measures_disagree = true;
+                }
+            } else {
+                assert!(
+                    line12 <= FORM_8283_THRESHOLD,
+                    "{name}: line 12 can never EXCEED the pre-ceiling total — a ceiling only clips"
+                );
+                saw_agreeing_no = true;
+            }
+
+            assert_eq!(
+                pr.f8283.is_some(),
+                expect_attached,
+                "{name}: contributed property (pre-ceiling) = {}, printed Schedule A line 12 = \
+                 {line12}. Form 8283 attaches when the PRE-ceiling total is over ${}, because both \
+                 instruction booklets define this threshold's measure as the deduction \"before \
+                 applying any income limits\".",
+                ar.noncash_gifts_before_limits,
+                FORM_8283_THRESHOLD
+            );
+        }
+
+        // ── Anti-vacuity. Each flag names a shape that must have been exercised; without them the loop
+        //    above could be satisfied by a fixture set that never separates the two measures.
+        assert!(
+            saw_measures_disagree,
+            "★ THE KILL: no row had gross noncash over $500 with Schedule A line 12 at or under it. \
+             That is the ONLY shape the pre-ceiling measure decides differently from the post-ceiling \
+             one, so without it this test cannot red on FR-244's defect at all"
+        );
+        assert!(
+            saw_agreeing_yes,
+            "…and one row must attach with BOTH measures over the threshold, or the no-attach rows \
+             are satisfied by an emitter that files no 8283 for anybody"
+        );
+        assert!(
+            saw_agreeing_no,
+            "…and one row must attach NOTHING with both measures at or under it, or the fix is \
+             \"always attach\" wearing a measure's clothes"
         );
     }
 }

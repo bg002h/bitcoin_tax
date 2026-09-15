@@ -2003,6 +2003,21 @@ pub struct AbsoluteReturn {
     pub net_ltcg: Usd,
     /// §170(d)(1) charitable carryover to next year (per class / vintage) from the WITH-crypto Schedule A —
     /// the REAL filed carryover (ages even in a standard-deduction year, G8). For the P4 write-back.
+    /// ★★★ **FR-244 — THE FORM 8283 ATTACHMENT MEASURE: this year's noncash contributions BEFORE any
+    ///     §170(b) income limit.** Not Schedule A line 12, which is the same gifts AFTER the
+    ///     AGI-percentage ceilings clipped them and sent the excess to §170(d) carryover.
+    ///
+    /// Both instruction booklets define the $500 filing threshold's measure explicitly and both say
+    /// *before applying any income limits* — the passages are quoted in full on
+    /// [`crate::tax::charitable::noncash_before_limits`], which is the ONE derivation and computes this
+    /// from the very `gifts` slice handed to `apply_170b`, so the measure and the limited figure cannot
+    /// be taken over two different gift sets.
+    ///
+    /// ★ **Why it is stored rather than re-derived at the two readers.** The packet's attachment filter
+    /// ([`crate::tax::packet::assemble_printed_forms`]) and `screen_absolute`'s §G-21 Section-B premise
+    /// must answer *"does an 8283 attach?"* identically — the packet writing a form the gate believes
+    /// absent is the drift that put an unanswerable restriction question on a printed page once already.
+    pub noncash_gifts_before_limits: Usd,
     pub charitable_carryover_out: Vec<CharitableCarryItem>,
     /// Form 8995 **line 17** — the REIT/PTP loss carryforward to next year (magnitude). For the write-back.
     pub qbi_reit_ptp_carryforward_out: Usd,
@@ -2485,6 +2500,11 @@ pub fn assemble_absolute(
         .map(|a| a.charitable.clone())
         .unwrap_or_default();
     gifts.extend(crypto_charitable_gifts(state, year));
+    // ★★★ FR-244 — the Form 8283 ATTACHMENT measure, taken from the SAME slice `apply_170b` is about
+    //     to limit, so the two can never be computed over different gift sets. i8283 and i1040sca both
+    //     define the $500 threshold's quantity as the deduction *"before applying any income limits
+    //     that could result in a carryover of contributions"* — see `noncash_before_limits`.
+    let noncash_gifts_before_limits = crate::tax::charitable::noncash_before_limits(&gifts);
     let charitable = apply_170b(agi, &gifts, &ri.charitable_carryover_in, year);
     let schedule_a = schedule_a_parts(ri, agi, &charitable, params);
     // ★ `as_ref()` since T9: `ScheduleAParts` is no longer `Copy` (line 8b's dotted lines carry the
@@ -2852,6 +2872,7 @@ pub fn assemble_absolute(
         total_deductions,
         taxable_income,
         net_ltcg,
+        noncash_gifts_before_limits,
         charitable_carryover_out: charitable.carryover_out,
         qbi_reit_ptp_carryforward_out: qbi.reit_ptp_carryforward_out,
         qbi_carryforward_out: qbi.qbi_carryforward_out,
@@ -3255,14 +3276,27 @@ pub fn screen_absolute(
     //   local, because only this path has a Schedule A:
     //     - an 8283 ATTACHES iff line 12 is over $0 (a DECLARED restriction shrinks or denies the
     //       deduction at any amount);
-    //     - 5a/5b/5c actually PRINT only when the 8283 attaches at over $500 (`packet.rs` filters on
-    //       line 12) **and** the year is a Section B one (`forms.rs` splits on the year aggregate
-    //       over $5,000). Both terms, or the UNANSWERED message asserts a form the packet does not
-    //       write.
+    //     - 5a/5b/5c actually PRINT only when the 8283 attaches at over $500 **and** the year is a
+    //       Section B one (`forms.rs` splits on the year aggregate over $5,000). Both terms, or the
+    //       UNANSWERED message asserts a form the packet does not write.
+    //
+    // ★★★ **FR-244 — THE SECOND PREMISE MOVED WITH `packet.rs`, IN LOCKSTEP.** The attachment test is
+    //     `ar.noncash_gifts_before_limits`, the PRE-ceiling measure both instruction booklets define
+    //     for the $500 threshold, not the post-ceiling line 12 — so this premise reads that same field.
+    //     Leaving it on line 12 would be the exact drift the paragraph above forbids: a filer whose
+    //     ceiling clips line 12 to $480 on $50,000 of donated crypto now files a Section B 8283, and a
+    //     gate that still believed no 8283 attached would have let the return print lines 5a/5b/5c
+    //     unanswered while telling nobody.
+    //
+    // ★★ **The FIRST premise deliberately does NOT move.** It is keyed on the DEDUCTION, not on the
+    //    paperwork: Reg §1.170A-7 reduces a *claim*, and a ceiling-zeroed year claims nothing, so a
+    //    restriction moves no figure on it. That is the r3 finding recorded above — keying this on the
+    //    ledger hard-blocked a filer whose only escape was a false answer under §6065 — and re-widening
+    //    it to the pre-ceiling measure would reinstate exactly that block.
     match crate::tax::return_refuse::donation_restriction_gate(
         ri.donations_had_restrictions,
         claimed_noncash > Usd::ZERO,
-        claimed_noncash > crate::tax::printed::FORM_8283_THRESHOLD
+        ar.noncash_gifts_before_limits > crate::tax::printed::FORM_8283_THRESHOLD
             && donated > crate::tax::tables::QUALIFIED_APPRAISAL_THRESHOLD,
     ) {
         Some(crate::tax::return_refuse::DonationRestrictionGate::Declared) => {
@@ -4668,11 +4702,18 @@ mod tests {
     /// As [`screened_restriction`], with the wage figure — and therefore the AGI, and therefore the
     /// §170(b)(1)(C) 30% ceiling — under the caller's control.
     ///
-    /// ★ That knob is what lets the gate's two Section-B conjuncts be falsified INDEPENDENTLY: the
-    /// ceiling can hold Schedule A line 12 at or below $500 while the year's donation aggregate is
-    /// far above $5,000, which is the only shape in which `claimed_noncash > FORM_8283_THRESHOLD`
-    /// is false and `donated > QUALIFIED_APPRAISAL_THRESHOLD` is true. Without it a test can only
-    /// move both terms together, and a gate keyed on either one alone passes.
+    /// ★★ **FR-244 — WHAT THE KNOB DOES, AND WHAT IT NO LONGER DOES.** Moving the ceiling is the only
+    /// way to separate the POST-ceiling Schedule A line 12 from the PRE-ceiling contributed total.
+    /// Until FR-244 that separated the gate's two Section-B conjuncts, because the $500 conjunct read
+    /// line 12. It now reads [`AbsoluteReturn::noncash_gifts_before_limits`], which no ceiling can
+    /// lower, so the two conjuncts are no longer independently falsifiable — the $5,000 conjunct
+    /// IMPLIES the $500 one. See
+    /// [`an_unanswered_restriction_question_refuses_on_a_section_b_year_only`], which states the
+    /// implication and keeps a row that reds if it is ever broken.
+    ///
+    /// ★ The knob stays load-bearing for the DECLARED arm, whose premise IS line 12 (over $0) and
+    /// which a ceiling genuinely can zero —
+    /// [`an_itemizer_whose_170b_ceiling_zeroes_the_gift_claims_nothing_and_is_not_blocked`].
     fn screened_restriction_at(
         wages: Usd,
         claimed: Usd,
@@ -4765,13 +4806,24 @@ mod tests {
     /// unanswered arm gets its own name, and both of its premises are isolated here.
     ///
     /// **The gate's Section-B premise is a CONJUNCTION** (`return_1040.rs`, the
-    /// `donation_restriction_gate` call): Schedule A **line 12** over
-    /// `FORM_8283_THRESHOLD` ($500 — the sentence Form 8283 itself prints, *"Attach one or more
-    /// Forms 8283 to your tax return if you claimed a total deduction of over $500 for all
-    /// contributed property"*) **and** the year's donation aggregate over
-    /// `QUALIFIED_APPRAISAL_THRESHOLD` ($5,000 — §170(f)(11)(C), the Section A / Section B split).
-    /// Each conjunct is falsified on its own below, because a gate keyed on either one alone passes
-    /// the both-true row.
+    /// `donation_restriction_gate` call): the year's noncash contributions **before any §170(b) income
+    /// limit** over `FORM_8283_THRESHOLD` ($500 — the sentence Form 8283 itself prints, *"Attach one
+    /// or more Forms 8283 to your tax return if you claimed a total deduction of over $500 for all
+    /// contributed property"*, measured as both instruction booklets define it, *"before applying any
+    /// income limits"*) **and** the year's donation aggregate over `QUALIFIED_APPRAISAL_THRESHOLD`
+    /// ($5,000 — §170(f)(11)(C), the Section A / Section B split).
+    ///
+    /// ★★★ **FR-244 — THE $500 CONJUNCT CANNOT BE FALSIFIED ON ITS OWN ANY MORE, AND THAT IS A FACT
+    ///     ABOUT THE MEASURE RATHER THAN A HOLE HERE.** Until FR-244 the first conjunct read the
+    ///     POST-ceiling Schedule A line 12, so a §170(b) ceiling could hold it at or below $500 while
+    ///     the aggregate cleared $5,000 — the shape the row below used. The first conjunct now reads
+    ///     the PRE-ceiling total, and the crypto aggregate `donated` sums is a SUBSET of it, so
+    ///     `donated > $5,000` entails `pre-ceiling total > $5,000 > $500`. There is therefore no
+    ///     household in which the $500 term is the one doing the work, and no fixture can invent one.
+    ///     What the test keeps instead is the row that reds if the entailment is ever broken (a
+    ///     `noncash_gifts_before_limits` that stopped including crypto, say) — the $1,600-AGI /
+    ///     $50,000-donation row, which must now REFUSE. The $5,000 conjunct is still falsified on its
+    ///     own, so a gate keyed on the $500 term alone still fails this test.
     ///
     /// **Why silence may not be filed on a Section B year.** Lines 5a/5b/5c ask whether any donated
     /// property carried a restriction or a retained right. They are printed, and an entry is sworn
@@ -4796,23 +4848,28 @@ mod tests {
             "a Section B year PRINTS 5a/5b/5c and btctax holds no answer — it may not file the year"
         );
 
-        // ★ CONJUNCT 1 falsified — over $500, NOT over $5,000. Section A: the boxes are never
-        //   printed, so the same silence is the correct return.
+        // ★ THE $5,000 CONJUNCT falsified — over $500, NOT over $5,000 (the mislabel this row used
+        //   to carry said "conjunct 1"; $4,000 clears $500, so it is the $5,000 term that is false).
+        //   Section A: the boxes are never printed, so the same silence is the correct return, and a
+        //   gate keyed on the $500 term alone refuses here.
         assert_eq!(
             screened_restriction(dec!(4000), None),
             None,
             "a Section A year never poses the question — silence forgoes nothing"
         );
 
-        // ★ CONJUNCT 2 falsified — and it can ONLY be falsified through the §170(b)(1)(C) ceiling,
-        //   because the two terms otherwise move together. AGI $1,600 gives a 30% ceiling of $480,
-        //   so Schedule A line 12 is $480 (≤ $500 — no 8283 attaches over the threshold, so
-        //   5a/5b/5c are never printed) while the year's aggregate is $50,000 (far over $5,000).
-        //   A gate keyed on the aggregate alone refuses here; the real one must not.
+        // ★★★ FR-244 — THE ENTAILMENT ROW. AGI $1,600 gives a 30% ceiling of $480, so Schedule A
+        //     line 12 is $480 while $50,000 of property was contributed: the two MEASURES disagree,
+        //     which is exactly the shape that used to falsify the $500 conjunct. It no longer does —
+        //     the conjunct reads the pre-ceiling $50,000 — so a Section B Form 8283 is filed, its
+        //     lines 5a/5b/5c are printed, and an unanswered filer must be refused. This row is the
+        //     guard on the entailment stated in the doc above: make
+        //     `noncash_gifts_before_limits` stop carrying the crypto aggregate and it reds.
         assert_eq!(
             screened_restriction_at(dec!(1600), dec!(50000), None),
-            None,
-            "the ceiling held line 12 at $480: no 8283 over $500, so nothing asks the filer"
+            Some(RefuseReason::DonationRestrictionsUnresolved),
+            "the ceiling holds line 12 at $480, but $50,000 of contributed property still files a \
+             Section B Form 8283 — and btctax holds no answer to the three boxes on it"
         );
 
         // ★ THE ANSWER IS WHAT LIFTS IT, not the size: the same Section-B-sized year with an
@@ -10665,16 +10722,22 @@ mod tests {
     ///
     /// The case that survives it: an itemizing filer whose §170(b) ceiling zeroes the noncash
     /// deduction. AGI $0 with $20,000 of mortgage interest itemizes on the mortgage alone, while
-    /// 30% × $0 = $0 allows no charitable deduction at all. Schedule A line 12 is `0`, the packet
-    /// writes **no Form 8283** — both skeptics exported it and confirmed the packet holds only
-    /// `00_f1040.pdf`, `07_f1040sa.pdf` and `manifest.txt` — and the return was still hard-blocked.
-    /// The only exits were a false "No" under §6065, or deleting a truthful ledger event.
+    /// 30% × $0 = $0 allows no charitable deduction at all. Schedule A line 12 is `0`, the return
+    /// CLAIMS NOTHING, and it was still hard-blocked. The only exits were a false "No" under §6065,
+    /// or deleting a truthful ledger event.
     ///
-    /// ★★ The predicate is now the quantity `packet.rs` ITSELF filters on — Schedule A line 12, the
-    /// §170(b)-LIMITED figure — so the gate and the packet cannot disagree about whether an 8283
-    /// exists. Form 8283's own text keys on the same thing (f8283--2025.txt:8,10: *"Attach one or more
-    /// Forms 8283 to your tax return if you claimed a total deduction of over $500 for all contributed
-    /// property"* — the CLAIMED deduction, not the ledger's fair market value).
+    /// ★★ The DECLARED arm's predicate is Schedule A line 12, the §170(b)-LIMITED figure — because
+    /// what a declared restriction spoils is a *deduction*: Reg §1.170A-7 reduces or denies a CLAIM,
+    /// and a year that claims $0 of noncash charity has no claim for it to spoil.
+    ///
+    /// ★★★ **FR-244 — AND THAT IS WHY THIS PREDICATE DID NOT MOVE WITH THE ATTACHMENT MEASURE.**
+    ///     `packet.rs` now attaches a Form 8283 on the PRE-ceiling noncash total (both instruction
+    ///     booklets define the $500 threshold as the deduction *"before applying any income limits"* —
+    ///     see [`crate::tax::charitable::noncash_before_limits`]), so the rows below DO now carry an
+    ///     8283 even though line 12 is `0`. That is the correct paper: the property was contributed
+    ///     and the form substantiates the contribution, whatever the ceiling later does to the claim.
+    ///     It changes nothing about THIS gate, whose question is whether a figure is overstated.
+    ///     Re-keying it to the pre-ceiling measure would reinstate the very block quoted above.
     ///
     /// ★ The ceiling-zeroed year is not thereby unguarded: its excess rolls forward, and
     /// `apply_carryover_writeback`'s vouch-for gate refuses to persist it. The year files clean
@@ -10682,7 +10745,7 @@ mod tests {
     ///
     /// Mutation-verified: restoring either `year_donation_deduction`-keyed arm reds the ceiling row.
     #[test]
-    fn an_itemizer_whose_170b_ceiling_zeroes_the_gift_files_no_8283_and_is_not_blocked() {
+    fn an_itemizer_whose_170b_ceiling_zeroes_the_gift_claims_nothing_and_is_not_blocked() {
         let p = ty2024_params();
         let table = real_2024_table();
         // AGI $0. Mortgage interest alone ($20,000) beats the $14,600 standard, so the return
@@ -10742,10 +10805,18 @@ mod tests {
         );
 
         // ★★ AND THE BAND BETWEEN THEM. A ceiling can land the claimed deduction ABOVE $0 but at or
-        //    below the $500 attachment threshold — AGI $1,600 gives a 30% ceiling of $480 — so the
-        //    return claims a noncash deduction and STILL files no Form 8283. The unanswered arm must
-        //    not fire there: with no 8283 attached, lines 5a/5b/5c are never printed, so silence
-        //    asserts nothing. (Mutation-verified: dropping the `> FORM_8283_THRESHOLD` term reds this.)
+        //    below $500 — AGI $1,600 gives a 30% ceiling of $480 — so the return claims a real
+        //    noncash deduction of $480 on $50,000 of contributed property.
+        //
+        // ★★★ **FR-244 CHANGED THIS ROW'S EXPECTATION, AND THE PREMISE IT RESTED ON IS THE REASON.**
+        //     This band used to file NO Form 8283 (the attachment test read line 12), so lines
+        //     5a/5b/5c were never printed and an unanswered filer asserted nothing — `None` was right.
+        //     The attachment measure is now the PRE-ceiling total, which is $50,000 here, so a Form
+        //     8283 SECTION B *is* filed and those three boxes are on the paper. The unanswered arm
+        //     must therefore fire: btctax may not file a printed question it holds no answer to, and
+        //     the refusal's own sentence ("this year files a Form 8283 SECTION B") is now true of this
+        //     return. The filer has an honest exit — answer it — which is exactly what the r3 block
+        //     quoted above did not.
         let band = |answer: Option<bool>| {
             let ri = ReturnInputs {
                 filing_status: FilingStatus::Single,
@@ -10771,7 +10842,8 @@ mod tests {
                 .map_or(Usd::ZERO, |a| a.charitable_noncash_12);
             assert!(
                 l12 > Usd::ZERO && l12 <= crate::tax::printed::FORM_8283_THRESHOLD,
-                "fixture must claim a noncash deduction in the no-8283 band, got {l12}"
+                "fixture must claim a noncash deduction in the band above $0 and at or below $500 \
+                 — the ceiling POSITION is the whole plant here, got {l12}"
             );
             screen_absolute(
                 &ri,
@@ -10785,8 +10857,9 @@ mod tests {
         };
         assert_eq!(
             band(None),
-            None,
-            "no 8283 attaches, so 5a/5b/5c are never printed — an unanswered filer asserts nothing"
+            Some(RefuseReason::DonationRestrictionsUnresolved),
+            "FR-244: $50,000 of contributed property files a Section B Form 8283 whatever the ceiling \
+             does to line 12, so 5a/5b/5c ARE printed and btctax holds no answer for them"
         );
         // …but a DECLARED restriction still refuses, because the claimed deduction is real and too
         // large whatever the form-attachment threshold says. Reg §1.170A-7 is about the DEDUCTION.

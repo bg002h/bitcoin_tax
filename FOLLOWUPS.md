@@ -9405,7 +9405,19 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   the publication is right because it is newer: the instructions are the more recently revised document
   for TY2024, and neither is law. `tax-authority-hierarchy` applies — only the statute and reg are.
 
-- **★★★ FR-244 — the Form 8283 FILING threshold is measured PRE-ceiling by the screen and POST-ceiling by the packet, so btctax can omit a Form 8283 that i8283 requires. Important, PRE-EXISTING (it governs crypto donations today, not just Section A). Owning phase: whichever cycle next touches the packet's attachment decisions.**
+- **✅ CLOSED — FR-244 — the Form 8283 FILING threshold was measured PRE-ceiling by the screen and POST-ceiling by the packet, so btctax omitted a Form 8283 that i8283 requires. Important, PRE-EXISTING (it governs crypto donations today, not just Section A). Owning phase: whichever cycle next touches the packet's attachment decisions.**
+  ★ Fixed by deciding presence from `AbsoluteReturn::noncash_gifts_before_limits`, computed in
+  `assemble_absolute` from the **same** `gifts` slice later handed to `apply_170b` — so the attachment
+  measure and the §170(b)-limited figure cannot be taken over two different gift sets. The trigger stays
+  a total; Schedule A line 12 itself is untouched.
+  ★★ **The golden corpus could not have caught this, and that is a finding in its own right** — see
+  [[FR-250]]. Controller-verified: of the 107 golden households, the ONLY charity input key is
+  `charitable_cash` and exactly **one** household carries a non-zero value; **zero** carry any noncash
+  contribution. So the regeneration trap the brief warned about had no surface, and no golden changed.
+  ★ The fix's own kill is `form_8283_attaches_on_the_pre_ceiling_noncash_total_not_the_printed_line_12`,
+  planting the household's **ceiling position** (a large cash gift crowding the 50%-of-AGI room) rather
+  than the predicate, with the exactly-$500 boundary asserted as a non-attachment so the fix is not
+  "always attach" in a measure's clothing.
   Reported by the FR-200b implementer as F-1 and **verified by the controller against the archived
   instructions**, which is why it is filed at Important rather than as a note:
   - `design/forms/extract/i8283--2024.txt:51-52` — *"For this purpose, “amount of your deduction” means
