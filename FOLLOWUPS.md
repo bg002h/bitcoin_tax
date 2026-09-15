@@ -9523,3 +9523,32 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   oracles. ★★ Before doing so, confirm the oracles model the line: if they consume Schedule A line 12 or
   14 as an **input** rather than computing it, their agreement proves nothing (§G-9) and the coverage must
   be honest about being a *reproduction* check instead. State which it is per line rather than assuming.
+
+- **★★★ FR-251 — FALSE REFUSAL: a STANDARD-DEDUCTION filer with Schedule A inputs and over $5,000 of crypto donations cannot file, for a Form 8283 that is never filed. Important, PRE-EXISTING. Owning phase: NOW.**
+  Recommended as FU-1 by the [[FR-244]] implementer and **verified by the controller against source**, not
+  taken from the report — the fold had moved one of the premises, so the report's wording described a
+  pre-fold tree while the defect itself is real and elsewhere.
+  `crates/btctax-core/src/tax/return_1040.rs:3268`:
+  ```rust
+  let claimed_noncash = ar.schedule_a.as_ref().map_or(Usd::ZERO, |a| a.charitable_noncash_12);
+  ```
+  It reads `ar.schedule_a` and **not** `ar.deduction_is_itemized`. That figure is the second premise of the
+  donation-restriction gate, so with over $5,000 donated and the Section B question unanswered the year is
+  **refused** — on a return claiming **no itemized deduction at all**, for a substantiation requirement
+  attached to a deduction the filer is not taking.
+  ★★★ **The fix, its reason, and even the words for the mistake are already in the tree, one crate away**
+  (`crates/btctax-cli/src/cmd/admin.rs:2165-2169`), verbatim:
+  > *"★ `deduction_is_itemized` is REQUIRED here (phase-2 review, merge Minor). `ScheduleAParts` is built
+  > whenever Schedule A inputs exist, **regardless of the §63(e) election** — so **testing line 12 alone**
+  > put the ATT line on a standard-deduction packet that claims nothing…"*
+  and its guard is `let claims_property_deduction = ar.deduction_is_itemized && …`. `return_1040.rs:3268`
+  tests line 12 **alone** — precisely the shape that comment names and repairs.
+  ★★ **This is [`B3`](design/HARNESS.md)'s founding failure again, and the THIRD instance recorded on
+  2026-09-14–15** (with [[FR-183]] and [[FR-249]]): the fix exists in the branch, reasoned, and nobody
+  carried it back, because no reviewer held both sites at once. ★ `interview_state.rs:707` also records the
+  correct principle — *"the ASSEMBLED return (`ar.deduction_is_itemized` — the computed §63(e) election)"*
+  — so the rule is written down **twice** and violated once.
+  ★ *Fix:* conjoin `ar.deduction_is_itemized`, and pair it with a test for the standard-deduction filer who
+  donates — the case that currently cannot file. ★★ Check the OTHER premises of that gate for the same
+  omission rather than fixing only the one named here: a gate with three premises that was audited once is
+  not a gate that was audited three times.
