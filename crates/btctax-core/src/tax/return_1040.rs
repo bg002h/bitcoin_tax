@@ -1688,7 +1688,31 @@ pub fn student_loan_deduction(
 /// Crypto is **excluded structurally** — `ReturnInputs` carries none; the engine adds the crypto delta on
 /// top. **P3:** the deduction is now the FULL §63 standard deduction (basic + §63(f) aged/blind + the
 /// dependent floor, with NON-crypto earned income = wages); Schedule A (the `max(std, itemized)`) and QBI
-/// land later in P3/P4. `magi_excluding_crypto = AGI` exactly (no §911/CFC/PFIC in the model — deep/02 C1).
+/// land later in P3/P4. `magi_excluding_crypto = AGI` for this profile (no §911/CFC/PFIC in the model —
+/// deep/02 C1).
+///
+/// ★★★ **FR-249 — THIS PROFILE'S `adjustments` IS NARROWER THAN THE RETURN'S, DELIBERATELY. Stated here
+/// because it was silent, and a silent narrowing is indistinguishable from a forgotten one.**
+///
+/// | | `adjustments` = |
+/// |---|---|
+/// | the real return (`assemble_absolute`) | `early_wd + half_se + student_loan + hsa_deduction_13` |
+/// | this profile | `early_wd + student_loan` |
+///
+/// The §164(f) half-of-SE-tax and §223 HSA deductions are **not computed here at all** — neither the SE
+/// computation nor Form 8889 is reachable from this function — so the baseline AGI runs HIGH by those two
+/// terms.
+///
+/// ★★ **And that is the SAFE direction, which is why this is a documented boundary rather than a bug to
+/// fix.** It is the same argument the Schedule C handling below already makes for taking GROSS receipts
+/// instead of net: *"a baseline slightly high stacks the crypto slice higher, OVERSTATING the
+/// crypto-attributable figure rather than understating it."* Adding the two terms would LOWER the
+/// baseline and move the crypto-attributable figure the less conservative way — so the obvious fix is the
+/// wrong one, and the previous wording (*"`= AGI` **exactly**"*) was what made it look obvious.
+///
+/// ★ What this does mean for a consumer: this profile's MAGI is a deliberately conservative **estimate**
+/// and must never be printed as a filed figure or compared to the return's own AGI for equality. It feeds
+/// the optimizer's marginal-rate estimate (`btctax-cli/src/resolve.rs`), nothing that files.
 pub fn derive_tax_profile(ri: &ReturnInputs, params: &FullReturnParams, year: i32) -> TaxProfile {
     let status = ri.filing_status;
 
