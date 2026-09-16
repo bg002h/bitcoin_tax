@@ -8297,7 +8297,7 @@ build, each with an owning phase.
   worksheet line 6 and `agi_before_student_loan`'s subtrahend are the **same quantity** and must share one
   accessor, so the next adjustment cannot diverge them again.
 
-- **FR-184 — S-9's coverage checker is blind in the direction that matters: a 4b→6b label swap passes. Important. Owning phase: FIRST in any retirement build (T14.0).**
+- **FR-184 — S-9's coverage checker cannot bind 1040 lines 4b/5b/6b to their own rows, and it is NOT fixable inside `label_precedes` — THREE attempted fixes measured and refuted. Important. Owning phase: FIRST in any retirement build (T14.0).**
   Reported as **measured, not read**: `label_precedes` reimplemented against the real extract puts the three
   `"b Taxable amount"` rows at offsets 8977/9281/9577, all inside the 700-char window, so a row labelled
   **4b is accepted at all three positions** and `5b` at two. r7 hardened two *other* halves of that
@@ -8306,6 +8306,35 @@ build, each with an owning phase.
   because it never ran over the region that mattered). **This blocks the retirement build rather than
   following it:** the new rows are otherwise unverifiable. Not yet independently reproduced by the
   controller — do that before acting.
+
+  ★★★ **REPRODUCED BY THE CONTROLLER 2026-09-15, as this entry asked.** Against
+  `design/forms/extract/f1040--2024.txt`, whitespace-normalized: `"b Taxable amount"` occurs **3** times at
+  offsets 3592 / 3681 / 3760 — gaps of **89 and 79 characters**, far inside the 700-char run-up window. The
+  form prints
+  ```
+  4a IRA distributions … 4a b Taxable amount … 4b        5a Pensions and annuities … 5a b Taxable amount … 5b
+  6a Social security benefits … 6a b Taxable amount … 6b
+  ```
+  so every stem sits in every other row's run-up and `label_precedes(text, l, "Taxable amount") == Some(true)`
+  for **all of `4b`, `5b`, `6b`**. Controller-measured: `left: ["4b", "5b", "6b"]`.
+  ★★ **BUT THE ENTRY'S FRAMING WAS WRONG, and this is the correction that matters.** That result is *not*
+  by itself a defect: each of the three rows really does carry that text, at its own box, so `Some(true)` is
+  the right answer for each. `label_precedes` answers *"is this quote printed as this line's own text
+  SOMEWHERE"* — and for these three the honest answer is yes. **The defect is at the TABLE level:** a
+  committed row `f1040:4b` quoting *"Taxable amount"* passes, and would pass **identically** if it said
+  `6b`. Nothing binds a row to an OCCURRENCE.
+  ★★★ **THREE fixes tried and all three refuted by measurement — recorded so the next person does not spend
+  the round again:**
+  | attempt | why it fails |
+  |---|---|
+  | tighten the 700-char window | the gaps are **89/79**; any window that admits a real run-up admits all three |
+  | require the NEAREST line-label token to be the stem | breaks `f8889:17b`: its run-up ends *"17a … included on line **16** … b"*, so the nearest label-shaped token is a **cross-reference inside 17a's sentence**, not a label |
+  | require the row's AMOUNT BOX to be the next label after the text (works perfectly on the 1040: `4b`/`5b`/`6b`) | breaks **f8995 lines 2–8** and two other tests — form layouts differ, and most forms do not print the box label as the next token |
+  ★ So the fix is a **new instrument, not a tweak**: for each form, group committed rows by normalized
+  quote; where two rows share one, require the form to print it at least that many times AND each row to
+  bind to a **distinct occurrence**. That is a table-level uniqueness check and it is what actually blocks
+  the retirement build, because 4b/5b/6b are precisely the rows a retirement build adds.
+  ★ `label_precedes` is left UNCHANGED at HEAD; nothing was shipped from these three attempts.
 
 - **FR-185 — ★★ SIX line-number collisions on TY2026 Schedule A, on the form the owner's own return uses. Important (DORMANT until TY2026 is wired). Owning phase: the TY2026 port, and it is now the highest-value item in it.**
   **Every line below verified by the controller against the text layer, both years, 2026-09-13.**
