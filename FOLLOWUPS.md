@@ -9664,3 +9664,25 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   ★ *Test shape:* a correct return with nothing omitted must emit **zero** advisories, asserted as
   `is_empty()` on a household built to be complete — and that test is what makes the ruling structural
   rather than a style note.
+
+- **★★★ FR-254 — a worktree agent gets a STALE copy of the artifact it was dispatched to review, and the review can silently be of the wrong text. Important process defect. Owning phase: NOW — it applies to every review dispatch. Belongs in `design/HARNESS.md` beside B2 and [[FR-239]].**
+  Caught 2026-09-15, minutes after dispatching the retirement-spec review. The worktree branched **57
+  commits** behind main, so the spec there was the 2026-09-04 version at **41,557 bytes** against main's
+  **52,410** — and the missing ~11 KB was *almost exactly the text the brief asked the reviewer to examine
+  hardest*, being the same-day amendments nobody had seen.
+  ★★ **This is [[FR-239]]'s mechanism with a worse consequence.** FR-239 is about a brief being ABSENT,
+  which fails loudly — the agent finds no file. This fails **silently and plausibly**: the artifact is
+  present, readable, and wrong. A reviewer would have produced a competent, well-evidenced report on text
+  that no longer exists, and the controller would have folded it against the current version.
+  ★★★ **And the copy-the-brief-in habit does not catch it**, because the brief is a NEW file (absent ⇒
+  noticed) while the artifact is an EXISTING file at an old revision (present ⇒ assumed current). The
+  FR-239 check — `test -f <worktree>/<brief>` — passes.
+  ★ *Fix, and it is one command per dispatch:* after copying the brief in, **also copy every artifact the
+  brief names**, or `cmp` them against main. For a review dispatch the artifact under review is the whole
+  payload, so this is not optional:
+  ```
+  cmp <worktree>/<artifact> <artifact> || cp <artifact> <worktree>/<artifact>
+  ```
+  ★★ Better still, state the byte count in the brief. A reviewer told *"the spec is 52,410 bytes"* can
+  check in one command that they are holding the artifact under review — which makes the reviewer a
+  witness to their own payload instead of trusting the harness.
