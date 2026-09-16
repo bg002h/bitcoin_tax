@@ -53,6 +53,13 @@ mod line_coverage_check;
 mod package_check;
 mod prompt_check;
 mod r15_stop_list;
+/// **FR-180 — every declared `RefuseReason` variant is covered by a test, residue pinned.**
+///
+/// `#[cfg(test)]` for the same reason `capital_loss_carryover_check` is: it answers a yes/no question
+/// with no operator-facing report, so the answer belongs in the suite where `make check` asks it on
+/// every commit rather than when someone remembers to.
+#[cfg(test)]
+mod refusal_test_census;
 /// Half 1a of the Schedule 1-A conformance KAT — the 48 entry labels, adjudicated by `label_reader`'s
 /// two witnesses over the committed geometry and compared to `Schedule1A`'s own leaves.
 ///

@@ -4803,6 +4803,97 @@ mod tests {
         .map(|r| r.reason)
     }
 
+    /// ★★★ **FR-180 — THE `Pub936Table1Line12BelowItsComponents` REFUSAL, WATCHED FIRING.**
+    ///
+    /// Found by `xtask refusal_test_census` on its FIRST integration: the variant was declared, raised
+    /// at two production sites, matched in two more — and named by no test anywhere. FR-200(a) shipped
+    /// `a_line_12_below_its_own_components_refuses_rather_than_being_clamped`, which asserts the
+    /// WORKSHEET function returns an error; nothing asserted that the error reaches the filer as this
+    /// refusal. That gap is FR-180's whole thesis in one variant: *recorded is not fired.*
+    ///
+    /// The trigger is the filer's own contradiction — Pub. 936 Table 1 line 12 is *"the total of the
+    /// average balances … from lines 1, 2, and 7"*, so it cannot be smaller than their sum. btctax
+    /// refuses rather than clamping, because line 12 is line 14's DENOMINATOR: too small a line 12 makes
+    /// the fraction too large and the deduction too big.
+    #[test]
+    fn a_line_12_below_its_components_reaches_the_filer_as_a_refusal() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let facts = |line12: Usd| crate::tax::pub936_table1::Table1Facts {
+            line1_grandfathered: Usd::ZERO,
+            line2_acquisition_before_dec_16_2017: dec!(400000),
+            line7_acquisition_after_dec_15_2017: dec!(300000),
+            line12_all_mortgages: line12,
+            mortgages_exceed_fair_market_value: false,
+            april_2018_binding_contract: false,
+            provenance: crate::tax::return_inputs::CarryProvenance::User,
+        };
+        let screened = |line12: Usd| -> Option<RefuseReason> {
+            let ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                // Force the itemized election so Schedule A's mortgage line — and therefore Table 1 —
+                // is genuinely live.
+                form_1098: vec![crate::tax::testonly::form_1098_with_interest(dec!(30000))],
+                schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
+                    salt_state_estimated_payments: dec!(10000),
+                    // ★ `Some(false)` = "one of the debt limits bites", which is the ONLY answer that
+                    //   routes through Pub. 936 Table 1 at all. `Some(true)` never reaches the facts,
+                    //   so a fixture left on the default answer cannot exercise this refusal — which is
+                    //   why the variant had no test.
+                    mortgage_within_debt_limit: Some(false),
+                    pub936_table1: Some(facts(line12)),
+                    ..Default::default()
+                }),
+                w2s: vec![w2(
+                    Owner::Taxpayer,
+                    dec!(400000),
+                    dec!(168600),
+                    dec!(400000),
+                )],
+                ..Default::default()
+            };
+            let ri = crate::tax::testonly::answered(ri);
+            let st = LedgerState::default();
+            let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+            assert!(
+                ar.deduction_is_itemized,
+                "premise: the fixture must itemize"
+            );
+            screen_absolute(
+                &ri,
+                &ar,
+                &p,
+                &st,
+                2024,
+                crate::forms::InformationReturnRegime::NONE,
+            )
+            .map(|r| r.reason)
+        };
+
+        // $500,000 stated against $700,000 on lines 1 + 2 + 7 — impossible, and refused.
+        assert_eq!(
+            screened(dec!(500000)),
+            Some(RefuseReason::Pub936Table1Line12BelowItsComponents),
+            "line 12 is the TOTAL of lines 1, 2 and 7; stating it smaller must refuse rather than be \
+             clamped, because line 12 is line 14's denominator and too small a denominator overstates \
+             the deduction"
+        );
+
+        // ★★ B1a — the near miss, so this cannot pass on a refusal that fires for every Table 1. Equal
+        //    is legitimate (no home-equity debt outside lines 1, 2 and 7), and larger is the normal case.
+        assert_ne!(
+            screened(dec!(700000)),
+            Some(RefuseReason::Pub936Table1Line12BelowItsComponents),
+            "line 12 EQUAL to its components is lawful — a filer with no home equity debt outside \
+             lines 1, 2 and 7"
+        );
+        assert_ne!(
+            screened(dec!(900000)),
+            Some(RefuseReason::Pub936Table1Line12BelowItsComponents),
+            "and larger is the NORMAL case, which the refusal's own message says in terms"
+        );
+    }
+
     /// ★★★ **FR-251 — A STANDARD-DEDUCTION FILER WHO DONATES MUST BE ABLE TO FILE.**
     ///
     /// The mirror of [`screened_restriction_at`], whose fixture deliberately FORCES the itemized
@@ -8595,6 +8686,373 @@ mod tests {
             .map(|r| r.reason),
             None,
             "under the threshold the SSTB answer is irrelevant — Form 8995 has no such checkbox"
+        );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+    // ★★★ FR-180 — THE FOUR §199A SUB-SCHEDULE REFUSALS, EACH WATCHED FIRING.
+    //
+    // `RefuseReason::CooperativePatron`, `CooperativePatronUnanswered`, `SstbInPhaseInRange` and
+    // `QbiCarryforwardNeedsSchedule8995AC` were declared, raised in `screen_absolute` above, and named
+    // in NO test anywhere in the workspace — measured, not guessed: the FR-180 test-context census in
+    // `xtask::refusal_test_census` reported all four as residue. §G-28/B1b replaced one blanket
+    // `QbiAboveThreshold` with these four, and two of them (`SstbUnanswered`, `QbiAboveThreshold`)
+    // got tests on the day while these four did not.
+    //
+    // Each test below drives a return to the state the variant NAMES and asserts that exact reason,
+    // so the answer to *"which test reds when this guard is reverted?"* is one sentence per variant.
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// A Schedule C QBI return whose §199A questions are all blank but for the ones the caller sets.
+    /// `mining` income is what produces `business_qbi`, exactly as the two SSTB tests above do.
+    fn qbi_schedule_c(f: impl FnOnce(&mut ScheduleCInputs)) -> ReturnInputs {
+        let mut c = ScheduleCInputs {
+            owner: Owner::Taxpayer,
+            business_description: "Bitcoin mining".into(),
+            ..Default::default()
+        };
+        f(&mut c);
+        ReturnInputs {
+            // ★ B3 C-1 — every screened fixture states the year it is screened in.
+            tax_year: 2024,
+            filing_status: FilingStatus::Single,
+            schedule_c: Some(c),
+            ..Default::default()
+        }
+    }
+
+    /// ★★★ **The PATRON question is mandatory at ANY income, and a blank one refuses.**
+    ///
+    /// Form 8995-A's own header sends a patron of an agricultural or horticultural cooperative to that
+    /// form *at any income*, and Form 8995's "Who Must File" excludes them — so an unasked `no` does
+    /// not leave a box blank, it prints the WRONG FORM. The fixture is deliberately BELOW the
+    /// §199A(e)(2) threshold, because "at any income" is the claim the refusal's own comment makes and
+    /// a fixture above the threshold would not test it.
+    #[test]
+    fn an_unanswered_cooperative_patron_question_refuses_below_the_threshold() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let ri = qbi_schedule_c(|c| {
+            c.is_cooperative_patron = None; // ← the whole defect
+            c.is_sstb = Some(false);
+        });
+        let st = state_income(vec![mining(dec!(60000))]);
+        let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+        assert!(
+            ar.printed_inputs.business_qbi > Usd::ZERO,
+            "the fixture must produce business QBI, else this test is vacuous"
+        );
+        assert_eq!(
+            Qbi199aRegime::of(ar.printed_inputs.ti_before_qbi, FilingStatus::Single, &p),
+            Qbi199aRegime::AtOrBelowThreshold,
+            "the point of this fixture is that the patron question is mandatory BELOW the threshold"
+        );
+        let r = screen_absolute(
+            &ri,
+            &ar,
+            &p,
+            &empty_ledger(),
+            2024,
+            crate::forms::InformationReturnRegime::NONE,
+        )
+        .expect("a blank patron answer must refuse");
+        assert_eq!(
+            r.reason,
+            RefuseReason::CooperativePatronUnanswered,
+            "an unanswered patron question decides WHICH §199A form is printed"
+        );
+        assert!(
+            r.detail.contains("8995-A") && r.detail.contains("income answer"),
+            "the refusal must name the form it cannot choose and the command that answers it: {}",
+            r.detail
+        );
+
+        // ★★★ **AND THE EXIT MUST NOT DEAD-END.** The refusal prescribes `btctax income answer`,
+        //     which walks the DECLARATION and SKIPPABLE registries — so the entry holding this answer
+        //     must be LIVE on exactly the return that refuses, or the filer runs the command, it
+        //     completes without asking, and the return still refuses. That is the recorded
+        //     `QbiAboveThreshold` falsehood and the `btctax set-pii` shape: a cure that dead-ends.
+        //     Measured through the registry's own `live`/`set_bool`, not read off the anchor table.
+        let sk = crate::tax::questions::SKIPPABLE_QUESTIONS
+            .iter()
+            .find(|s| s.id == crate::tax::questions::SkippableId::ScheduleCIsCooperativePatron)
+            .expect("the registry entry the refusal's exit points at");
+        assert!(
+            (sk.live)(&ri),
+            "the prompt must be OFFERED on the very return that refuses, or the exit is a brick"
+        );
+        let mut answered = ri.clone();
+        (sk.set_bool)(&mut answered, false);
+        let ar_answered = assemble_absolute(&answered, &st, &p, &table, 2024);
+        assert_eq!(
+            screen_absolute(
+                &answered,
+                &ar_answered,
+                &p,
+                &empty_ledger(),
+                2024,
+                crate::forms::InformationReturnRegime::NONE
+            )
+            .map(|x| x.reason),
+            None,
+            "answering through the registry the exit names must clear the refusal"
+        );
+    }
+
+    /// ★★★ **A patron who answers YES refuses too, and for a different reason: Schedule D (Form
+    /// 8995-A) line 14 is a reduction btctax does not compute.**
+    ///
+    /// The two states are not interchangeable — one is silence, one is testimony — so they get two
+    /// refusals and two tests. Filing with line 14 blank would OVERSTATE the deduction.
+    #[test]
+    fn a_cooperative_patron_refuses_on_the_unfilled_schedule_d() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let ri = qbi_schedule_c(|c| {
+            c.is_cooperative_patron = Some(true); // ← answered, and the answer is the blocker
+            c.is_sstb = Some(false);
+        });
+        let st = state_income(vec![mining(dec!(60000))]);
+        let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+        let r = screen_absolute(
+            &ri,
+            &ar,
+            &p,
+            &empty_ledger(),
+            2024,
+            crate::forms::InformationReturnRegime::NONE,
+        )
+        .expect("a patron must refuse");
+        assert_eq!(
+            r.reason,
+            RefuseReason::CooperativePatron,
+            "a patron's QBI component is reduced on Schedule D (Form 8995-A), which btctax does not \
+             fill"
+        );
+        assert!(
+            r.detail.contains("Schedule D") && r.detail.contains("OVERSTATE"),
+            "the refusal must name the schedule and the direction of the error: {}",
+            r.detail
+        );
+        // ★ And the NO answer clears this refusal — the pair, so the test cannot pass by refusing
+        //   every patron-shaped return.
+        let no = qbi_schedule_c(|c| {
+            c.is_cooperative_patron = Some(false);
+            c.is_sstb = Some(false);
+        });
+        let ar_no = assemble_absolute(&no, &st, &p, &table, 2024);
+        assert_eq!(
+            screen_absolute(
+                &no,
+                &ar_no,
+                &p,
+                &empty_ledger(),
+                2024,
+                crate::forms::InformationReturnRegime::NONE
+            )
+            .map(|r| r.reason),
+            None,
+            "a non-patron below the threshold files the simplified Form 8995 and is not refused"
+        );
+    }
+
+    /// ★★★ **An SSTB INSIDE the §199A phase-in range refuses — and above the range it does not.**
+    ///
+    /// Inside the range an SSTB is only PARTLY excluded: an applicable percentage scales its QBI, W-2
+    /// wages and UBIA on Schedule A (Form 8995-A) before Part I ever runs, and btctax does not fill
+    /// that schedule. ABOVE the range no schedule is needed — the business is simply not a qualified
+    /// trade or business — which is why the guard is keyed to the range and not to "above the
+    /// threshold". The second half of this test is what reds if someone widens it to the threshold.
+    #[test]
+    fn an_sstb_inside_the_phase_in_range_refuses_and_above_the_range_files() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+
+        // (a) INSIDE the range.
+        let ri = qbi_schedule_c(|c| {
+            c.is_cooperative_patron = Some(false);
+            c.is_sstb = Some(true);
+            // ★ Answered, so the wage/UBIA refusal that follows cannot be what fires here.
+            c.qbi_w2_wages = Some(Usd::ZERO);
+            c.qbi_ubia = Some(Usd::ZERO);
+        });
+        let st = state_income(vec![mining(dec!(250000))]);
+        let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+        assert_eq!(
+            Qbi199aRegime::of(ar.printed_inputs.ti_before_qbi, FilingStatus::Single, &p),
+            Qbi199aRegime::InPhaseInRange,
+            "this fixture exists to sit INSIDE the range; ti_before_qbi = {}",
+            ar.printed_inputs.ti_before_qbi
+        );
+        let r = screen_absolute(
+            &ri,
+            &ar,
+            &p,
+            &empty_ledger(),
+            2024,
+            crate::forms::InformationReturnRegime::NONE,
+        )
+        .expect("an in-range SSTB must refuse");
+        assert_eq!(
+            r.reason,
+            RefuseReason::SstbInPhaseInRange,
+            "inside the range the applicable percentage is figured on Schedule A (Form 8995-A)"
+        );
+        assert!(
+            r.detail.contains("APPLICABLE") && r.detail.contains("Schedule A"),
+            "the refusal must name the percentage and the schedule: {}",
+            r.detail
+        );
+
+        // (b) ABOVE the range the very same answer files: §199A(d)(3) simply excludes the business,
+        //     and core handles that without any sub-schedule.
+        //
+        // ★★★ **THE §199A DIVIDEND IS NOT DECORATION — WITHOUT IT THIS HALF IS VACUOUS, AND THE
+        //     FIRST DRAFT OF THIS TEST WAS.** Above the range §199A(d)(3) zeroes an SSTB's
+        //     `business_qbi` (measured: 0 at TI $467,786), so `has_qbi` is FALSE on a mining-only
+        //     return and `screen_absolute` never enters the §199A block at all. The `assert_ne!`
+        //     below then held for the wrong reason: the widening mutation
+        //     (`regime == InPhaseInRange` → `regime != AtOrBelowThreshold`) left all four of these
+        //     tests GREEN. A REIT dividend keeps `has_qbi` true with `business_qbi == 0`, so the
+        //     `is_sstb` match is REACHED and the range condition is the only thing standing.
+        let mut high = qbi_schedule_c(|c| {
+            c.is_cooperative_patron = Some(false);
+            c.is_sstb = Some(true);
+            c.qbi_w2_wages = Some(Usd::ZERO);
+            c.qbi_ubia = Some(Usd::ZERO);
+        });
+        high.div_1099 = vec![crate::tax::return_inputs::Form1099Div {
+            payer: "A REIT fund".into(),
+            box5_section_199a: dec!(5000),
+            ..Default::default()
+        }];
+        let st_high = state_income(vec![mining(dec!(500000))]);
+        let ar_high = assemble_absolute(&high, &st_high, &p, &table, 2024);
+        assert_eq!(
+            Qbi199aRegime::of(
+                ar_high.printed_inputs.ti_before_qbi,
+                FilingStatus::Single,
+                &p
+            ),
+            Qbi199aRegime::AboveThePhaseInRange,
+            "the second half of this test needs a return ABOVE the range; ti_before_qbi = {}",
+            ar_high.printed_inputs.ti_before_qbi
+        );
+        // ★ The reachability premise, asserted rather than assumed — this is the line that would
+        //   have caught the vacuous draft.
+        assert!(
+            crate::tax::qbi::has_qbi(
+                ar_high.printed_inputs.business_qbi,
+                high.div_1099.iter().map(|d| d.box5_section_199a).sum(),
+                high.qbi.reit_ptp_carryforward_in,
+                high.qbi.qbi_carryforward_in,
+            ),
+            "the §199A block must be REACHED, or this half proves nothing"
+        );
+        assert_ne!(
+            screen_absolute(
+                &high,
+                &ar_high,
+                &p,
+                &empty_ledger(),
+                2024,
+                crate::forms::InformationReturnRegime::NONE
+            )
+            .map(|r| r.reason),
+            Some(RefuseReason::SstbInPhaseInRange),
+            "above the range no Schedule A (Form 8995-A) is needed — this refusal must NOT fire"
+        );
+    }
+
+    /// ★★★ **A prior-year qualified business LOSS carryforward above the threshold refuses: Schedule
+    /// C (Form 8995-A) must net it before Part I, and btctax does not fill that schedule.**
+    ///
+    /// The fixture carries NO Schedule C of its own, which is deliberate: the guard sits OUTSIDE the
+    /// `if let Some(c) = ri.schedule_c` block in `screen_absolute`, and `has_qbi` returns true on the
+    /// carryforward alone (dropping the form would silently EXTINGUISH it). So the reachable state is
+    /// a wage filer above the threshold who brought a loss in — and this is the only test that proves
+    /// the guard is reachable without a business.
+    #[test]
+    fn a_qbi_loss_carryforward_above_the_threshold_refuses_on_schedule_c_of_form_8995a() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let mut ri = ReturnInputs {
+            tax_year: 2024,
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        ri.w2s = vec![crate::tax::return_inputs::W2 {
+            owner: Owner::Taxpayer,
+            employer: "ACME".into(),
+            box1_wages: dec!(250000),
+            ..Default::default()
+        }];
+        ri.qbi.qbi_carryforward_in = dec!(4000);
+        let st = empty_ledger();
+        let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+        assert_eq!(
+            ar.printed_inputs.business_qbi,
+            Usd::ZERO,
+            "the fixture has no business — the carryforward alone must be what requires the form"
+        );
+        assert_ne!(
+            Qbi199aRegime::of(ar.printed_inputs.ti_before_qbi, FilingStatus::Single, &p),
+            Qbi199aRegime::AtOrBelowThreshold,
+            "the guard is above-threshold only; ti_before_qbi = {}",
+            ar.printed_inputs.ti_before_qbi
+        );
+        let r = screen_absolute(
+            &ri,
+            &ar,
+            &p,
+            &empty_ledger(),
+            2024,
+            crate::forms::InformationReturnRegime::NONE,
+        )
+        .expect("a carried-in QBI loss above the threshold must refuse");
+        assert_eq!(
+            r.reason,
+            RefuseReason::QbiCarryforwardNeedsSchedule8995AC,
+            "i8995a requires Schedule C (Form 8995-A) whenever such a carryforward exists"
+        );
+        assert!(
+            r.detail.contains("Schedule C (Form 8995-A)") && r.detail.contains("line 3"),
+            "the refusal must name the schedule it cannot fill and the simplified line that can: {}",
+            r.detail
+        );
+
+        // ★ BELOW the threshold the same carryforward files: Form 8995 line 3 carries it, and btctax
+        //   fills that. Without this half the guard could be widened to every carryforward and stay
+        //   green.
+        let mut low = ri.clone();
+        low.w2s = vec![crate::tax::return_inputs::W2 {
+            owner: Owner::Taxpayer,
+            employer: "ACME".into(),
+            box1_wages: dec!(60000),
+            ..Default::default()
+        }];
+        let ar_low = assemble_absolute(&low, &st, &p, &table, 2024);
+        assert_eq!(
+            Qbi199aRegime::of(
+                ar_low.printed_inputs.ti_before_qbi,
+                FilingStatus::Single,
+                &p
+            ),
+            Qbi199aRegime::AtOrBelowThreshold,
+            "the second half needs a BELOW-threshold return"
+        );
+        assert_ne!(
+            screen_absolute(
+                &low,
+                &ar_low,
+                &p,
+                &empty_ledger(),
+                2024,
+                crate::forms::InformationReturnRegime::NONE
+            )
+            .map(|r| r.reason),
+            Some(RefuseReason::QbiCarryforwardNeedsSchedule8995AC),
+            "below the threshold Form 8995 line 3 carries the figure and btctax files the return"
         );
     }
 
