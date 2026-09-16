@@ -43,6 +43,7 @@ pub mod provenance;
 /// Part I branch bullets and Part II's STOP) from the archived text layer. It is what replaces
 /// refusing the whole packet over an over-$750,000 mortgage. See module doc.
 pub mod pub936_table1;
+pub mod public_vectors;
 pub mod qbi;
 pub mod qbi_a;
 pub mod questions;

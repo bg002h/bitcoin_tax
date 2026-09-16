@@ -66,6 +66,12 @@ pub const EXPECTED_CITED_AND_OPEN: &[(&str, &str)] = &[
          — cited at the line as a trap",
     ),
     (
+        "FR-250",
+        "the golden corpus has no retirement or charitable household — cited by `tax::public_vectors` \
+         as the REASON that module exists (a published corpus supplies the witness the goldens cannot), \
+         not as a fix. The corpus gap itself is untouched and still open",
+    ),
+    (
         "FR-220",
         "Schedule 1 line 14's eligibility widened to the intelligence community — cited at the line, \
          pending the port",
