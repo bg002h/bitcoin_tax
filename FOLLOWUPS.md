@@ -8280,7 +8280,10 @@ build, each with an owning phase.
   1099-R half is **still unanswered**, and T14 stands or falls on it."* Today's answer settles it: no
   retirement distributions. **Reconcile the two entries.**
 
-- **FR-183 — ★★ SPEC LANDMINE, tax-OVERSTATING: the Social Security worksheet's line 6 omits Schedule 1 line 13, and the fix is already in the tree. Important. Owning phase: before any retirement build (blocks T14.3).**
+- **✅ CLOSED (spec fix) — FR-183 — ★★ SPEC LANDMINE, tax-OVERSTATING: the Social Security worksheet's line 6 omitted Schedule 1 line 13, and the fix was already in the tree. Was Important. Owning phase: before any retirement build (blocks T14.3).**
+  ★★ Fixed in `design/ty2025/SPEC_retirement_income.md` S-5, which now prescribes **`printed Sch 1 L13 + L15 + L18`** and states the rule rather than a list: *the operand set is whatever btctax populates inside the block the worksheet names.* Measured at HEAD rather than cited from memory — `Schedule1Lines` carries exactly L13/L15/L18/L21 (`printed.rs:584-592`), `line26` is documented as *"13 + 15 + 18 + 21 here"*, and `adjustments` is `early_wd + half_se + student_loan + hsa_deduction_13` (`return_1040.rs:2442`). **Both of the spec's old citations were stale**, each omitting the HSA term T16 added after it was written.
+  ★★★ **And the mutation table was incomplete in the direction that matters.** M-6 mutates toward over-INCLUDING line 21; a mutation that OMITS line 13 passes it. Added **M-6b** for the other direction, because that is the one that overstates the filer's tax. ★ Two directions, two kills — the same lesson as `label_precedes`'s left-boundary half ([[FR-184]]) and the reason a one-sided guard reads as green.
+  ★ Still latent by design: the worksheet is not built, so nothing computes wrongly today. T14.3 must derive line 6 from the block and carry the M-6b kill, or this recurs on the next Schedule 1 adjustment.
   `SPEC_retirement_income.md`'s S-5 prescribes worksheet line 6 as *"Sch 1 L15 + L18"*, from an
   `adjustments` definition of `early_wd + half_se + student_loan`. **At HEAD `adjustments` also carries
   `hsa_deduction_13`** (`return_1040.rs:2312`, T16), and the worksheet's own sentence is a BLOCK —

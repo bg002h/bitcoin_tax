@@ -113,14 +113,41 @@ apply?"*, `None` refuses unanswered, `Some(true)` refuses unsupported, `Some(fal
 Justified in §5. It is the whole of 6b, it is self-contained, it needs no other form, and refusing it
 would refuse the single most common retirement return in the United States.
 
-**S-5. WORKSHEET LINE 6 IS NOT `AbsoluteReturn::adjustments`.** The worksheet says *"Schedule 1,
-lines 11 through 20, and 23 and 25"* (`i1040gi--2025.txt:3403`) — which **excludes Schedule 1 line 21**,
-the student-loan interest deduction (`f1040s1--2024.txt:72`), and line 22 (*"Reserved for future
-use"*, `:73`). btctax's `adjustments` is `early_wd + half_se + student_loan`
-(`return_1040.rs:1715`) and `Schedule1Lines.line26` is documented as *"`15 + 18 + 21` here"*
-(`printed.rs:441-442`). So worksheet line 6 in v1 is **printed Sch 1 L15 + printed L18**, transcribed
-as two operands, never as `line26 − line21`. Taking `adjustments` understates provisional income,
-which understates taxable benefits, which understates tax.
+**S-5. WORKSHEET LINE 6 IS NOT `AbsoluteReturn::adjustments`, AND IT IS A BLOCK RATHER THAN A LIST.**
+The worksheet says *"Schedule 1, lines 11 through 20, and 23 and 25"* (`i1040gi--2025.txt:3403`) — which
+**excludes Schedule 1 line 21**, the student-loan interest deduction (`f1040s1--2024.txt:72`), and line 22
+(*"Reserved for future use"*, `:73`). Taking `adjustments` whole understates provisional income, which
+understates taxable benefits, which understates tax.
+
+**★★★ CORRECTED 2026-09-15 (FR-183). This section previously prescribed *"printed Sch 1 L15 + printed
+L18"*, and that omits line 13.** The block *"11 through 20"* **contains line 13**, the §223 health savings
+account deduction, which T16 added after this section was written. Measured at HEAD rather than cited from
+memory:
+
+| | |
+|---|---|
+| `Schedule1Lines` adjustment fields | **L13** (HSA), **L15** (half SE), **L18** (early withdrawal), **L21** (student loan) — `printed.rs:584-592` |
+| `Schedule1Lines.line26` | documented as *"`13 + 15 + 18 + 21` here"* — the spec's old citation of *"`15 + 18 + 21`"* is stale |
+| `AbsoluteReturn::adjustments` | `early_wd + half_se + student_loan + hsa_deduction_13` (`return_1040.rs:2442`) — the spec's old citation omitted the HSA term too |
+
+**So worksheet line 6 is `printed Sch 1 L13 + L15 + L18`** — the block minus line 21 — transcribed as
+operands, never as `line26 − line21`.
+
+**★★ AND THE RULE, because a list will go stale again the next time Schedule 1 grows.** The operand set is
+*whatever btctax populates inside the block the worksheet names*, not a list of three. The identical rule
+is already written in the code for the §221 MAGI, one function away, with its own direction-of-error
+argument (`return_1040.rs:2425-2428`):
+
+> *"…adding it to `adjustments` and not here inflated the MAGI and OVERSTATED the tax. Held by
+> `form8889::tests::the_hsa_deduction_is_inside_the_section_221_magi`. ★ It is a BLOCK, not a list: a
+> future Schedule 1 lines 11–20 adjustment belongs here the day it is added, and the worksheet's own
+> sentence is the rule that says so."*
+
+Nobody carried that sentence to this spec, which is `design/HARNESS.md`'s **B3** shape exactly — the fix
+existing in the tree, reasoned, with no reviewer holding both sites at once. **T14.3 must derive line 6
+from the block and carry a test that reds when a block member is dropped**, or this recurs on the next
+adjustment. ★ Direction, stated so the test can assert it: omitting a block member *shrinks* line 6,
+*inflates* provisional income, and **overstates** the tax — the filer overpays.
 
 **S-6. THE IRA SIDE AND THE PENSION SIDE TREAT 1099-R BOX 2a DIFFERENTLY, AND THAT ASYMMETRY IS THE
 FORM'S.** The pension instructions say outright *"If your Form 1099-R shows a taxable amount, you can
@@ -484,6 +511,7 @@ not exist.
 | **M-4** | line 5a is blank when the pension is fully taxable and present when box 2a < box 1 | force `line5a = Some(box1)` unconditionally |
 | **M-5** | worksheet line 8's MFS-lived-with branch is a JUMP (T-1) | replace the jump with `ws8 = 0` and let 9–15 run. ★ The v1 arithmetic is unchanged, so the KAT must assert the **branch taken**, not only the dollar — a value-only test here is vacuous by construction |
 | **M-6** | worksheet line 6 excludes Schedule 1 line 21 (S-5) | change it to `ar.adjustments`; a household with student-loan interest and benefits must move |
+| **M-6b** | worksheet line 6 INCLUDES Schedule 1 line 13 (S-5, FR-183) | drop the `line13` operand; a household with an HSA deduction and benefits must move. ★ M-6 alone does NOT cover this — it mutates toward over-INCLUDING line 21, and a mutation that OMITS line 13 passes it. The two directions are separate kills, and the omission is the one that overstates the filer's tax |
 | **M-7** | worksheet line 1 reads box 5, not box 3 | swap to `box3_benefits_paid`; a filer with a repayment in box 4 must move |
 | **M-8** | the S-8 coupling: the worksheet is only the right instrument while IRA deductions refuse | delete the `IraDeductionClaimed` guard at `return_refuse.rs:1273-1278`; a KAT asserting *"a claimed IRA deduction never reaches the SS worksheet"* must red |
 | **M-9** | R-8 refuses rather than defaulting | set `mfs_lived_apart_all_year` to `Some(true)` when unanswered; the refusal test must red |
