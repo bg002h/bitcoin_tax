@@ -25,17 +25,29 @@ citations misdirected real work this week (§2's prompt-widening site, and S-5's
 ★ A symbol citation cannot drift: the reader greps it. Where a line number genuinely carries information a
 symbol cannot — a specific expression rather than a definition — quote the expression itself.
 
-★★ **What was actually done, stated so this note is not aspirational.** The **15 drifted** citations were
-converted to file+symbol. **24 line-number citations remain and were VERIFIED accurate at HEAD**
-(2026-09-15) — 11 of them sit beside a symbol and could be converted, 13 locate an expression where the
-line number is the only locator. They were left alone rather than churned: an accurate citation is not a
-defect, and rewriting two dozen of them would have buried the fifteen that mattered.
+★★ **What was actually done — and my first attempt at this note was itself wrong (review r1, I-7).** I
+converted the 15 drifted citations and then wrote that *"24 line-number citations remain and were VERIFIED
+accurate at HEAD"*. **They were not.** My check only covered citations sitting beside a named symbol (19
+pairs), and I stated the result as though it covered all 43. The reviewer re-measured at `main` and found
+**13 of 26 wrong** — *including three inside the edits I made the same day*.
 
-★ **The standing instruction, therefore:** when a line-number citation here is found stale, **convert it
-to a symbol** rather than renumbering it. Renumbering buys one correct reading and restores the drift
-class; converting ends it. The check that found these is four lines of script — does the symbol named
-beside a citation still appear within ±8 lines of it — and is worth re-running whenever this spec is
-picked up.
+★★★ **And two of those three drifted WITHIN HOURS, by my own hand.** `return_1040.rs:2425-2428` and
+`:2442`, which I wrote into S-5 that morning after measuring them, had moved to 2467 and 2481 by evening —
+because I added two tests to that file later in the same session. A line number is unstable at the
+timescale of a single afternoon.
+
+★ So **every** `.rs` line citation in this spec is now gone: 39 converted to file+symbol in total. Where a
+specific expression matters, the expression is quoted rather than located. There is nothing left here for
+a future edit to invalidate.
+
+★ **The standing instruction, therefore: never add a `.rs` line number to this spec.** Cite the file and
+the symbol, or quote the expression. Renumbering a stale citation buys one correct reading and restores
+the drift class; converting ends it.
+
+★★ **And a caution about the check itself, since mine misled me.** The script that finds drift — does the
+symbol named beside a citation still appear within ±8 lines of it — **can only see citations that have a
+symbol beside them.** Reporting its result as coverage of all citations is how I produced a false
+"verified" claim. If it is re-run, report what it covered, not what it checked.
 
 
 There is no separate instruction document for these lines: **`i1040gi` carries them**, in the same file
@@ -50,7 +62,7 @@ never from a rendered page (`CLAUDE.md`, *Transcribe IRS forms*).
 Extracts of record: `design/forms/extract/f1040--2025.txt` and
 `design/forms/extract/i1040gi--2025.txt`. Every quote below carries its extract line number, and every
 quote is machine-checkable by `cargo run -p xtask -- line-coverage-check`
-(`crates/xtask/src/line_coverage_check.rs:610-636`).
+(`crates/xtask/src/line_coverage_check.rs`).
 
 **Nothing here needs an oracle to establish.** Both engines compute taxable social security, and both
 should be asked (`CLAUDE.md`, *Two oracles*) — but §5's worksheet is the authority and an oracle is a
@@ -63,7 +75,7 @@ witness.
 **There is no field.** `Form1040Lines` (`crates/btctax-core/src/tax/printed.rs`) declares
 `line1z, line1a, line2a, line2b, line3a, line3b, line7, line8, line9, …` and stops. So does
 `Form1040Income` (`printed.rs`). Total income is composed at
-`crates/btctax-core/src/tax/return_1040.rs:1697-1698`:
+`crates/btctax-core/src/tax/return_1040.rs`:
 
 ```rust
 let total_income =
@@ -71,7 +83,7 @@ let total_income =
 ```
 
 **And the census already says so, in the form's own words.** The line-9 coverage row
-(`crates/btctax-core/src/tax/line_coverage.rs:2265-2272`) carries the instruction
+(`crates/btctax-core/src/tax/line_coverage.rs`) carries the instruction
 *"Add lines 1z, 2b, 3b, 4b, 5b, 6b, 7, and 8. This is your total income"* under
 `Production::Combine`, whose contract is *"Blank iff every operand is blank"*
 (`line_coverage.rs`). Three of the eight named operands have no field. The transcription is
@@ -80,13 +92,13 @@ verbatim and correct; the struct behind it is missing three summands.
 **★★ The catch-all does not catch a retiree, and the registry says why.** The only thing between a
 pensioner and a filed return that omits their pension is `other_out_of_scope_income`
 (`crates/btctax-core/src/tax/return_refuse.rs`). Its prompt
-(`crates/btctax-core/src/tax/questions.rs:548-556`) enumerates *"rent or royalties, a farm, a
+(`crates/btctax-core/src/tax/questions.rs`) enumerates *"rent or royalties, a farm, a
 partnership, S corporation, estate or trust (any Schedule K-1), unreported tips, gambling winnings,
 alimony, a business this tool did not capture, or anything else it never asked about."* It never says
 **pension**, **IRA** or **Social Security** — and the same registry entry states the rule that makes
 this fatal, twelve lines below:
 
-> *"a filer cannot answer `no` to a category they were never shown."* — `questions.rs:583-584`
+> *"a filer cannot answer `no` to a category they were never shown."* — `questions.rs`
 
 A retiree reading that list truthfully answers **No** (they have no rent, no farm, no K-1) and files a
 return omitting §61 and §86 income under §6065. That is
@@ -96,7 +108,7 @@ that only an enumerated YES-condition can carry.
 **★ The cheapest half of the fix does not need this spec.** Adding *"a pension or annuity, an IRA or
 retirement-plan distribution, or social security or railroad retirement benefits"* to that prompt's
 limb (a) is a one-line, whole-surface improvement in the SAFE direction (widening a mandatory
-question's YES-conditions — `questions.rs:585-587`) and should land whether or not this spec is built.
+question's YES-conditions — `questions.rs`) and should land whether or not this spec is built.
 It converts a silent omission into a refusal. **See §11, OQ-1.**
 
 ---
@@ -106,7 +118,7 @@ It converts a silent omission into a refusal. **See §11, OQ-1.**
 **S-1. REFUSE where an unanswered branch could UNDERSTATE; ADVISE where it can only OVERSTATE.**
 This is the classifier for every branch in §4, so the refusal list is *derived* rather than chosen. It
 is the repo's existing rule stated as a decision procedure: a conservative omission is permitted only
-if the filer is told (`return_refuse.rs:203-213`, the `SingleEmployerExcessSs` retraction), and an
+if the filer is told (`return_refuse.rs`, the `SingleEmployerExcessSs` retraction), and an
 unasked question that can understate refuses (`HsaActivityUnanswered`, `OtherIncomeUnanswered`,
 `SstbUnanswered`).
 
@@ -124,8 +136,8 @@ structurally never populated**, and line 5a is populated only when the 1099-R sh
 box 2a. Those are not forgotten lines — they are lines whose provenance is *"the form instructs a
 blank here"*, which is exactly the distinction `CLAUDE.md`'s provenance table draws and which
 `FOLLOWUPS.md` §G-11 says must be carried in the types. Precedent for a conditional money cell:
-`ScheduleALines.line2: Option<Usd>` (`printed.rs:311-340`). Precedent for the emitter declining to
-write: lines 34/35a/37 in `crates/btctax-forms/src/form1040_full.rs:263-317`, recorded at
+`ScheduleALines.line2: Option<Usd>` (`printed.rs`). Precedent for the emitter declining to
+write: lines 34/35a/37 in `crates/btctax-forms/src/form1040_full.rs`, recorded at
 `FOLLOWUPS.md:1747`.
 
 **S-3. ONE class-(A) declaration per document, enumerating the YES-conditions FROM THE FORM'S OWN
@@ -153,17 +165,27 @@ memory:
 
 | | |
 |---|---|
-| `Schedule1Lines` adjustment fields | **L13** (HSA), **L15** (half SE), **L18** (early withdrawal), **L21** (student loan) — `printed.rs:584-592` |
+| `Schedule1Lines` adjustment fields | **L13** (HSA), **L15** (half SE), **L18** (early withdrawal), **L21** (student loan) — `printed.rs` |
 | `Schedule1Lines.line26` | documented as *"`13 + 15 + 18 + 21` here"* — the spec's old citation of *"`15 + 18 + 21`"* is stale |
-| `AbsoluteReturn::adjustments` | `early_wd + half_se + student_loan + hsa_deduction_13` (`return_1040.rs:2442`) — the spec's old citation omitted the HSA term too |
+| `AbsoluteReturn::adjustments` | `early_wd + half_se + student_loan + hsa_deduction_13` (`return_1040.rs`) — the spec's old citation omitted the HSA term too |
 
-**So worksheet line 6 is `printed Sch 1 L13 + L15 + L18`** — the block minus line 21 — transcribed as
+**So worksheet line 6 is `printed Sch 1 L13 + L15 + L18`** — the block minus line 21 —
+
+**⚠️ INCOMPLETE, corrected by review r1 (I-9).** The block is *"lines 11 through 20, **and 23 and
+25**"* and I stopped at 20. Lines **23** (Archer MSA deduction) and **25** (other adjustments) are in
+it. They are latent today — `Schedule1Lines` carries no field for either — but **the rule is the
+deliverable, not the current operand list**, which is the whole point of stating it as a block. T14.3
+must derive line 6 from the block's full membership, and a field added later for line 23 or 25 belongs
+there the day it is added. ★ OTS corroborates independently: its own comment describes the worksheet's
+input as *"L6a and Sched1[11-25]"*.
+
+Reading on with the operands that exist today — transcribed as
 operands, never as `line26 − line21`.
 
 **★★ AND THE RULE, because a list will go stale again the next time Schedule 1 grows.** The operand set is
 *whatever btctax populates inside the block the worksheet names*, not a list of three. The identical rule
 is already written in the code for the §221 MAGI, one function away, with its own direction-of-error
-argument (`return_1040.rs:2425-2428`):
+argument (`return_1040.rs`):
 
 > *"…adding it to `adjustments` and not here inflated the MAGI and OVERSTATED the tax. Held by
 > `form8889::tests::the_hsa_deduction_is_inside_the_section_221_magi`. ★ It is a BLOCK, not a list: a
@@ -194,7 +216,7 @@ GETS A TEST.** The bullet — *"You made contributions to a traditional IRA for 
 spouse were covered by a retirement plan at work…"* (`i1040gi--2025.txt:3246-3250`) — exists because the
 IRA deduction and taxable benefits are mutually circular (Sch 1 line 20 sits inside worksheet line 6,
 and the §219(g) phase-out MAGI includes 6b). btctax already refuses any claimed IRA deduction:
-`RefuseReason::IraDeductionClaimed` (`return_refuse.rs`, fired at `return_refuse.rs:1273-1278`), so
+`RefuseReason::IraDeductionClaimed` (`return_refuse.rs`, fired at `return_refuse.rs`), so
 the circular branch cannot arise. **That is a guarantee held in another module**, and a future
 relaxation of that refusal would silently make this worksheet the wrong instrument — so it lands with
 a KAT that reds when the coupling is broken (§10, M-8).
@@ -205,7 +227,7 @@ THESE ROWS LAND (B1).** All three lines print the identical two words — *"Taxa
 sub-letter form `b` and then only requires the stem digit to appear within the preceding ~700
 characters; lines 4a–6b sit inside one 700-character window, so **a row labelled `4b` quoting
 *"Taxable amount"* matches at line 5b's position and passes.** That is the exact class r7 measured at
-71 accepted misattributions (`line_coverage_check.rs:299-306`), and it is Form 6251 line 33 again.
+71 accepted misattributions (`line_coverage_check.rs`), and it is Form 6251 line 33 again.
 
 Under **B1** this checker may not be relied on until it has been seen red on the planted defect. The
 fix that fits the existing design: anchor the match to the **physical extract row** whose first token
@@ -217,7 +239,7 @@ follow-up**, because without it the three most important new rows in the census 
 4a–6b exist in every year and the worksheet is unchanged (S-7). Only two things are year-shaped: the
 line-9 operand list, which reads *"…6b, **7**, and 8"* in `f1040--2024.txt:75` and *"…6b, **7a**, and
 8"* in `f1040--2025.txt:84`; and the field map. `Coverage` already carries a per-row `year`
-(`line_coverage.rs`) with Form 6251 line 1 as precedent (`line_coverage.rs:462-468`).
+(`line_coverage.rs`) with Form 6251 line 1 as precedent (`line_coverage.rs`).
 
 ---
 
@@ -333,7 +355,7 @@ and **6b is written as `-0-` by instruction**. Neither is a default, and a model
 `Usd::ZERO` has lost the difference the whole doctrine is about. Consequence for the census: 6b's
 production is **`Exception` with a written reason** — *"the worksheet's two STOP branches instruct
 `-0-`; a blank 6b means the worksheet never ran (no benefits), a `0` means it ran and stopped"* —
-because no clamp-free production in the grammar (`line_coverage.rs:58-95`) expresses an instructed zero
+because no clamp-free production in the grammar (`line_coverage.rs`) expresses an instructed zero
 that is also legitimately blank. That costs one unit of the exception ratchet, knowingly.
 
 ---
@@ -401,8 +423,8 @@ pub struct FormSsa1099 {
 ```
 
 New class-(A) declarations on `ReturnInputs`, each `Option<bool>` — the type the classifier forbids `_`
-on (`return_inputs.rs:963-966`), registered in `classifier.rs` beside
-`c.declaration(other_out_of_scope_income, …)` at `classifier.rs:208`, and given a `FormQuestion` in
+on (`return_inputs.rs`), registered in `classifier.rs` beside
+`c.declaration(other_out_of_scope_income, …)` at `classifier.rs`, and given a `FormQuestion` in
 `questions.rs` with `durability: Durability::PerYear` and `neutral: false`:
 
 | field | question, in the form's own YES-conditions | live when | `None` ⇒ |
@@ -421,7 +443,7 @@ literally: *"If the form asks something our input surface cannot answer, collect
 
 ★★ **No question is added for the PSO exclusion, the lump-sum election, or the §11 SSDI carve-out.**
 Under S-1 each can only lower the figure, so each gets an advisory instead (§9) — the same call
-`CtcOdcOmitted` and `AgedBoxForfeitedNoDob` already make (`advisories.rs:44-68`).
+`CtcOdcOmitted` and `AgedBoxForfeitedNoDob` already make (`advisories.rs`).
 
 TUI surface: one `decl_tristate!` entry per declaration in
 `crates/btctax-input-form/src/spec/registries.rs` (model at `:210-211`), plus the `QuestionId` mapping
@@ -524,7 +546,7 @@ it the other way: if the question is not worth asking, the advisory is not worth
 | **A-1** PSO premium exclusion | **ASK.** One cheap yes/no ("are you a retired public safety officer?"), asked once, and advise only on `Some(true)`. A PSO who says yes is genuinely overpaying; everyone else sees nothing. |
 | **A-2** lump-sum election | **ASK.** The SSA-1099 itself shows a lump-sum breakdown, so the filer can answer it from the paper in their hand. Advise only when they say the benefits included a payment for an earlier year. |
 | **A-3** §11-attack SSDI carve-out | **PROSE.** To `btctax limitations`, per the ruling and its own concession. It reaches almost nobody and the failure direction is already conservative. |
-| **A-4** Simplified Method not used | **ARGUABLE, and flagged rather than decided here.** Unlike A-1…A-3 this one fires on a condition that *is* about the filer: box 2a was taken, and box 2a is the **higher** of two lawful figures, so their tax really is above the minimum. But whether the alternative is lower cannot be known without the annuity facts. Either ASK for those facts (large) or keep A-4 as the single advisory a box-2a pension earns. **Owner decision at build time.** |
+| **A-4** Simplified Method not used | **⚠️ I MISREAD THIS — review r1 (I-6).** I called it the one advisory keyed on the filer rather than the return. It is not: §4.1 makes 5b *always* Σ box 2a, so A-4's condition **is** A-1's (`5b > 0`) and it fires on **100%** of in-scope pension returns — failing §9's own new test. And the source says only *"you **may** be able to report a lower taxable amount"*, not that box 2a is the higher figure; when box 2a equals box 1 there is usually nothing to recover. **Verdict: ASK, keyed on `box 2a == box 1`, or drop.** ORIGINAL (wrong) NOTE FOLLOWS: **ARGUABLE, and flagged rather than decided here.** Unlike A-1…A-3 this one fires on a condition that *is* about the filer: box 2a was taken, and box 2a is the **higher** of two lawful figures, so their tax really is above the minimum. But whether the alternative is lower cannot be known without the annuity facts. Either ASK for those facts (large) or keep A-4 as the single advisory a box-2a pension earns. **Owner decision at build time.** |
 
 ★★ **AND THE RULING REACHES SHIPPED CODE, which is the part that makes it more than a spec edit.**
 Controller-measured 2026-09-15: `Advisory` has **27** variants, of which **8** are of the
@@ -540,7 +562,7 @@ return is right, the figure is right, and nothing is wrong. Tracked as FR-253.
 message where it should suppress the advisory. Retirement's A-1…A-4 must not copy that pattern.
 
 
-Added to `Advisory` (`advisories.rs:43`), each carrying its figure, in the shape of
+Added to `Advisory` (`advisories.rs`), each carrying its figure, in the shape of
 `CtcOdcOmitted { dependents, provably_zero }`.
 
 **A-1 `PsoPremiumExclusionNotTaken { pensions: usize }`** — fires when line 5b > 0. Quotes the ceiling
@@ -586,7 +608,7 @@ not exist.
 **Conformance KAT.** The expected line set is enumerated **from the extract**, never from a range or a
 hand-list (`CLAUDE.md`, *Blank is the normal case*) — `crates/xtask/src/label_reader.rs` already derives
 the label column from the form itself and classifies each row `Amount` / `Heading` / `NonMoney`
-(`label_reader.rs:33-42`). Lines 4a–6d must each be **accounted for**: mapped to a field, or recorded
+(`label_reader.rs`). Lines 4a–6d must each be **accounted for**: mapped to a field, or recorded
 as carrying none **with a reason** (4c, 5c, 6c — §4.2).
 
 **Both oracles, per `CLAUDE.md`.** OpenTaxSolver and Tax-Calculator both compute taxable social
@@ -618,7 +640,7 @@ retirement benefits (Form SSA-1099 or RRB-1099)"*. So the ruling was satisfied b
 and this section had been advertising open work for eleven days.
 
 ★★ **Two stale things this uncovered, both worth more than the question.** This section cited
-`questions.rs:585-587` as the site to widen; that range is now `carryforward_in_present`, an
+`questions.rs` as the site to widen; that range is now `carryforward_in_present`, an
 unrelated function — a drifted citation of exactly the kind that has misdirected three fixes this
 week. And the fix commit itself **corrected its own overstatement**, which is the standard this spec
 should be held to: *"Stated precisely, because the first write-up overstated it: the prompt DOES end
@@ -641,11 +663,26 @@ I will have at least one of those returns for evaluation."*
 
 ★★ **The reason is the load-bearing part, and it changes how this feature must be tested.** "At least
 one of those returns for evaluation" means a **real filed return** to validate against — not a
-synthetic household. That is the one oracle this feature can have, because
-`FOLLOWUPS.md` §G-9 applies with full force here: both engines take Form 1040 line 6b as an INPUT, so
-a green two-oracle sweep on the Social Security worksheet proves nothing. A real return with a real
-SSA-1099 and a real 1099-R is therefore not a nice-to-have — **it is the validation**, and §10's test
-plan should name it as such.
+synthetic household. §10's test plan should name it as such.
+
+**⚠️ CORRECTED 2026-09-15 by review r1 (I-1) — MY ORIGINAL JUSTIFICATION WAS FALSE, and it is kept
+visible because I also put it in the review brief as the sharpest issue and thereby aimed a review
+round with it.** I wrote that *"`FOLLOWUPS.md` §G-9 applies with full force here: both engines take Form
+1040 line 6b as an INPUT, so a green two-oracle sweep proves nothing."* **Both engines COMPUTE line 6b.**
+Verified in the primary sources:
+
+- taxcalc — `calcfunctions.py`, `SSBenefits`: *"Calculates the taxable portion of OASDI benefits,
+  c02500"*.
+- OTS — `taxsolve_US_1040_2024.c`: *"SocSec_Worksheet(); /\* This calc. depends on line L6a and
+  Sched1[11-25]. **Calculates L6b**, which is L[6]. \*/"*
+
+So the sweep **is** a real three-way check on 6b, and §G-9 does not apply to it. ★ The real-return
+requirement still stands on its own merits — [[FR-250]]'s corpus has no retirement household at all, so
+day-one oracle coverage is zero regardless. What does not stand is calling it the *only* oracle.
+
+★★★ **And the OTS comment corroborates S-5 independently:** the worksheet's input is *"L6a and
+Sched1[11-25]"* — the BLOCK, not a list of two operands. That is the same finding S-5 records, arrived at
+from the other direction.
 
 ★ **And "both years" is NOT symmetric work.** Controller-measured 2026-09-15:
 
@@ -682,12 +719,12 @@ over an unverified transcription — F2/F4 exactly.
 
 **R-B. §G-11 is still open and this feature needs both of its halves.** 4a/5a must be blank by
 instruction and 6b must print `-0-` by instruction, on the same form. The emitter can decline to write
-(`form1040_full.rs:263-317`) so this is buildable, but it must be built as a *distinction*, not as two
+(`form1040_full.rs`) so this is buildable, but it must be built as a *distinction*, not as two
 zeros.
 
 **R-C. S-6's asymmetry invites exactly one compression.** "Taxable amount = box 2a" is the obvious
 helper and it is wrong on the IRA side, where the instructions never mention box 2a. Two comments in
-this codebase have carried confident equivalence claims that were false (`return_inputs.rs:48-53`,
+this codebase have carried confident equivalence claims that were false (`return_inputs.rs`,
 `SPEC_schedule_1a.md` §2).
 
 **R-D. S-5's operand set.** `adjustments` is right there and is wrong by one term. The error is
