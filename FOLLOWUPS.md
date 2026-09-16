@@ -9597,3 +9597,35 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   donates — the case that currently cannot file. ★★ Check the OTHER premises of that gate for the same
   omission rather than fixing only the one named here: a gate with three premises that was audited once is
   not a gate that was audited three times.
+
+- **★★★ FR-252 — `r15_stop_list::production_mask` brace-counts THROUGH string literals, so it classifies test code as production. Important. Owning phase: NOW — three checkers consume it unintersected.**
+  Found by the [[FR-180]] implementer and **measured by the controller across the shipped crates**:
+  | | |
+  |---|---|
+  | shipped `src/**.rs` files where the mask leaks test lines as production | **122** |
+  | leaked lines | **32,281** |
+  | of those, lines carrying an abort macro | **1,115** |
+  The mechanism is a `{` or `}` inside a string literal — e.g. `param_free_tier`'s
+  `rest.find("\n}\n")` — after which the brace counter loses the `#[cfg(test)]` region. In
+  `blockers.rs` itself it re-enters "production" 1,070 lines into the test module.
+  ★★ **`blockers::abort_census` is NOT affected**, and that is worth stating so nobody re-fixes it:
+  `shipped_mask` already intersects `production_mask` with an indentation-anchored tracker (the FR-227
+  fold), which is why the abort census reports 204 sites rather than 2,093. Verified at HEAD.
+  ★★★ **THREE consumers use the primitive UNINTERSECTED, and the direction of harm differs per site — so
+  this needs per-site adjudication, not one patch:**
+  | consumer | |
+  |---|---|
+  | `forge_reach_check.rs:141,168` | `production_source` directly |
+  | `service_center_check.rs:278` | `production_source` directly |
+  | `r15_stop_list.rs:76` | `production_source` is itself built on the mask |
+  ★ For a checker asking *"does production contain a forbidden pattern?"*, including test lines yields
+  FALSE POSITIVES — noisy but safe. For one asking *"does production satisfy a requirement?"*, test code
+  satisfying it yields a FALSE NEGATIVE — a checker that passes when it should fail, which is this repo's
+  dominant defect shape. **Determine which each of the three is before changing anything**, and say so in
+  the fix.
+  ★★ It also feeds `blockers::abort_census`'s `file:line` CITATIONS via the original-line mapping even
+  though the counts are intersected — so a cited line number may point into a test module. Cheap to check,
+  worth checking.
+  ★ And a sibling the FR-180 implementer flagged: **`blockers::non_test` truncates at the FIRST
+  `mod tests`**, which is the exact shape `production_source`'s own header records as a measured defect.
+  Two implementations of one idea, one of them the documented-bad version.
