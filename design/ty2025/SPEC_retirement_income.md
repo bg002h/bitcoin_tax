@@ -702,6 +702,54 @@ benefits from the first dollar**. The instrument would actively drive the build 
 
 ---
 
+## 10a. ACCEPTANCE VECTORS FROM PUBLIC DATA — the third witness §10 lacked (added 2026-09-16)
+
+**Why this section exists.** §9a (C-3) established that on the MFS-lived-with branch the two oracles
+**agree while both wrong**, and [[FR-250]] established that the 107-household golden corpus contains no
+retirement income at all. So before this section the feature had *no* independent witness: the oracles
+cannot witness the worksheet's hardest branch and the corpus cannot witness the feature at all.
+
+**TaxCalcBench** (`github.com/column-tax/tax-calc-bench`, **MIT**, 51 complete TY2024 returns with
+expected MeF output) supplies one. Of the 51, **8** touch retirement and **4** are genuine 1099-R /
+SSA-1099 cases rather than excess-Social-Security-tax withholding. Fetched and read 2026-09-16; nothing
+committed to this repo yet (see [[FR-255]]).
+
+| case | expected, verbatim from `output.xml` |
+|---|---|
+| `single-retirement-1099r-alaska-dividend` | 4a `IRADistributionsAmt` **10,000**; 5a `PensionsAnnuitiesAmt` **20,000**; 5b `TotalTaxablePensionsAmt` **20,000**; line 9 **31,000**; AGI **31,000**; deduction **16,550**; taxable **14,450**; tax **1,505**; 25b `WithholdingTaxAmt` **3,000**; refund **1,495** |
+| `hoh-schedule-b-ssa1099-unemployment` | 6a `SocSecBnftAmt` **8,742**; **no taxable-benefit element at all**; line 9 **27,038**; AGI **26,447**; deduction **23,850**; taxable **2,597**; tax **259** |
+| `mfj-both-blind-nontaxable-social-security` | 6a `SocSecBnftAmt` **7,333**; **no taxable-benefit element at all**; line 9 **5,000**; AGI **5,000**; deduction **35,400**; refund **1,000** |
+| `single-w2-retirement-sick-pay-social-security-tip` | line 9 **100**; AGI **100**; deduction **14,600** |
+
+**★★★ TWO INDEPENDENT CORROBORATIONS OF FINDINGS THIS SPEC ALREADY CARRIES, which is what makes this a
+witness rather than a fixture.**
+
+1. **C-2 is confirmed by a third party.** `single-retirement-1099r-alaska-dividend` asserts
+   `WithholdingTaxAmt` **3,000**, which is exactly the two 1099-R box-4 amounts (1,000 + 2,000). A retiree's
+   withholding belongs on line 25b — and this public case would have caught C-2's omission on its own.
+2. **"Blank is the normal case" is confirmed from outside this repo.** *Both* non-taxable Social Security
+   cases emit **no taxable-benefit element whatsoever** — not a zero. An independent MeF corpus represents
+   a non-taxable benefit exactly as `CLAUDE.md` insists btctax must: the absence of testimony, not a
+   printed `0`. R-6 and §5.1's ws9 STOP should be asserted against that shape.
+
+**★★ WHAT THESE VECTORS DO NOT ASSERT, stated because assuming otherwise would be a fabricated KAT.**
+
+- **Line 4b is not in the XML.** The 1099-R case's 1040 block carries 4a, 5a, 5b, line 9 and AGI and *no
+  taxable-IRA element*. 4b = **10,000** is **DERIVED** (31,000 − 20,000 − 1,000), not read. A KAT may use
+  it only with that derivation written beside it.
+- **No MFS case exists in the corpus at all**, so C-3's zero-witness branch stays at zero witnesses. This
+  section does not close §9a.
+- **No charitable and no HSA case**, so [[FR-250]]'s gap is untouched.
+- **TY2024 only.** The owner ruled both years; TY2025 vectors must come from elsewhere.
+- These are synthetic-but-verified returns, not filed ones. They do **not** substitute for [[FR-64]], the
+  owner's real documents driven end to end — which is the acceptance test §10 should name.
+
+**★ And the standing rule when one of these disagrees with btctax: adjudicate against the FORM.** The
+precedent is tenforty #278/#279 — OTS was never wrong, the wrapper was. A published corpus is a witness,
+never an authority.
+
+---
+
 ## 10. How it is tested
 
 Every guarantee below names the mutation that must make it RED (**B1**). A guarantee without one does

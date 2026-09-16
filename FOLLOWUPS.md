@@ -9686,3 +9686,25 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   ★★ Better still, state the byte count in the brief. A reviewer told *"the spec is 52,410 bytes"* can
   check in one command that they are holding the artifact under review — which makes the reviewer a
   witness to their own payload instead of trusting the harness.
+
+- **★★ FR-255 — integrate TaxCalcBench (MIT, 51 complete TY2024 returns) as a THIRD WITNESS. Important. Owning phase: with the retirement build (T14), and it should precede the lines rather than follow them.**
+  Recon done 2026-09-16 at the owner's direction; four retirement cases fetched, read and transcribed into
+  `SPEC_retirement_income.md` §10a as acceptance vectors. **Nothing is committed to this repo yet** — that
+  is this entry.
+  ★★★ **Why it matters more than coverage:** [[FR-250]] showed the golden corpus has no retirement income
+  and §9a (C-3) showed the two oracles *agree while both wrong* on the MFS-lived-with branch. So the
+  feature had **no** independent witness. A published corpus with expected MeF output is one, and it
+  already earned its place twice on first read: it confirms **C-2** independently
+  (`WithholdingTaxAmt 3,000` = the two 1099-R box-4 amounts, a line btctax drops) and confirms
+  *"blank is the normal case"* from outside this repo (both non-taxable Social Security cases emit **no**
+  taxable-benefit element — not a zero).
+  ★ **Decisions to take before pulling it in**, each with a reason rather than a default:
+  | | |
+  |---|---|
+  | in-repo or fetch-on-demand? | ~46 MB. The archive convention commits *publications* and gitignores *form PDFs*; a third-party corpus fits neither. Fetch-on-demand with a pinned commit SHA and a recorded hash matches `authority-refresh`'s existing shape. |
+  | witness or authority? | **Witness.** When it disagrees with btctax, adjudicate against the FORM — tenforty #278/#279 is the precedent: OTS was never wrong, the wrapper was. |
+  | how much translation? | Its `input.json` is MeF-shaped (`irs1099_r`, `irs1040`, `irs1040_schedule1`). Driving a case end to end needs a translator to `ReturnInputs`; transcribing its EXPECTED lines as KATs needs none. **Do the second first** — it costs nothing and gives the build an acceptance target. |
+  ★★ **What it cannot do, so nobody over-claims it:** zero MFS cases (C-3 stays unwitnessed), zero
+  charitable and zero HSA cases, TY2024 only, and line **4b is absent from the XML** — derivable from total
+  income but never asserted. ★ And it does not substitute for [[FR-64]]: these are synthetic-but-verified
+  returns, not a filed one.
