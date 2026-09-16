@@ -9629,3 +9629,34 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   ★ And a sibling the FR-180 implementer flagged: **`blockers::non_test` truncates at the FIRST
   `mod tests`**, which is the exact shape `production_source`'s own header records as a measured defect.
   Two implementations of one idea, one of them the documented-bad version.
+
+- **★★★ FR-253 — OWNER RULING: *"Zero is the goal when nothing is wrong."* An advisory must be keyed on whether it applies to THIS filer, not on a line being non-zero. Important, and it reaches SHIPPED code. Owning phase: NOW for the clear violation; the rest with the next advisory work.**
+  Ruled 2026-09-15 while answering `SPEC_retirement_income.md` §11 OQ-4, which had recommended keeping
+  four advisories and measuring the noise in a journey walk. **That was rejected:** a plain retiree with
+  one pension and social security, whose return is **correct**, must see **no advisory at all**.
+  ★★ **The mechanism, since this is not a volume dial.** The retirement spec's A-1…A-4 each fire on a
+  *condition of the return* (`line 5b > 0`, `line 6a > 0`) rather than a condition that makes the advice
+  apply to the filer. Most pension recipients are not retired public safety officers; most Social Security
+  recipients had no lump sum for an earlier year. **When applicability cannot be known, the choice is ASK
+  or stay silent — never advise everyone.** The spec is amended with per-advisory verdicts (ask / ask /
+  prose / owner-decides).
+  ★★★ **THE LIVE VIOLATION, and it is the cleanest possible test case.**
+  `Advisory::CtcOdcOmitted { provably_zero: true }` (`advisories.rs:440-450`) already **proves** the credit
+  is worth nothing to this filer — *"Schedule 8812 line 11 already exceeds the most line 8 could be"* — and
+  then prints anyway: *"NOT AVAILABLE TO YOU … here that costs you NOTHING … 1040 line 19 is $0 and that is
+  the correct figure."* Nothing is wrong, the figure is right, and the filer is told about a credit that
+  cannot reach them. Under this ruling it must be **silent**.
+  ★ So the existing `provably_zero` flag is the right SHAPE and the wrong ACTION: it branches the *message*
+  where it should suppress the *advisory*. Fixing it is the ruling's reference implementation, and the
+  retirement build must not copy the current pattern.
+  ★★ **Blast radius, controller-measured:** `Advisory` has **27** variants, **8** of the
+  omission shape — `CtcOdcOmitted`, `EicOmitted`, `AgedBoxForfeitedNoDob`,
+  `AgedBoxForfeitedDeathUnanswered`, `OtherCreditsOmitted`, `UnmodeledDeductionsOmitted`,
+  `UnmodeledReturnOptionsOmitted`, `BlindBoxForfeitedNotDeclared`. Each needs the same question asked of
+  it: *does this fire on a return where nothing is wrong?* ★ Two look defensible on inspection and should
+  not be swept up — `EicOmitted` fires only under an AGI ceiling where the filer may genuinely be
+  overpaying, and `AgedBoxForfeitedNoDob` fires only when a date of birth is absent, which is itself the
+  missing answer. **Adjudicate per advisory; do not apply the ruling as a blanket delete.**
+  ★ *Test shape:* a correct return with nothing omitted must emit **zero** advisories, asserted as
+  `is_empty()` on a household built to be complete — and that test is what makes the ruling structural
+  rather than a style note.

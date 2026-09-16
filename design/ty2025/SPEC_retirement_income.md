@@ -475,6 +475,44 @@ for the larger population. Neither default may be taken.
 
 ## 9. Advisories — the branches that can only overstate
 
+**★★★ OWNER RULING 2026-09-15, AND IT OVERRIDES THIS SECTION'S RECOMMENDATION. Verbatim: *"Zero is the
+goal when nothing is wrong."*** The spec (OQ-4) proposed keeping all four and measuring the noise in the
+journey walk. That is rejected: a plain retiree with one pension and social security, whose return is
+**correct**, must see **no advisory at all**.
+
+★★ **The mechanism, because the ruling is not a volume dial.** Every one of A-1…A-4 below fires on a
+*condition of the return* — `line 5b > 0`, `line 6a > 0` — rather than on a condition that makes the
+advice **apply to this filer**. Most pension recipients are not retired public safety officers; most
+Social Security recipients had no lump sum for an earlier year; almost none were injured in a §11 attack.
+So each one fires overwhelmingly on returns where nothing is wrong. **An advisory must be keyed on
+whether it applies to THIS filer, and when that cannot be known, the choice is to ASK or to say nothing —
+never to advise everyone.**
+
+★ **Per-advisory verdicts under the ruling.** A-3's own text concedes the point (*"asking every
+beneficiary about a terrorist attack is questionnaire bloat that buys nothing"*), and the ruling answers
+it the other way: if the question is not worth asking, the advisory is not worth printing.
+
+| | under the ruling |
+|---|---|
+| **A-1** PSO premium exclusion | **ASK.** One cheap yes/no ("are you a retired public safety officer?"), asked once, and advise only on `Some(true)`. A PSO who says yes is genuinely overpaying; everyone else sees nothing. |
+| **A-2** lump-sum election | **ASK.** The SSA-1099 itself shows a lump-sum breakdown, so the filer can answer it from the paper in their hand. Advise only when they say the benefits included a payment for an earlier year. |
+| **A-3** §11-attack SSDI carve-out | **PROSE.** To `btctax limitations`, per the ruling and its own concession. It reaches almost nobody and the failure direction is already conservative. |
+| **A-4** Simplified Method not used | **ARGUABLE, and flagged rather than decided here.** Unlike A-1…A-3 this one fires on a condition that *is* about the filer: box 2a was taken, and box 2a is the **higher** of two lawful figures, so their tax really is above the minimum. But whether the alternative is lower cannot be known without the annuity facts. Either ASK for those facts (large) or keep A-4 as the single advisory a box-2a pension earns. **Owner decision at build time.** |
+
+★★ **AND THE RULING REACHES SHIPPED CODE, which is the part that makes it more than a spec edit.**
+Controller-measured 2026-09-15: `Advisory` has **27** variants, of which **8** are of the
+"something-conservative-was-omitted" shape (`CtcOdcOmitted`, `EicOmitted`, `AgedBoxForfeitedNoDob`,
+`AgedBoxForfeitedDeathUnanswered`, `OtherCreditsOmitted`, `UnmodeledDeductionsOmitted`,
+`UnmodeledReturnOptionsOmitted`, `BlindBoxForfeitedNotDeclared`). ★★★ The clearest live violation is
+`CtcOdcOmitted { provably_zero: true }`: it already **proves** the credit is worth nothing to this filer
+and then prints anyway — *"NOT AVAILABLE TO YOU … here that costs you NOTHING … 1040 line 19 is $0 and
+that is the correct figure"*. Under this ruling that is exactly the advisory that must be **silent**: the
+return is right, the figure is right, and nothing is wrong. Tracked as FR-253.
+
+★ So the existing `provably_zero` flag is the right *shape* and the wrong *action* — it branches the
+message where it should suppress the advisory. Retirement's A-1…A-4 must not copy that pattern.
+
+
 Added to `Advisory` (`advisories.rs:43`), each carrying its figure, in the shape of
 `CtcOdcOmitted { dependents, provably_zero }`.
 
@@ -545,6 +583,8 @@ Recommendation: **yes, separately and immediately.** It is a one-line edit in th
 turns a silent §61/§86 omission into a refusal today, and it is not coupled to anything in this spec.
 Filing it as part of this feature delays the only protection retirees currently lack.
 
+**★★★ RULED 2026-09-15: YES, separately and now.** The widening ships as its own change ahead of this feature, so the silent §61/§86 omission becomes a refusal today rather than when the build lands.
+
 **OQ-2. Does 4b/5b/6b ship for TY2024 as well as TY2025?** The model is year-agnostic and the worksheet
 is byte-identical across the two years (S-7, machine-checked). Only the line-9 quote and the AcroForm
 map are year-shaped (S-10), and the TY2025 `f1040.map.toml` is currently a stub carrying **only line
@@ -552,11 +592,35 @@ map are year-shaped (S-10), and the TY2025 `f1040.map.toml` is currently a stub 
 `xtask dump-fields` either way. Recommendation: **both years**, since TY2024 is the year btctax can
 actually file.
 
+**★★★ RULED BY THE OWNER 2026-09-15: BOTH YEARS.** Verbatim: *"4-6 ship for both 2024 and 2025 because
+I will have at least one of those returns for evaluation."*
+
+★★ **The reason is the load-bearing part, and it changes how this feature must be tested.** "At least
+one of those returns for evaluation" means a **real filed return** to validate against — not a
+synthetic household. That is the one oracle this feature can have, because
+`FOLLOWUPS.md` §G-9 applies with full force here: both engines take Form 1040 line 6b as an INPUT, so
+a green two-oracle sweep on the Social Security worksheet proves nothing. A real return with a real
+SSA-1099 and a real 1099-R is therefore not a nice-to-have — **it is the validation**, and §10's test
+plan should name it as such.
+
+★ **And "both years" is NOT symmetric work.** Controller-measured 2026-09-15:
+
+| | map rows |
+|---|---|
+| `crates/btctax-forms/forms/2024/f1040.map.toml` | **14** |
+| `crates/btctax-forms/forms/2025/f1040.map.toml` | **4** |
+
+So TY2025's map is a stub missing ten rows relative to TY2024's *before* 4a–6b are added. Shipping
+both years means building that map out, not merely appending six cells — and every new cell on both
+years must be pinned with `xtask dump-fields` and held by the read-back verifier, never hand-typed.
+
 **OQ-3. Is refusing every QCD acceptable?** A qualified charitable distribution is a common, deliberate
 act for someone over 70½ and refusing it turns away a filer who did the ordinary thing. The
 counterweight is real (§4.2: three caps, an age test, an attachment, an ordering rule, and a Schedule A
 double-benefit path) and `no-users-yet` says the cost of refusing today is low. Recommendation:
 **refuse in v1**, and file the QCD split as the first widening once the base lands.
+
+**★★★ RULED 2026-09-15: REFUSE in v1, and the QCD split is the first widening once the base lands.** A QCD filer is turned away loudly rather than handed a wrong figure, and `no-users-yet` makes today's refusal cheap.
 
 **OQ-4. Advisory volume.** A-1 through A-4 mean a plain retiree with one pension and social security
 receives up to four advisories on a return where nothing is wrong. Is that the right noise level, or
