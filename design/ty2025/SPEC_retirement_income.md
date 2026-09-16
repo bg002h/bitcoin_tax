@@ -235,6 +235,46 @@ is the stem label — the 4a/4b row is `f1040--2025.txt:74`, 5a/5b is `:76`, 6a/
 each. The planted defect that must red is in §10, M-1. **This is a prerequisite of the feature, not a
 follow-up**, because without it the three most important new rows in the census are unverified.
 
+**⚠️⚠️⚠️ S-7/S-10 RETRACTION — review r1, C-1 (CRITICAL). THE WORKSHEET IS *NOT* BYTE-IDENTICAL ACROSS
+THE TWO YEARS, AND TY2024 FORM 1040 HAS NO LINE 6d AT ALL.** Controller-verified against the archived
+extracts, not accepted on report:
+
+| check | result |
+|---|---|
+| `f1040--2024.txt` contains `6d` | **0 hits** |
+| `f1040--2024.txt` contains *"lived apart"* | **0 hits** |
+| `f1040--2025.txt` contains `6d` | 1 hit |
+| section heading, `i1040gi--2024.txt:3117` | *"Lines 6a, 6b, and 6c"* |
+| section heading, `i1040gi--2025.txt:3233` | *"Lines 6a, 6b, 6c, and 6d"* |
+| worksheet line 3, `i1040gi--2024.txt:3370` | *"…lines 1z, 2b, 3b, 4b, 5b, **7**, and 8"* |
+| worksheet line 3, `i1040gi--2025.txt:3400` | *"…lines 1z, 2b, 3b, 4b, 5b, **7a**, and 8"* |
+| the MFS disclosure, `i1040gi--2024.txt:3416` | *"be sure you entered **“D” to the right of the word** benefits on line 6a"* |
+
+★★ **What S-7 actually machine-checked was the four §86 thresholds, and only that part survives** —
+$32,000 / $25,000 / $12,000 / $9,000 do print identically in both years' worksheet blocks. Generalising a
+four-constant check into *"the worksheet is byte-identical"* is the whole defect, and it is the
+`CLAUDE.md` failure of describing code from a claim about it rather than from the thing. ★ It then
+propagated: the review brief repeated it as **settled** and told the reviewer not to spend budget there.
+The reviewer found the Critical anyway, by diffing the blocks.
+
+★★★ **So a worksheet transcription CANNOT be year-agnostic.** Two of its own printed sentences differ (ws3
+and ws9), and per `CLAUDE.md` a transcription struct is **per line-set revision** — this worksheet has two.
+The consequences for the build, all of which T14 must carry:
+
+1. **The TY2024 MFS-lived-apart disclosure is a written character, not a checkbox.** `line6d_checked: bool`
+   has no TY2024 AcroForm cell to write to, so the TY2024 path cannot be built as this spec specifies.
+   TY2024 needs an annotation leaf for the **`D`** beside the word *benefits* on line 6a.
+2. **The consequence of omitting it is named by the IRS itself** and belongs in R-8's wording: *"If you
+   don't, you may get a math error notice from the IRS."* The filer gets the right figure on the page and
+   an adjustment in the post.
+3. **§5.1 must transcribe ws3 and ws9 PER YEAR**, because a doc comment that quotes one year's sentence is
+   wrong for the other.
+4. **§10's conformance KAT must derive its line set PER YEAR from the extract.** *"Lines 4a–6d must each be
+   accounted for"* is a hand-typed range that over-enumerates TY2024 by one line — the exact shape
+   *Blank is the normal case* forbids (a `1..=38` range against a 48-label set).
+5. **Confirm, never assume, that the TY2024 AcroForm can carry a character next to line 6a**, recording the
+   field name from `xtask dump-fields`.
+
 **S-10. THE MODEL IS YEAR-AGNOSTIC; THE COVERAGE ROWS AND THE ACROFORM MAP ARE YEAR-KEYED.** Lines
 4a–6b exist in every year and the worksheet is unchanged (S-7). Only two things are year-shaped: the
 line-9 operand list, which reads *"…6b, **7**, and 8"* in `f1040--2024.txt:75` and *"…6b, **7a**, and
@@ -375,7 +415,7 @@ Quotes are the form's own printed text (`f1040--2025.txt`), as the census requir
 | 6a | "Social security benefits" | `:78` | `line6a: Option<Usd>` | `Carry` — worksheet line 1 |
 | 6b | "Taxable amount" | `:78` | `line6b: Option<Usd>` | `Exception`, reason per T-2 |
 | 6c | "If you elect to use the lump-sum election method, check here (see instructions)" | `:79` | *(no field)* | never checked — A-2 |
-| 6d | "If you are married filing separately and lived apart from your spouse the entire year (see inst.), check here" | `:80` | `line6d_checked: bool` | `Collected` — from the R-8 declaration |
+| 6d **(TY2025 ONLY — see the S-7/S-10 retraction; TY2024 has no line 6d, and its disclosure is a written `D` on line 6a)** | "If you are married filing separately and lived apart from your spouse the entire year (see inst.), check here" | `:80` | `line6d_checked: bool` | `Collected` — from the R-8 declaration |
 | 9 | "Add lines 1z, 2b, 3b, 4b, 5b, 6b, 7a, and 8. This is your total income" | `:84` | `line9` | `Combine` — **gains three operands** |
 
 ★ Every one of these quotes must land **after** S-9's checker fix, or the three `"Taxable amount"`
@@ -448,6 +488,42 @@ Under S-1 each can only lower the figure, so each gets an advisory instead (§9)
 TUI surface: one `decl_tristate!` entry per declaration in
 `crates/btctax-input-form/src/spec/registries.rs` (model at `:210-211`), plus the `QuestionId` mapping
 at `:388`.
+
+---
+
+## 7a. ⚠️ LINE 25b — THE RETIREE'S WITHHOLDING, ADDED BY REVIEW r1 (C-2, CRITICAL)
+
+**The original spec dropped it.** `FormSsa1099` declared `box3_benefits_paid`, `box4_benefits_repaid`,
+`box5_net_benefits` and **nothing for box 6**, and no section put line 25b in scope. Voluntary federal
+withholding on benefits is a routine election — for many retirees it is the only way tax is withheld at all.
+
+**The instruction names the boxes**, controller-verified at `i1040gi--2025.txt:4239`:
+
+> *"…include the amount withheld in the total on line 25b. This should be shown in box 4 of Form 1099,
+> **box 6, of Form SSA-1099, or box 10 of Form RRB-1099**."*
+
+**★★★ And the receiving quantity is a TYPED LIST BESIDE A SET THAT GROWS.** At HEAD
+`AbsoluteReturn::withholding_25b` documents itself as *"1040 L25b — federal income tax withheld from Form(s)
+1099 (Σ box 4, **across INT/DIV/G**)"* — three document families, hand-listed. This feature adds **two**
+(1099-R, and SSA-1099/RRB-1099) and the original spec touched neither the list nor any test of it. By the
+spec's own rule — *a guarantee without a test that reds when it is removed does not exist* — there was **no
+guarantee that any retirement withholding reached the return**.
+
+**Direction of error, which is why it is Critical:** payments understated ⇒ lines 25d, 33 and 34/37 wrong ⇒
+**balance due overstated, refund understated**. A wrong bottom line on a signed return, in the direction the
+filer pays for.
+
+**What T14 must carry.**
+
+1. `box6_fed_withheld: Usd` on `FormSsa1099`. ★ One struct serving two forms must name **both** box numbers
+   in its doc comment (SSA box 6, RRB box 10) or be split — otherwise an RRB filer's transcription has no
+   home and the field name lies about half its sources.
+2. Line **25b** in §4.1's in-scope table and §6's transcription table, with its new operands.
+3. **`withholding_25b`'s doc comment restated as a DERIVED sum over the document families**, not a
+   four-letter list, so the next information return cannot be added silently. This is the fix that outlasts
+   the feature.
+4. Mutation rows in §10, one per new family: *drop the 1099-R box-4 term from 25b — a household with pension
+   withholding must stop reconciling*, and the same for SSA-1099 box 6.
 
 ---
 
@@ -585,6 +661,47 @@ instructions permit, and it is also the *higher* of the two lawful figures.
 
 ---
 
+## 9a. ⚠️⚠️⚠️ THE MFS-LIVED-WITH BRANCH HAS **ZERO** ORACLE WITNESSES — review r1 (C-3, CRITICAL)
+
+**§10 promised a two-witness sweep across all five filing statuses *"including the MFS lived-apart /
+lived-with pair"*. That is false, and believing it is dangerous.** Controller-verified in both engines'
+source, not taken on report:
+
+**Tax-Calculator 6.8.2**, `taxcalc.calcfunctions.SSBenefits` docstring, verbatim:
+
+> *"`SS_thd1[2]`/`SS_thd2[2]` ($25,000/$34,000) encode only the "MFS lived apart all year" case.
+> Tax-Calculator records do not carry a lived-apart-all-year flag …, so the code **unconditionally treats
+> every MARS=3 filer as lived-apart and under-taxes MFS-lived-with-spouse filers. Not fixable code-side.**"*
+
+**OpenTaxSolver 2024**, `taxsolve_US_1040_2024.c`, `SocSec_Worksheet()`: `ws[8]` is `32000.0` for MFJ and
+**`25000.0` for everyone else, unconditionally**; `ws[10]` likewise 12000/9000. Measured across the whole
+function: **zero** occurrences of *lived*, *apart* or *skip*. Neither engine implements the instructions'
+*"skip lines 8 through 15"* jump for a lived-with MFS filer at all.
+
+**★★★ So the two engines produce the SAME WRONG ANSWER on the branch with the largest money swing in this
+feature** — the one T-1 calls a trap, M-5 exists to pin, and R-8 exists to refuse rather than guess. This is
+`CLAUDE.md`'s *"Two disqualified oracles can align"*, landing on a new form.
+
+**★★ And it is actively dangerous, not merely uninformative.** A builder who runs the sweep, sees it red on
+an MFS-lived-with household, and reconciles to it — the normal and correct instinct with a red sweep — will
+adopt the **lived-apart** thresholds for a **lived-with** filer. That understates tax by up to **85% of
+benefits from the first dollar**. The instrument would actively drive the build to the wrong answer.
+
+**What T14 must do instead.**
+
+1. **Delete the claim from §10.** The sweep covers four filing statuses plus MFS-lived-**apart**. The
+   lived-with branch is **witnessed by nobody**, and the spec must say so where the test plan is written.
+2. **Add MFS-lived-with to the witness census as a known-zero-witness cell**, so it is counted rather than
+   assumed — the census exists precisely to stop a filing status losing its last witness silently.
+3. **Never reconcile the lived-with branch to the oracles.** Its authority is §86(c)(1)(C) and the
+   worksheet's own *"skip lines 8 through 15"* sentence, transcribed. A KAT must come from the
+   instructions' worked example or be hand-computed from the statute — never from a sweep.
+4. ★ R-8's refusal is therefore **load-bearing rather than conservative padding**: with no witness, refusing
+   a lived-with MFS retiree is the only defensible v1 behaviour, and that argument should be recorded in R-8
+   rather than left implicit.
+
+---
+
 ## 10. How it is tested
 
 Every guarantee below names the mutation that must make it RED (**B1**). A guarantee without one does
@@ -652,7 +769,8 @@ can give a truthful-feeling `No` on the strength of the enumeration."*
 *"converts a silent omission into a refusal"*, which claims more than the change delivers.
 
 **OQ-2. Does 4b/5b/6b ship for TY2024 as well as TY2025?** The model is year-agnostic and the worksheet
-is byte-identical across the two years (S-7, machine-checked). Only the line-9 quote and the AcroForm
+is byte-identical across the two years (S-7, machine-checked) — **⚠️ FALSE, retracted by review r1 (C-1);
+see the retraction under S-7.** Only the line-9 quote and the AcroForm
 map are year-shaped (S-10), and the TY2025 `f1040.map.toml` is currently a stub carrying **only line
 7a** (`crates/btctax-forms/forms/2025/f1040.map.toml:1-10`), so the TY2025 cells must be pinned with
 `xtask dump-fields` either way. Recommendation: **both years**, since TY2024 is the year btctax can
