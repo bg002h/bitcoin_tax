@@ -583,7 +583,24 @@ Recommendation: **yes, separately and immediately.** It is a one-line edit in th
 turns a silent §61/§86 omission into a refusal today, and it is not coupled to anything in this spec.
 Filing it as part of this feature delays the only protection retirees currently lack.
 
-**★★★ RULED 2026-09-15: YES, separately and now.** The widening ships as its own change ahead of this feature, so the silent §61/§86 omission becomes a refusal today rather than when the build lands.
+**★★★ RULED 2026-09-15: YES, separately and now — AND IT WAS ALREADY DONE, on 2026-09-04.**
+Commit `1548462af`, *"fix(questions): name retirement income in the scope attestation — an
+understatement path"*, is an ancestor of `main`. The `OtherOutOfScopeIncome` prompt's limb (a) now
+opens with *"a PENSION, ANNUITY or IRA DISTRIBUTION (Form 1099-R), SOCIAL SECURITY or railroad
+retirement benefits (Form SSA-1099 or RRB-1099)"*. So the ruling was satisfied before it was given,
+and this section had been advertising open work for eleven days.
+
+★★ **Two stale things this uncovered, both worth more than the question.** This section cited
+`questions.rs:585-587` as the site to widen; that range is now `carryforward_in_present`, an
+unrelated function — a drifted citation of exactly the kind that has misdirected three fixes this
+week. And the fix commit itself **corrected its own overstatement**, which is the standard this spec
+should be held to: *"Stated precisely, because the first write-up overstated it: the prompt DOES end
+with 'or anything else it never asked about', so this is a PRIMING gap, not a blind spot. But a filer
+holding a 1099-R and an SSA-1099, reading a list that contains nothing resembling their situation,
+can give a truthful-feeling `No` on the strength of the enumeration."*
+
+★ So the residual risk is **priming**, not silence — and that is the honest framing for §2's
+*"converts a silent omission into a refusal"*, which claims more than the change delivers.
 
 **OQ-2. Does 4b/5b/6b ship for TY2024 as well as TY2025?** The model is year-agnostic and the worksheet
 is byte-identical across the two years (S-7, machine-checked). Only the line-9 quote and the AcroForm
