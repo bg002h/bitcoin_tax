@@ -11,6 +11,33 @@ Passes an independent review loop to 0 Critical / 0 Important before an implemen
 
 ## 1. Sourcing of record — READ THIS FIRST
 
+**★★★ CITATION CONVENTION, corrected 2026-09-15. Code is cited by FILE and SYMBOL, never by line
+number.** This spec originally carried `file.rs:NNN` citations, and by the time the owner's §11 rulings
+were taken **15 of 19** of them had drifted — measured, not estimated, by checking whether the symbol named
+beside each citation still appeared within ±8 lines of it. Three verified by hand: `IraDeductionClaimed`
+248 → 1433, `label_precedes` 270 → 345, `agi_before_student_loan` 1709 → 1826.
+
+★★ A line number in a prose artifact is a **typed list beside a set that grows** — `CLAUDE.md`'s
+highest-yield rule, in the one place the rule is easiest to forget. It was correct on 2026-09-04 and the
+code moved underneath it; nothing red, and the spec went on citing confidently. Two of those stale
+citations misdirected real work this week (§2's prompt-widening site, and S-5's `adjustments` definition).
+
+★ A symbol citation cannot drift: the reader greps it. Where a line number genuinely carries information a
+symbol cannot — a specific expression rather than a definition — quote the expression itself.
+
+★★ **What was actually done, stated so this note is not aspirational.** The **15 drifted** citations were
+converted to file+symbol. **24 line-number citations remain and were VERIFIED accurate at HEAD**
+(2026-09-15) — 11 of them sit beside a symbol and could be converted, 13 locate an expression where the
+line number is the only locator. They were left alone rather than churned: an accurate citation is not a
+defect, and rewriting two dozen of them would have buried the fifteen that mattered.
+
+★ **The standing instruction, therefore:** when a line-number citation here is found stale, **convert it
+to a symbol** rather than renumbering it. Renumbering buys one correct reading and restores the drift
+class; converting ends it. The check that found these is four lines of script — does the symbol named
+beside a citation still appear within ±8 lines of it — and is worth re-running whenever this spec is
+picked up.
+
+
 There is no separate instruction document for these lines: **`i1040gi` carries them**, in the same file
 that carries the Schedule 1-A instructions. Everything below is quoted from the extracted text layer,
 never from a rendered page (`CLAUDE.md`, *Transcribe IRS forms*).
@@ -33,9 +60,9 @@ witness.
 
 ## 2. The gap, measured
 
-**There is no field.** `Form1040Lines` (`crates/btctax-core/src/tax/printed.rs:501-585`) declares
+**There is no field.** `Form1040Lines` (`crates/btctax-core/src/tax/printed.rs`) declares
 `line1z, line1a, line2a, line2b, line3a, line3b, line7, line8, line9, …` and stops. So does
-`Form1040Income` (`printed.rs:598-620`). Total income is composed at
+`Form1040Income` (`printed.rs`). Total income is composed at
 `crates/btctax-core/src/tax/return_1040.rs:1697-1698`:
 
 ```rust
@@ -47,12 +74,12 @@ let total_income =
 (`crates/btctax-core/src/tax/line_coverage.rs:2265-2272`) carries the instruction
 *"Add lines 1z, 2b, 3b, 4b, 5b, 6b, 7, and 8. This is your total income"* under
 `Production::Combine`, whose contract is *"Blank iff every operand is blank"*
-(`line_coverage.rs:64-68`). Three of the eight named operands have no field. The transcription is
+(`line_coverage.rs`). Three of the eight named operands have no field. The transcription is
 verbatim and correct; the struct behind it is missing three summands.
 
 **★★ The catch-all does not catch a retiree, and the registry says why.** The only thing between a
 pensioner and a filed return that omits their pension is `other_out_of_scope_income`
-(`crates/btctax-core/src/tax/return_refuse.rs:988-1001`). Its prompt
+(`crates/btctax-core/src/tax/return_refuse.rs`). Its prompt
 (`crates/btctax-core/src/tax/questions.rs:548-556`) enumerates *"rent or royalties, a farm, a
 partnership, S corporation, estate or trust (any Schedule K-1), unreported tips, gambling winnings,
 alimony, a business this tool did not capture, or anything else it never asked about."* It never says
@@ -106,8 +133,8 @@ EXCEPTION LIST — not one declaration per exception.** The instructions already
 (IRA: four numbered *Exceptions*, `i1040gi--2025.txt:2682/2698/2727/2758`; pension: fully-taxable vs
 partially-taxable vs PSO vs line-1h vs rollover, `2846-2906`). The question is *"does any of these
 apply?"*, `None` refuses unanswered, `Some(true)` refuses unsupported, `Some(false)` computes. Model:
-`ReturnInputs::hsa_activity` (`return_inputs.rs:606-611`) and
-`ReturnInputs::has_income_exclusion` (`return_inputs.rs:960-970`).
+`ReturnInputs::hsa_activity` (`return_inputs.rs`) and
+`ReturnInputs::has_income_exclusion` (`return_inputs.rs`).
 
 **S-4. THE SOCIAL SECURITY BENEFITS WORKSHEET IS IN SCOPE AND TRANSCRIBED IN FULL — 18 lines.**
 Justified in §5. It is the whole of 6b, it is self-contained, it needs no other form, and refusing it
@@ -167,14 +194,14 @@ GETS A TEST.** The bullet — *"You made contributions to a traditional IRA for 
 spouse were covered by a retirement plan at work…"* (`i1040gi--2025.txt:3246-3250`) — exists because the
 IRA deduction and taxable benefits are mutually circular (Sch 1 line 20 sits inside worksheet line 6,
 and the §219(g) phase-out MAGI includes 6b). btctax already refuses any claimed IRA deduction:
-`RefuseReason::IraDeductionClaimed` (`return_refuse.rs:248`, fired at `return_refuse.rs:1273-1278`), so
+`RefuseReason::IraDeductionClaimed` (`return_refuse.rs`, fired at `return_refuse.rs:1273-1278`), so
 the circular branch cannot arise. **That is a guarantee held in another module**, and a future
 relaxation of that refusal would silently make this worksheet the wrong instrument — so it lands with
 a KAT that reds when the coupling is broken (§10, M-8).
 
 **S-9. ★★ THE COVERAGE CHECKER CANNOT TELL 4b FROM 5b FROM 6b TODAY, AND MUST BE STRENGTHENED BEFORE
 THESE ROWS LAND (B1).** All three lines print the identical two words — *"Taxable amount"*
-(`f1040--2025.txt:74,76,78`). `label_precedes` (`line_coverage_check.rs:270-320`) accepts the bare
+(`f1040--2025.txt:74,76,78`). `label_precedes` (`line_coverage_check.rs`) accepts the bare
 sub-letter form `b` and then only requires the stem digit to appear within the preceding ~700
 characters; lines 4a–6b sit inside one 700-character window, so **a row labelled `4b` quoting
 *"Taxable amount"* matches at line 5b's position and passes.** That is the exact class r7 measured at
@@ -190,7 +217,7 @@ follow-up**, because without it the three most important new rows in the census 
 4a–6b exist in every year and the worksheet is unchanged (S-7). Only two things are year-shaped: the
 line-9 operand list, which reads *"…6b, **7**, and 8"* in `f1040--2024.txt:75` and *"…6b, **7a**, and
 8"* in `f1040--2025.txt:84`; and the field map. `Coverage` already carries a per-row `year`
-(`line_coverage.rs:100-106`) with Form 6251 line 1 as precedent (`line_coverage.rs:462-468`).
+(`line_coverage.rs`) with Form 6251 line 1 as precedent (`line_coverage.rs:462-468`).
 
 ---
 
@@ -252,14 +279,14 @@ backwards, and 4c never printing a check is a *consequence with a reason*, not a
    (`3400`) — **6b is absent by construction**. Its line 6 reads Schedule 1 adjustments that in v1 are
    ½-SE and the early-withdrawal penalty, neither of which depends on benefits. So the order is
    `4b, 5b → Sch 1 L15/L18 → worksheet → 6b → line 9 → student-loan MAGI → AGI`, acyclic, and it slots
-   ahead of `agi_before_student_loan` at `return_1040.rs:1709` without moving anything.
+   ahead of `agi_before_student_loan` at `return_1040.rs` without moving anything.
 
 **The Simplified Method Worksheet is the opposite call and is REFUSED** (R-3/R-5). It is fully
 transcribed in the same document (`i1040gi--2025.txt:2973-3036`, with Table 1 at `3037` and Table 2 at
 `3061`) and is the natural next increment — but its line 6, *"the amount recovered tax free in
 years after 1986 … enter the amount from line 10 of last year's worksheet"*, is a multi-year
 carryforward, which is a feature with a persistence surface and a provenance flag (cf.
-`QbiInputs::qbi_carryforward_in_provenance`, `return_inputs.rs:648-650`), not a worksheet.
+`QbiInputs::qbi_carryforward_in_provenance`, `return_inputs.rs`), not a worksheet.
 
 ### 5.1 The worksheet, transcribed
 
@@ -336,7 +363,7 @@ rows are unverified by construction.
 
 ## 7. The input surface — what must be COLLECTED
 
-New leaves on `ReturnInputs`, in the house shape (`return_inputs.rs:36-131` is the model for a typed
+New leaves on `ReturnInputs`, in the house shape (`return_inputs.rs` is the model for a typed
 information return; boxes are named for the box, refuse-guards per box).
 
 ```
@@ -386,7 +413,7 @@ on (`return_inputs.rs:963-966`), registered in `classifier.rs` beside
 | `form_8815_or_adoption_exclusion` | *"You file Form 2555, 4563, or 8815, or you exclude employer-provided adoption benefits or income from sources within Puerto Rico"* (`3261-3264`), minus the part `has_income_exclusion` already asks | Σ box 5 > 0 | **R-7** |
 
 ★ `form_8815_or_adoption_exclusion` exists because `has_income_exclusion`
-(`return_inputs.rs:960-970`) already covers §911 / §931 / §933 — Forms 2555 and 4563 and Puerto Rico —
+(`return_inputs.rs`) already covers §911 / §931 / §933 — Forms 2555 and 4563 and Puerto Rico —
 but **not** Form 8815 (excluded savings-bond interest) or employer-provided adoption benefits. Asking
 only the residue keeps the questionnaire honest and reuses the answer btctax already has. It is scoped
 `live` to filers with benefits, so nobody else ever sees it. This is `CLAUDE.md`'s corollary applied
@@ -404,7 +431,7 @@ at `:388`.
 
 ## 8. Refusals — exact wording and firing condition
 
-All are `RefuseReason` variants (`return_refuse.rs:36-260`) raised through `refuse(reason, detail)`.
+All are `RefuseReason` variants (`return_refuse.rs`) raised through `refuse(reason, detail)`.
 Wording follows the house voice: name the mechanism, name the direction of error, name what the filer
 can do.
 
@@ -551,7 +578,7 @@ not exist.
 | **M-6** | worksheet line 6 excludes Schedule 1 line 21 (S-5) | change it to `ar.adjustments`; a household with student-loan interest and benefits must move |
 | **M-6b** | worksheet line 6 INCLUDES Schedule 1 line 13 (S-5, FR-183) | drop the `line13` operand; a household with an HSA deduction and benefits must move. ★ M-6 alone does NOT cover this — it mutates toward over-INCLUDING line 21, and a mutation that OMITS line 13 passes it. The two directions are separate kills, and the omission is the one that overstates the filer's tax |
 | **M-7** | worksheet line 1 reads box 5, not box 3 | swap to `box3_benefits_paid`; a filer with a repayment in box 4 must move |
-| **M-8** | the S-8 coupling: the worksheet is only the right instrument while IRA deductions refuse | delete the `IraDeductionClaimed` guard at `return_refuse.rs:1273-1278`; a KAT asserting *"a claimed IRA deduction never reaches the SS worksheet"* must red |
+| **M-8** | the S-8 coupling: the worksheet is only the right instrument while IRA deductions refuse | delete the `IraDeductionClaimed` guard at `return_refuse.rs`; a KAT asserting *"a claimed IRA deduction never reaches the SS worksheet"* must red |
 | **M-9** | R-8 refuses rather than defaulting | set `mfs_lived_apart_all_year` to `Some(true)` when unanswered; the refusal test must red |
 | **M-10** | the four §86 thresholds are not indexed (S-7) | bump any of them by $1; the test that reads both `i1040gi--2024.txt` and `i1040gi--2025.txt` must red |
 | **M-11** | 6b prints `-0-` on a STOP branch and is BLANK when no benefits exist (T-2) | make the no-benefits case emit `Some(Usd::ZERO)`; the read-back must show an empty 6b cell |
