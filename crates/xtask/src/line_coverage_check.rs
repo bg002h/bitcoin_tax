@@ -12,7 +12,7 @@
 //! `crate-publishing-state`. So the quotes travel as data and the checking travels here.
 
 use btctax_core::tax::line_coverage::{self, Production};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 fn repo_root() -> PathBuf {
@@ -1609,6 +1609,84 @@ pub fn check(cov: &line_coverage::Coverage) -> Result<String, String> {
         return Err("line_coverage::all() is EMPTY — the checker would vacuously pass".into());
     }
 
+    // ★★★ **FR-184 — TWO ROWS MAY NOT CLAIM ONE OCCURRENCE.** Rule (2b) below asks *"is this quote
+    //     printed as this line's own text SOMEWHERE"*, which is the right question for a quote the form
+    //     prints once. It is the wrong question when the form prints the same words on several lines:
+    //     Form 1040 carries *"Taxable amount"* on 4b (IRA), 5b (pensions) AND 6b (social security), 89 and
+    //     79 characters apart, so every one of the three satisfies (2b) at every one of the three
+    //     occurrences. A table row saying `f1040:4b` passes, and would pass IDENTICALLY if it said `6b`.
+    //
+    // ★★ So a SHARED quote must be backed by at least as many printed occurrences as there are rows
+    //    claiming it. That does not by itself pin which row owns which occurrence — the discriminator for
+    //    that is form-shaped and three candidates were measured and refuted (FR-184) — but it does make
+    //    the pigeonhole hold, which is what a retirement build needs: 4b, 5b and 6b may exist together
+    //    only because the form really does print the words three times.
+    //
+    // ★ Scoped to shared quotes on purpose. A unique quote keeps rule (2b) exactly as it was, so
+    //   `f8889:17b` — whose run-up ends *"17a … included on line 16 … b"* and which a stricter global
+    //   rule wrongly rejected — is untouched.
+    {
+        // ★★ Keyed on DISTINCT LINES, not rows. A coverage row is per FIELD, so one line legitimately
+        //    contributes several rows carrying its own text — measured: naively counting rows reported 28
+        //    false positives, every one of them a line paired with itself (`1z, 1z`). The pigeonhole is
+        //    about two DIFFERENT lines claiming one printed occurrence.
+        let mut by_quote: BTreeMap<(String, String, String), BTreeSet<String>> = BTreeMap::new();
+        for e in &cov.0 {
+            if e.instruction.trim().is_empty() {
+                continue;
+            }
+            // ★★★ COLUMN CELLS ARE OUT OF SCOPE, and the existing rule (2b) already says why: a
+            //     column cell may legitimately quote its LINE's sentence or its COLUMN HEADER, neither of
+            //     which it owns alone. Measured: including them reported 11 findings, every one a
+            //     legitimate pattern — three columns of one Schedule D line (`8a(d)`, `8a(e)`, `8a(h)`)
+            //     sharing that line's sentence, or two Schedule 1-A rows sharing the printed header
+            //     *"(ii) Deducted on"*. The pigeonhole is about two whole LINES claiming one occurrence.
+            if e.line.contains('(') {
+                continue;
+            }
+            by_quote
+                .entry((
+                    e.form.to_string(),
+                    e.year.to_string(),
+                    normalize(e.instruction),
+                ))
+                .or_default()
+                .insert(e.line.clone());
+        }
+        for ((form, year, quote), rows) in &by_quote {
+            if rows.len() < 2 {
+                continue;
+            }
+            let stem = format!("{form}--{year}");
+            let text = match extracts.get(&stem) {
+                Some(t) => t.clone(),
+                None => {
+                    let p = root.join(format!("design/forms/extract/{stem}.txt"));
+                    match std::fs::read_to_string(&p) {
+                        Ok(t) => {
+                            let n = normalize(&t);
+                            raw_extracts.insert(stem.clone(), t);
+                            extracts.insert(stem.clone(), n.clone());
+                            n
+                        }
+                        Err(_) => continue, // no text layer: rule (2) already reports that
+                    }
+                }
+            };
+            let printed = text.matches(quote.as_str()).count();
+            if printed < rows.len() {
+                errs.push(format!(
+                    "{stem}: {} rows ({}) all claim the quote {:?}, but {stem}.txt prints it only \
+                     {printed} time(s). Two rows cannot be the same printed line — one of them is \
+                     quoting another line's text, which is the Form 6251 line-33 class.",
+                    rows.len(),
+                    rows.iter().cloned().collect::<Vec<_>>().join(", "),
+                    quote
+                ));
+            }
+        }
+    }
+
     for e in &cov.0 {
         // (1) Every Exception carries a reason; every non-Exception carries none. Both directions,
         //     because a reason on a real production is a sign the author was unsure.
@@ -2952,6 +3030,61 @@ line16 = \"g\"
         assert!(
             e.contains("NOT FOUND"),
             "rule (2) must reject a paraphrase: {e}"
+        );
+
+        // ★★★ **(FR-184) TWO WHOLE LINES CLAIMING ONE PRINTED OCCURRENCE.** The plant rule (2b) can
+        //     never fail, because the sentence really is this line's own text — for BOTH of them. Form
+        //     1040 prints *"Adjustments to income from Schedule 1, line 26"* exactly once, so two lines
+        //     cannot both be it.
+        //
+        // ★★ This is the gate a retirement build needs. Lines 4b, 5b and 6b all print *"Taxable amount"*,
+        //    and rule (2b) admits every one of them at every one of the three occurrences — so a table
+        //    that said `4b` where it meant `6b` passed. The pigeonhole does not pin WHICH row owns which
+        //    occurrence (three discriminators were measured and refuted, FR-184), but it does force the
+        //    three rows to be backed by three printed occurrences instead of one.
+        let mut c = Coverage::default();
+        for line in ["10", "11"] {
+            c.line(
+                btctax_core::conventions::Usd::ZERO,
+                "f1040",
+                line,
+                "line10",
+                Production::Scaled,
+                "Adjustments to income from Schedule 1, line 26",
+            );
+        }
+        let e = check(&c).unwrap_err();
+        assert!(
+            e.contains("prints it only 1 time(s)") && e.contains("10, 11"),
+            "FR-184: two LINES claiming a quote the form prints once must be rejected, and the message \
+             must name both: {e}"
+        );
+
+        // ★★ B1a — the other direction, and it is the one that matters for retirement: three lines
+        //    sharing a quote the form really does print three times must be ADMITTED. Without this the
+        //    rule could be "reject every shared quote", which would block 4b/5b/6b outright.
+        let mut c = Coverage::default();
+        for line in ["4b", "5b", "6b"] {
+            c.line(
+                btctax_core::conventions::Usd::ZERO,
+                "f1040",
+                line,
+                "line4b",
+                Production::Scaled,
+                "Taxable amount",
+            );
+        }
+        // ★ Either outcome is acceptable so long as the PIGEONHOLE did not fire — the table may pass
+        //   outright (it does today), or fail some unrelated rule. Asserting `unwrap_err` here would
+        //   have made the test depend on an error it does not care about.
+        let pigeonholed = match check(&c) {
+            Ok(_) => false,
+            Err(e) => e.contains("prints it only"),
+        };
+        assert!(
+            !pigeonholed,
+            "4b/5b/6b share a quote Form 1040 prints THREE times — the pigeonhole must admit them. \
+             Rejecting a shared quote outright would block the retirement lines outright."
         );
 
         // ★★★ (2b) THE FORM 6251 LINE-33 CLASS — a VERBATIM sentence attached to the WRONG LINE.
