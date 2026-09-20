@@ -2372,31 +2372,108 @@ pub fn abort_rows(year: i32, files: &[(String, String)], rep: &mut Report) {
 // Axis 7 — the OWNER's own pending-decision table
 // ════════════════════════════════════════════════════════════════════════════════════════════════
 
-/// The pending owner decisions, parsed out of `design/ROADMAP_STATUS.md`'s own table, so the set
-/// grows when the owner's table does. A row whose text says `RULED` is no longer pending.
-pub fn owner_rows(doc: &str, rep: &mut Report) {
-    let Some(i) = doc.find("OWNER DECISIONS PENDING") else {
-        rep.notes.push(
-            "owner decisions: `design/ROADMAP_STATUS.md` has no \"OWNER DECISIONS PENDING\" \
-             section — the axis did not run."
-                .into(),
-        );
-        return;
+/// ★★★ **Every status word this axis will accept, longest first — and the ordering is load-bearing.**
+///
+/// `PRE-RULED` contains `RULED`. A shortest-or-arbitrary-first scan reads S7's *"PRE-RULED as
+/// proposed"* as the token `RULED`, which happens to reach the same verdict here and would not on a
+/// token pair where it mattered. `a_prefix_token_does_not_shadow_a_longer_one` is the kill.
+///
+/// ★★ An `| **S…` row carrying **none** of these is an ERROR, not a pending row and not a ruled one.
+/// That is the fail-closed direction: a new status word the owner invents shows up as a refusal
+/// naming the row, instead of being silently sorted into whichever bucket the code happened to
+/// default to.
+pub const OWNER_STATUS_TOKENS: &[(&str, bool)] = &[
+    // (token, is_resolved)
+    ("PRE-RULED", true),
+    ("DISCHARGED", true),
+    ("WITHDRAWN", true),
+    ("SUPERSEDED", true),
+    ("ACCEPTED", true),
+    ("DEFERRED", true),
+    ("DROPPED", true),
+    ("PENDING", false),
+    ("RULED", true),
+    ("OPEN", false),
+];
+
+/// The machine anchors delimiting the owner's authoritative rulings table.
+pub const OWNER_SPAN_OPEN: &str = "<!-- blockers:owner-decisions -->";
+pub const OWNER_SPAN_CLOSE: &str = "<!-- /blockers:owner-decisions -->";
+
+/// The owner decisions, parsed out of `design/ROADMAP_STATUS.md`'s own table, so the set grows when
+/// the owner's table does.
+///
+/// ★★★ **Why this REFUSES where it used to leave a note.** Until 2026-09-20 this axis anchored on the
+/// prose string `"OWNER DECISIONS PENDING"` and, when it could not find it, pushed a note saying *"the
+/// axis did not run"* and returned normally. On 2026-09-19 a commit de-staling that section reworded
+/// the heading to `"OWNER DECISIONS"` — dropping the one word the anchor needed — and axis 7 went
+/// silently dark. Notes are not gated on, so nothing failed.
+///
+/// ★★ **The kill for exactly this defect already existed, and it certified the blindness.** It planted
+/// the missing heading and asserted the lenient behaviour:
+///
+/// ```text
+/// // PLANT: the section heading is gone — the axis must SAY it did not run.
+/// owner_rows("nothing here", &mut rep2);
+/// assert!(rep2.notes.iter().any(|n| n.contains("did not run")));
+/// ```
+///
+/// So the plant was right, the instrument was watched, and the assertion blessed the wrong remedy. A
+/// second test — `the_command_answers_for_ty2026_at_head`, via `Decide > 0` — did catch it, and the two
+/// disagreed; the lenient one was the one that read as the specification. **A B1 kill that plants the
+/// real defect and asserts the wrong response is worse than no kill, because it makes the blindness
+/// look deliberate.**
+///
+/// ★ It also anchors on an HTML comment now rather than a heading, so rewording the prose above the
+/// table cannot repeat this. `design/ROADMAP_STATUS.md` says so at the markers.
+pub fn owner_rows(doc: &str, rep: &mut Report) -> Result<(), String> {
+    let Some(i) = doc.find(OWNER_SPAN_OPEN) else {
+        return Err(format!(
+            "`design/ROADMAP_STATUS.md` carries no `{OWNER_SPAN_OPEN}` marker, so the owner-decision \
+             axis has nothing to parse. This used to be a NOTE and the axis simply went dark for a \
+             day when a heading was reworded (see `owner_rows`). Restore the marker around the \
+             authoritative rulings table."
+        ));
     };
+    let after = &doc[i + OWNER_SPAN_OPEN.len()..];
+    let Some(j) = after.find(OWNER_SPAN_CLOSE) else {
+        return Err(format!(
+            "`design/ROADMAP_STATUS.md` opens `{OWNER_SPAN_OPEN}` but never closes it with \
+             `{OWNER_SPAN_CLOSE}`. An unterminated span would swallow the retained-reasoning table \
+             below it, where the SAME S-ids appear with their original open wording — so S1, S2 and \
+             S7 would each be reported twice, once resolved and once pending."
+        ));
+    };
+    let span = &after[..j];
+
     let mut pending = 0usize;
     let mut ruled = 0usize;
-    for line in doc[i..].lines() {
+    let mut rows = 0usize;
+    for line in span.lines() {
         let t = line.trim();
         if !t.starts_with("| **S") {
-            if t.starts_with("## ") {
-                break;
-            }
             continue;
         }
+        rows += 1;
         let cells = split_row(t);
         let id = cells[0].trim_matches('*').to_string();
         let text = cells.get(1).cloned().unwrap_or_default();
-        if text.contains("RULED") {
+
+        // Longest-first, so PRE-RULED is never read as RULED.
+        let Some(&(token, resolved)) = OWNER_STATUS_TOKENS
+            .iter()
+            .find(|(tok, _)| text.contains(tok))
+        else {
+            return Err(format!(
+                "`design/ROADMAP_STATUS.md` §0a row {id} carries no recognised status token. One of \
+                 {:?} must appear in its ruling cell. Refusing rather than guessing: sorting an \
+                 unknown status into `pending` would re-raise a discharged decision at the owner, \
+                 and into `ruled` would hide a live one. The cell reads: {text:?}",
+                OWNER_STATUS_TOKENS.iter().map(|(t, _)| *t).collect::<Vec<_>>(),
+            ));
+        };
+        let _ = token;
+        if resolved {
             ruled += 1;
             continue;
         }
@@ -2416,30 +2493,76 @@ pub fn owner_rows(doc: &str, rep: &mut Report) {
             "owner",
             format!("`design/ROADMAP_STATUS.md` §0a, row {id}"),
         );
-        // An unruled decision naming work outside this repo is ALSO not ours to clear.
-        if text.contains("apprais") {
-            rep.push(
-                Who::NotOurs,
-                State::Blocked,
-                format!(
-                    "{id} names a §170(f)(11)(C) QUALIFIED APPRAISAL for a Bitcoin gift over $5,000 \
-                     — an external appraiser's work, with a deadline that falls before filing; no \
-                     code clears it"
-                ),
-                "before filing",
-                format!(
-                    "`design/ROADMAP_STATUS.md` §0a row {id}; \
-                     `design/SPEC_appraisal_trigger_minimal.md`; \
-                     `crates/btctax-core/src/donation.rs` (Section-B completeness needs \
-                     `appraisal_date` + `appraiser_qualifications`)"
-                ),
-            );
-        }
     }
+    if rows == 0 {
+        return Err(format!(
+            "`design/ROADMAP_STATUS.md`'s `{OWNER_SPAN_OPEN}` span holds no `| **S…` rows at all. \
+             Either the table moved out of the span or its row format changed; either way the axis \
+             would report 'no owner decisions' with equal confidence to having checked."
+        ));
+    }
+    // ★ The axis's OWN evidence that it ran. `pending == 0` is the goal, not a suspicious result
+    // (owner ruling on OQ-4: "Zero is the goal when nothing is wrong"), so the test that proves this
+    // axis is alive asserts THIS note — never `Decide > 0`.
     rep.notes.push(format!(
-        "owner decisions: {pending} pending, {ruled} already RULED, parsed from \
-         `design/ROADMAP_STATUS.md` §0a."
+        "owner decisions: axis RAN over {rows} row(s) inside `{OWNER_SPAN_OPEN}` — {pending} \
+         pending, {ruled} resolved. Parsed from `design/ROADMAP_STATUS.md` §0a."
     ));
+    Ok(())
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// Axis 8 — obligations on OUTSIDE parties, derived from the code that requires them
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// ★★★ **Why this axis exists, and what it replaced.**
+///
+/// The §170(f)(11)(C) qualified-appraisal row — an outside appraiser's work, with a deadline that
+/// falls before filing and that no code can clear — used to be emitted by [`owner_rows`], gated on an
+/// S-row that was **unruled** and whose text happened to contain `"apprais"`. On 2026-09-19 the owner
+/// ruled S2, and the ruling was about SCOPE: *"The correct question isn't whether it applies to me but
+/// whether we want to support the tax scenarios or not. The answer is yes, support all."*
+///
+/// ★★ Answering the scope question does not obtain an appraisal. But ruling S2 deleted the only row
+/// in the bucket, and `Who::NotOurs` went to **zero** — so the command stopped reporting a live
+/// external deadline because an unrelated question had been answered. The whole bucket had exactly
+/// one producer, and it was a substring match on a tracker sentence.
+///
+/// ★ So the obligation now derives from the thing that actually knows: `DonationDetails::
+/// is_review_complete`, whose Section-B arm requires `appraisal_date` and `appraiser_qualifications`
+/// before a Form 8283 carrier row may stop needing review. If that requirement is ever deleted, this
+/// axis REFUSES rather than falling quiet — a Section-B donation that no longer needs an appraiser
+/// declaration is a compliance regression, not a cleared blocker.
+pub fn external_obligation_rows(rep: &mut Report) -> Result<(), String> {
+    let path = root().join("crates/btctax-core/src/donation.rs");
+    let src = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let requires = src.contains("self.appraisal_date.is_some()")
+        && src.contains("self.appraiser_qualifications.is_some()");
+    if !requires {
+        return Err(format!(
+            "{}: `is_review_complete`'s Section-B arm no longer requires BOTH \
+             `appraisal_date.is_some()` and `appraiser_qualifications.is_some()`. Either the \
+             §170(f)(11)(D)/§6695A completeness rule was relaxed — a compliance regression that must \
+             not be discovered through a blockers row going quiet — or this axis is reading a \
+             renamed predicate and needs updating deliberately.",
+            path.display()
+        ));
+    }
+    rep.push(
+        Who::NotOurs,
+        State::Blocked,
+        "a §170(f)(11)(C) QUALIFIED APPRAISAL is required for any noncash gift whose year aggregate \
+         exceeds $5,000 — an outside appraiser's work, dated before the return is filed, which no \
+         code path can clear"
+            .to_string(),
+        "before filing",
+        format!(
+            "`{}` — `DonationDetails::is_review_complete`, Section-B arm, requires \
+             `appraisal_date` AND `appraiser_qualifications`; `design/SPEC_appraisal_trigger_minimal.md`",
+            path.strip_prefix(root()).unwrap_or(&path).display()
+        ),
+    );
+    Ok(())
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════
@@ -2480,12 +2603,13 @@ pub fn collect(year: i32) -> Result<Report, String> {
     abort_rows(year, &files, &mut rep);
 
     let rs = root().join("design/ROADMAP_STATUS.md");
-    match std::fs::read_to_string(&rs) {
-        Ok(doc) => owner_rows(&doc, &mut rep),
-        Err(e) => rep
-            .notes
-            .push(format!("owner decisions: {} unreadable: {e}", rs.display())),
-    }
+    // ★ Unreadable is an ERROR too. The old arm noted it and carried on, which is the same
+    // silent-dark-axis shape `owner_rows` documents: the tracker this command exists to read
+    // would be absent and the report would still print as an answer.
+    let doc = std::fs::read_to_string(&rs)
+        .map_err(|e| format!("owner decisions: {} unreadable: {e}", rs.display()))?;
+    owner_rows(&doc, &mut rep)?;
+    external_obligation_rows(&mut rep)?;
     rep.notes.push(format!(
         "form-axis tags: `{prior}` -> `{new}`, read out of the work list's own regeneration \
          command; {} source files scanned for archive citations.",
@@ -3295,30 +3419,171 @@ pub fn screen(ri: &ReturnInputs) -> Option<Refusal> {
         );
     }
 
-    /// ★★ The owner axis takes its rows from the owner's own table, and a RULED row is not pending.
+    /// ★★ The owner axis takes its rows from the owner's own table, and a resolved row is not pending.
     #[test]
-    fn the_owner_axis_reads_the_pending_decisions_and_skips_the_ruled_ones() {
-        let doc = "### OWNER DECISIONS PENDING — x\n\n| # | decision | a | b |\n|---|---|---|---|\n\
-                   | **S1** | **Un-pause a rehearsal** — detail | x | y |\n\
-                   | **S2** | **Two answers** — appraisal above $5,000 is an owner action | x | y |\n\
-                   | **S6** | **RULED 2026-09-06** — done | x | y |\n\n## next section\n";
+    fn the_owner_axis_reads_the_pending_decisions_and_skips_the_resolved_ones() {
+        let doc = format!(
+            "### OWNER DECISIONS — x\n\n{}\n\n| # | ruling | when |\n|---|---|---|\n\
+             | **S1** | **OPEN** — Un-pause a rehearsal | x | y |\n\
+             | **S2** | **PENDING** — appraisal above $5,000 is an owner action | x | y |\n\
+             | **S6** | **RULED** 2026-09-06 — done | x | y |\n\
+             | **S7** | **PRE-RULED** as proposed | x | y |\n\n{}\n\n## next section\n",
+            OWNER_SPAN_OPEN, OWNER_SPAN_CLOSE
+        );
         let mut rep = Report::default();
-        owner_rows(doc, &mut rep);
+        owner_rows(&doc, &mut rep).expect("the span is well formed");
         let decide: Vec<&Row> = rep.rows.iter().filter(|r| r.who == Who::Decide).collect();
-        assert_eq!(decide.len(), 2, "S1 and S2 pending, S6 ruled: {decide:#?}");
+        assert_eq!(
+            decide.len(),
+            2,
+            "S1 OPEN and S2 PENDING are pending; S6 RULED and S7 PRE-RULED are not: {decide:#?}"
+        );
         assert!(decide.iter().any(|r| r.what.starts_with("S1")));
+        // ★★ The appraisal row is deliberately NOT here any more. It used to be emitted from S2's
+        // own text whenever S2 was unruled, so ruling a SCOPE question silently cleared an outside
+        // appraiser's before-filing deadline. It derives from `donation.rs` now — see
+        // `external_obligation_rows` and `the_appraisal_obligation_survives_every_owner_ruling`.
         assert!(
-            rep.rows.iter().any(|r| r.who == Who::NotOurs
-                && r.what.contains("QUALIFIED APPRAISAL")
-                && r.when == "before filing"),
-            "the appraisal row is derived from S2's own text: {:#?}",
+            !rep.rows
+                .iter()
+                .any(|r| r.what.contains("QUALIFIED APPRAISAL")),
+            "the owner axis must no longer be the appraisal row's only source: {:#?}",
             rep.rows
         );
-        // PLANT: the section heading is gone — the axis must SAY it did not run.
-        let mut rep2 = Report::default();
-        owner_rows("nothing here", &mut rep2);
-        assert!(rep2.rows.is_empty());
-        assert!(rep2.notes.iter().any(|n| n.contains("did not run")));
+        // ★ The axis must leave its own proof-of-life, because `pending == 0` is a legitimate
+        // answer and therefore cannot itself be the evidence that the axis ran.
+        assert!(
+            rep.notes
+                .iter()
+                .any(|n| n.contains("axis RAN over 4 row(s)")),
+            "{:#?}",
+            rep.notes
+        );
+    }
+
+    /// ★★★ **The kill for the defect that actually happened — rewritten, because the version that
+    /// shipped here asserted the WRONG remedy and thereby certified the blindness.**
+    ///
+    /// On 2026-09-19 a commit reworded this section's heading from *"OWNER DECISIONS PENDING"* to
+    /// *"OWNER DECISIONS"*, which was the exact string the axis anchored on, and axis 7 went dark.
+    /// The kill in place planted precisely that — `owner_rows("nothing here", …)` — and then asserted
+    /// the axis *"must SAY it did not run"*, so it passed while the command answered with one axis
+    /// switched off. Notes are not gated on. A second test caught it only via `Decide > 0`, an
+    /// assertion that is itself wrong now that every decision is resolved.
+    ///
+    /// So each plant below asserts a REFUSAL.
+    #[test]
+    fn a_missing_or_broken_owner_span_fails_the_run() {
+        // PLANT 1 — no marker at all (the 2026-09-19 defect, verbatim).
+        let e = owner_rows("nothing here", &mut Report::default()).expect_err("must refuse");
+        assert!(e.contains(OWNER_SPAN_OPEN), "{e}");
+
+        // PLANT 2 — opened and never closed: would swallow the retained-reasoning table below,
+        // where S1/S2/S7 still carry their original open wording.
+        let unclosed = format!("{OWNER_SPAN_OPEN}\n| **S1** | **OPEN** — x | y |\n");
+        let e = owner_rows(&unclosed, &mut Report::default()).expect_err("must refuse");
+        assert!(e.contains(OWNER_SPAN_CLOSE), "{e}");
+
+        // PLANT 3 — the span is intact but holds no rows (the table moved out from under it).
+        let empty = format!("{OWNER_SPAN_OPEN}\n\nprose only\n\n{OWNER_SPAN_CLOSE}\n");
+        let e = owner_rows(&empty, &mut Report::default()).expect_err("must refuse");
+        assert!(e.contains("no `| **S"), "{e}");
+
+        // PLANT 4 — a status word nobody taught it. Fails CLOSED, naming the row.
+        let unknown = format!(
+            "{OWNER_SPAN_OPEN}\n| **S4** | ✅ **MOOTED** by the owner | x |\n{OWNER_SPAN_CLOSE}\n"
+        );
+        let e = owner_rows(&unknown, &mut Report::default()).expect_err("must refuse");
+        assert!(
+            e.contains("S4") && e.contains("no recognised status token"),
+            "{e}"
+        );
+    }
+
+    /// ★★ `PRE-RULED` contains `RULED`. Order the token table wrong and S7 is read as the shorter
+    /// token — which reaches the same verdict here, and would not on a pair where one member is
+    /// resolved and the other is not. This pins the ordering, not the outcome.
+    #[test]
+    fn a_prefix_token_does_not_shadow_a_longer_one() {
+        let pos = |t: &str| {
+            OWNER_STATUS_TOKENS
+                .iter()
+                .position(|(tok, _)| *tok == t)
+                .unwrap_or_else(|| panic!("{t} is not a known token"))
+        };
+        assert!(
+            pos("PRE-RULED") < pos("RULED"),
+            "PRE-RULED must be tried before RULED, or `contains` reads the shorter one"
+        );
+        // And the whole table must be free of any OTHER shadowing pair in the wrong order.
+        for (i, (a, _)) in OWNER_STATUS_TOKENS.iter().enumerate() {
+            for (j, (b, _)) in OWNER_STATUS_TOKENS.iter().enumerate() {
+                if i != j && a.contains(b) {
+                    assert!(
+                        i < j,
+                        "{a} contains {b} but is tried after it — {b} would shadow {a}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// ★★★ **The kill for axis 8.** The appraisal obligation must hold with an owner table in which
+    /// EVERY decision is resolved — which is the state that deleted it on 2026-09-19.
+    #[test]
+    fn the_appraisal_obligation_survives_every_owner_ruling() {
+        let all_resolved = format!(
+            "{OWNER_SPAN_OPEN}\n| **S2** | ✅ **RULED** — support all the scenarios | x |\n{OWNER_SPAN_CLOSE}\n"
+        );
+        let mut rep = Report::default();
+        owner_rows(&all_resolved, &mut rep).expect("parses");
+        assert_eq!(rep.count(Who::Decide), 0, "nothing is unruled here");
+        external_obligation_rows(&mut rep).expect("the requirement is in donation.rs");
+        assert_eq!(
+            rep.count(Who::NotOurs),
+            1,
+            "the appraisal deadline must survive a fully-ruled owner table: {:#?}",
+            rep.rows
+        );
+        assert!(rep
+            .rows
+            .iter()
+            .any(|r| r.what.contains("QUALIFIED APPRAISAL") && r.when == "before filing"));
+    }
+
+    /// ★ The real document must satisfy the parser. This is the check that would have red on
+    /// 2026-09-19 the moment the heading was reworded, had the anchor been machine-owned then.
+    #[test]
+    fn the_committed_roadmap_parses_and_its_span_holds_no_duplicate_ids() {
+        let doc =
+            std::fs::read_to_string(root().join("design/ROADMAP_STATUS.md")).expect("roadmap");
+        let mut rep = Report::default();
+        owner_rows(&doc, &mut rep).expect("the committed roadmap must parse");
+        assert!(
+            rep.notes.iter().any(|n| n.contains("axis RAN over")),
+            "{:#?}",
+            rep.notes
+        );
+        // ★★ The span must not reach the retained-reasoning table: S1, S2 and S7 appear there with
+        // their ORIGINAL open wording, so an over-long span reports each of them twice with
+        // contradictory status. Counting distinct ids inside the span is how that is held.
+        let i = doc.find(OWNER_SPAN_OPEN).expect("open marker");
+        let rest = &doc[i..];
+        let j = rest.find(OWNER_SPAN_CLOSE).expect("close marker");
+        let mut ids: Vec<String> = rest[..j]
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with("| **S"))
+            .map(|l| split_row(l)[0].trim_matches('*').to_string())
+            .collect();
+        let total = ids.len();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(
+            total,
+            ids.len(),
+            "an S-id appears twice inside the owner span: {ids:?}"
+        );
     }
 
     /// ★★★ **The whole command, at HEAD.** Not a golden — a shape assertion, so it cannot be made
@@ -3328,9 +3593,25 @@ pub fn screen(ri: &ReturnInputs) -> Option<Refusal> {
     fn the_command_answers_for_ty2026_at_head() {
         let rep = collect(2026).expect("blockers 2026");
         assert!(rep.rows.len() > 30, "{} rows", rep.rows.len());
-        for who in [Who::January, Who::Build, Who::Decide, Who::NotOurs] {
+        // ★★★ `Who::Decide` is deliberately NOT in this list. It counts UNRULED OWNER DECISIONS,
+        // and every one of them is now resolved — so a non-empty assertion here demands that the
+        // owner always have pending work, which is false and which the owner ruled against
+        // directly on OQ-4: "Zero is the goal when nothing is wrong."
+        //
+        // ★★ It was in this list, and that is how the 2026-09-19 dark axis was eventually noticed —
+        // but only after the commit landed, and by an assertion that was wrong for the right
+        // reason. The axis's liveness is proven by its own note instead, below, which stays true at
+        // zero. `a_missing_or_broken_owner_span_fails_the_run` holds the refusals.
+        for who in [Who::January, Who::Build, Who::NotOurs] {
             assert!(rep.count(who) > 0, "{who:?} is empty");
         }
+        assert!(
+            rep.notes
+                .iter()
+                .any(|n| n.contains("owner decisions: axis RAN over")),
+            "the owner axis must prove it ran, since finding nothing is a legitimate answer: {:#?}",
+            rep.notes
+        );
         assert!(rep.unmeasured() > 0, "nothing is UNMEASURED — suspicious");
         let all = rep.render(2026);
         for want in [

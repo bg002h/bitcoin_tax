@@ -88,7 +88,16 @@ reports work as outstanding when it is discharged *reports failure* the way a qu
 success — and it cost a wrong prioritisation, not merely a wrong sentence. This file calls itself *"the
 single live tracker"*; being 14 days behind makes it the opposite.
 
-**Rulings taken since this section was last written:**
+**Rulings taken since this section was last written.**
+
+★★ **The HTML markers below are load-bearing: `xtask blockers` axis 7 parses the rows between them,
+and REFUSES the whole run if they are absent.** They exist because on 2026-09-19 this section's
+heading was reworded from *"OWNER DECISIONS PENDING"* to *"OWNER DECISIONS"* — and that one dropped
+word was the string the parser anchored on, so axis 7 silently stopped running. Do not anchor code on
+prose again. Every `| **S…` row inside the span must carry exactly one UPPERCASE status token from
+`OWNER_STATUS_TOKENS`; an unrecognised one fails the run rather than being guessed at.
+
+<!-- blockers:owner-decisions -->
 
 | # | ruling | when |
 |---|---|---|
@@ -98,7 +107,9 @@ single live tracker"*; being 14 days behind makes it the opposite.
 | **S2** (which scenarios the real return holds) | ✅ RULED, and the **premise inverted**: *"The correct question isn't whether it applies to me but whether we want to support the tax scenarios or not. The answer is yes, support all."* | this arc |
 | **S7** (pre-rule the oracle fallback) | ✅ **PRE-RULED as proposed.** | this arc |
 | **S8** (the print rehearsal) | ✅ ACCEPTED, and the owner printed — which is how FR-218 was found (the 8949 first page printed twice). | this arc |
-| **S6**, **S9** | already recorded below as ruled 2026-09-06. | — |
+| **S6**, **S9** | ✅ **RULED** 2026-09-06 — the reasoning is in the retained section below. | 2026-09-06 |
+
+<!-- /blockers:owner-decisions -->
 
 **And the retirement feature's four open questions, all ruled 2026-09-15** (recorded at each question in
 `design/ty2025/SPEC_retirement_income.md` §11): OQ-1 widen the scope prompt **yes, and it was already
