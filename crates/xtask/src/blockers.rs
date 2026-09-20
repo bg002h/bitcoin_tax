@@ -3238,8 +3238,9 @@ pub fn screen(ri: &ReturnInputs) -> Option<Refusal> {
         //   year wall, and counting it as one would overstate what `blockers <year>` knows.
         assert_eq!(
             cen.variants.len(),
-            140,
-            "measured at HEAD 2026-09-20 — T14 added `RetirementIncomeNotComputed` (139 -> 140)"
+            142,
+            "measured at HEAD 2026-09-20 — T14 added `RetirementIncomeNotComputed` (139 -> 140), then \
+             T14.6 RETIRED it and added the three per-document Form 1099-R refusals (140 -> 142)"
         );
         assert!(
             cen.sites.len() >= 95,

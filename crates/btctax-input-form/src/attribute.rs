@@ -241,11 +241,27 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         //
         //     ★ The cure is outside the form in both directions: file with a preparer, or delete the
         //       row. So the note names the row, not a field.
-        R::RetirementIncomeNotComputed => vec![Anchor::NotInForm {
-            note: "a transcribed Form 1099-R (`[[r_1099]]`) is held but no 1040 line reads it yet, so \
-                   the whole return refuses rather than omit retirement income from total income. No \
-                   answer in this form clears it — the task that adds the 4a/4b and 5a/5b compute does",
+        // ★★★ **T14 — all three are `NotInForm`, and for DIFFERENT reasons worth keeping apart.**
+        //
+        //     The two UNANSWERED cases are the interesting ones: they ARE questions a filer can answer,
+        //     but not in this form — `r_1099` has no form section yet (`spec/coverage.rs`'s EXEMPT_LEAVES
+        //     records why), so the answer arrives through `income answer` or a TOML import. Pointing them
+        //     at a field that does not exist would be worse than saying nothing, and pointing them at
+        //     some OTHER document's exception question would be actively wrong.
+        //
+        //     ★ The other two cannot be cleared by any answer at all: an unsupported document needs a
+        //       preparer, and a missing box 2a needs a different piece of paper.
+        R::RetirementQuestionUnanswered(_) => vec![Anchor::NotInForm {
+            note: "a Form 1099-R question (`[[r_1099]]`) — answerable, but not in this form: the \
+                   retirement section is deferred (see `EXEMPT_LEAVES`), so the answer arrives through \
+                   `btctax income answer` or a TOML import",
         }],
+        R::RetirementDocumentUnsupported(_) | R::RetirementTaxableAmountUnavailable(_) => {
+            vec![Anchor::NotInForm {
+                note: "a Form 1099-R this build cannot file (`[[r_1099]]`). No answer in this form \
+                       clears it — the document needs a preparer, or a corrected form from the payer",
+            }]
+        }
         R::MortgageFairMarketValueLimit
         | R::MortgageApril2018TransitionRule
         | R::Pub936Table1Line12BelowItsComponents => vec![Anchor::NotInForm {
@@ -1005,7 +1021,10 @@ mod tests {
         /// ★ T14 — `RetirementIncomeNotComputed`. `NotInForm` for the strongest version of the reason:
         /// the form has no Form 1099-R section AND no answer in it could clear the refusal, because the
         /// refusal is about what this build can compute rather than about anything the filer left blank.
-        const ADDED_BY_T14: usize = 1;
+        /// ★ T14.6 — the three per-document Form 1099-R refusals. Two `NotInForm` arms, not three: the
+        /// unsupported-document and missing-box-2a cases share one, because neither is clearable by any
+        /// answer and the anchor is the same sentence.
+        const ADDED_BY_T14_6: usize = 2;
         let expect = BEFORE_T5 - 5
             + ADDED_BY_I4
             + ADDED_BY_FR103
@@ -1014,7 +1033,7 @@ mod tests {
             + ADDED_BY_SECTION_68
             + ADDED_BY_CHARITABLE_FLOOR
             + ADDED_BY_FR200A
-            + ADDED_BY_T14;
+            + ADDED_BY_T14_6;
         let now = src[start..end].matches("Anchor::NotInForm {").count();
         assert_eq!(
             now, expect,
@@ -1024,8 +1043,9 @@ mod tests {
              added one (Schedule1aNotOnThisYearsReturn), B3's C-1 added one \
              (ReturnInputsYearNotStated), FR-196 added one (the §111(a) worksheet's three \
              TOML-only refusals, sharing one arm), §68 added one \
-             (ItemizedDeductionLimitationNotComputed), T14 added one \
-             (RetirementIncomeNotComputed), §170(b)(1)(I) added one \
+             (ItemizedDeductionLimitationNotComputed), T14.6 added two (the three per-document Form 1099-R refusals, two of them \
+             sharing an arm; T14's earlier blanket `RetirementIncomeNotComputed` was RETIRED when the \
+             compute landed), §170(b)(1)(I) added one \
              (CharitableFloorNotComputed) and FR-200a added two (Pub. 936 Table 1's block — one \
              beside `MortgageOverDebtLimit`'s declaration anchor, one shared by the three refusals \
              no field can clear); the source now has {now} `NotInForm` anchors, not {expect}"

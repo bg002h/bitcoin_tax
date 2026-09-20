@@ -397,98 +397,143 @@ pub const QUESTIONS: &[(&str, bool, &str)] = &[
     ),
 ];
 
-/// What one IRA document contributes, or why the return cannot be filed.
+/// Why one document stops the return. One enum for both kinds: the IRA and pension sides share every
+/// refusal but the two that are branch-specific, and a second enum would be two lists to keep in step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DocumentTaxable {
-    /// This document's taxable amount for line 4b (step 1).
-    Taxable(Usd),
-    /// The return refuses. The variant names WHICH refusal, so the caller does not re-derive it.
-    Refuses(IraRefusal),
-}
-
-/// Why one IRA document stops the return.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IraRefusal {
-    /// R-1 — `exception_applies` is `None`. Silence is not testimony that none applies.
+pub enum DocRefusal {
+    /// R-1 (IRA) / R-3 (pension) — `exception_applies` is `None`. Silence is not testimony.
     ExceptionUnanswered,
-    /// R-2 — an exception applies and the document is NOT on the Roth `-0-` sub-branch.
+    /// R-2 (IRA) / R-4 (pension) — an exception applies and this build cannot follow it.
     ExceptionUnsupported,
     /// r2 I-1 — box 7 is exactly `T` and the lookback question is unanswered.
     RothLookbackUnanswered,
     /// r2 I-1 — box 7 is exactly `T` and the filer answered NO, so Form 8606 is genuinely needed.
     RothLookbackNo,
+    /// R-5 — box 2b's *"Taxable amount not determined"* checkbox. The PAYER declined to determine it.
+    TaxableAmountNotDetermined,
+    /// R-5 — a pension with a BLANK box 2a: the case the instructions send to the General Rule /
+    /// Simplified Method (`i1040gi--2025.txt:2888-2891`), which v1 does not build.
+    PensionTaxableAmountMissing,
+    /// ★★★ A box whose [`V1Disposition`] is [`V1Disposition::RefuseIfPresent`] carries a figure. The
+    /// label is the box's own, so the refusal can name it.
+    ///
+    /// Until this variant existed those five dispositions were **decorative**: `BOXES` declared that a
+    /// non-zero box 3, 6, 8 or 10 must stop the return and nothing read the declaration. That is the
+    /// `a-figure-with-no-reader` shape applied to a refusal rather than to a figure.
+    RefusingBoxPresent(&'static str),
 }
 
-/// ★★★ **STEP 1 of the C-1 rule — ONE DOCUMENT's taxable amount. Per document, never per return.**
+/// ★★★ **ONE DOCUMENT's taxable amount, or why the return refuses. Per document, never per return.**
 ///
 /// The first version of the spec's rule table keyed its rows on a per-DOCUMENT condition and its columns
-/// on per-RETURN 1040 lines, and fold-review r2's C-1 (Critical) showed that a return with a qualified
-/// Roth `Q` document beside a fully-taxable traditional IRA then files **`4b = -0-`** — the whole
-/// traditional distribution missing from total income, with nothing refusing. The instructions compose
-/// per PART and say so: *"enter the part that is not a QCD on line 4b **unless Exception 2 applies to
-/// that part**"* (`i1040gi--2025.txt:2731`).
+/// on per-RETURN 1040 lines, and fold-review r2's C-1 (Critical) showed that a qualified Roth `Q`
+/// document beside a fully-taxable traditional IRA then files **`4b = -0-`** — the whole traditional
+/// distribution missing from total income, with nothing refusing. The instructions compose per PART and
+/// say so: *"enter the part that is not a QCD on line 4b **unless Exception 2 applies to that part**"*
+/// (`i1040gi--2025.txt:2731`).
 ///
-/// So this function answers for ONE document and nothing here may name a 1040 line. Steps 2 and 3
-/// ([`line_4b`], [`line_4a`]) are the only places a line is written.
+/// So nothing here may name a 1040 line. [`line_4b`] / [`line_5b`] and [`line_4a`] / [`line_5a`] are the
+/// only places a line is written.
 ///
-/// ★★ **Box 7 is matched by EQUALITY, not membership** (r2 I-5). Table 1's *used with* column for `Q`
-/// reads `None` and the Note inside both the `Q` and `T` entries instructs the payer to print `J`
-/// INSTEAD when another code applies — so a composed code such as `"QJ"` is a document this build does
-/// not understand and reaches R-2. `contains("Q")` would admit it, which understates tax.
-#[must_use]
-pub fn document_taxable(f: &Form1099R) -> DocumentTaxable {
-    debug_assert_eq!(f.kind, Form1099RKind::Ira, "step 1 is the IRA side");
-    let code = f.box7_distribution_codes.trim();
-    match f.exception_applies {
-        // Silence first: it is prior to every reading of box 7.
-        None => DocumentTaxable::Refuses(IraRefusal::ExceptionUnanswered),
-        // No exception: the fully-taxable branch. "enter the total distribution on line 4b"
-        // (`i1040gi--2025.txt:2664-2667`) — this document's taxable amount IS its box 1.
-        Some(false) => DocumentTaxable::Taxable(f.box1_gross_distribution),
-        // An exception applies. Only the Roth sub-branch the instructions close themselves computes.
-        Some(true) => match code {
-            // "b. Distribution code Q is shown in box 7" ⇒ "enter -0- on line 4b" (`:2707-2715`).
-            // The payer has certified the 5-year period AND age/death/disability, so nothing is asked.
-            "Q" => DocumentTaxable::Taxable(Usd::ZERO),
-            // "a. Distribution code T ... and you made a contribution (including a conversion) to a
-            // Roth IRA for <YEAR> or an earlier year". The payer did NOT know the 5-year fact, so the
-            // filer supplies it — and silence must not be read as either answer.
-            "T" => match f.roth_contribution_before_lookback {
-                Some(true) => DocumentTaxable::Taxable(Usd::ZERO),
-                Some(false) => DocumentTaxable::Refuses(IraRefusal::RothLookbackNo),
-                None => DocumentTaxable::Refuses(IraRefusal::RothLookbackUnanswered),
-            },
-            _ => DocumentTaxable::Refuses(IraRefusal::ExceptionUnsupported),
-        },
+/// ★★ **Box 7 is matched by EQUALITY, not membership** (r2 I-5): Table 1's *used with* column for `Q`
+/// reads `None`, and the Note inside both the `Q` and `T` entries instructs the payer to print `J`
+/// INSTEAD when another code applies. So `"QJ"` is a document this build does not understand and
+/// refuses; `contains("Q")` would admit it to the `-0-` branch and UNDERSTATE tax.
+///
+/// ★ **Both kinds run the same gate order**, and the order is the argument: the payer's own
+/// *"not determined"* checkbox and the boxes v1 cannot carry are prior to the filer's declaration, which
+/// is prior to any reading of box 7.
+pub fn document_taxable(f: &Form1099R) -> Result<Usd, DocRefusal> {
+    // (1) The payer declined to determine the taxable amount. v1 may not determine it either.
+    if f.box2b_taxable_amount_not_determined {
+        return Err(DocRefusal::TaxableAmountNotDetermined);
+    }
+    // (2) Any box whose disposition says it must refuse, carrying a figure. DERIVED from `BOXES`, so a
+    //     disposition changed there changes this without a second list.
+    for (label, value) in [
+        ("3", f.box3_capital_gain),
+        ("6", f.box6_net_unrealized_appreciation),
+        ("8", f.box8_other),
+        ("10", f.box10_allocable_to_irr),
+    ] {
+        if refuses_on(label, value) {
+            return Err(DocRefusal::RefusingBoxPresent(match label {
+                "3" => "3",
+                "6" => "6",
+                "8" => "8",
+                _ => "10",
+            }));
+        }
+    }
+    // (3) The filer's declaration. Silence is prior to every reading of the form.
+    let Some(exception) = f.exception_applies else {
+        return Err(DocRefusal::ExceptionUnanswered);
+    };
+    match f.kind {
+        Form1099RKind::Ira => {
+            if !exception {
+                // "enter the total distribution on line 4b" (`:2664-2667`) — this document's taxable
+                // amount IS its box 1 on the fully-taxable branch.
+                return Ok(f.box1_gross_distribution);
+            }
+            match f.box7_distribution_codes.trim() {
+                // "b. Distribution code Q is shown in box 7" ⇒ "enter -0- on line 4b" (`:2707-2715`).
+                // The payer certified the 5-year period AND age/death/disability, so nothing is asked.
+                "Q" => Ok(Usd::ZERO),
+                // "a. Distribution code T ... and you made a contribution (including a conversion) to a
+                // Roth IRA for <YEAR> or an earlier year". The payer did NOT know the 5-year fact.
+                "T" => match f.roth_contribution_before_lookback {
+                    Some(true) => Ok(Usd::ZERO),
+                    Some(false) => Err(DocRefusal::RothLookbackNo),
+                    None => Err(DocRefusal::RothLookbackUnanswered),
+                },
+                _ => Err(DocRefusal::ExceptionUnsupported),
+            }
+        }
+        Form1099RKind::PensionOrAnnuity => {
+            // ★★ R-4. The pension exceptions (rollover, PSO, a pre-minimum-retirement-age disability
+            //    pension reported on line 1h) all route somewhere v1 has no line for. This arm was
+            //    MISSING until 2026-09-20: `line_5b` read only box 2a, so a pension whose filer declared
+            //    an exception computed anyway and the declaration had no reader.
+            if exception {
+                return Err(DocRefusal::ExceptionUnsupported);
+            }
+            // The taxable part comes from box 2a when the form shows it; a blank sends the filer to the
+            // General Rule / Simplified Method, which v1 refuses.
+            f.box2a_taxable_amount
+                .ok_or(DocRefusal::PensionTaxableAmountMissing)
+        }
     }
 }
 
-/// **STEP 2 — line 4b = Σ of every IRA document's own taxable amount from [`document_taxable`].**
+/// **Line 4b = Σ of every IRA document's own taxable amount.**
 ///
 /// *"figure the taxable amount of each distribution and enter the total of the taxable amounts on line
 /// 4b"* — `i1040gi--2025.txt:2789-2795`, identical at TY2024 `:2726-2732`.
 ///
-/// `Err` carries the FIRST refusing document's index and reason, because a return that refuses has no
-/// line 4b at all — returning a figure beside a refusal is how a refusal gets ignored.
-pub fn line_4b(rows: &[Form1099R]) -> Result<Usd, (usize, IraRefusal)> {
+/// `Err` carries the FIRST refusing document's index and reason: a return that refuses has no line 4b at
+/// all, and returning a figure beside a refusal is how a refusal gets ignored.
+pub fn line_4b(rows: &[Form1099R]) -> Result<Usd, (usize, DocRefusal)> {
+    sum_taxable(rows, Form1099RKind::Ira)
+}
+
+/// **Line 5b = Σ box 2a over pension documents**, subject to the same per-document gate.
+pub fn line_5b(rows: &[Form1099R]) -> Result<Usd, (usize, DocRefusal)> {
+    sum_taxable(rows, Form1099RKind::PensionOrAnnuity)
+}
+
+fn sum_taxable(rows: &[Form1099R], kind: Form1099RKind) -> Result<Usd, (usize, DocRefusal)> {
     let mut total = Usd::ZERO;
-    for (i, f) in rows
-        .iter()
-        .enumerate()
-        .filter(|(_, f)| f.kind == Form1099RKind::Ira)
-    {
-        match document_taxable(f) {
-            DocumentTaxable::Taxable(v) => total += v,
-            DocumentTaxable::Refuses(r) => return Err((i, r)),
-        }
+    for (i, f) in rows.iter().enumerate().filter(|(_, f)| f.kind == kind) {
+        total += document_taxable(f).map_err(|r| (i, r))?;
     }
     Ok(total)
 }
 
-/// **STEP 3 — line 4a.** `None` means the form instructs a BLANK, which is not the same as zero.
+/// **Line 4a.** `None` means the form instructs a BLANK, which is not the same as zero.
 ///
 /// Populated when **more than one** IRA document exists — *"Enter the total amount of those
-/// distributions on line 4a"* (`:2789-2795`, unscoped, unlike the pension analogue at `:2978-2980` which
+/// distributions on line 4a"* (`:2789-2795`, unscoped, unlike the pension analogue at `:2978-2980`, which
 /// is limited to *"more than one PARTIALLY TAXABLE pension"*) — **or** when any document is on the Roth
 /// `-0-` sub-branch, whose own instruction is *"enter the total distribution on line 4a"* (`:2698`).
 ///
@@ -514,27 +559,6 @@ pub fn line_4a(rows: &[Form1099R]) -> Option<Usd> {
     } else {
         None
     }
-}
-
-/// **Line 5b — the pension side.** Σ box 2a over pension documents.
-///
-/// `i1040gi--2025.txt:2888-2891`: a partially taxable pension's taxable part comes from box 2a when the
-/// form shows it; the General Rule / Simplified Method is reached **only** when box 2a is blank, and that
-/// case REFUSES in v1 (R-3/R-5). So `None` here means "a pension document has no box 2a", which the
-/// caller must refuse rather than treat as zero.
-pub fn line_5b(rows: &[Form1099R]) -> Result<Usd, usize> {
-    let mut total = Usd::ZERO;
-    for (i, f) in rows
-        .iter()
-        .enumerate()
-        .filter(|(_, f)| f.kind == Form1099RKind::PensionOrAnnuity)
-    {
-        match f.box2a_taxable_amount {
-            Some(v) => total += v,
-            None => return Err(i),
-        }
-    }
-    Ok(total)
 }
 
 /// **Line 5a.** Populated for **any partially taxable** pension — box 2a shown and less than box 1.
@@ -737,14 +761,8 @@ mod tests {
         );
         // ★ And the per-document step must not be readable as a return-level answer: each document
         //   answers for itself, which is the structural fix rather than the arithmetic one.
-        assert_eq!(
-            document_taxable(&rows[0]),
-            DocumentTaxable::Taxable(Usd::ZERO)
-        );
-        assert_eq!(
-            document_taxable(&rows[1]),
-            DocumentTaxable::Taxable(dec!(20_000))
-        );
+        assert_eq!(document_taxable(&rows[0]), Ok(Usd::ZERO));
+        assert_eq!(document_taxable(&rows[1]), Ok(dec!(20_000)));
     }
 
     /// ★★ A SINGLE fully-taxable IRA distribution leaves 4a BLANK — `None`, never `Some(0)`.
@@ -787,7 +805,7 @@ mod tests {
             let rows = vec![ira(9_000, Some(true), code, Some(true))];
             assert_eq!(
                 line_4b(&rows),
-                Err((0, IraRefusal::ExceptionUnsupported)),
+                Err((0, DocRefusal::ExceptionUnsupported)),
                 "box 7 {code:?} must refuse, not take the -0- branch"
             );
         }
@@ -795,11 +813,11 @@ mod tests {
         //   transcription realistically carries.
         assert_eq!(
             document_taxable(&ira(9_000, Some(true), " Q ", None)),
-            DocumentTaxable::Taxable(Usd::ZERO)
+            Ok(Usd::ZERO)
         );
         assert_eq!(
             document_taxable(&ira(9_000, Some(true), "T", Some(true))),
-            DocumentTaxable::Taxable(Usd::ZERO)
+            Ok(Usd::ZERO)
         );
     }
 
@@ -809,23 +827,23 @@ mod tests {
     fn code_t_asks_one_question_and_silence_refuses() {
         assert_eq!(
             document_taxable(&ira(9_000, Some(true), "T", None)),
-            DocumentTaxable::Refuses(IraRefusal::RothLookbackUnanswered),
+            Err(DocRefusal::RothLookbackUnanswered),
             "silence must not be read as either answer"
         );
         assert_eq!(
             document_taxable(&ira(9_000, Some(true), "T", Some(false))),
-            DocumentTaxable::Refuses(IraRefusal::RothLookbackNo),
+            Err(DocRefusal::RothLookbackNo),
             "answered NO ⇒ Form 8606 is genuinely needed"
         );
         assert_eq!(
             document_taxable(&ira(9_000, Some(true), "T", Some(true))),
-            DocumentTaxable::Taxable(Usd::ZERO)
+            Ok(Usd::ZERO)
         );
         // ★ `Q` asks nothing: the lookback answer is irrelevant on that branch, in all three states.
         for l in [None, Some(false), Some(true)] {
             assert_eq!(
                 document_taxable(&ira(9_000, Some(true), "Q", l)),
-                DocumentTaxable::Taxable(Usd::ZERO)
+                Ok(Usd::ZERO)
             );
         }
     }
@@ -836,7 +854,7 @@ mod tests {
         for code in ["7", "Q", "T", ""] {
             assert_eq!(
                 document_taxable(&ira(20_000, None, code, Some(true))),
-                DocumentTaxable::Refuses(IraRefusal::ExceptionUnanswered),
+                Err(DocRefusal::ExceptionUnanswered),
                 "silence on the declaration is prior to any reading of box 7 ({code:?})"
             );
         }
@@ -850,7 +868,7 @@ mod tests {
             ira(20_000, Some(false), "7", None),
             ira(5_000, None, "7", None), // the second document is the unanswered one
         ];
-        assert_eq!(line_4b(&rows), Err((1, IraRefusal::ExceptionUnanswered)));
+        assert_eq!(line_4b(&rows), Err((1, DocRefusal::ExceptionUnanswered)));
     }
 
     /// ★★ The pension side: 5b = Σ box 2a, 5a = Σ box 1 when any pension is PARTIALLY taxable.
@@ -881,7 +899,10 @@ mod tests {
         // ★★ A blank box 2a REFUSES — it is the case the instructions send to the General Rule /
         //    Simplified Method, which v1 does not build. It must never read as zero.
         let blank = vec![pension(30_000, None)];
-        assert_eq!(line_5b(&blank), Err(0));
+        assert_eq!(
+            line_5b(&blank),
+            Err((0, DocRefusal::PensionTaxableAmountMissing))
+        );
     }
 
     /// ★★ The two sides do not contaminate each other: an IRA row must not reach 5a/5b, nor a pension
@@ -908,6 +929,82 @@ mod tests {
             "the IRA must not enter 5b"
         );
         assert_eq!(line_5a(&rows), Some(dec!(30_000)));
+    }
+
+    /// ★★★ **R-4 — a PENSION whose filer declared an exception must refuse, and this arm was MISSING.**
+    ///
+    /// Until 2026-09-20 `line_5b` read only box 2a, so a pension document with
+    /// `exception_applies == Some(true)` computed its box 2a and filed — the declaration had no reader.
+    /// The pension exceptions (a rollover, the PSO premium exclusion, a disability pension before minimum
+    /// retirement age reported on line 1h) all route somewhere v1 has no line for.
+    #[test]
+    fn r4_a_pension_with_a_declared_exception_refuses() {
+        let mut p = pension(30_000, Some(24_000));
+        p.exception_applies = Some(true);
+        assert_eq!(
+            line_5b(&[p.clone()]),
+            Err((0, DocRefusal::ExceptionUnsupported)),
+            "the pension side must read the declaration, not just box 2a"
+        );
+        // ★ And R-3: silence on a pension refuses too, symmetrically with R-1 on the IRA side.
+        p.exception_applies = None;
+        assert_eq!(line_5b(&[p]), Err((0, DocRefusal::ExceptionUnanswered)));
+    }
+
+    /// ★★★ **The five `RefuseIfPresent` dispositions are ENFORCED, and until now they were decorative.**
+    ///
+    /// `BOXES` declared that a non-zero box 3, 6, 8 or 10 must stop the return, and nothing read the
+    /// declaration — `a-figure-with-no-reader` applied to a refusal. Each of these figures changes the
+    /// tax and v1 has no line for any of them, so filing past one understates or misstates.
+    #[test]
+    fn a_refusing_box_carrying_a_figure_stops_the_return() {
+        type Plant = fn(&mut Form1099R);
+        let cases: [(&str, Plant); 4] = [
+            ("3", |f| f.box3_capital_gain = dec!(1_500)),
+            ("6", |f| f.box6_net_unrealized_appreciation = dec!(4_000)),
+            ("8", |f| f.box8_other = dec!(250)),
+            ("10", |f| f.box10_allocable_to_irr = dec!(900)),
+        ];
+        for (label, set) in cases {
+            let mut f = ira(20_000, Some(false), "7", None);
+            set(&mut f);
+            assert_eq!(
+                document_taxable(&f),
+                Err(DocRefusal::RefusingBoxPresent(label)),
+                "box {label} carrying a figure must refuse — its disposition says so"
+            );
+        }
+        // ★★ And a printed ZERO on every one of them must NOT refuse: that is the ordinary document, and
+        //    a refusal here would be the too-wide kind that costs the filer their return.
+        let ordinary = ira(20_000, Some(false), "7", None);
+        assert_eq!(document_taxable(&ordinary), Ok(dec!(20_000)));
+        // ★ The refusing set itself is derived, so this cross-checks the enforcement against it.
+        assert_eq!(refusing_boxes(), vec!["2b", "3", "6", "8", "10"]);
+    }
+
+    /// ★★ R-5 — box 2b's *"Taxable amount not determined"* checkbox refuses, and it is checked BEFORE
+    /// everything else: the payer declining to determine the figure is prior to any question the filer
+    /// could answer.
+    #[test]
+    fn r5_the_payer_declining_to_determine_the_amount_refuses_first() {
+        for kind in [Form1099RKind::Ira, Form1099RKind::PensionOrAnnuity] {
+            let mut f = ira(20_000, Some(false), "7", None);
+            f.kind = kind;
+            f.box2b_taxable_amount_not_determined = true;
+            assert_eq!(
+                document_taxable(&f),
+                Err(DocRefusal::TaxableAmountNotDetermined)
+            );
+            // ★ Prior to the declaration: an unanswered exception must not shadow it, because the
+            //   filer answering the question would not make the payer's figure appear.
+            f.exception_applies = None;
+            assert_eq!(
+                document_taxable(&f),
+                Err(DocRefusal::TaxableAmountNotDetermined),
+                "the payer's own blank is the prior fact; sending the filer to a question they can \
+                 answer would be advice that does not help"
+            );
+        }
     }
 
     /// ★★★ C-2 — withholding is summed over EVERY row, both kinds. r1 found this box dropped entirely,

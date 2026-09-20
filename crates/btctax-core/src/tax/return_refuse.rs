@@ -1629,7 +1629,9 @@ pub enum RefuseReason {
     /// ★ The `year` rides in the payload so the message can name it, and the WINDOW comes from
     /// [`crate::tax::tables::SCHEDULE_1A_YEARS`] rather than a second copy of `2025..=2028` — the
     /// table's `None` and this sentence cannot then disagree when the provisions sunset.
-    Schedule1aNotOnThisYearsReturn { year: i32 },
+    Schedule1aNotOnThisYearsReturn {
+        year: i32,
+    },
     // ── ★★★ R3 / §5.1 — THE DOCUMENT CENSUS's four refusals. ────────────────────────────────────
     //
     // Each carries the ROW, never a string, so the message table lives in one place
@@ -1750,23 +1752,30 @@ pub enum RefuseReason {
     /// [`NotUsable::FactsNotCollected`]: crate::tax::state_local_refund::NotUsable::FactsNotCollected
     /// [`NotUsable::NoArchivedRevision`]: crate::tax::state_local_refund::NotUsable::NoArchivedRevision
     /// [`NotUsable::NoLine5AmountForStatus`]: crate::tax::state_local_refund::NotUsable::NoLine5AmountForStatus
+    /// ★★★ **T14 / R-1, R-3 — a Form 1099-R question the FILER can answer is unanswered.** The payload
+    /// names which: the line 4a/4b or 5a/5b exception declaration, or the code-T Roth lookback year.
+    ///
+    /// Grouped by REMEDY rather than one variant per condition, and that is the taxonomy a refusal is
+    /// for: everything here is fixed by the filer answering a question they already know the answer to.
+    /// The spec's R-numbers are named in the message so nothing is lost to the grouping.
+    RetirementQuestionUnanswered(String),
+    /// ★★★ **T14 / R-2, R-4 — the document is something this build cannot follow.** An exception the
+    /// filer declared applies (a rollover, basis/Form 8606, a QCD, an HSA funding distribution, the PSO
+    /// exclusion, a line-1h disability pension), a code-T Roth whose lookback answer is NO, or a box
+    /// whose figure v1 has no line for (3, 6, 8, 10). The remedy is a preparer, not an answer.
+    RetirementDocumentUnsupported(String),
+    /// ★★★ **T14 / R-5 — the PAYER's form does not carry the taxable amount.** Either box 2b's *"Taxable
+    /// amount not determined"* is checked, or a pension's box 2a is blank — the case
+    /// `i1040gi--2025.txt:2888-2891` sends to the General Rule / Simplified Method, which v1 refuses.
+    ///
+    /// ★ Distinct from the other two because NEITHER an answer nor a preparer is the first step: the
+    /// figure is missing from the document, and no question the filer answers makes it appear.
+    ///
+    /// ★★ These three REPLACED `RetirementIncomeNotComputed`, the blanket refusal that stood while
+    /// nothing computed. It was deleted rather than kept as a fallback: an unreachable refusal is a
+    /// refusal nobody can test, and `refusal_test_census` would have had to pin it as untested.
+    RetirementTaxableAmountUnavailable(String),
     StateAndLocalRefundWorksheetNotComputed,
-    /// ★★★ **T14 — a Form 1099-R is on the return and NOTHING COMPUTES FROM IT YET.**
-    ///
-    /// `ReturnInputs::r_1099` and the whole `form1099r` transcription landed before the 4a/4b and
-    /// 5a/5b compute, deliberately: the transcription is verifiable against the archived form with no
-    /// engine changes, and a wrong box caught then costs nothing while the same error found after
-    /// wiring is a money defect.
-    ///
-    /// ★★ **But holding a document no line reads is the worst possible middle state**, because the
-    /// filer's retirement income would simply be absent from total income with nothing said — the
-    /// understatement direction, silently. So the whole return refuses while any row is present. This
-    /// is the same fail-closed posture the roadmap uses for the deferred T13: *"an arriving 1099-MISC
-    /// refuses the return with its reason rather than filing something wrong"*.
-    ///
-    /// ★ It is removed, not relaxed, when the compute lands — and until then it is the one thing
-    /// standing between a transcribed 1099-R and a 1040 that omits it.
-    RetirementIncomeNotComputed,
     /// ★★★ **THE FORM FORBIDS THE WORKSHEET FOR THIS FILER — one of Pub. 525's nine Exception
     /// conditions applies.**
     ///
@@ -3945,6 +3954,163 @@ pub fn home_sale_decision(ri: &ReturnInputs) -> HomeSaleDecision {
     }
 }
 
+/// Which document a Form 1099-R refusal is about, phrased for the filer.
+fn r1099_payer(f: &crate::tax::form1099r::Form1099R, i: usize) -> String {
+    if f.payer.trim().is_empty() {
+        format!("Form 1099-R #{}", i + 1)
+    } else {
+        format!("the Form 1099-R from {}", f.payer.trim())
+    }
+}
+
+fn r1099_which(f: &crate::tax::form1099r::Form1099R) -> &'static str {
+    if f.kind == crate::tax::form1099r::Form1099RKind::Ira {
+        "IRA distribution"
+    } else {
+        "pension or annuity"
+    }
+}
+
+/// ★★★ **T14 — the Form 1099-R documents this build cannot file, whatever tier is running.**
+///
+/// Everything here is a fact about the DOCUMENT, not about a question left blank: an exception the filer
+/// declared applies, a code-T Roth whose lookback answer is no, a box carrying a figure v1 has no line
+/// for, or a taxable amount the payer's own form does not contain. None is fixable by
+/// `btctax income answer`, so all of them refuse at import too — which is the same rule
+/// `ScreenTier`'s doc gives for the census's value rules and for an unsupported document type.
+fn screen_r1099_unsupported(ri: &ReturnInputs) -> Option<Refusal> {
+    use crate::tax::form1099r::DocRefusal as D;
+    for (i, f) in ri.r_1099.iter().enumerate() {
+        let Err(why) = crate::tax::form1099r::document_taxable(f) else {
+            continue;
+        };
+        let payer = r1099_payer(f, i);
+        let which = r1099_which(f);
+        return match why {
+            // The two UNANSWERED cases are NOT here — see `screen_r1099_unanswered`.
+            D::ExceptionUnanswered | D::RothLookbackUnanswered => continue,
+            D::ExceptionUnsupported => refuse(
+                RefuseReason::RetirementDocumentUnsupported(format!("{payer}: a declared exception")),
+                format!(
+                    "you declared that an exception applies to {payer}, a {which}. Each of them routes \
+                     somewhere btctax cannot follow — a rollover to the 60-day rule and a filed \
+                     statement, basis or a Roth to Form 8606, a qualified charitable distribution to \
+                     its limit and attachment, an HSA funding distribution to Form 8889 Part III, the \
+                     retired public safety officer exclusion to its own ceiling. btctax models only \
+                     the ordinary case, so it refuses rather than file a figure it cannot stand \
+                     behind. File that distribution with a preparer. (R-2 / R-4)"
+                ),
+            ),
+            D::RothLookbackNo => refuse(
+                RefuseReason::RetirementDocumentUnsupported(format!(
+                    "{payer}: code T with no pre-lookback Roth contribution"
+                )),
+                format!(
+                    "{payer} shows distribution code T, and you answered that you did NOT contribute \
+                     or convert to a Roth IRA for the year its instructions name or earlier. That puts \
+                     the distribution on Form 8606, which btctax does not build. File it with a \
+                     preparer. (r2 I-1)"
+                ),
+            ),
+            D::RefusingBoxPresent(label) => refuse(
+                RefuseReason::RetirementDocumentUnsupported(format!("{payer}: box {label}")),
+                format!(
+                    "{payer} carries a figure in box {label}, and btctax has no line for it. Box 3 is \
+                     a capital gain inside box 2a that belongs on Form 4972's 20% election; box 6 is \
+                     net unrealized appreciation in employer securities, deferred until you sell \
+                     them; box 8 is an annuity or insurance figure with its own machinery; box 10 is \
+                     an in-plan Roth rollover inside the 5-year window, which carries a recapture \
+                     rule. Filing past any of them would misstate your tax. File this document with \
+                     a preparer."
+                ),
+            ),
+            D::TaxableAmountNotDetermined => refuse(
+                RefuseReason::RetirementTaxableAmountUnavailable(format!("{payer}: box 2b")),
+                format!(
+                    "{payer} has \"Taxable amount not determined\" checked in box 2b — the payer is \
+                     telling you it did not work out how much of this distribution is taxable. \
+                     btctax will not determine it either: that figure depends on your cost in the \
+                     plan and on records the payer does not hold. Ask the payer for a corrected form \
+                     if they can produce one, or file with a preparer. (R-5)"
+                ),
+            ),
+            D::PensionTaxableAmountMissing => refuse(
+                RefuseReason::RetirementTaxableAmountUnavailable(format!("{payer}: box 2a is blank")),
+                format!(
+                    "{payer} is a pension or annuity with a BLANK box 2a. Its instructions say that \
+                     when the form does not show the taxable amount you must use the General Rule or \
+                     the Simplified Method to figure it — worksheets btctax does not build, because \
+                     they need your cost at the annuity starting date, that date, your age then, and \
+                     the number of payments already received. File it with a preparer. (R-5)"
+                ),
+            ),
+        };
+    }
+    None
+}
+
+/// ★★★ **T14 / R-1, R-3 — the Form 1099-R questions the FILER can answer, in the UNANSWERED tier only.**
+///
+/// ★★ **This helper exists because of where its advice points.** The first version put these two beside
+/// the unsupported cases in the body, and `no_refusal_in_the_import_tier_prescribes_income_answer` caught
+/// it: the messages say *"answer it with `btctax income answer`"*, and a refused IMPORT stores no row, so
+/// there would be nothing to answer against.
+///
+/// These are class-(A) declarations left `None`, which is exactly what `ScreenTier::unanswered_refuses`
+/// gates. At import they do not fire, the row LANDS, and the advice becomes followable. The COMMIT gate
+/// runs every tier, so nothing unanswered reaches `assemble_absolute` — which is what its panic depends
+/// on.
+///
+/// ★ It is a separate FUNCTION, not an `if` in the body, for the same reason `screen_dependent_gates` is:
+/// `every_param_free_rule_is_censused_from_the_source_and_fires_on_both_paths` reads the body's text and
+/// would otherwise demand a param-free fixture for a rule that deliberately never fires at import.
+fn screen_r1099_unanswered(ri: &ReturnInputs) -> Option<Refusal> {
+    use crate::tax::form1099r::DocRefusal as D;
+    for (i, f) in ri.r_1099.iter().enumerate() {
+        let Err(why) = crate::tax::form1099r::document_taxable(f) else {
+            continue;
+        };
+        let payer = r1099_payer(f, i);
+        let which = r1099_which(f);
+        match why {
+            D::ExceptionUnanswered => {
+                return refuse(
+                    RefuseReason::RetirementQuestionUnanswered(format!(
+                        "{payer}: the line 4a/4b and 5a/5b exception declaration"
+                    )),
+                    format!(
+                        "{payer} is a {which}, and you did not say whether any of the exceptions in \
+                         its instructions applies to it — a rollover, a Form 8606 item (basis, a \
+                         Roth, a conversion, a returned or recharacterized contribution), a \
+                         qualified charitable distribution, an HSA funding distribution, or on the \
+                         pension side the retired public safety officer exclusion. Silence is not \
+                         testimony that none applies, and it matters in BOTH directions. Answer it \
+                         with `btctax income answer`. (R-1 / R-3)"
+                    ),
+                )
+            }
+            D::RothLookbackUnanswered => {
+                return refuse(
+                    RefuseReason::RetirementQuestionUnanswered(format!(
+                        "{payer}: the code-T Roth contribution year"
+                    )),
+                    format!(
+                        "{payer} shows distribution code T in box 7, which means the payer did NOT \
+                         know whether your Roth IRA met the 5-year holding period — so only you can \
+                         say. The question is whether you contributed or converted to a Roth IRA for \
+                         the year its instructions name, or earlier. Answering yes files a taxable \
+                         amount of -0-; leaving it blank would file that -0- without the fact behind \
+                         it, which would understate your tax. Answer it with \
+                         `btctax income answer`. (r2 I-1)"
+                    ),
+                )
+            }
+            _ => continue,
+        }
+    }
+    None
+}
+
 pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<Refusal> {
     // ★★★ **B3 C-1 — WHICH YEAR IS THIS? The premise, refused before any rule that depends on it.**
     //     See [`RefuseReason::ReturnInputsYearNotStated`] for why this is first and why the earlier
@@ -3973,27 +4139,17 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
         );
     }
 
-    // ★★★ T14 — a transcribed Form 1099-R that no line reads. Placed immediately after the data
-    //     integrity gate and before every computed rule, because it is a statement about what this
-    //     build CAN do rather than about the filer's facts: no later rule's answer could change it,
-    //     and letting one of them speak first would send the filer to fix something irrelevant.
-    if !ri.r_1099.is_empty() {
-        let n = ri.r_1099.len();
-        let s = if n == 1 { "" } else { "s" };
-        return refuse(
-            RefuseReason::RetirementIncomeNotComputed,
-            format!(
-                "this return carries {n} Form 1099-R{s}, and btctax cannot yet compute Form 1040 \
-                 lines 4a/4b (IRA distributions) or 5a/5b (pensions and annuities) from {}. The \
-                 boxes are transcribed and kept — nothing you typed is lost — but no line reads them \
-                 yet, so filing this return would leave your retirement income out of total income \
-                 entirely. btctax refuses rather than file a return that understates your tax. File \
-                 with a preparer for this year, or remove the Form 1099-R row{s} if {} entered by \
-                 mistake.",
-                if n == 1 { "it" } else { "them" },
-                if n == 1 { "it was" } else { "they were" },
-            ),
-        );
+    // ★★★ **T14 — the Form 1099-R gate, per DOCUMENT.** This replaced `RetirementIncomeNotComputed`,
+    //     the blanket refusal that stood while nothing computed. Lines 4a/4b/5a/5b and the box-4 share of
+    //     25b are wired now, so the only documents that refuse are the ones the FORM itself sends
+    //     somewhere v1 cannot follow.
+    //
+    //     ★★ It runs BEFORE every computed rule and immediately after the data-integrity gate, because
+    //        `assemble_absolute` PANICS on a refusing document — deliberately, as a claim about call
+    //        order. This is the call that makes that claim true, so it may not be moved below anything
+    //        that could return first.
+    if let Some(r) = screen_r1099_unsupported(ri) {
+        return Some(r);
     }
 
     // ★★★ §G-28/B4 — Schedule D lines 1a/8a carry TOTALS only for transactions the form itself admits:
@@ -4202,6 +4358,11 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
     }
 
     if tier.unanswered_refuses {
+        // ★ T14 / R-1, R-3 — see `screen_r1099_unanswered` for why these two live here and not in the
+        //   body beside their unsupported siblings.
+        if let Some(r) = screen_r1099_unanswered(ri) {
+            return Some(r);
+        }
         // ★★★ **R7 / T8 — the CLASS-(A) entries of `SKIPPABLE_QUESTIONS`.**
         //
         // That registry is class (B) by rule and by name, and exactly one entry declares otherwise:
@@ -11900,33 +12061,20 @@ mod param_free_tier {
         //     into the worksheet, `answer_remaining` answers limb (b) at its neutral (`false`), and
         //     `state_local_refund` is `None` — never collected. The reason is the same; what it MEANS
         //     is narrower.
-        // ★ T14 — one transcribed row is enough: the refusal is about what the build can do, not
-        //   about any figure on the row, so the fixture carries the minimum a real form would.
-        add("RetirementIncomeNotComputed", &|r| {
-            r.r_1099.push(crate::tax::form1099r::Form1099R {
-                payer: "Example Retirement Trust".into(),
-                payer_tin: String::new(),
-                transcribed_on: None,
-                kind: crate::tax::form1099r::Form1099RKind::Ira,
-                box1_gross_distribution: dec!(20_000),
-                box2a_taxable_amount: Some(dec!(20_000)),
-                box2b_taxable_amount_not_determined: false,
-                box2b_total_distribution: false,
-                box3_capital_gain: Usd::ZERO,
-                box4_fed_withheld: dec!(2_000),
-                box5_employee_contributions: Usd::ZERO,
-                box6_net_unrealized_appreciation: Usd::ZERO,
-                box7_distribution_codes: "7".into(),
-                box8_other: Usd::ZERO,
-                box9a_percentage_of_total: None,
-                box9b_total_employee_contributions: Usd::ZERO,
-                box10_allocable_to_irr: Usd::ZERO,
-                box11_first_year_desig_roth: None,
-                box14_state_tax_withheld: None,
-                box17_local_tax_withheld: None,
-                roth_contribution_before_lookback: None,
-                exception_applies: Some(false),
-            });
+        // ★★★ T14.6 — the three per-document Form 1099-R refusals, each reached by the ONE fact it is
+        //     about. Built from the shared fixture and then mutated, so each differs from a filable row
+        //     in exactly one place — which is what makes the fixture evidence that the gate discriminates
+        //     rather than evidence that a 1099-R refuses.
+        add("RetirementDocumentUnsupported", &|r| {
+            let mut f = crate::tax::testonly::form_1099r_all_boxes_populated();
+            f.exception_applies = Some(true);
+            f.box7_distribution_codes = "7".into(); // not the Roth sub-branch ⇒ R-2
+            r.r_1099.push(f);
+        });
+        add("RetirementTaxableAmountUnavailable", &|r| {
+            let mut f = crate::tax::testonly::form_1099r_all_boxes_populated();
+            f.box2b_taxable_amount_not_determined = true; // R-5
+            r.r_1099.push(f);
         });
         add("StateAndLocalRefundWorksheetNotComputed", &|r| {
             r.state_refund_without_1099g = Some(true);
@@ -12176,6 +12324,16 @@ mod param_free_tier {
         //     a duplicate, and the whole rule would be uncensused while the test still printed OK.
         let direct_deposit =
             body_after("fn screen_direct_deposit(ri: &ReturnInputs) -> Option<Refusal> {");
+        // ★★★ **T14 — a FOURTH helper, named for the same reason the third was.** The Form 1099-R
+        //     document rules live in `screen_r1099_unsupported`; without this line their two reasons
+        //     would never enter `named`, their fixtures would look like duplicates, and the whole gate
+        //     would be uncensused while this test still printed OK.
+        //
+        //     ★ Its UNANSWERED sibling `screen_r1099_unanswered` is deliberately NOT named here: the
+        //       body reaches it only inside `if tier.unanswered_refuses`, so it is exempt by
+        //       construction — the same treatment `screen_dependent_gates` gets.
+        let r1099 =
+            body_after("fn screen_r1099_unsupported(ri: &ReturnInputs) -> Option<Refusal> {");
 
         let named: BTreeSet<String> = reasons_in(body)
             .union(&reasons_in(census_fn))
@@ -12185,6 +12343,9 @@ mod param_free_tier {
             .cloned()
             .collect::<BTreeSet<String>>()
             .union(&reasons_in(direct_deposit))
+            .cloned()
+            .collect::<BTreeSet<String>>()
+            .union(&reasons_in(r1099))
             .cloned()
             .collect();
         let package_gated: BTreeSet<String> =
@@ -12299,6 +12460,83 @@ mod param_free_tier {
     ///
     /// ★ The UNANSWERED tier is exempt BY CONSTRUCTION and correctly so: it never runs at import
     ///   (`ScreenTier::unanswered_refuses`), so its registry details name `income answer` truthfully.
+    /// ★★★ **R-1 / R-3 fire at the COMMIT gate and NOT at import — both halves asserted, because the
+    /// asymmetry is the whole design and either half alone would be satisfied by a mistake.**
+    ///
+    /// These two are class-(A) declarations left `None`. `screen_inputs_tiered` reaches them only inside
+    /// `if tier.unanswered_refuses`, so:
+    ///
+    /// * at **import** they do NOT refuse — the row lands, and `btctax income answer` (which the message
+    ///   prescribes) becomes reachable. Refusing here would make that advice impossible to follow, which
+    ///   is what `no_refusal_in_the_import_tier_prescribes_income_answer` caught in the first draft.
+    /// * at the **commit gate** they DO refuse — which is what `assemble_absolute`'s panic depends on:
+    ///   it treats a refusing document as a call-order violation, not as data.
+    #[test]
+    fn r1_and_r3_refuse_at_the_commit_gate_and_land_at_import() {
+        let mut base = ri();
+        let mut f = crate::tax::testonly::form_1099r_all_boxes_populated();
+        f.exception_applies = None; // R-1
+        base.r_1099.push(f);
+
+        // Import tier: `unanswered_refuses: false`. Nothing about the 1099-R may refuse.
+        let at_import = screen_inputs_tiered(
+            &base,
+            ScreenTier {
+                package: None,
+                unanswered_refuses: false,
+            },
+        );
+        assert!(
+            !at_import
+                .as_ref()
+                .is_some_and(|r| matches!(r.reason, RefuseReason::RetirementQuestionUnanswered(_))),
+            "an unanswered Form 1099-R question must LAND at import so it can be answered: {at_import:?}"
+        );
+
+        // Commit tier: it must refuse, and the message must name the question.
+        let at_commit = screen_inputs_tiered(
+            &base,
+            ScreenTier {
+                package: None,
+                unanswered_refuses: true,
+            },
+        )
+        .expect("the commit gate must refuse an unanswered Form 1099-R declaration");
+        assert!(
+            matches!(
+                at_commit.reason,
+                RefuseReason::RetirementQuestionUnanswered(_)
+            ),
+            "{:?}",
+            at_commit.reason
+        );
+        assert!(
+            at_commit.detail.contains("Silence is not testimony"),
+            "the refusal must say WHY silence is not an answer: {}",
+            at_commit.detail
+        );
+
+        // ★ And the pension side (R-3) reaches the same refusal, so the grouping is not IRA-only.
+        let mut p = crate::tax::testonly::form_1099r_all_boxes_populated();
+        p.kind = crate::tax::form1099r::Form1099RKind::PensionOrAnnuity;
+        p.exception_applies = None;
+        let mut pension_only = ri();
+        pension_only.r_1099.push(p);
+        let r = screen_inputs_tiered(
+            &pension_only,
+            ScreenTier {
+                package: None,
+                unanswered_refuses: true,
+            },
+        )
+        .expect("R-3");
+        assert!(matches!(
+            r.reason,
+            RefuseReason::RetirementQuestionUnanswered(_)
+        ));
+        assert!(r.detail.contains("pension or annuity"), "{}", r.detail);
+    }
+
     #[test]
     fn no_refusal_in_the_import_tier_prescribes_income_answer() {
         let mut named: Vec<&str> = Vec::new();

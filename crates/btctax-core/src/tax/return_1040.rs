@@ -2476,10 +2476,10 @@ pub fn assemble_absolute(
              `screen_inputs_tiered` must run BEFORE assembly and refuse it"
         )
     });
-    let taxable_pension = crate::tax::form1099r::line_5b(&ri.r_1099).unwrap_or_else(|i| {
+    let taxable_pension = crate::tax::form1099r::line_5b(&ri.r_1099).unwrap_or_else(|(i, r)| {
         panic!(
-            "assemble_absolute reached a Form 1099-R (row {i}) with a BLANK box 2a — the General Rule / \
-             Simplified Method case, which `screen_inputs_tiered` must refuse before assembly"
+            "assemble_absolute reached a refusing Form 1099-R pension row {i} ({r:?}) — \
+             `screen_inputs_tiered` must run BEFORE assembly and refuse it"
         )
     });
     let ira_distributions_total = crate::tax::form1099r::line_4a(&ri.r_1099);
