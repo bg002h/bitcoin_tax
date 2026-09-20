@@ -9687,6 +9687,27 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   check in one command that they are holding the artifact under review — which makes the reviewer a
   witness to their own payload instead of trusting the harness.
 
+- **🔴 OPEN — FR-258 — Form 1099-R box 14 (and box 17) feed Schedule A line 5a, and NO document family beyond the W-2 has been swept for this. Owning phase: the retirement build (T14) for box 14; the QCD widening for box 17.**
+  The Schedule A line-5a instruction names **five** documents whose state/local withholding boxes reach
+  that line, verbatim: *"Forms W-2G, 1099-G, **1099-R**, 1099-MISC, and 1099-NEC may also show state and
+  local income taxes withheld"* (`design/forms/extract/i1040sca--2024.txt:324`; identical at
+  `--2025:218`). Only the **W-2** route has been built — interview T11 found and fixed the missing box 17
+  + 19 there ([[FR-91]]).
+  ★★ **So this is not one defect but a family, and the 1099-R is merely the one a fold tripped over.**
+  `Form1099R::box14_state_tax_withheld` is now specified (`SPEC_retirement_income.md` §7) and belongs to
+  the retirement build. What is NOT covered anywhere: **1099-G**, **1099-MISC** and **1099-NEC** state
+  withholding. 1099-G is already a modelled `DocumentKind` with an archived box census, so that one is
+  checkable today and should be swept in the same pass.
+  ★ **Why it is filed rather than fixed here:** an itemizing filer understates line 5a by the whole of
+  the withholding, which is the overstating-tax direction and therefore not a funds-safety emergency —
+  but it is a wrong result on a money line, so it gates its owning phase rather than batching to the end.
+  ★★★ **And the meta-finding, which is the reason this entry exists at all.** Fold-review r2's I-8: the
+  I-10 fold *discovered* this defect, wrote it up in the spec and in a commit message, and filed it
+  **nowhere** — no field, no refusal, no mutation row, no ledger entry — while the two NON-money findings
+  from the same fold (FR-256 input paths, FR-257 cite-check scope) both got FR numbers within minutes.
+  A discovery recorded only in prose is a discovery scheduled for nothing. The asymmetry was not a
+  judgment call; it was inattention, and it ran against the one finding that moves a number on a return.
+
 - **🔴 OPEN — FR-257 — `cite-check` cannot grade a spec that narrates its own review history, and the retirement spec is one. Owning phase: the §7 rewrite (retirement build), NOT before.**
   I-10's third ask was to bring the retirement spec's box quotations under `cite-check`. I extended
   `checked_docs()` to it and ran it: **57 of 152 quoted spans failed.** Reverted, because the failures

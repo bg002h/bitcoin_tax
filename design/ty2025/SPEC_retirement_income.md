@@ -86,7 +86,7 @@ what else is missing"* — and the first pass found:
 ★ §7 must therefore be rewritten against the extract, not patched. The form prints **21** box labels
 (1, 2a, 2b, 3, 4, 5, 6, 7, 8, 9a, 9b, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19) and §7 names five. At
 least four of the omissions carry decisions: box 3 (capital gain in box 2a), box 5 and box 9b (the
-Simplified Method's cost in the plan — the very worksheet this spec builds), and box 14. Per **blank is
+Simplified Method's cost in the plan — ⚠️ **not** "the worksheet this spec builds"; that phrase was wrong here too and is corrected per r2 I-3, since §5 REFUSES the Simplified Method Worksheet. The boxes still matter: they are what a future widening needs), and box 14. Per **blank is
 the normal case**, the rewrite's gate is not *"does every box carry a value"* but *"does every box have
 a determinate provenance"*.
 
@@ -203,15 +203,36 @@ conclusion — the first three are I-2's, the fourth is stronger and I-2 did not
    carries no such limb. Two adjacent rules, one qualified and one not, is a deliberate difference, not
    an oversight to be read away.
 
-3. **Exception 2 sub-branch (b)** instructs *"enter the total distribution on line 4a"* with `-0-` on
-   4b for a distribution-code-Q Roth IRA — a populated 4a on a branch the instructions close in one
+3. **Exception 2's LEAD sentence** instructs *"enter the total distribution on line 4a"* (`:2698`) and
+   sub-branch **(b)** then substitutes `-0-` on 4b for a distribution-code-Q Roth IRA (`:2714`). ★ r2's
+   M-2: the first version of this item attributed the 4a phrase to the sub-branch, which does not carry
+   it — the lead does, and that distinction is exactly what C-1 turned on — a populated 4a on a branch the instructions close in one
    sentence. See the I-3 fold.
 
-4. **★★★ Line 5a is populated unconditionally whenever the Simplified Method runs**, by that
-   worksheet's own line 1: *"Enter the total pension or annuity payments from Form 1099-R, box 1.
-   **Also, enter this amount on Form 1040 or 1040-SR, line 5a**"* (`:2981-2982`). That is the worksheet
-   this spec builds, so "5a only when box 2a is smaller" understates it: the worksheet writes 5a as a
-   step, not as a consequence of a comparison.
+4. **⚠️ REPLACED 2026-09-20 by fold-review r2 (I-3) — MY ARGUMENT HERE WAS BUILT ON A WORKSHEET THIS
+   SPEC REFUSES.** The retracted text: *"★★★ Line 5a is populated unconditionally whenever the
+   Simplified Method runs, by that worksheet's own line 1 … **That is the worksheet this spec
+   builds**."* The quote is verbatim (`:2981-2982` ✓) but the clause after it is **false**, and §5 says
+   so in its own words: *"The Simplified Method Worksheet is the opposite call and is REFUSED"*
+   (R-3/R-5). The worksheet this spec builds is the **Social Security Benefits Worksheet** (S-4). ★ I
+   made the identical false claim in the I-10 fold at §1, and both are corrected.
+
+   **The paragraph that actually governs line 5a sits 90 lines earlier and I had not cited it:**
+
+   > *"**Partially Taxable Pensions and Annuities.** Enter the total pension or annuity payments (from
+   > Form 1099-R, box 1) on line 5a. If your Form 1099-R doesn't show the taxable amount, you must use
+   > the General Rule explained in Pub. 939 to figure the taxable part to enter on line 5b."*
+   > — `i1040gi--2025.txt:2888-2891`
+
+   ★★ This is **better authority than the one I used**, and it settles v1 cleanly: for a partially
+   taxable pension 5a = Σ box 1 **unconditionally**, and the worksheet/General Rule is reached only when
+   box 2a is BLANK. In v1 §4.1 makes 5b = Σ box 2a — box 2a is shown — so the in-scope partially-taxable
+   case needs **no worksheet at all**: 5a = Σ box 1, 5b = Σ box 2a.
+
+   ★ So the ORIGINAL S-2 sentence — *"5a is populated only when the 1099-R shows a smaller box 2a"* —
+   was substantially **right**, and my retraction of that half overreached. What was wrong was calling
+   it a consequence of a comparison rather than the partially-taxable branch's own instruction. The 4a
+   half of the retraction stands unaffected.
 
 **THE ADJUDICATION.** Both cells are conditionally populated, and the conditions come from the form:
 
@@ -219,7 +240,8 @@ conclusion — the first three are I-2's, the fourth is stronger and I-2 did not
 |---|---|---|
 | **4a** | **more than one** IRA distribution ⇒ Σ box 1 over IRA documents; **or** a code-Q / code-T Roth sub-branch | `:2789-2795`; `:2707-2715` |
 | **4a** | left blank on a **single** fully-taxable IRA distribution | `:2664-2667` |
-| **5a** | the Simplified Method runs (worksheet line 1 writes it) **or** more than one *partially taxable* pension | `:2981-2982`; `:2978-2980` |
+| **5a** | **any partially taxable pension** — i.e. box 2a is shown and is less than box 1, which is the v1 case | *"**Partially Taxable Pensions and Annuities.** Enter the total pension or annuity payments (from Form 1099-R, box 1) on line 5a"* — `:2888-2891` |
+| **5a** | more than one *partially taxable* pension ⇒ Σ box 1 over them | `:2978-2980` |
 | **5a** | left blank on a **single** fully-taxable pension | `:2876-2880` |
 
 ★★ **`Option<Usd>` is therefore still the right type — for the opposite reason.** S-2's original
@@ -376,10 +398,32 @@ them:
 | `…f1_50[0]` | **6a** |
 | `…f1_51[0]` | **6b** |
 
-★★ Coverage rows are **per field** — `line_coverage_check.rs` says so where it keys the pigeonhole on
-distinct lines rather than rows (*"a coverage row is per FIELD"*) — so the row already carries the key
-`label_join` is indexed by. **Binding `row.line` to `label_join[row.field]` is therefore a lookup, not
-a heuristic**, and a 4b↔6b label swap becomes a disagreement between two independently derived values.
+**⚠️ CORRECTED 2026-09-20 by fold-review r2 (I-4) — the two are NOT in the same key space, so the
+claim below was wrong and M-1b as first written was circular.** The retracted text: *"Coverage rows are
+per field … so the row already carries the key `label_join` is indexed by. Binding `row.line` to
+`label_join[row.field]` is therefore a lookup, not a heuristic."*
+
+The structs say otherwise, and r2 quoted both:
+
+| side | its key | evidence |
+|---|---|---|
+| `LineCoverage.field` | the **Rust** field name, `"line16"` | `line_coverage.rs`: *"The Rust field, e.g. `"line16"`."* |
+| `label_join` | the **AcroForm** field name, `topmostSubform[0]…f1_47[0]` | `label_reader.rs`: *"for every AcroForm box, the printed line label that governs it"* |
+
+**The bridge between them is the `f1040.map.toml` row — which this fold's own I-8 proves is absent for
+all six lines** (`grep -cE '^line(4a|4b|5a|5b|6a|6b) *='` returns 0 on both years' maps). So M-1b
+depended on precisely the thing I had just measured as missing: circular.
+
+★★ **It is still buildable, and the ordering is now explicit.** The binding is a **two-hop join gated on
+the map rows the build must add anyway** (I-8's 6 + 6 cells):
+
+> `LineCoverage.field` → its `f1040.map.toml` row → the AcroForm name → `label_join` → the printed
+> label, compared against `LineCoverage.line`.
+
+★ Each hop is already a committed artefact and none is a heuristic. But the join **cannot be written
+before the map cells exist**, so M-1b is scheduled after them rather than beside them — and if the map
+work slips, S-9 must say in the spec that the three rows' mutual attribution is not machine-held and
+name the KAT standing in.
 
 ★ Two independent derivations agree that these six fields are 4a–6b: this geometry label join, and the
 AcroForm numbering plus column coordinates measured under I-8 (`f1_45` = 3b, `f1_52` = 7, subline column
@@ -446,9 +490,9 @@ line-9 operand list, which reads *"…6b, **7**, and 8"* in `f1040--2024.txt:75`
 
 | line | v1 behaviour |
 |---|---|
-| **4a** | `Option<Usd>`, **always `None` in v1** — the form instructs a blank on the only branch that computes (S-2) |
+| **4a** | `Option<Usd>` — ⚠️ **CORRECTED 2026-09-20 (r2 I-2): NOT "always `None`".** `Some(Σ box 1 over IRA documents)` when more than one IRA document exists or any is on the Roth `-0-` sub-branch; `None` on a single fully-taxable document. See S-2's adjudication and the C-1 rule table (§8) |
 | **4b** | Σ Form 1099-R box 1 over IRA-flagged documents, when the filer declares no Exception applies |
-| **5a** | `Option<Usd>` — `Some(Σ box 1)` when box 2a < box 1; `None` when the pension is fully taxable |
+| **5a** | `Option<Usd>` — `Some(Σ box 1)` when box 2a < box 1 (the partially-taxable branch); `None` when the pension is fully taxable. ★ Authority is `i1040gi--2025.txt:2888-2891`, *not* the Simplified Method Worksheet, which this spec REFUSES (r2 I-3) |
 | **5b** | Σ Form 1099-R box 2a (pension-flagged), per `i1040gi--2025.txt:2902-2904` |
 | **6a** | Σ Form SSA-1099 / RRB-1099 **box 5** — worksheet line 1 (`i1040gi--2025.txt:3396-3398`) |
 | **6b** | the Social Security Benefits Worksheet, transcribed in full (§5) |
@@ -563,7 +607,7 @@ Quotes are the form's own printed text (`f1040--2025.txt`), as the census requir
 
 | line | printed text | extract | field | production |
 |---|---|---|---|---|
-| 4a | "IRA distributions" | `:74` | `line4a: Option<Usd>` | `Collected` — **always `None` in v1** (S-2) |
+| 4a | "IRA distributions" | `:74` | `line4a: Option<Usd>` | `Collected` — ⚠️ **CORRECTED 2026-09-20 (r2 I-2)**: conditionally populated, per S-2's adjudication table and §8's C-1 rule. The previous text said *"always `None` in v1"* and cited *(S-2)* — the section that had retracted it |
 | 4b | "Taxable amount" | `:74` | `line4b: Usd` | `Collected` |
 | 4c | "Check if (see instructions) 1 Rollover 2 QCD 3" | `:75` | *(no field)* | never checked — every branch that would check it refuses (§4.2) |
 | 5a | "Pensions and annuities" | `:76` | `line5a: Option<Usd>` | `Collected` |
@@ -575,8 +619,13 @@ Quotes are the form's own printed text (`f1040--2025.txt`), as the census requir
 | 6d **(TY2025 ONLY — see the S-7/S-10 retraction; TY2024 has no line 6d, and its disclosure is a written `D` on line 6a)** | "If you are married filing separately and lived apart from your spouse the entire year (see inst.), check here" | `:80` | `line6d_checked: bool` | `Collected` — from the R-8 declaration |
 | 9 | "Add lines 1z, 2b, 3b, 4b, 5b, 6b, 7a, and 8. This is your total income" | `:84` | `line9` | `Combine` — **gains three operands** |
 
-★ Every one of these quotes must land **after** S-9's checker fix, or the three `"Taxable amount"`
-rows are unverified by construction.
+★ ⚠️ **CORRECTED 2026-09-20 (r2 M-5).** This note used to say the quotes *"must land **after** S-9's
+checker fix, or the three `"Taxable amount"` rows are unverified by construction"* — the gating framing
+the I-4 fold retracted in S-9 and M-1 but did not carry here, and §6's closing note is r1 I-4's own
+third named section. What holds today: FR-184's pigeonhole admits the three rows **because the form
+prints those words three times**, and row-to-line attribution is a separate guarantee scheduled after
+I-8's map cells (§10 M-1b). The rows are not blocked; their mutual attribution is simply not
+machine-held yet, and M-1b is the kill that will hold it.
 
 ---
 
@@ -604,9 +653,42 @@ pub struct Form1099R {
     /// 1, 4b = `-0-`, no Form 8606) — see the I-3 fold at R-2. Everything else falls through to R-2.
     /// The previous doc comment said *"screened, never interpreted"*, which was wrong: the
     /// instructions' own decision procedure is a box-7 test, so the field that decides was held and
-    /// not read. ★ Parse to a code SET; never `contains`, because box 7 is composed
-    /// (`i1099r--2025.txt`: *"If any other code, such as 8 or P, applies, use Code J"*).
+    /// not read. ★★ The test is **EQUALITY, not membership**: the sub-branch is taken only when box 7
+    /// is exactly `"Q"` or exactly `"T"`. Table 1's *used with* column for `Q` reads `None`
+    /// (`i1099r--2025.txt:2416`), and the Note inside both entries — *"If any other code, such as 8 or
+    /// P, applies, use Code J"* — instructs the payer to print `J` INSTEAD, so a composed code carrying
+    /// `Q` is a document this spec does not understand and R-2 refuses it. `contains("Q")` would admit
+    /// it, which understates tax (r2 I-5). ★ Every Table 1 code is one character, so there is no
+    /// separator to parse.
     pub box7_distribution_codes: String,
+    /// ★★★ **Box 14 — "State tax withheld". → SCHEDULE A LINE 5a.** Added 2026-09-20 folding r2's I-8:
+    /// the I-10 fold DISCOVERED this money defect and then filed it nowhere — no field, no refusal, no
+    /// mutation, no follow-up — while the two non-money findings from the same fold both got FR numbers.
+    ///
+    /// The authority, already committed in this tree the whole time:
+    /// *"Forms W-2G, 1099-G, **1099-R**, 1099-MISC, and 1099-NEC may also show state and local income
+    /// taxes withheld"* — `design/forms/extract/i1040sca--2024.txt:324` (identical at `--2025:218`).
+    ///
+    /// ★★ An itemizing retiree otherwise understates Schedule A line 5a by the whole of their state
+    /// pension withholding. This is the SAME defect interview T11 found and fixed for **W-2 boxes 17
+    /// and 19** (FR-91); nobody carried the reasoning across to this document. `Option<Usd>` because
+    /// most 1099-Rs carry no state withholding and a hardcoded `0` would be sworn testimony that none
+    /// was withheld.
+    ///
+    /// ★ **Boxes 15-19 are NOT collected, and that is a stated boundary rather than an omission.**
+    /// Box 15 (state/payer's state no.) and 18 (name of locality) are identifiers no federal line
+    /// reads; boxes 16 and 19 are state and local DISTRIBUTION amounts, which no federal line reads
+    /// either. Box 17 (**local** tax withheld) also feeds Schedule A line 5a by the same instruction
+    /// and is deliberately deferred with the QCD widening — recorded in FOLLOWUPS as part of the same
+    /// entry so it cannot be lost, because deferring it silently is what produced this finding.
+    pub box14_state_tax_withheld: Option<Usd>,
+    /// ★★ The SEVENTH question (r2 I-1). Asked **only** when `box7_distribution_codes == "T"` on an IRA
+    /// document. `None` REFUSES (`RothLookbackUnanswered`) — unlike A-1/A-2, silence here would admit
+    /// the filer to the `-0-` branch and understate tax, so it is a class-(A) declaration.
+    /// The `<YEAR>` in the prompt is read from that revision's own instructions and NEVER computed:
+    /// `i1040gi--2025.txt:2713` says 2020 and `i1040gi--2024.txt:2647` says 2018 — a two-year jump
+    /// across a one-year revision, so no offset formula is correct.
+    pub roth_contribution_before_lookback: Option<bool>,
     /// Which pair of 1040 lines this document reaches: 4a/4b or 5a/5b.
     pub kind: Form1099RKind,           // Ira | PensionOrAnnuity
     /// ★ class-(A) DECLARATION (S-3). `None` ⇒ R-1/R-3; `Some(true)` ⇒ R-2/R-4.
@@ -618,13 +700,17 @@ pub struct FormSsa1099 {
     pub owner: Owner,
     /// Box 3 — "total social security benefits paid to you" (i1040gi--2025.txt:3236-3237).
     pub box3_benefits_paid: Usd,
-    /// Box 4 — "the amount of any benefits you repaid in 2025" (:3237-3239). Box 4 > box 3 ⇒ R-6.
+    /// Box 4 — "the amount of any benefits you repaid in 2025" (:3237-3239). ★★ R-6 fires on
+    /// **Σ box 4 > Σ box 3 across ALL Forms SSA-1099/RRB-1099 of BOTH spouses**, never per form (r2 M-3).
+    /// Pub 915: *"If the total amount shown in box 5 of all of your Forms SSA-1099 and RRB-1099 is a
+    /// negative figure…"*, and its Ryan/Jordan example nets $3,000 against ($500) to $2,500. A per-form
+    /// test would refuse a return the instructions finish in one sentence.
     pub box4_benefits_repaid: Usd,
     /// ★★★ Box 5 is **NOT a field.** It is DERIVED — see the I-11 fold directly below.
 }
 
 /// Box 5 — NET benefits, the figure worksheet line 1 reads (:3396). Never collected: the form's own
-/// caption defines it, *"Box 5. Net Benefits for 2024 (Box 3 minus Box 4)"*, and it is NEGATIVE when
+/// caption defines it, *"Box 5. Net Benefits for 2025 (Box 3 minus Box 4)"*, and it is NEGATIVE when
 /// box 4 exceeds box 3 (printed in parentheses). `Usd` is `Decimal` and holds that; no new type.
 #[must_use]
 pub fn box5_net_benefits(f: &FormSsa1099) -> Usd {
@@ -659,17 +745,22 @@ SSA-1099 figure arrives through the adapter.
 ★★★ **I-11's second half is the one that decides the design, and it is entirely right.** Collecting
 boxes 3, 4 and 5 as three independent leaves permits a **triple that contradicts itself**, because on
 the form box 5 is not independent — the facsimile prints its definition in its own caption: *"Box 5.
-Net Benefits for 2024 (Box 3 minus Box 4)"*. So the fix is not a signed field beside two unsigned
+Net Benefits for 2025 (Box 3 minus Box 4)"* (the `--2025` edition; the `--2024` edition prints "2024"). So the fix is not a signed field beside two unsigned
 ones; it is to stop collecting a box the form computes. Deriving also moots the input-path split above
 for this spec, though the split itself remains and is filed as [[FR-256]].
 
-Pub 915 states the negative case in its own words, on **both** forms:
-> figure in box 3. This is a negative figure and means you repaid more money than you received."*
+Pub 915 states the negative case in its own words, on **both** forms — quoted here in full, because the
+first version of this fold spliced it and left it starting mid-sentence (r2 M-1):
 
-I-11's second half is the deeper one: collecting boxes 3, 4 and 5 as three independent leaves permits a
-**triple that contradicts itself**, because on the form box 5 is not independent — the facsimile prints
-its definition in the caption, *"Box 5. Net Benefits for 2024 (Box 3 minus Box 4)"*. So the fix is not a
-signed field beside two unsigned ones; it is to stop collecting a box the form computes.
+> *"If parentheses are around the figure in box 5, it means that the figure in box 4 is larger than the
+> figure in box 3. This is a negative figure and means you repaid more money than you received."*
+> — `Pub915_Social_Security_and_RRB_Benefits--2025.txt`, the SSA-1099 discussion and again for RRB-1099
+
+★ **The edition is now named in the citation, and r2's I-7 is why.** This fold originally quoted the box-5
+caption as *"Net Benefits for **2024**"* three times while citing an archive that holds the **2025**
+edition and prints "2025" — a string that appeared **zero** times in the file cited. Both editions are
+archived now (`--2024` and `--2025`) and every quote names one.
+
 
 ★★ **This is transcription, not derivation-in-the-forbidden-sense.** The standing rule bans a closed
 form that replaces the document's own steps. Here the document's own step *is* the subtraction, printed
@@ -760,7 +851,8 @@ SkippableQuestion {
     unanswered_detail: "",
     durability: Durability::PerYear,
     prompt: "Are YOU legally blind? (§63(f) additional deduction)",
-    help: "…Skipping leaves it unclaimed — lawful, since the burden to claim is yours — and the            forgone-benefit advisory fires.",
+    help: "…Skipping leaves it unclaimed — lawful, since the burden to claim is yours — and \
+           the forgone-benefit advisory fires.",
     kind: SkippableKind::YesNo,
     live: |_ri| true,            // ← the `live` condition I-5 asked for
     get_bool: |ri| ri.header.taxpayer.blind,   // ← an Option<bool> ON ReturnInputs
@@ -775,15 +867,48 @@ the silence. So A-1 and A-2 are `Option<bool>` leaves on `ReturnInputs` register
 `SKIPPABLE_QUESTIONS` with `unanswered: None`, their `live` closures as tabled above, and the §9
 advisory on `Some(true)`.
 
+★★ **The classifier bucket is named too, because the compiler will demand it (r2 M-4).** Adding two
+`Option<bool>` leaves to `ReturnInputs` forces an arm in `classifier.rs`'s exhaustive destructure, and the
+same precedent answers it — `blind` is registered as:
+
+```rust
+c.exempt(
+    blind,
+    Class::BenefitClaim,
+    "§63(f) blindness — New Colonial Ice: the burden to CLAIM is the filer's, so `false`/absent is \
+     lawful; the forgone benefit fires `BlindBoxForfeitedNotDeclared` (§2.2)",
+);
+```
+
+So A-1 and A-2 are `Class::BenefitClaim` exemptions with the same ground: *New Colonial Ice* puts the
+burden to claim on the filer, which is precisely why silence is lawful and why an advisory rather than a
+refusal is the right response to it.
+
 ★ **PROSE is therefore not the fallback, and the build has no decision left to make here.** The earlier
 draft of this fold hedged — *"if the only available `Option<bool>` slot is class-(A), A-1 and A-2 must
 go back to PROSE"* — which was written before the mechanism was measured. It is retracted: the slot
 exists, `durability: Durability::PerYear` is the right setting (both facts can change between years),
 and forcing these into a refusing type was never the only alternative.
 
-★ **The count, corrected everywhere it appears (§7 here, §10's journey walk, §12 R-E): SIX questions,
-of which FOUR refuse when unanswered and TWO are silent.** "Four" was right for the refusing set and
-was being read as the whole surface.
+★ **⚠️ THE COUNT IS SEVEN, not six — corrected again 2026-09-20 by fold-review r2 (I-1).** The I-3
+fold, in the SAME commit that announced "six", added a seventh question in a table cell — the code-T
+Roth-contribution-year question — and gave it no field, no `live`, no `None` rule, no refusal id and no
+mutation row. So this very paragraph, whose subject is a count that went stale, shipped stale. It is
+recorded rather than quietly renumbered, because twice in one document is a pattern and not a slip.
+
+**The seventh question, defined here so it exists somewhere a builder looks:**
+
+| field | question | live when | `None` ⇒ | authority |
+|---|---|---|---|---|
+| `Form1099R::roth_contribution_before_lookback` | *"Did you contribute or convert to a Roth IRA for &lt;YEAR&gt; or an earlier year?"* — `&lt;YEAR&gt;` read from that revision's own instructions, **never computed** | this document's box 7 contains `T` **and** it is an IRA document | **REFUSES** (`RothLookbackUnanswered`) — the one new question that must: silence here would admit the filer to the `-0-` branch, which understates tax. Silence is not testimony | `:2707-2715`; the year pair `i1040gi--2025.txt:2713` = 2020, `i1040gi--2024.txt:2647` = 2018 |
+
+★★ It is a **class-(A) refusing declaration**, unlike A-1 and A-2 — and the direction of error is why.
+A-1 and A-2 can only ever *lower* the figure, so silence is safe. This one *raises* 4b when answered
+`no`, so silence must not be read as either answer. **Four refusing + one refusing + two silent = seven
+questions, five of which refuse.**
+
+★ The count, corrected everywhere it appears (§7 here, §10's journey walk, §12 R-E). "Four" was right
+for the original refusing set and was being read as the whole surface.
 
 ★ Two mutation rows are added in §10 (M-12, M-13): answer yes and the advisory must appear; answer no
 and it must not; leave it `None` and **nothing must refuse**. That last clause is the one that reds if
@@ -859,7 +984,7 @@ can do.
 **★★★ I-3 FOLDED 2026-09-20 — R-2 WAS REFUSING THE ORDINARY RETIREE'S ROTH DISTRIBUTION, WHICH THE
 INSTRUCTIONS FINISH IN ONE SENTENCE. The clause above is new; option (a) is taken.**
 
-The instructions, verbatim (`i1040gi--2025.txt:2698-2715`, and the same sentence at TY2024 `:2640-2649`):
+The instructions, verbatim (`i1040gi--2025.txt:2698-2715`, and the same sentence at TY2024 `:2638-2639`, its sub-branches at `:2640-2649` (r2 M-2: the first range was off by two and held only the sub-branches)):
 
 > *"Exception 2. If any of the following apply, enter the total distribution on line 4a and see Form
 > 8606 and its instructions to figure the amount to enter on line 4b. … 2. You received a distribution
@@ -887,14 +1012,44 @@ could not determine it**. A single `exception_applies` boolean cannot express "n
 question" as different branches, which is why S-3's collapse was safe for the other three Exceptions
 and unsafe for this one.
 
-**THE RULE, as folded:**
+**⚠️ THE RULE — REWRITTEN 2026-09-20 by fold-review r2 (C-1, CRITICAL). The first version of this table
+composed with the I-2 fold in the same commit to UNDERSTATE line 4b, and nothing refused.**
 
-| box 7 contains | line 4a | line 4b | asked |
-|---|---|---|---|
-| `Q` | Σ box 1 | `-0-` | nothing |
-| `T` and the Roth-contribution-year answer is **yes** | Σ box 1 | `-0-` | one question |
-| `T` and the answer is **no** or `None` | — | — | **refuse** (Form 8606 is genuinely needed / silence is not testimony) |
-| any other Exception-2 case | — | — | **R-2 refuses**, unchanged |
+The table as first written keyed its **rows** on a per-DOCUMENT condition (*"box 7 contains `Q`"*) and
+labelled its **columns** with per-RETURN 1040 lines (*"line 4a", "line 4b"*). On the two-document return
+the I-2 fold brought explicitly into scope, applying it literally understates total income:
+
+| document | box 7 | box 1 | `exception_applies` | what fired |
+|---|---|---|---|---|
+| Roth IRA, qualified | `Q` | 10,000 | `Some(true)` | exempted from R-2 by the new clause |
+| traditional IRA, fully taxable | `7` | 20,000 | `Some(false)` | computes; nothing refuses |
+
+The old table said *box 7 contains `Q` ⇒ line 4b = `-0-`*, so **4b = `-0-`** on a return whose correct
+4b is **20,000** — the whole traditional distribution missing from total income, with no refusal behind
+it. ★★ The instructions answer the composition themselves and the fold had not transcribed it:
+*"enter the part that is not a QCD on line 4b **unless Exception 2 applies to that part**"*
+(`i1040gi--2025.txt:2731`) — **per part**, not per return.
+
+**So the sub-branch is PER DOCUMENT and the aggregation is stated once, in the instructions' own
+order.** Step 1 is per document; steps 2 and 3 are the only places a 1040 line is written:
+
+| step | rule | authority |
+|---|---|---|
+| **1. each IRA document's own taxable amount** | `Q` ⇒ **`-0-`**; `T` with the contribution-year answer **yes** ⇒ **`-0-`**; fully taxable (no Exception) ⇒ **its box 1**; anything else ⇒ **R-2 refuses the return** | `:2707-2715`; `:2664-2667` |
+| **2. line 4b** | **Σ of the per-document taxable amounts from step 1** | *"figure the taxable amount of each distribution and enter the total of the taxable amounts on line 4b"* (`:2789-2795`) |
+| **3. line 4a** | **Σ box 1 over ALL IRA documents** whenever more than one exists, or any one is on the step-1 `-0-` sub-branch; otherwise blank on the single fully-taxable document | `:2789-2795`; `:2698-2700`; `:2664-2667` |
+
+★★★ **The worked case above, under the rewritten rule: 4a = 30,000, 4b = 20,000.** That is the KAT
+(§10, M-14) and it reds against the first version of this table.
+
+★ **Why the first version was wrong in a way review was the right instrument for.** Each fold was
+correct in isolation — I-3's sub-branch reading is sound (r2 confirmed it on three grounds) and I-2's
+plural rule is quoted correctly. They were written in the same sitting, in the same commit, and the
+defect existed only in their *composition*. That is the seam class I-5 was itself an instance of, and it
+is why `STANDARD_WORKFLOW.md` treats a fold as authorship that re-earns the gate.
+
+★ **A table whose rows and columns have different scopes is the mechanism, not the typo.** The columns
+now say *this document's taxable amount*, and no per-document row names a 1040 line.
 
 ★★★ **THE YEAR IN THE T QUESTION IS YEAR-SHAPED AND IS NOT A CONSTANT OFFSET. Measured, both
 revisions:**
@@ -916,10 +1071,36 @@ place). The instructions' own decision procedure *is* a box-7 test, so the field
 held and not read. Interpretation is now confined to exactly two tokens, `Q` and `T`, with everything
 else falling through to R-2 — a closed, enumerable reading rather than an open one.
 
-★ **A code may not be matched by substring.** Box 7 can carry more than one code, and the payer
-instructions' own note — *"If any other code, such as 8 or P, applies, use Code J"* — shows codes are
-composed. A `contains("Q")` test must be a test of the parsed code SET, or a future alphanumeric code
-containing the letter would silently take the `-0-` branch. The KAT set must include a multi-code box 7.
+**⚠️ CORRECTED 2026-09-20 by fold-review r2 (I-5) — MY JUSTIFICATION CITED A SENTENCE THAT SAYS THE
+OPPOSITE, AND THE TEST I PRESCRIBED IS LOOSER THAN THE AUTHORITY.** The retracted text: *"Box 7 can carry
+more than one code, and the payer instructions' own note — 'If any other code, such as 8 or P, applies,
+use Code J' — shows codes are composed."*
+
+That Note is printed **inside the `Q` and `T` entries of Table 1** (`i1099r--2025.txt:2414` under
+*"Q—Qualified distribution from a Roth IRA"*, `:2447` under *"T—Roth IRA distribution, exception
+applies"*). It says the opposite of what I used it for: for these two codes, if another code applies,
+**use Code J instead** — so it is the authority for `Q` and `T` appearing **ALONE**. Table 1's *used
+with* column for `Q` reads **`None`** (`:2416`). ★ `T`'s cell is dropped by the layout at `:2448` and
+must not be asserted from this extract.
+
+**So the test is EQUALITY, not membership.** The `-0-` sub-branch is taken only when box 7 is **exactly**
+`Q`, or **exactly** `T`:
+
+| box 7 | branch | why |
+|---|---|---|
+| `Q` | the `-0-` sub-branch | Table 1: used with `None` |
+| `T` | the `-0-` sub-branch, after the seventh question | same entry's Note |
+| `QJ`, `Q8`, anything else containing `Q` | **R-2 refuses** | the payer was instructed to print `J` instead, so a composed `Q` is a document the spec does not understand |
+
+★★ `contains("Q")` is **wrong in the understating direction**, which is why this is Important and not a
+style note: it would admit a composed code to the `-0-` branch on a distribution the payer has signalled
+is *not* a plain qualified Roth. Equality fails closed.
+
+★ **And the separator question is settled by measurement, not left unstated.** Every box 7 code in Table
+1 is a **single character** — `1 2 3 4 5 6 7 8 9 A B C D E F G H J K L M N P Q R S T U W Y`, enumerated
+from `i1099r--2025.txt` — so a two-code box 7 is two characters with no separator, and there is nothing
+to split on. That is *why* equality is expressible at all, and a KAT must pin a composed box 7 (`"QJ"`)
+taking R-2 rather than the sub-branch.
 
 ★ **OQ-3's QCD refusal is untouched.** This fold splits out only the sub-branch the instructions close
 themselves; the qualified charitable distribution still refuses in v1 per the owner's ruling.
@@ -1015,11 +1196,20 @@ message where it should suppress the advisory. Retirement's A-1…A-4 must not c
 Added to `Advisory` (`advisories.rs`), each carrying its figure, in the shape of
 `CtcOdcOmitted { dependents, provably_zero }`.
 
-**A-1 `PsoPremiumExclusionNotTaken { pensions: usize }`** — fires when line 5b > 0. Quotes the ceiling
+**A-1 `PsoPremiumExclusionNotTaken { pensions: usize }`** — ⚠️ **CORRECTED 2026-09-20 (r2 I-6): fires
+when `retired_public_safety_officer == Some(true)`, NOT when line 5b > 0.** The old condition is the
+very defect r1's I-6 red-flagged for A-4 — it fires on 100% of in-scope pension returns, so it advises
+everyone and informs no one, and it violates the owner's ruling that **zero is the goal when nothing is
+wrong**. It also contradicted §7's I-5 ruling in the same document and would have red M-12's own plant
+(b). `live` for the QUESTION stays `Σ pension box 2a > 0`; the ADVISORY keys on the answer. Quotes the ceiling
 verbatim: *"You can exclude from income the smaller of the amount of the premiums paid or $3,000"*
 (`i1040gi--2025.txt:2926-2928`). Overstates tax for an eligible retired public safety officer.
 
-**A-2 `SocialSecurityLumpSumElectionNotTaken`** — fires when line 6b > 0. Quotes the worksheet's own
+**A-2 `SocialSecurityLumpSumElectionNotTaken`** — ⚠️ **CORRECTED 2026-09-20 (r2 I-6): fires when
+`benefits_included_an_earlier_year == Some(true)`, NOT when line 6b > 0.** Beyond the A-1 reasoning, the
+old condition was wrong in a second way: a filer whose benefits are NOT taxable has `Σ box 5 > 0` and
+`6b = 0`, so §9 suppressed the advisory on exactly the return where the lump-sum election could still
+matter — and M-13's plant (a) would have red against a spec-conformant build. Quotes the worksheet's own
 TIP: *"If any of your benefits are taxable for 2025 and they include a lump-sum benefit payment that
 was for an earlier year, you may be able to reduce the taxable amount"* (`3470-3471`).
 
@@ -1132,7 +1322,8 @@ not exist.
 | # | guarantee | the mutation that must red it |
 |---|---|---|
 | **M-1** | ★ the pigeonhole holds: three lines may not claim fewer printed occurrences (S-9, FR-184) | give the 4b/5b/6b rows a quote the form prints only **twice**; the pigeonhole must red. ⚠️ **REWRITTEN 2026-09-20 (I-4).** It used to say *"swap the `line` labels on the 4b and 6b rows … it must red before the rows land"* — that mutation **passes and always will**, because the swap leaves the distinct-line set at 3 against 3 occurrences. A mutation that cannot fail is not a kill. |
-| **M-1b** | ★★ row-to-line attribution: a 4b row is bound to the 4b FIELD, not merely to a line that prints the same words | swap the 4b and 6b rows' `line` labels; the binding to `label_reader::label_join`'s geometry-derived label must red. **This is the guarantee M-1 used to claim and never had.** Measured available: `label_join("f1040--2024")` returns `f1_47 → 4b`, `f1_49 → 5b`, `f1_51 → 6b`. If it is deferred past v1, S-9 must say in the spec that the three rows' mutual attribution is **not** machine-held and name the KAT standing in. |
+| **M-1b** | ★★ row-to-line attribution: a 4b row is bound to the 4b FIELD, not merely to a line that prints the same words | swap the 4b and 6b rows' `line` labels; the **two-hop** join must red — `LineCoverage.field` → its `f1040.map.toml` row → the AcroForm name → `label_join` → the printed label. ⚠️ **GATED, and r2 (I-4) is why:** `LineCoverage.field` is the RUST name while `label_join` is keyed by the ACROFORM name, so the map row is the bridge and it does not exist yet for any of the six lines. **Scheduled after I-8's map cells**, not beside them. Measured available once they land: `label_join("f1040--2024")` returns `f1_47 → 4b`, `f1_49 → 5b`, `f1_51 → 6b`. |
+| **M-14** | ★★★ **C-1's mixed return.** A Roth `Q` document (box 1 = 10,000) beside a fully-taxable traditional IRA document (box 1 = 20,000) files **4a = 30,000, 4b = 20,000** | implement §8's rule table per RETURN instead of per DOCUMENT — the version this spec carried before 2026-09-20 — and 4b becomes `-0-`, understating total income by 20,000 with no refusal behind it. The KAT must red. |
 | **M-2** | 1040 line 9 sums the three new operands | delete `+ line6b` from the line-9 sum; a household with only benefits must stop reconciling |
 | **M-3** | line 4a is blank, not `0`, on a fully-taxable IRA | change `line4a: Option<Usd>` to `Usd` / emit `Usd::ZERO`; the emitted-PDF read-back (`extract_lines`, `crates/btctax-forms/tests/extract_lines.rs`) must show the 4a cell present |
 | **M-4** | line 5a is blank when the pension is fully taxable and present when box 2a < box 1 | force `line5a = Some(box1)` unconditionally |
