@@ -234,66 +234,6 @@ pub fn run() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
 
-    /// ★★★ **THE TEETH for the four published acceptance vectors: FR-255 step 2 must stay OPEN while
-    /// they are unconsumed.**
-    ///
-    /// `btctax_core::tax::public_vectors` holds four TY2024 vectors transcribed from TaxCalcBench — the
-    /// only independent witness the retirement feature has, since `FR-250` records that the 107-household
-    /// golden corpus contains no retirement income at all and `C-3` showed the two oracles AGREE while
-    /// both wrong on the MFS-lived-with branch.
-    ///
-    /// T14.5 added Form 1040 lines 4a/4b/5a/5b, which retired that module's original tripwire (*"reds the
-    /// moment the retirement lines exist"*). Its instruction — drive each case, compare the printed lines
-    /// — cannot be followed yet: the corpus's raw inputs are not committed, so building inputs that
-    /// reproduce the expected outputs would derive the expectation from the thing under test (FR-230).
-    /// The MeF→`ReturnInputs` translator is FR-255 step 2.
-    ///
-    /// ★★ This test lives in `xtask` because `btctax-core` cannot read `FOLLOWUPS.md`: an `include_str!`
-    /// escaping the crate root ships a broken crates.io tarball with exit 0, and
-    /// `repo_hygiene::no_published_crate_includes_a_file_outside_its_own_root` refuses it. The crate that
-    /// already reads the ledger is the one that should hold a claim about the ledger.
-    #[test]
-    fn fr255_step_2_is_open_while_these_vectors_are_unconsumed() {
-        let ledger =
-            std::fs::read_to_string(repo_root().join("FOLLOWUPS.md")).expect("FOLLOWUPS.md");
-        let vectors = std::fs::read_to_string(
-            repo_root().join("crates/btctax-core/src/tax/public_vectors.rs"),
-        )
-        .expect("public_vectors.rs");
-
-        // The lines exist, so the vectors are no longer waiting on them.
-        let printed =
-            std::fs::read_to_string(repo_root().join("crates/btctax-core/src/tax/printed.rs"))
-                .expect("printed.rs");
-        // ★ Type-agnostic on purpose: `line4b` became `Option<Usd>` when T14.12 made the blank-capable
-        //   lines expressible, and pinning the TYPE here would red on a change that has nothing to do
-        //   with whether the vectors are consumed. What this premise needs is that the LINE EXISTS.
-        assert!(
-            printed.contains("pub line4b:"),
-            "Form 1040 line 4b is gone from printed.rs — this test's premise has changed"
-        );
-
-        // ★ "Unconsumed" is checked structurally: no test anywhere drives a vector against a computed
-        //   line. The marker is the vectors module naming the compute, which a real KAT would have to do.
-        let consumed = vectors.contains("form1099r::line_4b")
-            || vectors.contains("form1099r::line_5b")
-            || vectors.contains("assemble_absolute");
-        if consumed {
-            // Someone wired them. Then FR-255 step 2 has been discharged and this guard is finished —
-            // deleting it is the correct action, and the message says so rather than making them guess.
-            panic!(
-                "`public_vectors` now references the compute, so the vectors ARE consumed. Confirm the \
-                 KAT compares the printed 4a/4b/5a/5b against each vector, mark FR-255 step 2 CLOSED, \
-                 and DELETE this test — its whole purpose was to keep that from being forgotten."
-            );
-        }
-        assert!(
-            ledger.contains("FR-255") && ledger.contains("step 2"),
-            "the vectors are still unconsumed but FOLLOWUPS.md no longer records FR-255 step 2 as the \
-             task that consumes them. A published third witness that nothing reads, with nothing in the \
-             ledger pointing at it, is how it becomes four decorative tables."
-        );
-    }
     use super::*;
 
     fn repo_root() -> std::path::PathBuf {

@@ -9817,7 +9817,7 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   ★ What is NOT changed: the refusal surface. A parenthesised figure lands on exactly the error `-2.50`
   does, so nothing the form accepts has widened.
 
-- **✅ CLOSED (step 1 of 2) — FR-255 — TaxCalcBench (MIT, 51 complete TY2024 returns) is integrated as a THIRD WITNESS: the four retirement vectors are COMMITTED with pinned provenance. The translator that drives cases end to end is step 2 and is deliberately NOT built yet.**
+- **✅ CLOSED (both steps) — FR-255 — TaxCalcBench (MIT, 51 complete TY2024 returns) is integrated as a THIRD WITNESS: the four retirement vectors are COMMITTED with pinned provenance. The translator that drives cases end to end is step 2 and is deliberately NOT built yet.**
   ★ Landed as `crates/btctax-core/src/tax/public_vectors.rs` — the four cases' expected 1040 lines, pinned to corpus commit `8f89c2cf00a8906f4d896a02a2f45f9c9e85ae9b`, each with the sha256 prefix of the `output.xml` it was read from, and fetch-on-demand rather than 46 MB in the tree. All four pinned copies were verified byte-identical to what was transcribed.
   ★★★ **Two caveats made STRUCTURAL rather than left as prose**, which is the whole value of committing them as code: (a) line 4b is **derived**, so `line9_reconciles` forces `4b + 5b + 6b + other == line 9` and reds if any component is edited without line 9 — a derived figure nobody re-derives is a fabricated KAT; (b) a non-taxable benefit is `None`, **never** `Some(0)`, so nobody can tidy the corpus's own blank into a zero and erase the finding.
   ★★ **And the tripwire had to be redesigned to be testable.** The obvious plant — add `line4b` to `Form1040Lines` and watch it red — **cannot be run**: adding a field is an `E0063` at every construction site, so the crate stops compiling before any test executes. The compiler is the real forcing function; the check is the reminder on top. A guard that cannot be observed discriminating is what B1 forbids, so the predicate now takes a string and three fixture assertions plant it — including the near miss that a **comment** mentioning `line4b` is not a declaration. Blinding the predicate reds it.
@@ -9855,6 +9855,34 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   `single-retirement-1099r-alaska-dividend`, the one fully-specified case — single 65-or-older, two
   Forms 1099-R (10,000 IRA and 20,000 pension, both fully taxable), a 1,000 Alaska dividend, line 9
   31,000, AGI 31,000, deduction 16,550, withholding 3,000, with no above-the-line adjustment to model.
+  ★★★ **STEP 2 CLOSED 2026-09-20 — `single-retirement-1099r-alaska-dividend` is DRIVEN END TO END**, in
+  `public_vectors::driven::the_fully_specified_vector_computes_in_btctax_and_the_divergences_are_named`.
+  No MeF translator was needed: the corpus's expected lines are transcribed and its input facts are
+  described, so the `ReturnInputs` is built from the described facts and btctax's output compared. Six
+  figures matched on the FIRST run, which is the feature's first genuine end-to-end acceptance pass:
+  **4b = 10,000**, **5b = 20,000**, **25b = 3,000**, **line 9 = 31,000**, **AGI = 31,000**,
+  **deduction = 16,550**. The 25b agreement independently confirms review r1's **C-2** — btctax had been
+  dropping retiree withholding entirely — against a corpus that has never heard of this repo.
+  ★ ONE SUBSTITUTION, stated: the corpus's 1,000 is an Alaska Permanent Fund dividend (Schedule 1 line
+  10) and btctax has no such input, so it is carried as taxable interest. That changes which line prints
+  it (2b rather than 8) and nothing the test asserts; the §86 worksheet never runs on this vector, so no
+  threshold can be affected either.
+  ★★★ **AND IT FOUND A DIVERGENCE ON BOTH `a` LINES, which reframes what this corpus can witness.** The
+  corpus prints a gross amount on **4a** and on **5a** for distributions it also reports as fully
+  taxable. The instructions forbid exactly that, twice, in the same words — *"If the distribution from
+  your IRA is fully taxable, enter the total distribution on line 4b; don't make an entry on line 4a."*
+  (`i1040gi--2025.txt:2662-2665`) and the identical sentence for 5a/5b (`i1040gi--2024.txt:2790-2794`).
+  btctax leaves both blank.
+  ★★ **The right reading is PAPER-vs-MeF, not "the corpus is wrong."** This is e-file output; an MeF
+  schema carries `IRADistributionsAmt` and `PensionsAnnuitiesAmt` as elements and populating the gross is
+  normal for a transmitter even where the paper form says leave the line empty. btctax prints paper,
+  where the instruction is the authority. Both are internally right and they are not measuring the same
+  surface. **So step 1's claim needs narrowing:** this corpus confirms *"blank is the normal case"* for
+  **6b** (a non-taxable benefit appears as no element at all) and CONTRADICTS it for **4a/5a**. It is a
+  witness for the FIGURES and not for the blank-versus-filled question on the `a` lines.
+  ★ B1: three plants, three reds — `withholding_line_25b` made to drop the pension row (C-2's original
+  defect); `line_4a` made to fill on a single fully-taxable IRA (the corpus's own MeF behaviour); and the
+  vector's pinned 4a edited away so the divergence would stop being visible.
   ★ Step 2 (the MeF→`ReturnInputs` translator) remains open, and the ordering was deliberate: transcribing the expected lines costs nothing and gives the build an acceptance target BEFORE the code, which is the reverse of how retirement was heading.
   Recon done 2026-09-16 at the owner's direction; four retirement cases fetched, read and transcribed into
   `SPEC_retirement_income.md` §10a as acceptance vectors. **Nothing is committed to this repo yet** — that

@@ -486,3 +486,244 @@ mod tests {
         );
     }
 }
+
+/// **FR-255 step 2 — the one fully-specified vector, DRIVEN end to end.**
+#[cfg(test)]
+mod driven {
+    use super::*;
+    use crate::tax::return_1040::assemble_absolute;
+    use crate::tax::testonly::{build_golden_return, ty2024_params, ty2024_table, GoldenInputs};
+    use crate::tax::FilingStatus;
+
+    /// ★★★ **`single-retirement-1099r-alaska-dividend`, COMPUTED BY btctax AND COMPARED.**
+    ///
+    /// Step 1 transcribed the corpus's expected lines; step 2 was to drive them. Of the four vectors
+    /// only this one is fully specified — v4 carries no retirement figures at all, and v2/v3 carry only
+    /// 6a with a blank 6b plus an above-the-line adjustment whose composition the corpus does not state
+    /// (v2's AGI is 591 below its line 9). This one has no adjustment, so every line is reachable.
+    ///
+    /// **The case:** single, 65 or older (deduction 16,550 = 14,600 + one 1,950 §63(f) addition), two
+    /// Forms 1099-R — 10,000 IRA and 20,000 pension, both fully taxable — 3,000 of box-4 withholding,
+    /// and 1,000 of other income.
+    ///
+    /// ★★ **ONE SUBSTITUTION, stated because it is real:** the corpus's 1,000 is an Alaska Permanent
+    /// Fund dividend, which reaches line 9 via Schedule 1 line 10. btctax has no Alaska-dividend input,
+    /// so it is carried here as taxable interest. That changes WHICH line prints it (2b rather than 8)
+    /// and changes nothing this test asserts — lines 4a–6b, 9, 11, 12 and 25b — because both routes are
+    /// line-9 components. The §86 worksheet never runs on this vector (no benefits), so the carrier
+    /// cannot affect a threshold either.
+    ///
+    /// ★★★ **AND IT FOUND A DIVERGENCE ON BOTH `a` LINES — which is the point of driving rather than
+    ///        reading, and which reframes what this corpus can witness.**
+    ///
+    /// The corpus prints a gross amount on 4a **and** on 5a, for distributions it also reports as fully
+    /// taxable. The Form 1040 instructions forbid exactly that, twice, in the same words:
+    ///
+    /// > *"If the distribution from your IRA is fully taxable, enter the total distribution on line 4b;
+    /// > don't make an entry on line 4a."* — `i1040gi--2025.txt:2662-2665`
+    ///
+    /// > *"If your pension or annuity is fully taxable, enter the total pension or annuity payments
+    /// > (from Form(s) 1099-R, box 1) on line 5b; don't make an entry on line 5a."*
+    /// > — `i1040gi--2024.txt:2790-2794`
+    ///
+    /// btctax follows both and leaves 4a and 5a blank.
+    ///
+    /// ★★★ **THE RIGHT READING IS PAPER-vs-MeF, NOT "the corpus is wrong."** This corpus is **e-file
+    /// output**: an MeF schema carries `IRADistributionsAmt` and `PensionsAnnuitiesAmt` as elements, and
+    /// populating the gross there is normal for a transmitter even where the paper form says leave the
+    /// line empty. btctax prints PAPER, where the instruction is the authority. So both are internally
+    /// right and they are not measuring the same surface.
+    ///
+    /// ★★ **The consequence for step 1's claim.** That entry cites this corpus as outside-the-repo
+    /// confirmation of *"blank is the normal case"*. It confirms it for **6b** — a non-taxable benefit
+    /// appears as no element at all — and it CONTRADICTS it for **4a and 5a**, where an element appears
+    /// on a line the paper form instructs blank. So this corpus is a witness for the FIGURES and is not
+    /// a witness for the blank-versus-filled question on the `a` lines. Recorded rather than smoothed,
+    /// because the difference is the whole of what a `None` means in this module.
+    ///
+    /// Asserted below in btctax's direction, with the corpus's values pinned so neither side of the
+    /// divergence can be edited away silently.
+    #[test]
+    fn the_fully_specified_vector_computes_in_btctax_and_the_divergences_are_named() {
+        let v = PUBLIC_RETIREMENT_VECTORS
+            .iter()
+            .find(|v| v.case == "single-retirement-1099r-alaska-dividend")
+            .expect("the fully-specified vector is committed");
+        assert_eq!(v.filing_status, FilingStatus::Single);
+
+        let (mut ri, state) = build_golden_return(&GoldenInputs {
+            filing_status: "Single".into(),
+            // The substitution named above: the 1,000 as a line-9 component.
+            taxable_interest: 1000.0,
+            // 65 or older — what earns the 1,950 §63(f) addition the corpus's 16,550 records.
+            age_head: Some(70),
+            ..GoldenInputs::default()
+        });
+        ri.documents.r_1099 = Some(true);
+        ri.documents.int_1099 = Some(true);
+        ri.has_income_exclusion = Some(false);
+        ri.r_1099 = vec![
+            crate::tax::form1099r::Form1099R {
+                kind: crate::tax::form1099r::Form1099RKind::Ira,
+                box1_gross_distribution: dec!(10_000),
+                box2a_taxable_amount: Some(dec!(10_000)),
+                box4_fed_withheld: dec!(1_000),
+                box7_distribution_codes: "7".into(),
+                exception_applies: Some(false),
+                ..crate::tax::testonly::form_1099r_all_boxes_populated()
+            },
+            crate::tax::form1099r::Form1099R {
+                kind: crate::tax::form1099r::Form1099RKind::PensionOrAnnuity,
+                box1_gross_distribution: dec!(20_000),
+                box2a_taxable_amount: Some(dec!(20_000)),
+                box4_fed_withheld: dec!(2_000),
+                box7_distribution_codes: "7".into(),
+                exception_applies: Some(false),
+                ..crate::tax::testonly::form_1099r_all_boxes_populated()
+            },
+        ];
+
+        let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
+
+        // ── What the corpus and btctax AGREE on. ──────────────────────────────────────────────────
+        assert_eq!(
+            ar.taxable_ira, v.taxable_ira_4b_derived,
+            "4b — the corpus prints no taxable-IRA element, so this is its DERIVED value"
+        );
+        assert_eq!(
+            ar.taxable_pension, v.taxable_pensions_5b,
+            "5b — the fully-taxable pension's box 1, which is where the instruction puts it"
+        );
+        assert_eq!(
+            Some(ar.withholding_25b),
+            v.withholding_25b,
+            "25b — the two box-4 amounts, 1,000 + 2,000. This is the line review r1 (C-2) found btctax \
+             was dropping entirely, confirmed here against an independent corpus"
+        );
+        assert_eq!(
+            ar.total_income, v.total_income_9,
+            "9 — 10,000 + 20,000 + 1,000"
+        );
+        assert_eq!(ar.agi, v.agi_11, "11 — no adjustment on this vector");
+        assert_eq!(
+            ar.deduction, v.deduction_12,
+            "12 — 14,600 basic + one 1,950 §63(f) aged addition"
+        );
+
+        // ── Where they DIVERGE, in btctax's direction, with the corpus's figures pinned. ──────────
+        assert_eq!(
+            ar.ira_distributions_total, None,
+            "★★★ 4a is BLANK. The corpus prints {:?} for a single fully-taxable IRA distribution, and \
+             the instruction is explicit: \"If the distribution from your IRA is fully taxable, enter \
+             the total distribution on line 4b; don't make an entry on line 4a.\" This corpus is MeF \
+             output, where carrying the gross element is normal; btctax prints paper, where the \
+             instruction governs.",
+            v.ira_distributions_4a
+        );
+        assert_eq!(
+            v.ira_distributions_4a,
+            Some(dec!(10_000)),
+            "the corpus's own 4a is pinned, so this divergence cannot be edited away silently"
+        );
+        assert_eq!(
+            ar.pension_total, None,
+            "★★★ 5a is BLANK. The corpus prints {:?} here, on a pension it also reports as fully \
+             taxable, and the Form 1040 instructions forbid exactly that: \"If your pension or annuity \
+             is fully taxable, enter the total pension or annuity payments (from Form(s) 1099-R, box 1) \
+             on line 5b; don't make an entry on line 5a.\" Adjudicated against the FORM — a figure on a \
+             line the instructions say to leave empty is testimony the filer was never asked to give.",
+            v.pensions_annuities_5a
+        );
+        assert_eq!(
+            v.pensions_annuities_5a,
+            Some(dec!(20_000)),
+            "and the corpus's own 5a is pinned, so this divergence cannot be edited away silently"
+        );
+        assert_eq!(
+            (ar.social_security_benefits, ar.taxable_social_security),
+            (None, None),
+            "6a/6b — no benefit statement on this vector, so both are blank rather than zero"
+        );
+    }
+
+    /// ★★★ **`mfj-both-blind-nontaxable-social-security`, DRIVEN for its Social Security lines.**
+    ///
+    /// The second drivable vector, and the one that carries 6a. Married filing jointly, both 65-or-older
+    /// AND both blind — §63(f) gives each spouse one addition for age and one for blindness, so the
+    /// deduction is 35,400 = 29,200 + **four** × 1,550 — with **7,333** of benefits and **5,000** of
+    /// other income. §86 stops at worksheet line 9 — half the benefits plus the other income is 8,666.50,
+    /// below the $32,000 base amount — so none of it is taxable.
+    ///
+    /// ★★ **6b is `Some(ZERO)` here, not `None`, and that is the distinction this vector exists to
+    /// hold.** The corpus emits no taxable-benefit element; btctax prints the `-0-` the worksheet's own
+    /// STOP branch instructs. Those are the same three pixels and not the same fact: the corpus's
+    /// silence is an MeF transmitter omitting an element, while btctax's zero is the filer following an
+    /// instruction. A filer with NO benefit statement gets `None` from btctax — that is what
+    /// `the_fully_specified_vector_…` asserts above, on a return with no SSA-1099 at all.
+    ///
+    /// ★ The other two vectors are not driven, for reasons that are not oversight:
+    /// `single-w2-retirement-sick-pay-social-security-tip` carries no retirement figure at all (it is
+    /// kept for its deduction line), and `hoh-schedule-b-ssa1099-unemployment` is **DISPUTED** — §86,
+    /// this repo's worksheet and taxcalc 6.8.2 all give it 3,204.50 on a line the corpus leaves empty.
+    #[test]
+    fn the_mfj_vector_stops_at_worksheet_line_9_and_prints_the_instructed_zero() {
+        let v = PUBLIC_RETIREMENT_VECTORS
+            .iter()
+            .find(|v| v.case == "mfj-both-blind-nontaxable-social-security")
+            .expect("the MFJ vector is committed");
+        assert_eq!(v.filing_status, FilingStatus::Mfj);
+        assert_eq!(v.social_security_6a, Some(dec!(7333)));
+        assert_eq!(
+            v.taxable_social_security_6b, None,
+            "no element in the corpus"
+        );
+
+        let (mut ri, state) = build_golden_return(&GoldenInputs {
+            filing_status: "Married/Joint".into(),
+            // The 5,000 of other income, carried as interest for the same reason as above.
+            taxable_interest: 5000.0,
+            // ★ §63(f) gives each spouse an addition for being 65-or-older AND one for blindness, so
+            //   the corpus's 35,400 is 29,200 + FOUR × 1,550 — not two. My first fixture set only the
+            //   blindness boxes and btctax answered 32,300, which is what the deduction assertion is
+            //   for: it caught the fixture, not the compute.
+            age_head: Some(70),
+            age_spouse: Some(70),
+            blind_head: true,
+            blind_spouse: true,
+            ..GoldenInputs::default()
+        });
+        ri.documents.ssa_1099 = Some(true);
+        ri.documents.int_1099 = Some(true);
+        ri.has_income_exclusion = Some(false);
+        ri.ssa_1099 = vec![crate::tax::form_ssa1099::FormSsa1099 {
+            box3_benefits_paid: dec!(7_333),
+            box4_benefits_repaid: Usd::ZERO,
+            federal_withholding: dec!(1_000),
+            ..crate::tax::testonly::form_ssa1099_all_boxes_populated()
+        }];
+
+        let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
+
+        assert_eq!(
+            ar.social_security_benefits, v.social_security_6a,
+            "6a — net benefits, box 3 − box 4"
+        );
+        assert_eq!(
+            ar.taxable_social_security,
+            Some(Usd::ZERO),
+            "★★ 6b is the worksheet's INSTRUCTED zero, where the corpus emits no element. \
+             Not `None`: a filer holding a benefit statement whose worksheet stops is told to \
+             enter -0-, and that is testimony. `None` is for a filer with no statement at all."
+        );
+        assert_eq!(
+            ar.total_income, v.total_income_9,
+            "9 — 5,000, with none of the benefits taxable"
+        );
+        assert_eq!(ar.agi, v.agi_11, "11");
+        assert_eq!(
+            ar.deduction, v.deduction_12,
+            "12 — 29,200 + FOUR §63(f) additions at 1,550: one for age and one for blindness, per \
+             spouse"
+        );
+    }
+}
