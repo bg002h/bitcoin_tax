@@ -494,6 +494,33 @@ pub fn fill_form_1040_full_with_map(
         }
     }
 
+    // ★★★ **LINE 6d — the MFS lived-apart disclosure.**
+    //
+    //     `line6d_mfs_lived_apart` is already revision-aware: it is true ONLY on a revision whose form
+    //     HAS a 6d (`MfsLivedApartDisclosure::CheckboxOnLine6d`), so the TY2024 map's absence of the
+    //     cell and this flag's falseness agree by construction rather than by coincidence.
+    //
+    // ★★ Therefore a map with NO `line6d` while the flag is true is a BROKEN map and must fail loud —
+    //    the same rule as the digital-asset pair above. Silently dropping it would print a return
+    //    claiming the $25,000 base amount with nothing on the page that discloses the entitlement.
+    if lines.line6d_mfs_lived_apart {
+        let cell = map.line6d.as_ref().ok_or_else(|| {
+            FormsError::Geometry(format!(
+                "the TY{y} 1040 map has no `line6d`, but this return owes the MFS lived-apart \
+                 disclosure. A revision with no line 6d must not reach here: \
+                 `mfs_lived_apart_disclosure` returns `WriteInDBesideBenefitsOnLine6a` for those, \
+                 which the manifest's hand-marks block serves"
+            ))
+        })?;
+        writes.push((
+            cell.field.clone(),
+            pdf::FieldValue::Check {
+                on: cell.on.clone(),
+            },
+        ));
+        placements.push(FlatPlacement::check(cell.field.clone(), 0));
+    }
+
     let mut doc = pdf::load(pdf::f1040_pdf(y)?)?;
     let index = pdf::index(&pdf::collect_fields(&doc)?);
     pdf::drop_xfa_and_set_needappearances(&mut doc)?;

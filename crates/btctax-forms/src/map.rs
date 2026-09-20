@@ -1470,6 +1470,14 @@ pub struct Form1040Map {
     /// same as the blank a filer with no benefits files — which is why 6a is `Option` and this is not.
     #[serde(default)]
     pub line6b: Option<MoneyCell>,
+    /// ★★★ **Line 6d — "If you are married filing separately and lived apart from your spouse the
+    ///        entire year (see inst.), check here."**
+    ///
+    /// `None` for a revision whose form has no 6d. TY2024 is one: it instructs a WRITE-IN instead —
+    /// *"enter “D” to the right of the word “benefits” on line 6a"* — which no AcroForm field can
+    /// carry, so that revision is served by a `hand_marks` entry rather than a cell here.
+    /// `ss_benefits_worksheet::mfs_lived_apart_disclosure` is the per-revision decision.
+    pub line6d: Option<CheckChoice>,
     // ★★★ **NO `line4c` OR `line5c`, deliberately.** The TY2025 revision added both as narrow write-in
     //     CODE boxes (4c: "1 Rollover · 2 QCD"; 5c: "1 Rollover · 2 PSO") and TY2024 has neither. Every
     //     code they carry names a branch this build REFUSES, so leaving them blank is the correct return

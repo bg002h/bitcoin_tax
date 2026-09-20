@@ -2224,6 +2224,7 @@ fn schedule_d_full_refuses_a_negative_in_a_parenthesized_cell() {
 
 fn f1040() -> Form1040Lines {
     Form1040Lines {
+        line6d_mfs_lived_apart: false,
         line6a: None,
         line6b: None,
         line4a: None,

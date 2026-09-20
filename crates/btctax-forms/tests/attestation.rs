@@ -23,7 +23,7 @@ use btctax_core::tax::return_inputs::ReturnInputs;
 use btctax_core::tax::return_refuse::screen_inputs;
 use btctax_core::tax::testonly::{
     amt_owing_household, answer_all_live_declarations, build_golden_return, kitchen_sink_header,
-    ty2024_params, ty2024_table, GoldenInputs,
+    ty2024_params, ty2024_table, ty2025_table, GoldenInputs,
 };
 use btctax_forms::testonly::*;
 use btctax_forms::{fill_full_return, NamedForm};
@@ -51,21 +51,35 @@ struct Filed {
 /// acknowledgment gate. A fixture that quietly refused would produce no packet at all, and a test that
 /// unwrapped its way past that would be asserting about a return nobody could file.
 fn file(ri: &ReturnInputs, state: &LedgerState) -> Filed {
-    let params = ty2024_params();
-    let table = ty2024_table();
+    file_for_year(ri, state, 2024)
+}
+
+/// The same, for a named year. ★ Separate rather than a default argument because the year decides the
+/// FORM REVISION, and a KAT about a revision-specific cell must name the revision it is about.
+fn file_for_year(ri: &ReturnInputs, state: &LedgerState, year: i32) -> Filed {
+    // ★ `ty2024_params()` for BOTH years, following `kat_broker_reporting.rs`: only TY2024 has a
+    //   bundled `FullReturnParams` (`full_return_for(2025)` is `None` — see `xtask blockers`), and the
+    //   YEAR argument is what selects the form revision, which is what these KATs are about. The §86(c)
+    //   thresholds this test depends on are statutory and NOT indexed, so they come from
+    //   `ss_benefits_worksheet::line8_base` rather than from params at all.
+    let (params, table) = match year {
+        2024 => (ty2024_params(), ty2024_table()),
+        2025 => (ty2024_params(), ty2025_table()),
+        y => panic!("this harness bundles TY2024 and TY2025 only, not TY{y}"),
+    };
     assert!(
         screen_inputs(ri, &table, &params).is_none(),
         "this fixture must FILE, but screen_inputs refused: {:?}",
         screen_inputs(ri, &table, &params).map(|r| r.reason)
     );
-    let ar = assemble_absolute(ri, state, &params, &table, 2024);
+    let ar = assemble_absolute(ri, state, &params, &table, year);
     assert!(
         screen_absolute(
             ri,
             &ar,
             &params,
             state,
-            2024,
+            year,
             btctax_core::InformationReturnRegime::NONE
         )
         .is_none(),
@@ -75,7 +89,7 @@ fn file(ri: &ReturnInputs, state: &LedgerState) -> Filed {
             &ar,
             &params,
             state,
-            2024,
+            year,
             btctax_core::InformationReturnRegime::NONE
         )
         .map(|r| r.reason)
@@ -86,12 +100,12 @@ fn file(ri: &ReturnInputs, state: &LedgerState) -> Filed {
         &BTreeMap::new(),
         &ar,
         &table,
-        2024,
+        year,
         &[],
         btctax_core::InformationReturnRegime::NONE,
     )
     .expect("the fixture carries a well-formed SSN");
-    let packet = fill_full_return(&pr, 2024).expect("the packet must fill");
+    let packet = fill_full_return(&pr, year).expect("the packet must fill");
     Filed {
         ar,
         forms: packet.forms,
@@ -1459,5 +1473,159 @@ fn a_benefits_only_filer_prints_gross_benefits_on_6a_and_the_worksheets_own_zero
         (Some("12000"), Some("0")),
         "6a carries the gross benefit and 6b carries the instructed zero; neither may be blank on a \
          return that HAS a benefit statement"
+    );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// KAT 15 — THE MFS LIVED-APART DISCLOSURE.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// Assemble (but do not FILL) a return for a named year — the compute layer only.
+///
+/// ★ Separate from [`file_for_year`] because TY2025 assembles and does not fill: its `f1040.map.toml`
+/// has no `[header]` block and `YEAR.toml` says `status = "preparing"`. A KAT about a revision-specific
+/// DECISION must still be able to reach that revision.
+fn absolute_for_year(ri: &ReturnInputs, state: &LedgerState, year: i32) -> AbsoluteReturn {
+    let table = match year {
+        2024 => ty2024_table(),
+        2025 => ty2025_table(),
+        y => panic!("this harness bundles TY2024 and TY2025 only, not TY{y}"),
+    };
+    let params = ty2024_params();
+    assert!(
+        screen_inputs(ri, &table, &params).is_none(),
+        "this fixture must FILE, but screen_inputs refused: {:?}",
+        screen_inputs(ri, &table, &params).map(|r| r.reason)
+    );
+    assemble_absolute(ri, state, &params, &table, year)
+}
+
+/// Build an MFS filer who lived apart from their spouse all year and received Social Security.
+///
+/// ★ `mfs_lived_apart_all_year: Some(true)` is what earns the §86(c)(1)(A) **$25,000** base amount
+/// instead of MFS-lived-with's **$0** — a large favourable difference, and the reason both revisions
+/// ask the filer to say so on the paper.
+fn mfs_lived_apart_with_benefits() -> (ReturnInputs, LedgerState) {
+    let (mut ri, state) = build_golden_return(&zero_inputs(
+        btctax_core::tax::testonly::golden_filing_status_token(
+            btctax_core::tax::types::FilingStatus::Mfs,
+        ),
+    ));
+    ri.documents.ssa_1099 = Some(true);
+    ri.has_income_exclusion = Some(false);
+    ri.mfs_lived_apart_all_year = Some(true);
+    ri.ssa_1099 = vec![btctax_core::tax::form_ssa1099::FormSsa1099 {
+        box3_benefits_paid: dec!(30_000),
+        box4_benefits_repaid: dec!(0),
+        federal_withholding: dec!(0),
+        ..btctax_core::tax::testonly::form_ssa1099_all_boxes_populated()
+    }];
+    (ri, state)
+}
+
+/// ★★★ **THE DISCLOSURE IS DECIDED, PER REVISION, AND IT WAS NOT DECIDED AT ALL BEFORE 2026-09-20.**
+///
+/// `ss_benefits_worksheet::mfs_lived_apart_disclosure` had **no production caller**: btctax computed
+/// which disclosure a revision requires and then printed nothing. Meanwhile it had already used the
+/// lived-apart fact to pick the $25,000 base amount over $0, so line 6b carried the benefit of an
+/// election the paper never made. Both revisions price the omission identically — *"you may get a math
+/// error notice from the IRS"* — meaning the Service recomputes 6b with the $0 base and corrects the
+/// return against the filer.
+///
+/// ★★ **THREE STATES, and the two `None`s are the ones a too-wide condition gets wrong.** The
+/// disclosure annotates line 6a: with no benefit statement there is no line 6a and nothing to
+/// disclose, however true the lived-apart fact is.
+#[test]
+fn the_mfs_lived_apart_disclosure_is_the_revisions_own_and_only_when_owed() {
+    use btctax_core::tax::ss_benefits_worksheet::MfsLivedApartDisclosure as D;
+
+    // TY2024 — no line 6d exists on that form; the instruction is a WRITE-IN.
+    let (ri, state) = mfs_lived_apart_with_benefits();
+    let ar24 = absolute_for_year(&ri, &state, 2024);
+    assert_eq!(
+        ar24.mfs_lived_apart_disclosure,
+        Some(D::WriteInDBesideBenefitsOnLine6a),
+        "TY2024 discloses by writing \"D\" beside the word \"benefits\" on line 6a"
+    );
+    // TY2025 — the revision that replaced the write-in with a checkbox.
+    let ar25 = absolute_for_year(&ri, &state, 2025);
+    assert_eq!(
+        ar25.mfs_lived_apart_disclosure,
+        Some(D::CheckboxOnLine6d),
+        "TY2025 discloses by checking line 6d"
+    );
+
+    // NOT OWED (1): the filer lived WITH their spouse. A tick or a "D" here would be a false
+    // statement about where they lived, made under §6065 on their behalf — and they get the $0 base.
+    let mut lived_with = ri.clone();
+    lived_with.mfs_lived_apart_all_year = Some(false);
+    assert_eq!(
+        absolute_for_year(&lived_with, &state, 2025).mfs_lived_apart_disclosure,
+        None
+    );
+
+    // NOT OWED (2): no benefit statement, so no line 6a to annotate.
+    let mut no_statement = ri.clone();
+    no_statement.ssa_1099 = Vec::new();
+    no_statement.documents.ssa_1099 = Some(false);
+    assert_eq!(
+        absolute_for_year(&no_statement, &state, 2025).mfs_lived_apart_disclosure,
+        None,
+        "the lived-apart fact is still true; there is simply no line 6a on this return"
+    );
+
+    // ★ The PRINTED flag's own derivation from this decision is pinned where its types live:
+    //   `printed.rs::the_line_6d_flag_is_true_only_on_the_checkbox_revision`.
+}
+
+/// ★★★ **THE TY2025 MAP CELL IS THE WIDGET THE LABEL READER JOINS TO `6d`, WITH ITS DECLARED
+/// ON-STATE.**
+///
+/// ★★ **Why this and not an end-to-end tick.** TY2025 is not fillable: its `f1040.map.toml` has no
+/// `[header]` block and `YEAR.toml` says `status = "preparing"`, so `fill_full_return(.., 2025)`
+/// refuses before reaching any cell. Asserting the mapping against the TEMPLATE is the strongest claim
+/// available this year, and it is not a weak one — it catches the two ways a checkbox mapping goes
+/// wrong: the wrong widget (6c's `c1_41` is one row above, and ticking it would elect the §86(e)
+/// lump-sum method the filer never chose) and an on-state the widget does not declare, which renders
+/// as unchecked while the map reports success. The end-to-end tick is owed when TY2025 becomes
+/// fillable; `FOLLOWUPS.md` FR-260 carries it.
+#[test]
+fn the_ty2025_line_6d_cell_is_the_labelled_widget_with_a_declared_on_state() {
+    let map: btctax_forms::testonly::Form1040Map = toml::from_str(
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040, 2025).unwrap(),
+    )
+    .expect("the TY2025 1040 map parses");
+    let cell = map
+        .line6d
+        .as_ref()
+        .expect("the TY2025 map carries line6d — that revision's form HAS a 6d");
+    assert_eq!(cell.field, "topmostSubform[0].Page1[0].c1_42[0]");
+
+    let doc = btctax_forms::testonly::load(
+        btctax_forms::testonly::f1040_pdf(2025).expect("the TY2025 template is bundled"),
+    )
+    .expect("the template loads");
+    let fields = btctax_forms::testonly::collect_fields(&doc).expect("fields");
+    let idx = btctax_forms::testonly::index(&fields);
+    let f = idx
+        .get(cell.field.as_str())
+        .unwrap_or_else(|| panic!("{} is not a field on the TY2025 template", cell.field));
+    let on_states = btctax_forms::testonly::button_on_states(&doc, f.id);
+    assert!(
+        on_states.contains(&cell.on),
+        "the map writes on-state {:?} to line 6d, and the widget declares {on_states:?}. \
+         An undeclared on-state renders as UNCHECKED while every write reports success",
+        cell.on
+    );
+
+    // And TY2024 must NOT have the cell: that form has no 6d, and a cell there would be a write to a
+    // widget belonging to some other line.
+    let map24: btctax_forms::testonly::Form1040Map = toml::from_str(
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040, 2024).unwrap(),
+    )
+    .expect("the TY2024 1040 map parses");
+    assert!(
+        map24.line6d.is_none(),
+        "the TY2024 Form 1040 prints no line 6d — it instructs a write-in instead"
     );
 }

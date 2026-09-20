@@ -1278,7 +1278,13 @@ fn map_money_line_cells(year: i32) -> std::collections::BTreeSet<String> {
                 .chain("ine".chars())
                 .chain(rest.chars().take_while(|c| c.is_ascii_alphanumeric()))
                 .collect();
-            l.contains('=').then_some(key)
+            // ★★★ A MONEY cell only. `line6d` is a `{ field = …, on = … }` CHECKBOX — the MFS
+            //     lived-apart disclosure — and counting it here would make this function's name a lie
+            //     and its figure uncomparable with the money-line count the spec quotes. The
+            //     discriminator is the value shape, not a name list: a money cell's value is a bare
+            //     `"…"` string, a checkbox's is an inline table.
+            let value = l.split_once('=')?.1.trim_start();
+            (!value.starts_with('{')).then_some(key)
         })
         .collect()
 }

@@ -700,6 +700,19 @@ pub struct Form1040Lines {
     /// both of the worksheet's STOP branches instruct. It is NOT the same as the blank a filer with no
     /// benefits files, which is why 6a is `Option` and `Usd::ZERO` on 6b means something.
     pub line6b: Option<Usd>,
+    /// ★★★ **L6d — "If you are married filing separately and lived apart from your spouse the entire
+    ///        year (see inst.), check here."**
+    ///
+    /// `true` only when all of: the filer is MFS, they answered that they lived apart ALL year, and
+    /// this return HAS a benefit statement (no line 6a, nothing to disclose). btctax has already used
+    /// that fact to pick the §86(c)(1)(A) $25,000 base amount over MFS-lived-with's $0, so the
+    /// disclosure is what makes the figure defensible: *"If you don't check the box on line 6d, you
+    /// may get a math error notice from the IRS"* (`i1040gi--2025.txt:3332-3334`).
+    ///
+    /// ★ `false` on the TY2024 revision even when the facts hold, because that form has no 6d — it
+    ///   instructs a write-in of "D" beside line 6a, which reaches the filer through `hand_marks`.
+    ///   The decision is `ss_benefits_worksheet::mfs_lived_apart_disclosure`, never a year literal.
+    pub line6d_mfs_lived_apart: bool,
     /// L7 — capital gain or (loss): **Schedule D's printed line 16**, or on a net-loss year the
     /// §1211(b)-limited `−(Schedule D line 21)`. Signed with a **leading minus**.
     pub line7: Usd,
@@ -1075,6 +1088,13 @@ pub fn form_1040_lines(
     let line37 = (line24 - line33).max(Usd::ZERO);
 
     Form1040Lines {
+        // ★ Only the CHECKBOX revision writes a cell. The write-in revision (TY2024, which has no
+        //   6d) reaches the filer through the manifest's hand-marks block instead — there is no
+        //   AcroForm field that can carry a "D" beside the word "benefits".
+        line6d_mfs_lived_apart: matches!(
+            ar.mfs_lived_apart_disclosure,
+            Some(crate::tax::ss_benefits_worksheet::MfsLivedApartDisclosure::CheckboxOnLine6d)
+        ),
         line1a,
         line1z,
         line2a,
@@ -2033,6 +2053,54 @@ mod tests {
         assert_eq!(income.line5a, Some(dec!(500)));
     }
 
+    /// ★★★ **LINE 6d's FLAG FOLLOWS THE REVISION, NOT THE FACT.**
+    ///
+    /// `AbsoluteReturn::mfs_lived_apart_disclosure` is three-valued and the printed flag must be true
+    /// for exactly ONE of the three. The TY2024 revision has no line 6d at all — it instructs a
+    /// write-in of "D" beside the word "benefits" on line 6a — so a `true` there would send the
+    /// emitter looking for a cell that map correctly does not have.
+    #[test]
+    fn the_line_6d_flag_is_true_only_on_the_checkbox_revision() {
+        use crate::tax::ss_benefits_worksheet::MfsLivedApartDisclosure as D;
+        let flag = |d: Option<D>| {
+            let mut ar = ar_with(None, Usd::ZERO, Usd::ZERO);
+            ar.mfs_lived_apart_disclosure = d;
+            let sd = schedule_d_lines(&ar, None);
+            let f8959 = form_8959_lines(FilingStatus::Mfs, Usd::ZERO, Usd::ZERO, None);
+            let income = form_1040_income_lines(&ar, None, None, &sd);
+            form_1040_lines(
+                &ar,
+                &income,
+                None,
+                None,
+                None,
+                &f8959,
+                None,
+                None,
+                &tt(),
+                FilingStatus::Mfs,
+                Usd::ZERO,
+                Usd::ZERO,
+                Some(false),
+            )
+            .line6d_mfs_lived_apart
+        };
+        assert!(
+            flag(Some(D::CheckboxOnLine6d)),
+            "the revision that HAS a 6d must write it"
+        );
+        assert!(
+            !flag(Some(D::WriteInDBesideBenefitsOnLine6a)),
+            "★ the write-in revision must NOT set the flag: its form has no 6d, and the disclosure \
+             reaches the filer through the manifest's hand-marks block"
+        );
+        assert!(
+            !flag(None),
+            "no disclosure owed — an MFS filer who lived with their spouse, or one with no benefit \
+             statement at all — writes nothing"
+        );
+    }
+
     /// nonzero 13b and a nonzero QBI, where each term's absence changes the number.
     #[test]
     fn printed_1040_line14_needs_all_three_terms() {
@@ -2089,6 +2157,7 @@ mod tests {
         use crate::tax::other_taxes::{Form8959, Form8960};
         let z = Usd::ZERO;
         AbsoluteReturn {
+            mfs_lived_apart_disclosure: None,
             social_security_benefits: None,
             taxable_social_security: None,
             ira_distributions_total: None,

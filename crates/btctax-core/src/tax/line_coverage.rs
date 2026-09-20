@@ -3046,6 +3046,12 @@ pub fn cover_form1040lines(l: &crate::tax::printed::Form1040Lines) -> Coverage {
         line34,
         line37,
         digital_asset_answer: _,
+        // ★ Not a MONEY line, so it carries no coverage row: this checker joins printed figures to the
+        //   instruction text that defines them, and 6d is a checkbox whose presence is a disclosure
+        //   rather than an amount. Its own gates are the KATs in `attestation.rs` plus
+        //   `ss_benefits_worksheet`'s biconditional over the archive. Same treatment, same reason, as
+        //   `digital_asset_answer` above.
+        line6d_mfs_lived_apart: _,
     } = l;
     let mut c = Coverage::quoting("2024");
     c.line(
@@ -3379,6 +3385,7 @@ pub fn cover_form1040lines(l: &crate::tax::printed::Form1040Lines) -> Coverage {
 
 fn zero_form1040lines() -> crate::tax::printed::Form1040Lines {
     crate::tax::printed::Form1040Lines {
+        line6d_mfs_lived_apart: false,
         line1z: Usd::ZERO,
         line1a: Usd::ZERO,
         line2a: Usd::ZERO,

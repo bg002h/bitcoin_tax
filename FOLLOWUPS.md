@@ -9811,3 +9811,24 @@ in source, which is a hand-maintained list beside a set that grows — the exact
 reds on nothing. The boundary is stated in `toml_schema.rs` beside the pin instead, per option 3 of
 that rule. A real fix would derive the key set from the *type* rather than from a serialized fixture,
 which removes the `None`-unpublishes mechanism outright and makes both instruments unnecessary.
+
+### FR-260 — the TY2025 line 6d tick has no end-to-end PDF assertion (Minor, owner: the phase that makes TY2025 fillable)
+
+The MFS lived-apart disclosure is now decided per revision, printed on TY2025 (`c1_42[0]`, on-state
+`1`) and hand-marked on TY2024. What is NOT asserted is the tick appearing in a **filled** PDF, because
+TY2025 cannot be filled at all: `forms/2025/f1040.map.toml` has no `[header]` block and
+`forms/2025/YEAR.toml` says `status = "preparing"`, so `fill_full_return(.., 2025)` refuses with
+
+    Geometry("the TY2025 1040 map has no [header] block — a full return cannot file an unnamed 1040")
+
+**What stands in for it, and why it is not nothing.**
+`the_ty2025_line_6d_cell_is_the_labelled_widget_with_a_declared_on_state` checks the map cell against
+the TEMPLATE: the field is the widget `label_reader` joins to label `6d`, and the on-state is one the
+widget declares. Both plants red — pointing 6d at `c1_41` (6c, the §86(e) lump-sum election, one row
+above) and writing an undeclared on-state, which renders as unchecked while every write reports
+success.
+
+**What is still owed:** one `fill_full_return(.., 2025)` KAT reading `checkbox_on` back off the bytes,
+the way `the_retirement_block_prints_all_six_cells…` does for TY2024. Add it in the phase that
+completes the TY2025 map — the emitter code path is written and guarded (`line6d` absent from a map
+while the flag is true is a loud `Geometry` error), it has simply never run.

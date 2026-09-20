@@ -473,6 +473,9 @@ fn hand_marks(
     printed: &btctax_core::tax::packet::PrintedReturn,
     tax_year: i32,
     line8b_overflow: &[String],
+    // ★ Passed in rather than read off `printed`: `PrintedReturn` is what the PAGES say, and this is a
+    //   mark the pages deliberately do NOT carry — there is no field for it on this revision.
+    mfs_disclosure: Option<btctax_core::tax::ss_benefits_worksheet::MfsLivedApartDisclosure>,
 ) -> Vec<String> {
     let mut marks = Vec::new();
     // ★★★ T9 / R8 — SCHEDULE A LINE 8b's *"See attached"*: the one mark on this list that the
@@ -492,6 +495,7 @@ fn hand_marks(
     //    on stderr, which is the surface N4's own rationale rejects and which the Form 8283
     //    signatures mark above was moved OFF for exactly this reason. The manifest is the artifact
     //    the filer follows while assembling the envelope, and the statement goes in the envelope.
+    marks.extend(mfs_lived_apart_mark(mfs_disclosure, tax_year));
     if !line8b_overflow.is_empty() {
         marks.push(format!(
             "Schedule A line 8b — the STATEMENT the form now says is attached: btctax printed \"See \
@@ -669,6 +673,44 @@ fn forgoing_block(
 /// Render [`hand_marks`] as the packet manifest's closing section — the manifest is the artifact the
 /// filer is told to follow while assembling paper, which is why the marks live there (decision 13)
 /// rather than only on a stderr line that scrolls away.
+/// ★★★ **THE TY2024 "D" BESIDE LINE 6a — a mark no AcroForm field can carry.**
+///
+/// An MFS filer who lived apart from their spouse for the entire year gets the §86(c)(1)(A) base
+/// amount of $25,000 instead of MFS-lived-with's $0, and the TY2024 Form 1040 has no checkbox for that
+/// fact. Its instructions say, verbatim (`i1040gi--2024.txt:3361-3362`):
+///
+/// > "If you are married filing separately and you lived apart from your spouse for all of 2024,
+/// > enter “D” to the right of the word “benefits” on line 6a. If you don’t, you may get a math error
+/// > notice from the IRS."
+///
+/// ★★ Keyed on the REVISION's own instruction, never on a year literal or on the bare fact. The TY2025
+/// revision replaced the write-in with the line 6d checkbox, which btctax ticks — so this says nothing
+/// there, and a filer is never told to hand-mark a box the tool already filled.
+///
+/// ★ A pure function rather than an inline block in [`hand_marks`] so it is testable without
+/// assembling a whole [`btctax_core::tax::packet::PrintedReturn`]: nothing here reads the printed
+/// forms, because the whole point is that the forms do NOT carry this mark.
+fn mfs_lived_apart_mark(
+    disclosure: Option<btctax_core::tax::ss_benefits_worksheet::MfsLivedApartDisclosure>,
+    tax_year: i32,
+) -> Option<String> {
+    use btctax_core::tax::ss_benefits_worksheet::MfsLivedApartDisclosure as D;
+    match disclosure? {
+        D::CheckboxOnLine6d => None,
+        D::WriteInDBesideBenefitsOnLine6a => Some(format!(
+            "Form 1040 line 6a — write \"D\" to the RIGHT of the word \"benefits\": you file married \
+             filing separately and lived apart from your spouse for all of {tax_year}, so \
+             §86(c)(1)(A) gives you the $25,000 base amount instead of $0 — which is why any of your \
+             benefits escaped tax on line 6b. The {tax_year} Form 1040 has no checkbox for this (the \
+             2025 revision added line 6d; btctax ticks that one), and no AcroForm field can carry a \
+             write-in, so this one is yours. The instruction is \"enter 'D' to the right of the word \
+             'benefits' on line 6a\", and it prices the omission itself: \"If you don't, you may get a \
+             math error notice from the IRS\" — the Service would recompute line 6b with the $0 base \
+             amount and correct the return against you."
+        )),
+    }
+}
+
 fn hand_marks_block(marks: &[String]) -> String {
     use std::fmt::Write as _;
     let mut s = String::from(
@@ -2229,7 +2271,12 @@ fn export_full_return(
         Some(a) => btctax_forms::schedule_a_line8b_overflow(a, tax_year)?,
         None => Vec::new(),
     };
-    let marks = hand_marks(&printed, tax_year, &line8b_overflow);
+    let marks = hand_marks(
+        &printed,
+        tax_year,
+        &line8b_overflow,
+        ar.mfs_lived_apart_disclosure,
+    );
     manifest.push_str(&hand_marks_block(&marks));
     // ★★★ T12 / R12 / J-15 — the FORGOING list, immediately after the hand-marks block it
     //     completes. The two are different categories and the order encodes it: the marks above are
@@ -2557,6 +2604,49 @@ pub(crate) fn extension_from_session(
 mod tests {
     use super::*;
     use btctax_core::forms::InformationReturnRegime as Regime;
+
+    /// ★★★ **THE TY2024 "D" REACHES THE FILER, AND ONLY WHEN IT IS THAT REVISION'S INSTRUCTION.**
+    ///
+    /// TY2024's Form 1040 has no line 6d, so there is no AcroForm field that can carry the disclosure.
+    /// Its instructions say (`i1040gi--2024.txt:3361-3362`): *"If you are married filing separately and
+    /// you lived apart from your spouse for all of 2024, enter “D” to the right of the word “benefits”
+    /// on line 6a. If you don’t, you may get a math error notice from the IRS."*
+    ///
+    /// ★★ **The third case is the one that matters.** On TY2025 btctax TICKS line 6d, so the mark must
+    /// say nothing — a manifest telling the filer to hand-write a "D" beside a box the tool already
+    /// checked would have them make a mark the form does not ask for, on a revision that replaced it.
+    /// A mark conditioned on the FACT rather than on the revision's own instruction gets this wrong,
+    /// which is why the condition is the `MfsLivedApartDisclosure` variant.
+    #[test]
+    fn the_ty2024_write_in_d_is_a_hand_mark_and_the_checkbox_revision_owes_none() {
+        use btctax_core::tax::ss_benefits_worksheet::MfsLivedApartDisclosure as D;
+        let m = mfs_lived_apart_mark(Some(D::WriteInDBesideBenefitsOnLine6a), 2024);
+        let only = m.as_ref().expect("the write-in revision owes a mark");
+        for needle in [
+            "write \"D\"",
+            "RIGHT of the word \"benefits\"",
+            "$25,000",
+            "math error notice",
+            "2024",
+        ] {
+            assert!(
+                only.contains(needle),
+                "the mark must carry {needle:?} — the filer has to know WHAT to write, WHERE, why \
+                 they are entitled to it, and what happens if they skip it: {only}"
+            );
+        }
+
+        assert!(
+            mfs_lived_apart_mark(Some(D::CheckboxOnLine6d), 2025).is_none(),
+            "★ btctax CHECKS line 6d on that revision, so telling the filer to hand-write a \"D\" \
+             would have them mark a form that did not ask for it"
+        );
+        assert!(
+            mfs_lived_apart_mark(None, 2024).is_none(),
+            "no disclosure owed — an MFS filer who lived with their spouse, or any filer with no \
+             benefit statement — is told nothing"
+        );
+    }
 
     /// [I5] r2/NEW-IMPORTANT-1: the broker-reporting advisory is YEAR-AWARE. On the TY2025+
     /// digital-asset revision it must cite the 1099-DA and the digital-asset boxes (G/H/J/K separate,

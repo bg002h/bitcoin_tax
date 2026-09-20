@@ -188,6 +188,7 @@ fn extract_lines_ignores_map_metadata() {
 }
 fn f1040() -> Form1040Lines {
     Form1040Lines {
+        line6d_mfs_lived_apart: false,
         line6a: None,
         line6b: None,
         line4a: None,

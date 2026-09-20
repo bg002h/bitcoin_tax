@@ -2010,6 +2010,28 @@ pub struct AbsoluteReturn {
     /// own instruction on either STOP branch — *"Enter -0- on Form 1040 or 1040-SR, line 6b"* — and that
     /// printed `-0-` is the filer testifying that none of their benefits are taxable.
     pub taxable_social_security: Option<Usd>,
+    /// ★★★ **HOW an MFS filer who lived apart all year DISCLOSES it — the per-revision answer, or
+    ///        `None` when no disclosure is owed.**
+    ///
+    /// `Some` iff all three hold: the filer is MFS, they answered that they lived apart from their
+    /// spouse for the ENTIRE year, and this return carries a benefit statement (no statement ⇒ no line
+    /// 6a ⇒ nothing to annotate). The variant is the REVISION's own instruction, from
+    /// `ss_benefits_worksheet::mfs_lived_apart_disclosure`:
+    ///
+    /// | revision | instruction, verbatim |
+    /// |---|---|
+    /// | TY2024 | *"enter “D” to the right of the word “benefits” on line 6a"* — no 6d exists |
+    /// | TY2025 | *"check the box on line 6d"* |
+    ///
+    /// ★★★ **Why this field exists at all.** btctax has already used the lived-apart fact to pick the
+    /// §86(c)(1)(A) base amount of **$25,000** over MFS-lived-with's **$0** — a large, favourable
+    /// difference — and until 2026-09-20 it printed nothing that claimed it.
+    /// `mfs_lived_apart_disclosure` had NO production caller: a computed value with no reader, which
+    /// is not thereby correct. Both revisions price the omission identically: *"you may get a math
+    /// error notice from the IRS"*, i.e. the Service recomputes with the $0 base and corrects the
+    /// return against the filer.
+    pub mfs_lived_apart_disclosure:
+        Option<crate::tax::ss_benefits_worksheet::MfsLivedApartDisclosure>,
     /// 1040 L9 — total income = L1a + L2b + L3b + **L4b + L5b** + L7 + L8 (T14 added the two
     /// retirement operands; a sum missing one of them is the `a-figure-with-no-reader` shape).
     pub total_income: Usd,
@@ -2596,6 +2618,27 @@ pub fn assemble_absolute(
         (Some(ss_line1), Some(outcome.line_6b()))
     };
 
+    // ★★★ THE DISCLOSURE, decided by the REVISION and not by a year literal.
+    //
+    //     Owed only on a return that has a benefit statement: with no statement there is no line 6a
+    //     and nothing to annotate, so an MFS filer who lived apart and received nothing owes nothing.
+    let mfs_lived_apart_disclosure = (ri.filing_status == FilingStatus::Mfs
+        && ri.mfs_lived_apart_all_year == Some(true)
+        && !ri.ssa_1099.is_empty())
+    .then(|| {
+        crate::tax::ss_benefits_worksheet::mfs_lived_apart_disclosure(&year.to_string())
+            .unwrap_or_else(|| {
+                panic!(
+                    "f1040--{year} has no `mfs_lived_apart_disclosure` arm, and this return owes the \
+                     disclosure. `ss_benefits_worksheet` holds a biconditional gate \
+                     (`the_two_per_revision_tables_cover_the_same_revisions`) that makes this \
+                     unreachable: a revision whose `line3_operands` is transcribed — and the \
+                     worksheet cannot run without it — must have this arm too. If this fires, that \
+                     gate was removed or bypassed."
+                )
+            })
+    });
+
     // ★★★ **T14 — the two retirement operands are IN the L9 sum.** `a-figure-with-no-reader` is why
     //     this is the line that matters: `total_tax` was once short by the whole AMT with every test
     //     green, because a computed figure had no reader. M-2's kill is deleting an operand here.
@@ -3025,6 +3068,7 @@ pub fn assemble_absolute(
     let amount_owed = (total_tax - total_payments).max(Usd::ZERO);
 
     AbsoluteReturn {
+        mfs_lived_apart_disclosure,
         // ★★★ FR-29 / SPEC §6.3 — decided HERE, once, where the §1(g) threshold and the ledger are
         //     both in scope. `assemble_absolute` runs only after `screen_compute_dependent` has
         //     passed, so a `Some` here means the ladder reached step 6's first arm: the filer
@@ -9840,6 +9884,7 @@ mod tests {
         assert_eq!(
             pf.f1040,
             crate::tax::printed::Form1040Lines {
+                line6d_mfs_lived_apart: false,
                 line6a: None,
                 line6b: None,
                 line4a: None,
