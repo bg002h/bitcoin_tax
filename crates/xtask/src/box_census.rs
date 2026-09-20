@@ -2348,6 +2348,57 @@ mod tests {
         );
     }
 
+    /// ★★★ **THE TRANSCRIPTION GATE: `btctax_core::tax::form1099r::BOXES` must equal what the form
+    /// prints — derived by the enumerator, both directions, both editions.**
+    ///
+    /// This is the check that makes the transcription a fact rather than a claim. `SPEC_retirement_income.md`
+    /// §7 carried **five** of the form's boxes as a hand-written list and nothing compared it to
+    /// anything, which is how box 14 (*State tax withheld* → Schedule A line 5a, FR-258) stayed missing.
+    ///
+    /// ★★ It lives in `xtask` because this is the only crate that can see BOTH sides: the enumerator
+    /// that reads the archived extract, and `btctax-core`'s typed table. Neither crate alone can hold
+    /// this, and putting a hand-written count in either would be the defect it exists to catch.
+    ///
+    /// ★ **Both directions, and they fail differently.** A box the form prints and the table omits is a
+    /// forgotten box — the defect. A box the table names and the form does not print is an invented box,
+    /// or a caption reworded by a revision the archive has not absorbed.
+    #[test]
+    fn the_form1099r_box_set_equals_the_form() {
+        use btctax_core::tax::form1099r::BOXES;
+        let typed: BTreeMap<&str, &str> = BOXES.iter().map(|b| (b.label, b.caption)).collect();
+        for ed in ["2024", "2025"] {
+            let text = std::fs::read_to_string(extract_path(&repo_root(), "f1099r", ed))
+                .expect("archived extract");
+            let printed = printed_boxes(&text, PREAMBLE_1141)
+                .unwrap_or_else(|e| panic!("f1099r--{ed} must enumerate: {e}"));
+
+            let printed_labels: BTreeSet<&str> = printed.keys().map(String::as_str).collect();
+            let typed_labels: BTreeSet<&str> = typed.keys().copied().collect();
+            let forgotten: Vec<&&str> = printed_labels.difference(&typed_labels).collect();
+            let invented: Vec<&&str> = typed_labels.difference(&printed_labels).collect();
+            assert!(
+                forgotten.is_empty(),
+                "f1099r--{ed} prints box(es) {forgotten:?} that `form1099r::BOXES` does not carry — \
+                 the forgotten-box defect this module exists to prevent"
+            );
+            assert!(
+                invented.is_empty(),
+                "`form1099r::BOXES` names box(es) {invented:?} that f1099r--{ed} does not print — \
+                 either invented, or a revision reworded the caption"
+            );
+
+            // ★ And the CAPTIONS must agree, not merely the labels. A right label on a wrong caption is
+            //   how a transcription drifts from the form it claims to transcribe.
+            for (label, caption) in &typed {
+                assert_eq!(
+                    printed.get(*label).map(String::as_str),
+                    Some(*caption),
+                    "f1099r--{ed} box {label}: the table's caption is not what the form prints"
+                );
+            }
+        }
+    }
+
     /// ★★★ **B1 — a caption beginning with an ORDINAL must not be dropped, and BOTH predicates are
     /// planted, because the first fix widened only one of them and box 11 was still lost.**
     ///
