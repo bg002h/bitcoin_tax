@@ -58,6 +58,51 @@ never from a rendered page (`CLAUDE.md`, *Transcribe IRS forms*).
 |---|---|---|
 | `f1040--2025.pdf` | archived, `design/forms/2025/` | the printed lines 4a–6d and line 9 |
 | `i1040gi--2025.pdf` | `482e9c48` (`design/ty2025/SPEC.md:70`) | lines 4a/4b, 5a/5b, 6a–6d, the **Social Security Benefits Worksheet** and the **Simplified Method Worksheet** |
+| `f1099r--2024.pdf` | `93900e2b` | **Form 1099-R, all 21 printed box labels** (TY2024 edition) |
+| `f1099r--2025.pdf` | `d6b7be48` | Form 1099-R, TY2025 edition |
+| `i1099r--2024.pdf` | `ca90e8f0` | the 1099-R box instructions (with Form 5498) |
+| `i1099r--2025.pdf` | `a2ebc2c5` | same, TY2025 edition |
+| `Pub915…pdf` | `44c4053d` | the **SSA-1099, SSA-1042S and RRB-1099 facsimiles**, every box, plus the negative-box-5 and §1341 repayment rules |
+| `Pub575…pdf` | `30bd37cc` | the **Simplified Method** in its own publication |
+| `i1040sca--2024.pdf` | archived, `design/forms/2024/` | **Schedule A line 5a** — which documents' state-withholding boxes it takes |
+
+★★★ **I-10 FOLDED 2026-09-20 — the seven rows above the extract line are new, and the first
+derivation off them found a money defect.** Review r1's I-10: *"The whole input surface has NO archived
+primary source … so the box numbers in §7 are asserted from memory and sit outside cite-check."* That
+was exactly right. Not one of Form 1099-R, SSA-1099 or RRB-1099 was in the tree; §7's box list was a
+hand-written list of five, graded against nothing.
+
+★★ I-10 also predicted what archiving would surface — *"re-derive §7's box set from the extract and see
+what else is missing"* — and the first pass found:
+
+> **Form 1099-R box 14, *State tax withheld*, feeds Schedule A line 5a, and §7 omits it.** The
+> authority: *"Forms W-2G, 1099-G, **1099-R**, 1099-MISC, and 1099-NEC may also show state and local
+> income taxes withheld"* (`design/forms/extract/i1040sca--2024.txt:324`). An itemizing retiree
+> understates line 5a by the whole of their state pension withholding. ★ This is the SAME defect
+> interview T11 found and fixed for **W-2 boxes 17 and 19** ([[FR-91]]); nobody carried the reasoning
+> across to the 1099-R. And the authority was never missing — `i1040sca--2024.txt` has been committed
+> the whole time. It was a source nobody read for this form.
+
+★ §7 must therefore be rewritten against the extract, not patched. The form prints **21** box labels
+(1, 2a, 2b, 3, 4, 5, 6, 7, 8, 9a, 9b, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19) and §7 names five. At
+least four of the omissions carry decisions: box 3 (capital gain in box 2a), box 5 and box 9b (the
+Simplified Method's cost in the plan — the very worksheet this spec builds), and box 14. Per **blank is
+the normal case**, the rewrite's gate is not *"does every box carry a value"* but *"does every box have
+a determinate provenance"*.
+
+★★ **Box 6 means three different things across this family, so no rule may say "box 6" without naming
+its form.** SSA-1099 box 6 is *Voluntary Federal Income Tax Withheld*; SSA-1042S box 6 is *Rate of Tax*
+and its withholding is **box 7**; RRB-1099 box 6 is *Workers' Compensation Offset* and its withholding
+is **box 10**. C-2's "SSA-1099 box 6 and RRB-1099 box 10" is correct — and was correct for a reason the
+spec could not previously check.
+
+★ **The 1099-R is archived but NOT censused, deliberately.** `xtask box-census` covers documents the
+product *models* (`DocumentKind::ALL`); the 1099-R has no `DocumentKind` because this feature is not
+built. Adding one is now a **build error** in `box_census::modelled_stems`, which is what will demand
+the box population at the moment the build starts. Separately, the census enumerator cannot yet read
+this form — its contiguity guard reports *"[11] missing from 1..=19 … this is the READER dropping
+boxes"*, because the 1099-R packs boxes 10–16 onto one printed row. That reader fix belongs to the
+build.
 
 Extracts of record: `design/forms/extract/f1040--2025.txt` and
 `design/forms/extract/i1040gi--2025.txt`. Every quote below carries its extract line number, and every
@@ -457,10 +502,83 @@ pub struct FormSsa1099 {
     pub box3_benefits_paid: Usd,
     /// Box 4 — "the amount of any benefits you repaid in 2025" (:3237-3239). Box 4 > box 3 ⇒ R-6.
     pub box4_benefits_repaid: Usd,
-    /// Box 5 — NET benefits. **Worksheet line 1 reads THIS**, not box 3 (:3396).
-    pub box5_net_benefits: Usd,
+    /// ★★★ Box 5 is **NOT a field.** It is DERIVED — see the I-11 fold directly below.
+}
+
+/// Box 5 — NET benefits, the figure worksheet line 1 reads (:3396). Never collected: the form's own
+/// caption defines it, *"Box 5. Net Benefits for 2024 (Box 3 minus Box 4)"*, and it is NEGATIVE when
+/// box 4 exceeds box 3 (printed in parentheses). `Usd` is `Decimal` and holds that; no new type.
+#[must_use]
+pub fn box5_net_benefits(f: &FormSsa1099) -> Usd {
+    f.box3_benefits_paid - f.box4_benefits_repaid
 }
 ```
+
+★★★ **I-11 FOLDED 2026-09-20 — box 5 is DERIVED, not collected. But I-11's stated premise is FALSE,
+and the true mechanism is worse.**
+
+Review r1's I-11, verbatim: *"`Usd` cannot express a negative SSA-1099 box 5, so the R-6 population
+cannot enter what their form says."* **`Usd` can.** It is `pub type Usd = Decimal`
+(`btctax-core/src/conventions.rs`), and `rust_decimal::Decimal` is signed — verified empirically, not
+inferred from the alias: a probe computing `dec!(3000) - dec!(3500)` yields `-500` with
+`is_sign_negative()` true. The finding cited `FOLLOWUPS.md` §G-11, which records that `Usd` cannot
+express **blank** — true, and a different property from sign.
+
+★★ **The defect is real, and it is that the two input paths disagree about the exact notation SSA
+prints.**
+
+| path | negative money | the SSA notation `(500.00)` |
+|---|---|---|
+| `btctax-adapters/src/parse.rs` (CSV/exports) | accepted | **parsed** — *"parenthesized accounting negative `(1.23)`"*, with a test at `:210` |
+| `btctax-input-form/src/parse.rs` (the interview, which a retiree uses) | **rejected at the door** (`:42`, `negative → Negative`) | rejected |
+
+So the filer transcribing an SSA-1099 into the interview cannot enter what their document prints —
+while the adapter path has parsed that exact notation all along. ★ And
+`btctax-input-form/src/attribute.rs:333` carries a defensive comment reading *"a negative amount is
+unreachable from the form: tier-1 parse rejects it"* — true today, and it becomes false the moment any
+SSA-1099 figure arrives through the adapter.
+
+★★★ **I-11's second half is the one that decides the design, and it is entirely right.** Collecting
+boxes 3, 4 and 5 as three independent leaves permits a **triple that contradicts itself**, because on
+the form box 5 is not independent — the facsimile prints its definition in its own caption: *"Box 5.
+Net Benefits for 2024 (Box 3 minus Box 4)"*. So the fix is not a signed field beside two unsigned
+ones; it is to stop collecting a box the form computes. Deriving also moots the input-path split above
+for this spec, though the split itself remains and is filed as [[FR-256]].
+
+Pub 915 states the negative case in its own words, on **both** forms:
+> figure in box 3. This is a negative figure and means you repaid more money than you received."*
+
+I-11's second half is the deeper one: collecting boxes 3, 4 and 5 as three independent leaves permits a
+**triple that contradicts itself**, because on the form box 5 is not independent — the facsimile prints
+its definition in the caption, *"Box 5. Net Benefits for 2024 (Box 3 minus Box 4)"*. So the fix is not a
+signed field beside two unsigned ones; it is to stop collecting a box the form computes.
+
+★★ **This is transcription, not derivation-in-the-forbidden-sense.** The standing rule bans a closed
+form that replaces the document's own steps. Here the document's own step *is* the subtraction, printed
+in the box's caption, so applying it is following instructions. The filer is never asked to type a
+parenthesised figure, and no typed triple can disagree with itself.
+
+★ **The boundary, stated rather than hidden.** If a payer's form ever printed a box 5 that is not box 3
+minus box 4, deriving would silently overwrite it. That is accepted: the alternative — collecting it to
+cross-check — cannot be built, because the very case where a discrepancy would matter is the negative
+one the filer cannot enter. The exposure is a payer arithmetic error on a form whose caption states the
+arithmetic.
+
+★★ **Two consequences for R-6, both confirmed by the authority rather than assumed:**
+
+1. **R-6's Σ is right, and must stay a Σ.** *"If you receive more than one form, a negative figure in
+   box 5 of one form is used to offset a positive figure in box 5 of another form for that same year."*
+2. **On MFJ it must sum across BOTH spouses, not per filer.** Pub 915's own example: Ryan's box 5 is
+   $3,000, Jordan's is ($500), and *"Ryan and Jordan will use $2,500"*. A per-form or per-spouse R-6
+   would refuse a return the instructions finish in one sentence — [[widening-an-exemption-is-never-
+   the-safe-edit]] inverted: this is a refusal that is too WIDE, and too-wide refusals cost the filer
+   the return.
+
+★ **And R-6's remedy text is now sourced.** The >$3,000 repayment is §1341, and Pub 915 gives both
+branches: the itemized deduction on **Schedule A line 16**, or a credit on **Schedule 3 line 13z with
+"I.R.C. 1341" written on the entry line**, whichever produces the smaller tax. btctax computes neither,
+so R-6 correctly refuses — but the refusal should name both routes, because a filer told only about the
+deduction may take the worse of the two.
 
 New class-(A) declarations on `ReturnInputs`, each `Option<bool>` — the type the classifier forbids `_`
 on (`return_inputs.rs`), registered in `classifier.rs` beside

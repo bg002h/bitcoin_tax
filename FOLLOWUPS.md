@@ -9687,6 +9687,46 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   check in one command that they are holding the artifact under review — which makes the reviewer a
   witness to their own payload instead of trusting the harness.
 
+- **🔴 OPEN — FR-257 — `cite-check` cannot grade a spec that narrates its own review history, and the retirement spec is one. Owning phase: the §7 rewrite (retirement build), NOT before.**
+  I-10's third ask was to bring the retirement spec's box quotations under `cite-check`. I extended
+  `checked_docs()` to it and ran it: **57 of 152 quoted spans failed.** Reverted, because the failures
+  are mostly the CHECKER's scope, not the document's errors, and folding it now would grade text that
+  the §7 rewrite is about to delete.
+  ★★★ **The measurement, and the design it implies.** `cite-check`'s contract is *every `*"…"*` span
+  appears in an archived extract*. That holds for `SPEC_schedule_1a.md`, a pure transcription. The
+  retirement spec also quotes **the review report, tool output, the owner's own rulings, taxcalc's and
+  OTS's source, and `CLAUDE.md`** — all legitimately quoted, none in any IRS extract. Applied
+  unchanged, the checker's only satisfying edit is to *strip the quotation marks from honest quotes*,
+  which is worse than the gap it closes.
+  ★★ So the fix is **attribution, fail-closed**: a quoted span must either appear in an extract or
+  carry an explicit non-extract attribution, and an UNATTRIBUTED span defaults to needing the extract.
+  Then the checker grades what it can and says what it cannot, instead of being right about one
+  document shape and wrong about another.
+  ★ **One genuine document defect was found before the revert, and it is the layout class**
+  (`SPEC_retirement_income.md:411,413`). The spec quotes the Social Security Benefits Worksheet as
+  *"Is the amount on line 6 less than the amount on line 5? **No. STOP** None of your social security
+  benefits are taxable…"*. The extract prints `STOP` on its own line BETWEEN the sentence's lines —
+  *"…Enter -0- on Form 1040 or / STOP / 1040-SR, line 6b."* — because it is a graphic element the
+  layout interleaves. The reading is right; the span is a reconstruction, not a quotation.
+  `box_census`'s `BoxEntry` already has the convention for this (*"a caption the layout wraps is
+  quoted to its first printed line"*) and the spec should adopt it.
+
+- **🔴 OPEN — FR-256 — the two money-input paths disagree about the parenthesised negative, and it is the exact notation the SSA prints. Owning phase: the retirement build (T14).**
+  `btctax-adapters/src/parse.rs` accepts the accounting negative — *"parenthesized accounting negative
+  `(1.23)`"*, with a test at `:210`. `btctax-input-form/src/parse.rs:42` REJECTS any negative at the
+  door (`negative → Negative`). A filer transcribing an SSA-1099 into the interview therefore cannot
+  enter what their document prints, while the CSV path has parsed that notation all along.
+  ★ Found folding review r1's I-11, whose own premise was different and **false**: it said *"`Usd`
+  cannot express a negative SSA-1099 box 5"*. `Usd` is `rust_decimal::Decimal` and is signed —
+  verified empirically with a probe (`dec!(3000) - dec!(3500)` ⇒ `-500`, `is_sign_negative()` true),
+  not inferred from the alias. The finding cited §G-11, which is about `Usd` not expressing **blank**.
+  ★★ **Not blocking for retirement**, because the fold made box 5 DERIVED (`box3 - box4`, the form's
+  own caption) rather than collected, so nothing negative is ever typed on that path. It stays open
+  because the disagreement is general, and because
+  `btctax-input-form/src/attribute.rs:333` carries a comment — *"a negative amount is unreachable from
+  the form: tier-1 parse rejects it"* — that is true today and becomes false the moment any figure
+  with an accounting negative reaches the form path.
+
 - **✅ CLOSED (step 1 of 2) — FR-255 — TaxCalcBench (MIT, 51 complete TY2024 returns) is integrated as a THIRD WITNESS: the four retirement vectors are COMMITTED with pinned provenance. The translator that drives cases end to end is step 2 and is deliberately NOT built yet.**
   ★ Landed as `crates/btctax-core/src/tax/public_vectors.rs` — the four cases' expected 1040 lines, pinned to corpus commit `8f89c2cf00a8906f4d896a02a2f45f9c9e85ae9b`, each with the sha256 prefix of the `output.xml` it was read from, and fetch-on-demand rather than 46 MB in the tree. All four pinned copies were verified byte-identical to what was transcribed.
   ★★★ **Two caveats made STRUCTURAL rather than left as prose**, which is the whole value of committing them as code: (a) line 4b is **derived**, so `line9_reconciles` forces `4b + 5b + 6b + other == line 9` and reds if any component is edited without line 9 — a derived figure nobody re-derives is a fabricated KAT; (b) a non-taxable benefit is `None`, **never** `Some(0)`, so nobody can tidy the corpus's own blank into a zero and erase the finding.
