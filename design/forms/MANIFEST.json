@@ -324,6 +324,15 @@
     "extract": "design/forms/extract/f1099int--2024.txt"
   },
   {
+    "path": "design/forms/2024/f1099r--2024.pdf",
+    "kind": "form",
+    "storage": "note",
+    "sha256": "93900e2b23bfc8db96f818284bee91583cda97a8f47222adb8b640c78a4304a7",
+    "bytes": 601437,
+    "url": "https://www.irs.gov/pub/irs-prior/f1099r--2024.pdf",
+    "extract": "design/forms/extract/f1099r--2024.txt"
+  },
+  {
     "path": "design/forms/2024/f4868--2024.pdf",
     "kind": "form",
     "storage": "note",
@@ -529,6 +538,15 @@
     "bytes": 196656,
     "url": "https://www.irs.gov/pub/irs-prior/i1099int--2024.pdf",
     "extract": "design/forms/extract/i1099int--2024.txt"
+  },
+  {
+    "path": "design/forms/2024/i1099r--2024.pdf",
+    "kind": "instructions",
+    "storage": "note",
+    "sha256": "ca90e8f0c67225efbfaebe869c49c3a23266da3b6155ea5e826a02c0bac8dad9",
+    "bytes": 398131,
+    "url": "https://www.irs.gov/pub/irs-prior/i1099r--2024.pdf",
+    "extract": "design/forms/extract/i1099r--2024.txt"
   },
   {
     "path": "design/forms/2024/i1099sa--2024.pdf",
@@ -756,6 +774,15 @@
     "extract": "design/forms/extract/f1099b--2025.txt"
   },
   {
+    "path": "design/forms/2025/f1099r--2025.pdf",
+    "kind": "form",
+    "storage": "note",
+    "sha256": "d6b7be486a4d7419968df8a7c8cc36284b672d5fe66cff12359255eb56d31f7a",
+    "bytes": 601017,
+    "url": "https://www.irs.gov/pub/irs-prior/f1099r--2025.pdf",
+    "extract": "design/forms/extract/f1099r--2025.txt"
+  },
+  {
     "path": "design/forms/2025/f1099sa--2025.pdf",
     "kind": "form",
     "storage": "note",
@@ -961,6 +988,15 @@
     "bytes": 232745,
     "url": "https://www.irs.gov/pub/irs-prior/i1099b--2025.pdf",
     "extract": "design/forms/extract/i1099b--2025.txt"
+  },
+  {
+    "path": "design/forms/2025/i1099r--2025.pdf",
+    "kind": "instructions",
+    "storage": "note",
+    "sha256": "a2ebc2c5ab6be07cfddefa8941f54138cb4b646f5240db2f1469c4f97a8db61e",
+    "bytes": 408494,
+    "url": "https://www.irs.gov/pub/irs-prior/i1099r--2025.pdf",
+    "extract": "design/forms/extract/i1099r--2025.txt"
   },
   {
     "path": "design/forms/2025/i1099sa--2025.pdf",
@@ -1170,6 +1206,15 @@
     "extract": "design/forms/extract/f1099g--2026.txt"
   },
   {
+    "path": "design/forms/2026/f5498sa--2026.pdf",
+    "kind": "form",
+    "storage": "note",
+    "sha256": "aaf55e3c61e8fc6913e00ff3eb5ffb0c9a780f3e39339aa8d2ac1810b2657994",
+    "bytes": 82834,
+    "url": "https://www.irs.gov/pub/irs-prior/f5498sa--2026.pdf",
+    "extract": "design/forms/extract/f5498sa--2026.txt"
+  },
+  {
     "path": "design/forms/2026/f6251--2026-DRAFT.pdf",
     "kind": "form",
     "storage": "note",
@@ -1269,24 +1314,6 @@
     "extract": "design/forms/extract/i1099g--2026.txt"
   },
   {
-    "path": "design/forms/2026/iw2w3--2026.pdf",
-    "kind": "instructions",
-    "storage": "note",
-    "sha256": "d16b9f506f039f5af24f01fad699b0b60d392ac7920fcff528c7d97740c792b6",
-    "bytes": 527838,
-    "url": "https://www.irs.gov/pub/irs-prior/iw2w3--2026.pdf",
-    "extract": "design/forms/extract/iw2w3--2026.txt"
-  },
-  {
-    "path": "design/forms/2026/f5498sa--2026.pdf",
-    "kind": "form",
-    "storage": "note",
-    "sha256": "aaf55e3c61e8fc6913e00ff3eb5ffb0c9a780f3e39339aa8d2ac1810b2657994",
-    "bytes": 82834,
-    "url": "https://www.irs.gov/pub/irs-prior/f5498sa--2026.pdf",
-    "extract": "design/forms/extract/f5498sa--2026.txt"
-  },
-  {
     "path": "design/forms/2026/i1099sa--2026.pdf",
     "kind": "instructions",
     "storage": "note",
@@ -1294,6 +1321,15 @@
     "bytes": 157004,
     "url": "https://www.irs.gov/pub/irs-prior/i1099sa--2026.pdf",
     "extract": "design/forms/extract/i1099sa--2026.txt"
+  },
+  {
+    "path": "design/forms/2026/iw2w3--2026.pdf",
+    "kind": "instructions",
+    "storage": "note",
+    "sha256": "d16b9f506f039f5af24f01fad699b0b60d392ac7920fcff528c7d97740c792b6",
+    "bytes": 527838,
+    "url": "https://www.irs.gov/pub/irs-prior/iw2w3--2026.pdf",
+    "extract": "design/forms/extract/iw2w3--2026.txt"
   },
   {
     "path": "legal/primary-sources/federal-register/SSA_COLA_Determinations_2017.pdf",
@@ -1591,6 +1627,24 @@
     "bytes": 1306311,
     "url": "https://www.irs.gov/pub/irs-pdf/p561.pdf",
     "extract": "legal/text/irs-publications/Pub561_Value_of_Donated_Property.txt"
+  },
+  {
+    "path": "legal/primary-sources/irs-publications/Pub575_Pension_and_Annuity_Income.pdf",
+    "kind": "publication",
+    "storage": "committed",
+    "sha256": "30bd37ccfcb1fe2e191abadbb38ce7cf7fcbb638e3065335436dd6025a35caa5",
+    "bytes": 1616319,
+    "url": "https://www.irs.gov/pub/irs-pdf/p575.pdf",
+    "extract": "legal/text/irs-publications/Pub575_Pension_and_Annuity_Income.txt"
+  },
+  {
+    "path": "legal/primary-sources/irs-publications/Pub915_Social_Security_and_RRB_Benefits.pdf",
+    "kind": "publication",
+    "storage": "committed",
+    "sha256": "44c4053dab046c737e4eadff7cf8a8d23fe55d6147bde995c6055b55af6db22b",
+    "bytes": 1570254,
+    "url": "https://www.irs.gov/pub/irs-pdf/p915.pdf",
+    "extract": "legal/text/irs-publications/Pub915_Social_Security_and_RRB_Benefits.txt"
   },
   {
     "path": "legal/primary-sources/irs-publications/Pub936_Home_Mortgage_Interest_Deduction.pdf",

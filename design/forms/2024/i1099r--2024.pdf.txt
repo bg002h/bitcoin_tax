@@ -1,0 +1,24 @@
+https://www.irs.gov/pub/irs-prior/i1099r--2024.pdf
+
+# i1099r--2024.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  ca90e8f0c67225efbfaebe869c49c3a23266da3b6155ea5e826a02c0bac8dad9
+# bytes   398131
+#
+# Fetch:    curl -sL -o i1099r--2024.pdf https://www.irs.gov/pub/irs-prior/i1099r--2024.pdf
+# Verify:   sha256sum i1099r--2024.pdf   # must equal the sha256 above
+#
+# ★ A DIFFERENT hash does not mean a corrupt download — it means the IRS REVISED this
+# document. That is a change to the authority: review it, never silently absorb it.
+#
+# The committed text layer is design/forms/extract/i1099r--2024.txt — that is what the
+# conformance tests read, so they run with no PDF and no network.
+#
+# Archived 2026-09-20 folding retirement-spec review r1 (I-10): the retirement income spec
+# transcribed Form 1099-R boxes 1, 2a, 2b, 4 and 7 with NO archived primary source at all, so
+# its box numbers sat outside cite-check and were asserted from memory. I-10 predicted that
+# deriving the box set from the extract would surface omissions, and it did immediately: the
+# form carries 21 box labels and box 14 (State tax withheld) feeds Schedule A line 5a per
+# design/forms/extract/i1040sca--2024.txt — an authority already committed here.
+# REVISION, READ OFF THE DOCUMENT'S OWN TEXT (never assumed from the filename):
+#   "2024", printed at the head of page 1 (extract:1).
+# ANNUAL cadence.

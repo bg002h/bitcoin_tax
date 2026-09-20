@@ -1285,6 +1285,52 @@ pub fn entries_for(doc: &DocumentAuthority) -> Vec<&'static BoxEntry> {
 /// `(stem, edition)` pairs, forms and booklets — what [`archived_information_returns`] returns.
 pub type ArchivedEditions = (BTreeSet<(String, String)>, BTreeSet<(String, String)>);
 
+/// ★★★ **The stems the PRODUCT models, derived from `DocumentKind::ALL` — the census's population.**
+///
+/// ★★ **Why this is derived and not a list.** Until 2026-09-20 the census population lived as a hand
+/// list in three places — [`DOCUMENTS`], [`BOOKLETS`] and [`section_of_stem`] — and the archive-vs-census
+/// join required every archived information return to appear in it. That is correct for a document the
+/// product READS, and wrong for a document archived purely as AUTHORITY: archiving Form 1099-R and its
+/// instructions to give `SPEC_retirement_income.md` a primary source (review r1, I-10) red the join on
+/// four documents whose feature is not built, and the only ways out were to invent a `SectionId` for an
+/// unbuilt spec or to bolt a named exemption onto a derived checker.
+///
+/// ★★★ Neither was needed, because the answer was already in the tree: `DocumentKind::ALL` holds
+/// exactly the nine families the product models, and [`DOCUMENTS`]/[`section_of_stem`] were spelling
+/// that same set by hand. So the population derives from it, and the consequence is the one worth
+/// having — **the moment the retirement build adds `DocumentKind::Form1099R`, this match stops
+/// compiling**, and the census demands the 1099-R's boxes at exactly the moment the product starts
+/// reading them. An archived document with no `DocumentKind` is authority-only by construction, which
+/// is a derived fact rather than an excuse.
+///
+/// The `_`-free match is the whole mechanism; do not add a wildcard arm.
+#[must_use]
+pub fn modelled_stems() -> (BTreeSet<&'static str>, BTreeSet<&'static str>) {
+    use btctax_core::tax::provenance::DocumentKind;
+    let mut forms = BTreeSet::new();
+    for k in DocumentKind::ALL {
+        // ★ ONE fact per variant: the form stem. The instructions stem is NOT repeated here — it is
+        // read back off `DOCUMENTS` below, which already carries the pairing, so the two cannot drift.
+        forms.insert(match k {
+            DocumentKind::W2 => "fw2",
+            DocumentKind::Form1099Int => "f1099int",
+            DocumentKind::Form1099Div => "f1099div",
+            DocumentKind::Form1099G => "f1099g",
+            DocumentKind::Form1099B => "f1099b",
+            DocumentKind::Form1098 => "f1098",
+            DocumentKind::Form1098E => "f1098e",
+            DocumentKind::Form1099Sa => "f1099sa",
+            DocumentKind::Form5498Sa => "f5498sa",
+        });
+    }
+    let booklets = DOCUMENTS
+        .iter()
+        .filter(|d| forms.contains(d.stem))
+        .map(|d| d.instructions)
+        .collect();
+    (forms, booklets)
+}
+
 /// ★★★ **I2 — THE ARCHIVED W / 1098 / 1099 EDITIONS, READ OUT OF `MANIFEST.json`.**
 ///
 /// Returns `(forms, booklets)` as `(stem, edition)` pairs. This is the join [`DOCUMENTS`] and
@@ -1326,6 +1372,27 @@ pub fn check_document_set(root: &Path) -> Result<(), String> {
             forms.len()
         ));
     }
+    // ★★★ Restrict the REQUIRED side to what the product models. An archived document with no
+    // `DocumentKind` is authority-only — archived so a spec can cite a primary source — and requiring
+    // a census of it would force either an invented `SectionId` for an unbuilt feature or a named
+    // exemption on a derived checker. See `modelled_stems`.
+    let (modelled_forms, modelled_booklets) = modelled_stems();
+    let authority_only: Vec<String> = forms
+        .iter()
+        .chain(booklets.iter())
+        .filter(|(stem, _)| {
+            !modelled_forms.contains(stem.as_str()) && !modelled_booklets.contains(stem.as_str())
+        })
+        .map(|(stem, ed)| format!("{stem}--{ed}"))
+        .collect();
+    let forms: BTreeSet<(String, String)> = forms
+        .into_iter()
+        .filter(|(stem, _)| modelled_forms.contains(stem.as_str()))
+        .collect();
+    let booklets: BTreeSet<(String, String)> = booklets
+        .into_iter()
+        .filter(|(stem, _)| modelled_booklets.contains(stem.as_str()))
+        .collect();
     let censused_forms: BTreeSet<(String, String)> = DOCUMENTS
         .iter()
         .map(|d| (d.stem.to_string(), d.edition.to_string()))
@@ -1354,6 +1421,17 @@ pub fn check_document_set(root: &Path) -> Result<(), String> {
             ));
         }
     }
+    // ★★ The teeth point the other way too: a family the product MODELS must have an archive. Without
+    // this, `modelled_stems` narrowing the required set could hide a family whose archive went missing.
+    for stem in &modelled_forms {
+        if !forms.iter().any(|(s, _)| s == stem) {
+            problems.push(format!(
+                "`DocumentKind` models {stem} but MANIFEST.json holds no edition of it — the product \
+                 reads a document the archive does not have, so no box assertion about it can run"
+            ));
+        }
+    }
+    let _ = &authority_only;
     if problems.is_empty() {
         Ok(())
     } else {
@@ -1870,11 +1948,57 @@ mod tests {
             .skip(1)
             .map(|d| (d.stem.to_string(), d.edition.to_string()))
             .collect();
-        let missing: Vec<_> = forms.difference(&dropped).collect();
+        // ★ Against the same population `check_document_set` requires — the MODELLED families. The
+        //   raw archive also holds authority-only documents (Form 1099-R, archived for
+        //   `SPEC_retirement_income.md`), which are outside the census by construction; comparing
+        //   against the raw set made this plant count them and report 3 where it means 1.
+        let (modelled_forms, _) = modelled_stems();
+        let required: BTreeSet<(String, String)> = forms
+            .iter()
+            .filter(|(stem, _)| modelled_forms.contains(stem.as_str()))
+            .cloned()
+            .collect();
+        let missing: Vec<_> = required.difference(&dropped).collect();
         assert_eq!(
             missing.len(),
             1,
-            "dropping one authority must leave exactly one archived edition uncensused"
+            "dropping one authority must leave exactly one archived edition uncensused: {missing:?}"
+        );
+    }
+
+    /// ★★★ **B1 for the derived population — both directions, because each has a wrong fix.**
+    ///
+    /// `modelled_stems` narrows what the archive-vs-census join REQUIRES, so it could in principle
+    /// hide a family. Two set equalities close that:
+    ///
+    /// * a `DocumentKind` variant added without a [`DOCUMENTS`] row reds here — after the `_`-free
+    ///   match in `modelled_stems` has already refused to compile, which is the first line of defence;
+    /// * a [`DOCUMENTS`] row for a stem the product does **not** model also reds — and that direction
+    ///   matters most, because it is the tempting way to silence the first one. Archiving authority
+    ///   (Form 1099-R, for `SPEC_retirement_income.md`) must NOT be made to look like modelling it.
+    ///
+    /// Watched red 2026-09-20 by mapping `Form1098E` to a bogus stem in `modelled_stems`: this test
+    /// and `documents_equal_the_archived_information_returns` both failed, naming `f1098e`.
+    #[test]
+    fn the_modelled_population_equals_the_censused_one_in_both_directions() {
+        let (modelled_forms, modelled_booklets) = modelled_stems();
+        let censused_forms: BTreeSet<&str> = DOCUMENTS.iter().map(|d| d.stem).collect();
+        assert_eq!(
+            modelled_forms, censused_forms,
+            "`DocumentKind::ALL` and `DOCUMENTS` must name the same form stems — a family modelled \
+             but uncensused has no box assertions, and a stem censused but unmodelled is authority \
+             being passed off as a document the product reads"
+        );
+        let censused_booklets: BTreeSet<&str> = BOOKLETS.iter().map(|b| b.stem).collect();
+        assert_eq!(
+            modelled_booklets, censused_booklets,
+            "the instructions stems must match too"
+        );
+        // ★ And the derivation must not be vacuous: nine families at HEAD.
+        assert_eq!(
+            modelled_forms.len(),
+            btctax_core::tax::provenance::DocumentKind::ALL.len(),
+            "one stem per DocumentKind variant"
         );
     }
 
