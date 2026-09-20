@@ -564,6 +564,40 @@ fn when_clause(reason: &str) -> String {
     pick.chars().take(44).collect()
 }
 
+/// `(family, pinned tag)` pins that are deliberate, each with the reason it is not stale.
+/// ★ Not a suppression list: adding a pin does NOT add an entry here, so a new stale pin reds.
+pub const DELIBERATE_PINS: &[(&str, &str, &str)] = &[
+    (
+        "f8949",
+        "1999",
+        "a B1 kill that plants a map at a year with NO archived extract, and asserts that \
+         absence itself (`map_rows.rs`: \"the planted year must have NO archived extract, or \
+         this kill proves nothing\"). 1999 will never be archived; the pin IS the fixture.",
+    ),
+    (
+        "f8283",
+        "2024",
+        "not a document read at all — a STRING FIXTURE. `forms_extract.rs` plants sample \
+         `# Regenerate:` lines the normaliser must leave byte-exact, and this is one of them. \
+         Re-pointing it to 2025 would change nothing and measure nothing.",
+    ),
+    (
+        "f6251",
+        "2024",
+        "`f6251_map.rs` holds the 2024 MAP against the 2024 FORM, and that pairing is the \
+         point — a map is per-revision, so checking it against a different revision's form \
+         would be the defect. What this pin must not hide is a committed map with NO test, \
+         which is `every_committed_map_year_is_held_against_its_own_form` below.",
+    ),
+    (
+        "f8995a",
+        "2024",
+        "same pairing as f6251, and there is currently only the 2024 map. The gate that \
+         notices a 2025 map arriving is \
+         `every_committed_map_year_is_held_against_its_own_form`, not this one.",
+    ),
+];
+
 /// The generated form axes for one stem, as one cell, plus what state they leave it in.
 fn axis_cell(c: &Cells) -> (String, State) {
     let get = |k: &str| c.get(k).cloned().unwrap_or_default();
@@ -1014,10 +1048,22 @@ pub fn revision_pin_rows(year: i32, cit: &Citations, rep: &mut Report) {
     }
     let mut per_fam: BTreeMap<&str, Vec<(&String, &BTreeSet<String>)>> = BTreeMap::new();
     for ((fam, tag), sites) in &cit.pinned {
+        // ★★★ A pin RULED DELIBERATE is not a blocker, and reporting it as one is not harmless.
+        //     `every_pinned_revision_is_the_newest_archived_or_carries_its_reason` adjudicates these
+        //     with a written reason; if this report contradicted that gate, the two instruments would
+        //     disagree about the same fact and — per this repo's own measured failure — the LENIENT one
+        //     becomes the de-facto answer while the loud one trains its reader to discount the marker.
+        //     One list, read by both.
+        if DELIBERATE_PINS.iter().any(|(f, t, _)| f == fam && t == tag) {
+            continue;
+        }
         per_fam.entry(fam.as_str()).or_default().push((tag, sites));
     }
     let target = year.to_string();
     for (fam, mut pins) in per_fam {
+        if pins.is_empty() {
+            continue; // every pin for this family is deliberate
+        }
         pins.sort_by(|a, b| b.0.cmp(a.0));
         let newest = pins[0].0.clone();
         if newest.starts_with(&target) || cit.per_revision.contains_key(fam) {
@@ -2982,45 +3028,35 @@ mod tests {
     /// still the right one — and this gate is fail-closed: a NEW pin is not exempt, it reds.
     #[test]
     fn every_pinned_revision_is_the_newest_archived_or_carries_its_reason() {
-        /// `(family, pinned tag)` pins that are deliberate, each with the reason it is not stale.
-        /// ★ Not a suppression list: adding a pin does NOT add an entry here, so a new stale pin reds.
-        const DELIBERATE: &[(&str, &str, &str)] = &[
-            (
-                "f8949",
-                "1999",
-                "a B1 kill that plants a map at a year with NO archived extract, and asserts that \
-                 absence itself (`map_rows.rs`: \"the planted year must have NO archived extract, or \
-                 this kill proves nothing\"). 1999 will never be archived; the pin IS the fixture.",
-            ),
-            (
-                "f8283",
-                "2024",
-                "not a document read at all — a STRING FIXTURE. `forms_extract.rs` plants sample \
-                 `# Regenerate:` lines the normaliser must leave byte-exact, and this is one of them. \
-                 Re-pointing it to 2025 would change nothing and measure nothing.",
-            ),
-            (
-                "f6251",
-                "2024",
-                "`f6251_map.rs` holds the 2024 MAP against the 2024 FORM, and that pairing is the \
-                 point — a map is per-revision, so checking it against a different revision's form \
-                 would be the defect. What this pin must not hide is a committed map with NO test, \
-                 which is `every_committed_map_year_is_held_against_its_own_form` below.",
-            ),
-            (
-                "f8995a",
-                "2024",
-                "same pairing as f6251, and there is currently only the 2024 map. The gate that \
-                 notices a 2025 map arriving is \
-                 `every_committed_map_year_is_held_against_its_own_form`, not this one.",
-            ),
-        ];
+        // ★ The list lives at module scope so the REPORT below uses the same one — see
+        //   `DELIBERATE_PINS`.
 
         let archived = archived();
         let cit = scan_citations(&workspace_rust());
+
+        // ★★★ **THE EXEMPTION LIST IS ITSELF GATED**, because both this test and `revision_pin_rows`
+        //     now read it: an entry added here silences a real finding in BOTH instruments at once.
+        //     So every entry must name a pin that actually EXISTS and give a real reason. A stale
+        //     entry — the pin deleted, the exemption left behind — is the shape that quietly re-opens
+        //     the hole for the next pin that happens to match.
+        for (fam, tag, why) in DELIBERATE_PINS {
+            assert!(
+                cit.pinned
+                    .contains_key(&((*fam).to_string(), (*tag).to_string())),
+                "`DELIBERATE_PINS` exempts `{fam}--{tag}` and no source file pins it. Remove the \
+                 entry: an exemption with no pin behind it silences the next pin that matches it."
+            );
+            assert!(
+                why.len() > 60,
+                "`{fam}--{tag}`'s exemption reason is {} characters. An exemption is a claim that a \
+                 pin is correct; it has to say why, or it is a suppression.",
+                why.len()
+            );
+        }
+
         let mut stale: Vec<String> = Vec::new();
         for ((fam, tag), sites) in &cit.pinned {
-            if DELIBERATE.iter().any(|(f, t, _)| f == fam && t == tag) {
+            if DELIBERATE_PINS.iter().any(|(f, t, _)| f == fam && t == tag) {
                 continue;
             }
             // ★ `-DRAFT` revisions are excluded from "newest": a draft's label set cannot be read
