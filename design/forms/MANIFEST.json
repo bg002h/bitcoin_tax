@@ -1638,13 +1638,22 @@
     "extract": "legal/text/irs-publications/Pub575_Pension_and_Annuity_Income.txt"
   },
   {
-    "path": "legal/primary-sources/irs-publications/Pub915_Social_Security_and_RRB_Benefits.pdf",
+    "path": "legal/primary-sources/irs-publications/Pub915_Social_Security_and_RRB_Benefits--2024.pdf",
+    "kind": "publication",
+    "storage": "committed",
+    "sha256": "34d7d33f5e772214934f9b263c79e8379813167bffb8218b1cf4e15c985b93f2",
+    "bytes": 1521215,
+    "url": "https://www.irs.gov/pub/irs-prior/p915--2024.pdf",
+    "extract": "legal/text/irs-publications/Pub915_Social_Security_and_RRB_Benefits--2024.txt"
+  },
+  {
+    "path": "legal/primary-sources/irs-publications/Pub915_Social_Security_and_RRB_Benefits--2025.pdf",
     "kind": "publication",
     "storage": "committed",
     "sha256": "44c4053dab046c737e4eadff7cf8a8d23fe55d6147bde995c6055b55af6db22b",
     "bytes": 1570254,
-    "url": "https://www.irs.gov/pub/irs-pdf/p915.pdf",
-    "extract": "legal/text/irs-publications/Pub915_Social_Security_and_RRB_Benefits.txt"
+    "url": "https://www.irs.gov/pub/irs-prior/p915--2025.pdf",
+    "extract": "legal/text/irs-publications/Pub915_Social_Security_and_RRB_Benefits--2025.txt"
   },
   {
     "path": "legal/primary-sources/irs-publications/Pub936_Home_Mortgage_Interest_Deduction.pdf",
