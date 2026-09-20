@@ -37,8 +37,35 @@ pub fn parse(kind: FieldKind, raw: &str) -> Result<FieldValue, ParseError> {
 
 /// Money: trim whitespace, parse as `Decimal`; non-numeric → `NotANumber`; negative → `Negative`. No `$`/comma
 /// handling (kept simple per the brief) — a renderer that wants that strips it before calling `parse`.
+///
+/// ★★★ **THE PARENTHESISED ACCOUNTING NEGATIVE IS READ, AND THEN REFUSED AS A NEGATIVE** (FR-256,
+/// 2026-09-20). It is still refused — no field of this form admits a negative, and
+/// `attribute.rs`'s `R::NegativeAmount` anchor depends on that — but it is refused for the RIGHT
+/// REASON, which is the whole change.
+///
+/// Before this, `(2.50)` gave `NotANumber`: *"that is not a number"*, said to a filer who had typed a
+/// number in the notation their own document prints. **Form SSA-1099 box 5 prints exactly this** when
+/// repayments exceed benefits, and `Pub915` explains it: *"If parentheses are around the figure in box
+/// 5, it means that the figure in box 4 is larger than the figure in box 3."* The other money-input
+/// path, `btctax-adapters::parse_usd`, has read `(1.23)` as −1.23 all along, so the two surfaces
+/// disagreed about the notation itself and only one of them told the filer anything useful.
+///
+/// ★ Reading it does NOT widen what is accepted. A parenthesised figure lands on `ParseError::Negative`
+/// exactly as `-2.50` does, so the refusal surface is unchanged and the form's no-negative invariant is
+/// untouched — `every_field_of_the_form_refuses_a_negative` holds it.
 fn parse_money(raw: &str) -> Result<FieldValue, ParseError> {
-    let d = Decimal::from_str(raw.trim()).map_err(|_| ParseError::NotANumber)?;
+    let t = raw.trim();
+    // A parenthesised figure is a NEGATIVE in accounting notation, not a syntax error.
+    if let Some(inner) = t.strip_prefix('(').and_then(|r| r.strip_suffix(')')) {
+        return match Decimal::from_str(inner.trim()) {
+            // ★ `(0)` is zero, not a negative: there is no negative zero to refuse, and calling it one
+            //   would refuse a figure the filer is entitled to enter.
+            Ok(d) if d.is_zero() => Ok(FieldValue::Money(d)),
+            Ok(_) => Err(ParseError::Negative),
+            Err(_) => Err(ParseError::NotANumber),
+        };
+    }
+    let d = Decimal::from_str(t).map_err(|_| ParseError::NotANumber)?;
     if d.is_sign_negative() {
         return Err(ParseError::Negative);
     }
@@ -308,6 +335,88 @@ mod tests {
         assert_eq!(
             parse_ip_pin("112233"),
             Ok(FieldValue::SecretEntry("112233".into()))
+        );
+    }
+}
+
+#[cfg(test)]
+mod fr256 {
+    use super::*;
+
+    /// ★★★ **THE ACCOUNTING NEGATIVE IS READ AS A NEGATIVE, not as gibberish** (FR-256).
+    ///
+    /// `btctax-adapters::parse_usd` has read `(1.23)` as −1.23 since it was written; this path answered
+    /// `NotANumber` — *"that is not a number"* — to a filer who had typed one, in the notation Form
+    /// SSA-1099 box 5 prints when repayments exceed benefits. The refusal is unchanged; only its reason
+    /// is, and the reason is the whole of what a filer sees.
+    #[test]
+    fn a_parenthesised_figure_is_refused_as_a_negative_not_as_a_non_number() {
+        for raw in ["(2.50)", "( 2.50 )", "(1)", "(10000.00)"] {
+            assert_eq!(
+                parse(FieldKind::Money, raw),
+                Err(ParseError::Negative),
+                "{raw:?} is a negative in accounting notation"
+            );
+        }
+        // The plain spelling is unchanged, and so is genuine gibberish.
+        assert_eq!(parse(FieldKind::Money, "-5"), Err(ParseError::Negative));
+        assert_eq!(
+            parse(FieldKind::Money, "(abc)"),
+            Err(ParseError::NotANumber)
+        );
+        assert_eq!(
+            parse(FieldKind::Money, "(2.50"),
+            Err(ParseError::NotANumber)
+        );
+        // ★ `(0)` is ZERO, not a negative — there is no negative zero to refuse, and refusing it would
+        //   deny a figure the filer is entitled to enter.
+        assert_eq!(
+            parse(FieldKind::Money, "(0)"),
+            Ok(FieldValue::Money(rust_decimal::Decimal::ZERO))
+        );
+        // …and nothing about the accepting path moved.
+        assert_eq!(
+            parse(FieldKind::Money, "2.50"),
+            Ok(FieldValue::Money(rust_decimal::Decimal::new(250, 2)))
+        );
+    }
+
+    /// ★★★ **EVERY FIELD OF THE FORM REFUSES A NEGATIVE — derived from the spec, not claimed in prose.**
+    ///
+    /// `attribute.rs` anchors the `R::NegativeAmount` refusal at `NotInForm` with the note *"defensive
+    /// only — a negative amount is unreachable from the form: tier-1 parse rejects it before it enters
+    /// the working copy"*. That is true today and was held by nothing: it is a claim about the whole
+    /// field set, sitting beside a field set that grows, which is the shape `CLAUDE.md`'s "derive the
+    /// list" rule exists to forbid. Add one negative-capable field and the note becomes false silently,
+    /// and the refusal's form-coverage anchor is then wrong about where it can fire.
+    ///
+    /// This walks `form_spec()` and probes EVERY field with both negative spellings, whatever its kind —
+    /// so a future `FieldKind` that admits a negative reds here rather than in a filer's return.
+    #[test]
+    fn every_field_of_the_form_refuses_a_negative() {
+        let mut money = 0usize;
+        let mut probed = 0usize;
+        for section in crate::spec::form_spec() {
+            for field in section.fields {
+                if field.kind == FieldKind::Money {
+                    money += 1;
+                }
+                for raw in ["-1", "(1)"] {
+                    probed += 1;
+                    assert!(
+                        !matches!(parse(field.kind, raw), Ok(FieldValue::Money(_))),
+                        "{:?} accepted {raw:?} as money. `attribute.rs`'s `R::NegativeAmount` anchor \
+                         says a negative is UNREACHABLE from the form; if this field should admit one, \
+                         that anchor is now wrong and must move off `NotInForm` in the same commit.",
+                        field.id
+                    );
+                }
+            }
+        }
+        assert!(
+            money >= 10 && probed >= 40,
+            "only {money} money field(s) and {probed} probe(s) — if the spec accessor stopped \
+             enumerating, this gate would pass while measuring almost nothing"
         );
     }
 }

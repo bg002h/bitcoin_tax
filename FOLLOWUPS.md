@@ -9781,7 +9781,7 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   captions. That notice is the authority `form_ssa1099.rs` transcribes for its derived box 5, so it is
   worth closing; owning phase: whenever a publication-sourced worksheet is next transcribed.
 
-- **🔴 OPEN — FR-256 — the two money-input paths disagree about the parenthesised negative, and it is the exact notation the SSA prints. Owning phase: the retirement build (T14).**
+- **✅ CLOSED 2026-09-20 — FR-256 — the two money-input paths no longer disagree about the parenthesised negative, and the form's no-negative claim is now machine-checked. Owning phase: the retirement build (T14).**
   `btctax-adapters/src/parse.rs` accepts the accounting negative — *"parenthesized accounting negative
   `(1.23)`"*, with a test at `:210`. `btctax-input-form/src/parse.rs:42` REJECTS any negative at the
   door (`negative → Negative`). A filer transcribing an SSA-1099 into the interview therefore cannot
@@ -9796,6 +9796,26 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   `btctax-input-form/src/attribute.rs:333` carries a comment — *"a negative amount is unreachable from
   the form: tier-1 parse rejects it"* — that is true today and becomes false the moment any figure
   with an accounting negative reaches the form path.
+  ★★★ **CLOSED as two changes, because the entry named two different things.**
+  **(1) The notation.** `parse_money` now READS `(2.50)` and refuses it as `ParseError::Negative`
+  instead of `NotANumber`. It is still refused — no field of this form admits a negative — but for the
+  right reason, which is the whole of what a filer sees: *"that is not a number"*, said to someone who
+  typed one in the notation their own Form SSA-1099 box 5 prints, is the wrong sentence.
+  `btctax-adapters::parse_usd` has read `(1.23)` as −1.23 all along, so the two surfaces disagreed about
+  the notation itself and only one of them said anything useful. ★ `(0)` is ZERO, not a negative —
+  refusing it would deny a figure the filer is entitled to enter.
+  **(2) The claim.** `attribute.rs` anchors `R::NegativeAmount` at `NotInForm` with the note *"defensive
+  only — a negative amount is unreachable from the form: tier-1 parse rejects it"*. True when written,
+  held by nothing: a claim about the whole field set, beside a field set that grows — the exact shape
+  `CLAUDE.md`'s "derive the list" rule forbids. `every_field_of_the_form_refuses_a_negative` now walks
+  `form_spec()` and probes EVERY field with both spellings, whatever its `FieldKind`, with a floor
+  (≥10 money fields, ≥40 probes) so a spec accessor that stopped enumerating cannot make it vacuous.
+  Adding a negative-capable field now reds here, naming the anchor that must move.
+  ★ B1: three plants, three reds — the accounting-negative branch reverted; `(0)` refused as a negative;
+  and the sign check removed from `parse_money`, which reds the FIELD-SET gate as well as the notation
+  test. That third one is the one that matters: it is the future edit this entry existed to catch.
+  ★ What is NOT changed: the refusal surface. A parenthesised figure lands on exactly the error `-2.50`
+  does, so nothing the form accepts has widened.
 
 - **✅ CLOSED (step 1 of 2) — FR-255 — TaxCalcBench (MIT, 51 complete TY2024 returns) is integrated as a THIRD WITNESS: the four retirement vectors are COMMITTED with pinned provenance. The translator that drives cases end to end is step 2 and is deliberately NOT built yet.**
   ★ Landed as `crates/btctax-core/src/tax/public_vectors.rs` — the four cases' expected 1040 lines, pinned to corpus commit `8f89c2cf00a8906f4d896a02a2f45f9c9e85ae9b`, each with the sha256 prefix of the `output.xml` it was read from, and fetch-on-demand rather than 46 MB in the tree. All four pinned copies were verified byte-identical to what was transcribed.
