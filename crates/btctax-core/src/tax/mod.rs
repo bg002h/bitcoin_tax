@@ -28,6 +28,7 @@ pub mod form8275;
 /// either a printable row or a NAMED refusal. See module doc.
 pub mod form8283_section_a;
 pub mod form8889;
+pub mod form_ssa1099;
 pub mod frozen_guard;
 pub mod interview_state;
 pub mod line_coverage;
