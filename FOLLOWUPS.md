@@ -10143,6 +10143,52 @@ is the full page-1 identity + filing-status + dependents-grid mapping — the fi
 a follow-up item. What that phase inherits is **20 of 31 cells verified against the paper**, the three
 discriminators that resolve a shifted column, and the knowledge that caption proximity is not one of them.
 
+**2026-09-20, fourth pass — I TOOK THE PORT ON. Every cell is resolved; the blocker is ONE struct field.**
+Three findings, of which **two I had to withdraw after checking** — recorded that way because the
+withdrawals are the useful part.
+
+★★★ **(1) STANDS — the standard-deduction / age-blindness block LEFT THE HEADER.** On TY2024 it is the
+unnumbered "Standard Deduction" / "Age/Blindness" area of page 1 (`f1040--2024.txt:36-39`). On TY2025 it is
+**numbered line 12a-12d on PAGE 2** (`f1040--2025.txt:92-94`):
+
+| TY2024 header cell | TY2025 | the form's own words |
+|---|---|---|
+| `claimed_dependent_taxpayer` / `_spouse` | `Page2 c2_1` / `c2_2` | 12a *"Someone can claim … You / Your spouse as a dependent"* |
+| `mfs_spouse_itemizes` | `Page2 c2_3` | 12b *"Spouse itemizes on a separate return"* |
+| — | `Page2 c2_4` | 12c *"You were a dual-status alien"* |
+| `taxpayer_aged` / `taxpayer_blind` | `Page2 c2_5` / `c2_6` | 12d *"You: Were born before January 2, 1961 / Are blind"* |
+| `spouse_aged` / `spouse_blind` | `Page2 c2_7` / `c2_8` | 12d *"Spouse: …"* |
+
+★ **(2) WITHDRAWN.** I wrote that TY2024's combined *"Spouse itemizes on a separate return **or you were a
+dual-status alien**"* box splitting into 12b and 12c left btctax with an unmapped decision and no input.
+It does not: `ReturnInputs::dual_status_alien` exists and both states REFUSE
+(`DualStatusAlienUnanswered`, `DualStatusAlienUnsupported`), so a dual-status filer never reaches print
+and 12c is unreachable — the same treatment as the refused document families. I found a split and assumed
+a gap instead of asking whether btctax already handled it.
+
+★ **(3) WITHDRAWN.** I wrote that the transposed grid and the split name column mean
+`DependentRowCells` cannot express TY2025. It is not asked to: `DependentsGridCells` already exists for
+exactly this shape, `xtask dependents-grid f1040--2025` MEASURES its FQNs off the form, a test holds the
+committed file to that measurement, and `[dependents_grid]` is already in the TY2025 map with all four
+columns. Its rows (1)-(4) sit there as derived comments marked *"NOT mapped — identity block"* — waiting
+on precisely this port. The work I thought was missing was done, and annotated with the reason.
+
+★★★ **THE REAL BLOCKER, and it is one field.** `Form1040HeaderCells` requires
+`more_than_four_dependents`, and on a TY2025-shaped map that decision belongs to `[dependents_grid]`,
+which already declares it (`Dependents_ReadOrder[0].c1_11[0]`). So writing a TY2025 `[header]` forces
+either a DUPLICATE declaration of one decision in two places — which `fill_form_1040_full_with_map`'s own
+error calls out: *"two declarations of it"* — or making that one field `Option<CheckChoice>`, required on a
+TY2024-shaped map and owned by the grid on a TY2025-shaped one.
+
+That is the change, and it is small. It is not being made in this pass: it alters a shipped struct on the
+identity block, and I was wrong three times in this pass alone by moving one step ahead of verification —
+each caught only by checking. A struct edit on funds-and-identity code is the wrong thing to start at the
+end of a long session.
+
+**The port after that one field:** the 30 remaining header cells are all resolved and listed above and in
+the third-pass table, `[dependents_grid]`'s rows (1)-(4) become writable, then the 6d tick.
+
+
 **Still owed:** the `fill_full_return(.., 2025)` KAT reading `checkbox_on` back off the bytes. Unchanged
 owner — it needs the header resolved, which is the fillable-year phase.
 
