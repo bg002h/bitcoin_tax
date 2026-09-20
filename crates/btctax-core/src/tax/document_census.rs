@@ -528,10 +528,17 @@ pub struct DocumentCensus {
     /// Form 5498-SA — HSA contribution and FMV information (T16).
     #[serde(default)]
     pub sa_5498: Option<bool>,
-    /// Form 1099-R — §2.2, refuses on `Some(true)`.
+    /// Form 1099-R — IRA distributions (1040 lines 4a/4b), pensions and annuities (5a/5b), and the
+    /// box-4 share of line 25b. **Live since T14**, which is why this no longer refuses on
+    /// `Some(true)`: `exit_sentence` returns `None` for this row. TOML only — `SectionId::R1099s` has
+    /// no interview rows yet, so `answer_row_text` names the `[[r_1099]]` import as the one route.
     #[serde(default)]
     pub r_1099: Option<bool>,
-    /// Form SSA-1099 / RRB-1099 — §2.2, refuses on `Some(true)`.
+    /// Form SSA-1099 / RRB-1099 — Social Security benefits (1040 lines 6a/6b) and their withholding
+    /// share of line 25b. **Live since T14**, so `exit_sentence` returns `None` here too. Box 5 is
+    /// never entered; it is derived from boxes 3 and 4 as the form derives it. A filer who transcribes
+    /// rows and stops is still refused, for `has_income_exclusion` (R-7) and, filing separately,
+    /// `mfs_lived_apart_all_year` (R-8).
     #[serde(default)]
     pub ssa_1099: Option<bool>,
     /// Form 1099-NEC / 1099-MISC / 1099-K — §2.2, refuses on `Some(true)`.

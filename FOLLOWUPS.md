@@ -9788,3 +9788,26 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   charitable and zero HSA cases, TY2024 only, and line **4b is absent from the XML** — derivable from total
   income but never asserted. ★ And it does not substitute for [[FR-64]]: these are synthetic-but-verified
   returns, not a filed one.
+
+### FR-259 — the schema gate's two instruments share one blind spot (Minor, owner: post-release)
+
+`docs/income-import-schema.md` is now guarded two ways (commit `f04a269`): a **vanish check** that
+set-diffs the committed document against a fresh generation and refuses to let you regenerate past a
+missing key, and a **count pin** (`PUBLISHED_LEAVES = 400`) held in source where regeneration cannot
+reach it. Each covers the other's hole, measured:
+
+| state | vanish check | count pin |
+|---|---|---|
+| a fixture `Some` becomes `None` | FAIL | FAIL |
+| the same, then regenerated (the response the old message instructed) | PASS | **FAIL** |
+
+**The residue.** One commit that publishes one new leaf and unpublishes another leaves the count
+unchanged. The vanish check still catches it — but only while the committed document is the old one.
+Regenerate first, then add-one-and-remove-one, and *both* pass.
+
+**Why it is not being closed now.** The only instrument that closes it is the full 400-key set pinned
+in source, which is a hand-maintained list beside a set that grows — the exact shape
+`CLAUDE.md`'s "derive the list" rule exists to forbid, and it would go stale in the direction that
+reds on nothing. The boundary is stated in `toml_schema.rs` beside the pin instead, per option 3 of
+that rule. A real fix would derive the key set from the *type* rather than from a serialized fixture,
+which removes the `None`-unpublishes mechanism outright and makes both instruments unnecessary.

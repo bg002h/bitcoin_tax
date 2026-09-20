@@ -781,6 +781,14 @@ mod tests {
     /// A field added to `ReturnInputs` raises this number and the diff shows it going up, which is a
     /// one-line edit and a visible one. A key silently unpublished makes it go DOWN, and that needs a
     /// human to type a smaller number — which is precisely the decision that was being skipped.
+    ///
+    /// ★ **What this does NOT cover, stated rather than implied.** It is one total, so a single commit
+    /// that publishes one new key and unpublishes another leaves the number unchanged. The vanish
+    /// check above catches that case on its set difference — but only while the committed document is
+    /// still the old one, so the two instruments have a shared blind spot: regenerate first, then
+    /// add-one-and-remove-one, and both pass. Closing it means pinning all 400 keys in source, which
+    /// is a list beside a set that grows, and it would go stale in the direction that reds on nothing.
+    /// Recorded as the boundary instead. See `FOLLOWUPS.md` FR-259.
     #[test]
     fn the_published_leaf_count_is_pinned_where_regeneration_cannot_reach_it() {
         const PUBLISHED_LEAVES: usize = 400;
