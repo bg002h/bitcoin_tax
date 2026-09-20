@@ -603,13 +603,6 @@ mod tests {
     use rust_decimal_macros::dec;
     use std::collections::BTreeSet;
 
-    fn extract(edition: &str) -> String {
-        let p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../..")
-            .join(format!("design/forms/extract/f1099r--{edition}.txt"));
-        std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()))
-    }
-
     /// ★★★ **THE JOIN: the struct's field set is exactly what the dispositions require — held by an
     /// EXHAUSTIVE destructure, so the compiler enforces it rather than a reviewer.**
     ///
@@ -1046,18 +1039,25 @@ mod tests {
         }
     }
 
-    /// ★★★ **Every caption is verbatim in BOTH archived editions.** This is the transcription gate: a
+    /// ★★★ **Every caption is verbatim in EVERY archived revision.** This is the transcription gate: a
     /// caption someone paraphrased, or read off the rendered page instead of the text layer, reds here.
     /// The standing example of why is Form 6251 line 33, where a rendered `12` was transcribed for the
     /// form's `22` and taxed one slice twice.
+    ///
+    /// ★★★ **The revision set is DERIVED, and was not until 2026-09-20.** This loop read
+    /// `["2024", "2025"]`, typed here — correct when written, and blind to the one event it exists for.
+    /// Planting `f1099r--2026.txt` with none of these captions in it left the suite **3989/3989
+    /// green**, while `xtask blockers` reported this very family as one whose module *"derives its
+    /// revision set from `design/forms/extract/`, so archiving `f1099r--2026` REDS the suite."*
+    /// It did not. Now it does.
     #[test]
-    fn every_caption_is_verbatim_in_both_editions() {
-        for ed in ["2024", "2025"] {
-            let text = extract(ed);
+    fn every_caption_is_verbatim_in_every_archived_revision() {
+        for (year, text) in crate::tax::archived_revisions::of("f1099r", 2) {
             for b in BOXES {
                 assert!(
                     text.contains(b.caption),
-                    "f1099r--{ed} does not print {:?} (box {})",
+                    "f1099r--{year} does not print {:?} (box {}). If the IRS reworded it, the \
+                     transcription is what changes — from the TEXT LAYER, never the rendered page.",
                     b.caption,
                     b.label
                 );

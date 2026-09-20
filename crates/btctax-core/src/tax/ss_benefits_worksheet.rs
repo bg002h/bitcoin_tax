@@ -250,19 +250,31 @@ mod tests {
     /// says `22`, which taxed one slice twice and inflated the tentative minimum tax by $200,000 on a
     /// single vector. No review caught it; running the transcription against the extract caught it in
     /// seconds. This is that check for this worksheet.
+    ///
+    /// ★★★ **The revision set is DERIVED, and was not until 2026-09-20.** This loop read
+    /// `["2024", "2025"]`, typed here. Archiving `i1040gi--2026.txt` — the event the year-port exists
+    /// for — widened the set beneath it, and nothing red. Now the set comes out of the directory, so a
+    /// new revision makes the transcription DUE rather than absorbing it.
     #[test]
-    fn every_line_is_verbatim_in_both_editions() {
-        for ed in ["2024", "2025"] {
-            let src = extract(ed);
+    fn every_line_is_verbatim_in_every_archived_revision() {
+        for (year, src) in crate::tax::archived_revisions::of("i1040gi", 2) {
             for (n, text) in LINES {
                 assert!(
                     src.contains(text),
-                    "i1040gi--{ed} does not print worksheet line {n}'s text: {text:?}"
+                    "i1040gi--{year} does not print worksheet line {n}'s text: {text:?}"
                 );
             }
-            // Line 3 is per-revision by construction.
-            let l3 = line3_operands(ed).expect("both editions are transcribed");
-            assert!(src.contains(l3), "i1040gi--{ed} line 3: {l3:?}");
+            // Line 3 is per-revision by construction, so a new revision needs its own operand list
+            // before this module may be used for that year at all.
+            let l3 = line3_operands(&year.to_string()).unwrap_or_else(|| {
+                panic!(
+                    "i1040gi--{year} is archived and `line3_operands` has no entry for it. Line 3 \
+                     names the 1040 lines it combines and they MOVE between revisions (TY2024's \
+                     \"7, and 8\" became TY2025's \"7a, and 8\"), so it cannot be shared. \
+                     Transcribe that revision's list from the TEXT LAYER."
+                )
+            });
+            assert!(src.contains(l3), "i1040gi--{year} line 3: {l3:?}");
         }
     }
 
@@ -342,19 +354,55 @@ mod tests {
         assert!(form("2025").contains("6d"), "TY2025 Form 1040 prints 6d");
     }
 
+    /// ★★★ **THE TWO PER-REVISION TABLES COVER THE SAME REVISIONS — derived, as a biconditional.**
+    ///
+    /// This module has two `match`es on the revision: [`line3_operands`] (which 1040 lines line 3
+    /// combines) and [`mfs_lived_apart_disclosure`] (how an MFS filer who lived apart discloses it).
+    /// Both are per-revision because both MOVED between TY2024 and TY2025. Nothing tied them together,
+    /// so adding one arm and forgetting the other was a silent half-port.
+    ///
+    /// ★★ **Why a biconditional and not "every archived revision has both".** The archive holds
+    /// `f1040--{2020…2025}`, and btctax does not file 2020–2023: demanding a disclosure decision for
+    /// them would be an instrument refusing what it has no business asking about — the too-wide
+    /// refusal, applied to a gate. What is genuinely wrong is a revision this module IS transcribed
+    /// for that has only one of the two answers. Derived from the archive, so a revision added later
+    /// is measured on the same terms with no edit here.
+    #[test]
+    fn the_two_per_revision_tables_cover_the_same_revisions() {
+        for (year, _) in crate::tax::archived_revisions::of("f1040", 2) {
+            let ed = year.to_string();
+            let (l3, disc) = (
+                line3_operands(&ed).is_some(),
+                mfs_lived_apart_disclosure(&ed).is_some(),
+            );
+            assert_eq!(
+                l3, disc,
+                "f1040--{year}: `line3_operands` {} an arm and `mfs_lived_apart_disclosure` {}. A \
+                 revision this module is transcribed for needs BOTH — btctax uses the lived-apart \
+                 fact to pick the $25,000 base amount over $0, so a revision with line 3 transcribed \
+                 and no disclosure decision computes a lower tax and prints nothing that claims it.",
+                if l3 { "has" } else { "has no" },
+                if disc { "does" } else { "does not" }
+            );
+        }
+    }
+
     /// ★★★ **M-10 — the four §86(c) thresholds are NOT indexed, read out of BOTH extracts.**
     ///
     /// Pinning literals here would assert what this module already says. Reading them from the archived
     /// instructions and requiring both editions to agree is what makes "not indexed" a measurement: an
     /// edition that DID change one reds instead of being absorbed.
+    ///
+    /// ★ Every archived revision, derived — so "not indexed" keeps being a measurement as revisions
+    /// accumulate, rather than a claim about the two that happened to be listed here.
     #[test]
-    fn the_four_thresholds_are_not_indexed_and_both_editions_agree() {
-        for ed in ["2024", "2025"] {
-            let src = extract(ed);
+    fn the_four_thresholds_are_not_indexed_and_every_revision_agrees() {
+        for (year, src) in crate::tax::archived_revisions::of("i1040gi", 2) {
             for amount in ["$32,000", "$25,000", "$12,000", "$9,000"] {
                 assert!(
                     src.contains(amount),
-                    "i1040gi--{ed} does not print the threshold {amount}"
+                    "i1040gi--{year} does not print the threshold {amount} — if a revision changed \
+                     one, §86(c) was amended and this module's constants are wrong for that year"
                 );
             }
         }

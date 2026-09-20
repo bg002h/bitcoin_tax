@@ -715,9 +715,19 @@ pub fn form_rows(year: i32, ps: &PortStatus, rep: &mut Report) {
 pub struct Citations {
     /// `<family> -> files citing it in any form`.
     pub cited: BTreeMap<String, BTreeSet<String>>,
-    /// Families read through a **prefix** const / `format!` join — the per-revision shape: the module
-    /// derives its revision set from the directory, so a new revision is noticed the day it lands.
+    /// Families read through a `format!` join whose file ALSO walks the extract directory — the
+    /// genuinely per-revision shape: the revision set comes out of the directory, so a new revision is
+    /// noticed the day it lands.
     pub per_revision: BTreeMap<String, BTreeSet<String>>,
+    /// ★★★ Families read through a `format!` join whose file shows **no derivation** — the path is
+    /// parameterised and the parameters come from a list typed in the source.
+    ///
+    /// This field exists because conflating the two was a live defect in this instrument. Until
+    /// 2026-09-20 a `{parameter}` in the path was taken as proof that the revision set was derived,
+    /// and all four families in this bucket were reported as *"archiving `<fam>--2026` REDS the
+    /// suite."* Planting `f1099r--2026.txt` with none of the module's captions in it left the suite
+    /// **3989/3989 green**. A parameterised path proves the path is parameterised. Nothing more.
+    pub parameterised_only: BTreeMap<String, BTreeSet<String>>,
     /// `(family, tag) -> sites` for every citation pinned to ONE literal revision, in CODE (not a
     /// doc comment). A pin does not know the year moved.
     pub pinned: BTreeMap<(String, String), BTreeSet<String>>,
@@ -757,9 +767,48 @@ pub fn scan_citations(files: &[(String, String)]) -> Citations {
                         c.pinned.entry((fam, tag)).or_default().insert(site);
                     }
                 } else if (tail.starts_with('"') || tail.starts_with('{')) && !is_doc {
-                    c.per_revision.entry(fam).or_default().insert(site);
+                    // ★★★ The evidence that decides it: does THIS FILE walk the directory? A
+                    //     `format!("…--{ed}.txt")` beside `for ed in ["2024", "2025"]` is a hand list
+                    //     with extra steps, and calling it derived is how four blind gates were
+                    //     reported as protected.
+                    if text.contains("archived_revisions::of(") || text.contains("read_dir") {
+                        c.per_revision.entry(fam).or_default().insert(site);
+                    } else {
+                        c.parameterised_only.entry(fam).or_default().insert(site);
+                    }
                 }
             }
+        }
+    }
+    // ★★★ **The DERIVED call site, which carries no `extract/` prefix.**
+    //
+    //     `archived_revisions::of("f1099r", 2)` builds the path inside the shared helper, so the
+    //     `extract/<fam>--` needle above cannot see it. Without this pass, converting a module from a
+    //     hand list to the derived form makes its family vanish from BOTH buckets — the instrument
+    //     rewarding the fix with silence, which is the same false-completeness in a new place. Found
+    //     immediately after converting `form1099r.rs`: the family disappeared from the report.
+    for (path, text) in files {
+        let is_doc = path.ends_with(".md");
+        if is_doc {
+            continue;
+        }
+        const NEEDLE: &str = "archived_revisions::of(\"";
+        let mut rest = text.as_str();
+        while let Some(i) = rest.find(NEEDLE) {
+            rest = &rest[i + NEEDLE.len()..];
+            let fam: String = rest
+                .chars()
+                .take_while(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit())
+                .collect();
+            if fam.is_empty() || !rest[fam.len()..].starts_with('"') {
+                continue;
+            }
+            let n = text[..text.len() - rest.len()].matches('\n').count();
+            c.cited.entry(fam.clone()).or_default().insert(path.clone());
+            c.per_revision
+                .entry(fam)
+                .or_default()
+                .insert(format!("{path}:{n}"));
         }
     }
     c
@@ -906,6 +955,26 @@ fn transcribed(family: &str, year: i32) -> Option<bool> {
 /// itself" when it actually hands you work is the same false-completeness this whole instrument is
 /// against.
 pub fn revision_pin_rows(year: i32, cit: &Citations, rep: &mut Report) {
+    // ★★★ The parameterised-but-not-derived families FIRST, because they are the ones that read as
+    //     safe and are not. This is `Who::Build` and UNMEASURED: the instrument can see that nothing
+    //     in the file walks the directory, and it cannot see what the hand-written list contains, so
+    //     it must not claim either that the family is covered or that it is not.
+    for (fam, sites) in &cit.parameterised_only {
+        rep.push(
+            Who::Build,
+            State::Unmeasured,
+            format!(
+                "`{fam}` is read through a PARAMETERISED path whose file never walks \
+                 `design/forms/extract/`, so the revisions it checks come from a list typed in \
+                 the source and archiving `{fam}--{year}` may be absorbed in silence. This is \
+                 NOT the per-revision shape; it is a hand list with a `format!` in front of \
+                 it. Derive the set (`tax::archived_revisions::of`) or say in the source which \
+                 revisions it covers and which it does not"
+            ),
+            "now",
+            sites.iter().cloned().collect::<Vec<_>>().join(", "),
+        );
+    }
     for (fam, sites) in &cit.per_revision {
         rep.push(
             Who::January,
@@ -2896,13 +2965,17 @@ mod tests {
     /// revision (`January`, BLOCKED); the literal form never will (`Build`, UNMEASURED). Plant the
     /// prefix into a pin and the verdict must move.
     #[test]
-    fn a_pinned_revision_is_unmeasured_and_a_prefix_one_clears_itself() {
-        let prefix = vec![(
+    fn a_pinned_revision_is_unmeasured_and_a_derived_one_clears_itself() {
+        // (1) A parameterised path in a file that ALSO walks the directory — the genuine shape.
+        let derived = vec![(
             "crates/btctax-core/src/tax/state_local_refund.rs".to_string(),
-            format!("pub const EXTRACT_STEM: &str = \"{}i1040gi--\";", xp()),
+            format!(
+                "pub const EXTRACT_STEM: &str = \"{}i1040gi--\";\nfn f() {{ std::fs::read_dir(d) }}",
+                xp()
+            ),
         )];
         let mut rep = Report::default();
-        revision_pin_rows(2026, &scan_citations(&prefix), &mut rep);
+        revision_pin_rows(2026, &scan_citations(&derived), &mut rep);
         assert_eq!(rep.rows.len(), 1, "{:#?}", rep.rows);
         assert_eq!(rep.rows[0].who, Who::January);
         assert_eq!(rep.rows[0].state, State::Blocked);
@@ -2912,23 +2985,67 @@ mod tests {
             rep.rows[0]
         );
 
-        // PLANT: the same module pinned to one literal revision instead.
-        let pinned = vec![(
-            "crates/btctax-core/src/tax/capital_loss_carryover.rs".to_string(),
-            format!("pub const SOURCE: &str = \"{}i1040sd--2025.txt\";", xp()),
+        // ★★★ (2) THE KILL FOR THE 2026-09-20 DEFECT: the identical citation with the directory walk
+        //     REMOVED must stop reading as per-revision. Until that date this instrument classified on
+        //     the path shape alone, so a `format!("…--{ed}.txt")` beside `for ed in ["2024", "2025"]`
+        //     was reported as *"the module derives its revision set from `design/forms/extract/`, so
+        //     archiving `f1099r--2026` REDS the suite."* Planting that exact revision left the suite
+        //     3989/3989 green. Four families were in this bucket and every one of them was blind.
+        let parameterised_only = vec![(
+            "crates/btctax-core/src/tax/state_local_refund.rs".to_string(),
+            format!("pub const EXTRACT_STEM: &str = \"{}i1040gi--\";", xp()),
         )];
+        let cit = scan_citations(&parameterised_only);
+        assert!(
+            cit.per_revision.is_empty(),
+            "a parameterised path with NO evidence of derivation must not read as per-revision: {:#?}",
+            cit.per_revision
+        );
         let mut rep2 = Report::default();
-        revision_pin_rows(2026, &scan_citations(&pinned), &mut rep2);
+        revision_pin_rows(2026, &cit, &mut rep2);
         assert_eq!(rep2.rows.len(), 1, "{:#?}", rep2.rows);
         assert_eq!(rep2.rows[0].who, Who::Build);
         assert_eq!(
             rep2.rows[0].state,
             State::Unmeasured,
+            "the instrument cannot see what a hand-written list contains, so it must claim neither \
+             that the family is covered nor that it is not"
+        );
+        assert!(
+            rep2.rows[0].what.contains("PARAMETERISED"),
+            "{:?}",
+            rep2.rows[0]
+        );
+
+        // (3) The DERIVED CALL SITE carries no `extract/` prefix at all, because the shared helper
+        //     builds the path. Converting a module to the correct form must not make it invisible.
+        let via_helper = vec![(
+            "crates/btctax-core/src/tax/form1099r.rs".to_string(),
+            "let r = crate::tax::archived_revisions::of(\"f1099r\", 2);".to_string(),
+        )];
+        let c3 = scan_citations(&via_helper);
+        assert!(
+            c3.per_revision.contains_key("f1099r") && c3.cited.contains_key("f1099r"),
+            "the derived call site must register on BOTH axes: {c3:#?}"
+        );
+
+        // (4) PLANT: the same module pinned to one literal revision instead.
+        let pinned = vec![(
+            "crates/btctax-core/src/tax/capital_loss_carryover.rs".to_string(),
+            format!("pub const SOURCE: &str = \"{}i1040sd--2025.txt\";", xp()),
+        )];
+        let mut rep4 = Report::default();
+        revision_pin_rows(2026, &scan_citations(&pinned), &mut rep4);
+        assert_eq!(rep4.rows.len(), 1, "{:#?}", rep4.rows);
+        assert_eq!(rep4.rows[0].who, Who::Build);
+        assert_eq!(
+            rep4.rows[0].state,
+            State::Unmeasured,
             "a pin does not know the year moved — that is UNMEASURED, not fine"
         );
-        assert!(rep2.rows[0].what.contains("SHIPPED"), "{:?}", rep2.rows[0]);
+        assert!(rep4.rows[0].what.contains("SHIPPED"), "{:?}", rep4.rows[0]);
 
-        // A DOC-comment citation is evidence, not code, and must pin nothing.
+        // (5) A DOC-comment citation is evidence, not code, and must pin nothing.
         let doc = vec![(
             "crates/btctax-core/src/x.rs".to_string(),
             format!("/// see {}i1040gi--2025.txt:46610", xp()),
