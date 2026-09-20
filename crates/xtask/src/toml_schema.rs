@@ -729,10 +729,74 @@ mod tests {
                 path.display()
             )
         });
+        // ★★★ **BEFORE the equality check: did a key VANISH?** This ordering is the whole point.
+        //
+        //     The equality assertion below says only *"stale; regenerate"* — and for the case it was
+        //     written for (the types grew a field) that instruction is right. For the opposite case it
+        //     is a laundering machine. `maximal_sentinel` publishes a key only if the fixture has a
+        //     value there, so flipping one `Some(x)` to `None` in a fixture builder unpublishes that
+        //     key; the filer loses the documentation for a box they may hold, the emitted return
+        //     never mentions it, and the only instrument that noticed said *"regenerate"* — after
+        //     which it is green with the key gone. A golden cannot validate its own regeneration.
+        //
+        //     Measured 2026-09-20: `box17_local_tax_withheld: Some(dec!(40)) -> None` in
+        //     `form_1099r_all_boxes_populated` red exactly one test in 3988 — this one — with that
+        //     message. Regenerating made it green and dropped the key from the filer's manual.
+        let leaves = |doc: &str| -> std::collections::BTreeSet<String> {
+            doc.lines()
+                .filter_map(|l| l.strip_prefix("| `"))
+                .filter_map(|l| l.split('`').next())
+                .map(String::from)
+                .collect()
+        };
+        let fresh = generate();
+        let vanished: Vec<String> = leaves(&committed)
+            .difference(&leaves(&fresh))
+            .cloned()
+            .collect();
+        assert!(
+            vanished.is_empty(),
+            "{} keys are published in the committed {DOC_PATH} and ABSENT from a fresh generation: \
+             {vanished:?}\n\n\
+             ★ DO NOT REGENERATE. Regenerating deletes them from the filer's manual and turns this \
+             test green, which is the defect rather than the fix. A key disappears for exactly two \
+             reasons: a field was removed from `ReturnInputs` (then say so, and remove it here in the \
+             same commit), or a fixture builder under `maximal_sentinel` grew a `None` where it had a \
+             `Some` — which publishes nothing and looks like tidying. Check the fixture first.",
+            vanished.len()
+        );
         assert_eq!(
-            generate(),
-            committed,
-            "{DOC_PATH} is STALE; regenerate with `{REGEN}`"
+            fresh, committed,
+            "{DOC_PATH} is STALE; regenerate with `{REGEN}` — no key vanished, so this is the \
+             benign direction: the types grew and the document has not caught up"
+        );
+    }
+
+    /// ★★★ **THE COUNT PIN — the one number regeneration cannot touch.**
+    ///
+    /// The vanish check above reads the COMMITTED document, so it is defeated by the obvious operator
+    /// error: regenerate first, then run the tests. Nothing is left to compare against. This pins the
+    /// published leaf count in SOURCE, where `xtask toml-schema > docs/…` cannot reach it.
+    ///
+    /// A field added to `ReturnInputs` raises this number and the diff shows it going up, which is a
+    /// one-line edit and a visible one. A key silently unpublished makes it go DOWN, and that needs a
+    /// human to type a smaller number — which is precisely the decision that was being skipped.
+    #[test]
+    fn the_published_leaf_count_is_pinned_where_regeneration_cannot_reach_it() {
+        const PUBLISHED_LEAVES: usize = 400;
+        let fresh = generate();
+        let got = fresh
+            .lines()
+            .filter_map(|l| l.strip_prefix("| `"))
+            .filter(|l| !l.contains("| table |"))
+            .count();
+        assert_eq!(
+            got, PUBLISHED_LEAVES,
+            "the schema publishes {got} leaf keys, pinned at {PUBLISHED_LEAVES}. UP means a field was \
+             added — raise the constant in the same commit. DOWN means a key is no longer published, \
+             and the cause is usually a fixture builder whose `Some` became a `None`: a filer then has \
+             no documentation for a box they may be holding. Lower this number only with the reason \
+             written beside it."
         );
     }
 
