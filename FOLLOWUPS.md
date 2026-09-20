@@ -9934,7 +9934,7 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   income but never asserted. ★ And it does not substitute for [[FR-64]]: these are synthetic-but-verified
   returns, not a filed one.
 
-### FR-259 — the schema gate's two instruments share one blind spot (Minor, owner: post-release)
+### FR-259 — CLOSED 2026-09-20 — the `None`-unpublishes MECHANISM is dead, so the shared blind spot no longer has anything to hide
 
 `docs/income-import-schema.md` is now guarded two ways (commit `f04a269`): a **vanish check** that
 set-diffs the committed document against a fresh generation and refuses to let you regenerate past a
@@ -9957,7 +9957,29 @@ reds on nothing. The boundary is stated in `toml_schema.rs` beside the pin inste
 that rule. A real fix would derive the key set from the *type* rather than from a serialized fixture,
 which removes the `None`-unpublishes mechanism outright and makes both instruments unnecessary.
 
-### FR-260 — the TY2025 line 6d tick has no end-to-end PDF assertion (Minor, owner: the phase that makes TY2025 fillable)
+**CLOSED by removing the cause rather than widening the guards.** The vanish check and the count pin both
+watch for a key that stopped being published; the mechanism that unpublishes one is a fixture `Option`
+going from `Some` to `None`. `every_option_in_a_populated_fixture_builder_is_some` now destructures each
+"all boxes populated" builder with **no `..` rest pattern**, so adding a field to `Form1099R` or
+`FormSsa1099` is a COMPILE ERROR until someone says whether it must be populated — which is a thing
+neither existing guard could do, because both compare one derived artifact against another derived from
+the same fixture and nothing in that loop knows the type.
+
+**The shared blind spot is now empty in the case that mattered.** Replaying the measured defect
+(`box17_local_tax_withheld: Some(dec!(40)) → None`) reds THREE gates; then regenerating the document
+first — the operator error that defeated the old pair — still leaves TWO red, including the new one,
+which does not read the document at all.
+
+★★ **And a second, larger exposure found while checking `maximal_sentinel`'s docs.** That fixture claims
+*"every `Option` is `Some`"*; two are deliberately `None` (`noncash` on the two CASH charitable gifts,
+which is the form's own distinction and correct). All **22** `schedule_a.charitable[].noncash` keys ride
+on the single third gift. Tidy that one gift to cash and 22 keys leave the filer's manual at once.
+`the_noncash_block_is_published_by_a_sibling_gift` pins it — planted, reds — and the entry records the
+honest claim about the sentinel: not *"every `Option` is `Some"`* but *"every KEY has at least one row
+that publishes it"*. A general check of THAT still needs the type, which serde does not expose without a
+schema crate; this pins the one instance where a whole block hangs on one row.
+
+### FR-260 — STILL OPEN, now with the OBSTACLE MEASURED and a trap pinned (Minor, owner: the phase that makes TY2025 fillable)
 
 The MFS lived-apart disclosure is now decided per revision, printed on TY2025 (`c1_42[0]`, on-state
 `1`) and hand-marked on TY2024. What is NOT asserted is the tick appearing in a **filled** PDF, because
@@ -10033,4 +10055,33 @@ and cannot go stale the way a typed pair would. (The widget names did shift by o
 (the confusion that inflated one vector's tentative minimum tax by $200,000); a mapped FQN pointed at a
 censused widget (the one-widget shift the old count could not see); the 2025 row deleted from the INSET
 table; and the 2025 partition row understated by one.
+
+**2026-09-20 — I tried to write the end-to-end tick and found a trap worth more than the test.**
+
+The route was a TEST-ONLY header borrowed from the TY2024 map, so the shipped map and the year's
+`status = "preparing"` stay untouched. I first asserted that every widget it would write **exists** on the
+TY2025 template. Every one does. The emitter refused anyway:
+
+    Geometry("an SSN cell with /MaxLen 2 cannot hold an SSN (9 digits) — the map points at the wrong widget")
+
+★★★ **THE FQN EXISTING IS NOT THE SAME AS IT BEING THE SAME CELL.** TY2025 inserted a whole fiscal-year
+row above the name block — `f1_04`–`f1_10`, `/MaxLen` 2/2/4/2/2/4, two MM/DD/YYYY dates for *"or other
+tax year beginning … ending …"* — and every header widget below it shifted. TY2024's
+`taxpayer_ssn = f1_06[0]` therefore lands on a **two-character** box, and the only thing between that and
+a filed return bearing a truncated SSN was the `/MaxLen` guard.
+
+★★ **The shift must not be applied as an offset.** It looks uniform at **+10** — `f1_06`→`f1_16`,
+`f1_09`→`f1_19`, `f1_10`→`f1_20`, each in the same x-band with dy = −6.0 — and a geometric matcher I wrote
+to confirm that still mis-resolved `taxpayer_last` and `spouse_last` into the fiscal-year row. Porting the
+header by name, by offset, or by a quick same-x match writes into the wrong boxes. It has to be done per
+cell against the printed labels.
+
+**What is now committed** is `the_ty2024_header_fqns_exist_on_the_ty2025_template_and_are_different_cells`,
+which pins the trap: the TY2024 header FQNs exist on TY2025, the SSN one is a 2-character cell, and the
+real TY2025 SSN boxes are `f1_16`/`f1_19` (`/MaxLen` 9, x-band 469.0). It also **demands its own
+retirement**: give the TY2025 map a real `[header]` and it reds, telling you to write the end-to-end tick
+and delete it. B1: both planted (a grown header; the SSN FQN asserted one widget off).
+
+**Still owed:** the `fill_full_return(.., 2025)` KAT reading `checkbox_on` back off the bytes. Unchanged
+owner — it needs the header resolved, which is the fillable-year phase.
 

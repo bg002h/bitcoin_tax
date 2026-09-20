@@ -772,6 +772,145 @@ mod tests {
         );
     }
 
+    /// ★★★ **THE MECHANISM ITSELF, KILLED AT SOURCE: every `Option` in a "populated" fixture builder
+    ///        is `Some`, and the COMPILER enforces that the list is complete.**
+    ///
+    /// The vanish check and the count pin both guard the SYMPTOM — a key that stopped being published.
+    /// This removes the cause. `maximal_sentinel` publishes a key only where the fixture holds a value,
+    /// so one `Some(x) → None` unpublishes it; that is the edit measured on 2026-09-20
+    /// (`box17_local_tax_withheld`), and the response the old message instructed — regenerate — made it
+    /// green with the key gone.
+    ///
+    /// ★★ **Why this one is structural where the other two are not.** The destructures below have **no
+    /// `..` rest pattern**, so adding a field to `Form1099R` or `FormSsa1099` is a COMPILE ERROR here
+    /// until someone says whether it is an `Option` that must be populated. Neither guard above can do
+    /// that: both compare one derived artifact against another derived from the same fixture, and
+    /// nothing in that loop knows the type. This does.
+    ///
+    /// ★ Scope, stated rather than implied: the two information-return builders, which is where the
+    /// defect was measured and where the struct is small enough for an exhaustive destructure to be
+    /// readable. `maximal_sentinel` is NOT covered this way — see
+    /// `the_noncash_block_is_published_by_a_sibling_gift` below for the one case there that matters and
+    /// for why a blanket "every `Option` is `Some`" is the wrong claim about it.
+    #[test]
+    fn every_option_in_a_populated_fixture_builder_is_some() {
+        {
+            let btctax_core::tax::form1099r::Form1099R {
+                // Not `Option`s — listed so the destructure stays exhaustive and a new field reds.
+                payer: _,
+                payer_tin: _,
+                kind: _,
+                box1_gross_distribution: _,
+                box2b_taxable_amount_not_determined: _,
+                box2b_total_distribution: _,
+                box3_capital_gain: _,
+                box4_fed_withheld: _,
+                box5_employee_contributions: _,
+                box6_net_unrealized_appreciation: _,
+                box7_distribution_codes: _,
+                box8_other: _,
+                box9b_total_employee_contributions: _,
+                box10_allocable_to_irr: _,
+                // Every `Option` — each must be `Some`, or its key goes unpublished.
+                transcribed_on,
+                box2a_taxable_amount,
+                box9a_percentage_of_total,
+                box11_first_year_desig_roth,
+                box14_state_tax_withheld,
+                box17_local_tax_withheld,
+                roth_contribution_before_lookback,
+                exception_applies,
+            } = btctax_core::tax::testonly::form_1099r_all_boxes_populated();
+            for (name, is_some) in [
+                ("transcribed_on", transcribed_on.is_some()),
+                ("box2a_taxable_amount", box2a_taxable_amount.is_some()),
+                (
+                    "box9a_percentage_of_total",
+                    box9a_percentage_of_total.is_some(),
+                ),
+                (
+                    "box11_first_year_desig_roth",
+                    box11_first_year_desig_roth.is_some(),
+                ),
+                (
+                    "box14_state_tax_withheld",
+                    box14_state_tax_withheld.is_some(),
+                ),
+                (
+                    "box17_local_tax_withheld",
+                    box17_local_tax_withheld.is_some(),
+                ),
+                (
+                    "roth_contribution_before_lookback",
+                    roth_contribution_before_lookback.is_some(),
+                ),
+                ("exception_applies", exception_applies.is_some()),
+            ] {
+                assert!(
+                    is_some,
+                    "`form_1099r_all_boxes_populated().{name}` is None, so `r_1099[].{name}` is \
+                     UNPUBLISHED and the filer has no documentation for that box. The schema is \
+                     derived from this fixture: a `None` here is a silent deletion from their manual."
+                );
+            }
+        }
+        {
+            let btctax_core::tax::form_ssa1099::FormSsa1099 {
+                owner: _,
+                kind: _,
+                box3_benefits_paid: _,
+                box4_benefits_repaid: _,
+                federal_withholding: _,
+                transcribed_on,
+            } = btctax_core::tax::testonly::form_ssa1099_all_boxes_populated();
+            assert!(
+                transcribed_on.is_some(),
+                "`form_ssa1099_all_boxes_populated().transcribed_on` is None, so \
+                 `ssa_1099[].transcribed_on` is UNPUBLISHED"
+            );
+        }
+    }
+
+    /// ★★★ **THE `noncash` BLOCK IS PUBLISHED BY A SIBLING GIFT — the one place `maximal_sentinel`'s
+    ///        "every `Option` is `Some`" is not literally true, and it matters.**
+    ///
+    /// The sentinel carries THREE charitable gifts: two cash (`noncash: None`, correct — the form's
+    /// own distinction) and one noncash (`noncash: Some`). All **22** `schedule_a.charitable[].noncash`
+    /// keys ride on that third gift alone. Tidy it to a cash gift and 22 keys leave the filer's manual
+    /// at once, with `git diff` on the regenerated document as the only trace.
+    ///
+    /// ★★ So the honest claim about the sentinel is not *"every `Option` is `Some`"* — two are
+    /// deliberately `None` and should be — but *"every KEY has at least one row that publishes it."*
+    /// A general check of that needs the TYPE, which serde does not expose without a schema crate.
+    /// This pins the one instance where a whole block depends on a single row, which is the shape that
+    /// loses the most keys for the smallest edit.
+    #[test]
+    fn the_noncash_block_is_published_by_a_sibling_gift() {
+        let ri = btctax_core::tax::scrub_axis::maximal_sentinel();
+        let gifts = &ri
+            .schedule_a
+            .as_ref()
+            .expect("the sentinel itemizes")
+            .charitable;
+        let with_noncash = gifts.iter().filter(|g| g.noncash.is_some()).count();
+        assert!(
+            with_noncash >= 1,
+            "no charitable gift in `maximal_sentinel` carries a `noncash` block, so all 22 \
+             `schedule_a.charitable[].noncash` keys are UNPUBLISHED — the filer loses the documented \
+             shape of a property donation, and regenerating the schema would bless it silently."
+        );
+        let published = generate()
+            .lines()
+            .filter(|l| l.contains("schedule_a.charitable[].noncash"))
+            .count();
+        assert!(
+            published >= 9,
+            "only {published} `noncash` key(s) are published; the sentinel has {with_noncash} gift(s) \
+             carrying the block. If those disagree, the block is partly populated and the rest of its \
+             keys are gone."
+        );
+    }
+
     /// ★★★ **THE COUNT PIN — the one number regeneration cannot touch.**
     ///
     /// The vanish check above reads the COMMITTED document, so it is defeated by the obvious operator

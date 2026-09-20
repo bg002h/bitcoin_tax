@@ -1629,3 +1629,99 @@ fn the_ty2025_line_6d_cell_is_the_labelled_widget_with_a_declared_on_state() {
         "the TY2024 Form 1040 prints no line 6d — it instructs a write-in instead"
     );
 }
+
+/// ★★★ **FR-260 — WHY THE TY2025 6d TICK CANNOT YET BE READ OFF A FILLED PDF, MEASURED.**
+///
+/// The sibling KAT `the_ty2025_line_6d_cell_is_the_labelled_widget_with_a_declared_on_state` checks the
+/// map against the template. Proving the EMITTER writes the cell needs a filled TY2025 PDF, and TY2025
+/// is not fillable: its map has no `[header]` block and `YEAR.toml` says `status = "preparing"`.
+///
+/// I tried to get there with a TEST-ONLY header borrowed from the TY2024 map, having first asserted that
+/// every widget it would write **exists** on the TY2025 template. It does. The emitter refused anyway:
+///
+/// > `Geometry("an SSN cell with /MaxLen 2 cannot hold an SSN (9 digits) — the map points at the wrong
+/// > widget")`
+///
+/// ★★★ **THE FQN EXISTING IS NOT THE SAME AS IT BEING THE SAME CELL, and that is what this test pins.**
+/// TY2025 inserted a whole fiscal-year row above the name block — `f1_04`–`f1_10`, with `/MaxLen`
+/// 2/2/4/2/2/4, i.e. two MM/DD/YYYY dates for *"or other tax year beginning … ending …"*. Every header
+/// widget below it shifted. So TY2024's `taxpayer_ssn = f1_06[0]` lands on a **two-character** box on
+/// the TY2025 form, and the only thing between that and a filed return bearing a truncated SSN was the
+/// `/MaxLen` guard.
+///
+/// ★★ **And the shift is NOT safe to apply as an offset, which is the trap worth recording.** It looks
+/// uniform at **+10** — `f1_06`→`f1_16`, `f1_09`→`f1_19`, `f1_10`→`f1_20`, each in the same x-band with
+/// dy = −6.0 — and a geometric matcher written to confirm that still mis-resolved `taxpayer_last` and
+/// `spouse_last` into the fiscal-year row. A header ported by name, or by a uniform offset, or by a
+/// quick same-x match, writes into the wrong boxes. It has to be done per cell against the printed
+/// labels, which is the job of the phase that makes TY2025 fillable.
+///
+/// What this test therefore asserts is the trap itself, so nobody re-walks into it: the TY2024 header
+/// FQNs exist on TY2025, they are DIFFERENT cells, and the real TY2025 SSN boxes are `f1_16`/`f1_19`.
+#[test]
+fn the_ty2024_header_fqns_exist_on_the_ty2025_template_and_are_different_cells() {
+    let ty2024: btctax_forms::testonly::Form1040Map = toml::from_str(
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040, 2024).unwrap(),
+    )
+    .expect("the TY2024 1040 map parses");
+    let ty2025: btctax_forms::testonly::Form1040Map = toml::from_str(
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040, 2025).unwrap(),
+    )
+    .expect("the TY2025 1040 map parses");
+    assert!(
+        ty2025.header.is_none(),
+        "the TY2025 map has grown a real [header] — resolve it per cell against the printed \
+         labels, then write the end-to-end 6d tick FR-260 asks for and delete this test"
+    );
+    let h = ty2024.header.as_ref().expect("the TY2024 map has a header");
+
+    let doc = btctax_forms::testonly::load(
+        btctax_forms::testonly::f1040_pdf(2025).expect("the TY2025 template is bundled"),
+    )
+    .expect("the template loads");
+    let fields = btctax_forms::testonly::collect_fields(&doc).expect("fields");
+    let by_fqn = |fqn: &str| fields.iter().find(|f| f.fqn == fqn);
+
+    // (1) EXISTENCE IS NO PROTECTION: the TY2024 name and SSN FQNs are all on the TY2025 template.
+    for (what, fqn) in [
+        ("taxpayer_first", &h.taxpayer_first),
+        ("taxpayer_ssn", &h.taxpayer_ssn),
+        ("spouse_ssn", &h.spouse_ssn),
+    ] {
+        assert!(
+            by_fqn(fqn).is_some(),
+            "{what} ({fqn}) is absent from the TY2025 template, which would make this test's point moot \
+             — its whole subject is that these DO exist and are still wrong"
+        );
+    }
+
+    // (2) …and the SSN one is a TWO-CHARACTER box, because TY2025 inserted the fiscal-year row above.
+    let ssn_2025 = by_fqn(&h.taxpayer_ssn).expect("checked above");
+    assert_eq!(
+        ssn_2025.max_len,
+        Some(2),
+        "TY2024's taxpayer_ssn FQN ({}) must be a 2-character cell on the TY2025 template — it is part \
+         of that revision's \"or other tax year beginning … ending …\" date row. If this changes, the \
+         header shift changed with it and the mapping below must be re-measured.",
+        h.taxpayer_ssn
+    );
+
+    // (3) The real TY2025 SSN boxes, measured: same x-band as TY2024's, y six points lower, /MaxLen 9.
+    for (what, fqn) in [
+        ("taxpayer", "topmostSubform[0].Page1[0].f1_16[0]"),
+        ("spouse", "topmostSubform[0].Page1[0].f1_19[0]"),
+    ] {
+        let f = by_fqn(fqn).unwrap_or_else(|| panic!("{fqn} is not on the TY2025 template"));
+        assert_eq!(
+            f.max_len,
+            Some(9),
+            "the TY2025 {what} SSN box ({fqn}) must hold nine digits"
+        );
+        let r = f.rect.expect("a widget has a rect");
+        assert!(
+            (r[0] - 469.0).abs() < 1.0,
+            "the {what} SSN box sits in the same x-band as TY2024's (469.0), not at {}",
+            r[0]
+        );
+    }
+}
