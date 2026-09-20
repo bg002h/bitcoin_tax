@@ -10111,15 +10111,37 @@ its widget row, consistent across all five rows), not from the +10 numbering coi
 `spouse_last` in the fiscal-year row because the LAST-NAME COLUMN moved, 238.6 → 253.0 — not because the
 numbering surprised it. The +10 shift is real; the column shift is what makes matching by x unsafe.
 
-★★★ **WHAT IS STILL UNRESOLVED, and why geometry cannot settle it.** The page-2 signature block —
-`mfs_spouse_name`, `occupation_taxpayer`, `occupation_spouse`, `ip_pin`, `spouse_ip_pin`, `phone`. Page 2
-did **not** shift uniformly: TY2024's `f2_33` is absent on TY2025, which instead has `RoutingNo[0].f2_32`
-and `AccountNo[0].f2_33` groups there. Worse, a page-2 widget sits ~11pt from a caption on **both** sides
-— the TY2025 widget at box y=126 is 10.7pt below *"…Protection PIN, enter it here"* and 11.3pt above
-*"Spouse's occupation"* — so the page-1 convention does not disambiguate it, and guessing writes an IP PIN
-into an occupation box. `xtask label-boxes` cannot help: these widgets carry no line label, so it reports
-`?`. Resolving them needs the rendered page or a caption-to-widget join that handles a caption BELOW its
-field.
+★★★ **CORRECTION, same day, third pass: PAGE 2 *IS* RESOLVABLE, and I resolved it.** My "geometry cannot
+settle it" was wrong — I had tried to disambiguate by caption proximity, where a page-2 widget really does
+sit ~11pt from a caption on both sides. The discriminators that DO settle it are structural, and they agree
+three ways:
+
+* **the x column is IDENTICAL across revisions** — occupation at `x = 325.0`, IP PIN at `x = 504.0`, in
+  both TY2024 and TY2025;
+* **`/MaxLen 6` marks exactly two page-2 widgets** in each revision, and they are the two IP PIN boxes;
+* **the taxpayer row sits above the spouse row** — TY2024 y 300 vs 270 (verified in its shipped map),
+  TY2025 y 126 vs 96.
+
+| header cell | TY2024 (verified) | TY2025 | discriminator |
+|---|---|---|---|
+| `occupation_taxpayer` | `f2_33` (325.0, 300) | **`f2_40`** (325.0, 126) | x column + row order |
+| `ip_pin` | `f2_34` (504.0, 300, ml 6) | **`f2_41`** (504.0, 126, ml 6) | x column + `/MaxLen 6` |
+| `occupation_spouse` | `f2_35` (325.0, 270) | **`f2_42`** (325.0, 96) | x column + row order |
+| `spouse_ip_pin` | `f2_36` (504.0, 270, ml 6) | **`f2_43`** (504.0, 96, ml 6) | x column + `/MaxLen 6` |
+| `phone` | `f2_37` (134.8, 258) | **`f2_44`** (127.6, 84) | caption row *"Phone no. / Email address"* |
+| `mfs_spouse_name` | `f1_18` (288.0, 534) | **`f1_29`** (362.0, 534) | same y, caption *"and full name here:"* |
+
+★★★ **AND THE REAL BLOCKER IS SOMETHING I HAD NOT COUNTED.** `Form1040HeaderCells` has **31** required
+fields, not the 20 text cells now verified. The other eleven are **ten `CheckChoice` checkboxes** —
+presidential fund ×2, claimed-as-dependent ×2, MFS-spouse-itemizes, aged ×2, blind ×2,
+more-than-four-dependents, each needing its widget AND its declared on-state checked against a printed
+label — plus **`dependent_rows: Vec<DependentRowCells>`, the entire dependents grid**, which TY2025 rebuilt
+(`Table_Dependents[0].Row3[0].f1_39`–`f1_42` where TY2024 has `Row1[0].f1_21`…).
+
+So the header cannot be written partially (`deny_unknown_fields`, every field required), and completing it
+is the full page-1 identity + filing-status + dependents-grid mapping — the fillable-year phase proper, not
+a follow-up item. What that phase inherits is **20 of 31 cells verified against the paper**, the three
+discriminators that resolve a shifted column, and the knowledge that caption proximity is not one of them.
 
 **Still owed:** the `fill_full_return(.., 2025)` KAT reading `checkbox_on` back off the bytes. Unchanged
 owner — it needs the header resolved, which is the fillable-year phase.
