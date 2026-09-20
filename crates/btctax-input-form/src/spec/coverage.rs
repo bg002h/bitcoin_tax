@@ -975,8 +975,10 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     // change happened to keep the sets balanced.
     let field_count: usize = form_spec().iter().map(|s| s.fields.len()).sum();
     assert_eq!(
-        field_count, 280,
-        "expected 216 Fields — 117 before T5, plus its FIFTY-EIGHT: the four document-less income \
+        field_count, 281,
+        "★ 281 since FR-258, which added ONE: `G1099StateWithholding` — Form 1099-G box 11 \
+             (box 12 from TY2026), the state withholding Schedule A line 5a reads and which no field \
+             collected. Expected 216 Fields — 117 before T5, plus its FIFTY-EIGHT: the four document-less income \
          declarations (R3), W-2 boxes 13 and 14b, and the six document sections (1099-INT 14, \
          1099-DIV 14, 1099-B 8, 1099-G 7, 1098-E 4, and R5's five filer's-records leaves) — plus \
          the SEVEN the seam review's M-1 added, one per income box that had no reader and now \
@@ -993,8 +995,8 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     );
     assert_eq!(
         covered.len(),
-        280,
-        "★★★ EVERY Field is now distinctly covered — 280 of 280, and the last gap closed at T9. \
+        281,
+        "★★★ EVERY Field is now distinctly covered — 281 of 281 (FR-258 added `G1099StateWithholding`), and the last gap closed at T9. \
          It was 115 of 117 before T5, then 174 of 175, then 182 of 183, and the one always missing \
          was `DocForm1098`, whose census row was shadowed by the \
          `schedule_a.mortgage_interest_1098` scalar and so was never live. T9 replaced the scalar \
@@ -1591,6 +1593,10 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
     (
         FieldId::G1099Box10FamilyLeave,
         "g_1099[0].box10_family_leave_benefits",
+    ),
+    (
+        FieldId::G1099StateWithholding,
+        "g_1099[0].state_income_tax_withheld",
     ),
     // ── ★★★ R4 / T5 — Form 1098-E, and the census row its section opened. ──
     (FieldId::Form1098eLender, "form_1098e[0].lender"),

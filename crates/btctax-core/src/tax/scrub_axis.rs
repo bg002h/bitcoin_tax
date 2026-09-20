@@ -334,6 +334,7 @@ pub fn maximal_sentinel() -> ReturnInputs {
         box6_taxable_grants: dec!(0),
         box7_agriculture_payments: dec!(0),
         box9_market_gain: dec!(0),
+        state_income_tax_withheld: dec!(250),
         box10_family_leave_benefits: dec!(0),
     };
     let b_1099 = |tag: &str, tin: &str| Form1099B {

@@ -195,7 +195,31 @@ pub fn income_tax_salt(ri: &ReturnInputs, a: &crate::tax::return_inputs::Schedul
         .iter()
         .map(|w| w.box17_state_tax_withheld + w.box19_local_tax)
         .sum();
-    w2_wh + a.salt_state_estimated_payments + a.salt_prior_year_balance_paid
+    // ★★★ **FR-258 — the OTHER documents Schedule A line 5a names, and only the W-2 was here.**
+    //
+    //     The instruction is explicit and lists five: *"State and local income taxes withheld from your
+    //     salary during 2024. Your Form(s) W-2 will show these amounts. Forms W-2G, 1099-G, **1099-R**,
+    //     1099-MISC, and 1099-NEC may also show state and local income taxes withheld"*
+    //     (`i1040sca--2024.txt:324`, identical at `--2025:218`).
+    //
+    //     ★★ Interview T11 found and fixed the W-2's own box 17 + 19 (FR-91) and nobody carried the
+    //        reasoning across. An itemizing filer understated line 5a by the whole of any withholding on
+    //        a 1099-G or a 1099-R — the overstating-tax direction, but a wrong number either way.
+    //
+    //     ★ Still short of the five: **1099-MISC and 1099-NEC are not modelled at all** (T13, deferred)
+    //       and **W-2G is not modelled**, so those three are accounted for by their families refusing
+    //       rather than by a term here. FR-258 records that, and it is why this comment lists all five
+    //       rather than the two it sums.
+    let g_1099_wh: Usd = ri.g_1099.iter().map(|g| g.state_income_tax_withheld).sum();
+    let r_1099_wh: Usd = ri
+        .r_1099
+        .iter()
+        .map(|r| {
+            r.box14_state_tax_withheld.unwrap_or(Usd::ZERO)
+                + r.box17_local_tax_withheld.unwrap_or(Usd::ZERO)
+        })
+        .sum();
+    w2_wh + g_1099_wh + r_1099_wh + a.salt_state_estimated_payments + a.salt_prior_year_balance_paid
 }
 
 /// The §164(b)(5) SALT line 5a election: `true` (sales-tax path) → `salt_sales_tax_amount` ONLY; `false`
@@ -5466,6 +5490,104 @@ mod tests {
                                                           // Cross-foot L11 = L9 − L10 (with-crypto AGI).
         assert_eq!(ar.agi, ar.total_income - ar.adjustments);
         assert_eq!(ar.agi, dec!(116000) - ar.half_se_deduction);
+    }
+
+    /// ★★★ **FR-258 — Schedule A line 5a reads the 1099-G's and 1099-R's state withholding, and before
+    /// this it read only the W-2's.**
+    ///
+    /// The instruction names five documents: *"State and local income taxes withheld from your salary
+    /// during 2024. Your Form(s) W-2 will show these amounts. Forms W-2G, 1099-G, 1099-R, 1099-MISC, and
+    /// 1099-NEC may also show state and local income taxes withheld"*
+    /// (`i1040sca--2024.txt:324`). Interview T11 fixed the W-2's own box 17 + 19 and nobody carried the
+    /// reasoning across, so an itemizing filer understated line 5a by the whole of any withholding on a
+    /// 1099-G or a 1099-R.
+    ///
+    /// ★★ **The 1099-G's box NUMBER moves between revisions**, which is why its field is not named for
+    /// one: the December 2026 revision inserted box 10 (*"Family leave benefits"*) and pushed the state
+    /// block down, so state withholding is **box 11** on TY2024/2025 and **box 12** on TY2026. Derived
+    /// from both archived extracts in `the_1099g_state_withholding_box_moved_between_revisions`.
+    #[test]
+    fn fr258_schedule_a_line_5a_reads_every_modelled_documents_state_withholding() {
+        use crate::tax::return_inputs::{Form1099G, ScheduleAInputs, W2};
+        let mut r = crate::tax::testonly::form_1099r_all_boxes_populated();
+        r.exception_applies = Some(false);
+        r.box3_capital_gain = Usd::ZERO;
+        r.box6_net_unrealized_appreciation = Usd::ZERO;
+        r.box8_other = Usd::ZERO;
+        r.box10_allocable_to_irr = Usd::ZERO;
+        r.box14_state_tax_withheld = Some(dec!(300));
+        r.box17_local_tax_withheld = Some(dec!(40));
+        let ri = ReturnInputs {
+            tax_year: 2024,
+            w2s: vec![W2 {
+                box17_state_tax_withheld: dec!(9_000),
+                box19_local_tax: dec!(500),
+                ..Default::default()
+            }],
+            g_1099: vec![Form1099G {
+                state_income_tax_withheld: dec!(250),
+                ..Default::default()
+            }],
+            r_1099: vec![r],
+            ..Default::default()
+        };
+        let a = ScheduleAInputs::default();
+        assert_eq!(
+            income_tax_salt(&ri, &a),
+            dec!(10_090),
+            "9,000 + 500 (W-2 boxes 17 and 19) + 250 (1099-G) + 300 + 40 (1099-R boxes 14 and 17) = \
+             10,090. If this is 9,500 only the W-2 is being read, which is the defect FR-258 records."
+        );
+        // ★ Each term is separately load-bearing: the mutation log in this commit's message records
+        //   that dropping any one of the three reds this assertion, and the figures are distinct so the
+        //   shortfall names which.
+    }
+
+    /// ★★★ **The 1099-G's state-withholding box MOVED, derived from both archived extracts.**
+    ///
+    /// TY2024 prints `10a State`, `10b State identification no.` and `11 State income tax withheld`.
+    /// TY2026 prints `10 Family leave benefits`, `11a State`, `11b State identification no.` and
+    /// `12 State income tax withheld` — the new income box pushed the whole state block down one.
+    ///
+    /// ★★ This is the Schedule 1-A 37→43 shape: a box number REUSED for a different purpose by a later
+    /// revision. `Form1099G::box10_family_leave_benefits` is a live instance of the hazard — its name
+    /// carries the TY2026 number, and on a TY2024 form box 10a is the state's NAME.
+    #[test]
+    fn the_1099g_state_withholding_box_moved_between_revisions() {
+        let read = |ed: &str| {
+            std::fs::read_to_string(
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../..")
+                    .join(format!("design/forms/extract/f1099g--{ed}.txt")),
+            )
+            .unwrap_or_else(|e| panic!("f1099g--{ed}: {e}"))
+        };
+        let y24 = read("2024");
+        let y26 = read("2026");
+        assert!(
+            y24.contains("11 State income tax withheld"),
+            "TY2024: box 11"
+        );
+        assert!(
+            y24.contains("10a State"),
+            "TY2024: the state block is 10a/10b"
+        );
+        assert!(
+            !y24.contains("10 Family leave benefits"),
+            "TY2024 has no family-leave box — it is what the 2026 revision INSERTED"
+        );
+        assert!(
+            y26.contains("12 State income tax withheld"),
+            "TY2026: box 12"
+        );
+        assert!(
+            y26.contains("11a State"),
+            "TY2026: the state block moved to 11a/11b"
+        );
+        assert!(
+            y26.contains("10 Family leave benefits"),
+            "TY2026: the new box 10"
+        );
     }
 
     /// ★★★ **6a AND 6b REACH THE RETURN, end to end, and taxcalc says 4,000.**

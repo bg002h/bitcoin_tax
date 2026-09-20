@@ -1137,6 +1137,8 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
             box7_agriculture_payments: _,
             box9_market_gain: _,
             box10_family_leave_benefits: _,
+            // A figure; carries no identity.
+            state_income_tax_withheld: _,
             payer_tin: _,      // R10.2 — mapped below (see the 1099-INT loop)
             transcribed_on: _, // R10.2 — KEPT (see the 1099-INT loop)
         } = f;

@@ -9687,7 +9687,7 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   check in one command that they are holding the artifact under review — which makes the reviewer a
   witness to their own payload instead of trusting the harness.
 
-- **🔴 OPEN — FR-258 — Form 1099-R box 14 (and box 17) feed Schedule A line 5a, and NO document family beyond the W-2 has been swept for this. Owning phase: the retirement build (T14) for box 14; the QCD widening for box 17.**
+- **🟡 PARTLY CLOSED 2026-09-20 — FR-258 — Form 1099-R box 14/17 and Form 1099-G box 11/12 now reach Schedule A line 5a. The 1099-MISC, 1099-NEC and W-2G legs remain, blocked on those families not being modelled at all. Owning phase: the retirement build (T14) for box 14; the QCD widening for box 17.**
   The Schedule A line-5a instruction names **five** documents whose state/local withholding boxes reach
   that line, verbatim: *"Forms W-2G, 1099-G, **1099-R**, 1099-MISC, and 1099-NEC may also show state and
   local income taxes withheld"* (`design/forms/extract/i1040sca--2024.txt:324`; identical at
@@ -9701,6 +9701,21 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   ★ **Why it is filed rather than fixed here:** an itemizing filer understates line 5a by the whole of
   the withholding, which is the overstating-tax direction and therefore not a funds-safety emergency —
   but it is a wrong result on a money line, so it gates its owning phase rather than batching to the end.
+  ★★ **CLOSED FOR THE TWO MODELLED FAMILIES 2026-09-20.** `income_tax_salt` now sums the W-2's boxes 17
+  and 19, the Form 1099-G's state withholding, and the Form 1099-R's boxes 14 and 17. Each term is
+  mutation-verified separately, and the KAT's figures are distinct so a shortfall names which one is
+  missing (9,000 + 500 + 250 + 300 + 40 = 10,090).
+  ★★★ **And the 1099-G's box NUMBER MOVES, which is why its field is not named for one.** The December
+  2026 revision INSERTED box 10 (*"Family leave benefits"*) and pushed the state block down: `10a/10b`
+  State became `11a/11b`, and state withholding went from **box 11** to **box 12**. Derived from both
+  archived extracts by `the_1099g_state_withholding_box_moved_between_revisions`. ★ That is the Schedule
+  1-A 37→43 shape — a box number REUSED for a different purpose — and `box10_family_leave_benefits` is a
+  live instance of the hazard: its name carries the TY2026 number while on a TY2024 form box 10a is the
+  state's NAME.
+  ★ **STILL OPEN:** the 1099-MISC, 1099-NEC and W-2G legs. All three families are unmodelled (T13
+  deferred, W-2G never specced), so each is accounted for by its census row refusing rather than by a
+  term in `income_tax_salt` — which is a real boundary, not a fix, and it is why this entry stays amber.
+
   ★★★ **And the meta-finding, which is the reason this entry exists at all.** Fold-review r2's I-8: the
   I-10 fold *discovered* this defect, wrote it up in the spec and in a commit message, and filed it
   **nowhere** — no field, no refusal, no mutation row, no ledger entry — while the two NON-money findings

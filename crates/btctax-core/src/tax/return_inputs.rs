@@ -261,6 +261,24 @@ pub struct Form1099G {
     /// ([`super::return_refuse::RefuseReason::FamilyLeaveBenefits`]) rather than being dropped.
     #[serde(default)]
     pub box10_family_leave_benefits: Usd,
+    /// ★★★ **State income tax withheld — box 11 on the TY2024/2025 form, box 12 on the TY2026 one.**
+    ///
+    /// → **Schedule A line 5a**, which names this document explicitly: *"Forms W-2G, 1099-G, 1099-R,
+    /// 1099-MISC, and 1099-NEC may also show state and local income taxes withheld"*
+    /// (`design/forms/extract/i1040sca--2024.txt:324`). Omitting it understates line 5a by the whole of
+    /// the withholding for an itemizing filer — commonly a filer who took unemployment with voluntary
+    /// state withholding.
+    ///
+    /// ★★ **NOT named for a box, and the 2026 revision is why.** It INSERTED box 10 (*"Family leave
+    /// benefits"*) and pushed the state block down one: `10a/10b` State became `11a/11b`, and state
+    /// withholding moved from **11** to **12**. A `box11_` field would be wrong on TY2026 and a `box12_`
+    /// field wrong on TY2024. `state_withholding_box(year)` derives it.
+    ///
+    /// ★ The sibling field above is a live instance of that hazard: `box10_family_leave_benefits` carries
+    /// the TY2026 box number, and on a TY2024 form box 10a is the STATE NAME. The name is only right for
+    /// the revision that introduced the box.
+    #[serde(default)]
+    pub state_income_tax_withheld: Usd,
 }
 
 /// **Form 1098-E — *Student Loan Interest Statement*** (R4 / §5.2, new at T5).

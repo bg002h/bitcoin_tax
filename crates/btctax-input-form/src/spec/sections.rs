@@ -3059,6 +3059,13 @@ const G_1099_FIELDS: &[Field] = &[
         "Box 9 \u{201c}Market gain\u{201d} \u{2014} gain on the repayment of a Commodity Credit Corporation loan, which is farm income on Schedule F. As box 7, any amount refuses.", box9_market_gain),
     doc_money!(FieldId::G1099Box10FamilyLeave, g_1099, "10 Family leave benefits",
         "Box 10 \u{201c}Family leave benefits\u{201d} \u{2014} new on the December 2026 revision, for a state paid family and medical leave program (Rev. Rul. 2025-4). The benefits are income and reach Schedule 1 line 8z, which btctax fills from nothing, so any amount here refuses rather than vanish.", box10_family_leave_benefits),
+    doc_money!(FieldId::G1099StateWithholding, g_1099, "11 State income tax withheld (12 from TY2026)",
+        "Box 11 \u{201c}State income tax withheld\u{201d} \u{2014} box 12 on the December 2026 revision, \
+         which inserted box 10 for family leave benefits and pushed the state block down one. It reaches \
+         SCHEDULE A LINE 5a, whose instruction names this form: \u{201c}Forms W-2G, 1099-G, 1099-R, \
+         1099-MISC, and 1099-NEC may also show state and local income taxes withheld\u{201d}. Enter it if \
+         you itemize; leaving it out understates your deduction by the whole of the withholding \
+         (FR-258).", state_income_tax_withheld),
 ];
 
 pub(crate) const G_1099S: Section = Section {

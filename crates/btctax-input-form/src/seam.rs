@@ -525,6 +525,10 @@ pub enum FieldId {
     G1099Box9MarketGain,
     /// Box 10 — *Family leave benefits* (Rev. December 2026) — a refuse-guard.
     G1099Box10FamilyLeave,
+    /// ★★★ FR-258 — state income tax withheld: **box 11** on the TY2024/2025 Form 1099-G, **box 12** on
+    /// the TY2026 one (that revision inserted box 10 and pushed the state block down). → Schedule A
+    /// line 5a. NOT named for a box, because no single number is right for both revisions.
+    G1099StateWithholding,
     // ── ★★★ R4 / R8 / T9 — Form 1098 (per row). ─────────────────────────────────────────────────
     Form1098Lender,
     Form1098LenderTin,

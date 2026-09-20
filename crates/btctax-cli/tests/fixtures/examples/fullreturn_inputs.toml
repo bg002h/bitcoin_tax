@@ -107,6 +107,7 @@ box7_agriculture_payments = "0"
 box9_market_gain = "0"
 payer = "State of IL"
 payer_tin = ""
+state_income_tax_withheld = "0"
 
 [header]
 address_city = "Springfield"

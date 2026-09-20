@@ -694,7 +694,8 @@ $ btctax --vault v.pgp income show --year 2024
       "box6_taxable_grants": "0",
       "box7_agriculture_payments": "0",
       "box9_market_gain": "0",
-      "box10_family_leave_benefits": "0"
+      "box10_family_leave_benefits": "0",
+      "state_income_tax_withheld": "0"
     }
   ],
   "b_1099": [],

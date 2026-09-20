@@ -2415,10 +2415,16 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             box7_agriculture_payments,
             box9_market_gain,
             box10_family_leave_benefits,
+            // ★ FR-258 — money, and it must not be negative: withholding is a magnitude.
+            state_income_tax_withheld,
             // R10.2 document identity — not money leaves, so no negative screen applies.
             payer_tin: _,
             transcribed_on: _,
         } = g;
+        // ★ FR-258 — the box Schedule A line 5a reads (11 on TY2024/25, 12 on TY2026).
+        if neg(*state_income_tax_withheld) {
+            return Some("1099-G state income tax withheld (box 11, or box 12 from TY2026)");
+        }
         if neg(*box1_unemployment) {
             return Some("1099-G box 1 unemployment compensation");
         }

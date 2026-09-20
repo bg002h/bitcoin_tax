@@ -883,6 +883,8 @@ fn classify_1099g(_c: &mut Census, g: &Form1099G) {
         box7_agriculture_payments: _,
         box9_market_gain: _,
         box10_family_leave_benefits: _,
+        // ★ FR-258 — a plain `Usd`; no answered-ness decision to make.
+        state_income_tax_withheld: _,
         // R10.2 document identity — scalar leaves; see `classify_1099int`.
         payer_tin: _,
         transcribed_on: _,
