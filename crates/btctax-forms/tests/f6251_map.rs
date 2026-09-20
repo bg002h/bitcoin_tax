@@ -64,10 +64,6 @@ fn revisions_covers_every_committed_f6251_map() {
 }
 
 /// Every `lineNN = "…"` in the map, as (line label, FQN).
-fn mapped() -> Vec<(String, String)> {
-    mapped_in(MAP)
-}
-
 fn mapped_in(map: &str) -> Vec<(String, String)> {
     map.lines()
         .filter_map(|l| {
@@ -81,22 +77,48 @@ fn mapped_in(map: &str) -> Vec<(String, String)> {
 
 /// ★★★ Every mapped FQN must EXIST on the blank PDF. A typo'd field name is invisible to a fill —
 /// `lopdf` simply writes nothing — so a whole line would silently vanish from a filed return.
+///
+/// ★★★ **Walks every committed revision (FR-261).** This held the TY2024 map alone while
+/// `forms/2025/f6251.map.toml` shipped unchecked — and this is the check that most needed widening,
+/// because it is the one that catches a map shifted by ONE widget. Per-revision counts are stated in a
+/// table; a committed revision missing from it PANICS rather than being skipped.
 #[test]
 fn every_mapped_field_exists_in_the_blank_form() {
-    let doc = load(f6251_pdf(2024).expect("the crate ships f6251.pdf")).unwrap();
+    // (year, mapped, censused) — identity is always name + ssn. Measured, not assumed:
+    //   2024: 41 + 18 + 2 = 61 widgets.  2025: 42 + 18 + 2 = 62 widgets.
+    const PARTITION: &[(i32, usize, usize)] = &[(2024, 41, 18), (2025, 42, 18)];
+    for (year, map, _) in REVISIONS {
+        let (mapped_n, censused_n) = PARTITION
+            .iter()
+            .find(|(y, _, _)| y == year)
+            .map(|(_, m, c)| (*m, *c))
+            .unwrap_or_else(|| {
+                panic!(
+                    "f6251--{year} is a committed revision with no expected partition. Count its \
+                     mapped lines and censused widgets (`xtask dump-fields` for the total) and add the \
+                     row — a missing entry must not silently skip the revision."
+                )
+            });
+        every_mapped_field_exists_for(*year, map, mapped_n, censused_n);
+    }
+}
+
+fn every_mapped_field_exists_for(year: i32, map_text: &str, mapped_n: usize, censused_n: usize) {
+    let doc = load(f6251_pdf(year).expect("the crate ships f6251.pdf")).unwrap();
     let fields = collect_fields(&doc).unwrap();
     let present: BTreeSet<&str> = fields.iter().map(|f| f.fqn.as_str()).collect();
 
-    let m = mapped();
+    let m = mapped_in(map_text);
     assert_eq!(
         m.len(),
-        41,
-        "core models 41 of the form's 59 numbered boxes; 2c-2t are censused: {m:?}"
+        mapped_n,
+        "f6251--{year}: expected {mapped_n} mapped line(s); the rest of the numbered boxes are \
+         censused: {m:?}"
     );
     for (line, fqn) in &m {
         assert!(
             present.contains(fqn.as_str()),
-            "line {line} maps to {fqn}, which is NOT a field on the blank form"
+            "f6251--{year} line {line} maps to {fqn}, which is NOT a field on the blank form"
         );
     }
     // ★★★ …and the three sets PARTITION the AcroForm — a disjoint union, not a matching count.
@@ -110,12 +132,16 @@ fn every_mapped_field_exists_in_the_blank_form() {
     //     ★ The same repo has been bitten by count-not-partition before (a `BTreeSet` built from
     //       `1..=38` when the label set was 48). A count answers "how many"; only a partition answers
     //       "which", and "which" is the question a field map exists to answer.
-    let censused: BTreeSet<&str> = MAP
+    let censused: BTreeSet<&str> = map_text
         .lines()
         .filter(|l| l.starts_with("\"topmostSubform"))
         .filter_map(|l| l.split('"').nth(1))
         .collect();
-    assert_eq!(censused.len(), 18, "lines 2c-2t are censused");
+    assert_eq!(
+        censused.len(),
+        censused_n,
+        "f6251--{year}: expected {censused_n} censused widget(s)"
+    );
 
     let mapped: BTreeSet<&str> = m.iter().map(|(_, f)| f.as_str()).collect();
     assert_eq!(mapped.len(), m.len(), "no FQN is mapped to two lines");
@@ -130,7 +156,7 @@ fn every_mapped_field_exists_in_the_blank_form() {
     // ★ Keyed on `name`/`ssn`, NOT on "everything after `[identity]`" — the census section follows it
     //   in the file (the header must come last so TOML does not swallow the `lineNN` keys), so a
     //   positional read picks up all 18 census FQNs as identity and the partition silently widens.
-    let identity: BTreeSet<&str> = MAP
+    let identity: BTreeSet<&str> = map_text
         .lines()
         .filter(|l| {
             let k = l.split('=').next().unwrap_or("").trim();
@@ -168,42 +194,66 @@ fn every_mapped_field_exists_in_the_blank_form() {
 /// two sets coincide; under an off-by-N they do not, which is what pins the offset.
 #[test]
 fn the_three_inset_widgets_land_on_the_three_parenthesised_lines() {
-    let doc = load(f6251_pdf(2024).unwrap()).unwrap();
-    let fields = collect_fields(&doc).unwrap();
-    let width = |fqn: &str| -> f32 {
-        fields
+    // The three parenthesised boxes per revision, MEASURED off each blank PDF (`xtask dump-fields`;
+    // every one is 64.0pt wide against ~90pt for a full-width amount cell). TY2025's are each shifted
+    // by exactly one from TY2024's, which is the OBBBA line-1 → 1a/1b split adding a widget above them.
+    const INSET: &[(i32, [&str; 3])] = &[
+        (2024, ["f1_5[0]", "f1_9[0]", "f1_22[0]"]),
+        (2025, ["f1_6[0]", "f1_10[0]", "f1_23[0]"]),
+    ];
+    for (year, map_text, _) in REVISIONS {
+        let want = INSET
             .iter()
-            .find(|f| f.fqn == fqn)
-            .and_then(|f| f.rect.map(|r| r[2] - r[0]))
-            .unwrap_or_else(|| panic!("no rect for {fqn}"))
-    };
-    // Only 2b is MAPPED (2f and 2s are inside the censused 2c-2t range), so the inset check runs over
-    // the map for 2b and over the census for the other two.
-    let inset: Vec<&str> = MAP
-        .lines()
-        .filter_map(|l| l.split('"').nth(1))
-        .filter(|f| f.contains("Page1") && f.contains("f1_"))
-        .filter(|f| width(f) < 70.0)
-        .collect();
-    assert_eq!(
-        inset.len(),
-        3,
-        "the form prints exactly three parenthesised boxes; got {inset:?}"
-    );
-    for f in &inset {
-        assert!(
-            ["f1_5[0]", "f1_9[0]", "f1_22[0]"]
+            .find(|(y, _)| y == year)
+            .map(|(_, w)| *w)
+            .unwrap_or_else(|| {
+                panic!(
+                    "f6251--{year} is a committed revision with no recorded inset widgets. Measure \
+                     the narrow page-1 boxes off its blank PDF and add the row — a missing entry must \
+                     not silently skip the revision."
+                )
+            });
+        let doc = load(f6251_pdf(*year).unwrap()).unwrap();
+        let fields = collect_fields(&doc).unwrap();
+        let width = |fqn: &str| -> f32 {
+            fields
                 .iter()
-                .any(|w| f.ends_with(w)),
-            "{f} is inset but is not one of the three parenthesised widgets"
+                .find(|f| f.fqn == fqn)
+                .and_then(|f| f.rect.map(|r| r[2] - r[0]))
+                .unwrap_or_else(|| panic!("f6251--{year}: no rect for {fqn}"))
+        };
+        // Only 2b is MAPPED (2f and 2s are inside the censused 2c-2t range), so the inset check runs
+        // over the map for 2b and over the census for the other two.
+        let inset: Vec<&str> = map_text
+            .lines()
+            .filter_map(|l| l.split('"').nth(1))
+            .filter(|f| f.contains("Page1") && f.contains("f1_"))
+            .filter(|f| width(f) < 70.0)
+            .collect();
+        assert_eq!(
+            inset.len(),
+            3,
+            "f6251--{year}: the form prints exactly three parenthesised boxes; got {inset:?}"
+        );
+        for f in &inset {
+            assert!(
+                want.iter().any(|w| f.ends_with(w)),
+                "f6251--{year}: {f} is inset but is not one of that revision's three parenthesised \
+                 widgets {want:?}"
+            );
+        }
+        // ★ …and the mapped one of the three is line 2b, in every revision.
+        let l2b = mapped_in(map_text)
+            .into_iter()
+            .find(|(l, _)| l == "2b")
+            .unwrap_or_else(|| panic!("f6251--{year}: 2b is mapped"));
+        assert!(
+            l2b.1.ends_with(want[0]),
+            "f6251--{year}: line 2b must be the FIRST inset box ({}), and maps to {}",
+            want[0],
+            l2b.1
         );
     }
-    // ★ …and the mapped one of the three is line 2b.
-    let l2b = mapped()
-        .into_iter()
-        .find(|(l, _)| l == "2b")
-        .expect("2b is mapped");
-    assert!(l2b.1.ends_with("f1_5[0]"), "line 2b is the first inset box");
 }
 
 /// ★★ y must DESCEND as the line number ascends, WITHIN each page. Catches a transposition the column
@@ -332,24 +382,64 @@ fn every_quoted_instruction_is_verbatim_for(year: i32, map: &str, form_text: &st
     );
 }
 
-/// ★★★ THE LINE-33 PAIR, PINNED EXPLICITLY. Line 33 subtracts from **22**, line 36 from **12** — four
-/// rows apart, same verb, and getting 33 wrong once inflated the tentative minimum tax by $200,000.
+/// ★★★ **THE LINE-33 PAIR, PINNED PER REVISION AND DERIVED FROM THE MAP'S OWN QUOTES.**
+///
+/// Line 33 subtracts from **22** and line 36 from **12** — four rows apart, same verb — and
+/// transcribing 33 from the rendered page once produced "from line 12", taxing the ordinary slice twice
+/// and inflating the tentative minimum tax by $200,000 on one vector.
+///
+/// ★★★ **Walks every committed revision (FR-261), and the SOURCE LINES ARE READ, not typed.** When this
+/// held TY2024 alone I recorded in FR-261 that the OBBBA revision "renumbered below" the 1a/1b split, so
+/// the equivalent pair would have to be found afresh. Reading the form says otherwise: `f6251--2025.txt`
+/// prints the IDENTICAL set of nine `Subtract line X from line Y` sentences as `f6251--2024.txt`,
+/// including both of these. The premise was mine and it was wrong — which is exactly why the check now
+/// derives the two source lines from each revision's own map rather than asserting numbers here.
+///
+/// So a revision that DOES renumber is handled with no edit: what is asserted is the invariant that
+/// cost the $200,000 — the two lines subtract from DIFFERENT places — plus that each quote is on that
+/// revision's form.
 #[test]
 fn the_line_33_and_36_cross_references_name_different_lines() {
-    let by = |n: &str| -> String {
-        MAP.lines()
-            .find(|l| l.trim_start().starts_with(&format!("# {n} \"")))
-            .unwrap_or_else(|| panic!("no quote for line {n}"))
-            .to_string()
-    };
-    assert!(
-        by("33").contains("Subtract line 32 from line 22"),
-        "line 33 subtracts from line 22: {}",
-        by("33")
-    );
-    assert!(
-        by("36").contains("Subtract line 35 from line 12"),
-        "line 36 subtracts from line 12: {}",
-        by("36")
-    );
+    for (year, map_text, form_text) in REVISIONS {
+        let quote = |n: &str| -> String {
+            map_text
+                .lines()
+                .find(|l| l.trim_start().starts_with(&format!("# {n} \"")))
+                .unwrap_or_else(|| panic!("f6251--{year}: no quote for line {n}"))
+                .to_string()
+        };
+        // The source line each one subtracts FROM, read out of the quote.
+        let source_of = |n: &str| -> u32 {
+            let q = quote(n);
+            let after = q.split("from line ").nth(1).unwrap_or_else(|| {
+                panic!("f6251--{year} line {n} is not a `from line N` subtraction: {q}")
+            });
+            after
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect::<String>()
+                .parse()
+                .unwrap_or_else(|_| panic!("f6251--{year} line {n}: no source line number in {q}"))
+        };
+        let (s33, s36) = (source_of("33"), source_of("36"));
+        assert_ne!(
+            s33, s36,
+            "f6251--{year}: lines 33 and 36 both subtract from line {s33}. They are four rows apart \
+             with the same verb, and conflating them taxes the ordinary slice TWICE — measured at \
+             $200,000 of spurious tentative minimum tax on one vector."
+        );
+        // …and each quote really is that revision's sentence, so the numbers above are the form's.
+        for n in ["33", "36"] {
+            let inner = quote(n)
+                .split('"')
+                .nth(1)
+                .expect("a quoted instruction")
+                .to_string();
+            let squash = |t: &str| t.split_whitespace().collect::<Vec<_>>().join(" ");
+            assert!(
+                squash(form_text).contains(&squash(&inner)),
+                "f6251--{year} line {n}'s quote is not verbatim on that revision's form: {inner:?}"
+            );
+        }
+    }
 }

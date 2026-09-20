@@ -9921,7 +9921,7 @@ the way `the_retirement_block_prints_all_six_cells…` does for TY2024. Add it i
 completes the TY2025 map — the emitter code path is written and guarded (`line6d` absent from a map
 while the flag is true is a loud `Geometry` error), it has simply never run.
 
-### FR-261 — two of f6251_map.rs's four checks still hold only the TY2024 revision (Important, owner: the TY2026 f6251 port)
+### FR-261 — CLOSED 2026-09-20 — every check in f6251_map.rs now walks every committed revision
 
 `forms/2025/f6251.map.toml` shipped with **no map test at all** (found by
 `blockers::every_committed_map_year_is_held_against_its_own_form`). Two of the four checks now walk
@@ -9949,3 +9949,31 @@ PATHS, so a `const MAP_2025` that nothing walks satisfies it, and clippy does no
 `revisions_covers_every_committed_f6251_map` closes that locally, in the file that knows what it walks
 — verified by planting the deletion (reds) — but neither instrument can see WHICH of the four checks a
 revision gets. That is what this entry is for.
+
+**CLOSED 2026-09-20.** All five checks in `f6251_map.rs` now walk `REVISIONS`, so the shipped TY2025
+OBBBA map is held against its own form by every one of them:
+
+| check | how it was made per-revision |
+|---|---|
+| `the_lines_descend_each_page_in_order` | purely geometric; no per-year data |
+| `every_quoted_instruction_is_verbatim_on_the_form` | per-revision count (2024→41, 2025→42) |
+| `every_mapped_field_exists_in_the_blank_form` | per-revision partition, MEASURED: 41+18+2 = 61 widgets (2024), 42+18+2 = 62 (2025) |
+| `the_line_33_and_36_cross_references_name_different_lines` | the source lines are now **read out of each map's own quotes** |
+| `the_three_inset_widgets_land_on_the_three_parenthesised_lines` | per-revision widget names, measured off each blank PDF |
+
+In every table a committed revision with no row **panics** rather than being skipped.
+
+★★★ **MY OWN PREMISE IN THIS ENTRY WAS WRONG, and reading the form is what showed it.** I wrote that the
+OBBBA revision "split line 1 into 1a/1b and renumbered below it, so the equivalent pair must be READ off
+`f6251--2025.txt`, never inferred." Reading it: `f6251--2025.txt` prints the **identical** set of nine
+`Subtract line X from line Y` sentences as `f6251--2024.txt`, both of these among them. Nothing below the
+split was renumbered. So the 33/36 check now DERIVES each source line from the map's own quote and asserts
+only the invariant that cost the money — the two subtract from **different** lines — which is revision-proof
+and cannot go stale the way a typed pair would. (The widget names did shift by one, `f1_5/9/22` →
+`f1_6/10/23`, consistent with one added widget above them.)
+
+★ B1 — four plants on the TY2025 side, four reds: line 33 made to subtract from line 12 like line 36
+(the confusion that inflated one vector's tentative minimum tax by $200,000); a mapped FQN pointed at a
+censused widget (the one-widget shift the old count could not see); the 2025 row deleted from the INSET
+table; and the 2025 partition row understated by one.
+
