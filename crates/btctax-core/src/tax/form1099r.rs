@@ -35,6 +35,8 @@
 //! edition separately, so a future revision that reworded or added a box reds rather than being absorbed.
 
 use crate::conventions::Usd;
+use serde::{Deserialize, Serialize};
+use time::Date;
 
 /// What v1 does with one box. **Every box has exactly one**, and `NoFederalLine` is a decision rather
 /// than a gap — it records that the box encodes no federal tax consequence, with the reason.
@@ -261,6 +263,99 @@ pub fn refuses_on(label: &str, value: Usd) -> bool {
     value != Usd::ZERO && refusing_boxes().contains(&label)
 }
 
+/// Which pair of 1040 lines this document reaches. Decided by box 7's adjacent **IRA/SEP/SIMPLE**
+/// checkbox, which is why box 7's disposition is [`V1Disposition::Decides`] and not a figure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Form1099RKind {
+    /// The IRA/SEP/SIMPLE box is checked: lines 4a/4b.
+    Ira,
+    /// It is not: lines 5a/5b.
+    PensionOrAnnuity,
+}
+
+/// **One transcribed Form 1099-R — the 15 boxes v1 must hold, and nothing else.**
+///
+/// ★★★ **The field set is DERIVED from [`BOXES`], not typed beside it.** A box needs a field iff its
+/// disposition is anything but [`V1Disposition::NoFederalLine`] — you cannot refuse on a figure you did
+/// not collect, and you cannot route or decide on one either. The six `NoFederalLine` boxes (12, 13, 15,
+/// 16, 18, 19) deliberately have **no field**: that is a recorded decision, not a gap.
+///
+/// `tests::the_field_set_is_exactly_what_the_dispositions_require` holds the join by destructuring this
+/// struct **exhaustively**, so adding or removing a field breaks the build until the mapping is updated —
+/// the compiler holds it rather than a reviewer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Form1099R {
+    /// *"PAYER'S name"* as printed.
+    pub payer: String,
+    /// **R10.2 — document identity.**
+    #[serde(default)]
+    pub payer_tin: String,
+    /// **R10.2 — when this row was transcribed.**
+    #[serde(default)]
+    pub transcribed_on: Option<Date>,
+    /// Which line pair this document reaches — box 7's IRA/SEP/SIMPLE checkbox.
+    pub kind: Form1099RKind,
+
+    /// **Box 1 — gross distribution.** No `serde(default)`: a 1099-R without box 1 is a mistyped row,
+    /// not a lawful state.
+    pub box1_gross_distribution: Usd,
+    /// **Box 2a — taxable amount.** `Option`, and the `None` is load-bearing: an unfilled box 2a is
+    /// what box 2b's *"not determined"* checkbox reports, and it must not read as `0`.
+    #[serde(default)]
+    pub box2a_taxable_amount: Option<Usd>,
+    /// **Box 2b, first checkbox — *Taxable amount not determined*.** ⇒ R-5.
+    #[serde(default)]
+    pub box2b_taxable_amount_not_determined: bool,
+    /// **Box 2b, second checkbox — *Total distribution*.** Informational.
+    #[serde(default)]
+    pub box2b_total_distribution: bool,
+    /// **Box 3 — capital gain included in box 2a.** Refuses when non-zero.
+    #[serde(default)]
+    pub box3_capital_gain: Usd,
+    /// **Box 4 — federal income tax withheld.** → 1040 line 25b (review r1's C-2).
+    #[serde(default)]
+    pub box4_fed_withheld: Usd,
+    /// **Box 5 — employee contributions / designated Roth contributions or insurance premiums.**
+    #[serde(default)]
+    pub box5_employee_contributions: Usd,
+    /// **Box 6 — net unrealized appreciation in employer's securities.** Refuses when non-zero.
+    #[serde(default)]
+    pub box6_net_unrealized_appreciation: Usd,
+    /// **Box 7 — the distribution code(s).** Read by EQUALITY against `"Q"` / `"T"`; every Table 1 code
+    /// is a single character, so a composed box 7 such as `"QJ"` reaches R-2 rather than the `-0-`
+    /// sub-branch (r2 I-5).
+    pub box7_distribution_codes: String,
+    /// **Box 8 — *Other*.** Refuses when non-zero.
+    #[serde(default)]
+    pub box8_other: Usd,
+    /// **Box 9a — this recipient's percentage of the total distribution.** A percentage, not money.
+    #[serde(default)]
+    pub box9a_percentage_of_total: Option<Usd>,
+    /// **Box 9b — total employee contributions.**
+    #[serde(default)]
+    pub box9b_total_employee_contributions: Usd,
+    /// **Box 10 — amount allocable to an in-plan Roth rollover within 5 years.** Refuses when non-zero.
+    #[serde(default)]
+    pub box10_allocable_to_irr: Usd,
+    /// **Box 11 — the first year of designated Roth contributions.** A YEAR, not money.
+    #[serde(default)]
+    pub box11_first_year_desig_roth: Option<i32>,
+    /// **Box 14 — state tax withheld.** → Schedule A line 5a. The box §7 omitted; see FR-258.
+    #[serde(default)]
+    pub box14_state_tax_withheld: Option<Usd>,
+    /// **Box 17 — local tax withheld.** Schedule A line 5a by the same instruction; DEFERRED (FR-258).
+    #[serde(default)]
+    pub box17_local_tax_withheld: Option<Usd>,
+
+    /// ★★ **The seventh question (r2 I-1), not a box.** Asked only when [`Self::box7_distribution_codes`]
+    /// is exactly `"T"` on an IRA document, because code T means the payer did NOT know whether the
+    /// 5-year holding period was met. `None` REFUSES — unlike the two silent advisory questions, silence
+    /// here would admit the filer to the `-0-` branch and understate tax.
+    #[serde(default)]
+    pub roth_contribution_before_lookback: Option<bool>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -271,6 +366,111 @@ mod tests {
             .join("../..")
             .join(format!("design/forms/extract/f1099r--{edition}.txt"));
         std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()))
+    }
+
+    /// ★★★ **THE JOIN: the struct's field set is exactly what the dispositions require — held by an
+    /// EXHAUSTIVE destructure, so the compiler enforces it rather than a reviewer.**
+    ///
+    /// A box needs a field iff its disposition is anything but [`V1Disposition::NoFederalLine`]: you
+    /// cannot refuse on a figure you never collected, and you cannot route or decide on one either.
+    ///
+    /// ★★ **Why the destructure and not a list of names.** A `const FIELDS: &[&str]` beside the struct
+    /// would be a third hand-written list — correct the day it is typed and silent when a later edit
+    /// widens the struct. The `let Form1099R { .. } = ` below has no `..` rest pattern, so **adding a
+    /// field fails to compile here** until someone says which box it carries, and removing one fails
+    /// too. That is the only mechanism that survives an unrelated future edit.
+    #[test]
+    fn the_field_set_is_exactly_what_the_dispositions_require() {
+        // The mapping, one line per field. Adding a field to `Form1099R` breaks this destructure.
+        #[allow(unused_variables)]
+        fn map(f: &Form1099R) -> Vec<&'static str> {
+            let Form1099R {
+                // ── identity and routing, not boxes ───────────────────────────────────────────────
+                payer,
+                payer_tin,
+                transcribed_on,
+                kind,
+                // ── one per box needing a field ───────────────────────────────────────────────────
+                box1_gross_distribution,
+                box2a_taxable_amount,
+                box2b_taxable_amount_not_determined,
+                box2b_total_distribution,
+                box3_capital_gain,
+                box4_fed_withheld,
+                box5_employee_contributions,
+                box6_net_unrealized_appreciation,
+                box7_distribution_codes,
+                box8_other,
+                box9a_percentage_of_total,
+                box9b_total_employee_contributions,
+                box10_allocable_to_irr,
+                box11_first_year_desig_roth,
+                box14_state_tax_withheld,
+                box17_local_tax_withheld,
+                // ── the seventh question (r2 I-1): a question, not a printed box ─────────────────
+                roth_contribution_before_lookback,
+            } = f;
+            // `2b` appears once: two checkboxes, one printed box label.
+            vec![
+                "1", "2a", "2b", "2b", "3", "4", "5", "6", "7", "8", "9a", "9b", "10", "11", "14",
+                "17",
+            ]
+        }
+
+        let covered: BTreeSet<&str> = map(&sample()).into_iter().collect();
+        let required: BTreeSet<&str> = BOXES
+            .iter()
+            .filter(|b| !matches!(b.v1, NoFederalLine(_)))
+            .map(|b| b.label)
+            .collect();
+        assert_eq!(
+            covered, required,
+            "the struct's boxes and the dispositions requiring a field have diverged"
+        );
+
+        // ★ And the six NoFederalLine boxes must have NO field — asserted, so that a future edit which
+        //   quietly starts collecting one has to change this line and say why.
+        let no_field: BTreeSet<&str> = BOXES
+            .iter()
+            .filter(|b| matches!(b.v1, NoFederalLine(_)))
+            .map(|b| b.label)
+            .collect();
+        assert_eq!(
+            no_field,
+            ["12", "13", "15", "16", "18", "19"]
+                .into_iter()
+                .collect::<BTreeSet<_>>()
+        );
+        assert!(
+            covered.is_disjoint(&no_field),
+            "a NoFederalLine box gained a field"
+        );
+    }
+
+    fn sample() -> Form1099R {
+        Form1099R {
+            payer: "P".into(),
+            payer_tin: String::new(),
+            transcribed_on: None,
+            kind: Form1099RKind::Ira,
+            box1_gross_distribution: Usd::ZERO,
+            box2a_taxable_amount: None,
+            box2b_taxable_amount_not_determined: false,
+            box2b_total_distribution: false,
+            box3_capital_gain: Usd::ZERO,
+            box4_fed_withheld: Usd::ZERO,
+            box5_employee_contributions: Usd::ZERO,
+            box6_net_unrealized_appreciation: Usd::ZERO,
+            box7_distribution_codes: String::new(),
+            box8_other: Usd::ZERO,
+            box9a_percentage_of_total: None,
+            box9b_total_employee_contributions: Usd::ZERO,
+            box10_allocable_to_irr: Usd::ZERO,
+            box11_first_year_desig_roth: None,
+            box14_state_tax_withheld: None,
+            box17_local_tax_withheld: None,
+            roth_contribution_before_lookback: None,
+        }
     }
 
     /// ★★★ **Every caption is verbatim in BOTH archived editions.** This is the transcription gate: a

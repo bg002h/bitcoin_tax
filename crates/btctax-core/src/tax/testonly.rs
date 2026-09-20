@@ -17,6 +17,48 @@ use crate::event::{BasisSource, DisposeKind, IncomeKind};
 /// shared-interest gate is answered `no` (a blank refuses `SharedMortgageInterestUnanswered`,
 /// because line 8a sums box 1 in full). Box 2 is left at zero so no fixture picks up a
 /// §163(h)(3)(B) ceiling warning it was not written to exercise.
+/// ★★★ **A FULLY-POPULATED Form 1099-R row, for the fixtures that cannot use `maximal_sentinel`.**
+///
+/// Three instruments need a 1099-R row and `scrub_axis::maximal_sentinel` cannot supply one: that
+/// fixture must be a **fileable** return (`scrub_axis::matrix`: *"a refusing baseline masks every cell
+/// of this matrix"*) and a transcribed 1099-R refuses by design until its compute lands
+/// (`RefuseReason::RetirementIncomeNotComputed`). So the row lives here and the callers reach for it.
+///
+/// ★★ **Every field is `Some`/non-zero on purpose.** `xtask`'s `toml-schema` publishes keys by walking a
+/// serialized fixture, and *"an empty table or array instantiates no child, so every key beneath it goes
+/// unpublished — and the document still looks complete, which is the worst possible failure for a
+/// schema."* A `None` here silently unpublishes that box.
+///
+/// ★ It lives in `btctax-core` rather than in `xtask` because `dec!` and `time::macros::date!` are
+/// core's dependencies, not xtask's — and duplicating the row in each caller is the shape this repo
+/// keeps getting wrong.
+#[must_use]
+pub fn form_1099r_all_boxes_populated() -> crate::tax::form1099r::Form1099R {
+    crate::tax::form1099r::Form1099R {
+        payer: "SCHEMA_PLACEHOLDER_PAYER".into(),
+        payer_tin: "55-5555555".into(),
+        transcribed_on: Some(time::macros::date!(2025 - 02 - 09)),
+        kind: crate::tax::form1099r::Form1099RKind::Ira,
+        box1_gross_distribution: dec!(20000),
+        box2a_taxable_amount: Some(dec!(20000)),
+        box2b_taxable_amount_not_determined: false,
+        box2b_total_distribution: true,
+        box3_capital_gain: dec!(0),
+        box4_fed_withheld: dec!(2000),
+        box5_employee_contributions: dec!(0),
+        box6_net_unrealized_appreciation: dec!(0),
+        box7_distribution_codes: "7".into(),
+        box8_other: dec!(0),
+        box9a_percentage_of_total: Some(dec!(100)),
+        box9b_total_employee_contributions: dec!(0),
+        box10_allocable_to_irr: dec!(0),
+        box11_first_year_desig_roth: Some(2019),
+        box14_state_tax_withheld: Some(dec!(300)),
+        box17_local_tax_withheld: Some(dec!(40)),
+        roth_contribution_before_lookback: Some(true),
+    }
+}
+
 #[must_use]
 pub fn form_1098_with_interest(interest: Usd) -> crate::tax::return_inputs::Form1098 {
     crate::tax::return_inputs::Form1098 {

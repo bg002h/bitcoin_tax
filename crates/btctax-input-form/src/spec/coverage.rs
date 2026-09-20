@@ -726,6 +726,22 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
         //     know or choose it — and the one thing it decides (whether the carried filing status is
         //     confirmed) is asked as its own declaration, which DOES have a field.
         "opened_from",
+        // ★★★ **T14 — the Form 1099-R rows. Exempt because the SECTION exists and its rows do not, and
+        //     that is a deliberate, temporary state with a refusal standing behind it.**
+        //
+        //     `SectionId::R1099s` was forced into being by the compiler — `DocumentKind::Form1099R`
+        //     reds `box_census::modelled_stems`, which demands a census section — but no filer can
+        //     reach a question here, because any transcribed 1099-R refuses the whole return
+        //     (`RefuseReason::RetirementIncomeNotComputed`) before a question surface is reached.
+        //
+        //     ★ Giving the leaves form fields NOW would be worse than exempting them: it would put
+        //       twenty-one boxes in front of a filer whose return cannot be filed either way, and the
+        //       refusal's own anchor is `NotInForm` precisely because no answer in this form clears it.
+        //
+        //     ★★ The task that removes this exemption is the one that adds the 4a/4b and 5a/5b compute.
+        //        Until then the exemption is load-bearing in one direction only: it says "no field
+        //        yet", never "no field ever".
+        "r_1099",
         // ★★ §G-15 — `tax_year` is the SCOPE the form is filled in, not a value the filer types into
         // it, so an input field for it would invite the filer to contradict the year their return is
         // filed under. Exempt DELIBERATELY, which is what this census exists to force someone to

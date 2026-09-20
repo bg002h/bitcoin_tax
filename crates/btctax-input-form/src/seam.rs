@@ -46,6 +46,15 @@ pub enum SectionId {
     B1099s,
     /// Form 1099-G rows — `ri.g_1099`.
     G1099s,
+    /// ★★★ **T14 — Form 1099-R rows** — `ri.r_1099`. The identity exists so `box_census` can bind this
+    /// document's boxes to a section (a `Collected` box must belong to its own document's section), and
+    /// because the whole chain from `DocumentKind::Form1099R` is compiler-forced.
+    ///
+    /// ★★ **No live rows yet, deliberately, and that is safe by construction rather than by care:**
+    /// every box on the census is `NotRead` and the return REFUSES on any transcribed 1099-R
+    /// (`RefuseReason::RetirementIncomeNotComputed`), so no filer reaches a question here. The section
+    /// becomes live in the task that adds the 4a/4b and 5a/5b compute.
+    R1099s,
     /// ★★★ R8 / T9 — Form 1098 rows — `ri.form_1098` (Schedule A line 8a). **Live iff
     /// `schedule_a.is_some()`**: the document arrives whether or not the filer itemizes, but a
     /// standard-deduction filer is never made to transcribe it (R8/I8).

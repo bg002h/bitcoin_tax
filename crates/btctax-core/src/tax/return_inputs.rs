@@ -2294,6 +2294,19 @@ pub struct ReturnInputs {
     /// See [`Form1099Sa`].
     #[serde(default)]
     pub sa_1099: Vec<Form1099Sa>,
+    /// ★★★ **T14 — Form 1099-R rows** (retirement income: 1040 lines 4a/4b and 5a/5b).
+    ///
+    /// The transcription and every box's provenance live in [`crate::tax::form1099r`], which holds all
+    /// **21** printed boxes against the archived form by a derived set-equality gate. This vector
+    /// carries the **15** of them v1 must hold; the six `NoFederalLine` boxes deliberately have no
+    /// field, and the compiler holds that join.
+    ///
+    /// ★★ **NOTHING COMPUTES FROM THIS YET.** No 1040 line reads it, so a document here must REFUSE
+    /// the return rather than be silently dropped — the same fail-closed posture the roadmap uses for
+    /// the deferred T13 (an arriving 1099-MISC refuses with its reason instead of filing something
+    /// wrong). The refusal is `RetirementIncomeNotComputed`; the compute is the next task.
+    #[serde(default)]
+    pub r_1099: Vec<crate::tax::form1099r::Form1099R>,
     /// ★★★ **R4 / §5.2 — Form 5498-SA rows** (T16). Transcribed and censused; no line of Form 8889
     /// sums them, and [`Form5498Sa`] says why in the form's own words.
     #[serde(default)]
@@ -3059,6 +3072,7 @@ impl Default for ReturnInputs {
             g_1099: Vec::new(),
             b_1099: Vec::new(),
             form_1098e: Vec::new(),
+            r_1099: Vec::new(),
             sa_1099: Vec::new(),
             sa_5498: Vec::new(),
             // ★★★ R3 — all `None`: a fresh return has been asked NOTHING about income that arrived

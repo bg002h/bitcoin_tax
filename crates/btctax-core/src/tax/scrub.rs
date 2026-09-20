@@ -866,6 +866,8 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
         // ★ R4 / T16 — the two HSA information returns carry a TRUSTEE name and TIN, the same
         //   identity class as a 1099 payer. Scrubbed below, through the same `EinMap`.
         sa_1099: _,
+        // ★ T14 — Form 1099-R rows carry a payer NAME and TIN; scrubbed in its own loop below.
+        r_1099: _,
         sa_5498: _,
         // ★★★ R5 / T5 — THE MOST IDENTIFYING ROWS ON THE RETURN. A `schedule_b_filer_records` row
         //     is the seller-financed-mortgage case Schedule B asks for BY NAME: the buyer's own
@@ -1163,6 +1165,41 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
             replace_preserving_emptiness(&f.box8_property_address, format!("Property{}", i + 1));
         f.box10_other = replace_preserving_emptiness(&f.box10_other, format!("Box10Item{}", i + 1));
     }
+    // ★★★ T14 — Form 1099-R rows: a payer NAME and TIN, the same identity shape as every other
+    //     information return. The exhaustive destructure is what makes a future box addition land here
+    //     instead of leaking: a new free-text box must be classified before this compiles.
+    for (i, f) in out.r_1099.iter_mut().enumerate() {
+        let crate::tax::form1099r::Form1099R {
+            payer: _,
+            payer_tin: _, // mapped below, through the SAME `EinMap` as every other payer TIN
+            transcribed_on: _, // R10.2 — KEPT, as on every other row
+            kind: _,
+            box1_gross_distribution: _,
+            box2a_taxable_amount: _,
+            box2b_taxable_amount_not_determined: _,
+            box2b_total_distribution: _,
+            box3_capital_gain: _,
+            box4_fed_withheld: _,
+            box5_employee_contributions: _,
+            box6_net_unrealized_appreciation: _,
+            // ★ Box 7 is a CODE SET from a closed IRS table ("Q", "T", "7", "QJ"). It is not free
+            //   text and carries no identity, so it is kept — and it must be, since it decides the
+            //   Roth sub-branch and scrubbing it would change the return's tax.
+            box7_distribution_codes: _,
+            box8_other: _,
+            box9a_percentage_of_total: _,
+            box9b_total_employee_contributions: _,
+            box10_allocable_to_irr: _,
+            // A YEAR, not an identity.
+            box11_first_year_desig_roth: _,
+            box14_state_tax_withheld: _,
+            box17_local_tax_withheld: _,
+            // The filer's own yes/no about a Roth contribution year; no identity.
+            roth_contribution_before_lookback: _,
+        } = f;
+        f.payer = replace_preserving_emptiness(&f.payer, format!("Payer{}", i + 1));
+        f.payer_tin = map_payer_tin(&mut eins, &f.payer_tin);
+    }
     // ★★★ R8 / T9 — Schedule A line 8b's recipient block: a NAME, an SSN-or-EIN and an ADDRESS the
     //     instruction requires the filer to print on the dotted lines. The most identifying rows on
     //     the whole schedule.
@@ -1349,6 +1386,81 @@ fn rekey_dependent_answers(out: &mut ReturnInputs, originals: &[Dependent]) {
 
 #[cfg(test)]
 mod tests {
+
+    /// ★★★ **T14 — the Form 1099-R's payer NAME and TIN are scrubbed. This test carries the whole
+    /// guarantee for this family, because the derived axis cannot.**
+    ///
+    /// `maximal_sentinel` normally supplies the axis's coverage, but it must also be a FILEABLE return
+    /// (`scrub_axis::matrix`) and a transcribed 1099-R refuses by design
+    /// (`RefuseReason::RetirementIncomeNotComputed`) — so this family cannot live in that fixture. And
+    /// the axis's own stated blind spot is that *"a leaf that is `None` on both sides produces no
+    /// differing path and drops out of the derived axis silently"*, which means the coverage would be
+    /// lost with nothing red.
+    ///
+    /// ★ So: delete this test and the scrub of `r_1099` is unheld. That sentence is the reason it exists,
+    /// and `scrub_axis::maximal_sentinel` names it at the empty vector.
+    #[test]
+    fn a_form_1099r_payer_and_tin_are_scrubbed() {
+        use crate::tax::form1099r::{Form1099R, Form1099RKind};
+        use rust_decimal_macros::dec;
+        let row = |payer: &str, tin: &str| Form1099R {
+            payer: payer.into(),
+            payer_tin: tin.into(),
+            transcribed_on: None,
+            kind: Form1099RKind::Ira,
+            box1_gross_distribution: dec!(20000),
+            box2a_taxable_amount: Some(dec!(20000)),
+            box2b_taxable_amount_not_determined: false,
+            box2b_total_distribution: false,
+            box3_capital_gain: crate::conventions::Usd::ZERO,
+            box4_fed_withheld: dec!(2000),
+            box5_employee_contributions: crate::conventions::Usd::ZERO,
+            box6_net_unrealized_appreciation: crate::conventions::Usd::ZERO,
+            box7_distribution_codes: "7".into(),
+            box8_other: crate::conventions::Usd::ZERO,
+            box9a_percentage_of_total: None,
+            box9b_total_employee_contributions: crate::conventions::Usd::ZERO,
+            box10_allocable_to_irr: crate::conventions::Usd::ZERO,
+            box11_first_year_desig_roth: None,
+            box14_state_tax_withheld: Some(dec!(300)),
+            box17_local_tax_withheld: None,
+            roth_contribution_before_lookback: None,
+        };
+        let ri = crate::tax::return_inputs::ReturnInputs {
+            r_1099: vec![
+                row("Acme Retirement Trust", "55-5555555"),
+                row("Beta Pension Fund", "66-6666666"),
+            ],
+            ..Default::default()
+        };
+        let out = scrub_pii(&ri);
+
+        for (i, f) in out.r_1099.iter().enumerate() {
+            assert_eq!(
+                f.payer,
+                format!("Payer{}", i + 1),
+                "the payer NAME must be replaced"
+            );
+            assert!(
+                !f.payer_tin.is_empty(),
+                "an EIN present on the way in must be present on the way out — scrub preserves the \
+                 validity class, it does not blank"
+            );
+            assert_ne!(
+                f.payer_tin,
+                if i == 0 { "55-5555555" } else { "66-6666666" },
+                "the payer TIN must be MAPPED, not kept"
+            );
+        }
+        // ★ Two distinct payers must map to two distinct TINs, or the scrub has collapsed identities
+        //   that the return distinguishes.
+        assert_ne!(out.r_1099[0].payer_tin, out.r_1099[1].payer_tin);
+        // ★★ And the FIGURES must survive untouched: a scrub that altered box 1 or box 14 would change
+        //    the return's tax, which is the one thing it may never do.
+        assert_eq!(out.r_1099[0].box1_gross_distribution, dec!(20000));
+        assert_eq!(out.r_1099[0].box14_state_tax_withheld, Some(dec!(300)));
+        assert_eq!(out.r_1099[0].box7_distribution_codes, "7");
+    }
     use super::*;
     use crate::tax::return_1040::assemble_absolute;
     use crate::tax::testonly::{

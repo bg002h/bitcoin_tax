@@ -57,6 +57,12 @@ pub enum DocumentKind {
     Form1098E,
     /// ★ T16 — Form 1099-SA, *Distributions From an HSA, Archer MSA, or Medicare Advantage MSA*.
     /// Form 8889 line 14a reads the SUM of the rows' box 1.
+    /// ★★★ **T14 — Form 1099-R.** Added the moment the provenance audit demanded a `Source` for the
+    /// twelve money leaves `ReturnInputs::r_1099` introduced, which is the chain
+    /// `box_census::modelled_stems` was built to force: a document the product MODELS must be
+    /// censused, so adding this variant is a build error until `DOCUMENTS`, `section_of_stem` and all
+    /// 21 `BoxEntry` rows land with it.
+    Form1099R,
     Form1099Sa,
     /// ★ T16 — Form 5498-SA, *HSA, Archer MSA, or Medicare Advantage MSA Information*. No line sums
     /// it; the row is transcribed so the contributions on Form 8889 line 2 can be checked against
@@ -87,6 +93,7 @@ impl DocumentKind {
         DocumentKind::Form1099B,
         DocumentKind::Form1098,
         DocumentKind::Form1098E,
+        DocumentKind::Form1099R,
         DocumentKind::Form1099Sa,
         DocumentKind::Form5498Sa,
     ];
@@ -129,6 +136,7 @@ pub const LEAF_SOURCE: &[(&str, Source)] = &[
     ("b_1099", Source::Document(DocumentKind::Form1099B)),
     ("form_1098", Source::Document(DocumentKind::Form1098)),
     ("form_1098e", Source::Document(DocumentKind::Form1098E)),
+    ("r_1099", Source::Document(DocumentKind::Form1099R)),
     ("sa_1099", Source::Document(DocumentKind::Form1099Sa)),
     ("sa_5498", Source::Document(DocumentKind::Form5498Sa)),
     // ── The filer's own records ──────────────────────────────────────────────────────────────────
@@ -430,6 +438,13 @@ fn document_row_facts(ri: &ReturnInputs, kind: DocumentKind, i: usize) -> Docume
             ri.form_1098e.get(i).map(|r| r.lender.clone()),
             ri.form_1098e.get(i).map(|r| r.lender_tin.clone()),
             TranscribedOn::Row(ri.form_1098e.get(i).and_then(|r| r.transcribed_on)),
+        ),
+        DocumentKind::Form1099R => (
+            "Form 1099-R",
+            ri.r_1099.len(),
+            ri.r_1099.get(i).map(|r| r.payer.clone()),
+            ri.r_1099.get(i).map(|r| r.payer_tin.clone()),
+            TranscribedOn::Row(ri.r_1099.get(i).and_then(|r| r.transcribed_on)),
         ),
         DocumentKind::Form1099Sa => (
             "Form 1099-SA",
@@ -1162,6 +1177,28 @@ mod tests {
     ///    consecutive tasks losing a guard to a hand-written fixture that decided what the guard
     ///    could see. A family added tomorrow does not compile until it is given a row here, so the
     ///    kill below covers it on the day rather than the day someone remembers.
+    /// ★★★ **The fixture the MONEY-LEAF audit walks — `maximal_sentinel` plus every document family
+    /// it cannot carry.**
+    ///
+    /// `scrub_axis::maximal_sentinel` must be a **fileable** return (`scrub_axis::matrix`: *"a refusing
+    /// baseline masks every cell of this matrix behind whatever refuses first"*), so it cannot hold a
+    /// transcribed Form 1099-R — that document REFUSES by design until its compute lands
+    /// (`RefuseReason::RetirementIncomeNotComputed`).
+    ///
+    /// ★★ A PROVENANCE audit does not care whether the return is fileable; it cares that every money
+    /// leaf has a source. So it walks the sentinel with the unsupported families pushed on top, and
+    /// `push_undated_row` is reused rather than a second hand-written row per family — it already has an
+    /// `_`-free `match` over `DocumentKind`, so a future family arrives here automatically.
+    fn audit_fixture() -> crate::tax::return_inputs::ReturnInputs {
+        let mut ri = maximal_sentinel();
+        for k in DocumentKind::ALL {
+            if document_row_facts(&ri, *k, 0).rows == 0 {
+                push_undated_row(&mut ri, *k);
+            }
+        }
+        ri
+    }
+
     fn push_undated_row(ri: &mut crate::tax::return_inputs::ReturnInputs, kind: DocumentKind) {
         use crate::tax::return_inputs as t;
         match kind {
@@ -1193,6 +1230,33 @@ mod tests {
                 lender: "Servicer F".into(),
                 ..Default::default()
             }),
+            // ★ `Form1099R` has no `Default` (a defaulted `kind` would fabricate the routing between
+            //   lines 4a/4b and 5a/5b), so this arm writes the fields out.
+            DocumentKind::Form1099R => {
+                ri.r_1099.push(crate::tax::form1099r::Form1099R {
+                    payer: "Retirement Trust I".into(),
+                    payer_tin: String::new(),
+                    transcribed_on: None,
+                    kind: crate::tax::form1099r::Form1099RKind::Ira,
+                    box1_gross_distribution: crate::conventions::Usd::ZERO,
+                    box2a_taxable_amount: None,
+                    box2b_taxable_amount_not_determined: false,
+                    box2b_total_distribution: false,
+                    box3_capital_gain: crate::conventions::Usd::ZERO,
+                    box4_fed_withheld: crate::conventions::Usd::ZERO,
+                    box5_employee_contributions: crate::conventions::Usd::ZERO,
+                    box6_net_unrealized_appreciation: crate::conventions::Usd::ZERO,
+                    box7_distribution_codes: String::new(),
+                    box8_other: crate::conventions::Usd::ZERO,
+                    box9a_percentage_of_total: None,
+                    box9b_total_employee_contributions: crate::conventions::Usd::ZERO,
+                    box10_allocable_to_irr: crate::conventions::Usd::ZERO,
+                    box11_first_year_desig_roth: None,
+                    box14_state_tax_withheld: None,
+                    box17_local_tax_withheld: None,
+                    roth_contribution_before_lookback: None,
+                });
+            }
             DocumentKind::Form1099Sa => ri.sa_1099.push(t::Form1099Sa {
                 payer: "Custodian G".into(),
                 ..Default::default()
@@ -1255,12 +1319,25 @@ mod tests {
     /// the same number.
     #[test]
     fn the_transcription_date_columns_in_the_source_are_all_walked() {
-        let declared = RETURN_INPUTS_SRC
-            .matches("pub transcribed_on: Option<Date>,")
-            .count();
+        // ★★★ **T14 — the scan reads TWO modules now, and the first version of this read only one.**
+        //     `Form1099R` lives in its own module (`form1099r.rs`) rather than in `return_inputs.rs`
+        //     like its eight siblings, so a scan pinned to one file found 8 declared columns against 9
+        //     walked families and red — correctly, and for the right reason: the FILE LIST was a typed
+        //     list that an unrelated edit widened beneath it.
+        //
+        //     ★ Stated rather than implied, because this list can go stale the same way again: it
+        //       covers `return_inputs.rs` and `form1099r.rs` and NOTHING ELSE. A tenth document family
+        //       declared in a third module would red here — as 9 declared against 10 walked — which is
+        //       the failure direction that names itself. The `walked` half needs no list at all: it
+        //       derives from `DocumentKind::ALL`.
+        const SOURCES: [&str; 2] = [RETURN_INPUTS_SRC, include_str!("form1099r.rs")];
+        let declared: usize = SOURCES
+            .iter()
+            .map(|src| src.matches("pub transcribed_on: Option<Date>,").count())
+            .sum();
         // A broken parse must be LOUD, not silently permissive.
         assert!(
-            declared >= 8,
+            declared >= 9,
             "the source scan found {declared} `transcribed_on` columns — it has stopped parsing"
         );
         let ri = crate::tax::return_inputs::ReturnInputs::default();
@@ -1288,7 +1365,7 @@ mod tests {
     fn every_document_kind_is_listed_once() {
         assert_eq!(
             DocumentKind::ALL.len(),
-            9,
+            10,
             "the W-2, the four 1099 families `income import` fills, the 1098 and 1098-E, and \
              T16's two HSA information returns"
         );
@@ -1414,7 +1491,7 @@ mod tests {
     /// filer's-records struct; every `Usd` leaf has one source"*).
     #[test]
     fn every_money_leaf_has_exactly_one_source_and_every_source_prefix_is_live() {
-        let money = money_leaves(&maximal_sentinel());
+        let money = money_leaves(&audit_fixture());
         // ★ The floor is the MEASURED count, not a round number well below it (seam review N1). At
         //   `> 50` a fixture that had lost HALF its realized money leaves still passed the guard
         //   whose own message says *"it has stopped being maximal"* — a guard that cannot fire on the
@@ -1434,7 +1511,7 @@ mod tests {
     /// `String` / `Date` / `bool` leaves sitting right beside them.
     #[test]
     fn the_money_detector_separates_usd_from_the_leaves_that_look_like_it() {
-        let money = money_leaves(&maximal_sentinel());
+        let money = money_leaves(&audit_fixture());
         for yes in [
             "w2s[0].box1_wages",                  // a plain `Usd`
             "form_8960_line9b", // an `Option<Usd>` — realized because the fixture is maximal
@@ -1464,7 +1541,7 @@ mod tests {
     /// ★★★ **KILL — a money leaf with NO source reds** (B1: plant the exact defect).
     #[test]
     fn deleting_a_source_prefix_reds_the_kat() {
-        let money = money_leaves(&maximal_sentinel());
+        let money = money_leaves(&audit_fixture());
         let gutted: Vec<(&str, Source)> = LEAF_SOURCE
             .iter()
             .copied()
@@ -1481,7 +1558,7 @@ mod tests {
     /// that matches nothing silently over-claims: it looks like coverage and is not.
     #[test]
     fn a_prefix_that_matches_no_money_leaf_reds_the_kat() {
-        let money = money_leaves(&maximal_sentinel());
+        let money = money_leaves(&audit_fixture());
         let mut padded: Vec<(&str, Source)> = LEAF_SOURCE.to_vec();
         padded.push(("a_leaf_that_does_not_exist", Source::Ledger));
         let a = audit(&padded, &money);
@@ -1497,7 +1574,7 @@ mod tests {
     /// re-attribute a figure's source and nothing would say so.
     #[test]
     fn two_prefixes_claiming_the_same_leaf_red_the_kat() {
-        let money = money_leaves(&maximal_sentinel());
+        let money = money_leaves(&audit_fixture());
         let mut padded: Vec<(&str, Source)> = LEAF_SOURCE.to_vec();
         padded.push(("schedule_a.medical", Source::Ledger));
         let a = audit(&padded, &money);

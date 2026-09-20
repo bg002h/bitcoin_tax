@@ -14,7 +14,7 @@ cargo run -p xtask -- toml-schema > docs/income-import-schema.md
 
 Start from [the worked example](#a-complete-worked-example) below and delete what does not apply to you.
 
-**Almost every key is optional to the PARSER** — `ReturnInputs` carries `#[serde(default)]` on nearly every field — so a short file parses. **78 are not**, and they are measured rather than remembered — each one was deleted from a complete file and handed back to the deserializer:
+**Almost every key is optional to the PARSER** — `ReturnInputs` carries `#[serde(default)]` on nearly every field — so a short file parses. **82 are not**, and they are measured rather than remembered — each one was deleted from a complete file and handed back to the deserializer:
 
 - `b_1099[].payer`
 - `capital_loss_carryforward_in.long`
@@ -43,6 +43,10 @@ Start from [the worked example](#a-complete-worked-example) below and delete wha
 - `header.taxpayer.ssn`
 - `int_1099[].box1_interest`
 - `int_1099[].payer`
+- `r_1099[].box1_gross_distribution`
+- `r_1099[].box7_distribution_codes`
+- `r_1099[].kind`
+- `r_1099[].payer`
 - `sa_1099[].payer`
 - `sa_5498[].trustee`
 - `schedule_a.charitable[].amount`
@@ -140,7 +144,7 @@ Two key groups are read and then **normalised away**, with a note on stderr rath
 
 ## Every key `income import` honours
 
-**410 paths, 368 of them leaves that take a value.** Derived from the serialized shape of `ReturnInputs` over `btctax_core::tax::scrub_axis::maximal_sentinel()` — the fixture whose every `Option` is `Some`, every `Vec` non-empty and every nested struct present, written as an exhaustive `..`-free struct literal so a new field is a compile error before it can be an unpublished key.
+**433 paths, 390 of them leaves that take a value.** Derived from the serialized shape of `ReturnInputs` over `btctax_core::tax::scrub_axis::maximal_sentinel()` — the fixture whose every `Option` is `Some`, every `Vec` non-empty and every nested struct present, written as an exhaustive `..`-free struct literal so a new field is a compile error before it can be an unpublished key.
 
 **Reading the paths.** `a.b` is the key `b` under `[a]`. `a[]` is a repeated table, written `[[a]]` once per row, and `a[].b` is a key inside one of those rows. A `<placeholder>` segment is a key YOU choose, not a literal:
 
@@ -149,7 +153,7 @@ Two key groups are read and then **normalised away**, with a note on stderr rath
 
 **Money is a string.** Every dollar figure is a decimal serialized as a quoted string — `"12400"`, `"1234.56"` — never a bare number, because a TOML float cannot carry a cent exactly.
 
-**A DATE takes EITHER spelling, and the 16 `date` leaves below were found by trying one.** Write `date_of_birth = "2012-04-15"` — that is what the deserializer accepts and what you should type. btctax's own `income scrub` writes the same value as `time`'s compact `[2012, 106]` (year, ordinal day), which also reads back, so a scrubbed file round-trips without editing. Each of those leaves was identified by substituting an ISO date string at the path and re-parsing the whole file. A leaf still shown below as `array of integers` was NOT confirmed that way — every one of them is under `answer_log*`, which the import discards anyway, and the generator fails if such a leaf ever turns up anywhere else.
+**A DATE takes EITHER spelling, and the 17 `date` leaves below were found by trying one.** Write `date_of_birth = "2012-04-15"` — that is what the deserializer accepts and what you should type. btctax's own `income scrub` writes the same value as `time`'s compact `[2012, 106]` (year, ordinal day), which also reads back, so a scrubbed file round-trips without editing. Each of those leaves was identified by substituting an ISO date string at the path and re-parsing the whole file. A leaf still shown below as `array of integers` was NOT confirmed that way — every one of them is under `answer_log*`, which the import discards anyway, and the generator fails if such a leaf ever turns up anywhere else.
 
 **The last column** is `required` when omitting the key breaks the parse (measured, see above), plus what the import does with it BEYOND storing it (derived from the path). Blank means optional and stored as given.
 
@@ -414,6 +418,29 @@ Two key groups are read and then **normalised away**, with a note on stderr rath
 | `qbi.qbi_carryforward_in_provenance` | string | forced to `user` |
 | `qbi.reit_ptp_carryforward_in` | string |  |
 | `qbi.reit_ptp_carryforward_in_provenance` | string | forced to `user` |
+| `r_1099` | array of tables |  |
+| `r_1099[]` | table |  |
+| `r_1099[].box10_allocable_to_irr` | string |  |
+| `r_1099[].box11_first_year_desig_roth` | integer |  |
+| `r_1099[].box14_state_tax_withheld` | string |  |
+| `r_1099[].box17_local_tax_withheld` | string |  |
+| `r_1099[].box1_gross_distribution` | string | **required** |
+| `r_1099[].box2a_taxable_amount` | string |  |
+| `r_1099[].box2b_taxable_amount_not_determined` | boolean |  |
+| `r_1099[].box2b_total_distribution` | boolean |  |
+| `r_1099[].box3_capital_gain` | string |  |
+| `r_1099[].box4_fed_withheld` | string |  |
+| `r_1099[].box5_employee_contributions` | string |  |
+| `r_1099[].box6_net_unrealized_appreciation` | string |  |
+| `r_1099[].box7_distribution_codes` | string | **required** |
+| `r_1099[].box8_other` | string |  |
+| `r_1099[].box9a_percentage_of_total` | string |  |
+| `r_1099[].box9b_total_employee_contributions` | string |  |
+| `r_1099[].kind` | string | **required** |
+| `r_1099[].payer` | string | **required** |
+| `r_1099[].payer_tin` | string |  |
+| `r_1099[].roth_contribution_before_lookback` | boolean |  |
+| `r_1099[].transcribed_on` | date |  |
 | `sa_1099` | array of tables |  |
 | `sa_1099[]` | table |  |
 | `sa_1099[].box1_gross_distribution` | string |  |

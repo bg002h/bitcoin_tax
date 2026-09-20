@@ -313,6 +313,8 @@ fn row_depth(id: SectionId) -> usize {
         | SectionId::Div1099s
         | SectionId::B1099s
         | SectionId::G1099s
+        // ★ T14 — Form 1099-R rows, the same depth-1 shape over a top-level `Vec`.
+        | SectionId::R1099s
         | SectionId::Form1098Es
         // ★ R4 / R8 / T9 — the Form 1098 rows, same shape.
         | SectionId::Form1098s

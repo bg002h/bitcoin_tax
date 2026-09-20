@@ -122,6 +122,7 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         b_1099,
         form_1098,
         form_1098e,
+        r_1099,
         sa_1099,
         sa_5498,
         schedule_b_filer_records,
@@ -316,6 +317,9 @@ pub fn classify(ri: &ReturnInputs) -> Census {
     }
     for e in form_1098e {
         classify_1098e(&mut c, e);
+    }
+    for r in r_1099 {
+        classify_1099r(&mut c, r);
     }
     for r in sa_1099 {
         classify_1099sa(&mut c, r);
@@ -1501,6 +1505,67 @@ fn classify_hsa(c: &mut Census, h: &crate::tax::return_inputs::HsaInputs) {
 /// ★ T16 — a Form 1099-SA row. Its one non-money leaf is box 5's account-type checkbox, which is
 /// TRANSCRIBED DATA (which box the trustee ticked), not a defaulted answer for the filer — and its
 /// `None` refuses rather than defaulting to `Hsa`.
+/// ★★★ **T14 — a Form 1099-R row. Every leaf is EXEMPT for one reason, and the reason is a refusal.**
+///
+/// Nothing computes from `r_1099` yet, and `screen_inputs_tiered` refuses the whole return
+/// (`RefuseReason::RetirementIncomeNotComputed`) while any row is present. So no leaf here can reach a
+/// printed line, and classifying any of them as a live declaration would be a claim about a surface
+/// that does not exist: the filer is never asked these questions, because the return never gets that
+/// far.
+///
+/// ★★ **That makes the exemptions honest ONLY as long as the refusal stands**, which is why each one
+/// names it. When the compute lands, every exemption below becomes a real classification —
+/// `box2a_taxable_amount` and the two box-2b checkboxes decide line 5b and R-5, and
+/// `roth_contribution_before_lookback` becomes a class-(A) declaration whose `None` refuses. The
+/// refusal's own reachability fixture is what stops this comment from being the only thing holding it.
+fn classify_1099r(c: &mut Census, r: &crate::tax::form1099r::Form1099R) {
+    let crate::tax::form1099r::Form1099R {
+        payer: _,
+        payer_tin: _,
+        transcribed_on: _,
+        kind: _,
+        box1_gross_distribution: _,
+        box2a_taxable_amount,
+        box2b_taxable_amount_not_determined,
+        box2b_total_distribution,
+        box3_capital_gain: _,
+        box4_fed_withheld: _,
+        box5_employee_contributions: _,
+        box6_net_unrealized_appreciation: _,
+        box7_distribution_codes: _,
+        box8_other: _,
+        box9a_percentage_of_total,
+        box9b_total_employee_contributions: _,
+        box10_allocable_to_irr: _,
+        box11_first_year_desig_roth: _,
+        box14_state_tax_withheld,
+        box17_local_tax_withheld,
+        roth_contribution_before_lookback,
+    } = r;
+    const HELD: &str = "T14 — transcribed and HELD, read by nothing: `screen_inputs_tiered` refuses \
+                        the whole return (RetirementIncomeNotComputed) while any Form 1099-R row is \
+                        present, so this leaf cannot reach a line. It becomes a live classification \
+                        in the task that adds the 4a/4b and 5a/5b compute";
+    c.exempt(box2a_taxable_amount, Class::DataDerived, HELD);
+    c.exempt(
+        box2b_taxable_amount_not_determined,
+        Class::DataDerived,
+        HELD,
+    );
+    c.exempt(box2b_total_distribution, Class::DataDerived, HELD);
+    c.exempt(box9a_percentage_of_total, Class::DataDerived, HELD);
+    c.exempt(box14_state_tax_withheld, Class::DataDerived, HELD);
+    c.exempt(box17_local_tax_withheld, Class::DataDerived, HELD);
+    c.exempt(
+        roth_contribution_before_lookback,
+        Class::DataDerived,
+        "T14 / r2 I-1 — the SEVENTH question (code-T Roth lookback year). Held, not asked: the return \
+         refuses on any Form 1099-R before a question surface is reached. When the compute lands this \
+         becomes a class-(A) declaration whose `None` REFUSES, because silence would admit the filer \
+         to the 4b = -0- branch and understate tax",
+    );
+}
+
 fn classify_1099sa(c: &mut Census, r: &crate::tax::return_inputs::Form1099Sa) {
     let crate::tax::return_inputs::Form1099Sa {
         payer: _,

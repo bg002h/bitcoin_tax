@@ -517,6 +517,20 @@ pub fn maximal_sentinel() -> ReturnInputs {
         b_1099: vec![b_1099("one", "99-9999999"), b_1099("two", "10-1010101")],
         form_1098: vec![f1098("one", "12-3456789"), f1098("two", "98-7654321")],
         form_1098e: vec![f1098e("one", "11-1111111"), f1098e("two", "99-9999999")],
+        // ★★★ **T14 — DELIBERATELY EMPTY, and the reason is a real tension between two invariants of
+        //     this fixture.** `maximal_sentinel` must populate every field (so the derived axis has a
+        //     differing path for each) AND must be a FILEABLE return (`matrix`: *"a refusing baseline
+        //     masks every cell of this matrix behind whatever refuses first"*). A transcribed Form
+        //     1099-R refuses by design (`RetirementIncomeNotComputed`), so an unsupported-document
+        //     family cannot satisfy both — and fileability is the stronger one, because it gates a
+        //     whole matrix rather than one column.
+        //
+        //     ★ That leaves a hole this module names as its own blind spot: *"a leaf that is `None` on
+        //       both sides produces no differing path and drops out of the derived axis silently."* So
+        //       the 1099-R's payer name and TIN are covered by a DEDICATED test instead —
+        //       `scrub::tests::a_form_1099r_payer_and_tin_are_scrubbed`. Delete that test and the
+        //       scrub of this family is unheld.
+        r_1099: Vec::new(),
         sa_1099: vec![sa_1099("one", "11-1111111"), sa_1099("two", "22-2222222")],
         sa_5498: vec![sa_5498("one", "33-3333333"), sa_5498("two", "44-4444444")],
         schedule_b_filer_records: vec![

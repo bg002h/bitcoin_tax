@@ -28,6 +28,7 @@ form_2555_line50 = "0"
 form_4563_line15 = "0"
 itemize_election = "auto"
 other_out_of_scope_income = false
+r_1099 = []
 sa_1099 = []
 sa_5498 = []
 schedule_b_filer_records = []

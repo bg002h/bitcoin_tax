@@ -1751,6 +1751,22 @@ pub enum RefuseReason {
     /// [`NotUsable::NoArchivedRevision`]: crate::tax::state_local_refund::NotUsable::NoArchivedRevision
     /// [`NotUsable::NoLine5AmountForStatus`]: crate::tax::state_local_refund::NotUsable::NoLine5AmountForStatus
     StateAndLocalRefundWorksheetNotComputed,
+    /// ★★★ **T14 — a Form 1099-R is on the return and NOTHING COMPUTES FROM IT YET.**
+    ///
+    /// `ReturnInputs::r_1099` and the whole `form1099r` transcription landed before the 4a/4b and
+    /// 5a/5b compute, deliberately: the transcription is verifiable against the archived form with no
+    /// engine changes, and a wrong box caught then costs nothing while the same error found after
+    /// wiring is a money defect.
+    ///
+    /// ★★ **But holding a document no line reads is the worst possible middle state**, because the
+    /// filer's retirement income would simply be absent from total income with nothing said — the
+    /// understatement direction, silently. So the whole return refuses while any row is present. This
+    /// is the same fail-closed posture the roadmap uses for the deferred T13: *"an arriving 1099-MISC
+    /// refuses the return with its reason rather than filing something wrong"*.
+    ///
+    /// ★ It is removed, not relaxed, when the compute lands — and until then it is the one thing
+    /// standing between a transcribed 1099-R and a 1040 that omits it.
+    RetirementIncomeNotComputed,
     /// ★★★ **THE FORM FORBIDS THE WORKSHEET FOR THIS FILER — one of Pub. 525's nine Exception
     /// conditions applies.**
     ///
@@ -2094,6 +2110,11 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         // ★ R4 / R8 / T9 — the Form 1098 carries five money boxes (1, 2, 4, 5, 6); screened below.
         form_1098,
         form_1098e,
+        // ★ T14 — Form 1099-R carries EIGHT money boxes (1, 2a, 3, 4, 5, 6, 8, 9b) plus two
+        //   state/local withholding boxes (14, 17); every one is screened below. None of them may be
+        //   negative on a real form: a distribution, a withholding and a contribution are all
+        //   magnitudes, so a negative is a mistyped row and must not reach a line.
+        r_1099,
         // ★ R4 / T16 — the HSA information returns carry money (a distribution, an FMV, an
         //   earnings-on-excess figure); `screen_form_8889` screens all of it.
         sa_1099,
@@ -2444,6 +2465,65 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         }
     }
     // ★ R4 / T16 — Form 1099-SA's three money boxes.
+    // ★★ T14 — every money box on every Form 1099-R. The destructure has no `..`, so a box added to
+    //    `Form1099R` breaks HERE until it is classified as money (screened) or non-money (`_`) — which
+    //    is the only thing that stops a future box being a silent fail-open.
+    for r in r_1099 {
+        let crate::tax::form1099r::Form1099R {
+            payer: _,
+            payer_tin: _,
+            transcribed_on: _,
+            // Which line pair the document reaches; not money.
+            kind: _,
+            box1_gross_distribution,
+            box2a_taxable_amount,
+            // Two checkboxes.
+            box2b_taxable_amount_not_determined: _,
+            box2b_total_distribution: _,
+            box3_capital_gain,
+            box4_fed_withheld,
+            box5_employee_contributions,
+            box6_net_unrealized_appreciation,
+            // A code set from a closed IRS table, not money.
+            box7_distribution_codes: _,
+            box8_other,
+            // ★ A PERCENTAGE, not money — but it is still a magnitude and a negative share is
+            //   meaningless, so it is screened by the same rule.
+            box9a_percentage_of_total,
+            box9b_total_employee_contributions,
+            box10_allocable_to_irr,
+            // A YEAR.
+            box11_first_year_desig_roth: _,
+            box14_state_tax_withheld,
+            box17_local_tax_withheld,
+            // The filer's yes/no.
+            roth_contribution_before_lookback: _,
+        } = r;
+        for (v, what) in [
+            (Some(*box1_gross_distribution), "a Form 1099-R box 1"),
+            (*box2a_taxable_amount, "a Form 1099-R box 2a"),
+            (Some(*box3_capital_gain), "a Form 1099-R box 3"),
+            (Some(*box4_fed_withheld), "a Form 1099-R box 4"),
+            (Some(*box5_employee_contributions), "a Form 1099-R box 5"),
+            (
+                Some(*box6_net_unrealized_appreciation),
+                "a Form 1099-R box 6",
+            ),
+            (Some(*box8_other), "a Form 1099-R box 8"),
+            (*box9a_percentage_of_total, "a Form 1099-R box 9a"),
+            (
+                Some(*box9b_total_employee_contributions),
+                "a Form 1099-R box 9b",
+            ),
+            (Some(*box10_allocable_to_irr), "a Form 1099-R box 10"),
+            (*box14_state_tax_withheld, "a Form 1099-R box 14"),
+            (*box17_local_tax_withheld, "a Form 1099-R box 17"),
+        ] {
+            if v.is_some_and(neg) {
+                return Some(what);
+            }
+        }
+    }
     for r in sa_1099 {
         let crate::tax::return_inputs::Form1099Sa {
             payer: _,
@@ -3889,6 +3969,29 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
         return refuse(
             RefuseReason::NegativeAmount(field.to_string()),
             format!("{field} is negative — every full-return money amount is a form-box magnitude (≥ 0); fix the import"),
+        );
+    }
+
+    // ★★★ T14 — a transcribed Form 1099-R that no line reads. Placed immediately after the data
+    //     integrity gate and before every computed rule, because it is a statement about what this
+    //     build CAN do rather than about the filer's facts: no later rule's answer could change it,
+    //     and letting one of them speak first would send the filer to fix something irrelevant.
+    if !ri.r_1099.is_empty() {
+        let n = ri.r_1099.len();
+        let s = if n == 1 { "" } else { "s" };
+        return refuse(
+            RefuseReason::RetirementIncomeNotComputed,
+            format!(
+                "this return carries {n} Form 1099-R{s}, and btctax cannot yet compute Form 1040 \
+                 lines 4a/4b (IRA distributions) or 5a/5b (pensions and annuities) from {}. The \
+                 boxes are transcribed and kept — nothing you typed is lost — but no line reads them \
+                 yet, so filing this return would leave your retirement income out of total income \
+                 entirely. btctax refuses rather than file a return that understates your tax. File \
+                 with a preparer for this year, or remove the Form 1099-R row{s} if {} entered by \
+                 mistake.",
+                if n == 1 { "it" } else { "them" },
+                if n == 1 { "it was" } else { "they were" },
+            ),
         );
     }
 
@@ -11796,6 +11899,33 @@ mod param_free_tier {
         //     into the worksheet, `answer_remaining` answers limb (b) at its neutral (`false`), and
         //     `state_local_refund` is `None` — never collected. The reason is the same; what it MEANS
         //     is narrower.
+        // ★ T14 — one transcribed row is enough: the refusal is about what the build can do, not
+        //   about any figure on the row, so the fixture carries the minimum a real form would.
+        add("RetirementIncomeNotComputed", &|r| {
+            r.r_1099.push(crate::tax::form1099r::Form1099R {
+                payer: "Example Retirement Trust".into(),
+                payer_tin: String::new(),
+                transcribed_on: None,
+                kind: crate::tax::form1099r::Form1099RKind::Ira,
+                box1_gross_distribution: dec!(20_000),
+                box2a_taxable_amount: Some(dec!(20_000)),
+                box2b_taxable_amount_not_determined: false,
+                box2b_total_distribution: false,
+                box3_capital_gain: Usd::ZERO,
+                box4_fed_withheld: dec!(2_000),
+                box5_employee_contributions: Usd::ZERO,
+                box6_net_unrealized_appreciation: Usd::ZERO,
+                box7_distribution_codes: "7".into(),
+                box8_other: Usd::ZERO,
+                box9a_percentage_of_total: None,
+                box9b_total_employee_contributions: Usd::ZERO,
+                box10_allocable_to_irr: Usd::ZERO,
+                box11_first_year_desig_roth: None,
+                box14_state_tax_withheld: None,
+                box17_local_tax_withheld: None,
+                roth_contribution_before_lookback: None,
+            });
+        });
         add("StateAndLocalRefundWorksheetNotComputed", &|r| {
             r.state_refund_without_1099g = Some(true);
             r.itemized_prior_year = Some(true);

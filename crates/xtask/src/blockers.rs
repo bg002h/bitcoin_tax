@@ -3236,7 +3236,11 @@ pub fn screen(ri: &ReturnInputs) -> Option<Refusal> {
         //   contradiction between two answers, an FMV comparison, a line-12 cross-foot), not on the
         //   tax year, and none carries a `year` in its payload. A condition-keyed refusal is not a
         //   year wall, and counting it as one would overstate what `blockers <year>` knows.
-        assert_eq!(cen.variants.len(), 139, "measured at HEAD 2026-09-14");
+        assert_eq!(
+            cen.variants.len(),
+            140,
+            "measured at HEAD 2026-09-20 — T14 added `RetirementIncomeNotComputed` (139 -> 140)"
+        );
         assert!(
             cen.sites.len() >= 95,
             "95 raise sites measured at HEAD; found {}",

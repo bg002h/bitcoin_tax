@@ -279,6 +279,22 @@ pub const DOCUMENTS: &[DocumentAuthority] = &[
         preamble_end: PREAMBLE_1141,
     },
     DocumentAuthority {
+        stem: "f1099r",
+        edition: "2024",
+        revision_year: 2024,
+        cadence: Cadence::Annual,
+        instructions: "i1099r",
+        preamble_end: PREAMBLE_1141,
+    },
+    DocumentAuthority {
+        stem: "f1099r",
+        edition: "2025",
+        revision_year: 2025,
+        cadence: Cadence::Annual,
+        instructions: "i1099r",
+        preamble_end: PREAMBLE_1141,
+    },
+    DocumentAuthority {
         stem: "f1099b",
         edition: "2024",
         revision_year: 2024,
@@ -406,6 +422,18 @@ pub const DOCUMENTS: &[DocumentAuthority] = &[
 /// ★★ **The 16 archived BOOKLET editions**, asserted against `MANIFEST.json` `kind: instructions`
 /// the same way [`DOCUMENTS`] is.
 pub const BOOKLETS: &[BookletEdition] = &[
+    BookletEdition {
+        stem: "i1099r",
+        edition: "2024",
+        revision_year: 2024,
+        cadence: Cadence::Annual,
+    },
+    BookletEdition {
+        stem: "i1099r",
+        edition: "2025",
+        revision_year: 2025,
+        cadence: Cadence::Annual,
+    },
     BookletEdition {
         stem: "iw2w3",
         edition: "2024",
@@ -662,6 +690,8 @@ pub fn section_of_stem(stem: &str) -> Option<SectionId> {
         "f1099g" => Some(SectionId::G1099s),
         "f1098e" => Some(SectionId::Form1098Es),
         // ★ T16 — the two HSA information returns, each with its own repeating section.
+        // ★ T14 — Form 1099-R. The section has no live rows yet; see `SectionId::R1099s`.
+        "f1099r" => Some(SectionId::R1099s),
         "f1099sa" => Some(SectionId::Sa1099s),
         "f5498sa" => Some(SectionId::Sa5498s),
         // ★ T9 — the Form 1098 gained its own repeating section when `Form1098` replaced the
@@ -701,6 +731,58 @@ pub struct BoxEntry {
 /// Form W-2 box 14b *Treasury Tipped Occupation Code(s)*, which the 2026 revision added beside the
 /// old box 14 and which Schedule 1-A line 4a's tips deduction turns on.
 pub const BOXES: &[BoxEntry] = &[
+    // ── ★★★ Form 1099-R — 2024 and 2025 (21 printed boxes each, identical captions). ─────────────
+    //
+    //   ★★ EVERY ROW HERE IS `NotRead`, AND THAT IS THE CORRECT STATE, not a gap: nothing computes
+    //      from `ReturnInputs::r_1099` yet and the return REFUSES on any transcribed row
+    //      (`RefuseReason::RetirementIncomeNotComputed`), so no box can reach a line. Each reason
+    //      names the task that changes it.
+    //
+    //   ★ These rows were GENERATED from `btctax_core::tax::form1099r::BOXES` rather than typed, so no
+    //     caption is transcribed twice — and `the_form1099r_box_set_equals_the_form` holds that table
+    //     against the archived extract, which is what makes these captions trustworthy here.
+    BoxEntry { stem: "f1099r", editions: &["2024", "2025"], label: "1", caption: "1 Gross distribution",
+        decision: BoxDecision::NotRead("T14 — routes to a printed line once the 4a/4b and 5a/5b compute lands; the box is transcribed and held now, and the return REFUSES (RetirementIncomeNotComputed) until then") },
+    BoxEntry { stem: "f1099r", editions: &["2024", "2025"], label: "2a", caption: "2a Taxable amount",
+        decision: BoxDecision::NotRead("T14 — routes to a printed line once the 4a/4b and 5a/5b compute lands; the box is transcribed and held now, and the return REFUSES (RetirementIncomeNotComputed) until then") },
+    BoxEntry { stem: "f1099r", editions: &["2024", "2025"], label: "2b", caption: "2b Taxable amount",
+        decision: BoxDecision::NotRead("T14 — v1 cannot carry this figure, so a non-zero value REFUSES the return rather than being dropped") },
+    BoxEntry { stem: "f1099r", editions: &["2024", "2025"], label: "3", caption: "3 Capital gain (included in",
+        decision: BoxDecision::NotRead("T14 — v1 cannot carry this figure, so a non-zero value REFUSES the return rather than being dropped") },
+    BoxEntry { stem: "f1099r", editions: &["2024", "2025"], label: "4", caption: "4 Federal income tax",
+        decision: BoxDecision::NotRead("T14 — routes to a printed line once the 4a/4b and 5a/5b compute lands; the box is transcribed and held now, and the return REFUSES (RetirementIncomeNotComputed) until then") },
+    BoxEntry { stem: "f1099r", editions: &["2024", "2025"], label: "5", caption: "5 Employee contributions/",
+        decision: BoxDecision::NotRead("T14 — transcribed and carried; no v1 line reads it. `form1099r::BOXES` names what would") },
+    BoxEntry { stem: "f1099r", editions: &["2024", "2025"], label: "6", caption: "6 Net unrealized",
+        decision: BoxDecision::NotRead("T14 — v1 cannot carry this figure, so a non-zero value REFUSES the return rather than being dropped") },
+    BoxEntry { stem: "f1099r", editions: &["2024", "2025"], label: "7", caption: "7 Distribution",
+        decision: BoxDecision::NotRead("T14 — DECIDES the Roth Q/T sub-branch and the IRA-vs-pension line pair; no figure of its own reaches a line") },
+    BoxEntry { stem: "f1099r", editions: &["2024", "2025"], label: "8", caption: "8 Other",
+        decision: BoxDecision::NotRead("T14 — v1 cannot carry this figure, so a non-zero value REFUSES the return rather than being dropped") },
+    BoxEntry { stem: "f1099r", editions: &["2024", "2025"], label: "9a", caption: "9a Your percentage of total",
+        decision: BoxDecision::NotRead("T14 — transcribed and carried; no v1 line reads it. `form1099r::BOXES` names what would") },
+    BoxEntry { stem: "f1099r", editions: &["2024", "2025"], label: "9b", caption: "9b Total employee contributions",
+        decision: BoxDecision::NotRead("T14 — transcribed and carried; no v1 line reads it. `form1099r::BOXES` names what would") },
+    BoxEntry { stem: "f1099r", editions: &["2024", "2025"], label: "10", caption: "10 Amount allocable to IRR",
+        decision: BoxDecision::NotRead("T14 — v1 cannot carry this figure, so a non-zero value REFUSES the return rather than being dropped") },
+    BoxEntry { stem: "f1099r", editions: &["2024", "2025"], label: "11", caption: "11 1st year of desig.",
+        decision: BoxDecision::NotRead("T14 — transcribed and carried; no v1 line reads it. `form1099r::BOXES` names what would") },
+    BoxEntry { stem: "f1099r", editions: &["2024", "2025"], label: "12", caption: "12 FATCA filing",
+        decision: BoxDecision::NotRead("T14 — no FEDERAL line reads this box; `form1099r::BOXES` carries the reason") },
+    BoxEntry { stem: "f1099r", editions: &["2024", "2025"], label: "13", caption: "13 Date of",
+        decision: BoxDecision::NotRead("T14 — no FEDERAL line reads this box; `form1099r::BOXES` carries the reason") },
+    BoxEntry { stem: "f1099r", editions: &["2024", "2025"], label: "14", caption: "14 State tax withheld",
+        decision: BoxDecision::NotRead("T14 — routes to a printed line once the 4a/4b and 5a/5b compute lands; the box is transcribed and held now, and the return REFUSES (RetirementIncomeNotComputed) until then") },
+    BoxEntry { stem: "f1099r", editions: &["2024", "2025"], label: "15", caption: "15 State/Payer’s state no.",
+        decision: BoxDecision::NotRead("T14 — no FEDERAL line reads this box; `form1099r::BOXES` carries the reason") },
+    BoxEntry { stem: "f1099r", editions: &["2024", "2025"], label: "16", caption: "16 State distribution",
+        decision: BoxDecision::NotRead("T14 — no FEDERAL line reads this box; `form1099r::BOXES` carries the reason") },
+    BoxEntry { stem: "f1099r", editions: &["2024", "2025"], label: "17", caption: "17 Local tax withheld",
+        decision: BoxDecision::NotRead("T14 — transcribed and carried; no v1 line reads it. `form1099r::BOXES` names what would") },
+    BoxEntry { stem: "f1099r", editions: &["2024", "2025"], label: "18", caption: "18 Name of locality",
+        decision: BoxDecision::NotRead("T14 — no FEDERAL line reads this box; `form1099r::BOXES` carries the reason") },
+    BoxEntry { stem: "f1099r", editions: &["2024", "2025"], label: "19", caption: "19 Local distribution",
+        decision: BoxDecision::NotRead("T14 — no FEDERAL line reads this box; `form1099r::BOXES` carries the reason") },
     // ── Form W-2 — 2024, 2025 and 2026 (29 / 29 / 30 printed boxes) ─────────────────────────────────
     BoxEntry { stem: "fw2", editions: &["2024", "2025", "2026"], label: "a", caption: "a Employee’s social security number",
         decision: BoxDecision::CollectedElsewhere { fields: &[FieldId::TpSsn, FieldId::SpSsn], note: "header.taxpayer.ssn / header.spouse.ssn — the 1040 header prints it once for the return, not per W-2 row" } },
@@ -1351,6 +1433,7 @@ pub fn modelled_stems() -> (BTreeSet<&'static str>, BTreeSet<&'static str>) {
             DocumentKind::Form1099B => "f1099b",
             DocumentKind::Form1098 => "f1098",
             DocumentKind::Form1098E => "f1098e",
+            DocumentKind::Form1099R => "f1099r",
             DocumentKind::Form1099Sa => "f1099sa",
             DocumentKind::Form5498Sa => "f5498sa",
         });

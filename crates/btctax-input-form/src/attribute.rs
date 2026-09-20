@@ -233,6 +233,19 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         //     ★ Pointing them at the debt-limit declaration instead would be worse than saying
         //       nothing — answering it "yes" does not un-affirm a fair-market-value limit, does not
         //       retract a written binding contract, and does not correct a line-12 balance.
+        // ★★★ **T14 — `NotInForm`, and for the strongest version of the reason: the form has no Form
+        //     1099-R section AND no answer could clear this.** It is not a question the filer left
+        //     blank; it is a statement that this build cannot compute lines 4a/4b or 5a/5b at all.
+        //     Pointing it at any existing field would be worse than saying nothing — there is no leaf
+        //     whose value changes the outcome, and a filer sent to one would keep editing.
+        //
+        //     ★ The cure is outside the form in both directions: file with a preparer, or delete the
+        //       row. So the note names the row, not a field.
+        R::RetirementIncomeNotComputed => vec![Anchor::NotInForm {
+            note: "a transcribed Form 1099-R (`[[r_1099]]`) is held but no 1040 line reads it yet, so \
+                   the whole return refuses rather than omit retirement income from total income. No \
+                   answer in this form clears it — the task that adds the 4a/4b and 5a/5b compute does",
+        }],
         R::MortgageFairMarketValueLimit
         | R::MortgageApril2018TransitionRule
         | R::Pub936Table1Line12BelowItsComponents => vec![Anchor::NotInForm {
@@ -989,6 +1002,10 @@ mod tests {
         //    since answering it "yes" un-affirms neither unmodelled limit and corrects no balance.
         //    ★ FR-200b is the task that gives the block a form section and removes both.
         const ADDED_BY_FR200A: usize = 2;
+        /// ★ T14 — `RetirementIncomeNotComputed`. `NotInForm` for the strongest version of the reason:
+        /// the form has no Form 1099-R section AND no answer in it could clear the refusal, because the
+        /// refusal is about what this build can compute rather than about anything the filer left blank.
+        const ADDED_BY_T14: usize = 1;
         let expect = BEFORE_T5 - 5
             + ADDED_BY_I4
             + ADDED_BY_FR103
@@ -996,7 +1013,8 @@ mod tests {
             + ADDED_BY_FR196
             + ADDED_BY_SECTION_68
             + ADDED_BY_CHARITABLE_FLOOR
-            + ADDED_BY_FR200A;
+            + ADDED_BY_FR200A
+            + ADDED_BY_T14;
         let now = src[start..end].matches("Anchor::NotInForm {").count();
         assert_eq!(
             now, expect,
@@ -1006,7 +1024,8 @@ mod tests {
              added one (Schedule1aNotOnThisYearsReturn), B3's C-1 added one \
              (ReturnInputsYearNotStated), FR-196 added one (the §111(a) worksheet's three \
              TOML-only refusals, sharing one arm), §68 added one \
-             (ItemizedDeductionLimitationNotComputed), §170(b)(1)(I) added one \
+             (ItemizedDeductionLimitationNotComputed), T14 added one \
+             (RetirementIncomeNotComputed), §170(b)(1)(I) added one \
              (CharitableFloorNotComputed) and FR-200a added two (Pub. 936 Table 1's block — one \
              beside `MortgageOverDebtLimit`'s declaration anchor, one shared by the three refusals \
              no field can clear); the source now has {now} `NotInForm` anchors, not {expect}"

@@ -216,6 +216,17 @@ fn augmented_sentinel() -> btctax_core::tax::return_inputs::ReturnInputs {
             noncovered: Some(BrokerReported::NotReported),
         },
     );
+    // ★★★ **T14 — a Form 1099-R row, for the same reason the broker row is here and not in
+    //     `maximal_sentinel`.** That fixture must be a FILEABLE return (`scrub_axis::matrix`) and a
+    //     transcribed 1099-R refuses by design (`RefuseReason::RetirementIncomeNotComputed`), so the
+    //     family cannot live there — but a SCHEMA must still publish its twenty-one keys, or the
+    //     document looks complete while every box inside a row is undocumented.
+    //
+    //     ★ `Form1099R` has no `Default` on purpose (a defaulted `kind` would fabricate the routing
+    //       between lines 4a/4b and 5a/5b), so the row is written out. Every field is present, which is
+    //       what this fixture is for: a `None` here would unpublish that key.
+    ri.r_1099
+        .push(btctax_core::tax::testonly::form_1099r_all_boxes_populated());
     ri
 }
 
