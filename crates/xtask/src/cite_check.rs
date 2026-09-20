@@ -1340,10 +1340,15 @@ mod doc_figures {
         //     because the figures it holds had gone stale once before (the spec's "14 and 4"), and the
         //     first change to them red it by name.
         assert_eq!(y24.len(), 41, "TY2024 money-line cells: {y24:?}");
-        assert_eq!(y25.len(), 7, "TY2025 money-line cells: {y25:?}");
+        // ★ 38 since the TY2025 money-line transcription. The three still missing are `line11`,
+        //   `line12` and `line13`: TY2025 prints them at 11a/12e/13a and a map key must BE the
+        //   printed label, which `Form1040Map` cannot express — see the map's own note.
+        assert_eq!(y25.len(), 38, "TY2025 money-line cells: {y25:?}");
+        // ★ `line6d` is deliberately NOT here: it is a CHECKBOX, and `map_money_line_cells`
+        //   discriminates on the value shape so a checkbox never counts as a money line.
         assert!(
-            y25.contains("line7a"),
-            "TY2025's one cell is line7a: {y25:?}"
+            y25.contains("line7a") && y25.contains("line1a") && y25.contains("line35a"),
+            "TY2025 must carry the transcribed money cells: {y25:?}"
         );
 
         // ★ TY2025 is a strict SUBSET, so the gap is a clean difference with no double-count. That is
@@ -1354,7 +1359,23 @@ mod doc_figures {
             &y25 - &y24
         );
         let gap = &y24 - &y25;
-        assert_eq!(gap.len(), 34, "absent TY2025 cells: {gap:?}");
+        // ★★★ **3 since the TY2025 money-line transcription (was 34).** The remaining three are
+        //     `line11`, `line12` and `line13` — TY2025 prints them at **11a / 12e / 13a**, and a map key
+        //     must BE the printed label
+        //     (`label_reader::every_mapped_line_lands_on_its_own_printed_label`: *"a filled value would
+        //     print on the WRONG LINE of a signed return"*). `Form1040Map` has no `line11a`/`line12e`/
+        //     `line13a`, so those three need a second transcription struct — the
+        //     `Form6251Map`/`Form6251ObbbaMap` situation. Every other TY2024 money cell now has a
+        //     verified TY2025 counterpart.
+        assert_eq!(gap.len(), 3, "absent TY2025 cells: {gap:?}");
+        assert_eq!(
+            gap,
+            ["line11", "line12", "line13"]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+            "the gap must be exactly the three renumbered lines, not any three"
+        );
 
         // ★★★ **INVERTED 2026-09-20.** It used to assert the six retirement cells were ABSENT from both
         //     maps — the premise the spec's 46-cell figure rested on. T14 mapped them, so the assertion

@@ -10230,3 +10230,43 @@ income"*, `f1040--2025.txt:86`) where TY2024 has line 11, and the deduction bloc
 maps already declare different `line_set` values. `the_ty2025_map_still_lacks_the_money_lines_the_full_return_fill_needs`
 pins the gap, measures it rather than listing it, and demands its own retirement when the cells land.
 
+**2026-09-20, sixth pass — 32 OF 35 MONEY LINES TRANSCRIBED. The remaining THREE need a second struct.**
+
+`xtask label-boxes f1040--2025` joins every money widget to the label the form prints beside it, and the
+a/b pairs split by COLUMN against `form1040_full::f1040_full_clusters`. All 35 captions were checked
+verbatim against `design/forms/extract/f1040--2025.txt` **before** the block was written — 35/35 — and
+`xtask line-coverage` re-checks them every run.
+
+★★★ **THE THREE THAT CANNOT BE WRITTEN, and the gate that said so.** I pointed `line11`/`line12`/`line13`
+at TY2025's renumbered widgets on the theory that `Form1040Map`'s keys are SEMANTIC — its own doc says
+*"L11 — AGI"*. `label_reader::every_mapped_line_lands_on_its_own_printed_label` refused, in its own words:
+
+> 2025/f1040: map says line 11 -> f1_75[0], but the form prints "11a" beside that box
+> — *"a filled value would print on the WRONG LINE of a signed return"*
+
+It is right. A key must BE the printed label, so TY2025 needs `line11a`, `line12e`, `line13a`, which
+`Form1040Map` has not got. **That is the `Form6251Map` / `Form6251ObbbaMap` situation exactly** — one form,
+two line sets, two transcription structs — and `map.rs` already records why one struct spanning both is
+wrong: *"would need every field optional, which is how a revision silently stops printing something."*
+The three cells are backed out with that reasoning in the map, and `cite_check::doc_figures` now pins the
+gap at exactly **3** and asserts their identity, so it cannot quietly become four.
+
+★ Also not mapped, deliberately: **11b** (*"Amount from line 11a"*) and **13b** (*"Additional deductions
+from Schedule 1-A, line 38"*) — lines TY2025 added that the TY2024 line set has no field for. 13b's figure
+reaches the return through `AbsoluteReturn::schedule_1a_additional`.
+
+★★★ **AND THE COLUMN ASSIGNMENTS WERE UNHELD.** `every_mapped_line_lands_on_its_own_printed_label` checks
+the LINE and cannot check the COLUMN, because a line's sub-line and amount widgets carry the SAME printed
+label — the form prints `16` once over a pair. Measured: pointing `line16` at the MID widget instead of the
+AMOUNT one red **nothing**. The oracle that would catch it (`verify_flat`) runs at FILL time, and TY2025
+cannot fill. `every_ty2025_money_cell_is_in_the_same_column_band_as_its_ty2024_counterpart` closes it as a
+cross-revision check, since the three bands are shared between revisions. Three plants, three reds.
+
+★★ **My first version of that check was VACUOUS and green.** TY2024's cells carry a trailing `# comment`,
+so `trim_matches('"')` left it inside the FQN, every TY2024 cell failed to resolve, and the comparison had
+nothing to compare — three planted mis-maps passed. The floor asserted only the TY2025 count. Both sides
+are now floored, plus the shared-key count: *a comparison with an empty operand is not a weaker check, it
+is no check.*
+
+Register: `(2025, "f1040")` 135 → 104, `UNCENSUSED_FIELDS` 249 → 218.
+

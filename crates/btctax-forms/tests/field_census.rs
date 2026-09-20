@@ -89,7 +89,7 @@ const UNCENSUSED: &[(i32, &str, usize)] = &[
     //     them as narrow write-in CODE boxes (4c "1 Rollover · 2 QCD", 5c "1 Rollover · 2 PSO") and every
     //     code names a branch this build refuses, so a blank is the correct return. TY2024 has neither
     //     box at all — a per-revision structural difference of the same class as C-1's line 6d.
-    (2025, "f1040", 135),
+    (2025, "f1040", 104),
     (2025, "f8283", 63),
     (2025, "f8949", 12), // 16 → 12 on 2026-09-06: spec 1099-DA T3 mapped the four broker-reported checkboxes G/H (c1_1[3..4]) and J/K (c2_1[3..4])
     (2025, "schedule_d", 24),
@@ -112,7 +112,7 @@ const UNCENSUSED: &[(i32, &str, usize)] = &[
 /// 310 → 285 on 2026-09-07: interview T8 mapped 25 TY2025 `f1040` dependents-grid cells. The entry
 /// count is unchanged — the form is not censused, it is 25 cells less unaccounted.
 const UNCENSUSED_ENTRIES: usize = 5;
-const UNCENSUSED_FIELDS: usize = 249;
+const UNCENSUSED_FIELDS: usize = 218;
 
 // ★ Design r2 §10 step 4: the per-year ABSENT list is no longer a hand-list here — it is each year's
 //   `forms/<year>/YEAR.toml` `[forms_absent]` (with the reason beside each), read through

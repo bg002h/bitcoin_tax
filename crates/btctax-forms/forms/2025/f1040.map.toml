@@ -71,6 +71,110 @@ da_no = { field = "topmostSubform[0].Page1[0].c1_10[1]", on = "2" }
 #   and `Dependent` holds one `name` string. Splitting it at a space would invent testimony; it must
 #   be collected (FOLLOWUPS FR-84).
 
+# ════════════════════════════════════════════════════════════════════════════════════════════════
+# THE MONEY LINES — transcribed 2026-09-20 (FR-260).
+#
+# ★★★ THE KEY IS SEMANTIC, THE COMMENT IS THE PRINTED LABEL, AND ON THIS REVISION THEY DIFFER.
+#     `Form1040Map`'s fields name a QUANTITY — `line11` is documented "L11 — AGI" — while TY2025
+#     RENUMBERED the form. So `line11` carries the widget printed at **11a**, `line12` the one at
+#     **12e**, and `line13` the one at **13a**. Reading the key as a printed line number is the
+#     mistake this block is arranged to prevent; the label is in the comment beside every cell.
+#
+# ★★★ Every FQN is DERIVED, never typed: `xtask label-boxes f1040--2025` joins each widget to the
+#     label the form prints beside it, and the a/b pairs are split by COLUMN against
+#     `form1040_full::f1040_full_clusters` — SUBLINE [252,324], MID [410,482], AMOUNT [504,576].
+#     So 2a is the SUBLINE widget of the pair labelled `2a` and 2b is the AMOUNT one.
+#
+# ★★★ Every caption below was checked verbatim against `design/forms/extract/f1040--2025.txt`
+#     BEFORE this block was written — 35/35 — and `xtask line-coverage` re-checks them on every
+#     run. That gate already caught two captions I typed from memory in the identity block.
+#
+# ★ NOT mapped, deliberately: **11b** ("Amount from line 11a (adjusted gross income)"), the page-2
+#   carry-forward TY2025 added — `Form1040Map` has no field for it because the TY2024 line set has
+#   no such line. It stays in the field register rather than being pointed at a semantic cell it
+#   is not. Same for **13b** ("Additional deductions from Schedule 1-A, line 38"), whose figure
+#   reaches the return through `AbsoluteReturn::schedule_1a_additional`.
+# 1a "Total amount from Form(s) W-2, box 1 (see instructions)"
+line1a = "topmostSubform[0].Page1[0].f1_47[0]"
+# 1z "Add lines 1a through 1h"
+line1z = "topmostSubform[0].Page1[0].f1_57[0]"
+# 2a "Tax-exempt interest"
+line2a = "topmostSubform[0].Page1[0].f1_58[0]"
+# 2b "Taxable interest"
+line2b = "topmostSubform[0].Page1[0].f1_59[0]"
+# 3a "Qualified dividends"
+line3a = "topmostSubform[0].Page1[0].f1_60[0]"
+# 3b "Ordinary dividends"
+line3b = "topmostSubform[0].Page1[0].f1_61[0]"
+# 8 "Additional income from Schedule 1, line 10"
+line8 = "topmostSubform[0].Page1[0].f1_72[0]"
+# 9 "Add lines 1z, 2b, 3b, 4b, 5b, 6b, 7a, and 8"
+line9 = "topmostSubform[0].Page1[0].f1_73[0]"
+# 10 "Adjustments to income from Schedule 1, line 26"
+line10 = "topmostSubform[0].Page1[0].f1_74[0]"
+# ★★★ **line11 / line12 / line13 are DELIBERATELY ABSENT, and this is the port's remaining blocker.**
+#
+#     TY2025 renumbered them: AGI prints at **11a**, the deduction at **12e**, the QBI deduction at
+#     **13a**. `Form1040Map` has fields named `line11`, `line12`, `line13`, and this repo requires a map
+#     key to BE the printed label — `label_reader::every_mapped_line_lands_on_its_own_printed_label`
+#     refuses the mismatch in its own words: *"a filled value would print on the WRONG LINE of a signed
+#     return"*. It is right, and it is why these three cannot simply be pointed at the new widgets:
+#
+#         line11 -> f1_75[0]  but the form prints "11a" beside that box
+#         line12 -> f2_02[0]  but the form prints "12e"
+#         line13 -> f2_03[0]  but the form prints "13a"
+#
+#     So the TY2025 line set needs keys `line11a`, `line12e`, `line13a`, which `Form1040Map` does not
+#     have. That is the `Form6251Map` / `Form6251ObbbaMap` situation exactly — one form, two line sets,
+#     two transcription structs — and `map.rs` already records why one struct spanning both is wrong:
+#     *"would need every field optional, which is how a revision silently stops printing something."*
+#
+#     The widgets are measured and recorded above in the block comment; what is missing is the struct.
+# 14 "Add lines 12e, 13a, and 13b"
+line14 = "topmostSubform[0].Page2[0].f2_05[0]"
+# 15 "Subtract line 14 from line 11b"
+line15 = "topmostSubform[0].Page2[0].f2_06[0]"
+# 16 "Tax (see instructions)"
+line16 = "topmostSubform[0].Page2[0].f2_08[0]"
+# 17 "Amount from Schedule 2, line 3"
+line17 = "topmostSubform[0].Page2[0].f2_09[0]"
+# 18 "Add lines 16 and 17"
+line18 = "topmostSubform[0].Page2[0].f2_10[0]"
+# 19 "Child tax credit or credit for other dependents from Schedule 8812"
+line19 = "topmostSubform[0].Page2[0].f2_11[0]"
+# 20 "Amount from Schedule 3, line 8"
+line20 = "topmostSubform[0].Page2[0].f2_12[0]"
+# 21 "Add lines 19 and 20"
+line21 = "topmostSubform[0].Page2[0].f2_13[0]"
+# 22 "Subtract line 21 from line 18. If zero or less, enter -0-"
+line22 = "topmostSubform[0].Page2[0].f2_14[0]"
+# 23 "Other taxes, including self-employment tax, from Schedule 2, line 21"
+line23 = "topmostSubform[0].Page2[0].f2_15[0]"
+# 24 "Add lines 22 and 23"
+line24 = "topmostSubform[0].Page2[0].f2_16[0]"
+# 25a "Form(s) W-2"
+line25a = "topmostSubform[0].Page2[0].f2_17[0]"
+# 25b "Form(s) 1099"
+line25b = "topmostSubform[0].Page2[0].f2_18[0]"
+# 25c "Other forms (see instructions)"
+line25c = "topmostSubform[0].Page2[0].f2_19[0]"
+# 25d "Add lines 25a through 25c"
+line25d = "topmostSubform[0].Page2[0].f2_20[0]"
+# 26 "2025 estimated tax payments and amount applied from 2024 return"
+line26 = "topmostSubform[0].Page2[0].f2_21[0]"
+# 31 "Amount from Schedule 3, line 15"
+line31 = "topmostSubform[0].Page2[0].f2_27[0]"
+# 32 "Add lines 27a, 28, 29, 30, and 31"
+line32 = "topmostSubform[0].Page2[0].f2_28[0]"
+# 33 "Add lines 25d, 26, and 32"
+line33 = "topmostSubform[0].Page2[0].f2_29[0]"
+# 34 "If line 33 is more than line 24, subtract line 24 from line 33"
+line34 = "topmostSubform[0].Page2[0].f2_30[0]"
+# 35a "Amount of line 34 you want refunded to you"
+line35a = "topmostSubform[0].Page2[0].f2_31[0]"
+# 37 "Subtract line 33 from line 24"
+line37 = "topmostSubform[0].Page2[0].f2_35[0]"
+
 [dependents_grid]
 more_than_four_dependents = { field = "topmostSubform[0].Page1[0].Dependents_ReadOrder[0].c1_11[0]", on = "1" }
 

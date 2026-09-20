@@ -1835,9 +1835,115 @@ fn a_map_declaring_both_dependents_blocks_or_neither_is_refused() {
 
     // ★ And the baseline still fails for the MONEY lines, not the dependents block — which is what makes
     //   the assertion above about the dependents guard rather than about any old error.
+    // ★ Named by CLASS, not by one line: the money-line transcription moved this from `line1a` to
+    //   `line11`, and pinning whichever line happens to be missing first makes this assertion a
+    //   maintenance tax on unrelated work. What it must establish is that the baseline fails for a
+    //   MISSING CELL and not for the dependents block — otherwise the NEITHER assertion above proves
+    //   nothing about the dependents guard.
+    let baseline = fill(&base);
     assert!(
-        fill(&base).contains("line1a"),
-        "the unmutated TY2025 map must fail on the missing money lines, not on the dependents block: {}",
-        fill(&base)
+        baseline.contains("map has no `line"),
+        "the unmutated TY2025 map must fail on a missing money line, not on the dependents block: \
+         {baseline}"
+    );
+    assert!(
+        !baseline.contains("NEITHER"),
+        "…and specifically NOT on the dependents block: {baseline}"
+    );
+}
+
+/// ★★★ **EVERY TY2025 MONEY CELL LANDS IN THE SAME COLUMN AS ITS TY2024 COUNTERPART.**
+///
+/// `label_reader::every_mapped_line_lands_on_its_own_printed_label` checks the LINE. It cannot check the
+/// COLUMN, because a line's sub-line and amount widgets carry the SAME printed label — the form prints
+/// `2a` once over a pair, and `16` once over a pair. So a cell pointed at the wrong member of its own
+/// pair passes that gate.
+///
+/// Measured: pointing `line16` at `f2_07[0]` (the MID widget) instead of `f2_08[0]` (the AMOUNT one) red
+/// **nothing** across the whole suite. The geometry oracle that would catch it, `verify_flat`, runs at
+/// FILL time — and TY2025 cannot fill, so every column assignment in that map was unheld.
+///
+/// ★★ The check is a CROSS-REVISION one because the column layout is shared: the three bands are
+/// `form1040_full`'s own (`SUBLINE [252,324]`, `MID [410,482]`, `AMOUNT [504,576]`) and page 2's
+/// occupation/PIN columns sit at identical x in both revisions. So a cell whose band differs from its
+/// TY2024 counterpart's is a mis-map, and that is a fact about the pair, not about a number I typed.
+#[test]
+fn every_ty2025_money_cell_is_in_the_same_column_band_as_its_ty2024_counterpart() {
+    const BANDS: [(&str, f32, f32); 3] = [
+        ("SUBLINE", 252.0, 324.0),
+        ("MID", 410.0, 482.0),
+        ("AMOUNT", 504.0, 576.0),
+    ];
+    let band = |x: f32| -> String {
+        BANDS
+            .iter()
+            .find(|(_, lo, hi)| x >= lo - 1.0 && x <= hi + 1.0)
+            .map_or_else(|| format!("other({x:.0})"), |(n, _, _)| (*n).to_string())
+    };
+    let cells = |year: i32| -> BTreeMap<String, String> {
+        let doc = btctax_forms::testonly::load(btctax_forms::testonly::f1040_pdf(year).unwrap())
+            .expect("template loads");
+        let fields = btctax_forms::testonly::collect_fields(&doc).expect("fields");
+        let x_of = |fqn: &str| {
+            fields
+                .iter()
+                .find(|f| f.fqn == fqn)
+                .and_then(|f| f.rect.map(|r| r[0]))
+        };
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040, year)
+            .unwrap()
+            .lines()
+            .filter(|l| l.starts_with("line"))
+            .filter_map(|l| l.split_once('='))
+            .filter_map(|(k, v)| {
+                let v = v.trim();
+                // Money cells only — a checkbox's value is an inline table.
+                if v.starts_with('{') {
+                    return None;
+                }
+                // ★ Take the FIRST QUOTED SPAN, not the trimmed remainder: TY2024's cells carry a
+                //   trailing `# comment` on the same line, and `trim_matches('"')` left that inside the
+                //   FQN — every TY2024 cell then failed to resolve, the comparison silently had nothing
+                //   to compare, and three planted mis-maps passed. Measured, not hypothetical.
+                let fqn = v.split('"').nth(1)?;
+                Some((k.trim().to_string(), fqn.to_string()))
+            })
+            .filter_map(|(k, fqn)| x_of(&fqn).map(|x| (k, band(x))))
+            .collect()
+    };
+    let (a, b) = (cells(2024), cells(2025));
+    // ★★★ BOTH SIDES get a floor, and that is the correction this test was born from: my first version
+    //     asserted only the TY2025 count, the TY2024 side silently resolved to NOTHING (a parser bug),
+    //     and three planted mis-maps passed a green test. A comparison with an empty operand is not a
+    //     weaker check, it is no check.
+    assert!(
+        a.len() >= 35 && b.len() >= 30,
+        "TY2024 resolved {} money cells and TY2025 {} — a comparison needs both sides, and an empty \
+         operand makes this gate pass on everything",
+        a.len(),
+        b.len()
+    );
+    let shared = a.keys().filter(|k| b.contains_key(*k)).count();
+    assert!(
+        shared >= 30,
+        "only {shared} money cells are in BOTH maps, so almost nothing is actually compared"
+    );
+    let mut wrong: Vec<String> = Vec::new();
+    for (k, band25) in &b {
+        if let Some(band24) = a.get(k) {
+            if band24 != band25 {
+                wrong.push(format!("{k}: TY2024 {band24}, TY2025 {band25}"));
+            }
+        }
+    }
+    wrong.sort();
+    assert!(
+        wrong.is_empty(),
+        "{} TY2025 money cell(s) sit in a different COLUMN from their TY2024 counterpart:\n  {}\n\n\
+         A line's sub-line and amount widgets share one printed label, so the label gate cannot see \
+         this: the figure would print on the right LINE in the wrong COLUMN of a signed return. If the \
+         TY2025 form really moved a line to another column, say so here with the caption that proves it.",
+        wrong.len(),
+        wrong.join("\n  ")
     );
 }
