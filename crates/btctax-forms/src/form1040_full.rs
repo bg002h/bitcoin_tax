@@ -45,7 +45,38 @@ const COL_SUBLINE: usize = 0; // the lettered "a" sub-lines (2a, 3a)
 const COL_MID: usize = 1; // 25a, 25b, 25c, 31
 const COL_AMOUNT: usize = 2; // everything else
 
-const F1040_CLUSTERS: &[(f32, f32)] = &[(252.0, 324.0), (410.0, 482.0), (504.0, 576.0)];
+/// The three amount columns of the FULL return's page 1, as centre-x bands.
+///
+/// ★★★ **ENUMERATED PER YEAR, not a bare const — carried over from `form1040.rs` 2026-09-20.** This
+/// was a single `const` used for every year, while its sibling `form1040.rs::f1040_clusters` had
+/// already been converted to an enumerated year match for reasons recorded there in full. Nobody
+/// carried the fix across, because no reviewer held both files at once — `CLAUDE.md` B3's own case,
+/// and this time on the MORE consequential path: `form1040.rs` emits the pseudo/partial return,
+/// `form1040_full.rs` emits the packet a filer signs and posts.
+///
+/// The measurement that justifies it is in `form1040.rs`, unchanged: run TY2024/2025's amount band
+/// `[504,576]` over the TY2017 form and line 13's CENTS widget (cx 565.2) passes as the dollars cell.
+/// A year-blind band does not merely skip a check — it disarms the dollars/cents guard the band exists
+/// to be, in the one instrument built to catch a mis-mapped cell.
+///
+/// ★ A new year is added HERE, deliberately, after someone has measured its columns off the blank PDF
+/// (`xtask dump-fields`). Never a wildcard.
+fn f1040_full_clusters(year: i32) -> Result<&'static [(f32, f32)], FormsError> {
+    const UNIFIED: &[(f32, f32)] = &[(252.0, 324.0), (410.0, 482.0), (504.0, 576.0)];
+    match year {
+        2024 | 2025 => Ok(UNIFIED),
+        // ★★ An ERROR, not a panic — unlike `form1040.rs`'s, which is reached only from a path that
+        //    cannot return one. `fill_full_return` already returns `FormsError`, so the year that
+        //    cannot be served gets an exit and a remedy instead of a backtrace.
+        other => Err(FormsError::Geometry(format!(
+            "f1040_full_clusters: no amount-column geometry recorded for TY{other}. The unified bands \
+             cover TY2024-2025 only; measure that year's SUBLINE, MID and AMOUNT columns off its \
+             blank PDF (xtask dump-fields) and add the arm. Never widen this to a wildcard — the \
+             unified amount band [504,576] admitted the TY2017 cents widget at cx 565.2, so a \
+             wildcard turns the dollars/cents guard off on the packet a filer signs."
+        ))),
+    }
+}
 
 /// Descent groups — per page AND per column (a page-2 y is not comparable with a page-1 y, and a
 /// sub-line cell shares its row's y with the amount cell beside it).
@@ -530,7 +561,7 @@ pub fn fill_form_1040_full_with_map(
 
     let check = pdf::load(&bytes)?;
     let fields = pdf::collect_fields(&check)?;
-    verify_flat(&check, &fields, &placements, F1040_CLUSTERS)?;
+    verify_flat(&check, &fields, &placements, f1040_full_clusters(y)?)?;
     Ok(bytes)
 }
 
@@ -863,4 +894,55 @@ pub fn push_dependents_grid(
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// ★★★ **THE FULL RETURN'S AMOUNT-COLUMN GEOMETRY IS RECORDED FOR EXACTLY THE SUPPORTED YEARS.**
+    ///
+    /// The counterpart of `schedule_se.rs::geometry_is_recorded_for_exactly_the_supported_years` and
+    /// `form8283.rs`'s, which this file lacked. Until 2026-09-20 `form1040_full.rs` used a bare
+    /// `const F1040_CLUSTERS` for every year while its sibling `form1040.rs` had long since been
+    /// converted to an enumerated match — the fix sitting one file away, uncarried, on the path that
+    /// emits the packet a filer signs rather than the pseudo return.
+    ///
+    /// It reds in BOTH directions, which is what makes it an instrument:
+    ///
+    /// * a SUPPORTED year with no bands recorded — the year was bundled and nobody measured its
+    ///   columns, so `verify_flat` cannot run and the fill fails closed;
+    /// * bands handed to a year the product does not support — **the wildcard is back**, and with it
+    ///   the dollars/cents guard is off: the unified amount band `[504,576]` admits the TY2017 cents
+    ///   widget at cx 565.2 as if it were the dollars cell (measured; see `form1040.rs`).
+    ///
+    /// **Planted-defect check (B1):** replace `2024 | 2025 =>` with `_ =>` and this reds on the first
+    /// unsupported probe year.
+    #[test]
+    fn full_return_geometry_is_recorded_for_exactly_the_supported_years() {
+        let mut supported_seen = 0;
+        for year in 2010..=2040 {
+            let supported = crate::SUPPORTED_YEARS.contains(&year);
+            supported_seen += usize::from(supported);
+            let answered = f1040_full_clusters(year).is_ok();
+            assert_eq!(
+                answered,
+                supported,
+                "TY{year}: SUPPORTED_YEARS.contains = {supported} but f1040_full_clusters {} — {}",
+                if answered { "answered" } else { "refused" },
+                if supported {
+                    "a supported year with no bands recorded: measure the SUBLINE, MID and AMOUNT \
+                     columns off the year's blank PDF (xtask dump-fields) and add the arm"
+                } else {
+                    "an unsupported year must NOT inherit another revision's x-bands; the wildcard \
+                     is back, and the dollars/cents guard is off on the filed packet"
+                }
+            );
+        }
+        assert!(
+            supported_seen >= 2,
+            "only {supported_seen} supported year(s) fell in the probe range, so the positive \
+             direction of this gate measured almost nothing"
+        );
+    }
 }

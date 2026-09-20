@@ -893,3 +893,97 @@ fn no_bundled_params_year_aborts_the_ordinary_path() {
         aborted.join("\n")
     );
 }
+
+/// ★★★ **AND THE SAME PROPERTY FOR THE *EMIT* PATH, which the gate above cannot reach.**
+///
+/// [`no_bundled_params_year_aborts_the_ordinary_path`] drives `assemble_absolute` — the COMPUTE chain.
+/// Three of this workspace's deliberate year-keyed panics live downstream of it, in the emitter:
+///
+/// | site | what it guards |
+/// |---|---|
+/// | `form1040.rs::f1040_clusters` | the 1040's amount-column x-bands |
+/// | `schedule_se.rs::se_clusters` | Schedule SE's MID + AMOUNT columns |
+/// | `form8283.rs::sec_clusters` | Form 8283 Section A/B amount bands |
+///
+/// Each is `2024 | 2025 => …, other => panic!(…)`, and **each is right to be a panic**: its own comment
+/// says so — *"silently reusing last year's x-bands is how a wrong cell passes"*, and widening one to a
+/// wildcard DISARMS the dollars/cents guard (measured: the unified band [504,576] admitted the TY2017
+/// cents widget at cx 565.2). So the defect would never be the panic. It would be a year reaching it.
+///
+/// ★★ `xtask blockers` reports all three as UNMEASURED, and it is right to: it can see the tax year in
+/// the deciding expression and cannot trace whether control arrives. This measures it, by the same
+/// observable property and for the same reason — it names no rule, so a new year-keyed panic added
+/// anywhere under `fill_full_return` cannot slip past it.
+///
+/// ★ Note what this does NOT claim. It measures years whose params are BUNDLED, which is the set a user
+/// can actually ask for; today that is TY2024 alone. An unbundled year is refused upstream by
+/// `year_readiness`, and the non-vacuity assertion below is what keeps that from making the gate empty.
+#[test]
+fn no_bundled_params_year_aborts_the_emit_path() {
+    use btctax_core::tax::tables::{FullReturnTables, TaxTables};
+    let ft = btctax_adapters::tax_tables::BundledFullReturnTables::load();
+    let years: Vec<i32> = btctax_forms::bundled::bundled_years()
+        .iter()
+        .copied()
+        .filter(|y| ft.full_return_for(*y).is_some())
+        .collect();
+    assert!(
+        !years.is_empty(),
+        "no year has FullReturnParams bundled, so this gate would pass vacuously — which is itself \
+         the bug"
+    );
+
+    let mut aborted = Vec::new();
+    for y in years {
+        let params = ft.full_return_for(y).expect("filtered above").clone();
+        let table = btctax_adapters::tax_tables::BundledTaxTables::load()
+            .table_for(y)
+            .expect("a bundled-params year must have a TaxTable too")
+            .clone();
+        let (ri, state) = owner_shape_household(FilingStatus::Mfj, dec!(220000), dec!(14000));
+        let mut ri = ri;
+        ri.tax_year = y;
+        let ar = assemble_absolute(&ri, &state, &params, &table, y);
+        let printed = btctax_core::tax::packet::assemble_printed_return(
+            &ri,
+            &state,
+            &std::collections::BTreeMap::new(),
+            &ar,
+            &table,
+            y,
+            &[],
+            btctax_core::InformationReturnRegime::NONE,
+        )
+        .expect("the fixture carries a well-formed SSN");
+
+        let prior = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let outcome = std::panic::catch_unwind(|| btctax_forms::fill_full_return(&printed, y));
+        std::panic::set_hook(prior);
+
+        match outcome {
+            // A `FormsError` is the CORRECT answer for a year the emitter cannot serve: it carries an
+            // exit. Only an abort is the finding here.
+            Ok(_) => {}
+            Err(e) => {
+                let msg = e
+                    .downcast_ref::<String>()
+                    .cloned()
+                    .or_else(|| e.downcast_ref::<&str>().map(|s| (*s).to_string()))
+                    .unwrap_or_else(|| String::from("<non-String panic payload>"));
+                aborted.push(format!(
+                    "TY{y}: the EMIT path ABORTED rather than erroring — {msg}"
+                ));
+            }
+        }
+    }
+    assert!(
+        aborted.is_empty(),
+        "a year is declared computable whose EMIT path aborts. The three geometry panics are right to \
+         refuse an unmeasured year — what is wrong is a year reaching one, because a panic carries no \
+         `FormsError` and therefore no exit. Measure that year's columns off its blank PDF \
+         (`xtask dump-fields`) and add the arm; never widen one to a wildcard, which hands the year \
+         another revision's bands and turns the dollars/cents guard off.\n{}",
+        aborted.join("\n")
+    );
+}
