@@ -9723,7 +9723,7 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   A discovery recorded only in prose is a discovery scheduled for nothing. The asymmetry was not a
   judgment call; it was inattention, and it ran against the one finding that moves a number on a return.
 
-- **🔴 OPEN — FR-257 — `cite-check` cannot grade a spec that narrates its own review history, and the retirement spec is one. Owning phase: the §7 rewrite (retirement build), NOT before.**
+- **🟡 PARTLY CLOSED 2026-09-20 — FR-257 — `cite-check`'s haystack excluded the archived PUBLICATIONS (fixed); extending it to the retirement spec is RULED OUT, with the measurement. Owning phase: the §7 rewrite (retirement build), NOT before.**
   I-10's third ask was to bring the retirement spec's box quotations under `cite-check`. I extended
   `checked_docs()` to it and ran it: **57 of 152 quoted spans failed.** Reverted, because the failures
   are mostly the CHECKER's scope, not the document's errors, and folding it now would grade text that
@@ -9746,6 +9746,40 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   layout interleaves. The reading is right; the span is a reconstruction, not a quotation.
   `box_census`'s `BoxEntry` already has the convention for this (*"a caption the layout wraps is
   quoted to its first printed line"*) and the spec should adopt it.
+
+  ★★★ **RE-MEASURED 2026-09-20 with the REAL checker, not a reimplementation.** Pointing
+  `schedule_1a_docs()` at the retirement spec plus every form extract *and* every archived publication
+  gives **87 of 204 quoted spans failing**. My first three estimates of this number (94, 79, 46) were
+  all produced by a python approximation of `normalise`/`quoted_spans` and all were wrong — the real
+  functions already strip `*`, `` ` ``, `"` and `•`, already join markdown blockquote continuations, and
+  already strip IRS icon labels. **Do not re-derive a checker's behaviour; run the checker.**
+  ★★★ **RULING: cite-check must NOT be extended to this document.** Its contract is *every quoted span
+  appears in archived IRS authority*, and in this genre `*"…"*` is not a citation marker — it marks
+  emphasis, names a coinage, and quotes the review reports, `questions.rs`, btctax's own refusal
+  wording, taxcalc's and OTS's source, and a spoken owner ruling. 65 of the failing fragments are
+  locatable verbatim in a named in-repo file (38 in the spec itself, 23 in `design/agent-reports/`), so
+  the checker's only satisfying edit really is to strip the quotation marks from honest quotes.
+  **The attribution mechanism was designed and then declined.** The document already carries inline
+  attribution by convention — `*"…"* — \`questions.rs\``, `— \`Pub915_…\`` — so a checker could read
+  the source from prose adjacency. That is precisely a checker that INFERS, which is the class this
+  repo keeps being burned by, and it would grade a design document whose IRS-conformance claims are
+  already held structurally: `form1099r.rs::every_caption_is_verbatim_in_every_archived_revision`,
+  `ss_benefits_worksheet.rs::every_line_is_verbatim_in_every_archived_revision` and
+  `…the_four_thresholds_are_not_indexed_and_every_revision_agrees` each scan **every archived
+  revision**. Per `CLAUDE.md`: the risk has moved into the code, and the code has the tests.
+  ★★ **WHAT WAS FIXED, because it is general and not about this document.** The haystack was the two
+  Schedule 1-A fixtures alone, so a span quoting an IRS **publication** — real authority, archived in
+  this repo — reported "NOT IN THE EXTRACT". `legal/text/irs-publications/` is now in it, DERIVED from
+  the directory with a floor of 5 so a moved directory cannot silently narrow it. Held by
+  `a_span_quoting_an_archived_publication_is_accepted_and_a_paraphrase_of_it_is_not`, which asserts
+  both halves (a verbatim publication span verifies; one changed word still fails) and reds when the
+  publications are removed from the haystack. The 51 spans cite-check already graded are unchanged.
+  ★ **STILL OPEN, and narrowed to one mechanism:** a publication's TWO-COLUMN layout interleaves a
+  column caption mid-sentence — `Pub915`'s box-5 notice extracts as *"…in box 5, it means / Description
+  of Amount in Box 4    that the figure in box 4…"* — so that span stays unverifiable even with the
+  publication in the haystack. `strip_icon_labels` strips a known set of icon words, not arbitrary
+  captions. That notice is the authority `form_ssa1099.rs` transcribes for its derived box 5, so it is
+  worth closing; owning phase: whenever a publication-sourced worksheet is next transcribed.
 
 - **🔴 OPEN — FR-256 — the two money-input paths disagree about the parenthesised negative, and it is the exact notation the SSA prints. Owning phase: the retirement build (T14).**
   `btctax-adapters/src/parse.rs` accepts the accounting negative — *"parenthesized accounting negative

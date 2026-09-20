@@ -410,10 +410,43 @@ fn schedule_1a_docs() -> (Vec<PathBuf>, Vec<PathBuf>) {
             root.join("design/ty2025/SPEC_schedule_1a.md"),
             root.join("design/ty2025/IMPLEMENTATION_PLAN_schedule_1a.md"),
         ],
-        vec![
-            root.join("crates/btctax-core/src/tax/fixtures/schedule_1a_2025_form.txt"),
-            root.join("crates/btctax-core/src/tax/fixtures/schedule_1a_2025_instructions.txt"),
-        ],
+        {
+            // ★★★ **THE HAYSTACK INCLUDES THE ARCHIVED PUBLICATIONS, added 2026-09-20.** It was the
+            //     two Schedule 1-A fixtures alone, so a span quoting an IRS *publication* — real
+            //     authority, archived in this repo — read as "NOT IN THE EXTRACT". Measured on
+            //     `SPEC_retirement_income.md`: three spans quoting `Pub915_Social_Security_and_RRB_…`
+            //     verbatim, including the box-5 parenthesised-negative notice that
+            //     `form_ssa1099.rs` transcribes, were unverifiable for that reason alone.
+            //
+            // ★★ A publication is a WEAKER authority than the form (`CLAUDE.md`: only the statute and
+            //    the reg are law) — but it is the transcription source for every worksheet that is
+            //    printed in the instructions rather than on a form, so excluding it made the checker
+            //    blind to exactly the documents those worksheets come from.
+            //
+            // ★ DERIVED from the directory, never a list of publication names: a publication archived
+            //   later is in the haystack the day it lands.
+            let mut v = vec![
+                root.join("crates/btctax-core/src/tax/fixtures/schedule_1a_2025_form.txt"),
+                root.join("crates/btctax-core/src/tax/fixtures/schedule_1a_2025_instructions.txt"),
+            ];
+            let pubs = root.join("legal/text/irs-publications");
+            let mut found = 0;
+            for e in std::fs::read_dir(&pubs).into_iter().flatten().flatten() {
+                let p = e.path();
+                if p.extension().is_some_and(|x| x == "txt") {
+                    v.push(p);
+                    found += 1;
+                }
+            }
+            assert!(
+                found >= 5,
+                "only {found} archived publication(s) found in {} — if that directory moved, this \
+                 haystack silently narrowed and every span sourced from a publication would read as \
+                 a paraphrase",
+                pubs.display()
+            );
+            v
+        },
     )
 }
 
@@ -1884,6 +1917,56 @@ mod tests {
     /// ★ Mutation-proofing the checker itself: a paraphrase MUST be rejected. Without this, a
     /// `normalise` that collapsed too much (or a `contains` that always matched) would let every
     /// misquote through and the test above would be decoration.
+    /// ★★★ **A SPAN SOURCED ONLY FROM AN ARCHIVED PUBLICATION VERIFIES — and did not before.**
+    ///
+    /// The haystack was the two Schedule 1-A fixtures alone, so a quotation of an IRS *publication* —
+    /// real authority, archived in this repo under `legal/text/irs-publications/` — reported
+    /// "NOT IN THE EXTRACT". The worksheets btctax transcribes are printed in publications and
+    /// instructions rather than on forms, so that is the exact class the checker was blind to.
+    ///
+    /// **Planted-defect check (B1):** the sentence below is verified present in a publication and
+    /// ABSENT from every form extract, so the test asserts both halves. Remove
+    /// `legal/text/irs-publications` from `schedule_1a_docs`'s haystack and the accept half reds.
+    ///
+    /// ★ Stated rather than implied: this fixes the haystack, NOT the two-column layout problem.
+    /// `Pub915`'s box-5 notice reads *"…in box 5, it means\nDescription of Amount in Box 4    that the
+    /// figure in box 4…"* — a column caption interleaved mid-sentence, which `strip_icon_labels` does
+    /// not cover because it strips a known set of icon words, not arbitrary captions. Such a span stays
+    /// unverifiable and that is a separate gap (FR-257).
+    #[test]
+    fn a_span_quoting_an_archived_publication_is_accepted_and_a_paraphrase_of_it_is_not() {
+        let (_, extract_paths) = schedule_1a_docs();
+        let extracts: Vec<String> = extract_paths
+            .iter()
+            .map(|p| fs::read_to_string(p).unwrap_or_default())
+            .collect();
+        assert!(
+            extract_paths
+                .iter()
+                .any(|p| p.to_string_lossy().contains("irs-publications")),
+            "the haystack must carry the archived publications, or this test measures nothing"
+        );
+
+        // Verbatim and contiguous in `Pub525_Taxable_Nontaxable_Income.txt`; in NO form extract.
+        const REAL: &str =
+            "NOTE: Before completing lines 1a and 1b, see Worksheet 2a, Computations \
+                            for Worksheet 2, Lines 1a and 1b.";
+        let doc = format!("A sentence quoting the publication: *\"{}\"*\n", REAL);
+        assert!(
+            unverified_quotations(&doc, &extracts).is_empty(),
+            "a verbatim quotation of an archived publication must VERIFY"
+        );
+
+        // …and the checker still discriminates: one changed word fails.
+        let para = REAL.replace("Before completing", "After completing");
+        let bad = format!("A paraphrase: *\"{para}\"*\n");
+        assert!(
+            !unverified_quotations(&bad, &extracts).is_empty(),
+            "widening the haystack must not make the checker accept a paraphrase — a checker that \
+             accepts everything is indistinguishable from one that was never run"
+        );
+    }
+
     #[test]
     fn a_paraphrase_is_rejected_and_the_real_sentence_is_accepted() {
         let extract = "Divide line 27 by $1,000. If the resulting number isn't a whole number, \
