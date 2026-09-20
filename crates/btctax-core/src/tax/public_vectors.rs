@@ -55,6 +55,11 @@ use rust_decimal_macros::dec;
 pub struct Vector {
     /// The corpus's own directory name, which is its identity upstream.
     pub case: &'static str,
+    /// ★★★ **The filing status, added 2026-09-20 — and its absence is why the §86 defect below went
+    ///        unnoticed at step 1.** Every threshold in §86(c) is per status, so a vector that cannot
+    ///        state its status cannot be reconciled against the statute at all; it could only be
+    ///        transcribed and trusted. Read from the corpus's `deduction_12` and its case name.
+    pub filing_status: crate::tax::FilingStatus,
     /// First 16 hex of `sha256(output.xml)` at the pinned corpus commit. A changed corpus revision
     /// shows up here rather than silently altering an expected figure.
     pub output_sha256_prefix: &'static str,
@@ -110,6 +115,43 @@ impl Vector {
             + self.other_line9_components
             == self.total_income_9
     }
+
+    /// ★★★ **DOES THIS VECTOR'S LINE 6b AGREE WITH §86, computed from its own figures?**
+    ///
+    /// Returns `Ok(())`, or the taxable benefit the statute gives. This is the check step 1 could not
+    /// perform — [`Self::filing_status`] did not exist — and it is the check that matters most, because
+    /// 6b is the line the retirement feature computes and these vectors are its only independent
+    /// witness. A transcription that is merely *read carefully* is not a witness; one that reconciles
+    /// against the statute is.
+    ///
+    /// ★★ The `other_line9_components` total stands in for worksheet line 3, which is legitimate for
+    /// these four cases and is asserted rather than assumed: line 3 combines 1040 lines 1z, 2b, 3b, 4b,
+    /// 5b, 7 and 8, and every non-retirement component of these cases (wages, interest, dividends,
+    /// unemployment via Schedule 1 → line 8, the Alaska dividend likewise) lands on one of them. A
+    /// future vector with income OUTSIDE that set would need line 3 stated separately.
+    pub fn social_security_reconciles(&self) -> Result<(), Usd> {
+        let Some(benefits) = self.social_security_6a else {
+            return Ok(());
+        };
+        let statutory = crate::tax::ss_benefits_worksheet::run(
+            benefits,
+            self.filing_status,
+            // No MFS case exists in this corpus, so the lived-apart answer is never read.
+            false,
+            crate::tax::ss_benefits_worksheet::OtherIncome {
+                line3_combined: self.other_line9_components,
+                line4_tax_exempt_interest: Usd::ZERO,
+                line6_schedule_1_block: Usd::ZERO,
+            },
+        )
+        .line_6b();
+        let asserted = self.taxable_social_security_6b.unwrap_or(Usd::ZERO);
+        if statutory == asserted {
+            Ok(())
+        } else {
+            Err(statutory)
+        }
+    }
 }
 
 /// The four genuine 1099-R / SSA-1099 cases among TaxCalcBench's 51.
@@ -123,6 +165,8 @@ pub const PUBLIC_RETIREMENT_VECTORS: &[Vector] = &[
     // Permanent Fund dividend on Schedule 1.
     Vector {
         case: "single-retirement-1099r-alaska-dividend",
+        // deduction 16,550 = 14,600 basic + one 1,950 §63(f) aged addition ⇒ single, 65 or older.
+        filing_status: crate::tax::FilingStatus::Single,
         output_sha256_prefix: "e56cbe5298ab1b54",
         ira_distributions_4a: Some(dec!(10000)),
         taxable_ira_4b_derived: Some(dec!(10000)),
@@ -141,6 +185,8 @@ pub const PUBLIC_RETIREMENT_VECTORS: &[Vector] = &[
     //    STOP, represented as a blank rather than a zero.
     Vector {
         case: "hoh-schedule-b-ssa1099-unemployment",
+        // deduction 23,850 = 21,900 + 1,950 ⇒ head of household, 65 or older; the case name says so too.
+        filing_status: crate::tax::FilingStatus::HoH,
         output_sha256_prefix: "54202d0fa67aaccd",
         ira_distributions_4a: None,
         taxable_ira_4b_derived: None,
@@ -158,6 +204,8 @@ pub const PUBLIC_RETIREMENT_VECTORS: &[Vector] = &[
     //    7,333 of benefits, again with NO taxable-benefit element.
     Vector {
         case: "mfj-both-blind-nontaxable-social-security",
+        // deduction 35,400 = 29,200 + 2 × 1,550 × 2 boxes ⇒ married filing jointly, both blind.
+        filing_status: crate::tax::FilingStatus::Mfj,
         output_sha256_prefix: "480c853e471d7570",
         ira_distributions_4a: None,
         taxable_ira_4b_derived: None,
@@ -174,6 +222,8 @@ pub const PUBLIC_RETIREMENT_VECTORS: &[Vector] = &[
     // A minimal case kept for its deduction line: single, basic 14,600, everything else near zero.
     Vector {
         case: "single-w2-retirement-sick-pay-social-security-tip",
+        // deduction 14,600, the TY2024 single basic amount with no addition.
+        filing_status: crate::tax::FilingStatus::Single,
         output_sha256_prefix: "7ff4f7b0fef30c84",
         ira_distributions_4a: None,
         taxable_ira_4b_derived: None,
@@ -232,6 +282,80 @@ mod tests {
                 v.case
             );
         }
+    }
+
+    /// ★★★ **EVERY VECTOR'S LINE 6b RECONCILES WITH §86, COMPUTED FROM ITS OWN FIGURES — and one
+    ///        does not, which is why this test names it.**
+    ///
+    /// Step 1 transcribed these vectors carefully and could not do this check, because [`Vector`] had
+    /// no filing status and every §86(c) threshold is per status. So a vector could be *read correctly*
+    /// and still be arithmetically impossible, and one is.
+    ///
+    /// ★★★ **`hoh-schedule-b-ssa1099-unemployment` is DISPUTED.** Head of household, **$8,742** of
+    /// benefits, **$27,038** of other income. §86(c)(1)(A) gives a head of household the $25,000 base
+    /// amount, so provisional income is 27,038 + 4,371 = **31,409**, the worksheet does not stop, and
+    /// the taxable benefit is **$3,204.50**. The corpus's `output.xml` emits **no** taxable-benefit
+    /// element, and its line 9 of 27,038 is self-consistent with zero.
+    ///
+    /// **THREE INDEPENDENT WITNESSES give 3,204.50** (2026-09-20):
+    ///
+    /// | witness | line 6b |
+    /// |---|---|
+    /// | §86 worked by hand from the statute | 3,204.50 |
+    /// | `ss_benefits_worksheet::run` (this repo, transcribed from `i1040gi`) | 3,204.50 |
+    /// | Tax-Calculator 6.8.2, `c02500` | 3,204.50 |
+    ///
+    /// ★★ And taxcalc's AGI for the case is **30,242.50 = 27,038 + 3,204.50 exactly**, which is the
+    /// corpus's own other-income total plus the benefit it does not print. That is not a rounding
+    /// disagreement; it is a missing element.
+    ///
+    /// **So the vector may NOT be used as a 6b witness**, and the module note's claim that both
+    /// SSA-1099 cases show "a non-taxable benefit as the absence of testimony" holds only for
+    /// `mfj-both-blind-…`, which genuinely stops at worksheet line 9 (all three witnesses agree).
+    /// `CLAUDE.md`: *"A disagreement is adjudicated against the FORM, never encoded."* The form says
+    /// 3,204.50. Nothing is filed upstream on this yet — the corpus's `input.json` has not been read,
+    /// so it cannot be ruled out that the case's actual inputs differ from the transcribed totals, and
+    /// the standing rule is never to file on one reading. `FOLLOWUPS.md` FR-255 carries it.
+    #[test]
+    fn every_vector_with_benefits_reconciles_with_section_86_or_is_named_here() {
+        /// Cases whose 6b contradicts §86, with the statutory figure and why they are still committed.
+        /// ★ Fail-closed: a NEW disagreement is not on this list, so it reds.
+        const DISPUTED: &[(&str, &str)] = &[(
+            "hoh-schedule-b-ssa1099-unemployment",
+            "the corpus emits no taxable-benefit element; §86 by hand, this repo's worksheet and \
+             taxcalc 6.8.2 all give 3,204.50, and taxcalc's AGI is the corpus's line 9 plus exactly \
+             that. Unusable as a 6b witness until the corpus input.json is read (FR-255).",
+        )];
+        let mut carried = 0;
+        for v in PUBLIC_RETIREMENT_VECTORS {
+            match v.social_security_reconciles() {
+                Ok(()) => assert!(
+                    !DISPUTED.iter().any(|(c, _)| *c == v.case),
+                    "{} is listed as DISPUTED and now reconciles. If the vector was corrected, remove \
+                     the entry in the same commit — a stale dispute discredits the list.",
+                    v.case
+                ),
+                Err(statutory) => {
+                    let why = DISPUTED.iter().find(|(c, _)| *c == v.case).map(|(_, w)| *w);
+                    assert!(
+                        why.is_some(),
+                        "{}: §86 gives line 6b = {statutory} and the vector asserts {:?}. A vector \
+                         that contradicts the statute is not a witness. Adjudicate against the FORM \
+                         and either correct the vector or add it to DISPUTED with the arithmetic.",
+                        v.case,
+                        v.taxable_social_security_6b
+                    );
+                    carried += 1;
+                }
+            }
+        }
+        assert_eq!(
+            carried,
+            DISPUTED.len(),
+            "every DISPUTED entry must name a vector that really disagrees — {} disagree, {} listed",
+            carried,
+            DISPUTED.len()
+        );
     }
 
     /// ★★★ **A non-taxable benefit is a BLANK, not a zero — and the corpus says so independently.**

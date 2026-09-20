@@ -9801,6 +9801,40 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   ★ Landed as `crates/btctax-core/src/tax/public_vectors.rs` — the four cases' expected 1040 lines, pinned to corpus commit `8f89c2cf00a8906f4d896a02a2f45f9c9e85ae9b`, each with the sha256 prefix of the `output.xml` it was read from, and fetch-on-demand rather than 46 MB in the tree. All four pinned copies were verified byte-identical to what was transcribed.
   ★★★ **Two caveats made STRUCTURAL rather than left as prose**, which is the whole value of committing them as code: (a) line 4b is **derived**, so `line9_reconciles` forces `4b + 5b + 6b + other == line 9` and reds if any component is edited without line 9 — a derived figure nobody re-derives is a fabricated KAT; (b) a non-taxable benefit is `None`, **never** `Some(0)`, so nobody can tidy the corpus's own blank into a zero and erase the finding.
   ★★ **And the tripwire had to be redesigned to be testable.** The obvious plant — add `line4b` to `Form1040Lines` and watch it red — **cannot be run**: adding a field is an `E0063` at every construction site, so the crate stops compiling before any test executes. The compiler is the real forcing function; the check is the reminder on top. A guard that cannot be observed discriminating is what B1 forbids, so the predicate now takes a string and three fixture assertions plant it — including the near miss that a **comment** mentioning `line4b` is not a declaration. Blinding the predicate reds it.
+  ★★★ **STEP 2 FOUND A DEFECT IN STEP 1's OWN WITNESS (2026-09-20), before any translator was written.**
+  Driving the vectors meant computing §86 from their figures, and one vector is arithmetically
+  impossible: **`hoh-schedule-b-ssa1099-unemployment`**. Head of household, **$8,742** of benefits,
+  **$27,038** of other income ⇒ §86(c)(1)(A) base amount $25,000, provisional income
+  27,038 + 4,371 = **31,409**, the worksheet does not stop, taxable benefit **$3,204.50**. The corpus's
+  `output.xml` emits **no** taxable-benefit element and its line 9 of 27,038 is self-consistent with
+  zero. THREE independent witnesses give 3,204.50 — §86 worked by hand from the statute,
+  `ss_benefits_worksheet::run` (transcribed from `i1040gi`), and **Tax-Calculator 6.8.2** (`c02500`) —
+  and taxcalc's AGI is **30,242.50 = 27,038 + 3,204.50 exactly**, the corpus's own other-income total
+  plus the element it does not print. Not rounding; a missing element.
+  ★★ **Consequences, stated rather than smoothed.** (a) That vector may NOT be used as a line-6b
+  witness. (b) The entry above claims both SSA-1099 cases show *"a non-taxable benefit as the absence of
+  testimony"*; that now holds only for `mfj-both-blind-…`, which genuinely stops at worksheet line 9
+  (all three witnesses agree). The claim was overstated by one case. (c) Nothing is filed upstream: the
+  corpus's `input.json` has not been read, so it cannot be ruled out that the case's real inputs differ
+  from the transcribed totals — and the standing rule is never to file on one reading.
+  ★★★ **WHY IT SURVIVED STEP 1, and the structural fix.** `Vector` had no `filing_status`, and every
+  §86(c) threshold is per status — so the vector could be *read correctly off the XML* and still be
+  impossible, with nothing able to notice. `filing_status` is now a field (derived from each case's
+  `deduction_12` and stated beside it) and `Vector::social_security_reconciles` computes §86 from the
+  vector's own figures. `every_vector_with_benefits_reconciles_with_section_86_or_is_named_here` is
+  fail-closed: a NEW disagreement is not on the `DISPUTED` list, so it reds; and a STALE dispute — the
+  vector corrected while the entry stays — reds too. B1: four plants, four reds (dispute entry removed;
+  the HoH status flipped to Mfj, where the threshold genuinely decides; the MFJ vector's other income
+  raised past its threshold; the disputed vector "corrected" to the statutory figure).
+  ★ One plant did NOT red and is recorded as a WEAK PLANT rather than a blind gate: flipping the
+  `mfj-both-blind` vector's status to Single leaves 6b at zero, because its provisional income of
+  8,666.50 is below both the $32,000 and the $25,000 base. The status genuinely cannot change that
+  outcome, so the gate was right to stay green.
+  ★ The TRANSLATOR itself remains open, and its value is now clearer: three of the four vectors have no
+  retirement figures at all (v4) or only 6a with a blank 6b, so end-to-end driving buys most on
+  `single-retirement-1099r-alaska-dividend`, the one fully-specified case — single 65-or-older, two
+  Forms 1099-R (10,000 IRA and 20,000 pension, both fully taxable), a 1,000 Alaska dividend, line 9
+  31,000, AGI 31,000, deduction 16,550, withholding 3,000, with no above-the-line adjustment to model.
   ★ Step 2 (the MeF→`ReturnInputs` translator) remains open, and the ordering was deliberate: transcribing the expected lines costs nothing and gives the build an acceptance target BEFORE the code, which is the reverse of how retirement was heading.
   Recon done 2026-09-16 at the owner's direction; four retirement cases fetched, read and transcribed into
   `SPEC_retirement_income.md` §10a as acceptance vectors. **Nothing is committed to this repo yet** — that
