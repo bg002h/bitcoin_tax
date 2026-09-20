@@ -673,6 +673,19 @@ pub struct Form1040Lines {
     /// L3b — ordinary dividends: **Schedule B's printed line 6** when Schedule B files, else the sum.
     /// This is the FULL box-1a amount, which INCLUDES the qualified subset on 3a.
     pub line3b: Usd,
+    /// ★★★ **L4a — IRA distributions. `Option` because the form instructs a BLANK.**
+    ///
+    /// *"enter the total distribution on line 4b; don't make an entry on line 4a"* on a single fully
+    /// taxable distribution (`i1040gi--2025.txt:2664-2667`); populated once there is more than one, or on
+    /// the Roth `-0-` sub-branch. A `Some(Usd::ZERO)` here would swear the filer received no IRA
+    /// distribution — `an-entry-is-testimony`.
+    pub line4a: Option<Usd>,
+    /// L4b — "Taxable amount". Σ of each IRA document's own taxable amount (`form1099r::line_4b`).
+    pub line4b: Usd,
+    /// L5a — pensions and annuities. `Option`, same instructed blank as 4a (`:2876-2880`).
+    pub line5a: Option<Usd>,
+    /// L5b — "Taxable amount". Σ box 2a over pension documents.
+    pub line5b: Usd,
     /// L7 — capital gain or (loss): **Schedule D's printed line 16**, or on a net-loss year the
     /// §1211(b)-limited `−(Schedule D line 21)`. Signed with a **leading minus**.
     pub line7: Usd,
@@ -815,6 +828,14 @@ pub struct Form1040Income {
     pub line2b: Usd,
     pub line3a: Usd,
     pub line3b: Usd,
+    /// L4a — IRA distributions; `Option` because the form instructs a blank (see `Form1040Lines::line4a`).
+    pub line4a: Option<Usd>,
+    /// L4b — the taxable part of every IRA distribution.
+    pub line4b: Usd,
+    /// L5a — pensions and annuities; `Option`, same instructed blank.
+    pub line5a: Option<Usd>,
+    /// L5b — the taxable part of every pension or annuity.
+    pub line5b: Usd,
     pub line7: Usd,
     pub line8: Usd,
     pub line9: Usd,
@@ -844,8 +865,16 @@ pub fn form_1040_income_lines(
         ScheduleDRouting::NetLoss { line21, .. } => -line21,
         _ => sch_d.line16,
     };
+    // ★★★ T14 — the retirement cells come off `AbsoluteReturn`'s semantic quantities. `line4a`/`line5a`
+    //     stay `Option` all the way to the page: the emitter must be able to write a BLANK, which
+    //     FOLLOWUPS §G-11 records it once could not.
+    let line4a = ar.ira_distributions_total.map(round_dollar);
+    let line4b = round_dollar(ar.taxable_ira);
+    let line5a = ar.pension_total.map(round_dollar);
+    let line5b = round_dollar(ar.taxable_pension);
     let line8 = sch_1.map_or(Usd::ZERO, |s| s.line10);
-    let line9 = line1z + line2b + line3b + line7 + line8; // ★ sums the PRINTED lines
+    // ★★★ T14 — 4b and 5b are printed operands of L9, and the sum reads the PRINTED cells.
+    let line9 = line1z + line2b + line3b + line4b + line5b + line7 + line8; // ★ sums the PRINTED lines
     let line10 = sch_1.map_or(Usd::ZERO, |s| s.line26);
     let line11 = line9 - line10;
 
@@ -858,6 +887,10 @@ pub fn form_1040_income_lines(
         line2b,
         line3a,
         line3b,
+        line4a,
+        line4b,
+        line5a,
+        line5b,
         line7,
         line8,
         line9,
@@ -899,6 +932,10 @@ pub fn form_1040_lines(
         line2b,
         line3a,
         line3b,
+        line4a,
+        line4b,
+        line5a,
+        line5b,
         line7,
         line8,
         line9,
@@ -1004,6 +1041,10 @@ pub fn form_1040_lines(
         line2b,
         line3a,
         line3b,
+        line4a,
+        line4b,
+        line5a,
+        line5b,
         line7,
         line8,
         line9,
@@ -1886,6 +1927,54 @@ mod tests {
     /// `assemble_absolute` still hands over a zero 13b — which means a test driven through
     /// `assemble_absolute` asserts a trivial identity and every mutation survives it. (It did:
     /// dropping the 13b term left the suite green.) So this drives the printed path DIRECTLY with a
+    /// ★★★ **THE PRINTED LINE 9 MUST CROSS-FOOT — and until this test existed, dropping 4b and 5b from
+    /// it passed the ENTIRE suite: 3958 tests, all green.**
+    ///
+    /// Found by mutation, not by review. `m2_line_9_includes_the_retirement_operands_and_25b_includes_
+    /// box_4` guards the SEMANTIC side (`AbsoluteReturn::total_income`); nothing guarded the PRINTED
+    /// side. The two are separate sums over separate structs, and the printed one is what the filer
+    /// signs.
+    ///
+    /// ★★ **Why that hole was the dangerous kind.** The page would have shown 4b and 5b populated with
+    /// line 9 excluding them — a return that does not add up, on the line the Service totals. Not a
+    /// wrong figure hidden in a worksheet: an arithmetic contradiction printed on the form.
+    ///
+    /// ★ **Each operand gets a DISTINCT value, and the expectation is a literal.** A cross-foot that
+    /// re-derives `1z + 2b + 3b + 4b + 5b + 7 + 8` from the same fields would be FR-230's defect — a kill
+    /// deriving its expectation from the thing it tests. Distinct powers of ten mean a dropped term
+    /// changes the total in a way no other omission can imitate.
+    #[test]
+    fn the_printed_line_9_cross_foots_and_a_dropped_operand_changes_it() {
+        let mut ar = ar_with(None, Usd::ZERO, Usd::ZERO);
+        ar.wages = dec!(1_000_000); // 1z
+        ar.taxable_interest = dec!(100_000); // 2b
+        ar.ordinary_dividends = dec!(10_000); // 3b
+        ar.taxable_ira = dec!(1_000); // 4b
+        ar.taxable_pension = dec!(100); // 5b
+        ar.ira_distributions_total = Some(dec!(5_000));
+        ar.pension_total = Some(dec!(500));
+        ar.capital_gain = Usd::ZERO; // L7 comes from Schedule D below
+        let sd = schedule_d_lines(&ar, None);
+        let income = form_1040_income_lines(&ar, None, None, &sd);
+
+        // Every operand present and distinct, so the total identifies which one is missing.
+        assert_eq!(income.line1z, dec!(1_000_000));
+        assert_eq!(income.line2b, dec!(100_000));
+        assert_eq!(income.line3b, dec!(10_000));
+        assert_eq!(income.line4b, dec!(1_000), "4b must reach the printed cell");
+        assert_eq!(income.line5b, dec!(100), "5b must reach the printed cell");
+        assert_eq!(
+            income.line9,
+            dec!(1_111_100),
+            "printed L9 = 1z + 2b + 3b + 4b + 5b + 7 + 8. Each operand is a distinct power of ten, so \
+             this literal names exactly which term is missing: short by 1,000 ⇒ 4b was dropped, by 100 \
+             ⇒ 5b, by 10,000 ⇒ 3b, and so on."
+        );
+        // ★ And the two BLANK-capable cells print their figures rather than collapsing to zero.
+        assert_eq!(income.line4a, Some(dec!(5_000)));
+        assert_eq!(income.line5a, Some(dec!(500)));
+    }
+
     /// nonzero 13b and a nonzero QBI, where each term's absence changes the number.
     #[test]
     fn printed_1040_line14_needs_all_three_terms() {
@@ -1942,6 +2031,10 @@ mod tests {
         use crate::tax::other_taxes::{Form8959, Form8960};
         let z = Usd::ZERO;
         AbsoluteReturn {
+            ira_distributions_total: None,
+            taxable_ira: Usd::ZERO,
+            pension_total: None,
+            taxable_pension: Usd::ZERO,
             // FR-29 — this fixture is not on the §6.3 certification path.
             form8615_certification: None,
             schedule_1a_additional: Usd::ZERO,

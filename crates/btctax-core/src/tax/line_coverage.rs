@@ -3011,6 +3011,10 @@ pub fn cover_form1040lines(l: &crate::tax::printed::Form1040Lines) -> Coverage {
         line2b,
         line3a,
         line3b,
+        line4a,
+        line4b,
+        line5a,
+        line5b,
         line7,
         line8,
         line9,
@@ -3089,6 +3093,42 @@ pub fn cover_form1040lines(l: &crate::tax::printed::Form1040Lines) -> Coverage {
         "Form1040Lines.line3b",
         Production::doc_box("f1099div", "1a"),
         "Ordinary dividends",
+    );
+    // ★★★ **T14 — the four retirement cells. Captions VERBATIM from the form's own text layer**
+    //     (`f1040--2024.txt:65,67` / `f1040--2025.txt:74,76`), where 4a/5a print their label and 4b/5b
+    //     print *"Taxable amount"* — the identical two words on 4b, 5b AND 6b, which is why FR-184's
+    //     pigeonhole exists and why M-1b's row-to-line binding is still owed (SPEC S-9).
+    c.line(
+        *line4a,
+        "f1040",
+        "4a",
+        "Form1040Lines.line4a",
+        Production::doc_box("f1099r", "1"),
+        "IRA distributions",
+    );
+    c.line(
+        *line4b,
+        "f1040",
+        "4b",
+        "Form1040Lines.line4b",
+        Production::Combine,
+        "Taxable amount",
+    );
+    c.line(
+        *line5a,
+        "f1040",
+        "5a",
+        "Form1040Lines.line5a",
+        Production::doc_box("f1099r", "1"),
+        "Pensions and annuities",
+    );
+    c.line(
+        *line5b,
+        "f1040",
+        "5b",
+        "Form1040Lines.line5b",
+        Production::doc_box("f1099r", "2a"),
+        "Taxable amount",
     );
     c.line(
         *line7,
@@ -3314,6 +3354,10 @@ fn zero_form1040lines() -> crate::tax::printed::Form1040Lines {
         line2b: Usd::ZERO,
         line3a: Usd::ZERO,
         line3b: Usd::ZERO,
+        line4a: None,
+        line4b: Usd::ZERO,
+        line5a: None,
+        line5b: Usd::ZERO,
         line7: Usd::ZERO,
         line8: Usd::ZERO,
         line9: Usd::ZERO,
@@ -3360,6 +3404,10 @@ pub fn cover_form1040income(l: &crate::tax::printed::Form1040Income) -> Coverage
         line2b,
         line3a,
         line3b,
+        line4a,
+        line4b,
+        line5a,
+        line5b,
         line7,
         line8,
         line9,
@@ -3418,6 +3466,42 @@ pub fn cover_form1040income(l: &crate::tax::printed::Form1040Income) -> Coverage
         Production::doc_box("f1099div", "1a"),
         "Ordinary dividends",
     );
+    // ★★★ **T14 — the four retirement cells. Captions VERBATIM from the form's own text layer**
+    //     (`f1040--2024.txt:65,67` / `f1040--2025.txt:74,76`), where 4a/5a print their label and 4b/5b
+    //     print *"Taxable amount"* — the identical two words on 4b, 5b AND 6b, which is why FR-184's
+    //     pigeonhole exists and why M-1b's row-to-line binding is still owed (SPEC S-9).
+    c.line(
+        *line4a,
+        "f1040",
+        "4a",
+        "Form1040Income.line4a",
+        Production::doc_box("f1099r", "1"),
+        "IRA distributions",
+    );
+    c.line(
+        *line4b,
+        "f1040",
+        "4b",
+        "Form1040Income.line4b",
+        Production::Combine,
+        "Taxable amount",
+    );
+    c.line(
+        *line5a,
+        "f1040",
+        "5a",
+        "Form1040Income.line5a",
+        Production::doc_box("f1099r", "1"),
+        "Pensions and annuities",
+    );
+    c.line(
+        *line5b,
+        "f1040",
+        "5b",
+        "Form1040Income.line5b",
+        Production::doc_box("f1099r", "2a"),
+        "Taxable amount",
+    );
     c.line(
         *line7,
         "f1040",
@@ -3470,6 +3554,10 @@ fn zero_form1040income() -> crate::tax::printed::Form1040Income {
         line2b: Usd::ZERO,
         line3a: Usd::ZERO,
         line3b: Usd::ZERO,
+        line4a: None,
+        line4b: Usd::ZERO,
+        line5a: None,
+        line5b: Usd::ZERO,
         line7: Usd::ZERO,
         line8: Usd::ZERO,
         line9: Usd::ZERO,

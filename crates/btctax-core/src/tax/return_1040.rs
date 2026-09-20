@@ -1955,7 +1955,23 @@ pub struct AbsoluteReturn {
     /// 1040 L8 = Schedule 1 L10 — state refund + unemployment + Schedule C net (crypto business) + L8v
     /// non-business crypto ordinary income.
     pub schedule_1_income: Usd,
-    /// 1040 L9 — total income = L1a + L2b + L3b + L7 + L8.
+    /// ★★★ **T14 — retirement income, as SEMANTIC quantities rather than line names.**
+    ///
+    /// `CLAUDE.md`'s transcription rule is scoped: a field is named for its line *inside a transcription
+    /// struct*, and `AbsoluteReturn` is the cross-year quantity struct the 1040 consumes, so these are
+    /// named for what they ARE. The line-named forms live on `Form1040Income`.
+    ///
+    /// `ira_distributions_total` / `pension_total` are `Option` because the form instructs a BLANK on
+    /// the single-fully-taxable branch, and `Some(0)` there would be sworn testimony that no
+    /// distribution was received (`form1099r::line_4a`, `line_5a`).
+    pub ira_distributions_total: Option<Usd>,
+    /// The taxable part of every IRA distribution — Σ of each document's own taxable amount.
+    pub taxable_ira: Usd,
+    pub pension_total: Option<Usd>,
+    /// The taxable part of every pension or annuity — Σ box 2a.
+    pub taxable_pension: Usd,
+    /// 1040 L9 — total income = L1a + L2b + L3b + **L4b + L5b** + L7 + L8 (T14 added the two
+    /// retirement operands; a sum missing one of them is the `a-figure-with-no-reader` shape).
     pub total_income: Usd,
     /// 1040 L10 = Schedule 1 L26 — adjustments: ½-SE (L15) + early-withdrawal penalty (L18) + student-loan
     /// interest (L21).
@@ -2448,8 +2464,37 @@ pub fn assemble_absolute(
         //     §221 deduction $1,500 too large on the review's second probe.
         + hsa_income_8f;
 
-    let total_income =
-        wages + taxable_interest + ordinary_dividends + capital_gain + schedule_1_income; // L9
+    // ★★★ **T14 — the retirement figures, from the document rows.**
+    //
+    // `line_4b` / `line_5b` return `Result` because a refusing document has NO line — and that refusal
+    // has already fired in `screen_inputs_tiered` before assembly, so reaching here with an `Err` means
+    // the screen was bypassed. `expect` is therefore a claim about the CALL ORDER, not about the data,
+    // and the message says which order it depends on.
+    let taxable_ira = crate::tax::form1099r::line_4b(&ri.r_1099).unwrap_or_else(|(i, r)| {
+        panic!(
+            "assemble_absolute reached a refusing Form 1099-R (row {i}: {r:?}) — \
+             `screen_inputs_tiered` must run BEFORE assembly and refuse it"
+        )
+    });
+    let taxable_pension = crate::tax::form1099r::line_5b(&ri.r_1099).unwrap_or_else(|i| {
+        panic!(
+            "assemble_absolute reached a Form 1099-R (row {i}) with a BLANK box 2a — the General Rule / \
+             Simplified Method case, which `screen_inputs_tiered` must refuse before assembly"
+        )
+    });
+    let ira_distributions_total = crate::tax::form1099r::line_4a(&ri.r_1099);
+    let pension_total = crate::tax::form1099r::line_5a(&ri.r_1099);
+
+    // ★★★ **T14 — the two retirement operands are IN the L9 sum.** `a-figure-with-no-reader` is why
+    //     this is the line that matters: `total_tax` was once short by the whole AMT with every test
+    //     green, because a computed figure had no reader. M-2's kill is deleting an operand here.
+    let total_income = wages
+        + taxable_interest
+        + ordinary_dividends
+        + capital_gain
+        + schedule_1_income
+        + taxable_ira
+        + taxable_pension; // L9
 
     // ── Adjustments L10 (Sch 1 L26), AGI L11 ──────────────────────────────────────────────────────
     // §221 MAGI for the student-loan phase-out is AGI computed WITHOUT the student-loan deduction but WITH
@@ -2844,7 +2889,12 @@ pub fn assemble_absolute(
     let excess_social_security = excess_social_security(ri, table);
     let excess_ss_not_creditable = non_creditable_ss(ri, table);
 
-    // 1040 L25 withholding: 25a Σ W-2 box2; 25b Σ 1099 box4 (INT/DIV/G); 25c Form 8959 Part V + other.
+    // 1040 L25 withholding: 25a Σ W-2 box2; 25b Σ 1099 box4 (INT/DIV/G/R); 25c Form 8959 Part V + other.
+    //
+    // ★★★ **T14 — the Form 1099-R box 4 term is here, and review r1's C-2 was its absence.** A retiree
+    //     whose pension withheld tax had that withholding dropped entirely, which OVERSTATED the balance
+    //     due by the whole of it. `withholding_line_25b` sums both kinds, IRA and pension alike, because
+    //     box 4 is federal withholding regardless of which line pair the document reaches.
     let wh_25a: Usd = ri.w2s.iter().map(|w| w.box2_fed_withheld).sum();
     let wh_25b: Usd = ri
         .int_1099
@@ -2852,7 +2902,8 @@ pub fn assemble_absolute(
         .map(|i| i.box4_fed_withheld)
         .chain(ri.div_1099.iter().map(|d| d.box4_fed_withheld))
         .chain(ri.g_1099.iter().map(|g| g.box4_fed_withheld))
-        .sum();
+        .sum::<Usd>()
+        + crate::tax::form1099r::withholding_line_25b(&ri.r_1099);
     let wh_25c = additional_medicare.part5_withholding + ri.payments.other_withholding;
     let total_withholding = wh_25a + wh_25b + wh_25c; // L25
                                                       // L33 total payments = L25 + L26 estimated + Sch 3 L15 (L10 extension + L11 excess-SS).
@@ -2879,6 +2930,10 @@ pub fn assemble_absolute(
         qualified_dividends,
         capital_gain,
         schedule_1_income,
+        ira_distributions_total,
+        taxable_ira,
+        pension_total,
+        taxable_pension,
         total_income,
         adjustments,
         half_se_deduction: half_se,
@@ -5348,6 +5403,84 @@ mod tests {
                                                           // Cross-foot L11 = L9 − L10 (with-crypto AGI).
         assert_eq!(ar.agi, ar.total_income - ar.adjustments);
         assert_eq!(ar.agi, dec!(116000) - ar.half_se_deduction);
+    }
+
+    /// ★★★ **M-2 — LINE 9 ACTUALLY READS 4b AND 5b, end to end through `assemble_absolute`.**
+    ///
+    /// This is the `a-figure-with-no-reader` guard, and that memory is why it exists: `total_tax` was
+    /// once short by the whole AMT with every test green, because a correctly-computed figure had no
+    /// reader. The unit tests in `form1099r` prove the FIGURES are right; only this proves the return
+    /// consumes them.
+    ///
+    /// ★ It calls `assemble_absolute` directly, which is legitimate and is the only way to test the
+    /// wiring today: `screen_inputs_tiered` refuses any Form 1099-R
+    /// (`RefuseReason::RetirementIncomeNotComputed`), so no production path reaches assembly with one.
+    /// That refusal is retired in the task that adds R-1/R-2 to the screen — and until it is, this test
+    /// is the only thing exercising the operands.
+    #[test]
+    fn m2_line_9_includes_the_retirement_operands_and_25b_includes_box_4() {
+        use crate::tax::form1099r::{Form1099R, Form1099RKind};
+        let row = |kind, box1: i64, box2a: i64, wh: i64| Form1099R {
+            payer: "Trust".into(),
+            payer_tin: String::new(),
+            transcribed_on: None,
+            kind,
+            box1_gross_distribution: dec!(0) + rust_decimal::Decimal::from(box1),
+            box2a_taxable_amount: Some(rust_decimal::Decimal::from(box2a)),
+            box2b_taxable_amount_not_determined: false,
+            box2b_total_distribution: false,
+            box3_capital_gain: Usd::ZERO,
+            box4_fed_withheld: rust_decimal::Decimal::from(wh),
+            box5_employee_contributions: Usd::ZERO,
+            box6_net_unrealized_appreciation: Usd::ZERO,
+            box7_distribution_codes: "7".into(),
+            box8_other: Usd::ZERO,
+            box9a_percentage_of_total: None,
+            box9b_total_employee_contributions: Usd::ZERO,
+            box10_allocable_to_irr: Usd::ZERO,
+            box11_first_year_desig_roth: None,
+            box14_state_tax_withheld: None,
+            box17_local_tax_withheld: None,
+            roth_contribution_before_lookback: None,
+            exception_applies: Some(false),
+        };
+        let ri = ReturnInputs {
+            tax_year: 2024,
+            r_1099: vec![
+                row(Form1099RKind::Ira, 20_000, 20_000, 2_000),
+                row(Form1099RKind::PensionOrAnnuity, 30_000, 24_000, 3_000),
+            ],
+            ..Default::default()
+        };
+        let st = state_income(vec![]);
+        let table = synthetic_table(2024);
+        let ar = assemble_absolute(&ri, &st, &ty2024_params(), &table, 2024);
+
+        assert_eq!(ar.taxable_ira, dec!(20_000), "4b");
+        assert_eq!(ar.taxable_pension, dec!(24_000), "5b");
+        assert_eq!(
+            ar.total_income,
+            dec!(44_000),
+            "L9 must be 4b + 5b with no other income — if this is 0, the operands are computed and \
+             UNREAD, which is the whole failure this test exists for"
+        );
+        // ★ 4a stays blank on a single fully-taxable IRA; 5a is blank because the pension is partially
+        //   taxable ONLY if box 2a < box 1 — here it is, so 5a IS populated.
+        assert_eq!(
+            ar.ira_distributions_total, None,
+            "one fully-taxable IRA ⇒ 4a blank"
+        );
+        assert_eq!(
+            ar.pension_total,
+            Some(dec!(30_000)),
+            "partially taxable ⇒ 5a = Σ box 1"
+        );
+        // ★★ C-2: the withholding reaches line 25b, both kinds summed.
+        assert_eq!(
+            ar.withholding_25b,
+            dec!(5_000),
+            "Σ box 4 over both documents"
+        );
     }
 
     /// P4.0 / §6017 (R3-M3): net SE earnings (the 92.35%-factored base) below $400 ⇒ NO SE tax and NO ½-SE,
@@ -9428,6 +9561,10 @@ mod tests {
         assert_eq!(
             pf.f1040,
             crate::tax::printed::Form1040Lines {
+                line4a: None,
+                line4b: Usd::ZERO,
+                line5a: None,
+                line5b: Usd::ZERO,
                 line1z: dec!(5000),
                 line1a: dec!(5000),
                 line2a: z,

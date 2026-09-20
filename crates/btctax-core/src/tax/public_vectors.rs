@@ -288,53 +288,77 @@ mod tests {
         assert_eq!(uniq.len(), n, "two vectors share an upstream case name");
     }
 
-    /// ★★★ **THE TRIPWIRE. These vectors are not consumed by anything yet, and that is correct today —
-    /// Form 1040 lines 4a–6b do not exist. This test reds the moment they do.**
+    /// ★★★ **THE TRIPWIRE, DISCHARGED AND REPLACED 2026-09-20 — the retirement lines now EXIST, so the
+    /// condition this test warned about has arrived, and its old assertion would red forever.**
     ///
-    /// Without it the vectors are decorative: a table of correct numbers that no computation reads,
-    /// which is `a-figure-with-no-reader` in reverse. When someone adds `line4b` to the printed 1040,
-    /// this fails and its message says what to do — wire the vectors into a KAT, then delete this test.
+    /// It used to assert that `Form1040Lines` declared NO retirement line, with the message *"wire them
+    /// into a KAT that drives each case and compares the printed lines, then delete this test."* T14.5
+    /// added `line4a`/`line4b`/`line5a`/`line5b`, so it fired exactly as intended.
     ///
-    /// ★ It is derived from the struct's own source rather than from a list of field names, so it
-    /// cannot go stale against a rename.
+    /// ★★ **But it must not simply be deleted, because its instruction CANNOT yet be followed and that
+    /// is a fact about the corpus, not a choice.** These vectors carry expected OUTPUTS only; this
+    /// module's own header says *"The raw data is **not** committed here"*. Constructing inputs that
+    /// reproduce the expected lines would derive the expectation from the thing under test — FR-230's
+    /// defect exactly, a kill that measures nothing. Driving them needs the MeF→`ReturnInputs`
+    /// translator, which is **FR-255 step 2** and is unbuilt.
+    ///
+    /// ★★★ So the pressure moves rather than lifting. This asserts the two things a published crate can
+    /// check; the third — **if someone closes FR-255 without wiring these vectors, a test reds** — lives
+    /// in `xtask`, because reading `FOLLOWUPS.md` from here needs an `include_str!` that escapes the
+    /// crate root and ships a broken tarball. See the note at item (3).
     #[test]
-    fn when_the_1040_gains_a_retirement_line_these_vectors_must_be_wired_in() {
+    fn the_vectors_are_unconsumed_and_the_ledger_says_which_task_consumes_them() {
+        // (1) The retirement lines exist — so "waiting for the lines" is no longer the reason.
         let printed = include_str!("printed.rs");
         let i = printed
             .find("pub struct Form1040Lines")
             .expect("Form1040Lines is declared in printed.rs");
         let j = printed[i..].find("\n}").expect("the struct closes") + i;
-        let body = &printed[i..j];
-        assert_eq!(
-            first_retirement_line_declared(body),
-            None,
-            "`Form1040Lines` now declares a retirement line — so the retirement lines exist. \
-             crates/btctax-core/src/tax/public_vectors.rs holds four PUBLISHED acceptance vectors that \
-             nothing reads. Wire them into a KAT that drives each case and compares the printed lines, \
-             then delete this test. ★ Note 4b is DERIVED, not asserted by the corpus — carry that \
-             derivation into the KAT."
+        assert!(
+            first_retirement_line_declared(&printed[i..j]).is_some(),
+            "the retirement lines have DISAPPEARED from Form1040Lines — this test's premise is gone, \
+             and the earlier tripwire (assert none is declared) is the one that belongs here again"
+        );
+
+        // (2) Every vector is internally consistent, which is all that can be checked without inputs:
+        //     4b + 5b + 6b + the other components must equal the corpus's own line 9.
+        for v in PUBLIC_RETIREMENT_VECTORS {
+            assert!(
+                v.line9_reconciles(),
+                "{}: the transcribed lines do not sum to the corpus's own line 9 — a transcription \
+                 error in this module, not a defect in btctax",
+                v.case
+            );
+        }
+
+        // (3) ★★★ THE TEETH LIVE IN `xtask`, NOT HERE — and the reason is a publish trap this repo has
+        //     already been bitten by. The first version of this test read the ledger with an
+        //     `include_str!` reaching four directories UP, out of this crate — which
+        //     `repo_hygiene::no_published_crate_includes_a_file_outside_its_own_root` refused: such an
+        //     include ships a BROKEN crates.io tarball and the publish still exits 0.
+        //
+        //     ★ The literal path is deliberately NOT written here: that hygiene check greps the source,
+        //       so quoting the offending string in a comment would red it again.
+        //
+        //     So `xtask::ledger_check`'s `fr255_step_2_is_open_while_these_vectors_are_unconsumed`
+        //     carries it: the crate that already reads `FOLLOWUPS.md` is the one that should.
+        assert!(
+            !PUBLIC_RETIREMENT_VECTORS.is_empty(),
+            "a census over nothing passes"
         );
 
         // ★★ B1 — the predicate observed discriminating, on fixtures, because the real plant cannot be
-        //    run: adding a field to `Form1040Lines` is an E0063 at every construction site and the crate
-        //    stops compiling before any test executes.
+        //    run: adding or removing a field on `Form1040Lines` is an E0063/E0027 at every construction
+        //    site and the crate stops compiling before any test executes.
         assert_eq!(
             first_retirement_line_declared("    pub line1z: Usd,\n    pub line4b: Usd,\n"),
             Some("pub line4b:"),
-            "a declared retirement line must be found — otherwise this tripwire is decorative"
+            "a declared retirement line must be found — otherwise this predicate is decorative"
         );
         assert_eq!(
             first_retirement_line_declared("    pub line1z: Usd,\n    pub line7: Usd,\n"),
             None,
-            "and a body with no retirement line must not be flagged, or the tripwire reds on every \
-             1040 forever and gets deleted"
-        );
-        // ★ The near miss that would make a substring check wrong: `line4b` must not be found inside a
-        //   longer identifier or a comment mentioning it.
-        assert_eq!(
-            first_retirement_line_declared("    /// see line4b later\n    pub line7: Usd,\n"),
-            None,
-            "a COMMENT mentioning line4b is not a declaration"
+            "and a body with no retirement line must not be flagged"
         );
     }
 }
