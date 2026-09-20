@@ -1089,11 +1089,42 @@ fn is_label(s: &str) -> bool {
 /// A run that BEGINS with a label followed by a space: `"1 Interest income"`, `"a Employee’s …"`.
 fn label_head(run: &str) -> Option<(&str, &str)> {
     let (head, rest) = run.split_once(' ')?;
-    if is_label(head) && rest.starts_with(|c: char| c.is_uppercase() || c == '(') {
+    // ★ The ordinal arm must be here as well as in `label_cuts`, and forgetting it is why the first
+    //   attempt at Form 1099-R box 11 still dropped it: `label_cuts` made the cut and THIS function
+    //   then refused the segment, so the box was lost between two predicates that had to agree.
+    if is_label(head)
+        && (rest.starts_with(|c: char| c.is_uppercase() || c == '(') || starts_ordinal(rest))
+    {
         Some((head, rest))
     } else {
         None
     }
+}
+
+/// ★★★ **A caption may begin with an ORDINAL, and Form 1099-R box 11 is the only one in the archive
+/// that does.** Its caption is *"1st year of desig. Roth contrib."*, printed on a run that also carries
+/// boxes 12, 14, 15 and 16 (`f1099r--2024.txt:54`). [`label_cuts`] required a caption to start with an
+/// uppercase letter or `(`, so no cut was made at `11` and **box 11 was silently dropped** — caught only
+/// because [`contiguous`] refused the gap: *"the box numbers this enumerator found are not contiguous:
+/// [11] missing from 1..=19 … this is the READER dropping boxes, not the form omitting them."*
+///
+/// ★★ **Restricted to ordinals rather than widened to any digit, deliberately.** Allowing any
+/// digit-initial caption would make every `<number> <number>` adjacency a candidate cut, and these forms
+/// are full of them — *"Amount allocable to IRR within 5 years"*, *"…for 2020 or an earlier year"*. An
+/// ordinal suffix is the narrowest predicate that admits *"1st year"* and nothing else: measured across
+/// all 17 archived form extracts, `f1099r--2024` and `f1099r--2025` are the ONLY files containing a
+/// `<label> <ordinal>` sequence at all.
+///
+/// The kill is `a_caption_beginning_with_an_ordinal_is_not_dropped`.
+fn starts_ordinal(rest: &str) -> bool {
+    let digits = rest.len() - rest.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+    if digits == 0 {
+        return false;
+    }
+    let suffix = &rest[digits..];
+    ["st", "nd", "rd", "th"]
+        .iter()
+        .any(|s| suffix.starts_with(s))
 }
 
 /// Cut a run at every embedded label, so `"4 Federal income tax withheld 5 Investment expenses"`
@@ -1115,7 +1146,8 @@ fn label_cuts(run: &str) -> Vec<usize> {
             }
             let after = &run[i + len..];
             if let Some(rest) = after.strip_prefix(' ') {
-                if rest.starts_with(|c: char| c.is_uppercase() || c == '(') {
+                if rest.starts_with(|c: char| c.is_uppercase() || c == '(') || starts_ordinal(rest)
+                {
                     cuts.push(i);
                     break;
                 }
@@ -2314,6 +2346,67 @@ mod tests {
              when `Form1098` replaced that scalar. Anything appearing here is a document whose \
              section landed without `section_of_stem` being told."
         );
+    }
+
+    /// ★★★ **B1 — a caption beginning with an ORDINAL must not be dropped, and BOTH predicates are
+    /// planted, because the first fix widened only one of them and box 11 was still lost.**
+    ///
+    /// Form 1099-R box 11's caption is *"1st year of desig. Roth contrib."* — the only digit-initial
+    /// caption in the whole archive. `label_cuts` and `label_head` each carried an
+    /// uppercase-or-`(` test, and they have to AGREE: widening `label_cuts` alone made the cut and then
+    /// `label_head` refused the segment, so the box vanished between two predicates. The plants below
+    /// are therefore one per predicate, not one for the feature.
+    #[test]
+    fn a_caption_beginning_with_an_ordinal_is_not_dropped() {
+        // The real run, verbatim from `f1099r--2024.txt:54` (two-space gaps preserved).
+        let run = "11 1st year of desig. 12 FATCA filing 14 State tax withheld";
+
+        // label_cuts must cut at 11, 12 and 14.
+        assert_eq!(
+            label_cuts(run).len(),
+            3,
+            "cuts: {:?} in {run:?}",
+            label_cuts(run)
+        );
+        // label_head must ACCEPT the ordinal segment — this is the half the first fix missed.
+        assert_eq!(
+            label_head("11 1st year of desig.").map(|(l, _)| l),
+            Some("11"),
+            "label_head refused an ordinal caption, so the cut would be discarded"
+        );
+
+        // ★ And the narrowness is asserted, not just the fix: a NON-ordinal digit caption must still
+        //   be refused, or every `<number> <number>` adjacency becomes a spurious box.
+        assert!(
+            !starts_ordinal("5 years of service"),
+            "a bare digit is not an ordinal"
+        );
+        assert!(!starts_ordinal("2020 or an earlier year"));
+        assert!(starts_ordinal("1st year of desig."));
+        assert!(starts_ordinal("21st Century plan"));
+        assert!(
+            label_head("10 5 years").is_none(),
+            "a bare digit caption stays refused"
+        );
+
+        // The whole form must now enumerate, and the count is the FORM's, not a literal here: 21 box
+        // labels, which `contiguous` independently proves has no gap in 1..=19.
+        for ed in ["2024", "2025"] {
+            let t = std::fs::read_to_string(extract_path(&repo_root(), "f1099r", ed))
+                .expect("archived extract");
+            let boxes = printed_boxes(&t, PREAMBLE_1141)
+                .unwrap_or_else(|e| panic!("f1099r--{ed} must enumerate: {e}"));
+            assert_eq!(boxes.len(), 21, "f1099r--{ed}: {:?}", boxes.keys());
+            assert!(
+                boxes.contains_key("11"),
+                "box 11 is the one that was dropped"
+            );
+            assert_eq!(
+                boxes.get("14").map(String::as_str),
+                Some("14 State tax withheld"),
+                "box 14 is the Schedule A line 5a money box (FR-258)"
+            );
+        }
     }
 
     /// ★★★ **B1 — THE JOIN, SEEN RED ON PLANTED DEFECTS.** Four planted tables, one per mechanism,
