@@ -1244,6 +1244,142 @@ fn render(pairs: &[FormYear]) -> String {
         .join(", ")
 }
 
+/// ★★★ **A NUMERIC claim in a design document is the same species as a quoted one, and it goes stale
+/// the same way — but silently, because no `cite-check` reads it.**
+///
+/// `SPEC_retirement_income.md` carried a table sizing the owner's "ship both years" ruling at *"14 map
+/// rows for TY2024, 4 for TY2025, a shortfall of ten"*. Review r1's I-8 found that **neither number
+/// reproduced under any definition**, and the error ran in the direction that made the work look
+/// smaller — under a ruling the owner had made against that figure. The measured numbers are 35 and 1.
+///
+/// ★★ Quotations in this repo are held by `cite-check` against an archived extract. A COUNT had nothing
+/// holding it at all, so it decayed the moment either map file changed and no gate noticed. These
+/// functions are the reader for that class: they re-measure from the committed files, and
+/// `the_spec_map_row_figures_still_reproduce` asserts the document still says what is true.
+///
+/// ★ Deliberately NOT a new subcommand. Per owner ruling S-6 (*"no new instrument without a named
+/// consumer on the owner's path"*) the consumer is the test below, which runs in `make check`. Scope is
+/// stated rather than implied: this covers the two `f1040.map.toml` cell counts and nothing else. Other
+/// numeric claims in other documents remain unheld, and [[FR-257]] is where the general case lives.
+#[cfg(test)]
+fn map_money_line_cells(year: i32) -> std::collections::BTreeSet<String> {
+    let p = repo_root().join(format!("crates/btctax-forms/forms/{year}/f1040.map.toml"));
+    let src = fs::read_to_string(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+    src.lines()
+        .filter_map(|l| {
+            // A top-level money cell is `lineNN... =` at column 0. `line_set` is metadata and does not
+            // match, because the character after `line` must be a digit.
+            let rest = l.strip_prefix("line")?;
+            let mut cs = rest.chars();
+            if !cs.next()?.is_ascii_digit() {
+                return None;
+            }
+            let key: String = std::iter::once('l')
+                .chain("ine".chars())
+                .chain(rest.chars().take_while(|c| c.is_ascii_alphanumeric()))
+                .collect();
+            l.contains('=').then_some(key)
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod doc_figures {
+    use super::*;
+
+    /// The six Form 1040 retirement cells this spec exists to add.
+    const RETIREMENT: &[&str] = &["line4a", "line4b", "line5a", "line5b", "line6a", "line6b"];
+
+    /// ★★★ **I-8's figures, re-measured on every run.** If either map changes, this reds and names the
+    /// spec sentence to fix — which is exactly what did not happen to the "14 and 4" table.
+    #[test]
+    fn the_spec_map_row_figures_still_reproduce() {
+        let y24 = map_money_line_cells(2024);
+        let y25 = map_money_line_cells(2025);
+        assert_eq!(y24.len(), 35, "TY2024 money-line cells: {y24:?}");
+        assert_eq!(y25.len(), 1, "TY2025 money-line cells: {y25:?}");
+        assert!(
+            y25.contains("line7a"),
+            "TY2025's one cell is line7a: {y25:?}"
+        );
+
+        // ★ TY2025 is a strict SUBSET, so the gap is a clean difference with no double-count. That is
+        //   what makes "34" meaningful rather than an artefact of two independent counts.
+        assert!(
+            y25.is_subset(&y24),
+            "TY2025 holds a cell TY2024 does not, so the gap is not a simple difference: {:?}",
+            &y25 - &y24
+        );
+        let gap = &y24 - &y25;
+        assert_eq!(gap.len(), 34, "absent TY2025 cells: {gap:?}");
+
+        // ★★ And the premise the 46-cell figure rests on: the retirement cells are absent from BOTH.
+        //    If a build adds them to one map and not the other, this reds before the spec misleads.
+        for k in RETIREMENT {
+            assert!(
+                !y24.contains(*k),
+                "TY2024 now maps {k} — update the I-8 fold in the spec"
+            );
+            assert!(
+                !y25.contains(*k),
+                "TY2025 now maps {k} — update the I-8 fold in the spec"
+            );
+        }
+
+        // The document must still state these numbers. Checked as whole phrases, so a reworded
+        // sentence that keeps the figures passes and a changed figure does not.
+        let spec = fs::read_to_string(repo_root().join("design/ty2025/SPEC_retirement_income.md"))
+            .expect("the retirement spec");
+        for phrase in ["**35**", "**34 absent cells**", "34 + 6 + 6 = 46"] {
+            assert!(
+                spec.contains(phrase),
+                "the spec no longer states {phrase:?}; the measured figures are 35 / 1 / 34 / 46"
+            );
+        }
+    }
+
+    /// ★★★ **B1 — the counter must be watched telling the two files apart, not merely producing a
+    /// number.** Without this, `map_money_line_cells` could return the same set for both years (or an
+    /// empty one) and the test above would still be satisfiable by editing its own expectations.
+    #[test]
+    fn the_counter_discriminates_and_excludes_metadata() {
+        let y24 = map_money_line_cells(2024);
+        let y25 = map_money_line_cells(2025);
+        assert_ne!(y24, y25, "the counter cannot tell the two map files apart");
+        assert!(
+            !y24.is_empty() && !y25.is_empty(),
+            "a count over nothing passes"
+        );
+
+        // ★★ `line_set` is the exact trap I-8 fell into: its own arithmetic subtracted `line_set` from
+        //    a count that never contained it, so it reported 34 and 1 where the truth is 35 and 1.
+        //    Both files carry a `line_set` key, so if it were being counted BOTH numbers would be one
+        //    too high and the error would be invisible in the difference.
+        for y in [2024, 2025] {
+            let p = repo_root().join(format!("crates/btctax-forms/forms/{y}/f1040.map.toml"));
+            let src = fs::read_to_string(&p).unwrap();
+            assert!(
+                src.lines().any(|l| l.starts_with("line_set")),
+                "TY{y} has no `line_set`, so this guard is measuring nothing"
+            );
+        }
+        // ★★★ Asserted STRUCTURALLY, not by naming the string. `!contains("line_set")` was the first
+        //     version of this and it PASSED with the digit check deleted — because `line_set` then
+        //     yields the degenerate key `"line"`, not `"line_set"`. Watching the plant is what found
+        //     that; a kill that names the expected bad value tests the value, not the mechanism.
+        for k in y24.iter().chain(y25.iter()) {
+            let after = k
+                .strip_prefix("line")
+                .unwrap_or_else(|| panic!("{k} lost its prefix"));
+            assert!(
+                after.starts_with(|c: char| c.is_ascii_digit()),
+                "{k:?} is not a money-line cell — `line` must be followed by a DIGIT, so `line_set` \
+                 and any other `line_*` metadata key cannot enter the count"
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
