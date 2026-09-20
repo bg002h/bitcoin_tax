@@ -531,6 +531,10 @@ pub fn maximal_sentinel() -> ReturnInputs {
         //       `scrub::tests::a_form_1099r_payer_and_tin_are_scrubbed`. Delete that test and the
         //       scrub of this family is unheld.
         r_1099: Vec::new(),
+        // ★ T14 — empty for the same reason as `r_1099` above: this fixture must be a FILEABLE return,
+        //   and the Social Security family still refuses until its wiring lands. It carries no identity
+        //   to scrub either, so nothing is lost to the axis by its absence.
+        ssa_1099: Vec::new(),
         sa_1099: vec![sa_1099("one", "11-1111111"), sa_1099("two", "22-2222222")],
         sa_5498: vec![sa_5498("one", "33-3333333"), sa_5498("two", "44-4444444")],
         schedule_b_filer_records: vec![

@@ -2307,6 +2307,18 @@ pub struct ReturnInputs {
     /// wrong). The refusal is `RetirementIncomeNotComputed`; the compute is the next task.
     #[serde(default)]
     pub r_1099: Vec<crate::tax::form1099r::Form1099R>,
+    /// ★★★ **T14 — Form SSA-1099 / RRB-1099 rows** (Social Security, 1040 lines 6a and 6b).
+    ///
+    /// ★★ **ONE LETTER from [`Self::sa_1099`], which is a completely different document** — Form
+    /// 1099-SA, an HSA distribution feeding Form 8889 line 14a. `ssa_1099` is the Social Security
+    /// Administration's benefit statement. The census keys are `ssa_1099` and `sa_1099` likewise, and
+    /// the two must never be read for one another.
+    ///
+    /// Box 5 is DERIVED (`form_ssa1099::box5_net_benefits`), never a field: the facsimile prints its own
+    /// definition, *"Box 5. Net Benefits for 2025 (Box 3 minus Box 4)"*, and collecting all three would
+    /// permit a triple that contradicts itself.
+    #[serde(default)]
+    pub ssa_1099: Vec<crate::tax::form_ssa1099::FormSsa1099>,
     /// ★★★ **R4 / §5.2 — Form 5498-SA rows** (T16). Transcribed and censused; no line of Form 8889
     /// sums them, and [`Form5498Sa`] says why in the form's own words.
     #[serde(default)]
@@ -3073,6 +3085,7 @@ impl Default for ReturnInputs {
             b_1099: Vec::new(),
             form_1098e: Vec::new(),
             r_1099: Vec::new(),
+            ssa_1099: Vec::new(),
             sa_1099: Vec::new(),
             sa_5498: Vec::new(),
             // ★★★ R3 — all `None`: a fresh return has been asked NOTHING about income that arrived

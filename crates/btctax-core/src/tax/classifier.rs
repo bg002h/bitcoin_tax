@@ -123,6 +123,8 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         form_1098,
         form_1098e,
         r_1099,
+        // ★ T14 — see the note at the SSA-1099 loop below: no leaf here needs classifying.
+        ssa_1099: _,
         sa_1099,
         sa_5498,
         schedule_b_filer_records,
@@ -321,6 +323,11 @@ pub fn classify(ri: &ReturnInputs) -> Census {
     for r in r_1099 {
         classify_1099r(&mut c, r);
     }
+    // ★ T14 — a Form SSA-1099 / RRB-1099 row carries no `Option<bool>` and no `Option<Usd>` leaf at
+    //   all: three plain `Usd` figures, an `Owner` and a two-variant `kind` with no serde default. So
+    //   there is nothing for the classifier to classify, and that is a fact about the struct rather than
+    //   an omission — box 5 is DERIVED, which is what removes the `Option` that would otherwise be here.
+
     for r in sa_1099 {
         classify_1099sa(&mut c, r);
     }

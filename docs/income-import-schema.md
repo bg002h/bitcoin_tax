@@ -14,7 +14,7 @@ cargo run -p xtask -- toml-schema > docs/income-import-schema.md
 
 Start from [the worked example](#a-complete-worked-example) below and delete what does not apply to you.
 
-**Almost every key is optional to the PARSER** — `ReturnInputs` carries `#[serde(default)]` on nearly every field — so a short file parses. **82 are not**, and they are measured rather than remembered — each one was deleted from a complete file and handed back to the deserializer:
+**Almost every key is optional to the PARSER** — `ReturnInputs` carries `#[serde(default)]` on nearly every field — so a short file parses. **85 are not**, and they are measured rather than remembered — each one was deleted from a complete file and handed back to the deserializer:
 
 - `b_1099[].payer`
 - `capital_loss_carryforward_in.long`
@@ -70,6 +70,9 @@ Start from [the worked example](#a-complete-worked-example) below and delete wha
 - `schedule_a.pub936_table1.mortgages_exceed_fair_market_value`
 - `schedule_b_filer_records[].payer_name`
 - `schedule_c.owner`
+- `ssa_1099[].box3_benefits_paid`
+- `ssa_1099[].kind`
+- `ssa_1099[].owner`
 - `state_local_refund.exception_could_be_claimed_as_dependent`
 - `state_local_refund.exception_joint_state_return_not_joint_now`
 - `state_local_refund.exception_last_estimated_payment_in_filing_year`
@@ -144,7 +147,7 @@ Two key groups are read and then **normalised away**, with a note on stderr rath
 
 ## Every key `income import` honours
 
-**434 paths, 391 of them leaves that take a value.** Derived from the serialized shape of `ReturnInputs` over `btctax_core::tax::scrub_axis::maximal_sentinel()` — the fixture whose every `Option` is `Some`, every `Vec` non-empty and every nested struct present, written as an exhaustive `..`-free struct literal so a new field is a compile error before it can be an unpublished key.
+**442 paths, 398 of them leaves that take a value.** Derived from the serialized shape of `ReturnInputs` over `btctax_core::tax::scrub_axis::maximal_sentinel()` — the fixture whose every `Option` is `Some`, every `Vec` non-empty and every nested struct present, written as an exhaustive `..`-free struct literal so a new field is a compile error before it can be an unpublished key.
 
 **Reading the paths.** `a.b` is the key `b` under `[a]`. `a[]` is a repeated table, written `[[a]]` once per row, and `a[].b` is a key inside one of those rows. A `<placeholder>` segment is a key YOU choose, not a literal:
 
@@ -153,7 +156,7 @@ Two key groups are read and then **normalised away**, with a note on stderr rath
 
 **Money is a string.** Every dollar figure is a decimal serialized as a quoted string — `"12400"`, `"1234.56"` — never a bare number, because a TOML float cannot carry a cent exactly.
 
-**A DATE takes EITHER spelling, and the 17 `date` leaves below were found by trying one.** Write `date_of_birth = "2012-04-15"` — that is what the deserializer accepts and what you should type. btctax's own `income scrub` writes the same value as `time`'s compact `[2012, 106]` (year, ordinal day), which also reads back, so a scrubbed file round-trips without editing. Each of those leaves was identified by substituting an ISO date string at the path and re-parsing the whole file. A leaf still shown below as `array of integers` was NOT confirmed that way — every one of them is under `answer_log*`, which the import discards anyway, and the generator fails if such a leaf ever turns up anywhere else.
+**A DATE takes EITHER spelling, and the 18 `date` leaves below were found by trying one.** Write `date_of_birth = "2012-04-15"` — that is what the deserializer accepts and what you should type. btctax's own `income scrub` writes the same value as `time`'s compact `[2012, 106]` (year, ordinal day), which also reads back, so a scrubbed file round-trips without editing. Each of those leaves was identified by substituting an ISO date string at the path and re-parsing the whole file. A leaf still shown below as `array of integers` was NOT confirmed that way — every one of them is under `answer_log*`, which the import discards anyway, and the generator fails if such a leaf ever turns up anywhere else.
 
 **The last column** is `required` when omitting the key breaks the parse (measured, see above), plus what the import does with it BEYOND storing it (derived from the path). Blank means optional and stored as given.
 
@@ -545,6 +548,14 @@ Two key groups are read and then **normalised away**, with a note on stderr rath
 | `schedule_c.qbi_ubia` | string |  |
 | `schedule_c.qbi_w2_wages` | string |  |
 | `schedule_c.will_file_required_1099` | boolean |  |
+| `ssa_1099` | array of tables |  |
+| `ssa_1099[]` | table |  |
+| `ssa_1099[].box3_benefits_paid` | string | **required** |
+| `ssa_1099[].box4_benefits_repaid` | string |  |
+| `ssa_1099[].federal_withholding` | string |  |
+| `ssa_1099[].kind` | string | **required** |
+| `ssa_1099[].owner` | string | **required** |
+| `ssa_1099[].transcribed_on` | date |  |
 | `state_local_refund` | table |  |
 | `state_local_refund.exception_could_be_claimed_as_dependent` | boolean | **required** |
 | `state_local_refund.exception_joint_state_return_not_joint_now` | boolean | **required** |

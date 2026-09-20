@@ -1420,30 +1420,71 @@ pub type ArchivedEditions = (BTreeSet<(String, String)>, BTreeSet<(String, Strin
 /// The `_`-free match is the whole mechanism; do not add a wildcard arm.
 #[must_use]
 pub fn modelled_stems() -> (BTreeSet<&'static str>, BTreeSet<&'static str>) {
+    let (forms, booklets, _) = modelled_population();
+    (forms, booklets)
+}
+
+/// The full partition of `DocumentKind::ALL`: the form stems, their instruction stems, and the families
+/// that have **no archived IRS form at all** because the issuer is not the IRS.
+///
+/// ★★★ Returning the third set is what makes the partition CHECKABLE. `modelled_stems` alone loses the
+/// publication-only families, and a gate comparing its length to `DocumentKind::ALL` would then have to
+/// be loosened — which is how a family goes missing from a census without anything reding.
+#[must_use]
+pub fn modelled_population() -> (
+    BTreeSet<&'static str>,
+    BTreeSet<&'static str>,
+    BTreeSet<&'static str>,
+) {
     use btctax_core::tax::provenance::DocumentKind;
     let mut forms = BTreeSet::new();
+    let mut publication_only: BTreeSet<&'static str> = BTreeSet::new();
     for k in DocumentKind::ALL {
         // ★ ONE fact per variant: the form stem. The instructions stem is NOT repeated here — it is
         // read back off `DOCUMENTS` below, which already carries the pairing, so the two cannot drift.
-        forms.insert(match k {
-            DocumentKind::W2 => "fw2",
-            DocumentKind::Form1099Int => "f1099int",
-            DocumentKind::Form1099Div => "f1099div",
-            DocumentKind::Form1099G => "f1099g",
-            DocumentKind::Form1099B => "f1099b",
-            DocumentKind::Form1098 => "f1098",
-            DocumentKind::Form1098E => "f1098e",
-            DocumentKind::Form1099R => "f1099r",
-            DocumentKind::Form1099Sa => "f1099sa",
-            DocumentKind::Form5498Sa => "f5498sa",
-        });
+        //
+        // ★★★ **`None` means the family has NO ARCHIVED IRS FORM, and that is a fact about the
+        //     document rather than a gap in the archive.** Form SSA-1099 and Form RRB-1099 are issued by
+        //     the Social Security Administration and the Railroad Retirement Board — there is no
+        //     `irs.gov/pub/irs-prior/fssa1099.pdf` to fetch. Their authority is the FACSIMILE printed in
+        //     Publication 915, which IS archived (`legal/…/Pub915_…--2024.pdf` and `--2025.pdf`) and is
+        //     what `tax::form_ssa1099`'s tests read their box numbers out of.
+        //
+        //     ★★ So the box census cannot run its per-box enumerator on this family — `printed_boxes`
+        //        reads a form's own text layer, and a publication's facsimile is not one. That is stated
+        //        here rather than worked around, because a census that silently skipped a family would
+        //        be the false-completeness this whole module exists against.
+        let designation = format!("{k:?}");
+        let Some(stem) = (match k {
+            DocumentKind::W2 => Some("fw2"),
+            DocumentKind::Form1099Int => Some("f1099int"),
+            DocumentKind::Form1099Div => Some("f1099div"),
+            DocumentKind::Form1099G => Some("f1099g"),
+            DocumentKind::Form1099B => Some("f1099b"),
+            DocumentKind::Form1098 => Some("f1098"),
+            DocumentKind::Form1098E => Some("f1098e"),
+            DocumentKind::Form1099R => Some("f1099r"),
+            // ★★★ NO ARCHIVED IRS FORM — see this function's own doc. The SSA and the RRB issue Form
+            //     SSA-1099 and Form RRB-1099; their authority is the Publication 915 facsimile, which IS
+            //     archived, so `tax::form_ssa1099`'s tests read the box numbers out of that instead.
+            DocumentKind::FormSsa1099 => None,
+            DocumentKind::Form1099Sa => Some("f1099sa"),
+            DocumentKind::Form5498Sa => Some("f5498sa"),
+        }) else {
+            publication_only.insert(match k {
+                DocumentKind::FormSsa1099 => "FormSsa1099",
+                _ => unreachable!("only the SSA/RRB family has no IRS form: {designation}"),
+            });
+            continue;
+        };
+        forms.insert(stem);
     }
     let booklets = DOCUMENTS
         .iter()
         .filter(|d| forms.contains(d.stem))
         .map(|d| d.instructions)
         .collect();
-    (forms, booklets)
+    (forms, booklets, publication_only)
 }
 
 /// ★★★ **I2 — THE ARCHIVED W / 1098 / 1099 EDITIONS, READ OUT OF `MANIFEST.json`.**
@@ -2109,11 +2150,26 @@ mod tests {
             modelled_booklets, censused_booklets,
             "the instructions stems must match too"
         );
-        // ★ And the derivation must not be vacuous: nine families at HEAD.
+        // ★★★ **The partition must be EXHAUSTIVE, which is stronger than "one stem per variant".**
+        //     That assertion held while every family had an archived IRS form; Form SSA-1099 / RRB-1099
+        //     does not, because the SSA and the RRB issue it. Loosening the check would have been the
+        //     wrong repair — a family could then vanish from the census with nothing reding. So the
+        //     publication-only set is returned and counted, and the two must together cover every kind.
+        let (_, _, publication_only) = modelled_population();
         assert_eq!(
-            modelled_forms.len(),
+            modelled_forms.len() + publication_only.len(),
             btctax_core::tax::provenance::DocumentKind::ALL.len(),
-            "one stem per DocumentKind variant"
+            "every DocumentKind must be either form-backed or publication-only: {} stems + {} \
+             publication-only vs {} kinds",
+            modelled_forms.len(),
+            publication_only.len(),
+            btctax_core::tax::provenance::DocumentKind::ALL.len()
+        );
+        assert_eq!(
+            publication_only,
+            ["FormSsa1099"].into_iter().collect::<BTreeSet<_>>(),
+            "exactly one family has no archived IRS form — a NEW one appearing here needs its authority \
+             archived, or a reason recorded beside it"
         );
     }
 

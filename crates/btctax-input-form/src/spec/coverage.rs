@@ -742,6 +742,17 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
         //        Until then the exemption is load-bearing in one direction only: it says "no field
         //        yet", never "no field ever".
         "r_1099",
+        // ★★★ **T14 — the Form SSA-1099 / RRB-1099 rows, exempt for the same reason as `r_1099` above
+        //     and one MORE: this family still refuses outright.**
+        //
+        //     Its compute exists (`tax::ss_benefits_worksheet`, all 18 lines, reconciled against both
+        //     oracles) and so does its input surface (`tax::form_ssa1099`), but Form 1040 lines 6a and 6b
+        //     are not yet wired to them — so `DocumentRow::Ssa1099` is still one of §2.2's excluded
+        //     families and no filer reaches a question here at all.
+        //
+        //     ★ The task that removes this exemption is the one that wires 6a/6b. Until then it says
+        //       "no field yet", never "no field ever".
+        "ssa_1099",
         // ★★ §G-15 — `tax_year` is the SCOPE the form is filled in, not a value the filer types into
         // it, so an input field for it would invite the filer to contradict the year their return is
         // filed under. Exempt DELIBERATELY, which is what this census exists to force someone to

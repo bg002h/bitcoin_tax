@@ -227,6 +227,9 @@ fn augmented_sentinel() -> btctax_core::tax::return_inputs::ReturnInputs {
     //       what this fixture is for: a `None` here would unpublish that key.
     ri.r_1099
         .push(btctax_core::tax::testonly::form_1099r_all_boxes_populated());
+    // ★ T14 — the Social Security family, same reason: an empty array publishes none of a row's keys.
+    ri.ssa_1099
+        .push(btctax_core::tax::testonly::form_ssa1099_all_boxes_populated());
     ri
 }
 

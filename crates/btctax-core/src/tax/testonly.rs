@@ -32,6 +32,21 @@ use crate::event::{BasisSource, DisposeKind, IncomeKind};
 /// ★ It lives in `btctax-core` rather than in `xtask` because `dec!` and `time::macros::date!` are
 /// core's dependencies, not xtask's — and duplicating the row in each caller is the shape this repo
 /// keeps getting wrong.
+/// ★★★ **A fully-populated Form SSA-1099 row, for the same reason its 1099-R sibling exists**: the
+/// schema publishes keys by walking a serialized fixture, and an empty array documents none of the keys
+/// inside a row. Every field is non-zero so none is unpublished.
+#[must_use]
+pub fn form_ssa1099_all_boxes_populated() -> crate::tax::form_ssa1099::FormSsa1099 {
+    crate::tax::form_ssa1099::FormSsa1099 {
+        owner: crate::tax::return_inputs::Owner::Taxpayer,
+        kind: crate::tax::form_ssa1099::SsaFormKind::Ssa1099,
+        transcribed_on: Some(time::macros::date!(2025 - 02 - 09)),
+        box3_benefits_paid: dec!(24000),
+        box4_benefits_repaid: dec!(1200),
+        federal_withholding: dec!(1800),
+    }
+}
+
 #[must_use]
 pub fn form_1099r_all_boxes_populated() -> crate::tax::form1099r::Form1099R {
     crate::tax::form1099r::Form1099R {

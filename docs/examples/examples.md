@@ -721,6 +721,7 @@ $ btctax --vault v.pgp income show --year 2024
   ],
   "sa_1099": [],
   "r_1099": [],
+  "ssa_1099": [],
   "sa_5498": [],
   "schedule_c": {
     "owner": "taxpayer",

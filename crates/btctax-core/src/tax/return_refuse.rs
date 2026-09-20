@@ -2124,6 +2124,11 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         //   negative on a real form: a distribution, a withholding and a contribution are all
         //   magnitudes, so a negative is a mistyped row and must not reach a line.
         r_1099,
+        // ★ T14 — Form SSA-1099 / RRB-1099 carries THREE money boxes (3, 4, and the withholding box —
+        //   6 on the SSA form, 10 on the RRB one). None may be negative: benefits paid, benefits repaid
+        //   and tax withheld are all magnitudes. ★ Box 5 is DERIVED and CAN be negative, which is why it
+        //   is not a field and therefore not screened here.
+        ssa_1099,
         // ★ R4 / T16 — the HSA information returns carry money (a distribution, an FMV, an
         //   earnings-on-excess figure); `screen_form_8889` screens all of it.
         sa_1099,
@@ -2530,6 +2535,29 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             (*box17_local_tax_withheld, "a Form 1099-R box 17"),
         ] {
             if v.is_some_and(neg) {
+                return Some(what);
+            }
+        }
+    }
+    for r in ssa_1099 {
+        let crate::tax::form_ssa1099::FormSsa1099 {
+            owner: _,
+            // Which of the two forms; decides the withholding BOX NUMBER, not a figure.
+            kind: _,
+            transcribed_on: _,
+            box3_benefits_paid,
+            box4_benefits_repaid,
+            federal_withholding,
+        } = r;
+        for (v, what) in [
+            (*box3_benefits_paid, "a Form SSA-1099/RRB-1099 box 3"),
+            (*box4_benefits_repaid, "a Form SSA-1099/RRB-1099 box 4"),
+            (
+                *federal_withholding,
+                "a Form SSA-1099/RRB-1099 withholding box (6 on an SSA-1099, 10 on an RRB-1099)",
+            ),
+        ] {
+            if neg(v) {
                 return Some(what);
             }
         }

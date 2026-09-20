@@ -63,6 +63,17 @@ pub enum DocumentKind {
     /// censused, so adding this variant is a build error until `DOCUMENTS`, `section_of_stem` and all
     /// 21 `BoxEntry` rows land with it.
     Form1099R,
+    /// ★★★ **T14 — Form SSA-1099 / Form RRB-1099.** Social Security and railroad-retirement benefits,
+    /// 1040 lines 6a and 6b.
+    ///
+    /// ★★ **It has NO archived IRS form**, and that is a fact about the document: the SSA and the RRB
+    /// issue it, not the IRS. Its authority is the facsimile in Publication 915, which is archived — so
+    /// `box_census::modelled_stems` maps it to `None` and the per-box enumerator does not run on it.
+    ///
+    /// ★ **Do not confuse it with [`Self::Form1099Sa`]**, one letter away and a completely different
+    /// document (an HSA distribution, Form 8889 line 14a). The census keys `ssa_1099` and `sa_1099` are
+    /// likewise one letter apart.
+    FormSsa1099,
     Form1099Sa,
     /// ★ T16 — Form 5498-SA, *HSA, Archer MSA, or Medicare Advantage MSA Information*. No line sums
     /// it; the row is transcribed so the contributions on Form 8889 line 2 can be checked against
@@ -94,6 +105,7 @@ impl DocumentKind {
         DocumentKind::Form1098,
         DocumentKind::Form1098E,
         DocumentKind::Form1099R,
+        DocumentKind::FormSsa1099,
         DocumentKind::Form1099Sa,
         DocumentKind::Form5498Sa,
     ];
@@ -137,6 +149,7 @@ pub const LEAF_SOURCE: &[(&str, Source)] = &[
     ("form_1098", Source::Document(DocumentKind::Form1098)),
     ("form_1098e", Source::Document(DocumentKind::Form1098E)),
     ("r_1099", Source::Document(DocumentKind::Form1099R)),
+    ("ssa_1099", Source::Document(DocumentKind::FormSsa1099)),
     ("sa_1099", Source::Document(DocumentKind::Form1099Sa)),
     ("sa_5498", Source::Document(DocumentKind::Form5498Sa)),
     // ── The filer's own records ──────────────────────────────────────────────────────────────────
@@ -445,6 +458,15 @@ fn document_row_facts(ri: &ReturnInputs, kind: DocumentKind, i: usize) -> Docume
             ri.r_1099.get(i).map(|r| r.payer.clone()),
             ri.r_1099.get(i).map(|r| r.payer_tin.clone()),
             TranscribedOn::Row(ri.r_1099.get(i).and_then(|r| r.transcribed_on)),
+        ),
+        DocumentKind::FormSsa1099 => (
+            "Form SSA-1099 or RRB-1099",
+            ri.ssa_1099.len(),
+            // ★ The SSA and the RRB print no payer TIN on these forms, so there is no issuer identity
+            //   to carry beyond the agency named by `kind`.
+            ri.ssa_1099.get(i).map(|r| r.kind.designation().to_string()),
+            None,
+            TranscribedOn::Row(ri.ssa_1099.get(i).and_then(|r| r.transcribed_on)),
         ),
         DocumentKind::Form1099Sa => (
             "Form 1099-SA",
@@ -1258,6 +1280,16 @@ mod tests {
                     exception_applies: Some(false),
                 });
             }
+            DocumentKind::FormSsa1099 => {
+                ri.ssa_1099.push(crate::tax::form_ssa1099::FormSsa1099 {
+                    owner: crate::tax::return_inputs::Owner::Taxpayer,
+                    kind: crate::tax::form_ssa1099::SsaFormKind::Ssa1099,
+                    transcribed_on: None,
+                    box3_benefits_paid: crate::conventions::Usd::ZERO,
+                    box4_benefits_repaid: crate::conventions::Usd::ZERO,
+                    federal_withholding: crate::conventions::Usd::ZERO,
+                });
+            }
             DocumentKind::Form1099Sa => ri.sa_1099.push(t::Form1099Sa {
                 payer: "Custodian G".into(),
                 ..Default::default()
@@ -1331,14 +1363,26 @@ mod tests {
         //       declared in a third module would red here — as 9 declared against 10 walked — which is
         //       the failure direction that names itself. The `walked` half needs no list at all: it
         //       derives from `DocumentKind::ALL`.
-        const SOURCES: [&str; 2] = [RETURN_INPUTS_SRC, include_str!("form1099r.rs")];
+        // ★★★ **THIRD module, and this list PREDICTED its own next failure.** The T14 note below said it
+        //     covers `return_inputs.rs` and `form1099r.rs` and NOTHING ELSE, and that a family declared
+        //     in a third module *"would red here — as 9 declared against 10 walked — which is the failure
+        //     direction that names itself."* `form_ssa1099.rs` is that third module, it red at 10 against
+        //     11, and the prediction was exact.
+        //
+        //     ★ Still a list and still honest about it: a FOURTH module reds the same way. The `walked`
+        //       half needs no list — it derives from `DocumentKind::ALL`.
+        const SOURCES: [&str; 3] = [
+            RETURN_INPUTS_SRC,
+            include_str!("form1099r.rs"),
+            include_str!("form_ssa1099.rs"),
+        ];
         let declared: usize = SOURCES
             .iter()
             .map(|src| src.matches("pub transcribed_on: Option<Date>,").count())
             .sum();
         // A broken parse must be LOUD, not silently permissive.
         assert!(
-            declared >= 9,
+            declared >= 10,
             "the source scan found {declared} `transcribed_on` columns — it has stopped parsing"
         );
         let ri = crate::tax::return_inputs::ReturnInputs::default();
@@ -1366,7 +1410,7 @@ mod tests {
     fn every_document_kind_is_listed_once() {
         assert_eq!(
             DocumentKind::ALL.len(),
-            10,
+            11,
             "the W-2, the four 1099 families `income import` fills, the 1098 and 1098-E, and \
              T16's two HSA information returns"
         );

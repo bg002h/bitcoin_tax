@@ -868,6 +868,11 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
         sa_1099: _,
         // ★ T14 — Form 1099-R rows carry a payer NAME and TIN; scrubbed in its own loop below.
         r_1099: _,
+        // ★★ T14 — Form SSA-1099 / RRB-1099 carries NO issuer identity to scrub: the SSA and the RRB
+        //    print no payer name or TIN on these statements, so the only identifying content would be
+        //    the beneficiary's own name and SSN — which live on `header`, are scrubbed there, and are
+        //    deliberately NOT duplicated onto the row.
+        ssa_1099: _,
         sa_5498: _,
         // ★★★ R5 / T5 — THE MOST IDENTIFYING ROWS ON THE RETURN. A `schedule_b_filer_records` row
         //     is the seller-financed-mortgage case Schedule B asks for BY NAME: the buyer's own
