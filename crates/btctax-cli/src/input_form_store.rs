@@ -1547,6 +1547,12 @@ mod tests {
                 DocumentRow::Form1098 => r.form_1098.push(Default::default()),
                 DocumentRow::Form1098e => r.form_1098e.push(Default::default()),
                 // ★ T16 — the two HSA information returns became countable with Form 8889.
+                // ★ T14 — the 1099-R became a COUNTABLE row when the census stopped refusing it.
+                //   `Form1099R` has no `Default` on purpose (a defaulted `kind` would fabricate the
+                //   routing between lines 4a/4b and 5a/5b), so the shared fixture is used.
+                DocumentRow::R1099 => r
+                    .r_1099
+                    .push(btctax_core::tax::testonly::form_1099r_all_boxes_populated()),
                 DocumentRow::Sa1099 => r.sa_1099.push(Default::default()),
                 DocumentRow::Sa5498 => r.sa_5498.push(Default::default()),
                 other => panic!("a new countable census row ({other:?}) needs a case here"),

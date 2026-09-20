@@ -176,14 +176,33 @@ impl DocumentRow {
             // ★ T16 — both HSA information returns have their own section, so neither is an
             //   excluded family and neither is owed an exit.
             DocumentRow::Sa1099 | DocumentRow::Sa5498 => return None,
+            // ★★★ **T14 — the Form 1099-R is SUPPORTED as of 2026-09-20 and owes no exit.**
+            //
+            //     Its exit sentence used to read *"btctax cannot take a Form 1099-R for this year:
+            //     Form 1040 lines 4a–5b and the Simplified Method are not built"* — and by the time
+            //     the compute landed, the first half of that was FALSE while the row still refused
+            //     `Some(true)`. So a filer answering the census honestly was turned away from a
+            //     feature that worked.
+            //
+            //     ★★ That is the shape this repo keeps finding: the thing that DECIDES (the census)
+            //        was not the thing that KNOWS (the compute). Nothing failed, because a refusal
+            //        that is too wide looks exactly like a refusal that is right.
+            //
+            //     ★ What is still refused is narrower and lives per document, not per family:
+            //       `screen_r1099_unsupported` refuses a declared exception, a code-T Roth answered
+            //       no, an unreadable box and a taxable amount the payer did not determine — which
+            //       includes every case the Simplified Method would have been needed for.
+            DocumentRow::R1099 => return None,
             // ── §2.2, verbatim. ─────────────────────────────────────────────────────────────────
-            DocumentRow::R1099 => {
-                "btctax cannot take a Form 1099-R for this year: Form 1040 lines 4a–5b and the \
-                 Simplified Method are not built (T14, on S2). File with a preparer, or wait for T14."
-            }
             DocumentRow::Ssa1099 => {
-                "btctax cannot take Social Security or railroad retirement benefits: the Social \
-                 Security Benefits Worksheet is not built (T14, on S2)."
+                // ★★ CORRECTED 2026-09-20: the Social Security Benefits Worksheet IS built
+                //    (`tax::ss_benefits_worksheet`, all 18 lines, reconciled against both oracles) and
+                //    so is the input surface (`tax::form_ssa1099`). What is NOT built is the WIRING —
+                //    no `ReturnInputs` field carries the rows and no 1040 line reads them — so the
+                //    family still refuses, and the sentence now says the true reason.
+                "btctax cannot take Social Security or railroad retirement benefits yet: the Social \
+                 Security Benefits Worksheet is built, but Form 1040 lines 6a and 6b are not yet \
+                 wired to it. File with a preparer for this year."
             }
             DocumentRow::NecMiscK1099 => {
                 "btctax cannot take a Form 1099-NEC, 1099-MISC or 1099-K this year. Box 1 / \
@@ -266,6 +285,21 @@ impl DocumentRow {
             DocumentRow::W2 => {
                 "enter it in the W-2 section of the tax-inputs form, or as a `[[w2s]]` table through \
                  `btctax income import`"
+            }
+            // ★★★ **T14 — the 1099-R's route is the TOML ONLY, and saying so is the point.**
+            //
+            //     `SectionId::R1099s` exists as an identity (the census chain from
+            //     `DocumentKind::Form1099R` forced it) but has no LIVE rows, so there is nothing to
+            //     enter in the form yet. Naming a form section that cannot be reached would be worse
+            //     than naming one route: the filer would look for a screen that is not there.
+            //
+            //     ★ The import route is real and complete — `docs/income-import-schema.md` publishes
+            //       all 21 boxes plus the two questions.
+            DocumentRow::R1099 => {
+                "enter it as an `[[r_1099]]` table through `btctax income import` — Form 1040 lines \
+                 4a/4b (IRA) or 5a/5b (pension) and the box-4 share of line 25b read the rows. The \
+                 tax-inputs form has no Form 1099-R screen yet, so the TOML is the only route this \
+                 year"
             }
             DocumentRow::Int1099 => {
                 "enter it in the Form 1099-INT section of the tax-inputs form, or as an \
@@ -606,8 +640,9 @@ pub fn declared_rows(
         // ★ T9 — the 1098 gained a `Vec` when `Form1098` replaced the
         //   `schedule_a.mortgage_interest_1098` scalar.
         DocumentRow::Form1098 => Some(ri.form_1098.len()),
-        DocumentRow::R1099
-        | DocumentRow::Ssa1099
+        // ★ T14 — the 1099-R gained its `Vec` with the retirement build.
+        DocumentRow::R1099 => Some(ri.r_1099.len()),
+        DocumentRow::Ssa1099
         | DocumentRow::NecMiscK1099
         | DocumentRow::K1
         | DocumentRow::ScheduleERental
@@ -685,10 +720,13 @@ pub const fn requires_transcription(row: DocumentRow) -> bool {
         //     overstates tax — but the row is also where the §163(h)(3)(B) ceiling warning and the
         //     box-4 refusal live, and both of those move the other way.
         DocumentRow::Form1098 => true,
+        // ★★ T14 — a `Yes` on the 1099-R row now DEMANDS transcribed rows, exactly as the W-2 and
+        //    the other supported families do: answering yes and transcribing nothing would leave the
+        //    return silent about a document the filer said they hold.
+        DocumentRow::R1099 => true,
         // The §2.2 families refuse on `Yes` before this is ever read — none of them has rows to
         // demand.
-        DocumentRow::R1099
-        | DocumentRow::Ssa1099
+        DocumentRow::Ssa1099
         | DocumentRow::NecMiscK1099
         | DocumentRow::K1
         | DocumentRow::ScheduleERental
@@ -841,6 +879,11 @@ pub fn row_is_pre_named(
         DocumentRow::Form1098e
         // No section exists, so there is no row to be pre-named — and it is a `match`, so a kind
         // that GAINS a section reds here.
+        //
+        // ★ T14 — the 1099-R is SUPPORTED but still has no LIVE input-form section
+        //   (`SectionId::R1099s` exists as an identity only, and `spec/coverage.rs`'s `EXEMPT_LEAVES`
+        //   records why), so there is no row for the renderer to pre-name. It moves out of this arm in
+        //   the task that gives the section its rows.
         | DocumentRow::R1099
         | DocumentRow::Ssa1099
         | DocumentRow::NecMiscK1099
@@ -889,8 +932,9 @@ pub fn drop_pre_named_rows(
         DocumentRow::Sa5498 => retain_by(&mut ri.sa_5498, &keep),
         // ★ T9 — the 1098's lender IS seeded, so this arm really removes rows.
         DocumentRow::Form1098 => retain_by(&mut ri.form_1098, &keep),
+        // ★ T14 — a supported family must be able to SHED rows when the answer flips to No.
+        DocumentRow::R1099 => retain_by(&mut ri.r_1099, &keep),
         DocumentRow::Form1098e
-        | DocumentRow::R1099
         | DocumentRow::Ssa1099
         | DocumentRow::NecMiscK1099
         | DocumentRow::K1
@@ -1000,6 +1044,19 @@ mod tests {
             if declared_rows(&ri, *row).is_none() {
                 continue; // no section: nothing could be pre-named
             }
+            // ★★★ **COUNTABLE is not the same as PRE-NAMABLE, and until T14 it was.** This guard used
+            //     `declared_rows(..).is_none()` as its proxy for "has no section" — true while every
+            //     countable family also had a live input-form section. The Form 1099-R broke the
+            //     implication: it is countable (`ri.r_1099` exists and `income import` fills it) and has
+            //     NO live section, so nothing pre-names a row of it and there is nothing for the one
+            //     writer to drop.
+            //
+            //     ★ It rejoins this guard the day `SectionId::R1099s` gains rows — at which point
+            //       `row_is_pre_named` needs an arm and this skip must be deleted. Named rather than
+            //       silently filtered, so that day is a deliberate edit.
+            if matches!(row, DocumentRow::R1099) {
+                continue;
+            }
             match row {
                 DocumentRow::W2 => ri.w2s.push(W2 {
                     employer: "E".into(),
@@ -1060,6 +1117,11 @@ mod tests {
                     trustee: "P".into(),
                     ..Default::default()
                 }),
+                // ★ T14 — the 1099-R is countable but cannot be PRE-NAMED (no live section), so the
+                //   seed is a fully-built row rather than a payer-only stub.
+                DocumentRow::R1099 => ri
+                    .r_1099
+                    .push(crate::tax::testonly::form_1099r_all_boxes_populated()),
                 other => panic!("{other:?} gained a section — give it a pre-named seed here"),
             }
             let q = FORM_QUESTIONS
@@ -1108,6 +1170,19 @@ mod tests {
             let mut ri = ReturnInputs::default();
             if declared_rows(&ri, *row).is_none() {
                 continue; // no section: nothing could be pre-named
+            }
+            // ★★★ **COUNTABLE is not the same as PRE-NAMABLE, and until T14 it was.** This guard used
+            //     `declared_rows(..).is_none()` as its proxy for "has no section" — true while every
+            //     countable family also had a live input-form section. The Form 1099-R broke the
+            //     implication: it is countable (`ri.r_1099` exists and `income import` fills it) and has
+            //     NO live section, so nothing pre-names a row of it and there is nothing for the one
+            //     writer to drop.
+            //
+            //     ★ It rejoins this guard the day `SectionId::R1099s` gains rows — at which point
+            //       `row_is_pre_named` needs an arm and this skip must be deleted. Named rather than
+            //       silently filtered, so that day is a deliberate edit.
+            if matches!(row, DocumentRow::R1099) {
+                continue;
             }
             match row {
                 DocumentRow::W2 => ri.w2s.push(W2 {
@@ -1174,6 +1249,11 @@ mod tests {
                     trustee: "P".into(),
                     ..Default::default()
                 }),
+                // ★ T14 — the 1099-R is countable but cannot be PRE-NAMED (no live section), so the
+                //   seed is a fully-built row rather than a payer-only stub.
+                DocumentRow::R1099 => ri
+                    .r_1099
+                    .push(crate::tax::testonly::form_1099r_all_boxes_populated()),
                 other => panic!("{other:?} gained a section — give it a pre-named seed here"),
             }
             assert_eq!(declared_rows(&ri, *row), Some(1));
@@ -1243,10 +1323,12 @@ mod tests {
             }
         }
         assert_eq!(
-            refusing, 11,
-            "exactly §2.2's eleven excluded families refuse on Yes — the W-2 and the four 1099 \
-             families are transcribable TODAY (D1), and the two scalar-shadowed rows are not live"
-        );
+            refusing, 10,
+            "★★★ TEN, not eleven, since 2026-09-20: the Form 1099-R LEFT §2.2's excluded set when the \
+             retirement compute landed (T14). Its exit sentence used to say lines 4a–5b were not built, \
+             which had become FALSE while the row still refused a filer who answered honestly. What is \
+             still refused is narrower and per DOCUMENT — `screen_r1099_unsupported`. The remaining ten \
+             are the W-2 and four 1099 families' siblings that genuinely have no compute");
     }
 
     /// Each row's prompt names the document by the words on the paper, so the filer can check it

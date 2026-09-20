@@ -1332,7 +1332,7 @@ Schedule D (raw pre-netting part totals) — tax year 2024
     Form 1098-E                                  no         0 row(s) transcribed
     Form 1099-SA                                 no         0 row(s) transcribed
     Form 5498-SA                                 no         0 row(s) transcribed
-    Form 1099-R                                  no         no section holds rows of this type
+    Form 1099-R                                  no         0 row(s) transcribed
     Form SSA-1099 or RRB-1099                    no         no section holds rows of this type
     Form 1099-NEC, 1099-MISC or 1099-K           no         no section holds rows of this type
     Schedule K-1                                 no         no section holds rows of this type

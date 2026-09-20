@@ -6610,9 +6610,14 @@ mod tests {
             refused += 1;
         }
         assert_eq!(
-            refused, 11,
-            "§2.2's eleven excluded families refuse on Yes — a shrinking count means a family \
-             stopped being announced"
+            refused, 10,
+            "★★★ TEN since 2026-09-20, and the SHRINK IS DELIBERATE — which is exactly what this \
+             message asks to be justified. The Form 1099-R left §2.2 when the retirement compute \
+             landed (T14): its exit sentence claimed Form 1040 lines 4a–5b were not built, and that \
+             had become FALSE while the row still refused a filer who answered the census honestly. \
+             It is not un-announced — what announces it now is narrower and PER DOCUMENT \
+             (`screen_r1099_unsupported`), covering every case the family-wide refusal covered and \
+             none of the ones it covered wrongly. Any OTHER shrink is the defect this count catches."
         );
     }
 
@@ -7328,8 +7333,12 @@ mod tests {
                 // ★ T16 — the two HSA information returns gained `Vec`s with Form 8889.
                 DocumentRow::Sa1099,
                 DocumentRow::Sa5498,
+                DocumentRow::R1099,
             ],
-            "the nine `Vec`-bearing kinds, and only those, have a row count"
+            "★ TEN since T14: the nine plus the Form 1099-R, whose `Vec` landed with the retirement \
+                 build. \"Vec-bearing\" and \"has a live input-form section\" are now DIFFERENT \
+                 sets — the 1099-R has the first and not the second — so a kind appearing here is \
+                 not thereby pre-namable."
         );
         let demanding: Vec<DocumentRow> = DocumentRow::ALL
             .iter()
@@ -7364,6 +7373,15 @@ mod tests {
                 //     contributions; box 2 is the trustee's employer-and-employee calendar-year
                 //     total), so zero rows cannot understate anything.
                 DocumentRow::Sa1099,
+                // ★★★ **AND THE 1099-R (T14), for the same reason as every arrival before it: nothing
+                //     else carries a retirement distribution onto the return.** A declared Form 1099-R
+                //     with no row transcribed would leave Form 1040 lines 4a/4b or 5a/5b blank while the
+                //     filer has said they hold the document — income missing from line 9, which is the
+                //     understatement direction.
+                //
+                //     ★ It also carries box 4, so an untranscribed row loses WITHHOLDING as well, which
+                //       moves the other way and overstates the balance due. Both directions in one row.
+                DocumentRow::R1099,
             ],
             "★ 1099-B is the only supported row still OUT, and its excuse is the FORM'S OWN printed \
              blank (Schedule D line 1a/8a is a summary option, and the ledger is the crypto filer's \
@@ -12460,6 +12478,70 @@ mod param_free_tier {
     ///
     /// ★ The UNANSWERED tier is exempt BY CONSTRUCTION and correctly so: it never runs at import
     ///   (`ScreenTier::unanswered_refuses`), so its registry details name `income answer` truthfully.
+    /// ★★★ **THE REACHABILITY TEST: a filer who answers the census honestly and transcribes a Form
+    /// 1099-R gets lines 4a/4b filed — and until 2026-09-20 they DID NOT.**
+    ///
+    /// The compute landed across T14.2–T14.6 and the whole of it was unreachable, because
+    /// `DocumentRow::R1099` was still one of `SPEC_interview.md` §2.2's excluded families: answering
+    /// *"yes, I have a Form 1099-R"* refused the return with *"btctax cannot take a Form 1099-R for this
+    /// year: Form 1040 lines 4a–5b and the Simplified Method are not built."* The first half of that
+    /// sentence had become false and nothing noticed, because **a refusal that is too wide looks exactly
+    /// like a refusal that is right.**
+    ///
+    /// ★★ This is the test that would have caught it, and it is deliberately end-to-end rather than a
+    /// unit check: the defect was not in any one function but in the agreement between the census and the
+    /// compute — *the thing that decides was not the thing that knows.*
+    #[test]
+    fn a_censused_and_transcribed_form_1099r_reaches_the_return() {
+        use crate::tax::document_census::DocumentRow;
+        let mut ri = ri();
+        ri.documents.set(DocumentRow::R1099, Some(true));
+        let mut f = crate::tax::testonly::form_1099r_all_boxes_populated();
+        f.exception_applies = Some(false); // the ordinary fully-taxable case
+        f.box3_capital_gain = Usd::ZERO;
+        f.box6_net_unrealized_appreciation = Usd::ZERO;
+        f.box8_other = Usd::ZERO;
+        f.box10_allocable_to_irr = Usd::ZERO;
+        ri.r_1099.push(f);
+
+        // ★ The commit gate — every tier — must let this through.
+        let refusal = screen_inputs_tiered(
+            &ri,
+            ScreenTier {
+                package: None,
+                unanswered_refuses: true,
+            },
+        );
+        assert!(
+            refusal.is_none(),
+            "an honestly-censused, fully-transcribed Form 1099-R must not refuse: {refusal:?}"
+        );
+
+        // ★★ And the family must no longer be announced as unsupported at all.
+        assert_eq!(
+            DocumentRow::R1099.exit_sentence(),
+            None,
+            "the 1099-R owes no exit sentence now that its compute exists"
+        );
+        // ★ While a DECLARED row with nothing transcribed still refuses — the demand is real.
+        let mut declared_only = crate::tax::return_inputs::ReturnInputs {
+            tax_year: 2024,
+            ..Default::default()
+        };
+        declared_only.documents.set(DocumentRow::R1099, Some(true));
+        assert!(
+            screen_inputs_tiered(
+                &declared_only,
+                ScreenTier {
+                    package: None,
+                    unanswered_refuses: false,
+                },
+            )
+            .is_some(),
+            "answering yes and transcribing nothing must still refuse"
+        );
+    }
+
     /// ★★★ **R-1 / R-3 fire at the COMMIT gate and NOT at import — both halves asserted, because the
     /// asymmetry is the whole design and either half alone would be satisfied by a mistake.**
     ///
