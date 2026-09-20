@@ -10082,6 +10082,45 @@ real TY2025 SSN boxes are `f1_16`/`f1_19` (`/MaxLen` 9, x-band 469.0). It also *
 retirement**: give the TY2025 map a real `[header]` and it reds, telling you to write the end-to-end tick
 and delete it. B1: both planted (a grown header; the SSN FQN asserted one widget off).
 
+**2026-09-20, second pass — PAGE 1's ELEVEN IDENTITY CELLS ARE NOW RESOLVED AND VERIFIED.** Recorded here
+as evidence rather than written into the map, because `Form1040HeaderCells` is `deny_unknown_fields` with
+every field required: a partial `[header]` cannot be expressed, and fabricating the unresolved half is the
+very trap above.
+
+Each cell below was read from the TY2025 form's **own printed caption** (the caption row sits ~13pt above
+its widget row, consistent across all five rows), not from the +10 numbering coincidence:
+
+| header cell | TY2025 widget | x | verified by |
+|---|---|---|---|
+| `taxpayer_first` | `Page1[0].f1_14[0]` | 36.0 | caption *"Your first name and middle initial"* |
+| `taxpayer_last` | `Page1[0].f1_15[0]` | 253.0 | caption *"Last name"* — ★ the column moved 238.6 → **253.0** |
+| `taxpayer_ssn` | `Page1[0].f1_16[0]` | 469.0 | caption *"Your social security number"*, `/MaxLen 9` |
+| `spouse_first` | `Page1[0].f1_17[0]` | 36.0 | caption *"If joint return, spouse's first name and middle initial"* |
+| `spouse_last` | `Page1[0].f1_18[0]` | 253.0 | caption *"Last name"* |
+| `spouse_ssn` | `Page1[0].f1_19[0]` | 469.0 | caption *"Spouse's social security number"*, `/MaxLen 9` |
+| `address_street` | `Address_ReadOrder[0].f1_20[0]` | 36.0 | caption *"Home address (number and street)…"* |
+| `address_apt` | `Address_ReadOrder[0].f1_21[0]` | 418.6 | caption *"Apt. no."* |
+| `address_city` | `Address_ReadOrder[0].f1_22[0]` | 36.0 | caption *"City, town, or post office…"* |
+| `address_state` | `Address_ReadOrder[0].f1_23[0]` | 332.2 | caption *"State"* |
+| `address_zip` | `Address_ReadOrder[0].f1_24[0]` | 397.0 | caption *"ZIP code"* |
+| `foreign_country` | `Address_ReadOrder[0].f1_25[0]` | 36.0 | caption *"Foreign country name"* |
+| `foreign_province` | `Address_ReadOrder[0].f1_26[0]` | 224.2 | caption *"Foreign province/state/county"* |
+| `foreign_postal_code` | `Address_ReadOrder[0].f1_27[0]` | 397.0 | caption *"Foreign postal code"* |
+
+★★ **And this explains the earlier mis-resolution exactly.** The same-x matcher put `taxpayer_last` and
+`spouse_last` in the fiscal-year row because the LAST-NAME COLUMN moved, 238.6 → 253.0 — not because the
+numbering surprised it. The +10 shift is real; the column shift is what makes matching by x unsafe.
+
+★★★ **WHAT IS STILL UNRESOLVED, and why geometry cannot settle it.** The page-2 signature block —
+`mfs_spouse_name`, `occupation_taxpayer`, `occupation_spouse`, `ip_pin`, `spouse_ip_pin`, `phone`. Page 2
+did **not** shift uniformly: TY2024's `f2_33` is absent on TY2025, which instead has `RoutingNo[0].f2_32`
+and `AccountNo[0].f2_33` groups there. Worse, a page-2 widget sits ~11pt from a caption on **both** sides
+— the TY2025 widget at box y=126 is 10.7pt below *"…Protection PIN, enter it here"* and 11.3pt above
+*"Spouse's occupation"* — so the page-1 convention does not disambiguate it, and guessing writes an IP PIN
+into an occupation box. `xtask label-boxes` cannot help: these widgets carry no line label, so it reports
+`?`. Resolving them needs the rendered page or a caption-to-widget join that handles a caption BELOW its
+field.
+
 **Still owed:** the `fill_full_return(.., 2025)` KAT reading `checkbox_on` back off the bytes. Unchanged
 owner — it needs the header resolved, which is the fillable-year phase.
 
