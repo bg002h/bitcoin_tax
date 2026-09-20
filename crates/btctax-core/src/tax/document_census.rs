@@ -435,7 +435,8 @@ impl DocumentRow {
             DocumentRow::Sa5498 => {
                 "Form 5498-SA is furnished AFTER the filing deadline: the instructions for Forms \
                  1099-SA and 5498-SA tell the trustee \"you must provide a statement to the \
-                 participant (generally Copy B) by June 1\", and no line of Form 8889 reads this \
+                 participant (generally Copy B) by May 31 of the subsequent year\", and no line of \
+                 Form 8889 reads this \
                  form — so if it has not arrived, answer No, and nothing on your return changes. \
                  Do you have one or more Form 5498-SA IN HAND for this year (the trustee of a \
                  health savings account sends one reporting the year's contributions and the \

@@ -15,9 +15,61 @@ use std::collections::BTreeSet;
 const MAP: &str = include_str!("../forms/2024/f6251.map.toml");
 const FORM_TEXT: &str = include_str!("../../../design/forms/extract/f6251--2024.txt");
 
+/// ★★★ **THE TY2025 REVISION, which had no map test at all until 2026-09-20.**
+///
+/// `forms/2025/f6251.map.toml` has been committed and shipped — `f6251_revision.rs` selects it — while
+/// every check in this file read the 2024 map. The TY2025 Form 6251 is the OBBBA revision whose line 1
+/// split into 1a/1b, i.e. the revision most in need of a map held against the paper, and it had none.
+/// Found by `blockers::every_committed_map_year_is_held_against_its_own_form`.
+const MAP_2025: &str = include_str!("../forms/2025/f6251.map.toml");
+const FORM_TEXT_2025: &str = include_str!("../../../design/forms/extract/f6251--2025.txt");
+
+/// Every committed revision as `(year, map, extract)`. ★ The two REVISION-SPECIFIC checks below still
+/// name 2024 alone (see the module note); the two structural ones walk this.
+const REVISIONS: &[(i32, &str, &str)] = &[(2024, MAP, FORM_TEXT), (2025, MAP_2025, FORM_TEXT_2025)];
+
+/// ★★★ **`REVISIONS` COVERS EVERY COMMITTED MAP — derived from the forms directory.**
+///
+/// Without this, deleting a row from `REVISIONS` reds nothing: the `include_str!` consts stay, the
+/// file simply checks less, and both `blockers::every_committed_map_year_is_held_against_its_own_form`
+/// (which sees the paths, not the assertions) and clippy (the consts are still named by the ones that
+/// remain) report success. Measured 2026-09-20 by planting exactly that — zero tests red.
+///
+/// The gate that matters is therefore local, in the file that knows what it walks.
+#[test]
+fn revisions_covers_every_committed_f6251_map() {
+    let forms = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("forms");
+    let mut committed: Vec<i32> = std::fs::read_dir(&forms)
+        .expect("the forms directory is readable")
+        .flatten()
+        .filter_map(|e| {
+            let year: i32 = e.file_name().to_str()?.parse().ok()?;
+            e.path().join("f6251.map.toml").exists().then_some(year)
+        })
+        .collect();
+    committed.sort_unstable();
+    assert!(
+        committed.len() >= 2,
+        "only {} committed f6251 map(s) found — if the layout moved, this gate measures nothing",
+        committed.len()
+    );
+    let mut walked: Vec<i32> = REVISIONS.iter().map(|(y, _, _)| *y).collect();
+    walked.sort_unstable();
+    assert_eq!(
+        walked, committed,
+        "`REVISIONS` walks {walked:?} and the tree commits {committed:?}. A committed map absent from \
+         `REVISIONS` is a revision no check in this file holds against its own form — which is how the \
+         TY2025 OBBBA map went unheld while shipping."
+    );
+}
+
 /// Every `lineNN = "…"` in the map, as (line label, FQN).
 fn mapped() -> Vec<(String, String)> {
-    MAP.lines()
+    mapped_in(MAP)
+}
+
+fn mapped_in(map: &str) -> Vec<(String, String)> {
+    map.lines()
         .filter_map(|l| {
             let (k, v) = l.split_once('=')?;
             let n = k.trim().strip_prefix("line")?;
@@ -156,9 +208,17 @@ fn the_three_inset_widgets_land_on_the_three_parenthesised_lines() {
 
 /// ★★ y must DESCEND as the line number ascends, WITHIN each page. Catches a transposition the column
 /// check cannot see. Per page, because Part III starts on page 2 where y resets to the top.
+///
+/// ★ Walks every committed revision, so a new map year is held the day it lands.
 #[test]
 fn the_lines_descend_each_page_in_order() {
-    let doc = load(f6251_pdf(2024).unwrap()).unwrap();
+    for (year, map, _) in REVISIONS {
+        the_lines_descend_each_page_in_order_for(*year, map);
+    }
+}
+
+fn the_lines_descend_each_page_in_order_for(year: i32, map: &str) {
+    let doc = load(f6251_pdf(year).unwrap()).unwrap();
     let fields = collect_fields(&doc).unwrap();
     let y_of = |fqn: &str| -> f32 {
         fields
@@ -173,7 +233,7 @@ fn the_lines_descend_each_page_in_order() {
         (digits.parse().unwrap(), letter as u32)
     };
     for page in ["Page1", "Page2"] {
-        let mut m: Vec<(String, String)> = mapped()
+        let mut m: Vec<(String, String)> = mapped_in(map)
             .into_iter()
             .filter(|(_, f)| f.contains(page))
             .collect();
@@ -181,7 +241,7 @@ fn the_lines_descend_each_page_in_order() {
         for w in m.windows(2) {
             assert!(
                 y_of(&w[0].1) > y_of(&w[1].1),
-                "{page}: line {} sits at or below line {} ({} vs {}) — the map is transposed",
+                "f6251--{year} {page}: line {} sits at or below line {} ({} vs {}) — transposed",
                 w[0].0,
                 w[1].0,
                 y_of(&w[0].1),
@@ -193,8 +253,32 @@ fn the_lines_descend_each_page_in_order() {
 
 /// ★★★ Every quoted instruction is VERBATIM on the form. This is the standing root cause, and this is
 /// the form it happened on.
+///
+/// ★ Walks every committed revision. The per-revision COUNT is asserted from a table below rather than
+/// hardcoded once, because the count is the guard against a quote that stops being parsed and
+/// therefore silently stops being verified — a guard that must exist per revision or it guards one.
 #[test]
 fn every_quoted_instruction_is_verbatim_on_the_form() {
+    // ★ Per-revision expected counts. NOT a list beside a growing set: `REVISIONS` is what is walked,
+    //   and a revision missing from this table panics below rather than being skipped.
+    const EXPECTED: &[(i32, usize)] = &[(2024, 41), (2025, 42)];
+    for (year, map, form_text) in REVISIONS {
+        let want = EXPECTED
+            .iter()
+            .find(|(y, _)| y == year)
+            .map(|(_, n)| *n)
+            .unwrap_or_else(|| {
+                panic!(
+                    "f6251--{year} is a committed revision with no expected instruction count. Count \
+                     its quoted instructions and add the pair — a missing entry must not silently \
+                     skip the revision."
+                )
+            });
+        every_quoted_instruction_is_verbatim_for(*year, map, form_text, want);
+    }
+}
+
+fn every_quoted_instruction_is_verbatim_for(year: i32, map: &str, form_text: &str, want: usize) {
     // ★★★ STANDALONE BRACE GLYPHS ARE DROPPED, and this is not a convenience. The form draws large
     //     `{` / `}` braces to group its bracketed rows, and `pdftotext` emits them as lone tokens
     //     INSIDE a sentence: line 6's own text comes out as *"…on lines 7, 9, and } 11, and go to
@@ -210,9 +294,9 @@ fn every_quoted_instruction_is_verbatim_on_the_form() {
             .collect::<Vec<_>>()
             .join(" ")
     };
-    let form = norm(FORM_TEXT);
+    let form = norm(form_text);
     let mut checked = 0;
-    for l in MAP.lines() {
+    for l in map.lines() {
         let t = l.trim_start();
         let Some(rest) = t.strip_prefix("# ") else {
             continue;
@@ -237,14 +321,14 @@ fn every_quoted_instruction_is_verbatim_on_the_form() {
         );
         assert!(
             form.contains(&q),
-            "line {label}'s quoted instruction is NOT verbatim on the form:\n      {q:?}"
+            "f6251--{year} line {label}'s quoted instruction is NOT verbatim on the form:\n      {q:?}"
         );
         checked += 1;
     }
     assert_eq!(
-        checked, 41,
-        "all FORTY-ONE mapped instructions must be checked — the count is the guard against a quote \
-         that stops being parsed and therefore silently stops being verified"
+        checked, want,
+        "f6251--{year}: all {want} mapped instructions must be checked — the count is the guard \
+         against a quote that stops being parsed and therefore silently stops being verified"
     );
 }
 

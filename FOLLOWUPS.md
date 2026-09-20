@@ -9832,3 +9832,32 @@ success.
 the way `the_retirement_block_prints_all_six_cells…` does for TY2024. Add it in the phase that
 completes the TY2025 map — the emitter code path is written and guarded (`line6d` absent from a map
 while the flag is true is a loud `Geometry` error), it has simply never run.
+
+### FR-261 — two of f6251_map.rs's four checks still hold only the TY2024 revision (Important, owner: the TY2026 f6251 port)
+
+`forms/2025/f6251.map.toml` shipped with **no map test at all** (found by
+`blockers::every_committed_map_year_is_held_against_its_own_form`). Two of the four checks now walk
+every committed revision; two still name 2024 alone:
+
+| check | TY2025? | why |
+|---|---|---|
+| `the_lines_descend_each_page_in_order` | **yes** | purely geometric — parameterises with no per-year data |
+| `every_quoted_instruction_is_verbatim_on_the_form` | **yes** | per-revision count in a table (2024→41, 2025→42); a committed revision missing from that table PANICS rather than being skipped |
+| `every_mapped_field_exists_in_the_blank_form` | no | asserts a PARTITION of the AcroForm (mapped ∪ censused ∪ identity), and the censused/identity sets are per revision. Needs the TY2025 form read properly, not a count copied across |
+| `the_line_33_and_36_cross_references_name_different_lines` | no | TY2024 line numbers. The OBBBA revision split line 1 into 1a/1b and renumbered below it, so the equivalent pair must be READ off `f6251--2025.txt`, never inferred |
+
+**Why the two that are missing are the two that matter most.** The partition check is the one that
+catches a map shifted by one widget — which keeps every FQN existent, keeps y descending, and prints
+line N's figure in line N−1's box. Its own comment records that this repo has been bitten by
+count-not-partition before. And the 33/36 pair is the standing Form 6251 defect: a rendered `12`
+transcribed where the form says `22` inflated the tentative minimum tax by $200,000 on one vector.
+
+**Do it with the TY2026 port**, when the form is being read anyway — reading the TY2025 form carefully
+for its censused set and its cross-reference pair is the same work, and doing it hastily would produce
+a check that passes vacuously, which is worse than the gap.
+
+★ **What the guarding instruments can and cannot see.** `blockers`' gate matches on `include_str!`
+PATHS, so a `const MAP_2025` that nothing walks satisfies it, and clippy does not flag the orphan.
+`revisions_covers_every_committed_f6251_map` closes that locally, in the file that knows what it walks
+— verified by planting the deletion (reds) — but neither instrument can see WHICH of the four checks a
+revision gets. That is what this entry is for.

@@ -442,14 +442,22 @@ const QUESTION_CLAUSES: &[QuestionClause] = &[
     //     reader would have to take on trust. Sourced from `i1099sa`, which is why this table needed
     //     a per-clause `extract` at all: the sentence appears nowhere in the 1040 booklet.
     //
-    // ★ The span stops short of the YEAR the instructions print (*"by June 1, 2026"*), for the same
-    //   reason every other span here does — the prompt is asked of every year, and typing one would
-    //   be a second copy of derived data.
+    // ★★★ **RE-POINTED 2026-09-20, and the wording changed with it.** This read `i1099sa--2025` and
+    //     quoted *"by June 1"* while `i1099sa--2026` sat in the archive saying something else. The
+    //     2025 revision printed that season's APPLIED date — *"by June 1, 2026"*, because May 31, 2026
+    //     is a Sunday — and the 2026 revision prints the RULE: *"by May 31 of the subsequent year. If
+    //     May 31 falls on a Saturday, Sunday, or a legal holiday, you must provide the statement by
+    //     the next day that is not…"*. So btctax told the filer a deadline that is a day late in every
+    //     year May 31 is a weekday, and the instrument whose entire job is *"the prompt really is the
+    //     manual's words"* reported success the whole time, because it was reading the old manual.
+    //
+    // ★ Quoting the RULE rather than an applied date is also what makes the span revision-stable,
+    //   which is what the note here always intended and did not achieve.
     QuestionClause {
         id: btctax_core::tax::questions::QuestionId::DocSa5498,
-        text: "you must provide a statement to the participant (generally Copy B) by June 1",
+        text: "a statement to the participant (generally Copy B) by May\n31 of the subsequent year",
         rendered: None,
-        extract: "design/forms/extract/i1099sa--2025.txt",
+        extract: "design/forms/extract/i1099sa--2026.txt",
     },
 ];
 
@@ -740,7 +748,15 @@ mod tests {
         );
 
         // (d) RED on a softening of the deadline — the shape an editor tidying prose would commit.
-        let softened = prompt.replace("(generally Copy B) by June 1", "in June");
+        //
+        // ★ Re-pointed with the 2026 reword: the prompt now quotes the RULE ("by May 31 of the
+        //   subsequent year") rather than the 2026 season's applied date ("by June 1"). The mutation
+        //   target moved with it, which is the point — a kill whose target no longer occurs in the
+        //   subject silently stops mutating anything, and `assert_ne!` below is what catches that.
+        let softened = prompt.replace(
+            "(generally Copy B) by May 31 of the subsequent year",
+            "in May",
+        );
         assert_ne!(softened, prompt, "the mutation must change the prompt");
         assert!(
             !normalise(&softened).contains(&clause),

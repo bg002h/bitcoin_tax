@@ -2959,6 +2959,183 @@ mod tests {
         );
     }
 
+    /// ★★★ **EVERY PINNED REVISION LITERAL NAMES THE NEWEST ARCHIVED REVISION OF ITS FAMILY — or is
+    ///        listed here WITH A REASON.**
+    ///
+    /// A pin is not automatically wrong: a B1 kill that plants a year nobody will ever archive needs
+    /// one, and so does a test whose subject IS a particular revision. What is always wrong is a pin
+    /// that has fallen behind the archive **silently** — the transcription's authority, or a prompt's
+    /// wording check, still validating against a revision the IRS has superseded, and reporting
+    /// success for it.
+    ///
+    /// ★★★ **This gate found a live one on the day it was written.** `prompt_check.rs` validated the
+    /// Form 5498-SA prompt against `i1099sa--2025` while `i1099sa--2026` sat in the archive. The 2026
+    /// revision had rewritten the sentence: 2025 printed the applied date *"by June 1, 2026"* (May 31,
+    /// 2026 being a Sunday) and 2026 prints the RULE — *"by May 31 of the subsequent year. If May 31
+    /// falls on a Saturday, Sunday, or a legal holiday…"*. btctax's prompt quoted "June 1", which is a
+    /// day late in every year May 31 is a weekday, and the instrument whose whole job is *"the prompt
+    /// really is the manual's words"* was green throughout.
+    ///
+    /// ★★ **Why newest-archived and not "convert every pin to a loop".** Several of these are
+    /// legitimately about one revision, and rewriting them to scan the archive would destroy the thing
+    /// they measure. What every pin owes is a statement of WHICH revision it means and why that is
+    /// still the right one — and this gate is fail-closed: a NEW pin is not exempt, it reds.
+    #[test]
+    fn every_pinned_revision_is_the_newest_archived_or_carries_its_reason() {
+        /// `(family, pinned tag)` pins that are deliberate, each with the reason it is not stale.
+        /// ★ Not a suppression list: adding a pin does NOT add an entry here, so a new stale pin reds.
+        const DELIBERATE: &[(&str, &str, &str)] = &[
+            (
+                "f8949",
+                "1999",
+                "a B1 kill that plants a map at a year with NO archived extract, and asserts that \
+                 absence itself (`map_rows.rs`: \"the planted year must have NO archived extract, or \
+                 this kill proves nothing\"). 1999 will never be archived; the pin IS the fixture.",
+            ),
+            (
+                "f8283",
+                "2024",
+                "not a document read at all — a STRING FIXTURE. `forms_extract.rs` plants sample \
+                 `# Regenerate:` lines the normaliser must leave byte-exact, and this is one of them. \
+                 Re-pointing it to 2025 would change nothing and measure nothing.",
+            ),
+            (
+                "f6251",
+                "2024",
+                "`f6251_map.rs` holds the 2024 MAP against the 2024 FORM, and that pairing is the \
+                 point — a map is per-revision, so checking it against a different revision's form \
+                 would be the defect. What this pin must not hide is a committed map with NO test, \
+                 which is `every_committed_map_year_is_held_against_its_own_form` below.",
+            ),
+            (
+                "f8995a",
+                "2024",
+                "same pairing as f6251, and there is currently only the 2024 map. The gate that \
+                 notices a 2025 map arriving is \
+                 `every_committed_map_year_is_held_against_its_own_form`, not this one.",
+            ),
+        ];
+
+        let archived = archived();
+        let cit = scan_citations(&workspace_rust());
+        let mut stale: Vec<String> = Vec::new();
+        for ((fam, tag), sites) in &cit.pinned {
+            if DELIBERATE.iter().any(|(f, t, _)| f == fam && t == tag) {
+                continue;
+            }
+            // ★ `-DRAFT` revisions are excluded from "newest": a draft's label set cannot be read
+            //   (FR-58) and nothing may be transcribed against one.
+            let Some(newest) = archived
+                .get(fam)
+                .into_iter()
+                .flatten()
+                .filter(|t| !t.ends_with("-DRAFT"))
+                .max()
+            else {
+                continue;
+            };
+            if tag != newest {
+                stale.push(format!(
+                    "{fam}--{tag} is pinned at {} while {fam}--{newest} is archived",
+                    sites.iter().cloned().collect::<Vec<_>>().join(", ")
+                ));
+            }
+        }
+        assert!(
+            stale.is_empty(),
+            "{} pinned revision literal(s) have fallen behind the archive:\n  {}\n\n\
+             Each is one of two things. If the pin should FOLLOW the archive, re-point it and \
+             re-verify every quote against the new revision — the wording may have changed, which is \
+             the whole risk. If it is deliberately about that one revision, add it to `DELIBERATE` \
+             above with the reason, in the same commit.",
+            stale.len(),
+            stale.join("\n  ")
+        );
+    }
+
+    /// ★★★ **EVERY COMMITTED MAP YEAR IS HELD AGAINST ITS OWN FORM.**
+    ///
+    /// A map test pins a revision on purpose: `f6251_map.rs` checks `forms/2024/f6251.map.toml`
+    /// against `f6251--2024.txt`, and checking it against any other revision's form would be the
+    /// defect rather than the fix. So `every_pinned_revision_is_the_newest_archived_or_carries_its_reason`
+    /// exempts those pins — and that exemption is exactly where a real gap can hide: a map committed
+    /// for a NEW year, with no test pointing at it.
+    ///
+    /// ★★★ **It found one.** `forms/2025/f6251.map.toml` was committed and NOTHING tested it, while
+    /// the 2024 map carried four checks (every FQN exists on the blank PDF, sits in the column the form
+    /// prints it in, descends the page in line order, and carries the form's own sentence verbatim).
+    /// The TY2025 Form 6251 is the OBBBA revision whose line 1 split into 1a/1b — the revision most in
+    /// need of those four checks — and it had none of them.
+    ///
+    /// Derived on both sides: the committed map years come from the forms directory, the tested ones
+    /// from the `include_str!` paths in the test tree. Neither is typed here.
+    #[test]
+    fn every_committed_map_year_is_held_against_its_own_form() {
+        use std::collections::{BTreeMap, BTreeSet};
+        // ★ Only families that HAVE a map test are in scope: this gate is about a test falling behind
+        //   the maps it covers, not about demanding a test for every map in the tree (which is a
+        //   different and much larger claim, and not one this instrument can make).
+        let mut tested: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for (path, text) in workspace_rust() {
+            if !path.contains("/tests/") {
+                continue;
+            }
+            let mut rest = text.as_str();
+            const NEEDLE: &str = "../forms/";
+            while let Some(i) = rest.find(NEEDLE) {
+                rest = &rest[i + NEEDLE.len()..];
+                let Some((year, tail)) = rest.split_once('/') else {
+                    continue;
+                };
+                if year.len() != 4 || !year.chars().all(|c| c.is_ascii_digit()) {
+                    continue;
+                }
+                if let Some(stem) = tail.split(".map.toml").next().filter(|s| !s.contains('/')) {
+                    tested
+                        .entry(stem.to_string())
+                        .or_default()
+                        .insert(year.to_string());
+                    let _ = &path;
+                }
+            }
+        }
+        assert!(
+            tested.len() >= 2,
+            "no map tests were discovered, so this gate would pass vacuously: {tested:?}"
+        );
+
+        let forms = root().join("crates/btctax-forms/forms");
+        let mut missing: Vec<String> = Vec::new();
+        for e in std::fs::read_dir(&forms).into_iter().flatten().flatten() {
+            let year = e.file_name().to_string_lossy().to_string();
+            if year.len() != 4 || !year.chars().all(|c| c.is_ascii_digit()) {
+                continue;
+            }
+            for f in std::fs::read_dir(e.path()).into_iter().flatten().flatten() {
+                let name = f.file_name().to_string_lossy().to_string();
+                let Some(stem) = name.strip_suffix(".map.toml") else {
+                    continue;
+                };
+                if let Some(years) = tested.get(stem) {
+                    if !years.contains(&year) {
+                        missing.push(format!("forms/{year}/{name}"));
+                    }
+                }
+            }
+        }
+        missing.sort();
+        assert!(
+            missing.is_empty(),
+            "{} committed map(s) have a map TEST for their family and none for their own year:\n  \
+             {}\n\n\
+             A map is per-revision: its FQNs, columns and line order belong to one form. A year with \
+             no test is a map nobody has held against the paper it prints on. Point the family's map \
+             test at this year's map and this year's extract, in the same commit as the map.",
+            missing.len(),
+            missing.join("\n  ")
+        );
+    }
+
     /// ★★★ **B1 — a revision PIN is told apart from a revision TABLE, and the pin is UNMEASURED.**
     ///
     /// Two files, identical but for how they name the document. The prefix form notices a new
