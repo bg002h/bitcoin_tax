@@ -189,11 +189,11 @@ fn extract_lines_ignores_map_metadata() {
 fn f1040() -> Form1040Lines {
     Form1040Lines {
         line6a: None,
-        line6b: Usd::ZERO,
+        line6b: None,
         line4a: None,
-        line4b: Usd::ZERO,
+        line4b: None,
         line5a: None,
-        line5b: Usd::ZERO,
+        line5b: None,
         line1a: dec!(120000),
         line2a: dec!(1234),
         line1z: dec!(120000),

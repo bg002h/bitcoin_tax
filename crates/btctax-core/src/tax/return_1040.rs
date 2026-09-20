@@ -1990,15 +1990,26 @@ pub struct AbsoluteReturn {
     /// distribution was received (`form1099r::line_4a`, `line_5a`).
     pub ira_distributions_total: Option<Usd>,
     /// The taxable part of every IRA distribution — Σ of each document's own taxable amount.
-    pub taxable_ira: Usd,
+    ///
+    /// ★★★ **`Option`, and `None` means NO IRA DOCUMENT — which is not the same as a taxable amount of
+    /// zero.** A filer who holds no Form 1099-R files a BLANK line 4b; a filer who holds one on the Roth
+    /// `-0-` sub-branch files a printed zero, because the instructions say to. The two are
+    /// indistinguishable on the page unless the type keeps them apart, which is what
+    /// `attestation::the_all_zero_return_files_one_form_whose_every_money_line_is_zero_or_blank` exists
+    /// to enforce — and it caught this field being a bare `Usd`.
+    pub taxable_ira: Option<Usd>,
     pub pension_total: Option<Usd>,
-    /// The taxable part of every pension or annuity — Σ box 2a.
-    pub taxable_pension: Usd,
+    /// The taxable part of every pension or annuity — Σ box 2a. `None` = no pension document.
+    pub taxable_pension: Option<Usd>,
     /// 1040 L6a — Σ box 5 over every Form SSA-1099 / RRB-1099 of both spouses. `None` when the filer
     /// holds none: 6a and 6b are BLANK then, not zero.
     pub social_security_benefits: Option<Usd>,
     /// 1040 L6b — the Social Security Benefits Worksheet's line 18.
-    pub taxable_social_security: Usd,
+    ///
+    /// ★★ `None` = no Form SSA-1099 or RRB-1099 at all ⇒ a BLANK 6b. `Some(Usd::ZERO)` is the worksheet's
+    /// own instruction on either STOP branch — *"Enter -0- on Form 1040 or 1040-SR, line 6b"* — and that
+    /// printed `-0-` is the filer testifying that none of their benefits are taxable.
+    pub taxable_social_security: Option<Usd>,
     /// 1040 L9 — total income = L1a + L2b + L3b + **L4b + L5b** + L7 + L8 (T14 added the two
     /// retirement operands; a sum missing one of them is the `a-figure-with-no-reader` shape).
     pub total_income: Usd,
@@ -2499,18 +2510,31 @@ pub fn assemble_absolute(
     // has already fired in `screen_inputs_tiered` before assembly, so reaching here with an `Err` means
     // the screen was bypassed. `expect` is therefore a claim about the CALL ORDER, not about the data,
     // and the message says which order it depends on.
-    let taxable_ira = crate::tax::form1099r::line_4b(&ri.r_1099).unwrap_or_else(|(i, r)| {
+    let ira_rows = ri
+        .r_1099
+        .iter()
+        .any(|f| f.kind == crate::tax::form1099r::Form1099RKind::Ira);
+    let pension_rows = ri
+        .r_1099
+        .iter()
+        .any(|f| f.kind == crate::tax::form1099r::Form1099RKind::PensionOrAnnuity);
+    let taxable_ira_sum = crate::tax::form1099r::line_4b(&ri.r_1099).unwrap_or_else(|(i, r)| {
         panic!(
             "assemble_absolute reached a refusing Form 1099-R (row {i}: {r:?}) — \
              `screen_inputs_tiered` must run BEFORE assembly and refuse it"
         )
     });
-    let taxable_pension = crate::tax::form1099r::line_5b(&ri.r_1099).unwrap_or_else(|(i, r)| {
-        panic!(
-            "assemble_absolute reached a refusing Form 1099-R pension row {i} ({r:?}) — \
+    let taxable_pension_sum =
+        crate::tax::form1099r::line_5b(&ri.r_1099).unwrap_or_else(|(i, r)| {
+            panic!(
+                "assemble_absolute reached a refusing Form 1099-R pension row {i} ({r:?}) — \
              `screen_inputs_tiered` must run BEFORE assembly and refuse it"
-        )
-    });
+            )
+        });
+    // ★ The Option is the presence of a DOCUMENT, never the size of the figure: a Roth `Q` row with a
+    //   taxable amount of `-0-` must still PRINT its zero, and only a return with no such document blanks.
+    let taxable_ira = ira_rows.then_some(taxable_ira_sum);
+    let taxable_pension = pension_rows.then_some(taxable_pension_sum);
     let ira_distributions_total = crate::tax::form1099r::line_4a(&ri.r_1099);
     let pension_total = crate::tax::form1099r::line_5a(&ri.r_1099);
 
@@ -2543,7 +2567,7 @@ pub fn assemble_absolute(
         // No form, no line: 6a and 6b are BLANK, not zero. A printed `-0-` on 6b is the filer
         // testifying that none of their benefits are taxable, which a filer with no benefits is not
         // saying (`ss_benefits_worksheet::Outcome`).
-        (None, Usd::ZERO)
+        (None, None)
     } else {
         let outcome = crate::tax::ss_benefits_worksheet::run(
             ss_line1,
@@ -2557,8 +2581,8 @@ pub fn assemble_absolute(
                 line3_combined: wages
                     + taxable_interest
                     + ordinary_dividends
-                    + taxable_ira
-                    + taxable_pension
+                    + taxable_ira_sum
+                    + taxable_pension_sum
                     + capital_gain
                     + schedule_1_income,
                 line4_tax_exempt_interest: ri
@@ -2569,7 +2593,7 @@ pub fn assemble_absolute(
                 line6_schedule_1_block: ss_worksheet_line6,
             },
         );
-        (Some(ss_line1), outcome.line_6b())
+        (Some(ss_line1), Some(outcome.line_6b()))
     };
 
     // ★★★ **T14 — the two retirement operands are IN the L9 sum.** `a-figure-with-no-reader` is why
@@ -2580,9 +2604,9 @@ pub fn assemble_absolute(
         + ordinary_dividends
         + capital_gain
         + schedule_1_income
-        + taxable_ira
-        + taxable_pension
-        + taxable_social_security; // L9
+        + taxable_ira.unwrap_or(Usd::ZERO)
+        + taxable_pension.unwrap_or(Usd::ZERO)
+        + taxable_social_security.unwrap_or(Usd::ZERO); // L9
 
     // ── Adjustments L10 (Sch 1 L26), AGI L11 ──────────────────────────────────────────────────────
     // §221 MAGI for the student-loan phase-out is AGI computed WITHOUT the student-loan deduction but WITH
@@ -5629,7 +5653,7 @@ mod tests {
         );
         assert_eq!(
             ar.taxable_social_security,
-            dec!(9_600),
+            Some(dec!(9_600)),
             "6b is the worksheet's line 18, and taxcalc's c02500 for this household is 9,600"
         );
         assert_eq!(
@@ -5652,7 +5676,12 @@ mod tests {
         };
         let bare = assemble_absolute(&none, &st, &ty2024_params(), &table, 2024);
         assert_eq!(bare.social_security_benefits, None);
-        assert_eq!(bare.taxable_social_security, Usd::ZERO);
+        assert_eq!(
+            bare.taxable_social_security, None,
+            "★★ NOT Some(ZERO): a filer with no benefit statement files a BLANK 6b. A printed `-0-` is \
+             the worksheet's own instruction on either STOP branch, which is a filer TESTIFYING that \
+             none of their benefits are taxable — and that is a different cell."
+        );
     }
 
     /// ★★★ **M-2 — LINE 9 ACTUALLY READS 4b AND 5b, end to end through `assemble_absolute`.**
@@ -5706,8 +5735,8 @@ mod tests {
         let table = synthetic_table(2024);
         let ar = assemble_absolute(&ri, &st, &ty2024_params(), &table, 2024);
 
-        assert_eq!(ar.taxable_ira, dec!(20_000), "4b");
-        assert_eq!(ar.taxable_pension, dec!(24_000), "5b");
+        assert_eq!(ar.taxable_ira, Some(dec!(20_000)), "4b");
+        assert_eq!(ar.taxable_pension, Some(dec!(24_000)), "5b");
         assert_eq!(
             ar.total_income,
             dec!(44_000),
@@ -9812,11 +9841,11 @@ mod tests {
             pf.f1040,
             crate::tax::printed::Form1040Lines {
                 line6a: None,
-                line6b: Usd::ZERO,
+                line6b: None,
                 line4a: None,
-                line4b: Usd::ZERO,
+                line4b: None,
                 line5a: None,
-                line5b: Usd::ZERO,
+                line5b: None,
                 line1z: dec!(5000),
                 line1a: dec!(5000),
                 line2a: z,

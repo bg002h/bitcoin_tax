@@ -1430,8 +1430,8 @@ Measured at `main`, 2026-09-20, with the commands beside the numbers:
 
 | | money-line cells | command |
 |---|---|---|
-| `forms/2024/f1040.map.toml` | **35** | `grep -cE '^line[0-9]' <file>` |
-| `forms/2025/f1040.map.toml` | **1** (`line7a` only) | same |
+| `forms/2024/f1040.map.toml` | **41** (35 + the six T14 mapped 2026-09-20) | `grep -cE '^line[0-9]' <file>` |
+| `forms/2025/f1040.map.toml` | **7** (`line7a` + the same six) | same |
 | the gap | **34 absent cells** | — |
 
 `line_set` is metadata and does **not** match `^line[0-9]`, so no adjustment applies. Under the other
@@ -1466,7 +1466,14 @@ the table above is the starting point, not a substitute. ★ TY2025's numbering 
 per-revision and the six TY2025 fields must be dumped separately.
 
 ★ **This is an owner-level number, so it is stated plainly: shipping both years means 34 + 6 + 6 = 46
-map cells, not "six cells and ten rows".** The ruling stands as given — *"4-6 ship for both 2024 and
+map cells, not "six cells and ten rows".** ✅ **TWELVE OF THE 46 ARE DONE (2026-09-20)** — the six
+retirement cells on each year, every AcroForm name DERIVED from that edition's own geometry rather than
+typed. The remaining 34 are TY2025's catch-up, and they are the reason TY2025 still cannot emit a packet.
+
+★★ **And mapping them found a THIRD per-revision structural difference**, of the same class as C-1's line
+6d: **TY2025 has lines 4c and 5c and TY2024 has neither.** Both are narrow write-in CODE boxes — 4c
+*"Check if … 1 Rollover · 2 QCD"*, 5c *"… 1 Rollover · 2 PSO"* — and every code names a branch this build
+REFUSES, so both stay deliberately unmapped and a blank is the correct return. The ruling stands as given — *"4-6 ship for both 2024 and
 2025"* — and nothing here reverses it; it is recorded so the sizing is honest and so the owner can
 re-confirm against the real figure rather than the one that was wrong.
 

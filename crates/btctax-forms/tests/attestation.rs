@@ -1304,3 +1304,160 @@ fn form_1040_line_20_is_blank_unless_a_schedule_3_was_actually_filed() {
         sch3.get("line8")
     );
 }
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// KAT 14 — THE RETIREMENT BLOCK REACHES THE PAPER.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// ★★★ **LINES 4a–6b, READ BACK OFF THE FILLED PDF.**
+///
+/// T14 computed six figures and wired them into line 9. It did not print them: `form1040_full.rs`
+/// never referenced `line4b`, so a return owing tax on an IRA distribution filed a paper whose line 9
+/// included that distribution and whose line 4b was **empty** — the arithmetic visible on the page did
+/// not add up, and the filer's own copy could not be reconciled against the total it was signed under.
+/// Three thousand nine hundred and eighty-six tests were green the whole time. Both halves of the
+/// defect are held here: removing the 4b write, or the 6a write, reds this test.
+///
+/// ★★ **Every expected figure is a DIFFERENT number**, and none is a multiple of another, so a cell
+/// wired to its neighbour (4b ← 4a is the easy slip, they are adjacent in the map and adjacent in the
+/// struct) cannot pass. This is the FR-230 discipline applied to an emitter: an expectation derived
+/// from the thing under test measures nothing, so each value here is arithmetic done from the
+/// statutory rule, written down, and then checked against what the paper says.
+///
+/// | cell | figure  | why that number |
+/// |------|---------|-----------------|
+/// | 4a   | 130,000 | Σ box 1 over BOTH IRA documents — 100,000 + 30,000 |
+/// | 4b   | 100,000 | only the first is taxable; the second is a code-`Q` qualified Roth distribution |
+/// | 5a   |   7,000 | the pension's box 1, printed because box 2a is LESS than box 1 |
+/// | 5b   |   4,000 | the pension's box 2a — the partially-taxable branch |
+/// | 6a   |  24,000 | net benefits, box 3 − box 4 (24,000 − 0) |
+/// | 6b   |  20,400 | §86(a)(2): 85% of 24,000, the ceiling this much other income reaches |
+#[test]
+fn the_retirement_block_prints_all_six_cells_and_each_carries_its_own_figure() {
+    let (mut ri, state) = build_golden_return(&zero_inputs("Single"));
+
+    let ira_taxable = btctax_core::tax::form1099r::Form1099R {
+        box1_gross_distribution: dec!(100_000),
+        box2a_taxable_amount: Some(dec!(100_000)),
+        box7_distribution_codes: "7".into(),
+        exception_applies: Some(false),
+        ..btctax_core::tax::testonly::form_1099r_all_boxes_populated()
+    };
+    // A code-`Q` qualified Roth distribution: gross on 4a, nothing on 4b. This row is what makes the
+    // two IRA cells differ, and it is the reason the form prints 4a at all.
+    let ira_qualified_roth = btctax_core::tax::form1099r::Form1099R {
+        box1_gross_distribution: dec!(30_000),
+        box2a_taxable_amount: None,
+        box7_distribution_codes: "Q".into(),
+        exception_applies: Some(true),
+        ..btctax_core::tax::testonly::form_1099r_all_boxes_populated()
+    };
+    let pension = btctax_core::tax::form1099r::Form1099R {
+        kind: btctax_core::tax::form1099r::Form1099RKind::PensionOrAnnuity,
+        box1_gross_distribution: dec!(7_000),
+        box2a_taxable_amount: Some(dec!(4_000)),
+        box7_distribution_codes: "7".into(),
+        exception_applies: Some(false),
+        ..btctax_core::tax::testonly::form_1099r_all_boxes_populated()
+    };
+    ri.r_1099 = vec![ira_taxable, ira_qualified_roth, pension];
+    // The DOCUMENT census is the filer's own answer to "do you hold one of these?", and it is checked
+    // against the rows: a census saying no beside a transcribed row is a CONTRADICTION, not a row to
+    // trust. Both families must be declared, or `screen_inputs` refuses before any figure is computed.
+    ri.documents.r_1099 = Some(true);
+    ri.documents.ssa_1099 = Some(true);
+
+    // R-7: the §86 worksheet is barred outright by a §911/§931/§933 exclusion, so the question must be
+    // ANSWERED before a benefit figure may be computed. `Some(false)` is the filer saying no — not a
+    // default, and the refusal above proves the unanswered state is reachable.
+    ri.has_income_exclusion = Some(false);
+    ri.ssa_1099 = vec![btctax_core::tax::form_ssa1099::FormSsa1099 {
+        box3_benefits_paid: dec!(24_000),
+        box4_benefits_repaid: dec!(0),
+        ..btctax_core::tax::testonly::form_ssa1099_all_boxes_populated()
+    }];
+
+    let filed = file(&ri, &state);
+    let f1040 = cells(
+        &filed.forms,
+        "f1040",
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040, 2024).unwrap(),
+    );
+
+    let want = [
+        ("line4a", "130000"),
+        ("line4b", "100000"),
+        ("line5a", "7000"),
+        ("line5b", "4000"),
+        ("line6a", "24000"),
+        ("line6b", "20400"),
+    ];
+    let got: Vec<(&str, Option<&str>)> = want
+        .iter()
+        .map(|(k, _)| (*k, f1040.get(*k).map(String::as_str)))
+        .collect();
+    let expected: Vec<(&str, Option<&str>)> = want.iter().map(|(k, v)| (*k, Some(*v))).collect();
+    assert_eq!(
+        got, expected,
+        "the retirement block did not reach the paper. A figure that is `None` here is a cell the \
+         emitter never wrote — line 9 still includes it, so the printed return does not cross-foot."
+    );
+}
+
+/// ★★★ **AND THE OTHER HALF: A PRINTED `-0-` ON 6b IS TESTIMONY THE WORKSHEET ASKED FOR.**
+///
+/// The sibling KAT above proves the six cells print when there is something to say. This one pins the
+/// case they are most easily confused with, and which the T14 fold itself got wrong in the other
+/// direction: a filer whose ONLY income is Social Security.
+///
+/// §86 does not tax them. The worksheet says so by STOPPING — *"None of your social security benefits
+/// are taxable. Enter -0- on Form 1040 … line 6b"* — and `-0-` is a figure the filer was told to write.
+/// So 6b is `Some(ZERO)`, **not** blank, while the all-zero return one field away prints neither cell.
+/// Two identical-looking zeros:
+///
+/// | return | 6a | 6b | because |
+/// |---|---|---|---|
+/// | no benefit statement at all | blank | blank | no form, no line, no testimony |
+/// | this one — $12,000 of benefits | 12000 | 0 | the worksheet's own instruction on its STOP branch |
+///
+/// The arithmetic, from the statute rather than from the code: line 1 is 12,000, so line 2 is 6,000 and
+/// line 5 is 6,000 with no other income. Line 8 is the §86(c)(1)(A) base amount for a single filer,
+/// **$25,000** — not indexed, then or now. Line 9 asks whether 25,000 is less than 6,000; it is not, so
+/// the worksheet stops. AGI is $0 on twelve thousand dollars of benefits, and line 9 says so.
+#[test]
+fn a_benefits_only_filer_prints_gross_benefits_on_6a_and_the_worksheets_own_zero_on_6b() {
+    let (mut ri, state) = build_golden_return(&zero_inputs("Single"));
+    ri.documents.ssa_1099 = Some(true);
+    ri.has_income_exclusion = Some(false);
+    ri.ssa_1099 = vec![btctax_core::tax::form_ssa1099::FormSsa1099 {
+        box3_benefits_paid: dec!(12_000),
+        box4_benefits_repaid: dec!(0),
+        federal_withholding: dec!(0),
+        ..btctax_core::tax::testonly::form_ssa1099_all_boxes_populated()
+    }];
+
+    let filed = file(&ri, &state);
+    assert_eq!(
+        filed.ar.taxable_social_security,
+        Some(Usd::ZERO),
+        "★ Some(ZERO), not None: the worksheet instructed a -0-, and that instruction is the whole \
+         difference between this return and the all-zero one"
+    );
+    assert_eq!(
+        filed.ar.agi,
+        Usd::ZERO,
+        "§86 taxes none of these benefits, so AGI is zero on $12,000 received"
+    );
+
+    let f1040 = cells(
+        &filed.forms,
+        "f1040",
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040, 2024).unwrap(),
+    );
+    assert_eq!(
+        (f1040.get("line6a").map(String::as_str), f1040.get("line6b").map(String::as_str)),
+        (Some("12000"), Some("0")),
+        "6a carries the gross benefit and 6b carries the instructed zero; neither may be blank on a \
+         return that HAS a benefit statement"
+    );
+}

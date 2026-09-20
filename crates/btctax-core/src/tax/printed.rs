@@ -681,22 +681,25 @@ pub struct Form1040Lines {
     /// distribution — `an-entry-is-testimony`.
     pub line4a: Option<Usd>,
     /// L4b — "Taxable amount". Σ of each IRA document's own taxable amount (`form1099r::line_4b`).
-    pub line4b: Usd,
+    ///
+    /// ★★ `Option`: `None` = no IRA document ⇒ a BLANK cell. A Roth `Q` row whose taxable amount IS zero
+    /// prints its zero, because the instructions say to — the two are not the same cell.
+    pub line4b: Option<Usd>,
     /// L5a — pensions and annuities. `Option`, same instructed blank as 4a (`:2876-2880`).
     pub line5a: Option<Usd>,
-    /// L5b — "Taxable amount". Σ box 2a over pension documents.
-    pub line5b: Usd,
+    /// L5b — "Taxable amount". Σ box 2a over pension documents. `None` = no pension document.
+    pub line5b: Option<Usd>,
     /// ★★★ **L6a — Social Security benefits. `Option`, because a filer with none files a BLANK.**
     ///
     /// Σ box 5 over every Form SSA-1099 / RRB-1099 of both spouses, which is worksheet line 1's own
     /// instruction: *"Also enter this amount on Form 1040 or 1040-SR, line 6a."*
     pub line6a: Option<Usd>,
-    /// **L6b — the taxable part**, worksheet line 18.
+    /// **L6b — the taxable part**, worksheet line 18. `None` = no benefit statement ⇒ BLANK.
     ///
     /// ★★ A printed `-0-` here is TESTIMONY — the filer saying none of their benefits are taxable, which
     /// both of the worksheet's STOP branches instruct. It is NOT the same as the blank a filer with no
     /// benefits files, which is why 6a is `Option` and `Usd::ZERO` on 6b means something.
-    pub line6b: Usd,
+    pub line6b: Option<Usd>,
     /// L7 — capital gain or (loss): **Schedule D's printed line 16**, or on a net-loss year the
     /// §1211(b)-limited `−(Schedule D line 21)`. Signed with a **leading minus**.
     pub line7: Usd,
@@ -842,22 +845,22 @@ pub struct Form1040Income {
     /// L4a — IRA distributions; `Option` because the form instructs a blank (see `Form1040Lines::line4a`).
     pub line4a: Option<Usd>,
     /// L4b — the taxable part of every IRA distribution.
-    pub line4b: Usd,
+    pub line4b: Option<Usd>,
     /// L5a — pensions and annuities; `Option`, same instructed blank.
     pub line5a: Option<Usd>,
     /// L5b — the taxable part of every pension or annuity.
-    pub line5b: Usd,
+    pub line5b: Option<Usd>,
     /// ★★★ **L6a — Social Security benefits. `Option`, because a filer with none files a BLANK.**
     ///
     /// Σ box 5 over every Form SSA-1099 / RRB-1099 of both spouses, which is worksheet line 1's own
     /// instruction: *"Also enter this amount on Form 1040 or 1040-SR, line 6a."*
     pub line6a: Option<Usd>,
-    /// **L6b — the taxable part**, worksheet line 18.
+    /// **L6b — the taxable part**, worksheet line 18. `None` = no benefit statement ⇒ BLANK.
     ///
     /// ★★ A printed `-0-` here is TESTIMONY — the filer saying none of their benefits are taxable, which
     /// both of the worksheet's STOP branches instruct. It is NOT the same as the blank a filer with no
     /// benefits files, which is why 6a is `Option` and `Usd::ZERO` on 6b means something.
-    pub line6b: Usd,
+    pub line6b: Option<Usd>,
     pub line7: Usd,
     pub line8: Usd,
     pub line9: Usd,
@@ -891,16 +894,23 @@ pub fn form_1040_income_lines(
     //     stay `Option` all the way to the page: the emitter must be able to write a BLANK, which
     //     FOLLOWUPS §G-11 records it once could not.
     let line4a = ar.ira_distributions_total.map(round_dollar);
-    let line4b = round_dollar(ar.taxable_ira);
+    let line4b = ar.taxable_ira.map(round_dollar);
     let line5a = ar.pension_total.map(round_dollar);
-    let line5b = round_dollar(ar.taxable_pension);
+    let line5b = ar.taxable_pension.map(round_dollar);
     let line6a = ar.social_security_benefits.map(round_dollar);
-    let line6b = round_dollar(ar.taxable_social_security);
+    let line6b = ar.taxable_social_security.map(round_dollar);
     let line8 = sch_1.map_or(Usd::ZERO, |s| s.line10);
     // ★★★ T14 — 4b and 5b are printed operands of L9, and the sum reads the PRINTED cells.
     // ★★★ T14 — 6b joins the printed L9 sum. The worksheet reads every OTHER operand of this line
     //     (1z, 2b, 3b, 4b, 5b, 7, 8) and never 6b itself, so there is no circularity.
-    let line9 = line1z + line2b + line3b + line4b + line5b + line6b + line7 + line8; // ★ sums the PRINTED lines
+    let line9 = line1z
+        + line2b
+        + line3b
+        + line4b.unwrap_or(Usd::ZERO)
+        + line5b.unwrap_or(Usd::ZERO)
+        + line6b.unwrap_or(Usd::ZERO)
+        + line7
+        + line8; // ★ sums the PRINTED lines
     let line10 = sch_1.map_or(Usd::ZERO, |s| s.line26);
     let line11 = line9 - line10;
 
@@ -1981,9 +1991,9 @@ mod tests {
         ar.wages = dec!(1_000_000); // 1z
         ar.taxable_interest = dec!(100_000); // 2b
         ar.ordinary_dividends = dec!(10_000); // 3b
-        ar.taxable_ira = dec!(1_000); // 4b
-        ar.taxable_pension = dec!(100); // 5b
-        ar.taxable_social_security = dec!(10); // 6b
+        ar.taxable_ira = Some(dec!(1_000)); // 4b
+        ar.taxable_pension = Some(dec!(100)); // 5b
+        ar.taxable_social_security = Some(dec!(10)); // 6b
         ar.social_security_benefits = Some(dec!(50));
         ar.ira_distributions_total = Some(dec!(5_000));
         ar.pension_total = Some(dec!(500));
@@ -1995,9 +2005,21 @@ mod tests {
         assert_eq!(income.line1z, dec!(1_000_000));
         assert_eq!(income.line2b, dec!(100_000));
         assert_eq!(income.line3b, dec!(10_000));
-        assert_eq!(income.line4b, dec!(1_000), "4b must reach the printed cell");
-        assert_eq!(income.line5b, dec!(100), "5b must reach the printed cell");
-        assert_eq!(income.line6b, dec!(10), "6b must reach the printed cell");
+        assert_eq!(
+            income.line4b,
+            Some(dec!(1_000)),
+            "4b must reach the printed cell"
+        );
+        assert_eq!(
+            income.line5b,
+            Some(dec!(100)),
+            "5b must reach the printed cell"
+        );
+        assert_eq!(
+            income.line6b,
+            Some(dec!(10)),
+            "6b must reach the printed cell"
+        );
         assert_eq!(income.line6a, Some(dec!(50)));
         assert_eq!(
             income.line9,
@@ -2068,11 +2090,11 @@ mod tests {
         let z = Usd::ZERO;
         AbsoluteReturn {
             social_security_benefits: None,
-            taxable_social_security: Usd::ZERO,
+            taxable_social_security: None,
             ira_distributions_total: None,
-            taxable_ira: Usd::ZERO,
+            taxable_ira: None,
             pension_total: None,
-            taxable_pension: Usd::ZERO,
+            taxable_pension: None,
             // FR-29 — this fixture is not on the §6.3 certification path.
             form8615_certification: None,
             schedule_1a_additional: Usd::ZERO,

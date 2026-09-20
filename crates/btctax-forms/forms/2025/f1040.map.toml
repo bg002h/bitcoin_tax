@@ -13,6 +13,25 @@ instructions        = "i1040gi"
 line_set            = "f1040/2025"
 
 line7a = "topmostSubform[0].Page1[0].f1_70[0]"
+
+# ★★★ **T14 — Form 1040 lines 4a/4b, 5a/5b and 6a/6b, derived from the geometry (see the 2024 map).**
+#
+# ★★ **THIS REVISION ADDED 4c AND 5c, and they are DELIBERATELY UNMAPPED.** `f1_64` (4c) and `f1_67`
+# (5c) are narrow write-in CODE boxes — 4c: "Check if … 1 Rollover · 2 QCD"; 5c: "… 1 Rollover ·
+# 2 PSO" — sitting between each pair's amount row and the next line. They are not money, and every
+# code they can carry names a branch this build REFUSES (a rollover, a qualified charitable
+# distribution, the retired public safety officer exclusion). So leaving them blank is the CORRECT
+# return, and it is recorded here rather than left as an absence.
+#
+# ★ TY2024 has neither box. Their existence is a per-revision structural difference of the same class
+# as C-1's line 6d — which is why every name here is read off THIS edition's geometry.
+line4a = "topmostSubform[0].Page1[0].f1_62[0]"
+line4b = "topmostSubform[0].Page1[0].f1_63[0]"
+line5a = "topmostSubform[0].Page1[0].f1_65[0]"
+line5b = "topmostSubform[0].Page1[0].f1_66[0]"
+line6a = "topmostSubform[0].Page1[0].f1_68[0]"
+line6b = "topmostSubform[0].Page1[0].f1_69[0]"
+
 da_yes = { field = "topmostSubform[0].Page1[0].c1_10[0]", on = "1" }
 da_no = { field = "topmostSubform[0].Page1[0].c1_10[1]", on = "2" }
 

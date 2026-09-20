@@ -18,6 +18,25 @@ line_set            = "f1040/2024"
 # The capital-gain amount cell (line 7 for 2024). The struct field is named `line7a` for cross-year
 # uniformity; the value here is 2024's line-7 field.
 line7a = "topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_52[0]"
+
+# ★★★ **T14 — Form 1040 lines 4a/4b, 5a/5b and 6a/6b. Every name DERIVED, not typed.**
+#
+# `label_reader::label_join` reads the printed line label that governs each AcroForm box from the
+# GEOMETRY, and `dump-fields` confirms the column pairing (the subline column is x≈252, the amount
+# column x≈504). Two independent derivations agreed on this set: the geometry join, and the AcroForm
+# numbering plus coordinates measured under review r1's I-8.
+#
+# ★★ **TY2024 HAS NO LINE 4c OR 5c.** The TY2025 form added both — narrow write-in CODE boxes, not
+# money: 4c is "Check if … 1 Rollover · 2 QCD" and 5c is "… 1 Rollover · 2 PSO". Every code they
+# carry names a branch v1 REFUSES, so btctax writes neither on either year — and on this year the
+# boxes do not exist at all. Same class as C-1's finding that TY2024 has no line 6d.
+line4a = "topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_46[0]"
+line4b = "topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_47[0]"
+line5a = "topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_48[0]"
+line5b = "topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_49[0]"
+line6a = "topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_50[0]"
+line6b = "topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_51[0]"
+
 # da_present = true → this year HAS the Digital-Asset question (the adjacency guard runs). A future
 # no-DA year (2017) sets da_present = false and makes da_yes/da_no optional.
 da_present = true
@@ -323,12 +342,11 @@ extract_line = 128
 "topmostSubform[0].Page1[0].f1_40[0]" = { line = "1i", rule = "unmodeled", reason = "Nontaxable combat pay election — btctax models no combat pay and offers no election. ★ Note this cell sits in the MID column, not the amount column: line 1i feeds the EIC/IRA computations rather than the line 1z sum.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "Nontaxable combat pay" }
 
 # ── Lines 4a-6c: retirement and Social Security income ───────────────────────────────────────────
-"topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_46[0]" = { line = "4a", rule = "unmodeled", reason = "IRA distributions (gross) — btctax models no IRA, matching Schedule 2 line 8 (Form 5329).", covered_by = "RefuseReason::DocumentTypeUnsupported" }
-"topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_47[0]" = { line = "4b", rule = "unmodeled", reason = "IRA distributions, taxable amount — same.", covered_by = "RefuseReason::DocumentTypeUnsupported" }
-"topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_48[0]" = { line = "5a", rule = "unmodeled", reason = "Pensions and annuities (gross) — not modelled (matching Form 8960 line 3).", covered_by = "RefuseReason::DocumentTypeUnsupported" }
-"topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_49[0]" = { line = "5b", rule = "unmodeled", reason = "Pensions and annuities, taxable amount — same.", covered_by = "RefuseReason::DocumentTypeUnsupported" }
-"topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_50[0]" = { line = "6a", rule = "unmodeled", reason = "Social security benefits (gross) — btctax collects no SSA-1099 and runs no §86 provisional-income worksheet.", covered_by = "RefuseReason::DocumentTypeUnsupported" }
-"topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_51[0]" = { line = "6b", rule = "unmodeled", reason = "Social security benefits, taxable amount — same.", covered_by = "RefuseReason::DocumentTypeUnsupported" }
+# ★★★ **T14 — the six `unmodeled` rows for 4a/4b/5a/5b/6a/6b were DELETED from this census
+#     block on 2026-09-20, because those fields are now MAPPED above.** Their reasons said
+#     "btctax models no IRA", "not modelled", "btctax collects no SSA" — each true when written
+#     and false once the retirement build landed. The register is shrink-only precisely so that
+#     mapping a field forces this edit rather than leaving a stale excuse beside a live cell.
 "topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].c1_22[0]" = { line = "6c", rule = "unmodeled", reason = "The §86(e) lump-sum election checkbox — dead with lines 6a/6b blank.", covered_by = "RefuseReason::DocumentTypeUnsupported" }
 
 # ── Line 7's \"if not required\" checkbox ──────────────────────────────────────────────────────────

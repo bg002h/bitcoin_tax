@@ -163,25 +163,45 @@ pub fn fill_form_1040_full_with_map(
     }
 
     // ── Page 1, AMOUNT column, top to bottom. Line 7 carries a LEADING MINUS on a loss year. ────
-    let p1: [(&MoneyCell, Usd); 13] = [
+    // ★★★ **`Option<Usd>`, matching page 2's array and for the same reason its comment gives.** Lines
+    //     4b, 5b and 6b are blank-capable: `None` means the return carries no such document, which is a
+    //     different cell from a computed zero (a Roth `Q` row files a printed `-0-` because the
+    //     instructions say to). They stay IN this array keeping their descent ordinals rather than moving
+    //     to a conditional push — `verify_flat` checks the printed rows descend by those ordinals, and a
+    //     blank-capable line hoisted out of the sequence would renumber every line below it on one return
+    //     and not another.
+    let p1: [(&MoneyCell, Option<Usd>); 16] = [
         // ★ 1a must print BEFORE 1z — the form says "Add lines 1a through 1h", and a filled 1z above a
         // blank 1a does not add up (Fable P6 r1 I1).
-        (need(&map.line1a, "line1a", y)?, lines.line1a),
-        (need(&map.line1z, "line1z", y)?, lines.line1z),
-        (need(&map.line2b, "line2b", y)?, lines.line2b),
-        (need(&map.line3b, "line3b", y)?, lines.line3b),
-        (&map.line7a, lines.line7), // the existing crypto-slice cell IS line 7 on the 2024 form
-        (need(&map.line8, "line8", y)?, lines.line8),
-        (need(&map.line9, "line9", y)?, lines.line9),
-        (need(&map.line10, "line10", y)?, lines.line10),
-        (need(&map.line11, "line11", y)?, lines.line11),
-        (need(&map.line12, "line12", y)?, lines.line12),
-        (need(&map.line13, "line13", y)?, lines.line13),
-        (need(&map.line14, "line14", y)?, lines.line14),
-        (need(&map.line15, "line15", y)?, lines.line15),
+        (need(&map.line1a, "line1a", y)?, Some(lines.line1a)),
+        (need(&map.line1z, "line1z", y)?, Some(lines.line1z)),
+        (need(&map.line2b, "line2b", y)?, Some(lines.line2b)),
+        (need(&map.line3b, "line3b", y)?, Some(lines.line3b)),
+        // ★★★ **T14 — 4b, 5b and 6b. They are IN this array, in printed order, and that matters.**
+        //
+        //     The array's ordinals are what `verify_flat` checks the printed rows descend by, so a
+        //     retirement line hoisted out of the sequence would renumber every line below it.
+        //
+        //     ★★ Before this, lines 4a-6b were computed, reached `Form1040Lines`, and NOTHING WROTE
+        //        THEM — the emitter did not mention them at all. A filer's page would have shown blank
+        //        4b/5b/6b above a line 9 that included all three: an arithmetic contradiction printed on
+        //        the form, on the line the Service totals. Exactly the defect the printed-L9 cross-foot
+        //        caught one layer in, one layer further out.
+        (need(&map.line4b, "line4b", y)?, lines.line4b),
+        (need(&map.line5b, "line5b", y)?, lines.line5b),
+        (need(&map.line6b, "line6b", y)?, lines.line6b),
+        (&map.line7a, Some(lines.line7)), // the existing crypto-slice cell IS line 7 on the 2024 form
+        (need(&map.line8, "line8", y)?, Some(lines.line8)),
+        (need(&map.line9, "line9", y)?, Some(lines.line9)),
+        (need(&map.line10, "line10", y)?, Some(lines.line10)),
+        (need(&map.line11, "line11", y)?, Some(lines.line11)),
+        (need(&map.line12, "line12", y)?, Some(lines.line12)),
+        (need(&map.line13, "line13", y)?, Some(lines.line13)),
+        (need(&map.line14, "line14", y)?, Some(lines.line14)),
+        (need(&map.line15, "line15", y)?, Some(lines.line15)),
     ];
     for (ord, (cell, value)) in p1.iter().enumerate() {
-        push_money(
+        push_money_opt(
             &mut writes,
             &mut placements,
             cell,
@@ -209,6 +229,34 @@ pub fn fill_form_1040_full_with_map(
         COL_SUBLINE,
         Some((GRP_P1_SUBLINE, 1)),
     );
+
+    // ★★★ **T14 — 4a, 5a and 6a: the SUBLINE column, and `push_money_opt` because the form instructs a
+    //     BLANK on each of them.**
+    //
+    //     `None` means the form told the filer not to make an entry — a single fully-taxable
+    //     distribution for 4a/5a (`i1040gi--2025.txt:2664-2667`, `:2876-2880`), no benefit statement at
+    //     all for 6a. A printed `0` there would be sworn testimony that no distribution was received.
+    //     FOLLOWUPS §G-11 records that this emitter once could not express blank; these three cells are
+    //     what depend on it.
+    //
+    //     ★ Ordinals 2, 3, 4 continue the subline group after 2a (0) and 3a (1), in printed order.
+    for (ord, (cell, value)) in [
+        (need(&map.line4a, "line4a", y)?, lines.line4a),
+        (need(&map.line5a, "line5a", y)?, lines.line5a),
+        (need(&map.line6a, "line6a", y)?, lines.line6a),
+    ]
+    .iter()
+    .enumerate()
+    {
+        push_money_opt(
+            &mut writes,
+            &mut placements,
+            cell,
+            *value,
+            COL_SUBLINE,
+            Some((GRP_P1_SUBLINE, ord as u32 + 2)),
+        );
+    }
 
     // ── Page 2, AMOUNT column. ──────────────────────────────────────────────────────────────────
     //

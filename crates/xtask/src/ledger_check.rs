@@ -265,8 +265,11 @@ mod tests {
         let printed =
             std::fs::read_to_string(repo_root().join("crates/btctax-core/src/tax/printed.rs"))
                 .expect("printed.rs");
+        // ★ Type-agnostic on purpose: `line4b` became `Option<Usd>` when T14.12 made the blank-capable
+        //   lines expressible, and pinning the TYPE here would red on a change that has nothing to do
+        //   with whether the vectors are consumed. What this premise needs is that the LINE EXISTS.
         assert!(
-            printed.contains("pub line4b: Usd,"),
+            printed.contains("pub line4b:"),
             "Form 1040 line 4b is gone from printed.rs — this test's premise has changed"
         );
 

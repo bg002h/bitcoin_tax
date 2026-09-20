@@ -1296,8 +1296,12 @@ mod doc_figures {
     fn the_spec_map_row_figures_still_reproduce() {
         let y24 = map_money_line_cells(2024);
         let y25 = map_money_line_cells(2025);
-        assert_eq!(y24.len(), 35, "TY2024 money-line cells: {y24:?}");
-        assert_eq!(y25.len(), 1, "TY2025 money-line cells: {y25:?}");
+        // ★★★ **35 → 41 and 1 → 7 on 2026-09-20: T14 mapped the six retirement cells on BOTH years.**
+        //     This gate is what noticed. It was written hours earlier in the same session precisely
+        //     because the figures it holds had gone stale once before (the spec's "14 and 4"), and the
+        //     first change to them red it by name.
+        assert_eq!(y24.len(), 41, "TY2024 money-line cells: {y24:?}");
+        assert_eq!(y25.len(), 7, "TY2025 money-line cells: {y25:?}");
         assert!(
             y25.contains("line7a"),
             "TY2025's one cell is line7a: {y25:?}"
@@ -1313,16 +1317,16 @@ mod doc_figures {
         let gap = &y24 - &y25;
         assert_eq!(gap.len(), 34, "absent TY2025 cells: {gap:?}");
 
-        // ★★ And the premise the 46-cell figure rests on: the retirement cells are absent from BOTH.
-        //    If a build adds them to one map and not the other, this reds before the spec misleads.
+        // ★★★ **INVERTED 2026-09-20.** It used to assert the six retirement cells were ABSENT from both
+        //     maps — the premise the spec's 46-cell figure rested on. T14 mapped them, so the assertion
+        //     flips: they must be present in BOTH, and a build that maps them on one year only reds here.
+        //     That asymmetry is the real hazard — a packet would print 4b on one year and a blank on the
+        //     other with line 9 including it either way.
         for k in RETIREMENT {
+            assert!(y24.contains(*k), "TY2024 must map {k}");
             assert!(
-                !y24.contains(*k),
-                "TY2024 now maps {k} — update the I-8 fold in the spec"
-            );
-            assert!(
-                !y25.contains(*k),
-                "TY2025 now maps {k} — update the I-8 fold in the spec"
+                y25.contains(*k),
+                "TY2025 must map {k} — mapping one year only is the asymmetry"
             );
         }
 
@@ -1330,7 +1334,7 @@ mod doc_figures {
         // sentence that keeps the figures passes and a changed figure does not.
         let spec = fs::read_to_string(repo_root().join("design/ty2025/SPEC_retirement_income.md"))
             .expect("the retirement spec");
-        for phrase in ["**35**", "**34 absent cells**", "34 + 6 + 6 = 46"] {
+        for phrase in ["**41**", "**34 absent cells**", "34 + 6 + 6 = 46"] {
             assert!(
                 spec.contains(phrase),
                 "the spec no longer states {phrase:?}; the measured figures are 35 / 1 / 34 / 46"

@@ -1445,6 +1445,35 @@ pub struct Form1040Map {
     /// L3b — ordinary dividends. AMOUNT column.
     #[serde(default)]
     pub line3b: Option<MoneyCell>,
+    /// ★★★ **T14 — L4a, IRA distributions. SUBLINE column** (x ≈ [252,324]), like 2a and 3a.
+    ///
+    /// The value is `Option<Usd>` all the way from `AbsoluteReturn`: the form instructs a BLANK here on a
+    /// single fully-taxable distribution, and a printed `0` would be sworn testimony that the filer
+    /// received none.
+    #[serde(default)]
+    pub line4a: Option<MoneyCell>,
+    /// **T14 — L4b, the taxable IRA amount. AMOUNT column.**
+    #[serde(default)]
+    pub line4b: Option<MoneyCell>,
+    /// **T14 — L5a, pensions and annuities. SUBLINE column.** Same instructed blank as 4a.
+    #[serde(default)]
+    pub line5a: Option<MoneyCell>,
+    /// **T14 — L5b, the taxable pension amount. AMOUNT column.**
+    #[serde(default)]
+    pub line5b: Option<MoneyCell>,
+    /// **T14 — L6a, Social Security benefits. SUBLINE column.** Same instructed blank.
+    #[serde(default)]
+    pub line6a: Option<MoneyCell>,
+    /// **T14 — L6b, the taxable benefit. AMOUNT column.**
+    ///
+    /// ★★ A printed `-0-` here is TESTIMONY (both worksheet STOP branches instruct it) and is NOT the
+    /// same as the blank a filer with no benefits files — which is why 6a is `Option` and this is not.
+    #[serde(default)]
+    pub line6b: Option<MoneyCell>,
+    // ★★★ **NO `line4c` OR `line5c`, deliberately.** The TY2025 revision added both as narrow write-in
+    //     CODE boxes (4c: "1 Rollover · 2 QCD"; 5c: "1 Rollover · 2 PSO") and TY2024 has neither. Every
+    //     code they carry names a branch this build REFUSES, so leaving them blank is the correct return
+    //     on both years — recorded in each map file beside the cells rather than left as an absence.
     /// L8 — Schedule 1's printed L10.
     #[serde(default)]
     pub line8: Option<MoneyCell>,
