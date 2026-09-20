@@ -1630,98 +1630,214 @@ fn the_ty2025_line_6d_cell_is_the_labelled_widget_with_a_declared_on_state() {
     );
 }
 
-/// ★★★ **FR-260 — WHY THE TY2025 6d TICK CANNOT YET BE READ OFF A FILLED PDF, MEASURED.**
+/// ★★★ **FR-260 — THE HEADER BLOCKER IS GONE; THE TICK NOW WAITS ON THE MONEY-LINE SET.**
 ///
-/// The sibling KAT `the_ty2025_line_6d_cell_is_the_labelled_widget_with_a_declared_on_state` checks the
-/// map against the template. Proving the EMITTER writes the cell needs a filled TY2025 PDF, and TY2025
-/// is not fillable: its map has no `[header]` block and `YEAR.toml` says `status = "preparing"`.
+/// The TY2025 identity block is mapped (29 cells, each resolved from the form's own printed caption), so
+/// `push_header_block` no longer refuses and the `/MaxLen 2` trap that blocked the first attempt is
+/// closed. Driving the fill next reports, from the emitter itself:
 ///
-/// I tried to get there with a TEST-ONLY header borrowed from the TY2024 map, having first asserted that
-/// every widget it would write **exists** on the TY2025 template. It does. The emitter refused anyway:
+/// > `Geometry("the TY2025 Form 1040 map has no \`line1a\` — the full-return fill needs it")`
 ///
-/// > `Geometry("an SSN cell with /MaxLen 2 cannot hold an SSN (9 digits) — the map points at the wrong
-/// > widget")`
+/// ★★★ **And this one is a TRANSCRIPTION, not a mapping.** TY2025 RENUMBERED the middle of the form:
+/// AGI is **line 11a** (*"Subtract line 10 from line 9. This is your adjusted gross income"*,
+/// `f1040--2025.txt:86`) where TY2024 has line 11, and the deduction block became 12a-12e. So the 33
+/// missing cells cannot be ported by name from TY2024 — the line SET differs, which is why the two maps
+/// already declare different `line_set` values (`f1040/2024` vs `f1040/2025`).
 ///
-/// ★★★ **THE FQN EXISTING IS NOT THE SAME AS IT BEING THE SAME CELL, and that is what this test pins.**
-/// TY2025 inserted a whole fiscal-year row above the name block — `f1_04`–`f1_10`, with `/MaxLen`
-/// 2/2/4/2/2/4, i.e. two MM/DD/YYYY dates for *"or other tax year beginning … ending …"*. Every header
-/// widget below it shifted. So TY2024's `taxpayer_ssn = f1_06[0]` lands on a **two-character** box on
-/// the TY2025 form, and the only thing between that and a filed return bearing a truncated SSN was the
-/// `/MaxLen` guard.
-///
-/// ★★ **And the shift is NOT safe to apply as an offset, which is the trap worth recording.** It looks
-/// uniform at **+10** — `f1_06`→`f1_16`, `f1_09`→`f1_19`, `f1_10`→`f1_20`, each in the same x-band with
-/// dy = −6.0 — and a geometric matcher written to confirm that still mis-resolved `taxpayer_last` and
-/// `spouse_last` into the fiscal-year row. A header ported by name, or by a uniform offset, or by a
-/// quick same-x match, writes into the wrong boxes. It has to be done per cell against the printed
-/// labels, which is the job of the phase that makes TY2025 fillable.
-///
-/// What this test therefore asserts is the trap itself, so nobody re-walks into it: the TY2024 header
-/// FQNs exist on TY2025, they are DIFFERENT cells, and the real TY2025 SSN boxes are `f1_16`/`f1_19`.
+/// This test pins the gap and **demands its own retirement**: map the money lines and it reds, telling
+/// you to write the tick. Measured rather than asserted from a list, so the numbers cannot go stale.
 #[test]
-fn the_ty2024_header_fqns_exist_on_the_ty2025_template_and_are_different_cells() {
-    let ty2024: btctax_forms::testonly::Form1040Map = toml::from_str(
-        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040, 2024).unwrap(),
-    )
-    .expect("the TY2024 1040 map parses");
-    let ty2025: btctax_forms::testonly::Form1040Map = toml::from_str(
+fn the_ty2025_map_still_lacks_the_money_lines_the_full_return_fill_needs() {
+    let cells = |year: i32| -> BTreeSet<String> {
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040, year)
+            .unwrap()
+            .lines()
+            .filter_map(|l| l.split_once('='))
+            .map(|(k, _)| k.trim().to_string())
+            .filter(|k| {
+                k.strip_prefix("line")
+                    .is_some_and(|r| r.chars().next().is_some_and(|c| c.is_ascii_digit()))
+            })
+            .collect()
+    };
+    let (ty24, ty25) = (cells(2024), cells(2025));
+    let missing: Vec<&String> = ty24.difference(&ty25).collect();
+    assert!(
+        ty24.len() >= 40,
+        "only {} TY2024 money cells found — if the map layout changed, this gate is measuring nothing",
+        ty24.len()
+    );
+    assert!(
+        !missing.is_empty(),
+        "★ The TY2025 map now declares every money line TY2024 does. FR-260's end-to-end 6d tick is \
+         therefore writable: drive `fill_form_1040_full_with_map` on a computed MFS-lived-apart \
+         household and read `checkbox_on` back off `c1_42[0]`. DELETE this test in the same commit — \
+         its only purpose was to keep that from being forgotten. ★★ And re-read the line SET first: \
+         TY2025 renumbered AGI to 11a and the deduction block to 12a-12e, so a cell ported by NAME from \
+         TY2024 is pointing at a different line."
+    );
+    assert!(
+        ty25.contains("line6d"),
+        "the six retirement cells plus 6d are the TY2025 money cells that DO exist — if 6d has gone, \
+         this test is describing a map that no longer exists"
+    );
+}
+
+/// ★★★ **EVERY TY2025 HEADER CELL IS A REAL WIDGET OF THE RIGHT SHAPE — because nothing FILLS the
+///        TY2025 page yet, so the emitter's own guards never run on it.**
+///
+/// The identity block was mapped before the money lines, which means its 29 cells had **no test at all**:
+/// a wrong FQN would sit in the map until the money lines landed, and the `/MaxLen` guard that caught the
+/// first porting attempt only fires during a fill. Measured: pointing `taxpayer_ssn` back at the
+/// fiscal-year row's `f1_06[0]` red NOTHING across the whole suite.
+///
+/// So this checks the two things a fill would have: every cell exists, and the SSN cells can hold nine
+/// digits. The second is the one that matters — `f1_06[0]` EXISTS on this template and is a two-character
+/// box, so existence alone is not a check.
+#[test]
+fn every_ty2025_header_cell_exists_and_the_ssn_cells_hold_nine_digits() {
+    let map: btctax_forms::testonly::Form1040Map = toml::from_str(
         btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040, 2025).unwrap(),
     )
     .expect("the TY2025 1040 map parses");
-    assert!(
-        ty2025.header.is_none(),
-        "the TY2025 map has grown a real [header] — resolve it per cell against the printed \
-         labels, then write the end-to-end 6d tick FR-260 asks for and delete this test"
-    );
-    let h = ty2024.header.as_ref().expect("the TY2024 map has a header");
-
+    let h = map
+        .header
+        .as_ref()
+        .expect("the TY2025 identity block is mapped");
     let doc = btctax_forms::testonly::load(
         btctax_forms::testonly::f1040_pdf(2025).expect("the TY2025 template is bundled"),
     )
     .expect("the template loads");
     let fields = btctax_forms::testonly::collect_fields(&doc).expect("fields");
-    let by_fqn = |fqn: &str| fields.iter().find(|f| f.fqn == fqn);
+    let by = |fqn: &str| fields.iter().find(|f| f.fqn == fqn);
 
-    // (1) EXISTENCE IS NO PROTECTION: the TY2024 name and SSN FQNs are all on the TY2025 template.
-    for (what, fqn) in [
+    let text_cells = [
         ("taxpayer_first", &h.taxpayer_first),
+        ("taxpayer_last", &h.taxpayer_last),
+        ("taxpayer_ssn", &h.taxpayer_ssn),
+        ("spouse_first", &h.spouse_first),
+        ("spouse_last", &h.spouse_last),
+        ("spouse_ssn", &h.spouse_ssn),
+        ("address_street", &h.address_street),
+        ("address_apt", &h.address_apt),
+        ("address_city", &h.address_city),
+        ("address_state", &h.address_state),
+        ("address_zip", &h.address_zip),
+        ("mfs_spouse_name", &h.mfs_spouse_name),
+        ("occupation_taxpayer", &h.occupation_taxpayer),
+        ("occupation_spouse", &h.occupation_spouse),
+        ("ip_pin", &h.ip_pin),
+        ("spouse_ip_pin", &h.spouse_ip_pin),
+        ("phone", &h.phone),
+        ("foreign_country", &h.foreign_country),
+        ("foreign_province", &h.foreign_province),
+        ("foreign_postal_code", &h.foreign_postal_code),
+    ];
+    assert_eq!(text_cells.len(), 20, "all twenty text cells are checked");
+    for (what, fqn) in text_cells {
+        assert!(
+            by(fqn).is_some(),
+            "{what} maps to {fqn}, which is NOT a field on the TY2025 template"
+        );
+    }
+    // ★★ The SSN cells, by capacity. This is the assertion that would have caught the first port.
+    for (what, fqn) in [
         ("taxpayer_ssn", &h.taxpayer_ssn),
         ("spouse_ssn", &h.spouse_ssn),
     ] {
-        assert!(
-            by_fqn(fqn).is_some(),
-            "{what} ({fqn}) is absent from the TY2025 template, which would make this test's point moot \
-             — its whole subject is that these DO exist and are still wrong"
+        assert_eq!(
+            by(fqn).and_then(|f| f.max_len),
+            Some(9),
+            "{what} ({fqn}) must be a nine-digit box. TY2024's SSN FQN (`f1_06[0]`) EXISTS on this \
+             template and holds TWO characters — it is part of the fiscal-year row TY2025 inserted — so \
+             existence is not the check here, capacity is."
         );
     }
+    // ★ Every checkbox must exist AND declare the on-state the map writes: an undeclared on-state
+    //   renders as unchecked while the write reports success.
+    let checks = [
+        ("presidential_taxpayer", &h.presidential_taxpayer),
+        ("presidential_spouse", &h.presidential_spouse),
+        ("claimed_dependent_taxpayer", &h.claimed_dependent_taxpayer),
+        ("claimed_dependent_spouse", &h.claimed_dependent_spouse),
+        ("mfs_spouse_itemizes", &h.mfs_spouse_itemizes),
+        ("taxpayer_aged", &h.taxpayer_aged),
+        ("taxpayer_blind", &h.taxpayer_blind),
+        ("spouse_aged", &h.spouse_aged),
+        ("spouse_blind", &h.spouse_blind),
+    ];
+    assert_eq!(checks.len(), 9, "all nine header checkboxes are checked");
+    for (what, c) in checks {
+        let f = by(&c.field)
+            .unwrap_or_else(|| panic!("{what} maps to {}, not a field on the template", c.field));
+        let on = btctax_forms::testonly::button_on_states(&doc, f.id);
+        assert!(
+            on.contains(&c.on),
+            "{what} writes on-state {:?} to {} and the widget declares {on:?}",
+            c.on,
+            c.field
+        );
+    }
+    // ★★ And the TY2025 shape: the grid owns the dependents block, so these two are empty/absent.
+    assert!(
+        h.dependent_rows.is_empty() && h.more_than_four_dependents.is_none(),
+        "the TY2025 header must leave the dependents block to `[dependents_grid]`"
+    );
+}
 
-    // (2) …and the SSN one is a TWO-CHARACTER box, because TY2025 inserted the fiscal-year row above.
-    let ssn_2025 = by_fqn(&h.taxpayer_ssn).expect("checked above");
-    assert_eq!(
-        ssn_2025.max_len,
-        Some(2),
-        "TY2024's taxpayer_ssn FQN ({}) must be a 2-character cell on the TY2025 template — it is part \
-         of that revision's \"or other tax year beginning … ending …\" date row. If this changes, the \
-         header shift changed with it and the mapping below must be re-measured.",
-        h.taxpayer_ssn
+/// ★★★ **THE DEPENDENTS BLOCK IS DECLARED EXACTLY ONCE — both failure directions, driven through the
+///        real emitter.**
+///
+/// Making `dependent_rows` legitimately empty (so the TY2025 grid can own the block) created a new way to
+/// get it wrong: declare NEITHER, and no dependent prints anywhere while the map looks fine. Both
+/// directions are refusals, and both are checked here because neither had a kill — planted, and the
+/// unguarded version red nothing.
+#[test]
+fn a_map_declaring_both_dependents_blocks_or_neither_is_refused() {
+    let base: btctax_forms::testonly::Form1040Map = toml::from_str(
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040, 2025).unwrap(),
+    )
+    .expect("parses");
+    let (ri, state) = mfs_lived_apart_with_benefits();
+    let ar = absolute_for_year(&ri, &state, 2025);
+    let printed = btctax_core::tax::packet::assemble_printed_return(
+        &ri,
+        &state,
+        &BTreeMap::new(),
+        &ar,
+        &ty2025_table(),
+        2025,
+        &[],
+        btctax_core::InformationReturnRegime::NONE,
+    )
+    .expect("the fixture files");
+    let fill = |m: &btctax_forms::testonly::Form1040Map| {
+        btctax_forms::testonly::fill_form_1040_full_with_map(
+            &printed.forms.f1040,
+            &printed.header,
+            printed.filing_status,
+            m,
+        )
+        .err()
+        .map(|e| e.to_string())
+        .unwrap_or_default()
+    };
+
+    // NEITHER: drop the grid, leaving `dependent_rows` empty.
+    let mut neither = base.clone();
+    neither.dependents_grid = None;
+    let e = fill(&neither);
+    assert!(
+        e.contains("NEITHER"),
+        "a map with no dependents block at all must be REFUSED, or a return prints no dependent while \
+         looking complete: {e}"
     );
 
-    // (3) The real TY2025 SSN boxes, measured: same x-band as TY2024's, y six points lower, /MaxLen 9.
-    for (what, fqn) in [
-        ("taxpayer", "topmostSubform[0].Page1[0].f1_16[0]"),
-        ("spouse", "topmostSubform[0].Page1[0].f1_19[0]"),
-    ] {
-        let f = by_fqn(fqn).unwrap_or_else(|| panic!("{fqn} is not on the TY2025 template"));
-        assert_eq!(
-            f.max_len,
-            Some(9),
-            "the TY2025 {what} SSN box ({fqn}) must hold nine digits"
-        );
-        let r = f.rect.expect("a widget has a rect");
-        assert!(
-            (r[0] - 469.0).abs() < 1.0,
-            "the {what} SSN box sits in the same x-band as TY2024's (469.0), not at {}",
-            r[0]
-        );
-    }
+    // ★ And the baseline still fails for the MONEY lines, not the dependents block — which is what makes
+    //   the assertion above about the dependents guard rather than about any old error.
+    assert!(
+        fill(&base).contains("line1a"),
+        "the unmutated TY2025 map must fail on the missing money lines, not on the dependents block: {}",
+        fill(&base)
+    );
 }

@@ -125,3 +125,71 @@ full_time_student = { field = "topmostSubform[0].Page1[0].Table_Dependents[0].Ro
 permanently_and_totally_disabled = { field = "topmostSubform[0].Page1[0].Table_Dependents[0].Row6[0].Dependent4[0].c1_27[0]", on = "1" }
 child_tax_credit = { field = "topmostSubform[0].Page1[0].Table_Dependents[0].Row7[0].Dependent4[0].c1_31[0]", on = "1" }
 credit_for_other_dependents = { field = "topmostSubform[0].Page1[0].Table_Dependents[0].Row7[0].Dependent4[0].c1_31[1]", on = "2" }
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════
+# THE IDENTITY BLOCK — ported 2026-09-20 (FR-260).
+#
+# ★★★ Every cell below was resolved from the TY2025 form's OWN PRINTED CAPTION, never from the TY2024
+#     numbering. The FQNs shift by +10 on page 1 and that shift is REAL — but it is not what was used,
+#     because relying on it is unsafe twice over: TY2025 REUSES `c1_6`/`c1_7` for the presidential fund
+#     where TY2024 spent them on claimed-dependent, and the last-name COLUMN moved 238.6 -> 253.0, which
+#     is what made an earlier same-x match land `taxpayer_last` in the fiscal-year row.
+#
+# ★★★ **TY2025 inserted a fiscal-year row above the name block** (`f1_04`-`f1_10`, /MaxLen 2/2/4/2/2/4 —
+#     two MM/DD/YYYY dates for "or other tax year beginning … ending …"). So TY2024's
+#     `taxpayer_ssn = f1_06[0]` lands on a TWO-CHARACTER box here. Only the /MaxLen guard caught that;
+#     the FQN exists, and existing is not the same as being the same cell.
+#
+# ★★★ **The standard-deduction / age-blindness block LEFT the header.** On TY2024 it is the unnumbered
+#     "Standard Deduction" / "Age/Blindness" area of page 1. On TY2025 it is NUMBERED LINE 12a-12d, on
+#     PAGE 2 (`f1040--2025.txt:92-94`), which is why six of these cells are `Page2` widgets.
+#
+# ★ Line 12c ("You were a dual-status alien"), which TY2024 folded into 12b's caption, has no cell here:
+#   `dual_status_alien` REFUSES in both states (`DualStatusAlienUnsupported`), so the box is unreachable.
+[header]
+# y=684, captions "Your first name and middle initial" / "Last name" / "Your social security number".
+taxpayer_first  = "topmostSubform[0].Page1[0].f1_14[0]"
+taxpayer_last   = "topmostSubform[0].Page1[0].f1_15[0]"
+taxpayer_ssn    = "topmostSubform[0].Page1[0].f1_16[0]"
+# y=660, "If joint return, spouse's first name and middle initial" / "Last name" / "Spouse's social …".
+spouse_first    = "topmostSubform[0].Page1[0].f1_17[0]"
+spouse_last     = "topmostSubform[0].Page1[0].f1_18[0]"
+spouse_ssn      = "topmostSubform[0].Page1[0].f1_19[0]"
+# y=636 "Home address (number and street)…" / "Apt. no."; y=612 "City, town, or post office…" / "State" /
+# "ZIP code"; y=588 "Foreign country name" / "Foreign province/state/county" / "Foreign postal code".
+address_street  = "topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_20[0]"
+address_apt     = "topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_21[0]"
+address_city    = "topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_22[0]"
+address_state   = "topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_23[0]"
+address_zip     = "topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_24[0]"
+foreign_country     = "topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_25[0]"
+foreign_province    = "topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_26[0]"
+foreign_postal_code = "topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_27[0]"
+# y=534, the same row as TY2024's, caption "and full name here:" — the MFS/HOH spouse-or-child name.
+mfs_spouse_name = "topmostSubform[0].Page1[0].f1_29[0]"
+# Page 2's signature block. Resolved by the x COLUMN, which is identical across revisions (occupation
+# 325.0, IP PIN 504.0), plus /MaxLen 6 on the two PIN boxes, plus the taxpayer row sitting above the
+# spouse row (y 126 vs 96). Caption proximity does NOT resolve these — a widget there sits ~11pt from a
+# caption on both sides.
+occupation_taxpayer = "topmostSubform[0].Page2[0].f2_40[0]"
+ip_pin              = "topmostSubform[0].Page2[0].f2_41[0]"
+occupation_spouse   = "topmostSubform[0].Page2[0].f2_42[0]"
+spouse_ip_pin       = "topmostSubform[0].Page2[0].f2_43[0]"
+# y=84, caption row "Phone no. / Email address".
+phone               = "topmostSubform[0].Page2[0].f2_44[0]"
+# y=589.5, the Presidential Election Campaign pair, caption "You  Spouse".
+presidential_taxpayer = { field = "topmostSubform[0].Page1[0].c1_6[0]", on = "1" }
+presidential_spouse   = { field = "topmostSubform[0].Page1[0].c1_7[0]", on = "1" }
+# LINE 12a-12d, on PAGE 2. See the block note above.
+claimed_dependent_taxpayer = { field = "topmostSubform[0].Page2[0].c2_1[0]", on = "1" }   # 12a "You as a dependent"
+claimed_dependent_spouse   = { field = "topmostSubform[0].Page2[0].c2_2[0]", on = "1" }   # 12a "Your spouse as a dependent"
+mfs_spouse_itemizes        = { field = "topmostSubform[0].Page2[0].c2_3[0]", on = "1" }   # 12b "Spouse itemizes on a separate return"
+taxpayer_aged              = { field = "topmostSubform[0].Page2[0].c2_5[0]", on = "1" }   # 12d "You: Were born before January 2, 1961"
+taxpayer_blind             = { field = "topmostSubform[0].Page2[0].c2_6[0]", on = "1" }   # 12d "Are blind"
+spouse_aged                = { field = "topmostSubform[0].Page2[0].c2_7[0]", on = "1" }   # 12d "Spouse: Was born before January 2, 1961"
+spouse_blind               = { field = "topmostSubform[0].Page2[0].c2_8[0]", on = "1" }   # 12d "Is blind"
+# ★★★ `dependent_rows` is EMPTY and `more_than_four_dependents` is ABSENT, both deliberately: the TY2025
+#     dependents block is `[dependents_grid]` above, which declares the same continuation checkbox. Two
+#     declarations of one decision are two answers to where a dependent prints, and the emitter refuses
+#     them. Declaring NEITHER is also refused, so this empty is a statement rather than an omission.
+dependent_rows = []

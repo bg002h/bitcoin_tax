@@ -10192,3 +10192,41 @@ the third-pass table, `[dependents_grid]`'s rows (1)-(4) become writable, then t
 **Still owed:** the `fill_full_return(.., 2025)` KAT reading `checkbox_on` back off the bytes. Unchanged
 owner — it needs the header resolved, which is the fillable-year phase.
 
+**2026-09-20, fifth pass — THE HEADER IS PORTED. 29 cells, gated. The tick now waits on the money lines.**
+
+Owner said to make the port mine, so I did it. What shipped:
+
+* **`more_than_four_dependents` is `Option<CheckChoice>`** and `dependent_rows` may be EMPTY — the TY2025
+  shape, where `[dependents_grid]` owns the block and declares the same widget. Requiring both would have
+  forced one decision to be declared twice, which the emitter's own error calls *"two answers to where a
+  dependent's cells are"*.
+* **`push_header_block` skips the dependents block on an empty `dependent_rows`**, and refuses a map that
+  declares rows WITHOUT the box (they are one decision, so rows-and-no-box would print the continuation
+  statement beside a clear checkbox).
+* **A map declaring NEITHER block is refused** — a new hole the optional-ness opened: no dependent would
+  print anywhere while the map looked complete.
+* **`forms/2025/f1040.map.toml` has a `[header]`**: 20 text cells + 9 checkboxes, every one resolved from
+  the TY2025 form's own printed caption, with the six line-12a-12d cells on **PAGE 2** where that revision
+  moved them. `dependent_rows = []`, `more_than_four_dependents` absent, both deliberately.
+* Field register `(2025, "f1040")` **164 → 135** and `UNCENSUSED_FIELDS` 278 → 249. ★ The census
+  independently measured 29 newly-accounted widgets, which is exactly the number of cells written — a
+  cross-check I did not have to ask for.
+* ★ `line-coverage` caught two of my own TOML captions as non-verbatim: I wrote *"You: Are blind"* where
+  the form prints `You:` and `Are blind` in separate columns. It named the Form 6251 line-33 class by name.
+  Corrected to the form's own column text.
+
+★★★ **AND THE 29 CELLS WERE UNHELD UNTIL I NOTICED.** Nothing FILLS the TY2025 page yet, so the emitter's
+`/MaxLen` guard — the thing that caught the very first porting attempt — never runs on this map. Measured:
+pointing `taxpayer_ssn` back at the fiscal-year row's `f1_06[0]` red **nothing** across the whole suite.
+Two tests now hold it: every cell exists and the SSN cells are `/MaxLen 9` (existence alone is not the
+check — `f1_06[0]` exists and holds TWO characters), every checkbox declares the on-state the map writes,
+and both dependents-block failure directions are driven through the real emitter. Four plants, four reds.
+
+★★★ **THE TICK'S NEW BLOCKER, and it is a TRANSCRIPTION not a mapping.** With the header in place the fill
+reports `Geometry("the TY2025 Form 1040 map has no \`line1a\`")`. The TY2025 map has **8** money-line
+cells against TY2024's **41** — and the missing 33 cannot be ported by name, because TY2025 RENUMBERED the
+middle of the form: AGI is **line 11a** (*"Subtract line 10 from line 9. This is your adjusted gross
+income"*, `f1040--2025.txt:86`) where TY2024 has line 11, and the deduction block became 12a-12e. The two
+maps already declare different `line_set` values. `the_ty2025_map_still_lacks_the_money_lines_the_full_return_fill_needs`
+pins the gap, measures it rather than listing it, and demands its own retirement when the cells land.
+

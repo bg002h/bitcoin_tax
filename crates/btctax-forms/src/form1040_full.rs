@@ -156,6 +156,17 @@ pub fn fill_form_1040_full_with_map(
             )));
         }
         push_dependents_grid(&mut writes, &mut placements, grid, header)?;
+    } else if h.dependent_rows.is_empty() {
+        // ★★★ NEITHER declared. Since the TY2025 port made an empty `dependent_rows` legitimate (the
+        //     grid owns the block there), "no dependents block at all" became reachable by simply
+        //     leaving both out — and a return that silently prints no dependent would understate every
+        //     credit that turns on one while looking complete. So it is a refusal, not a skip.
+        return Err(FormsError::Geometry(format!(
+            "the TY{y} 1040 map declares NEITHER `header.dependent_rows` nor \
+             `[dependents_grid]`, so no dependent would print anywhere on the return. One of \
+             the two is required: the form prints a dependents block in every revision this \
+             product supports."
+        )));
     }
 
     // ★★★ **T10 / §5.4 — lines 35b-35d.** Written iff the map declares the block AND the filer gave
@@ -791,6 +802,14 @@ fn push_header_block(
     // decision and the printed grid would diverge SILENTLY — a row could go to the statement while an
     // empty map cell sat on the page, or a fifth row could print while the statement said "1-4".
     // Neither is visible in the emitted PDF. Checked here, before a single cell is written.
+    //
+    // ★★★ **EMPTY `dependent_rows` is the TY2025+ shape and skips this whole block**, because
+    //     `[dependents_grid]` owns it there. It is a DECLARATION, not an omission — a map that declares
+    //     neither is refused by `fill_form_1040_full_with_map`, so "no dependents printed at all" is
+    //     not reachable by forgetting.
+    if cells.dependent_rows.is_empty() {
+        return Ok(());
+    }
     if cells.dependent_rows.len() != DEPENDENTS_GRID_ROWS {
         return Err(FormsError::Geometry(format!(
             "the 1040 map declares {} dependent row(s) but core splits the household at {} \
@@ -802,8 +821,18 @@ fn push_header_block(
         )));
     }
     let (on_form, overflow) = header.dependents_split();
-    // The box and the statement are ONE decision — see `more_than_four_dependents`.
-    check(w, p, &cells.more_than_four_dependents, !overflow.is_empty());
+    // The box and the statement are ONE decision — see `more_than_four_dependents`. A map with rows
+    // must declare it; the `ok_or_else` is what makes "rows but no box" a refusal rather than a silent
+    // unchecked box beside a printed statement.
+    let more = cells.more_than_four_dependents.as_ref().ok_or_else(|| {
+        FormsError::Geometry(
+            "the 1040 map declares `header.dependent_rows` but no `more_than_four_dependents`. The \
+             box and the continuation statement are ONE decision, so a map with rows and no box would \
+             print the statement while leaving the box clear — the two disagreeing on paper."
+                .to_string(),
+        )
+    })?;
+    check(w, p, more, !overflow.is_empty());
     for (d, row) in on_form.iter().zip(&cells.dependent_rows) {
         text(w, p, &row.name, &d.name);
         text(w, p, &row.ssn, &render_ssn(&d.ssn, max_len_of(&row.ssn))?);

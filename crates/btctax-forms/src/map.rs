@@ -1244,8 +1244,18 @@ pub struct Form1040HeaderCells {
     /// A stale refusal claim is not a harmless comment: it is the shape that sends a future reader
     /// looking for a refusal path that does not exist, or — worse — invites one to be re-added over
     /// working behaviour.
-    pub more_than_four_dependents: CheckChoice,
-    /// The four dependents rows the form physically has.
+    ///
+    /// ★★★ **`Option` since the TY2025 port.** On a TY2024-shaped map this is required and owns the
+    /// decision. On a TY2025-shaped map the dependents block is `[dependents_grid]`, which declares
+    /// **the same widget** — so requiring it here too would force one decision to be declared twice,
+    /// which is exactly what `fill_form_1040_full_with_map`'s own error calls *"two answers to where a
+    /// dependent's cells are"*. Absent here means the grid owns it.
+    #[serde(default)]
+    pub more_than_four_dependents: Option<CheckChoice>,
+    /// The four dependents rows the form physically has — or EMPTY when `[dependents_grid]` owns the
+    /// block instead (TY2025+). ★ Empty is a declaration, not an omission: `push_header_block` skips the
+    /// whole dependents block, and `fill_form_1040_full_with_map` refuses a map that declares NEITHER.
+    #[serde(default)]
     pub dependent_rows: Vec<DependentRowCells>,
 }
 
