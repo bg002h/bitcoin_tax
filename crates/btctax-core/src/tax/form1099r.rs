@@ -397,9 +397,186 @@ pub const QUESTIONS: &[(&str, bool, &str)] = &[
     ),
 ];
 
+/// What one IRA document contributes, or why the return cannot be filed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocumentTaxable {
+    /// This document's taxable amount for line 4b (step 1).
+    Taxable(Usd),
+    /// The return refuses. The variant names WHICH refusal, so the caller does not re-derive it.
+    Refuses(IraRefusal),
+}
+
+/// Why one IRA document stops the return.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IraRefusal {
+    /// R-1 — `exception_applies` is `None`. Silence is not testimony that none applies.
+    ExceptionUnanswered,
+    /// R-2 — an exception applies and the document is NOT on the Roth `-0-` sub-branch.
+    ExceptionUnsupported,
+    /// r2 I-1 — box 7 is exactly `T` and the lookback question is unanswered.
+    RothLookbackUnanswered,
+    /// r2 I-1 — box 7 is exactly `T` and the filer answered NO, so Form 8606 is genuinely needed.
+    RothLookbackNo,
+}
+
+/// ★★★ **STEP 1 of the C-1 rule — ONE DOCUMENT's taxable amount. Per document, never per return.**
+///
+/// The first version of the spec's rule table keyed its rows on a per-DOCUMENT condition and its columns
+/// on per-RETURN 1040 lines, and fold-review r2's C-1 (Critical) showed that a return with a qualified
+/// Roth `Q` document beside a fully-taxable traditional IRA then files **`4b = -0-`** — the whole
+/// traditional distribution missing from total income, with nothing refusing. The instructions compose
+/// per PART and say so: *"enter the part that is not a QCD on line 4b **unless Exception 2 applies to
+/// that part**"* (`i1040gi--2025.txt:2731`).
+///
+/// So this function answers for ONE document and nothing here may name a 1040 line. Steps 2 and 3
+/// ([`line_4b`], [`line_4a`]) are the only places a line is written.
+///
+/// ★★ **Box 7 is matched by EQUALITY, not membership** (r2 I-5). Table 1's *used with* column for `Q`
+/// reads `None` and the Note inside both the `Q` and `T` entries instructs the payer to print `J`
+/// INSTEAD when another code applies — so a composed code such as `"QJ"` is a document this build does
+/// not understand and reaches R-2. `contains("Q")` would admit it, which understates tax.
+#[must_use]
+pub fn document_taxable(f: &Form1099R) -> DocumentTaxable {
+    debug_assert_eq!(f.kind, Form1099RKind::Ira, "step 1 is the IRA side");
+    let code = f.box7_distribution_codes.trim();
+    match f.exception_applies {
+        // Silence first: it is prior to every reading of box 7.
+        None => DocumentTaxable::Refuses(IraRefusal::ExceptionUnanswered),
+        // No exception: the fully-taxable branch. "enter the total distribution on line 4b"
+        // (`i1040gi--2025.txt:2664-2667`) — this document's taxable amount IS its box 1.
+        Some(false) => DocumentTaxable::Taxable(f.box1_gross_distribution),
+        // An exception applies. Only the Roth sub-branch the instructions close themselves computes.
+        Some(true) => match code {
+            // "b. Distribution code Q is shown in box 7" ⇒ "enter -0- on line 4b" (`:2707-2715`).
+            // The payer has certified the 5-year period AND age/death/disability, so nothing is asked.
+            "Q" => DocumentTaxable::Taxable(Usd::ZERO),
+            // "a. Distribution code T ... and you made a contribution (including a conversion) to a
+            // Roth IRA for <YEAR> or an earlier year". The payer did NOT know the 5-year fact, so the
+            // filer supplies it — and silence must not be read as either answer.
+            "T" => match f.roth_contribution_before_lookback {
+                Some(true) => DocumentTaxable::Taxable(Usd::ZERO),
+                Some(false) => DocumentTaxable::Refuses(IraRefusal::RothLookbackNo),
+                None => DocumentTaxable::Refuses(IraRefusal::RothLookbackUnanswered),
+            },
+            _ => DocumentTaxable::Refuses(IraRefusal::ExceptionUnsupported),
+        },
+    }
+}
+
+/// **STEP 2 — line 4b = Σ of every IRA document's own taxable amount from [`document_taxable`].**
+///
+/// *"figure the taxable amount of each distribution and enter the total of the taxable amounts on line
+/// 4b"* — `i1040gi--2025.txt:2789-2795`, identical at TY2024 `:2726-2732`.
+///
+/// `Err` carries the FIRST refusing document's index and reason, because a return that refuses has no
+/// line 4b at all — returning a figure beside a refusal is how a refusal gets ignored.
+pub fn line_4b(rows: &[Form1099R]) -> Result<Usd, (usize, IraRefusal)> {
+    let mut total = Usd::ZERO;
+    for (i, f) in rows
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| f.kind == Form1099RKind::Ira)
+    {
+        match document_taxable(f) {
+            DocumentTaxable::Taxable(v) => total += v,
+            DocumentTaxable::Refuses(r) => return Err((i, r)),
+        }
+    }
+    Ok(total)
+}
+
+/// **STEP 3 — line 4a.** `None` means the form instructs a BLANK, which is not the same as zero.
+///
+/// Populated when **more than one** IRA document exists — *"Enter the total amount of those
+/// distributions on line 4a"* (`:2789-2795`, unscoped, unlike the pension analogue at `:2978-2980` which
+/// is limited to *"more than one PARTIALLY TAXABLE pension"*) — **or** when any document is on the Roth
+/// `-0-` sub-branch, whose own instruction is *"enter the total distribution on line 4a"* (`:2698`).
+///
+/// Blank on a single fully-taxable distribution: *"enter the total distribution on line 4b; **don't make
+/// an entry on line 4a**"* (`:2664-2667`).
+///
+/// ★★ A `Some(Usd::ZERO)` here would be sworn testimony that the filer received no IRA distribution, so
+/// the blank case is `None` and never a zero ([`an-entry-is-testimony`]).
+#[must_use]
+pub fn line_4a(rows: &[Form1099R]) -> Option<Usd> {
+    let ira: Vec<&Form1099R> = rows
+        .iter()
+        .filter(|f| f.kind == Form1099RKind::Ira)
+        .collect();
+    if ira.is_empty() {
+        return None;
+    }
+    let on_sub_branch = ira.iter().any(|f| {
+        f.exception_applies == Some(true) && matches!(f.box7_distribution_codes.trim(), "Q" | "T")
+    });
+    if ira.len() > 1 || on_sub_branch {
+        Some(ira.iter().map(|f| f.box1_gross_distribution).sum())
+    } else {
+        None
+    }
+}
+
+/// **Line 5b — the pension side.** Σ box 2a over pension documents.
+///
+/// `i1040gi--2025.txt:2888-2891`: a partially taxable pension's taxable part comes from box 2a when the
+/// form shows it; the General Rule / Simplified Method is reached **only** when box 2a is blank, and that
+/// case REFUSES in v1 (R-3/R-5). So `None` here means "a pension document has no box 2a", which the
+/// caller must refuse rather than treat as zero.
+pub fn line_5b(rows: &[Form1099R]) -> Result<Usd, usize> {
+    let mut total = Usd::ZERO;
+    for (i, f) in rows
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| f.kind == Form1099RKind::PensionOrAnnuity)
+    {
+        match f.box2a_taxable_amount {
+            Some(v) => total += v,
+            None => return Err(i),
+        }
+    }
+    Ok(total)
+}
+
+/// **Line 5a.** Populated for **any partially taxable** pension — box 2a shown and less than box 1.
+///
+/// *"**Partially Taxable Pensions and Annuities.** Enter the total pension or annuity payments (from Form
+/// 1099-R, box 1) on line 5a"* — `i1040gi--2025.txt:2888-2891`. ★ This is the authority fold-review r2's
+/// I-3 supplied; the earlier draft rested on the Simplified Method Worksheet, which this spec REFUSES.
+///
+/// Blank on a single fully-taxable pension: *"don't make an entry on line 5a"* (`:2876-2880`).
+#[must_use]
+pub fn line_5a(rows: &[Form1099R]) -> Option<Usd> {
+    let pens: Vec<&Form1099R> = rows
+        .iter()
+        .filter(|f| f.kind == Form1099RKind::PensionOrAnnuity)
+        .collect();
+    if pens.is_empty() {
+        return None;
+    }
+    let partially_taxable = |f: &Form1099R| {
+        f.box2a_taxable_amount
+            .is_some_and(|t| t < f.box1_gross_distribution)
+    };
+    if pens.iter().any(|f| partially_taxable(f)) {
+        Some(pens.iter().map(|f| f.box1_gross_distribution).sum())
+    } else {
+        None
+    }
+}
+
+/// **Line 25b's share — Σ box 4 over EVERY Form 1099-R**, IRA and pension alike.
+///
+/// Review r1's C-2: this box was dropped entirely, so a retiree's withholding never reached line 25b and
+/// the return overstated the balance due by the whole of it.
+#[must_use]
+pub fn withholding_line_25b(rows: &[Form1099R]) -> Usd {
+    rows.iter().map(|f| f.box4_fed_withheld).sum()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rust_decimal_macros::dec;
     use std::collections::BTreeSet;
 
     fn extract(edition: &str) -> String {
@@ -505,6 +682,244 @@ mod tests {
             covered.is_disjoint(&no_field),
             "a NoFederalLine box gained a field"
         );
+    }
+
+    /// Build one IRA row: `(box1, exception_applies, box7, lookback)`.
+    fn ira(box1: i64, exc: Option<bool>, code: &str, lookback: Option<bool>) -> Form1099R {
+        Form1099R {
+            kind: Form1099RKind::Ira,
+            box1_gross_distribution: rust_decimal::Decimal::from(box1),
+            box2a_taxable_amount: Some(rust_decimal::Decimal::from(box1)),
+            box7_distribution_codes: code.into(),
+            exception_applies: exc,
+            roth_contribution_before_lookback: lookback,
+            ..sample()
+        }
+    }
+
+    /// Build one pension row: `(box1, box2a)`.
+    fn pension(box1: i64, box2a: Option<i64>) -> Form1099R {
+        Form1099R {
+            kind: Form1099RKind::PensionOrAnnuity,
+            box1_gross_distribution: rust_decimal::Decimal::from(box1),
+            box2a_taxable_amount: box2a.map(rust_decimal::Decimal::from),
+            box7_distribution_codes: "7".into(),
+            exception_applies: Some(false),
+            ..sample()
+        }
+    }
+
+    /// ★★★ **M-14 — THE CRITICAL, AS A KAT. Fold-review r2's C-1.**
+    ///
+    /// A qualified Roth `Q` document (box 1 = 10,000) beside a fully-taxable traditional IRA (box 1 =
+    /// 20,000). The spec's first rule table — rows keyed per DOCUMENT, columns labelled with per-RETURN
+    /// 1040 lines — read *box 7 contains `Q` ⇒ line 4b = `-0-`* and filed **4b = -0-**, losing the whole
+    /// traditional distribution from total income with no refusal behind it.
+    ///
+    /// The correct figures come from the instructions' own composition: 4b = Σ of each document's taxable
+    /// amount, 4a = Σ box 1 over all of them.
+    #[test]
+    fn m14_the_mixed_return_files_4a_30000_and_4b_20000() {
+        let rows = vec![
+            ira(10_000, Some(true), "Q", None),  // qualified Roth: taxable -0-
+            ira(20_000, Some(false), "7", None), // fully taxable traditional
+        ];
+        assert_eq!(
+            line_4b(&rows),
+            Ok(dec!(20_000)),
+            "4b is the SUM of per-document taxable amounts — the Roth contributes -0-, the traditional \
+             its whole box 1. `-0-` here is the Critical."
+        );
+        assert_eq!(
+            line_4a(&rows),
+            Some(dec!(30_000)),
+            "4a is Σ box 1 over ALL IRA documents once more than one exists"
+        );
+        // ★ And the per-document step must not be readable as a return-level answer: each document
+        //   answers for itself, which is the structural fix rather than the arithmetic one.
+        assert_eq!(
+            document_taxable(&rows[0]),
+            DocumentTaxable::Taxable(Usd::ZERO)
+        );
+        assert_eq!(
+            document_taxable(&rows[1]),
+            DocumentTaxable::Taxable(dec!(20_000))
+        );
+    }
+
+    /// ★★ A SINGLE fully-taxable IRA distribution leaves 4a BLANK — `None`, never `Some(0)`.
+    ///
+    /// *"enter the total distribution on line 4b; don't make an entry on line 4a"* (`:2664-2667`). A zero
+    /// would be sworn testimony that no distribution was received.
+    #[test]
+    fn a_single_fully_taxable_ira_leaves_4a_blank_and_never_zero() {
+        let rows = vec![ira(20_000, Some(false), "7", None)];
+        assert_eq!(line_4b(&rows), Ok(dec!(20_000)));
+        assert_eq!(
+            line_4a(&rows),
+            None,
+            "the form instructs a BLANK, which is not zero"
+        );
+        assert_ne!(line_4a(&rows), Some(Usd::ZERO));
+    }
+
+    /// ★★★ A single code-`Q` Roth distribution — the ordinary retiree r1's I-3 found being REFUSED —
+    /// files 4a = the total and 4b = `-0-`, and asks nothing.
+    #[test]
+    fn a_lone_qualified_roth_files_4a_and_a_zero_4b() {
+        let rows = vec![ira(15_000, Some(true), "Q", None)];
+        assert_eq!(line_4b(&rows), Ok(Usd::ZERO));
+        assert_eq!(
+            line_4a(&rows),
+            Some(dec!(15_000)),
+            "Exception 2's lead sentence: \"enter the total distribution on line 4a\" (:2698)"
+        );
+    }
+
+    /// ★★★ **Box 7 is EQUALITY, not membership (r2 I-5), and the direction of the error is why.**
+    ///
+    /// The payer instructions' Note inside both the `Q` and `T` entries says that if another code
+    /// applies, use Code **J** instead — so a composed `"QJ"` is not a plain qualified Roth. A
+    /// `contains("Q")` test would put it on the `-0-` branch and UNDERSTATE tax.
+    #[test]
+    fn a_composed_box7_refuses_rather_than_taking_the_zero_branch() {
+        for code in ["QJ", "Q8", "8Q", "TQ", "T4", " Q7"] {
+            let rows = vec![ira(9_000, Some(true), code, Some(true))];
+            assert_eq!(
+                line_4b(&rows),
+                Err((0, IraRefusal::ExceptionUnsupported)),
+                "box 7 {code:?} must refuse, not take the -0- branch"
+            );
+        }
+        // ★ And the two bare codes still work, including with surrounding whitespace, which a
+        //   transcription realistically carries.
+        assert_eq!(
+            document_taxable(&ira(9_000, Some(true), " Q ", None)),
+            DocumentTaxable::Taxable(Usd::ZERO)
+        );
+        assert_eq!(
+            document_taxable(&ira(9_000, Some(true), "T", Some(true))),
+            DocumentTaxable::Taxable(Usd::ZERO)
+        );
+    }
+
+    /// ★★ Code `T` asks ONE question and its silence REFUSES — the asymmetry with `Q` that S-3's single
+    /// boolean destroyed. `Q` means the payer KNEW the 5-year period was met; `T` means it did not.
+    #[test]
+    fn code_t_asks_one_question_and_silence_refuses() {
+        assert_eq!(
+            document_taxable(&ira(9_000, Some(true), "T", None)),
+            DocumentTaxable::Refuses(IraRefusal::RothLookbackUnanswered),
+            "silence must not be read as either answer"
+        );
+        assert_eq!(
+            document_taxable(&ira(9_000, Some(true), "T", Some(false))),
+            DocumentTaxable::Refuses(IraRefusal::RothLookbackNo),
+            "answered NO ⇒ Form 8606 is genuinely needed"
+        );
+        assert_eq!(
+            document_taxable(&ira(9_000, Some(true), "T", Some(true))),
+            DocumentTaxable::Taxable(Usd::ZERO)
+        );
+        // ★ `Q` asks nothing: the lookback answer is irrelevant on that branch, in all three states.
+        for l in [None, Some(false), Some(true)] {
+            assert_eq!(
+                document_taxable(&ira(9_000, Some(true), "Q", l)),
+                DocumentTaxable::Taxable(Usd::ZERO)
+            );
+        }
+    }
+
+    /// ★★★ R-1 — an unanswered `exception_applies` refuses, and it is checked BEFORE box 7 is read.
+    #[test]
+    fn an_unanswered_exception_refuses_whatever_box_7_says() {
+        for code in ["7", "Q", "T", ""] {
+            assert_eq!(
+                document_taxable(&ira(20_000, None, code, Some(true))),
+                DocumentTaxable::Refuses(IraRefusal::ExceptionUnanswered),
+                "silence on the declaration is prior to any reading of box 7 ({code:?})"
+            );
+        }
+    }
+
+    /// ★ A refusing document must not yield a FIGURE alongside its refusal, and the refusal must name
+    /// the document — otherwise a caller can print a line for a return that cannot be filed.
+    #[test]
+    fn line_4b_refuses_with_the_documents_index_and_never_a_figure() {
+        let rows = vec![
+            ira(20_000, Some(false), "7", None),
+            ira(5_000, None, "7", None), // the second document is the unanswered one
+        ];
+        assert_eq!(line_4b(&rows), Err((1, IraRefusal::ExceptionUnanswered)));
+    }
+
+    /// ★★ The pension side: 5b = Σ box 2a, 5a = Σ box 1 when any pension is PARTIALLY taxable.
+    ///
+    /// Authority is `i1040gi--2025.txt:2888-2891` — NOT the Simplified Method Worksheet, which this spec
+    /// refuses (r2 I-3 corrected exactly this).
+    #[test]
+    fn the_pension_side_fills_5a_only_when_partially_taxable() {
+        // Fully taxable: box 2a == box 1 ⇒ 5a blank, 5b the whole amount.
+        let full = vec![pension(30_000, Some(30_000))];
+        assert_eq!(line_5b(&full), Ok(dec!(30_000)));
+        assert_eq!(
+            line_5a(&full),
+            None,
+            "\"don't make an entry on line 5a\" (:2876-2880)"
+        );
+
+        // Partially taxable: box 2a < box 1 ⇒ 5a = Σ box 1, 5b = Σ box 2a.
+        let part = vec![pension(30_000, Some(24_000))];
+        assert_eq!(line_5b(&part), Ok(dec!(24_000)));
+        assert_eq!(line_5a(&part), Some(dec!(30_000)));
+
+        // ★ Two pensions, one partially taxable: 5a takes Σ box 1 over BOTH, per :2978-2980.
+        let two = vec![pension(30_000, Some(24_000)), pension(10_000, Some(10_000))];
+        assert_eq!(line_5a(&two), Some(dec!(40_000)));
+        assert_eq!(line_5b(&two), Ok(dec!(34_000)));
+
+        // ★★ A blank box 2a REFUSES — it is the case the instructions send to the General Rule /
+        //    Simplified Method, which v1 does not build. It must never read as zero.
+        let blank = vec![pension(30_000, None)];
+        assert_eq!(line_5b(&blank), Err(0));
+    }
+
+    /// ★★ The two sides do not contaminate each other: an IRA row must not reach 5a/5b, nor a pension
+    /// row 4a/4b. `kind` is the only thing that routes, and it comes from box 7's own checkbox.
+    #[test]
+    fn the_two_line_pairs_are_disjoint() {
+        let rows = vec![
+            ira(20_000, Some(false), "7", None),
+            pension(30_000, Some(24_000)),
+        ];
+        assert_eq!(
+            line_4b(&rows),
+            Ok(dec!(20_000)),
+            "the pension must not enter 4b"
+        );
+        assert_eq!(
+            line_4a(&rows),
+            None,
+            "one IRA document, fully taxable ⇒ 4a blank"
+        );
+        assert_eq!(
+            line_5b(&rows),
+            Ok(dec!(24_000)),
+            "the IRA must not enter 5b"
+        );
+        assert_eq!(line_5a(&rows), Some(dec!(30_000)));
+    }
+
+    /// ★★★ C-2 — withholding is summed over EVERY row, both kinds. r1 found this box dropped entirely,
+    /// which overstated the balance due by the whole of it.
+    #[test]
+    fn withholding_sums_across_both_kinds() {
+        let mut a = ira(20_000, Some(false), "7", None);
+        a.box4_fed_withheld = dec!(2_000);
+        let mut b = pension(30_000, Some(24_000));
+        b.box4_fed_withheld = dec!(3_000);
+        assert_eq!(withholding_line_25b(&[a, b]), dec!(5_000));
+        assert_eq!(withholding_line_25b(&[]), Usd::ZERO);
     }
 
     fn sample() -> Form1099R {
