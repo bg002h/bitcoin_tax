@@ -1093,11 +1093,27 @@ pub fn revision_pin_rows(year: i32, cit: &Citations, rep: &mut Report) {
             all.join(", "),
         );
     }
+    // ★★★ The note must count what the ROWS above show, or the report disagrees with itself inside one
+    //     document — and a reader who spots a summary of 13 above five rows learns to discount both.
+    //     Deliberate pins are adjudicated (with reasons) by
+    //     `every_pinned_revision_is_the_newest_archived_or_carries_its_reason`, so they are reported
+    //     separately and NOT folded into the literal count.
+    let deliberate = cit
+        .pinned
+        .keys()
+        .filter(|(f, t)| DELIBERATE_PINS.iter().any(|(df, dt, _)| df == f && dt == t))
+        .count();
     rep.notes.push(format!(
-        "revision shape: {} family(ies) are read through a per-revision prefix (they notice a new \
-         document); {} (family, revision) pins are literal.",
+        "revision shape: {} family(ies) read through a per-revision prefix (they notice a new \
+         document); {} family(ies) through a parameterised path with NO derivation; {} literal \
+         (family, revision) pins, of which {deliberate} are ruled DELIBERATE with a written reason. \
+         ★ The PIN COUNT here and the pinned ROWS above are different units and will not match: a row \
+         is per FAMILY, and a family is skipped entirely when its newest pin is already at the target \
+         year or when it also has a revision table. Both numbers are right; neither is the other's \
+         total.",
         cit.per_revision.len(),
-        cit.pinned.len()
+        cit.parameterised_only.len(),
+        cit.pinned.len(),
     ));
 }
 
