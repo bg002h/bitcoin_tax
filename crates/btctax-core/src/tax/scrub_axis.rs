@@ -535,6 +535,9 @@ pub fn maximal_sentinel() -> ReturnInputs {
         //   and the Social Security family still refuses until its wiring lands. It carries no identity
         //   to scrub either, so nothing is lost to the axis by its absence.
         ssa_1099: Vec::new(),
+        // ★ A maximal fixture leaves no `Option` at `None` — but this one must also stay FILEABLE, and
+        //   the status here is not MFS, so the value is never read by the worksheet.
+        mfs_lived_apart_all_year: Some(true),
         sa_1099: vec![sa_1099("one", "11-1111111"), sa_1099("two", "22-2222222")],
         sa_5498: vec![sa_5498("one", "33-3333333"), sa_5498("two", "44-4444444")],
         schedule_b_filer_records: vec![

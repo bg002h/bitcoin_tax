@@ -125,6 +125,7 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         r_1099,
         // ★ T14 — see the note at the SSA-1099 loop below: no leaf here needs classifying.
         ssa_1099: _,
+        mfs_lived_apart_all_year,
         sa_1099,
         sa_5498,
         schedule_b_filer_records,
@@ -320,6 +321,18 @@ pub fn classify(ri: &ReturnInputs) -> Census {
     for e in form_1098e {
         classify_1098e(&mut c, e);
     }
+    c.exempt(
+        mfs_lived_apart_all_year,
+        Class::DataDerived,
+        "T14 / R-8 — \"married filing separately and you lived apart from your spouse for ALL of the \
+         year\". EXEMPT here rather than a `declaration` because it has no `QuestionId` or registry \
+         entry yet: it is answered through `income import` today, the same route the Form 1099-R rows \
+         take, and the interview surface arrives with the retirement section. ★★ Its silence is NOT \
+         lawful and is NOT defaulted — `form_ssa1099::screen` refuses it (MfsLivedApartUnanswered) \
+         whenever the status is MFS and a benefit statement is present, because the two answers reach \
+         DIFFERENT ARITHMETIC: lived-apart applies the $25,000/$9,000 thresholds, lived-with skips \
+         lines 8-15 and takes 85% of line 7 with no threshold at all",
+    );
     for r in r_1099 {
         classify_1099r(&mut c, r);
     }

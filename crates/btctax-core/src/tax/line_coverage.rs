@@ -3015,6 +3015,8 @@ pub fn cover_form1040lines(l: &crate::tax::printed::Form1040Lines) -> Coverage {
         line4b,
         line5a,
         line5b,
+        line6a,
+        line6b,
         line7,
         line8,
         line9,
@@ -3128,6 +3130,35 @@ pub fn cover_form1040lines(l: &crate::tax::printed::Form1040Lines) -> Coverage {
         "5b",
         "Form1040Lines.line5b",
         Production::doc_box("f1099r", "2a"),
+        "Taxable amount",
+    );
+    // ★★★ **T14 — 6a and 6b. Captions VERBATIM from the form's own text layer** (`f1040--2024.txt:67`
+    //     / `f1040--2025.txt:78`). 6b prints *"Taxable amount"* — the SAME two words as 4b and 5b, which
+    //     is the third occurrence FR-184's pigeonhole counts and the reason M-1b's row-to-line binding is
+    //     still owed (SPEC S-9).
+    c.line(
+        *line6a,
+        "f1040",
+        "6a",
+        "Form1040Lines.line6a",
+        // ★★★ **`Combine`, not `doc_box`, and the reason is a fact about the figure rather than about
+        //     the archive.** Line 6a is Σ box 5 over every Form SSA-1099 / RRB-1099 — and box 5 is
+        //     ITSELF derived, `box 3 minus box 4`, per the facsimile's own caption. So no single
+        //     transcribed box produces this line; it is a combination of two, summed across forms.
+        //
+        //     ★★ `doc_box("pub915", "5")` was the first attempt and `line-coverage` refused it,
+        //        correctly: *"no such information return is archived for TY2024"*. That refusal is right
+        //        twice over — the SSA and the RRB issue these forms, so there IS no archived IRS form
+        //        stem, and even if there were, box 5 is not what the filer transcribes.
+        Production::Combine,
+        "Social security benefits",
+    );
+    c.line(
+        *line6b,
+        "f1040",
+        "6b",
+        "Form1040Lines.line6b",
+        Production::Combine,
         "Taxable amount",
     );
     c.line(
@@ -3358,6 +3389,8 @@ fn zero_form1040lines() -> crate::tax::printed::Form1040Lines {
         line4b: Usd::ZERO,
         line5a: None,
         line5b: Usd::ZERO,
+        line6a: None,
+        line6b: Usd::ZERO,
         line7: Usd::ZERO,
         line8: Usd::ZERO,
         line9: Usd::ZERO,
@@ -3408,6 +3441,8 @@ pub fn cover_form1040income(l: &crate::tax::printed::Form1040Income) -> Coverage
         line4b,
         line5a,
         line5b,
+        line6a,
+        line6b,
         line7,
         line8,
         line9,
@@ -3502,6 +3537,35 @@ pub fn cover_form1040income(l: &crate::tax::printed::Form1040Income) -> Coverage
         Production::doc_box("f1099r", "2a"),
         "Taxable amount",
     );
+    // ★★★ **T14 — 6a and 6b. Captions VERBATIM from the form's own text layer** (`f1040--2024.txt:67`
+    //     / `f1040--2025.txt:78`). 6b prints *"Taxable amount"* — the SAME two words as 4b and 5b, which
+    //     is the third occurrence FR-184's pigeonhole counts and the reason M-1b's row-to-line binding is
+    //     still owed (SPEC S-9).
+    c.line(
+        *line6a,
+        "f1040",
+        "6a",
+        "Form1040Income.line6a",
+        // ★★★ **`Combine`, not `doc_box`, and the reason is a fact about the figure rather than about
+        //     the archive.** Line 6a is Σ box 5 over every Form SSA-1099 / RRB-1099 — and box 5 is
+        //     ITSELF derived, `box 3 minus box 4`, per the facsimile's own caption. So no single
+        //     transcribed box produces this line; it is a combination of two, summed across forms.
+        //
+        //     ★★ `doc_box("pub915", "5")` was the first attempt and `line-coverage` refused it,
+        //        correctly: *"no such information return is archived for TY2024"*. That refusal is right
+        //        twice over — the SSA and the RRB issue these forms, so there IS no archived IRS form
+        //        stem, and even if there were, box 5 is not what the filer transcribes.
+        Production::Combine,
+        "Social security benefits",
+    );
+    c.line(
+        *line6b,
+        "f1040",
+        "6b",
+        "Form1040Income.line6b",
+        Production::Combine,
+        "Taxable amount",
+    );
     c.line(
         *line7,
         "f1040",
@@ -3558,6 +3622,8 @@ fn zero_form1040income() -> crate::tax::printed::Form1040Income {
         line4b: Usd::ZERO,
         line5a: None,
         line5b: Usd::ZERO,
+        line6a: None,
+        line6b: Usd::ZERO,
         line7: Usd::ZERO,
         line8: Usd::ZERO,
         line9: Usd::ZERO,

@@ -251,6 +251,21 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         //
         //     ★ The other two cannot be cleared by any answer at all: an unsupported document needs a
         //       preparer, and a missing box 2a needs a different piece of paper.
+        // ★★★ **T14 — the three Social Security refusals, all `NotInForm` and all for the same reason
+        //     the 1099-R's are: the retirement section has no rows, so the answers arrive by TOML.**
+        //
+        //     ★ Two of them are ANSWERABLE (the exclusion question and the MFS lived-apart declaration)
+        //       and one is not (repayments exceeding benefits is a fact about the paper). They share an
+        //       arm because the anchor is the same sentence — there is no field for any of them — and the
+        //       refusal's own detail is where the difference belongs.
+        R::SocialSecurityRepaymentsExceedBenefits(_)
+        | R::SocialSecurityWorksheetBarred(_)
+        | R::SocialSecurityMfsLivedApartUnanswered => vec![Anchor::NotInForm {
+            note: "the Social Security block (`[[ssa_1099]]`, `has_income_exclusion`, \
+                   `mfs_lived_apart_all_year`) is a deferred (non-v1-form) section entered via \
+                   TOML import — the task that gives the retirement section its questions removes \
+                   this",
+        }],
         R::RetirementQuestionUnanswered(_) => vec![Anchor::NotInForm {
             note: "a Form 1099-R question (`[[r_1099]]`) — answerable, but not in this form: the \
                    retirement section is deferred (see `EXEMPT_LEAVES`), so the answer arrives through \
@@ -1025,6 +1040,9 @@ mod tests {
         /// unsupported-document and missing-box-2a cases share one, because neither is clearable by any
         /// answer and the anchor is the same sentence.
         const ADDED_BY_T14_6: usize = 2;
+        /// ★ T14.11 — the three Social Security refusals, sharing ONE `NotInForm` arm: no field exists
+        /// for any of them, so the anchor is identical and only the detail differs.
+        const ADDED_BY_T14_11: usize = 1;
         let expect = BEFORE_T5 - 5
             + ADDED_BY_I4
             + ADDED_BY_FR103
@@ -1033,7 +1051,8 @@ mod tests {
             + ADDED_BY_SECTION_68
             + ADDED_BY_CHARITABLE_FLOOR
             + ADDED_BY_FR200A
-            + ADDED_BY_T14_6;
+            + ADDED_BY_T14_6
+            + ADDED_BY_T14_11;
         let now = src[start..end].matches("Anchor::NotInForm {").count();
         assert_eq!(
             now, expect,
@@ -1044,6 +1063,7 @@ mod tests {
              (ReturnInputsYearNotStated), FR-196 added one (the §111(a) worksheet's three \
              TOML-only refusals, sharing one arm), §68 added one \
              (ItemizedDeductionLimitationNotComputed), T14.6 added two (the three per-document Form 1099-R refusals, two of them \
+             sharing an arm) and T14.11 added one (the three Social Security refusals, all three \
              sharing an arm; T14's earlier blanket `RetirementIncomeNotComputed` was RETIRED when the \
              compute landed), §170(b)(1)(I) added one \
              (CharitableFloorNotComputed) and FR-200a added two (Pub. 936 Table 1's block — one \

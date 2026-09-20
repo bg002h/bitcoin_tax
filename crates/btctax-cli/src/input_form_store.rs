@@ -1553,6 +1553,10 @@ mod tests {
                 DocumentRow::R1099 => r
                     .r_1099
                     .push(btctax_core::tax::testonly::form_1099r_all_boxes_populated()),
+                // ★ T14 — the Social Security family became countable with the 6a/6b wiring.
+                DocumentRow::Ssa1099 => r
+                    .ssa_1099
+                    .push(btctax_core::tax::testonly::form_ssa1099_all_boxes_populated()),
                 DocumentRow::Sa1099 => r.sa_1099.push(Default::default()),
                 DocumentRow::Sa5498 => r.sa_5498.push(Default::default()),
                 other => panic!("a new countable census row ({other:?}) needs a case here"),

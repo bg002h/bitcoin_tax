@@ -145,6 +145,12 @@ pub enum SsRefusal {
     /// instructions: *"You file Form 2555, 4563, or 8815, or you exclude employer-provided adoption
     /// benefits or income from sources within Puerto Rico. Instead, use the worksheet in Pub. 915."*
     WorksheetBarredByExclusion,
+    /// ★★★ **R-8 — the MFS lived-apart declaration is unanswered, and it changes the ARITHMETIC.**
+    ///
+    /// Lived apart ⇒ the $25,000 / $9,000 thresholds apply. Lived with ⇒ *"skip lines 8 through 15;
+    /// multiply line 7 by 85% (0.85)"*, with no threshold at all. So the same figures produce either a
+    /// wholly non-taxable benefit or 85% of it taxable, and neither answer may be defaulted.
+    MfsLivedApartUnanswered,
     /// **R-7's unanswered limb** — the exclusion declaration is `None`. Silence is not testimony that no
     /// exclusion applies, and guessing `false` would run a worksheet the instructions forbid.
     ExclusionUnanswered,
@@ -156,7 +162,12 @@ pub enum SsRefusal {
 /// ★★ R-6 is tested BEFORE R-7, and that order is the instructions' own: the Exception list puts the
 /// repayment case above the exclusion case, and a filer whose benefits are entirely non-taxable does not
 /// need to answer a question about which worksheet to use.
-pub fn screen(rows: &[FormSsa1099], has_exclusion: Option<bool>) -> Result<(), SsRefusal> {
+pub fn screen(
+    rows: &[FormSsa1099],
+    status: crate::tax::FilingStatus,
+    mfs_lived_apart: Option<bool>,
+    has_exclusion: Option<bool>,
+) -> Result<(), SsRefusal> {
     if rows.is_empty() {
         return Ok(());
     }
@@ -168,10 +179,17 @@ pub fn screen(rows: &[FormSsa1099], has_exclusion: Option<bool>) -> Result<(), S
         });
     }
     match has_exclusion {
-        Some(true) => Err(SsRefusal::WorksheetBarredByExclusion),
-        None => Err(SsRefusal::ExclusionUnanswered),
-        Some(false) => Ok(()),
+        Some(true) => return Err(SsRefusal::WorksheetBarredByExclusion),
+        None => return Err(SsRefusal::ExclusionUnanswered),
+        Some(false) => {}
     }
+    // ★★★ R-8, LAST of the three, and the order is argued: a filer whose benefits are wholly
+    //     non-taxable (R-6) or who must use a different worksheet entirely (R-7) does not need to settle
+    //     a question that only changes which threshold this worksheet applies.
+    if status == crate::tax::FilingStatus::Mfs && mfs_lived_apart.is_none() {
+        return Err(SsRefusal::MfsLivedApartUnanswered);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -252,7 +270,7 @@ mod tests {
         ];
         assert_eq!(worksheet_line1(&rows), dec!(2_500), "Pub. 915's own figure");
         assert_eq!(
-            screen(&rows, Some(false)),
+            screen(&rows, crate::tax::FilingStatus::Single, None, Some(false)),
             Ok(()),
             "Σ box 4 (500) does not exceed Σ box 3 (3,000), so R-6 must NOT fire — a per-form test \
              would refuse Jordan's form and turn the household away"
@@ -268,7 +286,7 @@ mod tests {
             ssa(Owner::Spouse, 0, 5_000, 0),
         ];
         assert_eq!(
-            screen(&rows, Some(false)),
+            screen(&rows, crate::tax::FilingStatus::Single, None, Some(false)),
             Err(SsRefusal::RepaymentsExceedBenefits {
                 excess: dec!(8_000)
             })
@@ -280,7 +298,10 @@ mod tests {
         // ★ And EXACT equality does not refuse: the instructions say repayments must be MORE than
         //   benefits, and refusing at equality would be the too-wide direction again.
         let equal = vec![ssa(Owner::Taxpayer, 5_000, 5_000, 0)];
-        assert_eq!(screen(&equal, Some(false)), Ok(()));
+        assert_eq!(
+            screen(&equal, crate::tax::FilingStatus::Single, None, Some(false)),
+            Ok(())
+        );
         assert_eq!(worksheet_line1(&equal), Usd::ZERO);
     }
 
@@ -292,14 +313,20 @@ mod tests {
     fn r7_bars_the_worksheet_and_silence_refuses() {
         let rows = vec![ssa(Owner::Taxpayer, 20_000, 0, 0)];
         assert_eq!(
-            screen(&rows, Some(true)),
+            screen(&rows, crate::tax::FilingStatus::Single, None, Some(true)),
             Err(SsRefusal::WorksheetBarredByExclusion)
         );
-        assert_eq!(screen(&rows, None), Err(SsRefusal::ExclusionUnanswered));
-        assert_eq!(screen(&rows, Some(false)), Ok(()));
+        assert_eq!(
+            screen(&rows, crate::tax::FilingStatus::Single, None, None),
+            Err(SsRefusal::ExclusionUnanswered)
+        );
+        assert_eq!(
+            screen(&rows, crate::tax::FilingStatus::Single, None, Some(false)),
+            Ok(())
+        );
         // ★ With NO forms at all nothing is asked: the question is live only because a benefit exists.
         assert_eq!(
-            screen(&[], None),
+            screen(&[], crate::tax::FilingStatus::Single, None, None),
             Ok(()),
             "no benefits ⇒ no question, no refusal"
         );
@@ -313,7 +340,12 @@ mod tests {
         for exclusion in [None, Some(true), Some(false)] {
             assert!(
                 matches!(
-                    screen(&repaid_more, exclusion),
+                    screen(
+                        &repaid_more,
+                        crate::tax::FilingStatus::Single,
+                        None,
+                        exclusion
+                    ),
                     Err(SsRefusal::RepaymentsExceedBenefits { .. })
                 ),
                 "R-6 must fire whatever the exclusion answer is ({exclusion:?})"

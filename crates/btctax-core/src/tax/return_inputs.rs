@@ -2319,6 +2319,27 @@ pub struct ReturnInputs {
     /// permit a triple that contradicts itself.
     #[serde(default)]
     pub ssa_1099: Vec<crate::tax::form_ssa1099::FormSsa1099>,
+    /// ★★★ **T14 / R-8 — "married filing separately and you lived apart from your spouse for ALL of the
+    /// year". The single most consequential yes/no in the Social Security worksheet.**
+    ///
+    /// LIVE only when the filing status is MFS and a Form SSA-1099 or RRB-1099 is present. `None`
+    /// REFUSES (`SsRefusal::MfsLivedApartUnanswered`), and the reason is that the two answers reach
+    /// different arithmetic rather than different wording:
+    ///
+    /// * **lived APART** — the $25,000 / $9,000 thresholds apply, so a modest benefit can be entirely
+    ///   non-taxable;
+    /// * **lived WITH** — *"skip lines 8 through 15; multiply line 7 by 85% (0.85)"*. No threshold at
+    ///   all, so the same figures can make 85% of the benefit taxable.
+    ///
+    /// ★★ So btctax may not default it. Defaulting to `false` (lived with) would invent the harsher
+    /// answer; `true` would invent the one that lowers tax on testimony the filer never gave. Either is
+    /// a fabricated answer to a question only they can settle.
+    ///
+    /// ★ It also drives a DISCLOSURE whose mechanics differ by revision (review r1's C-1): a write-in
+    /// `"D"` beside the word *"benefits"* on line 6a for TY2024, which prints no line 6d, and a checkbox
+    /// on line 6d for TY2025. See `ss_benefits_worksheet::mfs_lived_apart_disclosure`.
+    #[serde(default)]
+    pub mfs_lived_apart_all_year: Option<bool>,
     /// ★★★ **R4 / §5.2 — Form 5498-SA rows** (T16). Transcribed and censused; no line of Form 8889
     /// sums them, and [`Form5498Sa`] says why in the form's own words.
     #[serde(default)]
@@ -3086,6 +3107,7 @@ impl Default for ReturnInputs {
             form_1098e: Vec::new(),
             r_1099: Vec::new(),
             ssa_1099: Vec::new(),
+            mfs_lived_apart_all_year: None,
             sa_1099: Vec::new(),
             sa_5498: Vec::new(),
             // ★★★ R3 — all `None`: a fresh return has been asked NOTHING about income that arrived

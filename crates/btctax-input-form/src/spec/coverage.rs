@@ -753,6 +753,17 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
         //     ★ The task that removes this exemption is the one that wires 6a/6b. Until then it says
         //       "no field yet", never "no field ever".
         "ssa_1099",
+        // ★★★ **T14 / R-8 — the MFS lived-apart declaration. Exempt because it has no `QuestionId` or
+        //     registry entry yet, NOT because its silence is lawful.**
+        //
+        //     Its silence REFUSES (`SsRefusal::MfsLivedApartUnanswered`) whenever the status is MFS and a
+        //     benefit statement is present, because the two answers reach different ARITHMETIC — the
+        //     $25,000/$9,000 thresholds versus "skip lines 8-15, take 85% of line 7". It is answered
+        //     through `income import` today, the same route the Form 1099-R rows take.
+        //
+        //     ★ The task that removes this exemption is the one that gives the retirement section its
+        //       questions — at which point this becomes a real class-(A) declaration with a prompt.
+        "mfs_lived_apart_all_year",
         // ★★ §G-15 — `tax_year` is the SCOPE the form is filled in, not a value the filer types into
         // it, so an input field for it would invite the filer to contradict the year their return is
         // filed under. Exempt DELIBERATELY, which is what this census exists to force someone to

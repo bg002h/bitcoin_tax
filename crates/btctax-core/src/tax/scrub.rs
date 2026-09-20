@@ -873,6 +873,8 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
         //    the beneficiary's own name and SSN — which live on `header`, are scrubbed there, and are
         //    deliberately NOT duplicated onto the row.
         ssa_1099: _,
+        // A yes/no about the household's living arrangement; carries no identity.
+        mfs_lived_apart_all_year: _,
         sa_5498: _,
         // ★★★ R5 / T5 — THE MOST IDENTIFYING ROWS ON THE RETURN. A `schedule_b_filer_records` row
         //     is the seller-financed-mortgage case Schedule B asks for BY NAME: the buyer's own

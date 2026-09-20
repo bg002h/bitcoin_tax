@@ -722,6 +722,7 @@ $ btctax --vault v.pgp income show --year 2024
   "sa_1099": [],
   "r_1099": [],
   "ssa_1099": [],
+  "mfs_lived_apart_all_year": null,
   "sa_5498": [],
   "schedule_c": {
     "owner": "taxpayer",
@@ -1334,7 +1335,7 @@ Schedule D (raw pre-netting part totals) — tax year 2024
     Form 1099-SA                                 no         0 row(s) transcribed
     Form 5498-SA                                 no         0 row(s) transcribed
     Form 1099-R                                  no         0 row(s) transcribed
-    Form SSA-1099 or RRB-1099                    no         no section holds rows of this type
+    Form SSA-1099 or RRB-1099                    no         0 row(s) transcribed
     Form 1099-NEC, 1099-MISC or 1099-K           no         no section holds rows of this type
     Schedule K-1                                 no         no section holds rows of this type
     a rental or royalty statement (Schedule E)   no         no section holds rows of this type

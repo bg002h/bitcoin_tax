@@ -1970,6 +1970,11 @@ pub struct AbsoluteReturn {
     pub pension_total: Option<Usd>,
     /// The taxable part of every pension or annuity — Σ box 2a.
     pub taxable_pension: Usd,
+    /// 1040 L6a — Σ box 5 over every Form SSA-1099 / RRB-1099 of both spouses. `None` when the filer
+    /// holds none: 6a and 6b are BLANK then, not zero.
+    pub social_security_benefits: Option<Usd>,
+    /// 1040 L6b — the Social Security Benefits Worksheet's line 18.
+    pub taxable_social_security: Usd,
     /// 1040 L9 — total income = L1a + L2b + L3b + **L4b + L5b** + L7 + L8 (T14 added the two
     /// retirement operands; a sum missing one of them is the `a-figure-with-no-reader` shape).
     pub total_income: Usd,
@@ -2485,6 +2490,64 @@ pub fn assemble_absolute(
     let ira_distributions_total = crate::tax::form1099r::line_4a(&ri.r_1099);
     let pension_total = crate::tax::form1099r::line_5a(&ri.r_1099);
 
+    // ★★★ **T14 — the SOCIAL SECURITY BLOCK. It must come before the L9 sum, because line 6b is an
+    //     operand of it — and its own inputs are every OTHER L9 operand, which is why it sits exactly
+    //     here and not earlier.**
+    //
+    //     There is no circularity and the worksheet is explicit about that: line 3 combines Form 1040
+    //     lines 1z, 2b, 3b, 4b, 5b, 7 and 8 — every income line EXCEPT 6b.
+    //
+    //     ★ `early_wd` is hoisted above this point for the same reason: worksheet line 6 needs it.
+    let early_wd: Usd = ri
+        .int_1099
+        .iter()
+        .map(|i| i.box2_early_withdrawal_penalty)
+        .sum();
+    // ★★★ **Worksheet line 6 — "the total of the amounts from Schedule 1, lines 11 through 20, and 23
+    //     and 25". A BLOCK (FR-183 / r1 I-9), and the membership test is the RANGE, not a habit.**
+    //
+    //     btctax models three members of it: line 13 (HSA), line 15 (½ SE) and line 18 (early
+    //     withdrawal penalty). ★★ The STUDENT LOAN deduction is Schedule 1 **line 21**, which is
+    //     OUTSIDE 11–20 and is not 23 or 25 — so it must NOT be here. Including it would enlarge line 6,
+    //     shrink line 7, and UNDERSTATE the taxable benefit.
+    //
+    //     ★ OpenTaxSolver reads the same block from the other direction and agrees:
+    //       `ws[6] = Σ Sched1[11..20] + Sched1[23] + Sched1[25]`.
+    let ss_worksheet_line6 = hsa_deduction_13 + half_se + early_wd;
+    let ss_line1 = crate::tax::form_ssa1099::worksheet_line1(&ri.ssa_1099);
+    let (social_security_benefits, taxable_social_security) = if ri.ssa_1099.is_empty() {
+        // No form, no line: 6a and 6b are BLANK, not zero. A printed `-0-` on 6b is the filer
+        // testifying that none of their benefits are taxable, which a filer with no benefits is not
+        // saying (`ss_benefits_worksheet::Outcome`).
+        (None, Usd::ZERO)
+    } else {
+        let outcome = crate::tax::ss_benefits_worksheet::run(
+            ss_line1,
+            ri.filing_status,
+            // ★ Safe to unwrap_or here ONLY because `screen_social_security` has already refused the
+            //   `None` case for an MFS filer with a benefit statement, and the screen runs before
+            //   assembly. On any other status the value is not read by the worksheet at all.
+            ri.mfs_lived_apart_all_year.unwrap_or(false),
+            crate::tax::ss_benefits_worksheet::OtherIncome {
+                // Worksheet line 3 — the 1040's own operands, named in its own order.
+                line3_combined: wages
+                    + taxable_interest
+                    + ordinary_dividends
+                    + taxable_ira
+                    + taxable_pension
+                    + capital_gain
+                    + schedule_1_income,
+                line4_tax_exempt_interest: ri
+                    .int_1099
+                    .iter()
+                    .map(|i| i.box8_tax_exempt_interest)
+                    .sum(),
+                line6_schedule_1_block: ss_worksheet_line6,
+            },
+        );
+        (Some(ss_line1), outcome.line_6b())
+    };
+
     // ★★★ **T14 — the two retirement operands are IN the L9 sum.** `a-figure-with-no-reader` is why
     //     this is the line that matters: `total_tax` was once short by the whole AMT with every test
     //     green, because a computed figure had no reader. M-2's kill is deleting an operand here.
@@ -2494,7 +2557,8 @@ pub fn assemble_absolute(
         + capital_gain
         + schedule_1_income
         + taxable_ira
-        + taxable_pension; // L9
+        + taxable_pension
+        + taxable_social_security; // L9
 
     // ── Adjustments L10 (Sch 1 L26), AGI L11 ──────────────────────────────────────────────────────
     // §221 MAGI for the student-loan phase-out is AGI computed WITHOUT the student-loan deduction but WITH
@@ -2511,11 +2575,6 @@ pub fn assemble_absolute(
     //
     //     ★ It is a BLOCK, not a list: a future Schedule 1 lines 11–20 adjustment belongs here the
     //       day it is added, and the worksheet's own sentence is the rule that says so.
-    let early_wd: Usd = ri
-        .int_1099
-        .iter()
-        .map(|i| i.box2_early_withdrawal_penalty)
-        .sum();
     let agi_before_student_loan = total_income - early_wd - half_se - hsa_deduction_13;
     let student_loan = student_loan_deduction(
         sum_student_loan_interest(ri),
@@ -2903,7 +2962,9 @@ pub fn assemble_absolute(
         .chain(ri.div_1099.iter().map(|d| d.box4_fed_withheld))
         .chain(ri.g_1099.iter().map(|g| g.box4_fed_withheld))
         .sum::<Usd>()
-        + crate::tax::form1099r::withholding_line_25b(&ri.r_1099);
+        + crate::tax::form1099r::withholding_line_25b(&ri.r_1099)
+        // ★ T14 — SSA-1099 box 6 / RRB-1099 box 10. Voluntary, but withheld all the same.
+        + crate::tax::form_ssa1099::withholding(&ri.ssa_1099);
     let wh_25c = additional_medicare.part5_withholding + ri.payments.other_withholding;
     let total_withholding = wh_25a + wh_25b + wh_25c; // L25
                                                       // L33 total payments = L25 + L26 estimated + Sch 3 L15 (L10 extension + L11 excess-SS).
@@ -2934,6 +2995,8 @@ pub fn assemble_absolute(
         taxable_ira,
         pension_total,
         taxable_pension,
+        social_security_benefits,
+        taxable_social_security,
         total_income,
         adjustments,
         half_se_deduction: half_se,
@@ -5403,6 +5466,71 @@ mod tests {
                                                           // Cross-foot L11 = L9 − L10 (with-crypto AGI).
         assert_eq!(ar.agi, ar.total_income - ar.adjustments);
         assert_eq!(ar.agi, dec!(116000) - ar.half_se_deduction);
+    }
+
+    /// ★★★ **6a AND 6b REACH THE RETURN, end to end, and taxcalc says 4,000.**
+    ///
+    /// The T14.9 lesson applied as a test rather than a promise: a compute that no censused, transcribed
+    /// document can reach is not a feature. This drives `assemble_absolute` with a Form SSA-1099 whose
+    /// figures **taxcalc independently computes**: Single, 20,000 of benefits against 30,000 of wages ⇒
+    /// `c02500` = **9,600**, measured live on 2026-09-20. Hand-walking the worksheet reaches the same
+    /// figure — line 9 = 15,000, line 11 = 6,000, line 14 = 4,500, line 15 = 5,100, line 16 = 9,600, and
+    /// line 17 = 17,000 does not bind.
+    #[test]
+    fn social_security_reaches_6a_6b_l9_and_25b() {
+        let ri = ReturnInputs {
+            tax_year: 2024,
+            filing_status: FilingStatus::Single,
+            has_income_exclusion: Some(false),
+            ssa_1099: vec![crate::tax::form_ssa1099::FormSsa1099 {
+                owner: crate::tax::return_inputs::Owner::Taxpayer,
+                kind: crate::tax::form_ssa1099::SsaFormKind::Ssa1099,
+                transcribed_on: None,
+                box3_benefits_paid: dec!(20_000),
+                box4_benefits_repaid: Usd::ZERO,
+                federal_withholding: dec!(1_500),
+            }],
+            w2s: vec![crate::tax::return_inputs::W2 {
+                box1_wages: dec!(30_000),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let st = state_income(vec![]);
+        let table = synthetic_table(2024);
+        let ar = assemble_absolute(&ri, &st, &ty2024_params(), &table, 2024);
+
+        assert_eq!(
+            ar.social_security_benefits,
+            Some(dec!(20_000)),
+            "6a is Σ box 5 — and box 5 is DERIVED, box 3 minus box 4"
+        );
+        assert_eq!(
+            ar.taxable_social_security,
+            dec!(9_600),
+            "6b is the worksheet's line 18, and taxcalc's c02500 for this household is 9,600"
+        );
+        assert_eq!(
+            ar.total_income,
+            dec!(39_600),
+            "L9 = 30,000 wages + 9,600 taxable benefits. If this is 30,000 the operand is computed and \
+             UNREAD — the failure this test exists for."
+        );
+        assert_eq!(
+            ar.withholding_25b,
+            dec!(1_500),
+            "SSA-1099 box 6's voluntary withholding must reach line 25b"
+        );
+
+        // ★★ And a filer with NO benefit statement files a BLANK 6a, not a zero — the distinction
+        //    `an-entry-is-testimony` is about.
+        let none = ReturnInputs {
+            tax_year: 2024,
+            ..Default::default()
+        };
+        let bare = assemble_absolute(&none, &st, &ty2024_params(), &table, 2024);
+        assert_eq!(bare.social_security_benefits, None);
+        assert_eq!(bare.taxable_social_security, Usd::ZERO);
     }
 
     /// ★★★ **M-2 — LINE 9 ACTUALLY READS 4b AND 5b, end to end through `assemble_absolute`.**
@@ -9561,6 +9689,8 @@ mod tests {
         assert_eq!(
             pf.f1040,
             crate::tax::printed::Form1040Lines {
+                line6a: None,
+                line6b: Usd::ZERO,
                 line4a: None,
                 line4b: Usd::ZERO,
                 line5a: None,

@@ -1759,6 +1759,20 @@ pub enum RefuseReason {
     /// for: everything here is fixed by the filer answering a question they already know the answer to.
     /// The spec's R-numbers are named in the message so nothing is lost to the grouping.
     RetirementQuestionUnanswered(String),
+    /// ★★★ **T14 / R-6 — repayments exceed benefits across every Form SSA-1099 / RRB-1099 of both
+    /// spouses.** *"None of your benefits are taxable … Don't use Worksheet 1 in this case."* The excess
+    /// may reach Schedule A line 16 or a Schedule 3 line 13z credit marked *"I.R.C. 1341"*; btctax
+    /// computes neither, and the message names BOTH because a filer told only of the deduction may take
+    /// the worse of the two.
+    SocialSecurityRepaymentsExceedBenefits(String),
+    /// ★★★ **T14 / R-7 — the worksheet is BARRED for this filer**, or the declaration that decides it is
+    /// unanswered. The Exception in the line 6a/6b instructions: Form 2555, 4563 or 8815, or an
+    /// employer-provided adoption or Puerto Rico exclusion, sends the filer to Pub. 915's own worksheet.
+    SocialSecurityWorksheetBarred(String),
+    /// ★★★ **T14 / R-8 — the MFS lived-apart declaration is unanswered, and it changes the arithmetic.**
+    /// Lived apart applies the $25,000 / $9,000 thresholds; lived with skips lines 8–15 and takes 85% of
+    /// line 7 with no threshold at all. btctax may not default it.
+    SocialSecurityMfsLivedApartUnanswered,
     /// ★★★ **T14 / R-2, R-4 — the document is something this build cannot follow.** An exception the
     /// filer declared applies (a rollover, basis/Form 8606, a QCD, an HSA funding distribution, the PSO
     /// exclusion, a line-1h disability pension), a code-T Roth whose lookback answer is NO, or a box
@@ -2129,6 +2143,8 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         //   and tax withheld are all magnitudes. ★ Box 5 is DERIVED and CAN be negative, which is why it
         //   is not a field and therefore not screened here.
         ssa_1099,
+        // ★ R-8's declaration — a yes/no, not money. `screen_social_security` reads it.
+        mfs_lived_apart_all_year: _,
         // ★ R4 / T16 — the HSA information returns carry money (a distribution, an FMV, an
         //   earnings-on-excess figure); `screen_form_8889` screens all of it.
         sa_1099,
@@ -3982,6 +3998,68 @@ pub fn home_sale_decision(ri: &ReturnInputs) -> HomeSaleDecision {
     }
 }
 
+/// ★★★ **T14 — the Social Security gate (R-6, R-7, R-8).** Runs unconditionally: none of the three is
+/// fixable by `btctax income answer` today, because the declarations arrive through `income import` — so
+/// all three refuse at import as well, which is the treatment `ScreenTier`'s doc gives an unsupported type
+/// and the census's own value rules.
+fn screen_social_security(ri: &ReturnInputs) -> Option<Refusal> {
+    use crate::tax::form_ssa1099::SsRefusal as S;
+    let Err(why) = crate::tax::form_ssa1099::screen(
+        &ri.ssa_1099,
+        ri.filing_status,
+        ri.mfs_lived_apart_all_year,
+        ri.has_income_exclusion,
+    ) else {
+        return None;
+    };
+    match why {
+        S::RepaymentsExceedBenefits { excess } => refuse(
+            RefuseReason::SocialSecurityRepaymentsExceedBenefits(format!("excess {excess}")),
+            format!(
+                "your Forms SSA-1099 and RRB-1099 show that you repaid MORE in benefits than you \
+                 received — {excess} more, adding every form of both spouses together. The \
+                 instructions say none of your benefits are taxable for the year and that this \
+                 worksheet must not be used. And if the excess is more than $3,000 you may be able to \
+                 take an itemized deduction on Schedule A line 16 OR a credit on Schedule 3 line 13z \
+                 marked \"I.R.C. 1341\" — whichever gives the smaller tax. btctax computes neither, so \
+                 filing without them would OVERSTATE your tax. See Pub. 915 and file this return with \
+                 a preparer. (R-6)"
+            ),
+        ),
+        S::WorksheetBarredByExclusion => refuse(
+            RefuseReason::SocialSecurityWorksheetBarred("an income exclusion applies".into()),
+            "you declared an income exclusion — Form 2555, 4563 or 8815, employer-provided adoption \
+             benefits, or income from sources within Puerto Rico. The Exception in the Form 1040 line \
+             6a and 6b instructions says that a filer in that position must use the worksheet in \
+             Pub. 915 INSTEAD of the one in the 1040 instructions, and btctax builds only the latter. \
+             File with a preparer. (R-7)"
+                .to_string(),
+        ),
+        S::ExclusionUnanswered => refuse(
+            RefuseReason::SocialSecurityWorksheetBarred("the exclusion question is unanswered".into()),
+            "you have Social Security or railroad retirement benefits, and you have not said whether \
+             any income exclusion applies to you — Form 2555, 4563 or 8815, employer-provided adoption \
+             benefits, or income from sources within Puerto Rico. Silence is not testimony that none \
+             applies, and the answer decides WHICH worksheet figures your taxable benefits: btctax \
+             builds the one in the 1040 instructions and not Pub. 915's. Set \
+             `has_income_exclusion` and re-import. (R-7)"
+                .to_string(),
+        ),
+        S::MfsLivedApartUnanswered => refuse(
+            RefuseReason::SocialSecurityMfsLivedApartUnanswered,
+            "you are filing separately and you have Social Security or railroad retirement benefits, \
+             and you have not said whether you lived apart from your spouse for ALL of the year. That \
+             one answer changes the arithmetic rather than the wording: if you lived apart, the \
+             worksheet gives you the $25,000 and $9,000 thresholds and a modest benefit can be \
+             entirely non-taxable; if you lived with your spouse at any time, the worksheet skips \
+             those thresholds altogether and taxes 85% of the figure it reaches. btctax will not \
+             choose for you — either guess would put a number on your return that you never stated. \
+             Set `mfs_lived_apart_all_year` and re-import. (R-8)"
+                .to_string(),
+        ),
+    }
+}
+
 /// Which document a Form 1099-R refusal is about, phrased for the filer.
 fn r1099_payer(f: &crate::tax::form1099r::Form1099R, i: usize) -> String {
     if f.payer.trim().is_empty() {
@@ -4177,6 +4255,11 @@ pub fn screen_inputs_tiered(ri: &ReturnInputs, tier: ScreenTier<'_>) -> Option<R
     //        order. This is the call that makes that claim true, so it may not be moved below anything
     //        that could return first.
     if let Some(r) = screen_r1099_unsupported(ri) {
+        return Some(r);
+    }
+    // ★ T14 — the Social Security gate, beside its 1099-R sibling and for the same reason: it is a
+    //   statement about what this build can do, so no later rule's answer could change it.
+    if let Some(r) = screen_social_security(ri) {
         return Some(r);
     }
 
@@ -6638,14 +6721,15 @@ mod tests {
             refused += 1;
         }
         assert_eq!(
-            refused, 10,
+            refused, 9,
             "★★★ TEN since 2026-09-20, and the SHRINK IS DELIBERATE — which is exactly what this \
              message asks to be justified. The Form 1099-R left §2.2 when the retirement compute \
              landed (T14): its exit sentence claimed Form 1040 lines 4a–5b were not built, and that \
              had become FALSE while the row still refused a filer who answered the census honestly. \
              It is not un-announced — what announces it now is narrower and PER DOCUMENT \
              (`screen_r1099_unsupported`), covering every case the family-wide refusal covered and \
-             none of the ones it covered wrongly. Any OTHER shrink is the defect this count catches."
+             none of the ones it covered wrongly. ★ NINE as of T14.11: the Social Security family left too, when lines 6a/6b \
+             were wired. Any OTHER shrink is the defect this count catches."
         );
     }
 
@@ -7362,8 +7446,9 @@ mod tests {
                 DocumentRow::Sa1099,
                 DocumentRow::Sa5498,
                 DocumentRow::R1099,
+                DocumentRow::Ssa1099,
             ],
-            "★ TEN since T14: the nine plus the Form 1099-R, whose `Vec` landed with the retirement \
+            "★ ELEVEN since T14: the nine plus the Form 1099-R and the Social Security family, whose `Vec` landed with the retirement \
                  build. \"Vec-bearing\" and \"has a live input-form section\" are now DIFFERENT \
                  sets — the 1099-R has the first and not the second — so a kind appearing here is \
                  not thereby pre-namable."
@@ -7410,6 +7495,11 @@ mod tests {
                 //     ★ It also carries box 4, so an untranscribed row loses WITHHOLDING as well, which
                 //       moves the other way and overstates the balance due. Both directions in one row.
                 DocumentRow::R1099,
+                // ★★★ **And the SOCIAL SECURITY family (T14.11)**: Form 1040 lines 6a and 6b read Σ box
+                //     5 across both spouses' forms, and nothing else carries a benefit onto the return. A
+                //     declared statement with no row transcribed loses income from line 9 AND the
+                //     voluntary withholding from line 25b — both directions, as with the 1099-R.
+                DocumentRow::Ssa1099,
             ],
             "★ 1099-B is the only supported row still OUT, and its excuse is the FORM'S OWN printed \
              blank (Schedule D line 1a/8a is a summary option, and the ledger is the crypto filer's \
@@ -12111,6 +12201,28 @@ mod param_free_tier {
         //     about. Built from the shared fixture and then mutated, so each differs from a filable row
         //     in exactly one place — which is what makes the fixture evidence that the gate discriminates
         //     rather than evidence that a 1099-R refuses.
+        // ★★★ T14.11 — the three Social Security refusals. Each differs from a FILABLE return in
+        //     exactly one place, so the fixtures are evidence the gate DISCRIMINATES rather than
+        //     evidence that a benefit statement refuses.
+        add("SocialSecurityRepaymentsExceedBenefits", &|r| {
+            let mut f = crate::tax::testonly::form_ssa1099_all_boxes_populated();
+            f.box3_benefits_paid = dec!(1_000);
+            f.box4_benefits_repaid = dec!(9_000); // R-6: Σ box 4 > Σ box 3
+            r.ssa_1099.push(f);
+            r.has_income_exclusion = Some(false);
+        });
+        add("SocialSecurityWorksheetBarred", &|r| {
+            r.ssa_1099
+                .push(crate::tax::testonly::form_ssa1099_all_boxes_populated());
+            r.has_income_exclusion = Some(true); // R-7: the Exception bars the worksheet
+        });
+        add("SocialSecurityMfsLivedApartUnanswered", &|r| {
+            r.filing_status = crate::tax::FilingStatus::Mfs;
+            r.ssa_1099
+                .push(crate::tax::testonly::form_ssa1099_all_boxes_populated());
+            r.has_income_exclusion = Some(false);
+            r.mfs_lived_apart_all_year = None; // R-8: the one answer btctax may not invent
+        });
         add("RetirementDocumentUnsupported", &|r| {
             let mut f = crate::tax::testonly::form_1099r_all_boxes_populated();
             f.exception_applies = Some(true);
@@ -12380,6 +12492,10 @@ mod param_free_tier {
         //       construction — the same treatment `screen_dependent_gates` gets.
         let r1099 =
             body_after("fn screen_r1099_unsupported(ri: &ReturnInputs) -> Option<Refusal> {");
+        // ★ T14.11 — a FIFTH helper, for the same reason as the fourth. The Social Security rules live in
+        //   `screen_social_security`; all three of them refuse at import, so they belong to the param-free
+        //   census and each has a fixture.
+        let ss = body_after("fn screen_social_security(ri: &ReturnInputs) -> Option<Refusal> {");
 
         let named: BTreeSet<String> = reasons_in(body)
             .union(&reasons_in(census_fn))
@@ -12392,6 +12508,9 @@ mod param_free_tier {
             .cloned()
             .collect::<BTreeSet<String>>()
             .union(&reasons_in(r1099))
+            .cloned()
+            .collect::<BTreeSet<String>>()
+            .union(&reasons_in(ss))
             .cloned()
             .collect();
         let package_gated: BTreeSet<String> =

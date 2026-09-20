@@ -686,6 +686,17 @@ pub struct Form1040Lines {
     pub line5a: Option<Usd>,
     /// L5b — "Taxable amount". Σ box 2a over pension documents.
     pub line5b: Usd,
+    /// ★★★ **L6a — Social Security benefits. `Option`, because a filer with none files a BLANK.**
+    ///
+    /// Σ box 5 over every Form SSA-1099 / RRB-1099 of both spouses, which is worksheet line 1's own
+    /// instruction: *"Also enter this amount on Form 1040 or 1040-SR, line 6a."*
+    pub line6a: Option<Usd>,
+    /// **L6b — the taxable part**, worksheet line 18.
+    ///
+    /// ★★ A printed `-0-` here is TESTIMONY — the filer saying none of their benefits are taxable, which
+    /// both of the worksheet's STOP branches instruct. It is NOT the same as the blank a filer with no
+    /// benefits files, which is why 6a is `Option` and `Usd::ZERO` on 6b means something.
+    pub line6b: Usd,
     /// L7 — capital gain or (loss): **Schedule D's printed line 16**, or on a net-loss year the
     /// §1211(b)-limited `−(Schedule D line 21)`. Signed with a **leading minus**.
     pub line7: Usd,
@@ -836,6 +847,17 @@ pub struct Form1040Income {
     pub line5a: Option<Usd>,
     /// L5b — the taxable part of every pension or annuity.
     pub line5b: Usd,
+    /// ★★★ **L6a — Social Security benefits. `Option`, because a filer with none files a BLANK.**
+    ///
+    /// Σ box 5 over every Form SSA-1099 / RRB-1099 of both spouses, which is worksheet line 1's own
+    /// instruction: *"Also enter this amount on Form 1040 or 1040-SR, line 6a."*
+    pub line6a: Option<Usd>,
+    /// **L6b — the taxable part**, worksheet line 18.
+    ///
+    /// ★★ A printed `-0-` here is TESTIMONY — the filer saying none of their benefits are taxable, which
+    /// both of the worksheet's STOP branches instruct. It is NOT the same as the blank a filer with no
+    /// benefits files, which is why 6a is `Option` and `Usd::ZERO` on 6b means something.
+    pub line6b: Usd,
     pub line7: Usd,
     pub line8: Usd,
     pub line9: Usd,
@@ -872,9 +894,13 @@ pub fn form_1040_income_lines(
     let line4b = round_dollar(ar.taxable_ira);
     let line5a = ar.pension_total.map(round_dollar);
     let line5b = round_dollar(ar.taxable_pension);
+    let line6a = ar.social_security_benefits.map(round_dollar);
+    let line6b = round_dollar(ar.taxable_social_security);
     let line8 = sch_1.map_or(Usd::ZERO, |s| s.line10);
     // ★★★ T14 — 4b and 5b are printed operands of L9, and the sum reads the PRINTED cells.
-    let line9 = line1z + line2b + line3b + line4b + line5b + line7 + line8; // ★ sums the PRINTED lines
+    // ★★★ T14 — 6b joins the printed L9 sum. The worksheet reads every OTHER operand of this line
+    //     (1z, 2b, 3b, 4b, 5b, 7, 8) and never 6b itself, so there is no circularity.
+    let line9 = line1z + line2b + line3b + line4b + line5b + line6b + line7 + line8; // ★ sums the PRINTED lines
     let line10 = sch_1.map_or(Usd::ZERO, |s| s.line26);
     let line11 = line9 - line10;
 
@@ -891,6 +917,8 @@ pub fn form_1040_income_lines(
         line4b,
         line5a,
         line5b,
+        line6a,
+        line6b,
         line7,
         line8,
         line9,
@@ -936,6 +964,8 @@ pub fn form_1040_lines(
         line4b,
         line5a,
         line5b,
+        line6a,
+        line6b,
         line7,
         line8,
         line9,
@@ -1045,6 +1075,8 @@ pub fn form_1040_lines(
         line4b,
         line5a,
         line5b,
+        line6a,
+        line6b,
         line7,
         line8,
         line9,
@@ -1951,6 +1983,8 @@ mod tests {
         ar.ordinary_dividends = dec!(10_000); // 3b
         ar.taxable_ira = dec!(1_000); // 4b
         ar.taxable_pension = dec!(100); // 5b
+        ar.taxable_social_security = dec!(10); // 6b
+        ar.social_security_benefits = Some(dec!(50));
         ar.ira_distributions_total = Some(dec!(5_000));
         ar.pension_total = Some(dec!(500));
         ar.capital_gain = Usd::ZERO; // L7 comes from Schedule D below
@@ -1963,12 +1997,14 @@ mod tests {
         assert_eq!(income.line3b, dec!(10_000));
         assert_eq!(income.line4b, dec!(1_000), "4b must reach the printed cell");
         assert_eq!(income.line5b, dec!(100), "5b must reach the printed cell");
+        assert_eq!(income.line6b, dec!(10), "6b must reach the printed cell");
+        assert_eq!(income.line6a, Some(dec!(50)));
         assert_eq!(
             income.line9,
-            dec!(1_111_100),
-            "printed L9 = 1z + 2b + 3b + 4b + 5b + 7 + 8. Each operand is a distinct power of ten, so \
+            dec!(1_111_110),
+            "printed L9 = 1z + 2b + 3b + 4b + 5b + 6b + 7 + 8. Each operand is a distinct power of ten, so \
              this literal names exactly which term is missing: short by 1,000 ⇒ 4b was dropped, by 100 \
-             ⇒ 5b, by 10,000 ⇒ 3b, and so on."
+             ⇒ 5b, by 10 ⇒ 6b, by 10,000 ⇒ 3b, and so on."
         );
         // ★ And the two BLANK-capable cells print their figures rather than collapsing to zero.
         assert_eq!(income.line4a, Some(dec!(5_000)));
@@ -2031,6 +2067,8 @@ mod tests {
         use crate::tax::other_taxes::{Form8959, Form8960};
         let z = Usd::ZERO;
         AbsoluteReturn {
+            social_security_benefits: None,
+            taxable_social_security: Usd::ZERO,
             ira_distributions_total: None,
             taxable_ira: Usd::ZERO,
             pension_total: None,

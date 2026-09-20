@@ -194,16 +194,19 @@ impl DocumentRow {
             //       includes every case the Simplified Method would have been needed for.
             DocumentRow::R1099 => return None,
             // ── §2.2, verbatim. ─────────────────────────────────────────────────────────────────
-            DocumentRow::Ssa1099 => {
-                // ★★ CORRECTED 2026-09-20: the Social Security Benefits Worksheet IS built
-                //    (`tax::ss_benefits_worksheet`, all 18 lines, reconciled against both oracles) and
-                //    so is the input surface (`tax::form_ssa1099`). What is NOT built is the WIRING —
-                //    no `ReturnInputs` field carries the rows and no 1040 line reads them — so the
-                //    family still refuses, and the sentence now says the true reason.
-                "btctax cannot take Social Security or railroad retirement benefits yet: the Social \
-                 Security Benefits Worksheet is built, but Form 1040 lines 6a and 6b are not yet \
-                 wired to it. File with a preparer for this year."
-            }
+            // ★★★ **T14 — the Social Security family is SUPPORTED as of 2026-09-20 and owes no exit.**
+            //
+            //     Its exit sentence went through TWO false states before this: first *"the Social Security
+            //     Benefits Worksheet is not built"* (false once T14.7 landed), then *"the worksheet is
+            //     built, but Form 1040 lines 6a and 6b are not yet wired"* (false as of this commit). Both
+            //     were true when written. That is why the T14.9 lesson is applied here in the SAME commit
+            //     as the wiring rather than a commit later: the 1099-R spent five commits unreachable
+            //     because its census row was corrected separately.
+            //
+            //     ★ What is still refused is narrower and per RETURN: `screen_social_security` refuses
+            //       repayments exceeding benefits (R-6), the barred-worksheet exclusion and its unanswered
+            //       limb (R-7), and the unanswered MFS lived-apart declaration (R-8).
+            DocumentRow::Ssa1099 => return None,
             DocumentRow::NecMiscK1099 => {
                 "btctax cannot take a Form 1099-NEC, 1099-MISC or 1099-K this year. Box 1 / \
                  non-employee compensation is Schedule C income and Schedule C Part II is not built; \
@@ -295,6 +298,16 @@ impl DocumentRow {
             //
             //     ★ The import route is real and complete — `docs/income-import-schema.md` publishes
             //       all 21 boxes plus the two questions.
+            // ★ T14 — TOML only, same as the 1099-R and for the same reason: `SectionId::R1099s` has no
+            //   live rows yet. The two DECLARATIONS this family needs (`has_income_exclusion` for R-7 and
+            //   `mfs_lived_apart_all_year` for R-8) are named, because a filer who transcribes the rows
+            //   and stops will be refused for want of them.
+            DocumentRow::Ssa1099 => {
+                "enter it as an `[[ssa_1099]]` table through `btctax income import`, with \
+                 `has_income_exclusion` and — if you file separately — `mfs_lived_apart_all_year` \
+                 beside it. Form 1040 lines 6a and 6b and the withholding share of line 25b read the \
+                 rows. Box 5 is NOT entered: btctax derives it from boxes 3 and 4, as the form does"
+            }
             DocumentRow::R1099 => {
                 "enter it as an `[[r_1099]]` table through `btctax income import` — Form 1040 lines \
                  4a/4b (IRA) or 5a/5b (pension) and the box-4 share of line 25b read the rows. The \
@@ -642,8 +655,9 @@ pub fn declared_rows(
         DocumentRow::Form1098 => Some(ri.form_1098.len()),
         // ★ T14 — the 1099-R gained its `Vec` with the retirement build.
         DocumentRow::R1099 => Some(ri.r_1099.len()),
-        DocumentRow::Ssa1099
-        | DocumentRow::NecMiscK1099
+        // ★ T14 — the Social Security family gained its `Vec` with the 6a/6b wiring.
+        DocumentRow::Ssa1099 => Some(ri.ssa_1099.len()),
+        DocumentRow::NecMiscK1099
         | DocumentRow::K1
         | DocumentRow::ScheduleERental
         | DocumentRow::S1099
@@ -724,10 +738,13 @@ pub const fn requires_transcription(row: DocumentRow) -> bool {
         //    the other supported families do: answering yes and transcribing nothing would leave the
         //    return silent about a document the filer said they hold.
         DocumentRow::R1099 => true,
+        // ★★ T14 — a `Yes` here demands rows: answering yes and transcribing nothing would leave 6a
+        //    and 6b blank while the filer has said they hold the statement, which is income missing
+        //    from line 9 — and it would lose the voluntary withholding as well.
+        DocumentRow::Ssa1099 => true,
         // The §2.2 families refuse on `Yes` before this is ever read — none of them has rows to
         // demand.
-        DocumentRow::Ssa1099
-        | DocumentRow::NecMiscK1099
+        DocumentRow::NecMiscK1099
         | DocumentRow::K1
         | DocumentRow::ScheduleERental
         | DocumentRow::S1099
@@ -934,8 +951,8 @@ pub fn drop_pre_named_rows(
         DocumentRow::Form1098 => retain_by(&mut ri.form_1098, &keep),
         // ★ T14 — a supported family must be able to SHED rows when the answer flips to No.
         DocumentRow::R1099 => retain_by(&mut ri.r_1099, &keep),
+        DocumentRow::Ssa1099 => retain_by(&mut ri.ssa_1099, &keep),
         DocumentRow::Form1098e
-        | DocumentRow::Ssa1099
         | DocumentRow::NecMiscK1099
         | DocumentRow::K1
         | DocumentRow::ScheduleERental
@@ -1054,7 +1071,7 @@ mod tests {
             //     ★ It rejoins this guard the day `SectionId::R1099s` gains rows — at which point
             //       `row_is_pre_named` needs an arm and this skip must be deleted. Named rather than
             //       silently filtered, so that day is a deliberate edit.
-            if matches!(row, DocumentRow::R1099) {
+            if matches!(row, DocumentRow::R1099 | DocumentRow::Ssa1099) {
                 continue;
             }
             match row {
@@ -1181,7 +1198,7 @@ mod tests {
             //     ★ It rejoins this guard the day `SectionId::R1099s` gains rows — at which point
             //       `row_is_pre_named` needs an arm and this skip must be deleted. Named rather than
             //       silently filtered, so that day is a deliberate edit.
-            if matches!(row, DocumentRow::R1099) {
+            if matches!(row, DocumentRow::R1099 | DocumentRow::Ssa1099) {
                 continue;
             }
             match row {
@@ -1323,12 +1340,13 @@ mod tests {
             }
         }
         assert_eq!(
-            refusing, 10,
-            "★★★ TEN, not eleven, since 2026-09-20: the Form 1099-R LEFT §2.2's excluded set when the \
-             retirement compute landed (T14). Its exit sentence used to say lines 4a–5b were not built, \
-             which had become FALSE while the row still refused a filer who answered honestly. What is \
-             still refused is narrower and per DOCUMENT — `screen_r1099_unsupported`. The remaining ten \
-             are the W-2 and four 1099 families' siblings that genuinely have no compute");
+            refusing, 9,
+            "★★★ NINE, and the shrink is DELIBERATE twice over: the Form 1099-R left §2.2 when its \
+             compute landed (T14.9) and the Social Security family left when lines 6a/6b were wired \
+             (T14.11). Each had an exit sentence that had become FALSE while the row still refused a \
+             filer who answered the census honestly — the SSA one went through TWO false states. What \
+             announces them now is narrower and per document or per return. Any OTHER shrink is the \
+             defect this count exists to catch.");
     }
 
     /// Each row's prompt names the document by the words on the paper, so the filer can check it
