@@ -59,6 +59,7 @@ pub mod schedule_1a;
 pub mod scrub;
 pub mod scrub_axis;
 pub mod se;
+pub mod ss_benefits_worksheet;
 /// ★★★ **FR-196 — the §111(a) STATE AND LOCAL INCOME TAX REFUND WORKSHEET (Schedule 1, line 1)**,
 /// transcribed line by line from every archived `i1040gi` revision, plus the nine Pub. 525 Exception
 /// conditions that decide whether it may be used at all. See module doc.
