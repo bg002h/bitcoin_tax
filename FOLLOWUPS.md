@@ -9687,7 +9687,7 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   check in one command that they are holding the artifact under review — which makes the reviewer a
   witness to their own payload instead of trusting the harness.
 
-- **🟡 PARTLY CLOSED 2026-09-20 — FR-258 — Form 1099-R box 14/17 and Form 1099-G box 11/12 now reach Schedule A line 5a. The 1099-MISC, 1099-NEC and W-2G legs remain, blocked on those families not being modelled at all. Owning phase: the retirement build (T14) for box 14; the QCD widening for box 17.**
+- **✅ CLOSED 2026-09-20 — FR-258 — all five families the Schedule A line-5a instruction names are now accounted for, and a GATE derived from that instruction holds it.
   The Schedule A line-5a instruction names **five** documents whose state/local withholding boxes reach
   that line, verbatim: *"Forms W-2G, 1099-G, **1099-R**, 1099-MISC, and 1099-NEC may also show state and
   local income taxes withheld"* (`design/forms/extract/i1040sca--2024.txt:324`; identical at
@@ -9722,6 +9722,35 @@ The rehearsal ported `f8995a/2025` by hand in a throwaway worktree to test desig
   from the same fold (FR-256 input paths, FR-257 cite-check scope) both got FR numbers within minutes.
   A discovery recorded only in prose is a discovery scheduled for nothing. The asymmetry was not a
   judgment call; it was inattention, and it ran against the one finding that moves a number on a return.
+  ★★★ **CLOSED, and the residue was never an open understatement path.** The three "missing" families are
+  accounted for by REFUSING, which I verified by deriving the supported set from
+  `DocumentRow::exit_sentence` rather than by grepping (a first fragile grep reported the **W-2** as
+  refusing, which is absurd — it is the primary income document — because `-A1` after
+  `DocumentRow::W2` landed on the next `|` arm, not on the arm's `return None`):
+
+  | family the line-5a sentence names | census row | state |
+  |---|---|---|
+  | W-2 | `W2` | SUPPORTED, summed (boxes 17 + 19, FR-91) |
+  | 1099-G | `G1099` | SUPPORTED, summed |
+  | 1099-R | `R1099` | SUPPORTED, summed (boxes 14 + 17) |
+  | W-2G | `W2g` | **REFUSES** — btctax cannot take gambling winnings |
+  | 1099-MISC / 1099-NEC | `NecMiscK1099` | **REFUSES** |
+
+  So a filer holding a 1099-MISC or a W-2G cannot file at all, and there is no line-5a understatement to
+  be had. The entry above read as though three families were an open gap; they are gated scope.
+  ★★ **WHAT WAS ACTUALLY MISSING was the gate.** `income_tax_salt`'s comment already reasoned all of this
+  out — *"those three are accounted for by their families refusing rather than by a term here"* — and that
+  reasoning was held by nothing. It is a claim about which families are supported, sitting beside the set
+  of supported families: model 1099-MISC without wiring its withholding box and the comment goes false in
+  silence, with an itemizing filer understating line 5a by the whole of it.
+  `every_schedule_a_line_5a_family_is_refused_or_summed` closes it, derived on BOTH sides — the family
+  list is PARSED from `i1040sca--2025`'s own sentence (a revision naming a sixth document reds), and
+  support is read from `exit_sentence` (a family that becomes supported reds until summed). The check on
+  the supported families is BEHAVIOURAL: money in, money out of `income_tax_salt`, with one distinct power
+  of ten each so a shortfall names which term is gone. Plus a W-2 floor so its positive direction can
+  never go vacuous.
+  ★ B1: three plants, three reds — the 1099-R term dropped; the 1099-G term dropped; and **W-2G made
+  SUPPORTED with no withholding wired**, which is precisely the future edit this gate exists to catch.
 
 - **🟡 PARTLY CLOSED 2026-09-20 — FR-257 — `cite-check`'s haystack excluded the archived PUBLICATIONS (fixed); extending it to the retirement spec is RULED OUT, with the measurement. Owning phase: the §7 rewrite (retirement build), NOT before.**
   I-10's third ask was to bring the retirement spec's box quotations under `cite-check`. I extended

@@ -5611,6 +5611,116 @@ mod tests {
         //   shortfall names which.
     }
 
+    /// ★★★ **EVERY FAMILY THE SCHEDULE A LINE-5a INSTRUCTION NAMES IS EITHER REFUSED OR SUMMED —
+    ///        derived from the instruction's own sentence, not from a list typed here.**
+    ///
+    /// `income_tax_salt`'s comment already reasons this out: the instruction names five documents, three
+    /// are supported and summed, and *"those three are accounted for by their families refusing rather
+    /// than by a term here."* That reasoning was held by NOTHING. It is a claim about which families are
+    /// supported, sitting beside the set of supported families — so modelling 1099-MISC, 1099-NEC or
+    /// W-2G without also wiring its state-withholding box would make the comment false in silence, and
+    /// an itemizing filer would understate Schedule A line 5a by the whole of that withholding.
+    ///
+    /// ★★ **Both halves are derived.** The family list is PARSED from `i1040sca`'s own sentence, so a
+    /// revision that names a sixth document reds; and support is read from `DocumentRow::exit_sentence`,
+    /// so a family that becomes supported reds until its withholding is summed. The check on the
+    /// supported ones is BEHAVIOURAL — money in, money out of `income_tax_salt` — not a grep for a
+    /// field name.
+    ///
+    /// **Planted-defect check (B1):** drop any of the three terms from `income_tax_salt` and the matching
+    /// family reds by name; give `W2g` a `None` exit sentence without wiring it and it reds as an
+    /// unsummed supported family.
+    #[test]
+    fn every_schedule_a_line_5a_family_is_refused_or_summed() {
+        use crate::tax::document_census::DocumentRow;
+        let extract = {
+            let p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../..")
+                .join("design/forms/extract/i1040sca--2025.txt");
+            std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()))
+        };
+        // The instruction's own sentence, and the families it names.
+        let squashed = extract.split_whitespace().collect::<Vec<_>>().join(" ");
+        let sentence = squashed
+            .split_once("may also show state and local income taxes withheld")
+            .map(|(before, _)| before)
+            .and_then(|b| b.rsplit_once("Forms ").map(|(_, list)| list.to_string()))
+            .expect("i1040sca prints the line-5a sentence naming the other documents");
+        let named: Vec<&str> = ["W-2G", "1099-G", "1099-R", "1099-MISC", "1099-NEC"]
+            .into_iter()
+            .filter(|f| sentence.contains(f))
+            .collect();
+        assert_eq!(
+            named.len(),
+            5,
+            "the line-5a sentence named {named:?}, not the five this check knows. If the revision \
+             ADDED a document, map it to its `DocumentRow` below and decide: refused, or summed. \
+             Sentence as extracted: {sentence:?}"
+        );
+
+        // Each named family, with the row it is, and the withholding a supported one must carry.
+        let rows: &[(&str, DocumentRow)] = &[
+            ("W-2G", DocumentRow::W2g),
+            ("1099-G", DocumentRow::G1099),
+            ("1099-R", DocumentRow::R1099),
+            // The census models 1099-NEC, 1099-MISC and 1099-K as ONE row.
+            ("1099-MISC", DocumentRow::NecMiscK1099),
+            ("1099-NEC", DocumentRow::NecMiscK1099),
+        ];
+        // A return carrying state/local withholding on every SUPPORTED family, one distinct power of
+        // ten each so a shortfall names which term is missing.
+        let with_withholding = |row: DocumentRow| -> Usd {
+            let mut ri = ReturnInputs::default();
+            match row {
+                DocumentRow::W2 => {
+                    ri.w2s = vec![crate::tax::return_inputs::W2 {
+                        box17_state_tax_withheld: dec!(1_000),
+                        box19_local_tax: dec!(100),
+                        ..Default::default()
+                    }]
+                }
+                DocumentRow::G1099 => {
+                    ri.g_1099 = vec![crate::tax::return_inputs::Form1099G {
+                        state_income_tax_withheld: dec!(10),
+                        ..Default::default()
+                    }]
+                }
+                DocumentRow::R1099 => {
+                    ri.r_1099 = vec![crate::tax::form1099r::Form1099R {
+                        box14_state_tax_withheld: Some(dec!(1)),
+                        box17_local_tax_withheld: Some(dec!(2)),
+                        ..crate::tax::testonly::form_1099r_all_boxes_populated()
+                    }]
+                }
+                // A family with no input surface cannot be given withholding; it must be REFUSED, which
+                // is what the assertion below requires of it.
+                _ => {}
+            }
+            income_tax_salt(&ri, &crate::tax::return_inputs::ScheduleAInputs::default())
+        };
+
+        for (name, row) in rows {
+            let refused = row.exit_sentence().is_some();
+            if refused {
+                continue; // accounted for by the refusal — the comment's own reasoning, now checked
+            }
+            let got = with_withholding(*row);
+            assert!(
+                got > Usd::ZERO,
+                "★ Form {name} ({row:?}) is SUPPORTED — `exit_sentence` returns None — and its state or \
+                 local withholding does NOT reach `income_tax_salt`. Schedule A line 5a names it \
+                 explicitly, so an itemizing filer understates that line by the whole of the \
+                 withholding. Either sum it in `income_tax_salt`, or the family must refuse."
+            );
+        }
+        // ★ And the W-2, which the same sentence names first and which FR-91 fixed, so the positive
+        //   direction of this gate is never vacuous.
+        assert!(
+            with_withholding(DocumentRow::W2) >= dec!(1_100),
+            "the W-2's own boxes 17 and 19 must reach line 5a — FR-91"
+        );
+    }
+
     /// ★★★ **The 1099-G's state-withholding box MOVED, derived from both archived extracts.**
     ///
     /// TY2024 prints `10a State`, `10b State identification no.` and `11 State income tax withheld`.
