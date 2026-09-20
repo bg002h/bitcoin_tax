@@ -1255,6 +1255,7 @@ mod tests {
                     box14_state_tax_withheld: None,
                     box17_local_tax_withheld: None,
                     roth_contribution_before_lookback: None,
+                    exception_applies: Some(false),
                 });
             }
             DocumentKind::Form1099Sa => ri.sa_1099.push(t::Form1099Sa {

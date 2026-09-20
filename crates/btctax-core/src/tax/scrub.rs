@@ -1194,8 +1194,9 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
             box11_first_year_desig_roth: _,
             box14_state_tax_withheld: _,
             box17_local_tax_withheld: _,
-            // The filer's own yes/no about a Roth contribution year; no identity.
+            // The filer's own yes/nos; neither carries identity.
             roth_contribution_before_lookback: _,
+            exception_applies: _,
         } = f;
         f.payer = replace_preserving_emptiness(&f.payer, format!("Payer{}", i + 1));
         f.payer_tin = map_payer_tin(&mut eins, &f.payer_tin);
@@ -1425,6 +1426,7 @@ mod tests {
             box14_state_tax_withheld: Some(dec!(300)),
             box17_local_tax_withheld: None,
             roth_contribution_before_lookback: None,
+            exception_applies: Some(false),
         };
         let ri = crate::tax::return_inputs::ReturnInputs {
             r_1099: vec![

@@ -354,7 +354,48 @@ pub struct Form1099R {
     /// here would admit the filer to the `-0-` branch and understate tax.
     #[serde(default)]
     pub roth_contribution_before_lookback: Option<bool>,
+
+    /// ★★★ **The class-(A) declaration the whole compute turns on (SPEC S-3), and it was MISSING from
+    /// this struct until 2026-09-20.**
+    ///
+    /// *"Does any of the exceptions in the line 4a/4b (or 5a/5b) instructions apply to this
+    /// distribution?"* — one question per document over the form's OWN exception list, not one per
+    /// exception. `None` ⇒ **R-1** (IRA) / **R-3** (pension): silence is not testimony that none
+    /// applies, and it matters in both directions. `Some(true)` ⇒ **R-2** / **R-4**, unless the document
+    /// is on the Roth `Q`/`T` sub-branch the instructions close themselves. `Some(false)` computes.
+    ///
+    /// ★★ **How it went missing is the interesting part.** `tests::the_field_set_is_exactly_what_the_
+    /// dispositions_require` holds this struct's fields against `BOXES` — and `exception_applies` is not
+    /// a box, so the gate was blind to it. It was equally blind to
+    /// [`Self::roth_contribution_before_lookback`], which I happened to include. Care caught one of two;
+    /// structure caught neither. [`QUESTIONS`] is the fix: the same destructure now partitions into
+    /// boxes and QUESTIONS, and a question with no declared `None` behaviour fails the gate.
+    #[serde(default)]
+    pub exception_applies: Option<bool>,
 }
+
+/// ★★★ **Every field on [`Form1099R`] that is a QUESTION rather than a printed box, with what its
+/// silence means.**
+///
+/// A printed box's provenance comes from [`BOXES`]; a question has none there, which is exactly how
+/// `exception_applies` was omitted from the struct for two commits without any gate noticing. Each entry
+/// carries `refuses_on_none`, because that is the decision that cannot be left implicit: a question
+/// whose silence is lawful and one whose silence understates tax look identical in the type system.
+pub const QUESTIONS: &[(&str, bool, &str)] = &[
+    // (field, refuses when `None`, why)
+    (
+        "exception_applies",
+        true,
+        "S-3 — silence is not testimony that no exception applies, and it matters in BOTH \
+         directions: R-1 (IRA) / R-3 (pension)",
+    ),
+    (
+        "roth_contribution_before_lookback",
+        true,
+        "r2 I-1 — code T means the PAYER did not know whether the 5-year period was met, so \
+         silence would admit the filer to the 4b = -0- branch and understate tax",
+    ),
+];
 
 #[cfg(test)]
 mod tests {
@@ -407,9 +448,28 @@ mod tests {
                 box11_first_year_desig_roth,
                 box14_state_tax_withheld,
                 box17_local_tax_withheld,
-                // ── the seventh question (r2 I-1): a question, not a printed box ─────────────────
+                // ── QUESTIONS, not printed boxes. Held by `QUESTIONS` below, not by `BOXES`. ─────
                 roth_contribution_before_lookback,
+                exception_applies,
             } = f;
+            // ★★★ Every question destructured above must appear in `QUESTIONS`, and vice versa. This is
+            //     the half that was missing: `exception_applies` was absent from the STRUCT for two
+            //     commits and no gate could see it, because the box join has nothing to say about a
+            //     field that is not a box.
+            let questioned = ["roth_contribution_before_lookback", "exception_applies"];
+            let declared: Vec<&str> = QUESTIONS.iter().map(|(f, _, _)| *f).collect();
+            assert_eq!(
+                questioned.iter().copied().collect::<BTreeSet<_>>(),
+                declared.iter().copied().collect::<BTreeSet<_>>(),
+                "a question field and `QUESTIONS` have diverged — a question with no declared `None` \
+                 behaviour is how a silent understatement gets in"
+            );
+            for (field, _refuses, why) in QUESTIONS {
+                assert!(
+                    why.len() > 30,
+                    "{field}: a question's `None` behaviour needs a REASON, not a label"
+                );
+            }
             // `2b` appears once: two checkboxes, one printed box label.
             vec![
                 "1", "2a", "2b", "2b", "3", "4", "5", "6", "7", "8", "9a", "9b", "10", "11", "14",
@@ -470,6 +530,7 @@ mod tests {
             box14_state_tax_withheld: None,
             box17_local_tax_withheld: None,
             roth_contribution_before_lookback: None,
+            exception_applies: None,
         }
     }
 

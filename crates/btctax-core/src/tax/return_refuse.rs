@@ -2496,8 +2496,9 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             box11_first_year_desig_roth: _,
             box14_state_tax_withheld,
             box17_local_tax_withheld,
-            // The filer's yes/no.
+            // The filer's two yes/nos; neither is money.
             roth_contribution_before_lookback: _,
+            exception_applies: _,
         } = r;
         for (v, what) in [
             (Some(*box1_gross_distribution), "a Form 1099-R box 1"),
@@ -11924,6 +11925,7 @@ mod param_free_tier {
                 box14_state_tax_withheld: None,
                 box17_local_tax_withheld: None,
                 roth_contribution_before_lookback: None,
+                exception_applies: Some(false),
             });
         });
         add("StateAndLocalRefundWorksheetNotComputed", &|r| {

@@ -56,6 +56,7 @@ pub fn form_1099r_all_boxes_populated() -> crate::tax::form1099r::Form1099R {
         box14_state_tax_withheld: Some(dec!(300)),
         box17_local_tax_withheld: Some(dec!(40)),
         roth_contribution_before_lookback: Some(true),
+        exception_applies: Some(false),
     }
 }
 

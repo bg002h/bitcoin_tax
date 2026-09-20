@@ -1541,6 +1541,7 @@ fn classify_1099r(c: &mut Census, r: &crate::tax::form1099r::Form1099R) {
         box14_state_tax_withheld,
         box17_local_tax_withheld,
         roth_contribution_before_lookback,
+        exception_applies,
     } = r;
     const HELD: &str = "T14 — transcribed and HELD, read by nothing: `screen_inputs_tiered` refuses \
                         the whole return (RetirementIncomeNotComputed) while any Form 1099-R row is \
@@ -1556,6 +1557,14 @@ fn classify_1099r(c: &mut Census, r: &crate::tax::form1099r::Form1099R) {
     c.exempt(box9a_percentage_of_total, Class::DataDerived, HELD);
     c.exempt(box14_state_tax_withheld, Class::DataDerived, HELD);
     c.exempt(box17_local_tax_withheld, Class::DataDerived, HELD);
+    c.exempt(
+        exception_applies,
+        Class::DataDerived,
+        "T14 / S-3 — the class-(A) DECLARATION the 4a/4b and 5a/5b compute turns on. Held, not asked: \
+         the return refuses on any Form 1099-R before a question surface is reached. When the compute \
+         lands this becomes a live declaration whose `None` REFUSES (R-1 for an IRA, R-3 for a pension) \
+         — silence is not testimony that no exception applies, and it matters in BOTH directions",
+    );
     c.exempt(
         roth_contribution_before_lookback,
         Class::DataDerived,

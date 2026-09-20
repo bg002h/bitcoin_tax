@@ -144,7 +144,7 @@ Two key groups are read and then **normalised away**, with a note on stderr rath
 
 ## Every key `income import` honours
 
-**433 paths, 390 of them leaves that take a value.** Derived from the serialized shape of `ReturnInputs` over `btctax_core::tax::scrub_axis::maximal_sentinel()` — the fixture whose every `Option` is `Some`, every `Vec` non-empty and every nested struct present, written as an exhaustive `..`-free struct literal so a new field is a compile error before it can be an unpublished key.
+**434 paths, 391 of them leaves that take a value.** Derived from the serialized shape of `ReturnInputs` over `btctax_core::tax::scrub_axis::maximal_sentinel()` — the fixture whose every `Option` is `Some`, every `Vec` non-empty and every nested struct present, written as an exhaustive `..`-free struct literal so a new field is a compile error before it can be an unpublished key.
 
 **Reading the paths.** `a.b` is the key `b` under `[a]`. `a[]` is a repeated table, written `[[a]]` once per row, and `a[].b` is a key inside one of those rows. A `<placeholder>` segment is a key YOU choose, not a literal:
 
@@ -436,6 +436,7 @@ Two key groups are read and then **normalised away**, with a note on stderr rath
 | `r_1099[].box8_other` | string |  |
 | `r_1099[].box9a_percentage_of_total` | string |  |
 | `r_1099[].box9b_total_employee_contributions` | string |  |
+| `r_1099[].exception_applies` | boolean |  |
 | `r_1099[].kind` | string | **required** |
 | `r_1099[].payer` | string | **required** |
 | `r_1099[].payer_tin` | string |  |
