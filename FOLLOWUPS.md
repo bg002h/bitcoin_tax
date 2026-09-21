@@ -10343,8 +10343,16 @@ the register is for) but not silently."* The count is the record, not the remedy
 widgets, delete their two census entries, and lower `GAPS` to 0 in the same diff. Per the gate's own
 message, closing a gap means mapping the field to a real question — never re-describing the omission.
 
-**Not yet measured:** whether TY2026's Schedule 1 keeps the pair. `design/forms/2026/f1040s1--2026-DRAFT.pdf`
-is archived, so `cargo run -p xtask -- port-map f1040s1 2025 2026-DRAFT` answers it in one command.
+**MEASURED 2026-09-21 — TY2026 KEEPS THE PAIR, so this is not a TY2025 curiosity.**
+`design/forms/2026/f1040s1--2026-DRAFT.pdf` declares both widgets under the same names and within 0.5pt
+of the same rects (`Line7_ReadOrder[0].c1_3[0]` at 449.3,524.0 and `Line7_ReadOrder[0].f1_11[0]` at
+151.2,510.5), and `cargo run -p xtask -- port-map f1040s1 2025 2026-DRAFT` carries both gap census
+entries forward.
+
+**That raises the stakes.** TY2026 is the FIRST year btctax will file (owner ruling 2026-09-11: TY2025
+is never filed with this software). So the unasked declaration is live for a real return, not for a
+year that exists only as a stepping stone — and the two `gap` records will arrive in the TY2026 map by
+the port rather than needing to be rediscovered. Collect the repayment before TY2026 ships.
 
 ### FR-263 — 🟡 OPEN — TY2025 Form 8995-A is one ARCHIVED BOOKLET away, not one transcription away
 
