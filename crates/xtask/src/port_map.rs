@@ -82,6 +82,24 @@ fn same_column(was: &Shape, now: &Shape) -> bool {
     (was.x - now.x).abs() <= OTHER_COLUMN_TOLERANCE_PT
 }
 
+/// The `Table_X[0].RowY[0]` container a widget sits in, if it sits in one.
+///
+/// ★★★ **The row identity is IN THE ACROFORM NAME, which is what makes a grid carry structural rather
+/// than positional.** `topmostSubform[0].Page1[0].Table_PartII[0].Row10[0].f1_34[0]` says table and row
+/// outright, and Form 8995-A's TY2024 and TY2025 revisions declare the **same 95** table/row containers.
+/// Contrast the identity block, where the only available facts were page, column and rank — a guess that
+/// got 12 of 29 cells WRONG and is refused on purpose.
+#[must_use]
+fn container(fqn: &str) -> Option<String> {
+    let (table, rest) = fqn.split_once("[0].Row")?;
+    let table = table.rsplit_once('.').map_or(table, |(_, t)| t);
+    if !table.starts_with("Table_") {
+        return None;
+    }
+    let row = rest.split_once("[0]")?.0;
+    Some(format!("{table}[0].Row{row}[0]"))
+}
+
 /// One cell of a map: its key, the FQN it names, and the on-state when it is a checkbox.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cell {
@@ -174,15 +192,26 @@ pub struct CensusEntry {
 }
 
 impl CensusEntry {
-    /// The printed LABEL this entry claims — the first whitespace-delimited token of `line`.
+    /// The printed LABEL this entry claims, or `None` when it does not claim one.
     ///
     /// ★★ `line` is a human location, not always a bare label: `"13z amount"` and `"13z type"` are two
     /// widgets of line 13z distinguished by COLUMN, `"34 Yes"` is a checkbox of line 34, and `"1 stat
     /// emp"` is a box beside line 1. The label is the part a form prints in its margin; the qualifier
     /// says which widget of that line, and the column band is what actually resolves it.
+    ///
+    /// ★★★ **Some entries name a GRID CELL instead, and saying so is the whole value of the `Option`.**
+    /// All 65 of Form 8995-A's census entries read `"Part III Row17"` — a part and a row, because that
+    /// form's Parts I–III are tables whose rows carry no printed line number. Returning `"Part"` for
+    /// those made the tool refuse them as [`Why::PriorMapDisagreesWithPriorForm`] — *"the prior form
+    /// prints "17" beside this widget, not "Part""* — which reads as **65 wrong map entries** and would
+    /// send a reviewer to audit a census that is entirely correct. They are the same "declined by design"
+    /// case as the identity block: no printed label to carry, so nothing to carry it by.
     #[must_use]
-    pub fn label(&self) -> &str {
-        self.line.split_whitespace().next().unwrap_or("")
+    pub fn label(&self) -> Option<&str> {
+        self.line
+            .split_whitespace()
+            .next()
+            .filter(|t| t.starts_with(|c: char| c.is_ascii_digit()))
     }
 }
 
@@ -301,6 +330,8 @@ pub enum Why {
     PriorFqnNotAWidget,
     /// Two prior entries resolve to ONE new widget — the revision merged them.
     TwoPriorCellsOneNewWidget,
+    /// A grid cell whose `Table_X.RowY` container the new revision does not declare.
+    GridRowGone,
 }
 
 impl Why {
@@ -316,6 +347,7 @@ impl Why {
             Self::PriorMapDisagreesWithPriorForm => "the prior map disagrees with the prior form",
             Self::PriorFqnNotAWidget => "prior FQN is not a widget of the prior template",
             Self::TwoPriorCellsOneNewWidget => "two prior entries resolve to one new widget",
+            Self::GridRowGone => "the new revision does not declare that table row",
         }
     }
 }
@@ -402,6 +434,21 @@ pub fn port(
                 .filter(|r| r.chars().next().is_some_and(|ch| ch.is_ascii_digit()))
         });
         // Only LINE cells have a printed label to carry. Everything else is the identity block's.
+        //
+        // ★★★ **The grid resolver is NOT offered here, and the asymmetry is deliberate.** It was, and
+        //     `no_identity_cell_is_ever_carried` caught it immediately: it carried **5 of the 16** f1040
+        //     dependents-grid cells — `relationship` on four rows and one stray `ssn` — because within a
+        //     dependents row the columns are not 12pt-separated the way a computation row's are. A
+        //     partial grid is worse than none: a reviewer skimming a candidate sees four plausible rows
+        //     and commits the transposition that prints one dependent's relationship in another's SSN box.
+        //
+        // ★★ And the committed TY2025 map refuses those cells on its own grounds, recorded in its header:
+        //    this build writes no TY2025 identity block, so "a mapped cell that nothing writes is the
+        //    'blank because nothing populated it' defect with a map entry in front of it."
+        //
+        // ★ The consequences differ, which is what makes this a rule rather than a convenience. A census
+        //   entry carried to the wrong box of the right row still writes NOTHING — it misfiles a reason.
+        //   A map cell carried to the wrong box writes a filer's answer into it.
         let Some(want) = want else {
             p.refused.push(Refused {
                 key: c.key.clone(),
@@ -447,11 +494,31 @@ pub fn port(
     //    `"1.1411-10(g)"` — a regulation cite — and a dotted key would have split it to `1` and carried a
     //    §1.1411-10(g) census entry onto line 1 of the new form. Hence [`CensusEntry::label`].
     for e in census {
+        let Some(want) = e.label() else {
+            // ★ The entry locates the widget as e.g. "Part III Row17" — no printed line number, which is
+            //   exactly what the grid resolver is for. It refuses if the container is gone.
+            match carry_grid(
+                &format!("census.{}", e.line),
+                &e.fqn,
+                None,
+                old_shapes,
+                new_shapes,
+            ) {
+                Ok(got) => {
+                    if let Some(m) = got.page_move {
+                        p.page_moves.push(m);
+                    }
+                    p.census.push((got.fqn, e.clone()));
+                }
+                Err(r) => p.refused.push(r),
+            }
+            continue;
+        };
         match carry(
             &format!("census.{}", e.line),
             &e.fqn,
             None,
-            e.label(),
+            want,
             old_shapes,
             new_shapes,
             old_labels,
@@ -537,6 +604,135 @@ fn refuse_collisions(p: &mut Port) {
     p.refused.append(&mut withdrawn);
 }
 
+/// The checks that do not depend on HOW the candidate was found: capacity, on-state, page.
+///
+/// ★ Shared by both resolvers on purpose. The label path and the grid path disagree about what makes two
+/// widgets the same widget; they must not disagree about whether a nine-digit SSN fits a two-character box.
+fn finish(
+    key: &str,
+    was: &Shape,
+    fqn: &str,
+    now: &Shape,
+    on: Option<&str>,
+) -> Result<Carried, Refused> {
+    let refuse = |class: Why, why: String| {
+        Err(Refused {
+            key: key.to_string(),
+            candidate: fqn.to_string(),
+            class,
+            why,
+        })
+    };
+    if was.max_len.is_some() && was.max_len != now.max_len {
+        return refuse(
+            Why::CapacityChanged,
+            format!(
+                "/MaxLen {:?} → {:?}. The label and column agree and the CAPACITY does not; this is \
+                 how a nine-digit SSN meets a two-character box.",
+                was.max_len, now.max_len
+            ),
+        );
+    }
+    if let Some(on) = on {
+        if !now.on_states.contains(on) {
+            return refuse(
+                Why::OnStateNotDeclared,
+                format!(
+                    "on-state {on:?} is not declared by that widget, which offers {:?}. An undeclared \
+                     on-state renders as UNCHECKED while the write reports success.",
+                    now.on_states
+                ),
+            );
+        }
+    }
+    Ok(Carried {
+        fqn: fqn.to_string(),
+        page_move: (was.page != now.page)
+            .then(|| format!("{key}: page {} → {}", was.page, now.page)),
+    })
+}
+
+/// Resolve a widget that carries no printed line label by its `Table_X.RowY` container and its column.
+///
+/// ★★★ **Two of the three axes are STRUCTURAL.** The table and the row come from the AcroForm name, not
+/// from geometry, so this cannot drift the way a rank within a column drifts — and a row the new revision
+/// does not declare is a refusal rather than a nearest match. Only the column within the row is resolved
+/// by x, under the same [`OTHER_COLUMN_TOLERANCE_PT`] window the label path uses; within one grid row the
+/// columns are the widest-separated widgets on the page, so that window is nowhere near them.
+///
+/// ★★ This is what makes Form 8995-A portable at all: all 65 of its census entries locate a widget as
+/// `"Part III Row17"`, because its Parts I–III are tables whose rows print no line number. Both revisions
+/// declare the same 95 containers.
+fn carry_grid(
+    key: &str,
+    fqn: &str,
+    on: Option<&str>,
+    old_shapes: &BTreeMap<String, Shape>,
+    new_shapes: &BTreeMap<String, Shape>,
+) -> Result<Carried, Refused> {
+    let refuse = |class: Why, why: String| {
+        Err(Refused {
+            key: key.to_string(),
+            candidate: String::new(),
+            class,
+            why,
+        })
+    };
+    let Some(was) = old_shapes.get(fqn) else {
+        return refuse(
+            Why::PriorFqnNotAWidget,
+            format!("{fqn} is not a widget of the prior template"),
+        );
+    };
+    let Some(cell) = container(fqn) else {
+        return refuse(
+            Why::NotANumberedLine,
+            "no printed line label and no `Table_X[0].RowY[0]` container either, so neither resolver \
+             has an anchor: the identity block, the filing-status radios and the dependents grid are \
+             read from column x, /MaxLen, row order and the caption ABOVE the widget. A wrong one \
+             prints an SSN in a date box. Read the form."
+                .into(),
+        );
+    };
+    let in_row: Vec<&String> = new_shapes
+        .keys()
+        .filter(|f| container(f).as_deref() == Some(cell.as_str()))
+        .collect();
+    if in_row.is_empty() {
+        return refuse(
+            Why::GridRowGone,
+            format!("the new revision declares no {cell} — the row was removed or renamed"),
+        );
+    }
+    let hits: Vec<&&String> = in_row
+        .iter()
+        .filter(|f| same_column(was, &new_shapes[**f]))
+        .collect();
+    match hits.as_slice() {
+        [one] => finish(key, was, one, &new_shapes[**one], on),
+        [] => refuse(
+            Why::LabelRenumberedOrGone,
+            format!(
+                "{cell} exists on the new revision but holds no widget within \
+                 {OTHER_COLUMN_TOLERANCE_PT}pt of x={:.1}; its columns are at {:?}",
+                was.x,
+                in_row
+                    .iter()
+                    .map(|f| new_shapes[*f].x)
+                    .collect::<Vec<f64>>()
+            ),
+        ),
+        many => refuse(
+            Why::AmbiguousLabel,
+            format!(
+                "{} widgets of {cell} sit within {OTHER_COLUMN_TOLERANCE_PT}pt of x={:.1}: {many:?}",
+                many.len(),
+                was.x
+            ),
+        ),
+    }
+}
+
 /// A carried cell: where it lands on the new revision, and the page move if it moved.
 pub struct Carried {
     pub fqn: String,
@@ -611,39 +807,7 @@ fn carry(
         _ => hits,
     };
     match hits.as_slice() {
-        [one] => {
-            let now = &new_shapes[*one];
-            if was.max_len.is_some() && was.max_len != now.max_len {
-                return refuse(
-                    Why::CapacityChanged,
-                    (*one).clone(),
-                    format!(
-                        "/MaxLen {:?} → {:?}. The label and column agree and the CAPACITY does \
-                         not; this is how a nine-digit SSN meets a two-character box.",
-                        was.max_len, now.max_len
-                    ),
-                );
-            }
-            if let Some(on) = on {
-                if !now.on_states.contains(on) {
-                    return refuse(
-                        Why::OnStateNotDeclared,
-                        (*one).clone(),
-                        format!(
-                            "on-state {on:?} is not declared by that widget, which offers {:?}. An \
-                             undeclared on-state renders as UNCHECKED while the write reports \
-                             success.",
-                            now.on_states
-                        ),
-                    );
-                }
-            }
-            Ok(Carried {
-                fqn: (*one).clone(),
-                page_move: (was.page != now.page)
-                    .then(|| format!("{key}: page {} → {}", was.page, now.page)),
-            })
-        }
+        [one] => finish(key, was, one, &new_shapes[*one], on),
         many if !many.is_empty() => refuse(
             Why::AmbiguousLabel,
             String::new(),
@@ -1350,6 +1514,197 @@ mod tests {
         port(&[], &census, &olds, &news, &ol, &nl)
     }
 
+    /// One grid census entry, and whatever containers/columns the caller plants on each side.
+    fn grid_one(prior: &str, new: &[(&str, f64)], prior_x: f64) -> Port {
+        let census = vec![CensusEntry {
+            fqn: prior.into(),
+            line: "Part II Row10".into(),
+            rest: r#"{ line = "Part II Row10", rule = "unmodeled", reason = "planted" }"#.into(),
+        }];
+        let olds: BTreeMap<String, Shape> = [(
+            prior.to_string(),
+            shape(1, &format!("other({prior_x:.0})"), None, &[]),
+        )]
+        .into();
+        let news: BTreeMap<String, Shape> = new
+            .iter()
+            .map(|(f, x)| {
+                (
+                    (*f).to_string(),
+                    shape(1, &format!("other({x:.0})"), None, &[]),
+                )
+            })
+            .collect();
+        port(
+            &[],
+            &census,
+            &olds,
+            &news,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+    }
+
+    /// ★★★ **B1 — the grid resolver never carries across a row, and a vanished row is a refusal.**
+    ///
+    /// The table and row come from the AcroForm NAME, so this is the axis that must not be allowed to
+    /// degrade into a nearest match: carrying `Row10` onto `Row11` would file one trade-or-business's
+    /// figures under another's, and both rows exist, so a positional fallback would find one happily.
+    #[test]
+    fn a_grid_cell_never_leaves_its_own_row() {
+        const IN: &str = "topmostSubform[0].Page1[0].Table_PartII[0].Row10[0].f1_34[0]";
+        // Same row, same column: carries.
+        let ok = grid_one(
+            IN,
+            &[("f[0].Table_PartII[0].Row10[0].new[0]", 300.0)],
+            300.0,
+        );
+        assert_eq!(
+            ok.census.len(),
+            1,
+            "a same-row same-column carry must resolve: {:?}",
+            ok.refused
+        );
+
+        // The row is GONE, and a sibling row sits at the identical x. Must refuse, not slide.
+        let gone = grid_one(
+            IN,
+            &[("f[0].Table_PartII[0].Row11[0].new[0]", 300.0)],
+            300.0,
+        );
+        assert!(
+            gone.census.is_empty(),
+            "carried into another row: {:?}",
+            gone.census
+        );
+        assert_eq!(gone.refused[0].class, Why::GridRowGone);
+
+        // Row present, but no column within the window — refuse rather than take the only widget there.
+        let far = grid_one(
+            IN,
+            &[("f[0].Table_PartII[0].Row10[0].new[0]", 400.0)],
+            300.0,
+        );
+        assert!(
+            far.census.is_empty(),
+            "carried 100pt sideways: {:?}",
+            far.census
+        );
+        assert_eq!(far.refused[0].class, Why::LabelRenumberedOrGone);
+
+        // Two columns of the right row inside the window — ambiguous is not resolvable by rule.
+        let two = grid_one(
+            IN,
+            &[
+                ("f[0].Table_PartII[0].Row10[0].a[0]", 298.0),
+                ("f[0].Table_PartII[0].Row10[0].b[0]", 302.0),
+            ],
+            300.0,
+        );
+        assert!(two.census.is_empty(), "picked one of two: {:?}", two.census);
+        assert_eq!(two.refused[0].class, Why::AmbiguousLabel);
+    }
+
+    /// ★★★ **B1 — `container` reads a `Table_*` row and refuses to invent one.**
+    ///
+    /// A widget with `Row` in its path but no `Table_` ancestor has no grid identity, and treating it as
+    /// one would hand the resolver an anchor it did not earn. `Line8a_ReadOrder[0]` and
+    /// `Dependents_ReadOrder[0]` are real read-order wrappers in these templates, not tables.
+    #[test]
+    fn container_names_a_table_row_or_nothing() {
+        assert_eq!(
+            container("topmostSubform[0].Page1[0].Table_PartII[0].Row10[0].f1_34[0]").as_deref(),
+            Some("Table_PartII[0].Row10[0]")
+        );
+        assert_eq!(
+            container("topmostSubform[0].Page2[0].Table_PartIII[0].Row17[0].f2_02[0]").as_deref(),
+            Some("Table_PartIII[0].Row17[0]")
+        );
+        // ★★★ The first three of these are the EASY negatives — no `[0].Row` anywhere, so they return
+        //     `None` from the `split_once` and never reach the `Table_` guard. A plant that deleted that
+        //     guard left this test GREEN when it held only those, which is the failure mode where a kill
+        //     plants the right defect and asserts a response satisfied for the wrong reason. The last two
+        //     DO reach it: a `[0].Row` whose parent container is not a table.
+        for not_a_grid in [
+            "topmostSubform[0].Page1[0].f1_04[0]",
+            "topmostSubform[0].Page1[0].Line8a_ReadOrder[0].f1_13[0]",
+            "form1[0].Page1[0].Subform_Row1[0].f1_01[0]",
+            "topmostSubform[0].Page1[0].Dependents_ReadOrder[0].Row1[0].f1_20[0]",
+            "form1[0].Page2[0].Row3[0].f2_07[0]",
+        ] {
+            assert_eq!(
+                container(not_a_grid),
+                None,
+                "{not_a_grid} is not a Table_*/Row* cell and must yield no container"
+            );
+        }
+    }
+
+    /// ★★★ **Over every REAL form, a carried grid entry lands in the very same `Table.Row`.**
+    ///
+    /// The plants above prove the rule on fixtures; this proves it on the 22 committed maps, where the
+    /// containers are whatever the IRS actually shipped. It needs no committed TY2025 map to compare
+    /// against — the invariant is internal, which is what makes it available for f8995a, the form being
+    /// ported right now and the one with 65 grid entries and no TY2025 map yet.
+    #[test]
+    fn every_grid_carry_stays_in_its_container_on_every_committed_form() {
+        let root = crate::form_geometry::repo_root();
+        let mut checked = 0usize;
+        for stem in std::fs::read_dir(root.join("crates/btctax-forms/forms/2024"))
+            .expect("forms dir")
+            .flatten()
+            .filter_map(|e| {
+                e.file_name()
+                    .to_str()?
+                    .strip_suffix(".map.toml")
+                    .map(str::to_string)
+            })
+        {
+            let map = root.join(format!("crates/btctax-forms/forms/2024/{stem}.map.toml"));
+            let text = std::fs::read_to_string(&map).expect("map");
+            let prior_by_key: BTreeMap<String, String> = census_of(&text)
+                .into_iter()
+                .map(|e| (format!("census.{}", e.line), e.fqn))
+                .collect();
+            let pdf = |y: i32| root.join(format!("crates/btctax-forms/forms/{y}/{stem}.pdf"));
+            let new_pdf = if pdf(2025).exists() {
+                pdf(2025)
+            } else {
+                root.join(format!("design/forms/2025/{stem}--2025.pdf"))
+            };
+            if !pdf(2024).exists() || !new_pdf.exists() {
+                continue;
+            }
+            let (o, n) = (shapes(&pdf(2024)).unwrap(), shapes(&new_pdf).unwrap());
+            let ol = crate::label_reader::label_join(&format!("{stem}--2024")).unwrap_or_default();
+            let nl = crate::label_reader::label_join(&format!("{stem}--2025")).unwrap_or_default();
+            let p = port(&cells_of(&text), &census_of(&text), &o, &n, &ol, &nl);
+            for (new_fqn, e) in &p.census {
+                let Some(prior_fqn) = prior_by_key.get(&format!("census.{}", e.line)) else {
+                    continue;
+                };
+                let (was, now) = (container(prior_fqn), container(new_fqn));
+                if was.is_none() && now.is_none() {
+                    continue;
+                }
+                assert_eq!(
+                    was, now,
+                    "{stem}: {} carried from {prior_fqn} to {new_fqn}, which is a DIFFERENT table row",
+                    e.line
+                );
+                checked += 1;
+            }
+        }
+        // ★ A floor, because `checked` counts only GRID carries and this whole test is vacuous at zero —
+        //   f8995a alone contributes 65.
+        assert!(
+            checked >= 60,
+            "only {checked} grid carr(ies) were checked; measured at 65 from f8995a alone, so the grid \
+             resolver has stopped resolving and this invariant is near-vacuous"
+        );
+        eprintln!("  port-map: {checked} grid carr(ies) stayed in their own Table.Row");
+    }
+
     /// ★★★ **B1 — a MERGED box must refuse both claimants, and the plant is the real Schedule A change.**
     ///
     /// TY2024 line 16 had three write-in description boxes (`f1_30` x=331.8, `f1_31` and `f1_32` both
@@ -1444,8 +1799,20 @@ mod tests {
                 rest: String::new(),
             }
             .label(),
-            "1.1411-10(g)",
+            Some("1.1411-10(g)"),
             "the label is the whole first token — splitting on '.' yields \"1\""
+        );
+        // ★ And a grid location claims no label at all, rather than claiming "Part".
+        assert_eq!(
+            CensusEntry {
+                fqn: String::new(),
+                line: "Part III Row17".into(),
+                rest: String::new(),
+            }
+            .label(),
+            None,
+            "a part/row location names no printed line, and saying \"Part\" made the tool report 65 \
+             correct f8995a entries as disagreeing with their own form"
         );
         let census = vec![CensusEntry {
             fqn: "form1[0].Page1[0].reg[0]".into(),
