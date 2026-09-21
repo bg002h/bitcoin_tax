@@ -88,7 +88,11 @@ pub fn cells_of(map_text: &str) -> Vec<Cell> {
         let Some(fqn) = v.split('"').nth(1) else {
             continue;
         };
-        if !fqn.starts_with("topmostSubform") {
+        // ★ An FQN root is NOT always `topmostSubform`: the TY2025 Schedule A template uses `form1[0]`,
+        //   and filtering on that one root silently dropped every Schedule A cell — which made the
+        //   committed map look EMPTY and produced 20 phantom "committed ABSENT" disagreements. The test
+        //   that caught it was comparing the tool against nothing. Shape, not prefix.
+        if !fqn.contains("[0]") || !fqn.contains('.') {
             continue;
         }
         let on = v.split("on = \"").nth(1).and_then(|r| r.split('"').next());
@@ -389,44 +393,8 @@ mod tests {
     /// everything would have to guess at the four cells below, and guessing is what it exists not to do.
     #[test]
     fn the_f1040_ty2025_port_reproduces_the_hand_written_map() {
-        let root = crate::form_geometry::repo_root();
-        let read = |y: i32| {
-            std::fs::read_to_string(
-                root.join(format!("crates/btctax-forms/forms/{y}/f1040.map.toml")),
-            )
-            .expect("committed map")
-        };
-        let pdf = |y: i32| root.join(format!("crates/btctax-forms/forms/{y}/f1040.pdf"));
-        let (old_sh, new_sh) = (shapes(&pdf(2024)).unwrap(), shapes(&pdf(2025)).unwrap());
-        let ol = crate::label_reader::label_join("f1040--2024").unwrap();
-        let nl = crate::label_reader::label_join("f1040--2025").unwrap();
-        let p = port(&cells_of(&read(2024)), &old_sh, &new_sh, &ol, &nl);
-
-        let hand: BTreeMap<String, String> = cells_of(&read(2025))
-            .into_iter()
-            .map(|c| (c.key, c.fqn))
-            .collect();
-        assert!(
-            p.emitted.len() >= 35,
-            "only {} cells emitted — if the tool has stopped resolving, this test is measuring almost \
-             nothing",
-            p.emitted.len()
-        );
-        let mut wrong = Vec::new();
-        for c in &p.emitted {
-            match hand.get(&c.key) {
-                Some(h) if *h == c.fqn => {}
-                Some(h) => wrong.push(format!("{}: tool {} vs hand {h}", c.key, c.fqn)),
-                None => wrong.push(format!("{}: tool {} vs hand ABSENT", c.key, c.fqn)),
-            }
-        }
-        assert!(
-            wrong.is_empty(),
-            "the tool disagrees with the hand-written TY2025 map on {} cell(s). One of the two is \
-             wrong, and a filed return depends on which:\n  {}",
-            wrong.len(),
-            wrong.join("\n  ")
-        );
+        assert_disagreements_are_zero("f1040", 35);
+        let p = ported("f1040");
         // ★ And it must NOT have invented the four a human had to read: three renumbered lines
         //   (11 → 11a, 12 → 12e, 13 → 13a) and one line TY2025 added outright (6d).
         for key in ["line11a", "line12e", "line13a", "line6d"] {
@@ -442,6 +410,114 @@ mod tests {
             "the page move for line14 must be reported: {:?}",
             p.page_moves
         );
+    }
+
+    /// Run the tool for one stem, TY2024 → TY2025.
+    fn ported(stem: &str) -> Port {
+        let root = crate::form_geometry::repo_root();
+        let map = |y: i32| {
+            std::fs::read_to_string(
+                root.join(format!("crates/btctax-forms/forms/{y}/{stem}.map.toml")),
+            )
+            .unwrap_or_else(|e| panic!("{stem} {y} map: {e}"))
+        };
+        let pdf = |y: i32| root.join(format!("crates/btctax-forms/forms/{y}/{stem}.pdf"));
+        let (o, n) = (shapes(&pdf(2024)).unwrap(), shapes(&pdf(2025)).unwrap());
+        let ol = crate::label_reader::label_join(&format!("{stem}--2024")).unwrap_or_default();
+        let nl = crate::label_reader::label_join(&format!("{stem}--2025")).unwrap_or_default();
+        port(&cells_of(&map(2024)), &o, &n, &ol, &nl)
+    }
+
+    /// Every cell the tool emits for `stem` must match the committed TY2025 map, with a floor so a tool
+    /// that stopped resolving cannot pass by emitting nothing.
+    fn assert_disagreements_are_zero(stem: &str, floor: usize) -> usize {
+        let root = crate::form_geometry::repo_root();
+        let hand: BTreeMap<String, String> = cells_of(
+            &std::fs::read_to_string(
+                root.join(format!("crates/btctax-forms/forms/2025/{stem}.map.toml")),
+            )
+            .expect("committed TY2025 map"),
+        )
+        .into_iter()
+        .map(|c| (c.key, c.fqn))
+        .collect();
+        let p = ported(stem);
+        assert!(
+            p.emitted.len() >= floor,
+            "{stem}: only {} cell(s) emitted against a floor of {floor} — the tool has stopped \
+             resolving and this check is measuring almost nothing",
+            p.emitted.len()
+        );
+        let wrong: Vec<String> = p
+            .emitted
+            .iter()
+            .filter_map(|c| match hand.get(&c.key) {
+                Some(h) if *h == c.fqn => None,
+                Some(h) => Some(format!(
+                    "{}/{}: tool {} vs committed {h}",
+                    stem, c.key, c.fqn
+                )),
+                None => Some(format!(
+                    "{}/{}: tool {} vs committed ABSENT",
+                    stem, c.key, c.fqn
+                )),
+            })
+            .collect();
+        assert!(
+            wrong.is_empty(),
+            "{} disagreement(s) between the tool and a committed map. One of the two is wrong, and a \
+             filed return depends on which:\n  {}",
+            wrong.len(),
+            wrong.join("\n  ")
+        );
+        p.emitted.len()
+    }
+
+    /// ★★★ **SEVENTEEN known answers, not one.** Every form bundled for BOTH years was ported by
+    /// somebody against its form and is held by the map gates, so each is an independent check on the
+    /// tool. Validating against one form proves the tool agrees with me; validating against seventeen
+    /// proves it agrees with the repo.
+    ///
+    /// ★ Stems are DERIVED from the intersection of the two years' bundled maps, so a form bundled later
+    /// joins this check with no edit — and a form that stops being bundled cannot silently leave it.
+    #[test]
+    fn the_tool_agrees_with_every_committed_ty2025_map() {
+        let root = crate::form_geometry::repo_root();
+        let stems = |y: i32| -> BTreeSet<String> {
+            std::fs::read_dir(root.join(format!("crates/btctax-forms/forms/{y}")))
+                .expect("forms dir")
+                .flatten()
+                .filter_map(|e| {
+                    e.file_name()
+                        .to_str()?
+                        .strip_suffix(".map.toml")
+                        .map(str::to_string)
+                })
+                .collect()
+        };
+        let both: Vec<String> = stems(2024).intersection(&stems(2025)).cloned().collect();
+        assert!(
+            both.len() >= 15,
+            "only {} form(s) are bundled for both years — this check has lost its population",
+            both.len()
+        );
+        let mut total = 0usize;
+        let mut covered = 0usize;
+        for stem in &both {
+            // A stem with no bundled template on one side cannot be shaped; skipped and counted.
+            let pdf = |y: i32| root.join(format!("crates/btctax-forms/forms/{y}/{stem}.pdf"));
+            if !pdf(2024).exists() || !pdf(2025).exists() {
+                continue;
+            }
+            total += assert_disagreements_are_zero(stem, 0);
+            covered += 1;
+        }
+        assert!(
+            covered >= 12 && total >= 150,
+            "only {covered} form(s) and {total} cell(s) were actually compared — a population this \
+             small means the intersection or the templates moved, and the check is near-vacuous"
+        );
+        eprintln!("  port-map: {covered} form(s), {total} cell(s) agree with the committed maps");
     }
 
     fn shape(page: u32, band: &str, max_len: Option<usize>, on: &[&str]) -> Shape {
