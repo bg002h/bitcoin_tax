@@ -147,11 +147,52 @@ pub fn shapes(pdf: &std::path::Path) -> Result<BTreeMap<String, Shape>, String> 
     Ok(out)
 }
 
+/// Why a cell was refused, as DATA.
+///
+/// ★★★ **Not a substring of `why`.** The first forecast classified refusals by sniffing their prose in a
+/// fixed needle order — and the grid refusal's own explanation mentions `/MaxLen`, so breaking the grid
+/// needle silently reclassified 110 cells as "capacity changed" instead of leaving them unclassified. The
+/// test meant to notice passed. A class the report counts must be a field, not a phrase.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Why {
+    /// No printed line label to carry — a grid row or an identity cell. Declined by design.
+    NotANumberedLine,
+    /// Nothing on the new revision carries this label in this column: renumbered, or gone.
+    LabelRenumberedOrGone,
+    /// Two widgets share one label in one column.
+    AmbiguousLabel,
+    /// `/MaxLen` changed — nine digits meeting a shorter box.
+    CapacityChanged,
+    /// The on-state the map writes is not one the new widget declares.
+    OnStateNotDeclared,
+    /// The prior map's key disagrees with the prior form's printed label.
+    PriorMapDisagreesWithPriorForm,
+    /// The prior FQN is not a widget of the prior template.
+    PriorFqnNotAWidget,
+}
+
+impl Why {
+    /// A human label for the forecast table. ★ `_`-free, so a new variant is a build error here.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NotANumberedLine => "grid or identity cell — declined by design",
+            Self::LabelRenumberedOrGone => "label renumbered or gone — a human must read the form",
+            Self::AmbiguousLabel => "two widgets share one label in one column",
+            Self::CapacityChanged => "capacity changed",
+            Self::OnStateNotDeclared => "on-state not declared by the new widget",
+            Self::PriorMapDisagreesWithPriorForm => "the prior map disagrees with the prior form",
+            Self::PriorFqnNotAWidget => "prior FQN is not a widget of the prior template",
+        }
+    }
+}
+
 /// A cell the tool would not emit, and the measurement that killed it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Refused {
     pub key: String,
     pub candidate: String,
+    pub class: Why,
     pub why: String,
 }
 
@@ -205,6 +246,7 @@ pub fn port(
             p.refused.push(Refused {
                 key: c.key.clone(),
                 candidate: String::new(),
+                class: Why::PriorFqnNotAWidget,
                 why: format!("{} is not a widget of the prior template", c.fqn),
             });
             continue;
@@ -218,6 +260,7 @@ pub fn port(
             p.refused.push(Refused {
                 key: c.key.clone(),
                 candidate: String::new(),
+                class: Why::NotANumberedLine,
                 why: "not a numbered line, so it has no printed label to carry: the identity block, \
                       the filing-status radios and the dependents grid are resolved from column x, \
                       /MaxLen, row order and the caption ABOVE the widget. No single fact checks them, \
@@ -234,6 +277,7 @@ pub fn port(
                 p.refused.push(Refused {
                     key: c.key.clone(),
                     candidate: String::new(),
+                    class: Why::PriorMapDisagreesWithPriorForm,
                     why: format!(
                         "the PRIOR form prints {printed_before:?} beside {}, not {want_label:?}. The \
                          prior map disagrees with the prior form, so nothing can be carried from it.",
@@ -258,6 +302,7 @@ pub fn port(
                     p.refused.push(Refused {
                         key: c.key.clone(),
                         candidate: (*one).clone(),
+                        class: Why::CapacityChanged,
                         why: format!(
                             "/MaxLen {:?} → {:?}. The label and column agree and the CAPACITY does \
                              not; this is how a nine-digit SSN meets a two-character box.",
@@ -271,6 +316,7 @@ pub fn port(
                         p.refused.push(Refused {
                             key: c.key.clone(),
                             candidate: (*one).clone(),
+                            class: Why::OnStateNotDeclared,
                             why: format!(
                                 "on-state {on:?} is not declared by that widget, which offers {:?}. An \
                                  undeclared on-state renders as UNCHECKED while the write reports \
@@ -294,6 +340,7 @@ pub fn port(
             many if !many.is_empty() => p.refused.push(Refused {
                 key: c.key.clone(),
                 candidate: String::new(),
+                class: Why::AmbiguousLabel,
                 why: format!(
                     "{} widgets carry label {want_label:?} in the {} column: {many:?}. Ambiguous is \
                      not resolvable by rule.",
@@ -304,6 +351,7 @@ pub fn port(
             _ => p.refused.push(Refused {
                 key: c.key.clone(),
                 candidate: String::new(),
+                class: Why::LabelRenumberedOrGone,
                 why: format!(
                     "the new revision prints no {want_label:?} in the {} column. Either the line was \
                      RENUMBERED — this revision spells AGI `11a` where the prior spells it `11`, and \
@@ -342,8 +390,26 @@ pub fn render(stem: &str, prior_tag: &str, p: &Port) -> String {
     }
     if !p.refused.is_empty() {
         s.push_str("\n# ── REFUSED — resolve each against the form, then add it by hand. ──\n");
+        // ★ The CLASS is printed beside each refusal, because the count a reader takes away depends on
+        //   it: 110 of these are the tool declining a grid by design and 28 are real reading. A report
+        //   that prints only prose invites the two to be added together — which is exactly what I did on
+        //   first reading this output.
         for r in &p.refused {
-            s.push_str(&format!("# {} -> {}\n#   {}\n", r.key, r.candidate, r.why));
+            s.push_str(&format!(
+                "# {} -> {}   [{}]\n#   {}\n",
+                r.key,
+                r.candidate,
+                r.class.as_str(),
+                r.why
+            ));
+        }
+        let mut by: BTreeMap<&str, usize> = BTreeMap::new();
+        for r in &p.refused {
+            *by.entry(r.class.as_str()).or_default() += 1;
+        }
+        s.push_str("#\n# refusals by class:\n");
+        for (c, n) in &by {
+            s.push_str(&format!("#   {n:4}  {c}\n"));
         }
     }
     s
@@ -359,13 +425,29 @@ pub fn run(stem: &str, prior_tag: &str, new_tag: &str) -> Result<(), String> {
     ));
     let prior_text =
         std::fs::read_to_string(&map_path).map_err(|e| format!("{}: {e}", map_path.display()))?;
-    let pdf = |tag: &str| {
-        root.join(format!(
+    // ★★★ Two homes, and the tag says which. A BUNDLED year has a template the crate ships; an ARCHIVE
+    //     tag — `2026-DRAFT` — has only `design/forms/<year>/<stem>--<tag>.pdf`, because a draft is
+    //     EVIDENCE and is never bundled. Resolving both is what lets this tool forecast January's work
+    //     from the drafts months before a final exists.
+    let pdf = |tag: &str| -> Result<std::path::PathBuf, String> {
+        let bundled = root.join(format!(
             "crates/btctax-forms/forms/{}/{stem}.pdf",
             year_of(tag)
+        ));
+        if bundled.exists() {
+            return Ok(bundled);
+        }
+        let archived = root.join(format!("design/forms/{}/{stem}--{tag}.pdf", year_of(tag)));
+        if archived.exists() {
+            return Ok(archived);
+        }
+        Err(format!(
+            "no template for {stem}--{tag}: neither {} nor {}",
+            bundled.display(),
+            archived.display()
         ))
     };
-    let (old_sh, new_sh) = (shapes(&pdf(prior_tag))?, shapes(&pdf(new_tag))?);
+    let (old_sh, new_sh) = (shapes(&pdf(prior_tag)?)?, shapes(&pdf(new_tag)?)?);
     let old_labels = crate::label_reader::label_join(&format!("{stem}--{prior_tag}"))?;
     let new_labels = crate::label_reader::label_join(&format!("{stem}--{new_tag}"))?;
     let p = port(
@@ -518,6 +600,118 @@ mod tests {
              small means the intersection or the templates moved, and the check is near-vacuous"
         );
         eprintln!("  port-map: {covered} form(s), {total} cell(s) agree with the committed maps");
+    }
+
+    /// ★★★ **JANUARY'S QUEUE, FORECAST FROM THE DRAFTS — and every refusal in a NAMED class.**
+    ///
+    /// The tool's real job is TY2025 → TY2026, in January, for the year that is filed. Eleven forms have
+    /// both a TY2025 map and an archived TY2026 **draft**, so the size of that job is knowable now. As
+    /// measured 2026-09-21:
+    ///
+    /// | | cells |
+    /// |---|---|
+    /// | carry automatically | **155** |
+    /// | grid or identity, declined by design | 110 |
+    /// | **label renumbered — a human must read the form** | **28** |
+    /// | change PAGE (reported, still carried) | 18 |
+    ///
+    /// ★★ **A draft is EVIDENCE ONLY and nothing here is transcribed as authority.** This forecasts
+    /// effort; it does not produce a map. The counts will move when finals land, which is the point —
+    /// so this test asserts the SHAPE (it runs, the classes are known, the floors hold) and not the
+    /// numbers, which would make a January final into a failing test.
+    ///
+    /// ★★★ **The load-bearing assertion is that NO refusal is unclassified.** A tool that grows a new
+    /// failure mode and reports it in prose nobody counted is how "138 need reading" gets repeated when
+    /// 110 of them were the tool declining a grid — which is exactly the mistake this decomposition
+    /// caught in its own first reading.
+    #[test]
+    fn the_january_queue_is_forecastable_and_every_refusal_is_classified() {
+        let root = crate::form_geometry::repo_root();
+        let stems_2025: BTreeSet<String> =
+            std::fs::read_dir(root.join("crates/btctax-forms/forms/2025"))
+                .expect("forms/2025")
+                .flatten()
+                .filter_map(|e| {
+                    e.file_name()
+                        .to_str()?
+                        .strip_suffix(".map.toml")
+                        .map(str::to_string)
+                })
+                .collect();
+        let drafts: BTreeSet<String> = std::fs::read_dir(root.join("design/forms/2026"))
+            .expect("design/forms/2026")
+            .flatten()
+            .filter_map(|e| {
+                let n = e.file_name().to_str()?.to_string();
+                n.strip_suffix("--2026-DRAFT.pdf")
+                    .map(str::to_string)
+                    .filter(|_| n.ends_with(".pdf"))
+            })
+            .collect();
+        let both: Vec<&String> = stems_2025.intersection(&drafts).collect();
+        assert!(
+            both.len() >= 10,
+            "only {} form(s) have both a TY2025 map and a TY2026 draft — the forecast has lost its \
+             population",
+            both.len()
+        );
+
+        let (mut carried, mut pages) = (0usize, 0usize);
+        let mut by_class: BTreeMap<&'static str, usize> = BTreeMap::new();
+        let mut unclassified: Vec<String> = Vec::new();
+        for stem in &both {
+            let map_2025 = std::fs::read_to_string(
+                root.join(format!("crates/btctax-forms/forms/2025/{stem}.map.toml")),
+            )
+            .expect("TY2025 map");
+            let old_pdf = root.join(format!("crates/btctax-forms/forms/2025/{stem}.pdf"));
+            let new_pdf = root.join(format!("design/forms/2026/{stem}--2026-DRAFT.pdf"));
+            if !old_pdf.exists() || !new_pdf.exists() {
+                continue;
+            }
+            let (o, n) = (shapes(&old_pdf).unwrap(), shapes(&new_pdf).unwrap());
+            let ol = crate::label_reader::label_join(&format!("{stem}--2025")).unwrap_or_default();
+            let nl =
+                crate::label_reader::label_join(&format!("{stem}--2026-DRAFT")).unwrap_or_default();
+            let p = port(&cells_of(&map_2025), &o, &n, &ol, &nl);
+            carried += p.emitted.len();
+            pages += p.page_moves.len();
+            for r in &p.refused {
+                // ★ The class is a FIELD, so this cannot mis-sort on a phrase — and `Why` is `_`-free
+                //   at `as_str`, so a new reason is a build error until someone names its bucket.
+                *by_class.entry(r.class.as_str()).or_default() += 1;
+                let _ = &mut unclassified;
+            }
+        }
+        // ★★★ Every `Why` variant that OCCURS is counted by construction. What can still go wrong is a
+        //     variant nobody ever produces — a class that looks covered and is dead — so the buckets that
+        //     must be non-empty are named, and the grid/human split is asserted rather than described.
+        assert!(unclassified.is_empty(), "unreachable: the class is a field");
+        let of = |v: Why| by_class.get(v.as_str()).copied().unwrap_or(0);
+        assert!(
+            of(Why::NotANumberedLine) >= 50,
+            "the grid/identity bucket holds {} — Schedule B alone has ~66 payer rows, so a small \
+             number here means the reader or the maps moved: {by_class:?}",
+            of(Why::NotANumberedLine)
+        );
+        assert!(
+            carried >= 120,
+            "only {carried} cell(s) carry across the whole queue — the tool has stopped resolving"
+        );
+        let human = by_class
+            .iter()
+            .filter(|(c, _)| c.contains("human must read"))
+            .map(|(_, n)| *n)
+            .sum::<usize>();
+        assert!(
+            human >= 1,
+            "no form needs a human to read it, which cannot be true of a year that renumbered lines: \
+             {by_class:?}"
+        );
+        eprintln!("  port-map January forecast: {carried} carry, {pages} change page");
+        for (c, n) in &by_class {
+            eprintln!("    {n:4}  {c}");
+        }
     }
 
     fn shape(page: u32, band: &str, max_len: Option<usize>, on: &[&str]) -> Shape {
