@@ -175,6 +175,12 @@ pub const fn schema(ls: LineSet) -> Schema {
         //      carries the owner ruling.
         LineSet::F1040_2025 => Schema::Form1040Map,
         LineSet::F1040s1a_2025 => Schema::Unwired,
+        // ★ TY2025 Schedule 1 reuses TY2024's struct: `Schedule1Map`'s twelve line fields are exactly
+        //   the twelve this revision maps, and the two revisions differ only in the root subform, some
+        //   widget ordinals, and line 7's new repayment pair — none of which the STRUCT sees. Wired
+        //   rather than `Unwired` for the `f1040s2/2025` reason and not the `f1040s1a/2025` one: the
+        //   struct is not thrown away next season.
+        LineSet::F1040s1_2025 => Schema::Schedule1Map,
         LineSet::F1040s2_2025 => Schema::Schedule2Map,
         LineSet::F1040s3_2025 => Schema::Schedule3Map,
         LineSet::F1040sa_2025 => Schema::ScheduleAMap,

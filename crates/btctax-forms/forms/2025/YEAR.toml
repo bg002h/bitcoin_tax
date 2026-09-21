@@ -11,6 +11,7 @@ prices_through = 2025-12-31
 
 forms_expected = [
     "f1040",
+    "f1040s1",
     "f1040s1a",
     "f1040s2",
     "f1040s3",
@@ -31,7 +32,6 @@ forms_expected = [
 ]
 
 [forms_absent]
-f1040s1      = "Schedule 1 is bundled for 2024 only; the TY2025 revision has no map yet (NO PRIOR SIDE in the TY2026 work list — archive f1040s1--2025, then port)"
 f8275        = "periodic (Rev. 10-2024) — served from forms/2024/ by bundled::periodic_template, whose pairing of the bytes with the year whose row says periodic is the licence"
 f8995a       = "not ported to TY2025 (Form 8995-A Rev. 2025 map not yet transcribed); the simplified Form 8995 is bundled"
 

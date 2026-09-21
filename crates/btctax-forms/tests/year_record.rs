@@ -44,8 +44,9 @@ fn every_bundled_year_has_a_record_that_partitions_the_closed_set_and_matches_th
             // TY2017's `5` was removed 2026-09-06 with its form package (owner ruling S9).
             // 2026-09-06: 17 → 19 and 15 → 17 — Form 4868 and Form 1040-V (spec 4868/1040-V T1).
             // 2026-09-07: 19 → 20 and 17 → 18 — Form 8889 (T16 / FR-76).
+            // 2026-09-21: 18 → 19 — Schedule 1 ported to TY2025 (`xtask port-map f1040s1 2024 2025`).
             2024 => 20,
-            2025 => 18,
+            2025 => 19,
             2026 => 0, // preparing: the record exists, no TY2026 revision is released (spec 1099-DA T0)
             other => panic!("TY{other}: record the expected form count here — a new year does not arrive silently"),
         };

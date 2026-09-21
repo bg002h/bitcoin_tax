@@ -10309,3 +10309,39 @@ the instructed `-0-` beside a 6a carrying the full 30,000.
 
 Register: `(2025, "f1040")` 104 → 96, `UNCENSUSED_FIELDS` 218 → 210.
 
+
+### FR-262 — 🟡 OPEN — TY2025 Schedule 1 line 7 asks about an unemployment REPAYMENT and btctax never does
+
+**Owning phase: the TY2026 port** (this revision's line 7 is that port's prior side, so the widgets
+arrive again the moment Schedule 1 is carried to TY2026).
+
+TY2025 rewrote Schedule 1 line 7 from *"Unemployment compensation"* to
+
+    7  Unemployment compensation. If you repaid a 2025 overpayment (see instructions), check here ☐
+       and enter amount repaid: ______
+
+adding `Line7_ReadOrder[0].c1_3[0]` (a checkbox, on-state `1`) and `Line7_ReadOrder[0].f1_11[0]` (the
+repaid amount). TY2024 Schedule 1 declares **zero** buttons; this revision declares five.
+
+**Why this is a `gap` and not `unmodeled`, which is the whole reason it is here.** `unmodeled` means a
+situation outside btctax's scope, which the filer FORGOES. Line 7 is inside scope: it is mapped
+(`line7 = "topmostSubform[0].Page1[0].f1_12[0]"`) and written from the filer's own unemployment figure.
+What is missing is a **declaration about an in-scope line**. A filer who repaid an overpayment gets a
+line 7 carrying the GROSS with the box unchecked, and nothing says so — the same species as the
+`schedule_se` line-A Form 4361 minister declaration, which is the precedent the `gap` rule was written
+for.
+
+The direction is conservative: income overstated, so tax overstated. That is not a defence. A wrong
+value on a line the filer signs under §6065 is not made right by being unfavourable, and the unchecked
+box is a false answer to a question the form asked rather than a blank where nothing was asked.
+
+**This raised `recorded_gaps_may_only_shrink`'s pin from 0 to 2** — the first gaps since the surface was
+closed on 2026-07-31 — which is the ratchet behaving as designed: *"a NEW gap can be added (that is what
+the register is for) but not silently."* The count is the record, not the remedy.
+
+**What closing it takes.** Collect the repayment amount (one input, plus the derived checkbox), map both
+widgets, delete their two census entries, and lower `GAPS` to 0 in the same diff. Per the gate's own
+message, closing a gap means mapping the field to a real question — never re-describing the omission.
+
+**Not yet measured:** whether TY2026's Schedule 1 keeps the pair. `design/forms/2026/f1040s1--2026-DRAFT.pdf`
+is archived, so `cargo run -p xtask -- port-map f1040s1 2025 2026-DRAFT` answers it in one command.

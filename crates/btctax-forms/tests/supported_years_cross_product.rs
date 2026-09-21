@@ -144,7 +144,8 @@ const BUNDLED_BUT_NOT_SUPPORTED: &[i32] = &[2026]; // TY2026: a `preparing` reco
 /// adding one — a cell with no recorded gap vanishing from the matrix would otherwise be silent.
 // 2026-09-06: 2024 17 → 19 and 2025 15 → 17 — the Form 4868 and Form 1040-V rows (spec 4868/1040-V
 // T1). The `(2017, 5)` row was removed the same day: S9 dropped the TY2017 package (owner ruling).
-const BUNDLED_FORMS_PER_YEAR: &[(i32, usize)] = &[(2024, 20), (2025, 18)];
+// 2026-09-21: 2025 18 → 19 — Schedule 1 ported to TY2025 (`xtask port-map f1040s1 2024 2025`).
+const BUNDLED_FORMS_PER_YEAR: &[(i32, usize)] = &[(2024, 20), (2025, 19)];
 
 /// Bundled stems for which this build ships **no map type at all**, so nothing can parse the
 /// committed `*.map.toml`. Recorded rather than skipped (`CLAUDE.md`: *skipping is not passing*).

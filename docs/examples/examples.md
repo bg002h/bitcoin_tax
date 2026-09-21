@@ -97,7 +97,7 @@ Tax profile for 2025 saved.
 ```
 ```console
 $ btctax --vault v.pgp report --tax-year 2025
-TY2025 — preparing (18 forms; TaxTable yes; full-return params no; 1099-DA proceeds)
+TY2025 — preparing (19 forms; TaxTable yes; full-return params no; 1099-DA proceeds)
 Federal tax attributable to crypto — tax year 2025
   net short-term (whole-return level): -350.00   net long-term (whole-return level): 0.00
   crypto ordinary income (level): 0.00
@@ -294,7 +294,7 @@ Recorded decision decision|2
 ```
 ```console
 $ btctax --vault v.pgp report --tax-year 2025
-TY2025 — preparing (18 forms; TaxTable yes; full-return params no; 1099-DA proceeds)
+TY2025 — preparing (19 forms; TaxTable yes; full-return params no; 1099-DA proceeds)
 Federal tax attributable to crypto — tax year 2025
   net short-term (whole-return level): 0.00   net long-term (whole-return level): 0.00
   crypto ordinary income (level): 7450.67

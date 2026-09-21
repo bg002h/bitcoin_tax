@@ -105,7 +105,7 @@ fn only_the_periodic_forms_reach_ty2026() {
 // The join below is per-document and per-year: every archived extract records the SHA-256 of the PDF
 // its text layer was taken from (`# sha256:…`), so a bundled template whose hash is that year's
 // extract's hash IS the document we transcribed, and its printed revision is that year's BY
-// CONSTRUCTION. Coverage is total today — 38 of 38 bundled templates — and it does not weaken in
+// CONSTRUCTION. Coverage is total today — 39 of 39 bundled templates — and it does not weaken in
 // January: when `f1040sa--2026.txt` lands, the join demands the bundled 2026 template be that file's
 // source.
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -176,7 +176,7 @@ fn every_map(forms_root: &Path) -> Vec<(i32, String, PathBuf)> {
     out
 }
 
-/// ★★★ **THE LIVE HALF — 38 of 38, and the two failure classes are NAMED rather than skipped.**
+/// ★★★ **THE LIVE HALF — 39 of 39, and the two failure classes are NAMED rather than skipped.**
 ///
 /// `irs_stem` comes from the map ROW (`schedule_d` gives `f1040sd`), so the alias is derived from the
 /// committed artifact and not typed here.
@@ -214,7 +214,8 @@ fn every_bundled_template_is_the_document_its_year_archived() {
          name them here rather than letting the join pass vacuously: {no_extract:?}"
     );
     assert_eq!(
-        is, 38,
+        // 2026-09-21: 38 → 39 — the bundled TY2025 Schedule 1 joins its archived extract.
+        is, 39,
         "coverage changed: {is} bundled templates joined to their year's extract. A NEW pair is fine \
          — update this count. A SMALLER one means a template lost its archive."
     );

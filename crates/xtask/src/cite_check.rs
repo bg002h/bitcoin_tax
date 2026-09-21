@@ -2182,19 +2182,32 @@ mod map_row_tests {
     }
 
     /// B1 — the SAME `two_way_diff` the green test runs, observed red in each direction on a plant.
+    ///
+    /// ★★★ **Both plants use a stem no form will ever have, and the premise is ASSERTED.** The emitted
+    /// side originally planted `("f1040s1", 2025)` — a real stem at a year that happened not to be
+    /// bundled. Schedule 1 was ported to TY2025 on 2026-09-21, the pair became a genuine row, and
+    /// inserting it into the emitted set stopped planting anything: the `BTreeSet` insert was a no-op
+    /// and the diff was empty for the honest reason, so the KILL passed while planting nothing. A plant
+    /// keyed to something that can become true is a plant with an expiry date on it.
     #[test]
     fn a_row_pointing_at_no_template_is_caught_in_both_directions() {
         let emitted = emitted_form_years().unwrap();
+        let (rows_side, emitted_side) = (("f9999".to_string(), 2024), ("f9998".to_string(), 2025));
+        assert!(
+            !row_set().contains(&rows_side) && !emitted.contains(&emitted_side),
+            "premise: neither plant may already be present, or the insert below plants NOTHING and \
+             this kill passes on an empty diff"
+        );
         let mut planted_rows = row_set();
-        planted_rows.insert(("f9999".to_string(), 2024));
+        planted_rows.insert(rows_side.clone());
         let (only_rows, only_emitted) = two_way_diff(&planted_rows, &emitted);
-        assert_eq!(only_rows, vec![("f9999".to_string(), 2024)]);
+        assert_eq!(only_rows, vec![rows_side]);
         assert!(only_emitted.is_empty());
         let mut planted_emitted = emitted.clone();
-        planted_emitted.insert(("f1040s1".to_string(), 2025));
+        planted_emitted.insert(emitted_side.clone());
         let (only_rows, only_emitted) = two_way_diff(&row_set(), &planted_emitted);
         assert!(only_rows.is_empty());
-        assert_eq!(only_emitted, vec![("f1040s1".to_string(), 2025)]);
+        assert_eq!(only_emitted, vec![emitted_side]);
     }
 
     /// P6 — the row's `instructions` names a document the archive HOLDS: for every row of an archived

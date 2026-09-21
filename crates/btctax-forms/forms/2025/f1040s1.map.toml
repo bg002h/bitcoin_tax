@@ -1,0 +1,171 @@
+# Schedule 1 (Additional Income and Adjustments to Income), Form 1040, TY2025.
+#
+# PORTED from forms/2024/f1040s1.map.toml by `cargo run -p xtask -- port-map f1040s1 2024 2025`, which
+# carried 12 of the 14 line cells and 52 of the 55 census entries by (printed label, column band) and
+# REFUSED five. Every refusal is resolved below against the form, and every carry is held by
+# `port_map::tests::the_tool_agrees_with_every_committed_ty2025_map` once this file is committed.
+#
+# ⚠️ THE ROOT SUBFORM FLIPPED. TY2024 Schedule 1 roots at `form1[0]`; this revision roots at
+#    `topmostSubform[0]`. Every FQN in this file therefore differs from TY2024's in its first segment,
+#    and a prefix-rename of the TY2024 map would still be wrong — the widget ORDINALS also shifted
+#    (TY2024's `f1_11` is line 7's amount; here that is `f1_12`, and `f1_11` is a new box). This is why
+#    the port carries by printed label and not by name.
+#
+# ⚠️ TWO PAGES — descent is grouped BY PAGE (Part II is entirely on page 2).
+#
+# Column x-clusters: MID x ≈ [410,482], AMOUNT x ≈ [504,576].
+#
+# ── WHAT TY2025 CHANGED, measured ────────────────────────────────────────────────────────────────
+#
+# ★★★ LINE 7 GAINED TWO WIDGETS AND A NEW QUESTION. TY2024 printed "Unemployment compensation" with one
+#     amount box. TY2025 prints "Unemployment compensation. If you repaid a 2025 overpayment (see
+#     instructions), check here ☐ and enter amount repaid: ____". So line 7 now carries
+#     `Line7_ReadOrder[0].c1_3[0]` (a checkbox, on="1") and `Line7_ReadOrder[0].f1_11[0]` (the repaid
+#     amount) beside the amount cell. btctax collects neither, so both are censused — and the amount
+#     this build writes to line 7 is whatever the filer entered as unemployment compensation, which for
+#     a filer who repaid an overpayment is the GROSS. That overstates income, the conservative
+#     direction, but it is a collection gap and is filed as one (FOLLOWUPS FR-262).
+#
+# ★★★ 8z AND 24z EACH LOST A DESCRIPTION CELL TO A MERGE — the same change Schedule A made on line 16.
+#     TY2024 gave each write-in TWO description boxes stacked 12pt apart; TY2025 gives ONE box of 24pt.
+#       line 8z:  (214.8, 186-198) + (64.8, 174-186)  ->  (64.8, 150-174)   `Line8z_ReadOrder[0].f1_35[0]`
+#       line 24z: (234.8, 324-336) + (64.8, 312-324)  ->  (64.8, 276-300)   `Line24z_ReadOrder[0].f2_27[0]`
+#     The wider cell's census entry carries onto the merged box; the narrower one has no widget to
+#     account for and is DROPPED, which is why this census has 53 entries where TY2024 had 55. The tool
+#     refused both rather than choosing, which is the correct behaviour — see
+#     `port_map::refuse_collisions`.
+#
+# ★ The 1099-K reconciliation box did NOT move: `f1_03[0]` sits at (482.4, 660-672) on both revisions
+#   and both print the same sentence with the year changed. It refused only because "1099-K" is not a
+#   printed LINE label, so there was nothing for the label resolver to match. Resolved by geometry.
+
+form = "f1040s1"
+year = 2025
+# ── design r2 §4 — the ROW of the year-package table. Values COMPUTED 2026-09-21 (sha256 from the
+#    bundled PDF; attachment sequence read off the printed form), never typed by hand. ──
+irs_stem            = "f1040s1"
+versioning          = "annual"
+template_sha256     = "8dafec719f6a4716c259a2bdaca546d9bb9e262d1eabef885fe116a7327458fa"
+instructions        = "i1040gi"
+line_set            = "f1040s1/2025"
+attachment_sequence = "01"
+
+# ── Part I — Additional Income (page 1) ─────────────────────────────────────────────────────────
+line1  = "topmostSubform[0].Page1[0].f1_04[0]"   # "Taxable refunds, credits, or offsets of state and local income taxes"  AMOUNT
+line3  = "topmostSubform[0].Page1[0].f1_07[0]"   # "Business income or (loss). Attach Schedule C"                          AMOUNT
+line7  = "topmostSubform[0].Page1[0].f1_12[0]"   # "Unemployment compensation"                                            AMOUNT
+line8f = "topmostSubform[0].Page1[0].f1_18[0]"   # "Income from Form 8889"                                                AMOUNT  ★ T16
+line8v = "topmostSubform[0].Page1[0].f1_34[0]"   # "Digital assets received as ordinary income not reported elsewhere"    MID   ★ btctax
+line9  = "topmostSubform[0].Page1[0].f1_37[0]"   # "Total other income. Add lines 8a through 8z"                          AMOUNT
+line10 = "topmostSubform[0].Page1[0].f1_38[0]"   # "Combine lines 1 through 7 and 9…" → 1040 line 8                       AMOUNT
+
+# ── Part II — Adjustments to Income (page 2) ────────────────────────────────────────────────────
+line13 = "topmostSubform[0].Page2[0].f2_03[0]"   # "Health savings account deduction. Attach Form 8889"                   AMOUNT  ★ T16
+line15 = "topmostSubform[0].Page2[0].f2_05[0]"   # "Deductible part of self-employment tax. Attach Schedule SE"           AMOUNT
+line18 = "topmostSubform[0].Page2[0].f2_08[0]"   # "Penalty on early withdrawal of savings"                               AMOUNT
+line21 = "topmostSubform[0].Page2[0].f2_13[0]"   # "Student loan interest deduction"                                      AMOUNT
+line26 = "topmostSubform[0].Page2[0].f2_30[0]"   # "Add lines 11 through 23 and 25…" → 1040 line 10                       AMOUNT
+
+# ── Page-1 identity block ───────────────────────────────────────────────────────────────────────
+# ★ REFUSED by the port (no printed line label) and resolved here by geometry: both widgets sit at
+#   y=684-698 on page 1 with byte-identical rects to TY2024's, and the SSN box carries /MaxLen 11 —
+#   the hyphenated spelling every schedule in this crate uses.
+[identity]
+name = "topmostSubform[0].Page1[0].f1_01[0]"
+ssn  = "topmostSubform[0].Page1[0].f1_02[0]"
+
+# ★★★ R2.2 — THE `[direction]` TABLE. Each block's `caption` is asserted VERBATIM against
+#     design/forms/extract/f1040s1--2025.txt at `extract_line` BEFORE the join uses it, so this table
+#     is a READING of the form and a re-parted revision REDS rather than drifting. The part captions
+#     and their line ranges are unchanged from TY2024; only the 1099-K sentence's year and the Part II
+#     extract line moved (62 -> 64).
+[[direction]]
+caption      = "For 2025, enter the amount reported to you on Form(s) 1099-K"
+extract_line = 15
+
+[[direction]]
+caption      = "Part I       Additional Income"
+extract_line = 19
+first_line   = "1"
+last_line    = "10"
+
+[[direction]]
+caption      = "Part II     Adjustments to Income"
+extract_line = 64
+first_line   = "11"
+last_line    = "26"
+
+[census]
+
+# ── The unnumbered 1099-K reconciliation line, above Part I ──────────────────────────────────────
+# ── THE FIVE CHECKBOXES AND ONE WRITE-IN THIS REVISION ADDED ─────────────────────────────────────
+# TY2024 Schedule 1 declares ZERO buttons (measured: `dump-fields | grep -c btn` = 0). TY2025 declares
+# five, plus one write-in amount, and each attaches a NEW question to a line that already existed. None
+# was carried by the port because none has a TY2024 counterpart to carry — they are read off the form
+# here, with the sentence each one belongs to quoted from design/forms/extract/f1040s1--2025.txt.
+#
+# ★★★ Each is censused rather than mapped, and for a reason that differs per line. A checkbox is
+#     TESTIMONY: checking line 20's says "I am married filing separately and lived apart from my spouse
+#     for the entire year" in support of an IRA deduction this build does not compute. Writing it beside
+#     a blank line 20 would assert a fact in aid of a claim nobody made.
+"topmostSubform[0].Page1[0].c1_1[0]" = { line = "4 Form 4797", rule = "unmodeled", names = "Form 4797", reason = "Form 4797 — \"Other gains or (losses). Check if any from Form(s): 4797\". TY2024 printed \"Attach Form 4797\" with no box. Line 4 itself is unmodelled (no \u00a71231 property), so the box saying which form the figure came from has no figure to qualify.", covered_by = "QuestionId::OtherOutOfScopeIncome" }
+"topmostSubform[0].Page1[0].c1_2[0]" = { line = "4 Form 4684", rule = "unmodeled", names = "Form 4684", reason = "Form 4684 — the casualty-and-theft half of the same line-4 pair, NEW on this revision; TY2024 named only Form 4797. Same reason: line 4 is unmodelled.", covered_by = "QuestionId::OtherOutOfScopeIncome" }
+"topmostSubform[0].Page1[0].Line7_ReadOrder[0].c1_3[0]" = { line = "7 repaid", rule = "gap", reason = "\"If you repaid a 2025 overpayment (see instructions), check here\" — NEW on this revision, and a declaration btctax never asks. Line 7 IS modelled, so this is not an out-of-scope situation: it is a required disclosure about an in-scope line. A filer who repaid an overpayment files a line 7 that is the GROSS with the box unchecked, and nothing says so. Direction is conservative (income overstated), but the value on a sworn line is still wrong. FOLLOWUPS FR-262." }
+"topmostSubform[0].Page1[0].Line7_ReadOrder[0].f1_11[0]" = { line = "7 amount repaid", rule = "gap", reason = "\"and enter amount repaid:\" — the write-in beside the checkbox above, and the second half of the same never-asked declaration. A value here without the checkbox, or either without a collected repayment, would be invented testimony. FOLLOWUPS FR-262." }
+"topmostSubform[0].Page2[0].c2_1[0]" = { line = "14 storage fees", rule = "unmodeled", reason = "\"If claiming only storage fees (see instructions), check here\" — NEW on this revision. Line 14 (moving expenses for members of the Armed Forces, Form 3903) is unmodelled, so there is no claim for this box to narrow.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page2[0].c2_2[0]" = { line = "20 MFS lived apart", rule = "unmodeled", reason = "\"If you are married filing separately and lived apart from your spouse for the entire year (see instructions), check here\" — NEW on this revision. btctax DOES know this fact: `AbsoluteReturn::mfs_lived_apart_disclosure` computes it for the \u00a786 Social Security worksheet. It stays blank anyway, because line 20 is the IRA deduction and this build models no IRA — the box is testimony in support of a deduction that is not being claimed.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+
+"topmostSubform[0].Page1[0].f1_03[0]" = { line = "1099-K", rule = "unmodeled", reason = "Amount from Form(s) 1099-K included in error or for personal items sold at a loss — btctax collects no 1099-K. Informational: it feeds no sum, and it reduces rather than adds.", covered_by = "RefuseReason::DocumentTypeUnsupported", part = "For 2025, enter the amount reported to you on Form(s) 1099-K" }
+
+"topmostSubform[0].Page1[0].f1_05[0]" = { line = "2a", rule = "unmodeled", reason = "Alimony received — btctax models no alimony.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "Alimony received" }
+"topmostSubform[0].Page1[0].f1_06[0]" = { line = "2b", rule = "unmodeled", reason = "Date of the original divorce or separation agreement — dead with line 2a blank (the date only matters to decide pre/post-TCJA treatment of an amount).", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "divorce or separation agreement" }
+"topmostSubform[0].Page1[0].f1_08[0]" = { line = "4",  rule = "unmodeled", reason = "Other gains or (losses), Form 4797 — no §1231 property modelled (matching Schedule D line 11).", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "4797" }
+"topmostSubform[0].Page1[0].f1_09[0]" = { line = "5",  rule = "unmodeled", reason = "Rental real estate, royalties, partnerships, S corporations, trusts (Schedule E) — btctax models no pass-through entities or rental property (matching Form 8960 line 4a).", covered_by = "RefuseReason::DocumentTypeUnsupported" }
+"topmostSubform[0].Page1[0].f1_10[0]" = { line = "6",  rule = "unmodeled", reason = "Farm income or (loss), Schedule F — not modelled.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "Farm income" }
+"topmostSubform[0].Page1[0].Line8a_ReadOrder[0].f1_13[0]" = { line = "8a", rule = "unmodeled", reason = "Net operating loss ★ PAREN — btctax models no NOL (already recorded as uncaptured at btctax-core/src/tax/amt.rs:40). A negative line, so forgoing it overstates.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "Net operating loss" }
+"topmostSubform[0].Page1[0].f1_14[0]" = { line = "8b", rule = "unmodeled", reason = "Gambling income — not modelled (broken out onto its own line for 2024; previously an 8z write-in).", covered_by = "RefuseReason::DocumentTypeUnsupported" }
+"topmostSubform[0].Page1[0].f1_15[0]" = { line = "8c", rule = "unmodeled", reason = "Cancellation of debt — btctax collects no Form 1099-C. Income, so the understatement direction; there is no input that could reach it.", covered_by = "RefuseReason::DocumentTypeUnsupported" }
+"topmostSubform[0].Page1[0].f1_16[0]" = { line = "8d", rule = "unmodeled", reason = "Foreign earned income exclusion from Form 2555 ★ PAREN — btctax models a domestic filer and emits no Form 2555 (see also line 24j).", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "2555" }
+"topmostSubform[0].Page1[0].f1_17[0]" = { line = "8e", rule = "unmodeled", reason = "Income from Form 8853 (Archer MSA / long-term care) — no MSA modelled.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "8853" }
+"topmostSubform[0].Page1[0].f1_19[0]" = { line = "8g", rule = "unmodeled", reason = "Alaska Permanent Fund dividends — not modelled.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "Alaska Permanent Fund" }
+"topmostSubform[0].Page1[0].f1_20[0]" = { line = "8h", rule = "unmodeled", reason = "Jury duty pay — not modelled (its offsetting adjustment is line 24a).", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "Jury duty pay" }
+"topmostSubform[0].Page1[0].f1_21[0]" = { line = "8i", rule = "unmodeled", reason = "Prizes and awards — not modelled.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "Prizes and awards" }
+"topmostSubform[0].Page1[0].f1_22[0]" = { line = "8j", rule = "unmodeled", reason = "Activity not engaged in for profit income (§183 hobby income) — btctax's only business path is Schedule C, which is by definition for-profit.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "Activity not engaged in for profit" }
+"topmostSubform[0].Page1[0].f1_23[0]" = { line = "8k", rule = "unmodeled", reason = "Stock options — not modelled. ★ Note this is the ORDINARY-income side of a nonqualified option; the AMT side (an ISO exercise, Form 6251 line 2i) is a separate known exposure tracked in the AMT work.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "Stock options" }
+"topmostSubform[0].Page1[0].f1_24[0]" = { line = "8l", rule = "unmodeled", reason = "Income from the rental of personal property engaged in for profit but not as a business — not modelled (its adjustment is line 24b).", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "rental of personal property" }
+"topmostSubform[0].Page1[0].f1_25[0]" = { line = "8m", rule = "unmodeled", reason = "Olympic and Paralympic medals and USOC prize money — not modelled (its adjustment is line 24c).", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "Olympic and Paralympic medals" }
+"topmostSubform[0].Page1[0].f1_26[0]" = { line = "8n", rule = "unmodeled", reason = "Section 951(a) inclusion (subpart F) — btctax models no CFC, matching Form 8960's §1.1411-10(g) election census entry.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "951(a)" }
+"topmostSubform[0].Page1[0].f1_27[0]" = { line = "8o", rule = "unmodeled", reason = "Section 951A(a) inclusion (GILTI) — same.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "951A(a)" }
+"topmostSubform[0].Page1[0].f1_28[0]" = { line = "8p", rule = "unmodeled", reason = "Section 461(l) excess business loss adjustment. ★ FAIL-CLOSED, not merely unmodelled: a Schedule C net loss REFUSES the return (RefuseReason::ScheduleCLoss, noted at qbi.rs:63), so btctax can never produce the business loss whose excess this line adds back. An add-back is the understatement direction, which is why the refusal matters.", covered_by = "RefuseReason::ScheduleCLoss" }
+"topmostSubform[0].Page1[0].f1_29[0]" = { line = "8q", rule = "unmodeled", reason = "Taxable distributions from an ABLE account — not modelled.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "ABLE account" }
+"topmostSubform[0].Page1[0].f1_30[0]" = { line = "8r", rule = "unmodeled", reason = "Scholarship and fellowship grants not reported on Form W-2 — not modelled.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "Scholarship and fellowship grants" }
+"topmostSubform[0].Page1[0].f1_31[0]" = { line = "8s", rule = "unmodeled", reason = "Nontaxable Medicaid waiver payments included on Form 1040 line 1a or 1d ★ PAREN — the pairing for 1040 line 1d, which is likewise unmodelled; a negative line, so forgoing it overstates.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "Medicaid waiver payments" }
+"topmostSubform[0].Page1[0].f1_32[0]" = { line = "8t", rule = "unmodeled", reason = "Pension or annuity from a nonqualified deferred compensation plan or a nongovernmental §457 plan — not modelled (matching Schedule 2 lines 17h/17i).", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "nonqualified deferred compensation" }
+"topmostSubform[0].Page1[0].f1_33[0]" = { line = "8u", rule = "unmodeled", reason = "Wages earned while incarcerated — not modelled.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "Wages earned while incarcerated" }
+"topmostSubform[0].Page1[0].Line8z_ReadOrder[0].f1_35[0]" = { line = "8z type",   rule = "unmodeled", reason = "Second (wider) description cell for the same 8z write-in — same.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "8z write-in" }
+"topmostSubform[0].Page1[0].f1_36[0]" = { line = "8z amount", rule = "unmodeled", reason = "Amount for the 8z write-in — same.", covered_by = "QuestionId::OtherOutOfScopeIncome", names = "8z write-in" }
+"topmostSubform[0].Page2[0].f2_01[0]" = { line = "11", rule = "unmodeled", reason = "Educator expenses — not modelled.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page2[0].f2_02[0]" = { line = "12", rule = "unmodeled", reason = "Certain business expenses of reservists, performing artists and fee-basis government officials (Form 2106) — not modelled.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page2[0].f2_04[0]" = { line = "14", rule = "unmodeled", reason = "Moving expenses for members of the Armed Forces (Form 3903) — not modelled.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page2[0].f2_06[0]" = { line = "16", rule = "unmodeled", reason = "Self-employed SEP, SIMPLE and qualified plans. ★ Adjacent to modelled behaviour — btctax computes Schedule C and Schedule SE — but it collects no retirement-plan contributions. A forgone deduction; it can only overstate the tax.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page2[0].f2_07[0]" = { line = "17", rule = "unmodeled", reason = "Self-employed health insurance deduction — same adjacency, same direction: Schedule C exists, health-insurance premiums are not collected.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page2[0].f2_09[0]" = { line = "19a", rule = "unmodeled", reason = "Alimony paid — btctax models no alimony (the receiving side is line 2a).", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page2[0].Line19b_CombField[0].f2_10[0]" = { line = "19b", rule = "unmodeled", reason = "Recipient's SSN (/MaxLen 9, a comb) — dead with line 19a blank, and btctax collects no third party's SSN.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page2[0].f2_11[0]" = { line = "19c", rule = "unmodeled", reason = "Date of the original divorce or separation agreement — dead with 19a blank.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page2[0].f2_12[0]" = { line = "20", rule = "unmodeled", reason = "IRA deduction — btctax models no IRA (matching 1040 lines 4a/4b and Schedule 2 line 8).", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page2[0].f2_14[0]" = { line = "22", rule = "artifact",  reason = "\"Reserved for future use.\" A printed cell that takes no entry from anyone — the third such across the return, after Schedule 3 line 6e and Form 1040 line 30." }
+"topmostSubform[0].Page2[0].f2_15[0]" = { line = "23", rule = "unmodeled", reason = "Archer MSA deduction — no MSA modelled.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page2[0].Line24a_ReadOrder[0].f2_16[0]" = { line = "24a", rule = "unmodeled", reason = "Jury duty pay repaid to an employer — dead by construction: it offsets line 8h, which is blank.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page2[0].f2_17[0]" = { line = "24b", rule = "unmodeled", reason = "Deductible expenses related to line 8l personal-property rental income — dead by construction: 8l is blank.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page2[0].f2_18[0]" = { line = "24c", rule = "unmodeled", reason = "Nontaxable value of Olympic and Paralympic medals and USOC prize money reported on line 8m — dead by construction: 8m is blank.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page2[0].f2_19[0]" = { line = "24d", rule = "unmodeled", reason = "Reforestation amortization and expenses — not modelled.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page2[0].f2_20[0]" = { line = "24e", rule = "unmodeled", reason = "Repayment of supplemental unemployment benefits under the Trade Act of 1974 — not modelled.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page2[0].f2_21[0]" = { line = "24f", rule = "unmodeled", reason = "Contributions to §501(c)(18)(D) pension plans — not modelled. ★ FR-215: this line now has an advisory OF ITS OWN. FR-205 built Advisory::Section501c18DeductionForgone, which fires on a W-2 box 12 code H entry and names THIS line with the box 12 figure as a ceiling, so the generic Schedule-1-Part-II blanket is no longer the closest cover. The blanket still fires unconditionally beside it — this row points at the specific one because a covered_by that names the nearest reader is what keeps the census joinable.", covered_by = "Advisory::Section501c18DeductionForgone" }
+"topmostSubform[0].Page2[0].f2_22[0]" = { line = "24g", rule = "unmodeled", reason = "Contributions by certain chaplains to §403(b) plans — not modelled. ★ The second minister-specific line met in this census, after Schedule SE line A (the Form 4361 declaration, a recorded gap); this one is a deduction, so its direction is safe.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page2[0].f2_23[0]" = { line = "24h", rule = "unmodeled", reason = "Attorney fees and court costs for actions involving certain unlawful discrimination claims — not modelled.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page2[0].f2_24[0]" = { line = "24i", rule = "unmodeled", reason = "Attorney fees and court costs paid in connection with an IRS whistleblower award — not modelled.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page2[0].f2_25[0]" = { line = "24j", rule = "unmodeled", reason = "Housing deduction from Form 2555 — btctax models a domestic filer and emits no Form 2555 (pairs with line 8d).", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page2[0].f2_26[0]" = { line = "24k", rule = "unmodeled", reason = "Excess deductions of §67(e) expenses from Schedule K-1 (Form 1041) — btctax models no estates or trusts.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page2[0].Line24z_ReadOrder[0].f2_27[0]" = { line = "24z type",   rule = "unmodeled", reason = "Second (wider) description cell for the same 24z write-in — same.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page2[0].f2_28[0]" = { line = "24z amount", rule = "unmodeled", reason = "Amount for the 24z write-in — same.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }
+"topmostSubform[0].Page2[0].f2_29[0]" = { line = "25", rule = "unmodeled", reason = "\"Total other adjustments. Add lines 24a through 24z\" — dead with all of line 24 blank. Line 26 (mapped) adds lines 11 through 23 and 25, so a blank line 25 contributes nothing.", covered_by = "Advisory::UnmodeledDeductionsOmitted" }

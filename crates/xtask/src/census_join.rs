@@ -154,6 +154,15 @@ pub const DIRECTION_OF_CAPTION: &[Reading] = &[
         "enter the amount reported to you on Form(s) 1099-K that was included in error or for \
          personal items sold at a loss",
     ),
+    // ★ TY2025 prints the identical sentence with the year changed, so the EVIDENCE quote is
+    //   byte-identical and the reading is the same: the amount asked for does not belong in income, so
+    //   a blank forgoes a reduction rather than omitting income.
+    (
+        "For 2025, enter the amount reported to you on Form(s) 1099-K",
+        Direction::Overstates,
+        "enter the amount reported to you on Form(s) 1099-K that was included in error or for \
+         personal items sold at a loss",
+    ),
     (
         "Part I       Additional Income",
         Direction::Understates,
@@ -1398,16 +1407,20 @@ mod tests {
                 }
             }
         }
+        // 2026-09-21: 28 → 31 blocks over 22 → 23 captions. The TY2025 Schedule 1 map adds three
+        // blocks (the 1099-K reconciliation line and Parts I and II) and exactly ONE new caption — the
+        // two part headings are byte-identical to TY2024's, so they reuse its readings; only the
+        // 1099-K sentence carries the year and needed its own.
         assert_eq!(
-            blocks, 28,
-            "the committed tree carries 28 [[direction]] blocks"
+            blocks, 31,
+            "the committed tree carries 31 [[direction]] blocks"
         );
-        assert_eq!(captions.len(), 22, "…over 22 distinct captions");
+        assert_eq!(captions.len(), 23, "…over 23 distinct captions");
         let orphans = reading_table_findings(DIRECTION_OF_CAPTION, &captions);
         assert!(orphans.is_empty(), "{orphans:?}");
         assert_eq!(
             DIRECTION_OF_CAPTION.len(),
-            22,
+            23,
             "one reading per committed caption, and no reading nothing uses"
         );
     }

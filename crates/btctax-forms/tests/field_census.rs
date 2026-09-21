@@ -521,7 +521,25 @@ fn recorded_gaps_may_only_shrink() {
     // ★ Zero is not the end of the census — it is the ratchet at rest. `<` is still the only legal
     // direction, and every field must still be accounted for, so a NEW gap can be added (that is what
     // the register is for) but not silently.
-    const GAPS: usize = 0;
+    //
+    // ★★★ 2026-09-21: 0 → 2, NOT SILENTLY, and it is the form that moved rather than this build. TY2025
+    // Schedule 1 rewrote line 7 from "Unemployment compensation" to "Unemployment compensation. If you
+    // repaid a 2025 overpayment (see instructions), check here ☐ and enter amount repaid: ____", adding
+    // `Line7_ReadOrder[0].c1_3[0]` and `Line7_ReadOrder[0].f1_11[0]`. TY2024 Schedule 1 declares ZERO
+    // buttons; this revision declares five.
+    //
+    // These two are `gap` and not `unmodeled`, and the line between those is the whole reason this
+    // count exists. `unmodeled` means a situation outside scope, which the filer FORGOES — line 7 is
+    // inside scope, mapped, and written. What is missing is a DECLARATION about an in-scope line: a
+    // filer who repaid an overpayment gets a line 7 carrying the GROSS with the box unchecked, and
+    // nothing says so. That is the `schedule_se` line-A precedent exactly (the Form 4361 minister
+    // declaration), not the unclaimed-deduction one. The direction is conservative — income overstated,
+    // so tax overstated — but a wrong value on a sworn line is not made right by being unfavourable.
+    //
+    // Closing it means COLLECTING the repayment and mapping both fields, which is FOLLOWUPS FR-262
+    // (owning phase: the TY2026 port, where this revision's line 7 is the prior side). Raising the
+    // count here is the record, not the remedy.
+    const GAPS: usize = 2;
 
     let mut found = Vec::new();
     let mut scanned = 0usize;
