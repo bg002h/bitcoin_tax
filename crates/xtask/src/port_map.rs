@@ -72,9 +72,30 @@ pub struct Cell {
 #[must_use]
 pub fn cells_of(map_text: &str) -> Vec<Cell> {
     let mut out = Vec::new();
+    // ★★★ **The enclosing TABLE is part of a cell's identity.** A grid writes the same key once per row —
+    //     `payer` appears fourteen times in Schedule B — so a flat scan produces fourteen colliding
+    //     `payer` cells and reports every one as unresolvable. Keys are therefore qualified
+    //     `part1_rows[3].payer`, which is what lets [`grids_of`] carry a grid by ROW INDEX.
+    let mut table: Option<String> = None;
+    let mut row: BTreeMap<String, usize> = BTreeMap::new();
     for line in map_text.lines() {
         let t = line.trim_start();
-        if t.starts_with('#') || t.starts_with('[') {
+        if t.starts_with('#') {
+            continue;
+        }
+        if let Some(rest) = t.strip_prefix("[[") {
+            let name = rest.split(']').next().unwrap_or("").to_string();
+            let n = row.entry(name.clone()).or_insert(0);
+            table = Some(format!("{name}[{}]", *n));
+            *n += 1;
+            continue;
+        }
+        if t.starts_with('[') {
+            table = t
+                .trim_start_matches('[')
+                .split(']')
+                .next()
+                .map(str::to_string);
             continue;
         }
         let Some((k, v)) = t.split_once('=') else {
@@ -97,7 +118,10 @@ pub fn cells_of(map_text: &str) -> Vec<Cell> {
         }
         let on = v.split("on = \"").nth(1).and_then(|r| r.split('"').next());
         out.push(Cell {
-            key: key.to_string(),
+            key: match &table {
+                Some(t) => format!("{t}.{key}"),
+                None => key.to_string(),
+            },
             fqn: fqn.to_string(),
             on: on.map(str::to_string),
         });
@@ -267,11 +291,14 @@ pub fn port(
             continue;
         };
         // Only LINE cells have a printed label to carry. Everything else is the identity block's.
-        let Some(want_label) = c
-            .key
-            .strip_prefix("line")
-            .filter(|r| r.chars().next().is_some_and(|ch| ch.is_ascii_digit()))
-        else {
+        // ★★★ The label lives in the key's `lineN` COMPONENT, not in the whole key. A map may nest a
+        //     line's cells in a table — Schedule B's `[line7a]` holds the `yes`/`no` pair — so the
+        //     qualified key is `line7a.yes` and the label is still `7a`. Reading the whole key gave
+        //     `7a.yes` and reported ten cells as "the prior map disagrees with the prior form".
+        let Some(want_label) = c.key.split('.').find_map(|seg| {
+            seg.strip_prefix("line")
+                .filter(|r| r.chars().next().is_some_and(|ch| ch.is_ascii_digit()))
+        }) else {
             p.refused.push(Refused {
                 key: c.key.clone(),
                 candidate: String::new(),
@@ -310,6 +337,24 @@ pub fn port(
             })
             .flat_map(|(_, v)| v.iter().copied())
             .collect();
+        // ★★ A `yes`/`no` pair shares one printed label in one column, and the ON-STATE is what tells
+        //    them apart — the same fact the emitter writes. Narrowing by it before declaring ambiguity is
+        //    not a guess: a candidate that does not declare the state this cell writes cannot be it.
+        let hits: Vec<&String> = match &c.on {
+            Some(on) if hits.len() > 1 => {
+                let narrowed: Vec<&String> = hits
+                    .iter()
+                    .copied()
+                    .filter(|f| new_shapes[*f].on_states.contains(on))
+                    .collect();
+                if narrowed.is_empty() {
+                    hits
+                } else {
+                    narrowed
+                }
+            }
+            _ => hits,
+        };
         match hits.as_slice() {
             [one] => {
                 let now = &new_shapes[*one];
@@ -650,6 +695,96 @@ mod tests {
             "only {named} identity cell(s) were reported as refused — a dropped cell is work nobody \
              can see"
         );
+    }
+
+    /// ★★★ **EVERY CHECKBOX CELL IN EVERY COMMITTED MAP WRITES AN ON-STATE ITS WIDGET DECLARES.**
+    ///
+    /// An undeclared on-state does not fail: `apply_writes` reports success and the box renders as
+    /// **unchecked**. So a wrong on-state is an answer the filer gave and the paper does not carry —
+    /// invisible in the emitted PDF, invisible to both oracles, and invisible to any test that checks a
+    /// figure.
+    ///
+    /// ★★★ **Nothing checked this across the maps until 2026-09-21.** `button_on_states` had exactly three
+    /// callers: one form's dependents grid and two TY2025 f1040 cells. Measured: setting Form 8283 line
+    /// 5a's `no` to on-state `1` — which that widget does not declare, it declares `2` — red NOTHING
+    /// across the whole suite, and a filer answering "no" to a restriction question would have filed a
+    /// blank.
+    ///
+    /// ★★ Also asserted: the two halves of a yes/no pair must write DIFFERENT on-states. Both writing the
+    /// same one is declared-but-wrong, which the check above cannot see.
+    #[test]
+    fn every_checkbox_cell_writes_an_on_state_its_widget_declares() {
+        let root = crate::form_geometry::repo_root();
+        let mut checked = 0usize;
+        let mut maps = 0usize;
+        let mut bad: Vec<String> = Vec::new();
+        let mut pairs: BTreeMap<(String, String), Vec<(String, String)>> = BTreeMap::new();
+        for year in std::fs::read_dir(root.join("crates/btctax-forms/forms"))
+            .expect("forms")
+            .flatten()
+        {
+            let y = year.file_name().to_string_lossy().to_string();
+            if y.len() != 4 || !y.chars().all(|c| c.is_ascii_digit()) {
+                continue;
+            }
+            for e in std::fs::read_dir(year.path()).expect("year dir").flatten() {
+                let name = e.file_name().to_string_lossy().to_string();
+                let Some(stem) = name.strip_suffix(".map.toml") else {
+                    continue;
+                };
+                let pdf = year.path().join(format!("{stem}.pdf"));
+                if !pdf.exists() {
+                    continue; // a map whose template is not bundled cannot be shaped; counted by absence
+                }
+                let Ok(sh) = shapes(&pdf) else { continue };
+                maps += 1;
+                for c in cells_of(&std::fs::read_to_string(e.path()).expect("map")) {
+                    let Some(on) = &c.on else { continue };
+                    checked += 1;
+                    match sh.get(&c.fqn) {
+                        None => {
+                            bad.push(format!("{y}/{stem} {}: {} is not a widget", c.key, c.fqn))
+                        }
+                        Some(shape) if !shape.on_states.contains(on) => bad.push(format!(
+                            "{y}/{stem} {}: writes on-state {on:?}, widget declares {:?} — the box \
+                             would render UNCHECKED and the answer would be lost",
+                            c.key, shape.on_states
+                        )),
+                        Some(_) => {}
+                    }
+                    // Group yes/no siblings by their table so the pair can be compared.
+                    if let Some((table, role)) = c.key.rsplit_once('.') {
+                        if role == "yes" || role == "no" {
+                            pairs
+                                .entry((format!("{y}/{stem}"), table.to_string()))
+                                .or_default()
+                                .push((role.to_string(), on.clone()));
+                        }
+                    }
+                }
+            }
+        }
+        for ((map, table), v) in &pairs {
+            if v.len() == 2 && v[0].1 == v[1].1 {
+                bad.push(format!(
+                    "{map} [{table}]: yes and no both write on-state {:?}. One of them is \
+                     declared-but-wrong, and the box it belongs to would carry the other answer.",
+                    v[0].1
+                ));
+            }
+        }
+        assert!(
+            maps >= 25 && checked >= 60,
+            "only {maps} map(s) and {checked} checkbox cell(s) were examined — the population moved and \
+             this gate is near-vacuous"
+        );
+        assert!(
+            bad.is_empty(),
+            "{} checkbox cell(s) would render UNCHECKED or carry the wrong answer:\n  {}",
+            bad.len(),
+            bad.join("\n  ")
+        );
+        eprintln!("  on-states: {checked} checkbox cell(s) across {maps} map(s) all declared");
     }
 
     /// ★★★ **JANUARY'S QUEUE, FORECAST FROM THE DRAFTS — and every refusal in a NAMED class.**

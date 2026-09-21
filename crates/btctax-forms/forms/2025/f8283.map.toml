@@ -51,3 +51,33 @@ rows = [
   { desc = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Line3B[0].f1_45[0]", fmv = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Line3B[0].f1_47[0]", date_acq = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3B[0].f1_57[0]", how = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3B[0].f1_58[0]", cost = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3B[0].f1_59[0]" },
   { desc = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Line3C[0].f1_48[0]", fmv = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Line3C[0].f1_50[0]", date_acq = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_63[0]", how = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_64[0]", cost = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_65[0]" },
 ]
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════
+# SECTION B PART II — THE RESTRICTION QUESTIONS, restored 2026-09-21.
+#
+# ★★★ **These three pairs were LOST in the TY2025 port and `xtask port-map` found them.** TY2024's map
+#     declares all three; this map declared none, and the FQNs are IDENTICAL between the revisions — so
+#     it was a plain omission, not a renumbering. The consequence was a refusal, not a blank: the
+#     emitter fails closed with *"the 2025 Form 8283 map has no 5a/5b/5c pair — a full return may not
+#     file a Section B with its restriction questions blank when the filer HAS answered"*. A filer with
+#     a >$5,000 non-cash gift who answered the restriction questions could not file at all.
+#
+# ★★ Every widget and on-state is READ, not carried: `label-boxes f8283--2025` joins `c2_1`/`c2_2`/`c2_3`
+#    to labels 5a/5b/5c, and `dump-fields` shows each declares `1` (yes, x 538.1) and `2` (no, x 559.7).
+# 5a "Is there a restriction, either temporary or permanent, on the donee's right to use or dispose of
+#     the donated property"
+[line5a]
+yes = { field = "Form8283[0].Page2[0].c2_1[0]", on = "1" }
+no  = { field = "Form8283[0].Page2[0].c2_1[1]", on = "2" }
+# 5b "Did you give to anyone (other than the donee organization or another organization participating
+#     with the donee organization in cooperative fundraising) the right to the income from the donated
+#     property or to the possession of the property, including the right to vote donated securities, to
+#     acquire the property by purchase or otherwise, or to designate the person having such income,
+#     possession, or right to acquire?"
+[line5b]
+yes = { field = "Form8283[0].Page2[0].c2_2[0]", on = "1" }
+no  = { field = "Form8283[0].Page2[0].c2_2[1]", on = "2" }
+# 5c "Is there a restriction limiting the donated property for a particular use?"
+[line5c]
+yes = { field = "Form8283[0].Page2[0].c2_3[0]", on = "1" }
+no  = { field = "Form8283[0].Page2[0].c2_3[1]", on = "2" }

@@ -1485,11 +1485,16 @@ mod map_label_join_tests {
             "f8275",
             "Form 8275's disclosure items are positional rows; no numbered line",
         ),
-        (
-            "2025",
-            "f8283",
-            "the Rev. 12-2025 map binds property rows positionally and no Section B question line",
-        ),
+        // ★★★ **`("2025", "f8283")` REMOVED 2026-09-21.** Its reason read *"…and no Section B question
+        //     line"* — which was true, and was the DEFECT: the TY2025 port had lost lines 5a/5b/5c, and
+        //     this entry documented the omission as if it were the design. `xtask port-map` found the
+        //     three pairs (identical FQNs to TY2024's, labels joined, on-states declared), they are
+        //     restored, and the map now reaches the label join like any other. The property rows are
+        //     still positional; they are not numbered-line keys, so they were never what this entry was
+        //     needed for.
+        //
+        // ★★ The gate caught this itself: restoring the pairs made the map "declared grid, holds 3
+        //    numbered bindings", which is exactly the `(true, k, …)` red its own doc comment predicts.
         (
             "2024",
             "f1040v",
@@ -2348,14 +2353,18 @@ mod map_label_join_tests {
             p("2025", "f8949", 1, 1, 1).is_some(),
             "a grid map grew a numbered key"
         );
-        assert!(
-            p("2024", "f8283", 0, 0, 0).is_some(),
-            "2024/f8283 binds 5a–5c: NOT a grid that year (r2 N2)"
-        );
-        assert!(
-            p("2025", "f8283", 0, 0, 0).is_none(),
-            "2025/f8283 is the recorded blank"
-        );
+        // ★★★ **BOTH years bind 5a-5c, so NEITHER is a grid — corrected 2026-09-21.** These two lines
+        //     used to disagree: 2024 `is_some()` *"binds 5a-5c: NOT a grid that year"*, 2025
+        //     `is_none()` *"the recorded blank"*. That asymmetry WAS the defect — the TY2025 port had
+        //     lost lines 5a/5b/5c and both this fixture and the `GRID_MAPS` entry recorded the omission
+        //     as design, so three question pairs were missing and two instruments agreed they should be.
+        //     `xtask port-map` found them by comparing the two years' maps; the FQNs are identical.
+        for year in ["2024", "2025"] {
+            assert!(
+                p(year, "f8283", 0, 0, 0).is_some(),
+                "{year}/f8283 binds 5a-5c, so a zero-binding map IS a reach problem (r2 N2)"
+            );
+        }
         assert!(
             p("2025", "f8949", 0, 0, 0).is_none(),
             "a grid map with no key is the recorded blank"
