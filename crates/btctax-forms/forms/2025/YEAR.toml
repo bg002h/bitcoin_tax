@@ -33,7 +33,7 @@ forms_expected = [
 
 [forms_absent]
 f8275        = "periodic (Rev. 10-2024) — served from forms/2024/ by bundled::periodic_template, whose pairing of the bytes with the year whose row says periodic is the licence"
-f8995a       = "not ported to TY2025 (Form 8995-A Rev. 2025 map not yet transcribed); the simplified Form 8995 is bundled"
+f8995a       = "absent for ONE missing document, and it is not the map: `design/forms/2025/i8995a--2025.pdf` (the instructions booklet) is not archived, so the authority join cannot back a TY2025 row and `map_rows::EXCUSED` is shrink-only. The map itself was ported and verified 2026-09-21 — both revisions declare the IDENTICAL 111 widgets and only the §199A thresholds moved ($191,950->$197,300, $383,900->$394,600) — and was withdrawn rather than excused. Archive the booklet and the port is a re-run: FOLLOWUPS FR-263. The simplified Form 8995 is bundled."
 
 [oracles]
 ots     = "OpenTaxSolver 2025 (OpenTaxSolver2025_23.06_linux64) — an EXTERNAL install selected by scripts/oracle/ots_direct.py via OTS_DIR + OTS_YEAR=2025; not archived in-repo. The TY2026 baseline's prior side."

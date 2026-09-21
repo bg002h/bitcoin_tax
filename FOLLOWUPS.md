@@ -10345,3 +10345,50 @@ message, closing a gap means mapping the field to a real question — never re-d
 
 **Not yet measured:** whether TY2026's Schedule 1 keeps the pair. `design/forms/2026/f1040s1--2026-DRAFT.pdf`
 is archived, so `cargo run -p xtask -- port-map f1040s1 2025 2026-DRAFT` answers it in one command.
+
+### FR-263 — 🟡 OPEN — TY2025 Form 8995-A is one ARCHIVED BOOKLET away, not one transcription away
+
+**Owning phase: the TY2026 port** (whoever archives a year's documents archives both halves; the same
+gap will block TY2026's Form 8995-A identically).
+
+`crates/btctax-forms/forms/2025/YEAR.toml` said Form 8995-A was absent because "the Rev. 2025 map
+[was] not yet transcribed". That was true when written and is no longer the blocker. The map was
+transcribed and verified on 2026-09-21, then **withdrawn** — because the blocker is a document, not a
+map.
+
+**The actual blocker.** `design/forms/2025/i8995a--2025.pdf` — the Form 8995-A instructions booklet —
+is not in `design/forms/MANIFEST.json`. Only `i8995a--2024.pdf` is archived. Three gates say so, and
+they are right to:
+
+    2025/f8995a: instructions = "i8995a" but design/forms/2025/i8995a--2025.pdf is not in MANIFEST.json
+
+The sanctioned escape is an `authority = "not-yet-archived: …"` header, but `map_rows::EXCUSED` is
+pinned to exactly `[(2024, "f8283")]` and is **shrink-only**, so taking it would grow an excuse set
+whose whole purpose is to shrink. Withdrawing the port keeps the ratchet honest. `f1040s1/2025` landed
+the same day with no trouble precisely because `i1040gi--2025.pdf` IS archived — the asymmetry is the
+booklet and nothing else.
+
+**What was already measured, so the re-run does not repeat it.**
+
+- `port-map f8995a 2024 2025` carries **39 of 39** line cells and **all 65** census entries. The seven
+  refusals are Part I row A's five grid cells and the two identity cells.
+- **The two revisions declare the IDENTICAL 111 widgets**, set-diffed both ways: every FQN the TY2024
+  map names is declared by the TY2025 template, and every TY2025 widget is named. Nothing renumbered,
+  nothing added, nothing changed page. Row A's rects differ by at most 0.8pt and the TIN box keeps
+  `/MaxLen 11`.
+- Diffing the two text layers (whitespace-normalised) leaves **only** the year, the OMB number
+  (1545-2294 → 1545-0074) and the §199A constants: threshold **$191,950 → $197,300** ($383,900 →
+  $394,600 MFJ), Part III ceiling $241,950 → $247,300 ($483,900 → $494,600 MFJ), phase-in width
+  $50,000 / $100,000 **unchanged**.
+- ★ **Line 21 is MAPPED, so btctax prints the threshold from the year package rather than off the
+  page.** There is no TY2025 `FullReturnParams` — only `ty2024_full_return` ($191,950) and
+  `ty2026_full_return` ($201,750) — so no TY2025 return fills and line 21 never prints for this year.
+  Anyone adding a TY2025 package must enter **$197,300**, which is what this form prints
+  (`design/forms/extract/f8995a--2025.txt` line 75).
+
+**To finish it:** archive `i8995a--2025.pdf` with its URL and sha256, re-run
+`cargo run -p xtask -- port-map f8995a 2024 2025`, resolve the seven refusals (all verified above), add
+`LineSet::F8995a_2025 => Schema::Form8995AMap` (the struct is reused unchanged — the field map is
+identical), move `f8995a` from `[forms_absent]` to `forms_expected`, and raise the bundled-form,
+template/extract and map-caption pins. The census needs no work: the TY2024 map is already 100 %
+censused and every FQN matches.
