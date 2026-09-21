@@ -51,6 +51,7 @@ mod label_reader;
 mod ledger_check;
 mod line_coverage_check;
 mod package_check;
+mod port_map;
 mod prompt_check;
 mod r15_stop_list;
 /// **FR-180 — every declared `RefuseReason` variant is covered by a test, residue pinned.**
@@ -144,6 +145,7 @@ const SUBCOMMANDS: &[(&str, &[&str], &str)] = &[
     ("label-census", &[], "<stem>"),
     ("label-proof", &[], "<stem> [out.pdf]"),
     ("line-coverage", &[], ""),
+    ("port-map", &[], "<stem> <prior-tag> <new-tag>"),
     ("port-status", &[], "<prior-tag> <new-tag>"),
     ("prompt-check", &[], ""),
     ("stop-list", &[], ""),
@@ -368,6 +370,19 @@ fn main() {
             };
             if let Err(e) = form_delta::run(a, b) {
                 eprintln!("xtask form-delta: {e}");
+                std::process::exit(1);
+            }
+        }
+        Some("port-map") => {
+            let (Some(stem), Some(a), Some(b)) = (args.get(1), args.get(2), args.get(3)) else {
+                eprintln!(
+                    "usage: cargo run -p xtask -- port-map <stem> <prior-tag> <new-tag>\n\
+                     e.g. port-map f1040 2024 2025   (a CANDIDATE map to review, never to trust)"
+                );
+                std::process::exit(2);
+            };
+            if let Err(e) = port_map::run(stem, a, b) {
+                eprintln!("xtask port-map: {e}");
                 std::process::exit(1);
             }
         }

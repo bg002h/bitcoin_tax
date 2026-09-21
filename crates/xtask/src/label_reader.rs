@@ -1347,6 +1347,39 @@ pub fn witness_boxes_x(g: &Geometry) -> Vec<(u32, f64, f64, f64, String)> {
 /// across every label column — so the 1040's `2b` cell joins to "2b" and its `2a` cell to "2a". Only when no label shares the row does the
 /// older rule apply: the lowest label at or above the box centre in the primary column (a multi-line
 /// item whose number prints on the first line, the box on a later one).
+/// Does a map key name the line the form prints beside that box?
+///
+/// ★★★ **The tolerance is ONE-WAY, and deliberately so.** A key MAY carry a sub-letter the form does not
+/// print — TY2024's map says `line7a` where that revision prints plain `7`, because the field names a
+/// quantity that is `7a` on later revisions and there is only ONE line 7 to mean. A key may NOT lack a
+/// letter the form HAS: `line11` against a printed `11a` is refused, because 11a and 11b both exist and
+/// the key would not say which. That asymmetry is why TY2025's map spells AGI `line11a` and relies on
+/// `Form1040Map`'s `#[serde(alias)]`.
+///
+/// Exact match is the rule. Two NARROW normalisations are allowed, each because the schema and the
+/// printed page legitimately disagree about granularity — not to make failures go away:
+///
+/// * a `_suffix` on the key (`7b_countries`) is btctax naming two cells of one printed line;
+/// * a trailing LETTER on the key where the form prints only the number (`7a` vs `7`) is the 1040's
+///   capital-gain line, printed once and modelled as a sub-line.
+///
+/// ★ Only a trailing *letter* is stripped, never a digit — `line11` must not be accepted against a
+/// printed `1`, which is precisely the off-by-one this check exists to catch.
+///
+/// ★★ Hoisted out of `mod tests` on 2026-09-21 so `port_map` uses THIS predicate rather than a second
+/// opinion. Its first version compared strictly and refused TY2024's `line7a` as a mismatch — a false
+/// positive against a convention this function already encodes. A new checker that reimplements an
+/// existing predicate inherits none of its reasoning.
+#[must_use]
+pub fn label_matches(key: &str, printed: &str) -> bool {
+    let base = key.split('_').next().unwrap_or(key);
+    if base == printed {
+        return true;
+    }
+    let trimmed = base.trim_end_matches(|c: char| c.is_ascii_alphabetic());
+    !trimmed.is_empty() && trimmed != base && trimmed == printed
+}
+
 pub fn label_join(stem: &str) -> Result<std::collections::BTreeMap<String, String>, String> {
     let g = crate::form_geometry::load(&crate::form_geometry::repo_root(), stem)?;
     let primary = witness_text(&g)?;
@@ -1666,27 +1699,6 @@ mod map_label_join_tests {
         }
         out
     }
-
-    /// Does a map key's line part name the same line the form printed beside the box?
-    ///
-    /// Exact match is the rule. Two NARROW normalisations are allowed, each because the schema and
-    /// the printed page legitimately disagree about granularity — not to make failures go away:
-    ///
-    /// * a `_suffix` on the key (`7b_countries`) is btctax naming two cells of one printed line;
-    /// * a trailing LETTER on the key where the form prints only the number (`7a` vs `7`) is the
-    ///   1040's capital-gain line, printed once and modelled as a sub-line.
-    ///
-    /// ★ Only a trailing *letter* is stripped, never a digit — `line11` must not be accepted
-    /// against a printed `1`, which is precisely the off-by-one this check exists to catch.
-    fn label_matches(key: &str, printed: &str) -> bool {
-        let base = key.split('_').next().unwrap_or(key);
-        if base == printed {
-            return true;
-        }
-        let trimmed = base.trim_end_matches(|c: char| c.is_ascii_alphabetic());
-        !trimmed.is_empty() && trimmed != base && trimmed == printed
-    }
-
     /// sha256 of a byte slice, lowercase hex.
     fn sha256_hex(bytes: &[u8]) -> String {
         use sha2::{Digest, Sha256};
