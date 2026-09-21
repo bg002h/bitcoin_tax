@@ -55,6 +55,33 @@ fn band_of(x: f64) -> String {
         .map_or_else(|| format!("other({x:.0})"), |(n, _, _)| (*n).to_string())
 }
 
+/// How far an unnamed column may drift between revisions and still be the same column.
+///
+/// ★★★ **CALIBRATED, not chosen.** Over the 183 census entries that 2024 and 2025 maps resolve to the
+/// same line on both revisions, 179 sit at |Δx| = **0.0pt** and the largest true column shift is
+/// **7.2pt** (Schedule A lines 6 and 8d, 417.6 → 410.4). Over the 200 same-row widget pairs in the 21
+/// committed templates, the CLOSEST two distinct columns are **35.2pt** apart, and **none** is within
+/// 12pt. So 12pt clears every real shift with 4.8pt to spare and is 23pt short of merging two columns.
+/// If a future layout crosses that, the KATs over the committed maps are what will say so.
+const OTHER_COLUMN_TOLERANCE_PT: f64 = 12.0;
+
+/// Are these the same column on two revisions?
+///
+/// ★★ A NAMED band is compared by identity, exactly as before — the three money bands are 72pt wide and
+/// already absorb any drift inside them, so widening them would be a change with no defect behind it.
+/// The tolerance applies only where [`band_of`] had to fall back to a bare x, which is where it was
+/// **exact-x equality** and therefore could never match: Schedule 1's line-19c date box moved 334.8 →
+/// 338.4, so `other(335)` and `other(338)` compared unequal and five entries refused that should carry.
+/// Every one of those five is a narrow write-in or date box — precisely the boxes a money band misses.
+#[must_use]
+fn same_column(was: &Shape, now: &Shape) -> bool {
+    let named = |b: &str| !b.starts_with("other(");
+    if named(&was.band) || named(&now.band) {
+        return was.band == now.band;
+    }
+    (was.x - now.x).abs() <= OTHER_COLUMN_TOLERANCE_PT
+}
+
 /// One cell of a map: its key, the FQN it names, and the on-state when it is a checkbox.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cell {
@@ -129,11 +156,88 @@ pub fn cells_of(map_text: &str) -> Vec<Cell> {
     out
 }
 
+/// One `[census]` entry: the widget it accounts for, the line it claims, and the decision verbatim.
+///
+/// ★★★ **A census entry states its own printed label, which a line cell only implies.** `line1 = "…"`
+/// says "line 1" through its KEY; `"…f1_25[0]" = { line = "8n", … }` says "8n" in a FIELD. That makes
+/// the census the stronger carry of the two: the claim is checked against the printed label on BOTH
+/// revisions, so a mis-carry needs both forms to print one label twice in one column — which is the
+/// [`Why::AmbiguousLabel`] refusal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CensusEntry {
+    /// The prior revision's FQN — the entry's key.
+    pub fqn: String,
+    /// The `line` field verbatim, qualifier included: `"8n"`, `"13z amount"`, `"16 box 1"`.
+    pub line: String,
+    /// The whole inline table, byte-exact, so `rule` and `reason` are re-emitted and never reworded.
+    pub rest: String,
+}
+
+impl CensusEntry {
+    /// The printed LABEL this entry claims — the first whitespace-delimited token of `line`.
+    ///
+    /// ★★ `line` is a human location, not always a bare label: `"13z amount"` and `"13z type"` are two
+    /// widgets of line 13z distinguished by COLUMN, `"34 Yes"` is a checkbox of line 34, and `"1 stat
+    /// emp"` is a box beside line 1. The label is the part a form prints in its margin; the qualifier
+    /// says which widget of that line, and the column band is what actually resolves it.
+    #[must_use]
+    pub fn label(&self) -> &str {
+        self.line.split_whitespace().next().unwrap_or("")
+    }
+}
+
+/// Every `"<fqn>" = { … }` line of a map's `[census]` table, in file order.
+///
+/// ★ Scoped to `[census]` deliberately: it is the only table in any of the 22 committed maps whose keys
+/// are quoted FQNs (measured — 763 of 763 quoted-key lines sit under it), and a future table of that
+/// shape must be opted in here rather than swept up silently.
+#[must_use]
+pub fn census_of(map_text: &str) -> Vec<CensusEntry> {
+    let mut out = Vec::new();
+    let mut in_census = false;
+    for line in map_text.lines() {
+        let t = line.trim_start();
+        if t.starts_with('#') {
+            continue;
+        }
+        if t.starts_with('[') {
+            in_census = t.starts_with("[census]");
+            continue;
+        }
+        if !in_census || !t.starts_with('"') {
+            continue;
+        }
+        let mut q = t.split('"');
+        let (Some(_), Some(fqn)) = (q.next(), q.next()) else {
+            continue;
+        };
+        let Some((_, rest)) = t.split_once('=') else {
+            continue;
+        };
+        let rest = rest.trim();
+        let Some(claim) = rest
+            .split("line = \"")
+            .nth(1)
+            .and_then(|r| r.split('"').next())
+        else {
+            continue;
+        };
+        out.push(CensusEntry {
+            fqn: fqn.to_string(),
+            line: claim.to_string(),
+            rest: rest.to_string(),
+        });
+    }
+    out
+}
+
 /// What a widget looks like on one revision: where it sits, how much it holds, what it declares.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Shape {
     pub page: u32,
     pub band: String,
+    /// The widget's left edge in points — what resolves a column [`band_of`] could not name.
+    pub x: f64,
     pub max_len: Option<usize>,
     pub on_states: BTreeSet<String>,
 }
@@ -146,10 +250,11 @@ pub fn shapes(pdf: &std::path::Path) -> Result<BTreeMap<String, Shape>, String> 
         btctax_forms::testonly::collect_fields(&doc).map_err(|e| format!("fields: {e}"))?;
     let mut out = BTreeMap::new();
     for f in &fields {
-        let (page, band) = f.rect.map_or((0, String::new()), |r| {
+        let (page, band, x) = f.rect.map_or((0, String::new(), 0.0), |r| {
             (
                 u32::from(f.fqn.contains("Page2")) + 1,
                 band_of(f64::from(r[0])),
+                f64::from(r[0]),
             )
         });
         out.insert(
@@ -157,6 +262,7 @@ pub fn shapes(pdf: &std::path::Path) -> Result<BTreeMap<String, Shape>, String> 
             Shape {
                 page,
                 band,
+                x,
                 max_len: f.max_len,
                 on_states: if f.is_button {
                     btctax_forms::testonly::button_on_states(&doc, f.id)
@@ -193,6 +299,8 @@ pub enum Why {
     PriorMapDisagreesWithPriorForm,
     /// The prior FQN is not a widget of the prior template.
     PriorFqnNotAWidget,
+    /// Two prior entries resolve to ONE new widget — the revision merged them.
+    TwoPriorCellsOneNewWidget,
 }
 
 impl Why {
@@ -207,6 +315,7 @@ impl Why {
             Self::OnStateNotDeclared => "on-state not declared by the new widget",
             Self::PriorMapDisagreesWithPriorForm => "the prior map disagrees with the prior form",
             Self::PriorFqnNotAWidget => "prior FQN is not a widget of the prior template",
+            Self::TwoPriorCellsOneNewWidget => "two prior entries resolve to one new widget",
         }
     }
 }
@@ -224,6 +333,8 @@ pub struct Refused {
 #[derive(Debug, Default)]
 pub struct Port {
     pub emitted: Vec<Cell>,
+    /// Carried `[census]` entries: `(the NEW revision's fqn, the prior entry verbatim)`.
+    pub census: Vec<(String, CensusEntry)>,
     pub refused: Vec<Refused>,
     /// `key: prior page → new page`, reported because the emitter derives descent groups from the page.
     pub page_moves: Vec<String>,
@@ -263,6 +374,7 @@ pub struct Port {
 /// is counted honestly, and this table is here to stop the shortcut being tried again.
 pub fn port(
     prior: &[Cell],
+    census: &[CensusEntry],
     old_shapes: &BTreeMap<String, Shape>,
     new_shapes: &BTreeMap<String, Shape>,
     old_labels: &BTreeMap<String, String>,
@@ -281,24 +393,16 @@ pub fn port(
 
     let mut p = Port::default();
     for c in prior {
-        let Some(was) = old_shapes.get(&c.fqn) else {
-            p.refused.push(Refused {
-                key: c.key.clone(),
-                candidate: String::new(),
-                class: Why::PriorFqnNotAWidget,
-                why: format!("{} is not a widget of the prior template", c.fqn),
-            });
-            continue;
-        };
-        // Only LINE cells have a printed label to carry. Everything else is the identity block's.
         // ★★★ The label lives in the key's `lineN` COMPONENT, not in the whole key. A map may nest a
         //     line's cells in a table — Schedule B's `[line7a]` holds the `yes`/`no` pair — so the
         //     qualified key is `line7a.yes` and the label is still `7a`. Reading the whole key gave
         //     `7a.yes` and reported ten cells as "the prior map disagrees with the prior form".
-        let Some(want_label) = c.key.split('.').find_map(|seg| {
+        let want = c.key.split('.').find_map(|seg| {
             seg.strip_prefix("line")
                 .filter(|r| r.chars().next().is_some_and(|ch| ch.is_ascii_digit()))
-        }) else {
+        });
+        // Only LINE cells have a printed label to carry. Everything else is the identity block's.
+        let Some(want) = want else {
             p.refused.push(Refused {
                 key: c.key.clone(),
                 candidate: String::new(),
@@ -311,117 +415,256 @@ pub fn port(
             });
             continue;
         };
-        // ★ Sanity: the prior cell's own key must match the prior form's label, or the premise is gone.
-        if let Some(printed_before) = old_labels.get(&c.fqn) {
-            if printed_before != "?"
-                && !crate::label_reader::label_matches(want_label, printed_before)
-            {
-                p.refused.push(Refused {
-                    key: c.key.clone(),
-                    candidate: String::new(),
-                    class: Why::PriorMapDisagreesWithPriorForm,
-                    why: format!(
-                        "the PRIOR form prints {printed_before:?} beside {}, not {want_label:?}. The \
-                         prior map disagrees with the prior form, so nothing can be carried from it.",
-                        c.fqn
-                    ),
-                });
-                continue;
-            }
-        }
-        // ★ The same one-way tolerance on the NEW side: a key may carry a sub-letter the form omits.
-        let hits: Vec<&String> = by_label_band
-            .iter()
-            .filter(|((label, band), _)| {
-                *band == was.band && crate::label_reader::label_matches(want_label, label)
-            })
-            .flat_map(|(_, v)| v.iter().copied())
-            .collect();
-        // ★★ A `yes`/`no` pair shares one printed label in one column, and the ON-STATE is what tells
-        //    them apart — the same fact the emitter writes. Narrowing by it before declaring ambiguity is
-        //    not a guess: a candidate that does not declare the state this cell writes cannot be it.
-        let hits: Vec<&String> = match &c.on {
-            Some(on) if hits.len() > 1 => {
-                let narrowed: Vec<&String> = hits
-                    .iter()
-                    .copied()
-                    .filter(|f| new_shapes[*f].on_states.contains(on))
-                    .collect();
-                if narrowed.is_empty() {
-                    hits
-                } else {
-                    narrowed
-                }
-            }
-            _ => hits,
-        };
-        match hits.as_slice() {
-            [one] => {
-                let now = &new_shapes[*one];
-                if was.max_len.is_some() && was.max_len != now.max_len {
-                    p.refused.push(Refused {
-                        key: c.key.clone(),
-                        candidate: (*one).clone(),
-                        class: Why::CapacityChanged,
-                        why: format!(
-                            "/MaxLen {:?} → {:?}. The label and column agree and the CAPACITY does \
-                             not; this is how a nine-digit SSN meets a two-character box.",
-                            was.max_len, now.max_len
-                        ),
-                    });
-                    continue;
-                }
-                if let Some(on) = &c.on {
-                    if !now.on_states.contains(on) {
-                        p.refused.push(Refused {
-                            key: c.key.clone(),
-                            candidate: (*one).clone(),
-                            class: Why::OnStateNotDeclared,
-                            why: format!(
-                                "on-state {on:?} is not declared by that widget, which offers {:?}. An \
-                                 undeclared on-state renders as UNCHECKED while the write reports \
-                                 success.",
-                                now.on_states
-                            ),
-                        });
-                        continue;
-                    }
-                }
-                if was.page != now.page {
-                    p.page_moves
-                        .push(format!("{}: page {} → {}", c.key, was.page, now.page));
+        match carry(
+            &c.key,
+            &c.fqn,
+            c.on.as_deref(),
+            want,
+            old_shapes,
+            new_shapes,
+            old_labels,
+            &by_label_band,
+        ) {
+            Ok(got) => {
+                if let Some(m) = got.page_move {
+                    p.page_moves.push(m);
                 }
                 p.emitted.push(Cell {
                     key: c.key.clone(),
-                    fqn: (*one).clone(),
+                    fqn: got.fqn,
                     on: c.on.clone(),
                 });
             }
-            many if !many.is_empty() => p.refused.push(Refused {
-                key: c.key.clone(),
-                candidate: String::new(),
-                class: Why::AmbiguousLabel,
-                why: format!(
-                    "{} widgets carry label {want_label:?} in the {} column: {many:?}. Ambiguous is \
-                     not resolvable by rule.",
-                    many.len(),
-                    was.band
-                ),
-            }),
-            _ => p.refused.push(Refused {
-                key: c.key.clone(),
-                candidate: String::new(),
-                class: Why::LabelRenumberedOrGone,
-                why: format!(
-                    "the new revision prints no {want_label:?} in the {} column. Either the line was \
-                     RENUMBERED — this revision spells AGI `11a` where the prior spells it `11`, and \
-                     that cannot be inferred, only read — or it is gone.",
-                    was.band
-                ),
-            }),
+            Err(r) => p.refused.push(r),
         }
     }
+    // ★★★ **The census runs the IDENTICAL five checks, through a second door.** The two artifacts state
+    //     the label differently — a cell in its key, an entry in its `line` field — so only the
+    //     extraction differs; everything that decides is [`carry`], once. A second matcher here would be
+    //     a second list to keep in step with the first, which is the failure this repo has measured most.
+    //
+    // ★★ The label is NOT taken by splitting a synthesised dotted key. One committed entry claims line
+    //    `"1.1411-10(g)"` — a regulation cite — and a dotted key would have split it to `1` and carried a
+    //    §1.1411-10(g) census entry onto line 1 of the new form. Hence [`CensusEntry::label`].
+    for e in census {
+        match carry(
+            &format!("census.{}", e.line),
+            &e.fqn,
+            None,
+            e.label(),
+            old_shapes,
+            new_shapes,
+            old_labels,
+            &by_label_band,
+        ) {
+            Ok(got) => {
+                if let Some(m) = got.page_move {
+                    p.page_moves.push(m);
+                }
+                p.census.push((got.fqn, e.clone()));
+            }
+            Err(r) => p.refused.push(r),
+        }
+    }
+    refuse_collisions(&mut p);
     p
+}
+
+/// Withdraw every carry that shares its target widget with another, and refuse them all.
+///
+/// ★★★ **Found by widening [`same_column`], and it is a real form change rather than a tool artefact.**
+/// TY2024 Schedule A gave line 16 three write-in description boxes — `f1_30` at x=331.8, `f1_31` and
+/// `f1_32` both at x=115.2. TY2025 MERGED them into one 24pt-tall box, `f1_28` at x=122.4. Two prior
+/// entries then resolved to that one widget and the renderer emitted the same TOML key twice, which TOML
+/// either rejects or silently resolves last-wins.
+///
+/// ★★ **Both sides are withdrawn, not one.** Which prior entry now accounts for a merged box is a
+/// reading of the new form — the three reasons were "write-in description", "second description line",
+/// "third description line", and the merged box is none of those verbatim. Picking the first, the
+/// narrowest, or the nearest would each be a guess dressed as a rule; the tool exists not to make it.
+///
+/// ★ It sweeps cells and census entries TOGETHER. A widget that is mapped *and* censused is the same
+/// defect wearing two hats: the census would claim it encodes no decision while a line writes to it.
+fn refuse_collisions(p: &mut Port) {
+    let mut seen: BTreeMap<String, usize> = BTreeMap::new();
+    for fqn in p
+        .emitted
+        .iter()
+        .map(|c| &c.fqn)
+        .chain(p.census.iter().map(|(f, _)| f))
+    {
+        *seen.entry(fqn.clone()).or_default() += 1;
+    }
+    let dup: BTreeSet<String> = seen
+        .into_iter()
+        .filter(|(_, n)| *n > 1)
+        .map(|(f, _)| f)
+        .collect();
+    if dup.is_empty() {
+        return;
+    }
+    let why = |fqn: &str| {
+        format!(
+            "another prior entry resolves to {fqn} as well. The revision MERGED two boxes into one, \
+             and which prior entry accounts for the survivor is a reading of the new form, not a rule."
+        )
+    };
+    let mut withdrawn: Vec<Refused> = Vec::new();
+    p.emitted.retain(|c| {
+        if dup.contains(&c.fqn) {
+            withdrawn.push(Refused {
+                key: c.key.clone(),
+                candidate: c.fqn.clone(),
+                class: Why::TwoPriorCellsOneNewWidget,
+                why: why(&c.fqn),
+            });
+            return false;
+        }
+        true
+    });
+    p.census.retain(|(fqn, e)| {
+        if dup.contains(fqn) {
+            withdrawn.push(Refused {
+                key: format!("census.{}", e.line),
+                candidate: fqn.clone(),
+                class: Why::TwoPriorCellsOneNewWidget,
+                why: why(fqn),
+            });
+            return false;
+        }
+        true
+    });
+    p.refused.append(&mut withdrawn);
+}
+
+/// A carried cell: where it lands on the new revision, and the page move if it moved.
+pub struct Carried {
+    pub fqn: String,
+    pub page_move: Option<String>,
+}
+
+/// The five checks, applied to one `(key, prior fqn, on-state, printed label)` — the only place that
+/// decides anything. Both a line cell and a census entry come through here.
+#[allow(clippy::too_many_arguments)]
+fn carry(
+    key: &str,
+    fqn: &str,
+    on: Option<&str>,
+    want_label: &str,
+    old_shapes: &BTreeMap<String, Shape>,
+    new_shapes: &BTreeMap<String, Shape>,
+    old_labels: &BTreeMap<String, String>,
+    by_label_band: &BTreeMap<(String, String), Vec<&String>>,
+) -> Result<Carried, Refused> {
+    let refuse = |class: Why, candidate: String, why: String| {
+        Err(Refused {
+            key: key.to_string(),
+            candidate,
+            class,
+            why,
+        })
+    };
+    let Some(was) = old_shapes.get(fqn) else {
+        return refuse(
+            Why::PriorFqnNotAWidget,
+            String::new(),
+            format!("{fqn} is not a widget of the prior template"),
+        );
+    };
+    // ★ Sanity: the prior cell's own key must match the prior form's label, or the premise is gone.
+    if let Some(printed_before) = old_labels.get(fqn) {
+        if printed_before != "?" && !crate::label_reader::label_matches(want_label, printed_before)
+        {
+            return refuse(
+                Why::PriorMapDisagreesWithPriorForm,
+                String::new(),
+                format!(
+                    "the PRIOR form prints {printed_before:?} beside {fqn}, not {want_label:?}. The \
+                     prior map disagrees with the prior form, so nothing can be carried from it."
+                ),
+            );
+        }
+    }
+    // ★ The same one-way tolerance on the NEW side: a key may carry a sub-letter the form omits.
+    let hits: Vec<&String> = by_label_band
+        .iter()
+        .filter(|((label, _), _)| crate::label_reader::label_matches(want_label, label))
+        .flat_map(|(_, v)| v.iter().copied())
+        .filter(|f| new_shapes.get(*f).is_some_and(|now| same_column(was, now)))
+        .collect();
+    // ★★ A `yes`/`no` pair shares one printed label in one column, and the ON-STATE is what tells
+    //    them apart — the same fact the emitter writes. Narrowing by it before declaring ambiguity is
+    //    not a guess: a candidate that does not declare the state this cell writes cannot be it.
+    let hits: Vec<&String> = match on {
+        Some(on) if hits.len() > 1 => {
+            let narrowed: Vec<&String> = hits
+                .iter()
+                .copied()
+                .filter(|f| new_shapes[*f].on_states.contains(on))
+                .collect();
+            if narrowed.is_empty() {
+                hits
+            } else {
+                narrowed
+            }
+        }
+        _ => hits,
+    };
+    match hits.as_slice() {
+        [one] => {
+            let now = &new_shapes[*one];
+            if was.max_len.is_some() && was.max_len != now.max_len {
+                return refuse(
+                    Why::CapacityChanged,
+                    (*one).clone(),
+                    format!(
+                        "/MaxLen {:?} → {:?}. The label and column agree and the CAPACITY does \
+                         not; this is how a nine-digit SSN meets a two-character box.",
+                        was.max_len, now.max_len
+                    ),
+                );
+            }
+            if let Some(on) = on {
+                if !now.on_states.contains(on) {
+                    return refuse(
+                        Why::OnStateNotDeclared,
+                        (*one).clone(),
+                        format!(
+                            "on-state {on:?} is not declared by that widget, which offers {:?}. An \
+                             undeclared on-state renders as UNCHECKED while the write reports \
+                             success.",
+                            now.on_states
+                        ),
+                    );
+                }
+            }
+            Ok(Carried {
+                fqn: (*one).clone(),
+                page_move: (was.page != now.page)
+                    .then(|| format!("{key}: page {} → {}", was.page, now.page)),
+            })
+        }
+        many if !many.is_empty() => refuse(
+            Why::AmbiguousLabel,
+            String::new(),
+            format!(
+                "{} widgets carry label {want_label:?} in the {} column: {many:?}. Ambiguous is \
+                 not resolvable by rule.",
+                many.len(),
+                was.band
+            ),
+        ),
+        _ => refuse(
+            Why::LabelRenumberedOrGone,
+            String::new(),
+            format!(
+                "the new revision prints no {want_label:?} in the {} column. Either the line was \
+                 RENUMBERED — this revision spells AGI `11a` where the prior spells it `11`, and \
+                 that cannot be inferred, only read — or it is gone.",
+                was.band
+            ),
+        ),
+    }
 }
 
 /// Render a port as TOML plus a refusal report.
@@ -431,8 +674,9 @@ pub fn render(stem: &str, prior_tag: &str, p: &Port) -> String {
     s.push_str(&format!(
         "# CANDIDATE map for {stem}, derived from {prior_tag} by `xtask port-map`.\n\
          # ★ REVIEW EVERY LINE against the form. This tool proposes; it never decides.\n\
-         # {} cell(s) passed all five checks; {} refused; {} page move(s).\n",
+         # {} cell(s) and {} census entr(ies) passed all five checks; {} refused; {} page move(s).\n",
         p.emitted.len(),
+        p.census.len(),
         p.refused.len(),
         p.page_moves.len()
     ));
@@ -446,6 +690,15 @@ pub fn render(stem: &str, prior_tag: &str, p: &Port) -> String {
                 c.key, c.fqn
             )),
             None => s.push_str(&format!("{} = \"{}\"\n", c.key, c.fqn)),
+        }
+    }
+    if !p.census.is_empty() {
+        // ★ The inline table is re-emitted BYTE-EXACT. A census entry's `reason` is a decision someone
+        //   wrote and a reviewer approved — the tool re-homes it onto a new widget and must not reword
+        //   one character of it, because a reworded reason reads as a fresh reading of the new form.
+        s.push_str("\n[census]\n");
+        for (fqn, e) in &p.census {
+            s.push_str(&format!("\"{fqn}\" = {}\n", e.rest));
         }
     }
     if !p.refused.is_empty() {
@@ -512,6 +765,7 @@ pub fn run(stem: &str, prior_tag: &str, new_tag: &str) -> Result<(), String> {
     let new_labels = crate::label_reader::label_join(&format!("{stem}--{new_tag}"))?;
     let p = port(
         &cells_of(&prior_text),
+        &census_of(&prior_text),
         &old_sh,
         &new_sh,
         &old_labels,
@@ -567,23 +821,31 @@ mod tests {
         let (o, n) = (shapes(&pdf(2024)).unwrap(), shapes(&pdf(2025)).unwrap());
         let ol = crate::label_reader::label_join(&format!("{stem}--2024")).unwrap_or_default();
         let nl = crate::label_reader::label_join(&format!("{stem}--2025")).unwrap_or_default();
-        port(&cells_of(&map(2024)), &o, &n, &ol, &nl)
+        port(
+            &cells_of(&map(2024)),
+            &census_of(&map(2024)),
+            &o,
+            &n,
+            &ol,
+            &nl,
+        )
     }
 
     /// Every cell the tool emits for `stem` must match the committed TY2025 map, with a floor so a tool
     /// that stopped resolving cannot pass by emitting nothing.
-    fn assert_disagreements_are_zero(stem: &str, floor: usize) -> usize {
+    /// Returns `(cells that agree, census entries that agree)`.
+    fn assert_disagreements_are_zero(stem: &str, floor: usize) -> (usize, usize) {
         let root = crate::form_geometry::repo_root();
-        let hand: BTreeMap<String, String> = cells_of(
-            &std::fs::read_to_string(
-                root.join(format!("crates/btctax-forms/forms/2025/{stem}.map.toml")),
-            )
-            .expect("committed TY2025 map"),
+        let held = std::fs::read_to_string(
+            root.join(format!("crates/btctax-forms/forms/2025/{stem}.map.toml")),
         )
-        .into_iter()
-        .map(|c| (c.key, c.fqn))
-        .collect();
+        .expect("committed TY2025 map");
+        let hand: BTreeMap<String, String> = cells_of(&held)
+            .into_iter()
+            .map(|c| (c.key, c.fqn))
+            .collect();
         let p = ported(stem);
+        let census = assert_census_agrees(stem, &held, &hand, &p);
         assert!(
             p.emitted.len() >= floor,
             "{stem}: only {} cell(s) emitted against a floor of {floor} — the tool has stopped \
@@ -612,7 +874,87 @@ mod tests {
             wrong.len(),
             wrong.join("\n  ")
         );
-        p.emitted.len()
+        (p.emitted.len(), census)
+    }
+
+    /// Every census entry the tool carries must land where the committed TY2025 map put that decision.
+    ///
+    /// ★★★ **"The committed map does not census it" is NOT automatically a disagreement.** A line that
+    /// became MODELLED between revisions moves from the census to a real cell — Schedule A's TY2025 map
+    /// censuses 6 widgets where TY2024 censused 9, and three of those became mapped. So the bar is that
+    /// the widget is *accounted for* by the committed map either way; a carry onto a widget the committed
+    /// map never mentions at all is the real defect, because then nothing accounts for it.
+    ///
+    /// ★★ This is the [`CensusEntry`] carry's known answer, and it is a larger population than the cell
+    /// carry's: measured over the 11 forms whose maps census on both sides, **173** entries carry with
+    /// **zero** disagreements, against 197 cells.
+    /// TY2025 maps where the tool can carry census entries and the committed map records NONE.
+    ///
+    /// ★★★ **A pinned GAP, not an exemption.** f1040's TY2025 map was ported by mapping its cells and
+    /// never carrying its census: TY2024 accounts for 39 widgets with a reason each, TY2025 accounts for
+    /// none, and the field register's `(2025, "f1040", 96)` row absorbs the residue. The register is
+    /// honest about the COUNT and silent about the CAUSE — that decisions already made were available and
+    /// not brought forward. This names the cause.
+    ///
+    /// ★★ **"No census" is not by itself a defect, which is why the condition is narrow.** f8889 maps
+    /// every one of its 24 widgets and needs no census at all; three more — f8949, `schedule_d`, `schedule_se` — have TY2024
+    /// censuses (6, 6, 13 entries) that this tool carries **0** of, so their gap is register-recorded but
+    /// not yet demonstrable here. The trigger is therefore *the tool
+    /// carried entries AND the committed map has none*, which is the only case where the comparison had
+    /// something to say and found nothing to compare against.
+    const CENSUS_NOT_PORTED: [&str; 2] = ["f1040", "f8283"];
+
+    fn assert_census_agrees(
+        stem: &str,
+        held: &str,
+        mapped: &BTreeMap<String, String>,
+        p: &Port,
+    ) -> usize {
+        if census_of(held).is_empty() {
+            assert!(
+                p.census.is_empty() || CENSUS_NOT_PORTED.contains(&stem),
+                "{stem}: the tool carries {} census entr(ies) and the committed TY2025 map records \
+                 none, so that many widgets are accounted for on TY2024 and unaccounted on TY2025 — \
+                 with the field register absorbing the count and naming no cause. Port the census, or \
+                 add {stem} to CENSUS_NOT_PORTED with the reason.",
+                p.census.len()
+            );
+            return 0;
+        }
+        assert!(
+            !CENSUS_NOT_PORTED.contains(&stem),
+            "{stem} now HAS a committed census, so it must leave CENSUS_NOT_PORTED — and the field \
+             register's (2025, {stem:?}, n) row should shrink by what the census now accounts for"
+        );
+        let held_census: BTreeMap<String, String> = census_of(held)
+            .into_iter()
+            .map(|e| (e.fqn, e.line))
+            .collect();
+        let mapped_fqns: BTreeSet<&String> = mapped.values().collect();
+        let wrong: Vec<String> = p
+            .census
+            .iter()
+            .filter_map(|(fqn, e)| match held_census.get(fqn) {
+                Some(line) if *line == e.line => None,
+                Some(line) => Some(format!(
+                    "{stem}/{fqn}: tool claims line {:?}, committed census says {line:?}",
+                    e.line
+                )),
+                None if mapped_fqns.contains(fqn) => None,
+                None => Some(format!(
+                    "{stem}/{fqn}: tool censuses it as line {:?}; the committed map neither censuses \
+                     NOR maps it, so nothing accounts for that widget",
+                    e.line
+                )),
+            })
+            .collect();
+        assert!(
+            wrong.is_empty(),
+            "{} census disagreement(s) between the tool and a committed map:\n  {}",
+            wrong.len(),
+            wrong.join("\n  ")
+        );
+        p.census.len()
     }
 
     /// ★★★ **SEVENTEEN known answers, not one.** Every form bundled for BOTH years was ported by
@@ -644,6 +986,7 @@ mod tests {
             both.len()
         );
         let mut total = 0usize;
+        let mut entries = 0usize;
         let mut covered = 0usize;
         for stem in &both {
             // A stem with no bundled template on one side cannot be shaped; skipped and counted.
@@ -651,15 +994,29 @@ mod tests {
             if !pdf(2024).exists() || !pdf(2025).exists() {
                 continue;
             }
-            total += assert_disagreements_are_zero(stem, 0);
+            // ★ ONE port per stem. An earlier cut called `ported` twice per form — once for the cells,
+            //   once for the census — which doubled 17 PDF parses to measure the same thing.
+            let (cells, census) = assert_disagreements_are_zero(stem, 0);
+            total += cells;
+            entries += census;
             covered += 1;
         }
+        // ★ A FLOOR on the census population too, for the same reason the cell floor exists: the carry
+        //   could regress to emitting nothing and every `filter_map` above would be vacuously satisfied.
+        assert!(
+            entries >= 150,
+            "only {entries} census entr(ies) carried — measured at 173, so the census carry has \
+             regressed and its zero-disagreement result above is near-vacuous"
+        );
         assert!(
             covered >= 12 && total >= 150,
             "only {covered} form(s) and {total} cell(s) were actually compared — a population this \
              small means the intersection or the templates moved, and the check is near-vacuous"
         );
-        eprintln!("  port-map: {covered} form(s), {total} cell(s) agree with the committed maps");
+        eprintln!(
+            "  port-map: {covered} form(s), {total} cell(s) and {entries} census entr(ies) agree \
+             with the committed maps"
+        );
     }
 
     /// ★★★ **EVERY f1040 IDENTITY CELL IS REFUSED, and the measurement behind that is in `port`'s docs.**
@@ -858,7 +1215,14 @@ mod tests {
             let ol = crate::label_reader::label_join(&format!("{stem}--2025")).unwrap_or_default();
             let nl =
                 crate::label_reader::label_join(&format!("{stem}--2026-DRAFT")).unwrap_or_default();
-            let p = port(&cells_of(&map_2025), &o, &n, &ol, &nl);
+            let p = port(
+                &cells_of(&map_2025),
+                &census_of(&map_2025),
+                &o,
+                &n,
+                &ol,
+                &nl,
+            );
             carried += p.emitted.len();
             pages += p.page_moves.len();
             for r in &p.refused {
@@ -899,10 +1263,23 @@ mod tests {
         }
     }
 
+    /// A planted shape. ★ `x` is DERIVED from the band rather than taken as a parameter, so a fixture
+    /// cannot plant a band and an x that contradict each other — `same_column` reads both.
     fn shape(page: u32, band: &str, max_len: Option<usize>, on: &[&str]) -> Shape {
+        let x = band
+            .strip_prefix("other(")
+            .and_then(|r| r.trim_end_matches(')').parse().ok())
+            .or_else(|| {
+                BANDS
+                    .iter()
+                    .find(|(n, ..)| *n == band)
+                    .map(|(_, lo, _)| *lo)
+            })
+            .unwrap_or(0.0);
         Shape {
             page,
             band: band.to_string(),
+            x,
             max_len,
             on_states: on.iter().map(|s| (*s).to_string()).collect(),
         }
@@ -936,7 +1313,202 @@ mod tests {
             "topmostSubform[0].Page1[0].new[0]".to_string(),
             printed_after.to_string(),
         );
-        port(&prior, &olds, &news, &ol, &nl)
+        port(&prior, &[], &olds, &news, &ol, &nl)
+    }
+
+    /// Two prior census entries, one candidate widget, and the labels/shapes to make both match.
+    fn two_onto_one(prior_x: (f64, f64), new_x: f64, line: &str) -> Port {
+        let census = vec![
+            CensusEntry {
+                fqn: "form1[0].Page1[0].a[0]".into(),
+                line: line.into(),
+                rest: r#"{ line = "16", rule = "unmodeled", reason = "first description line" }"#
+                    .into(),
+            },
+            CensusEntry {
+                fqn: "form1[0].Page1[0].b[0]".into(),
+                line: line.into(),
+                rest: r#"{ line = "16", rule = "unmodeled", reason = "second description line" }"#
+                    .into(),
+            },
+        ];
+        let sh = |x: f64| shape(1, &format!("other({x:.0})"), None, &[]);
+        let olds: BTreeMap<String, Shape> = [
+            ("form1[0].Page1[0].a[0]".to_string(), sh(prior_x.0)),
+            ("form1[0].Page1[0].b[0]".to_string(), sh(prior_x.1)),
+        ]
+        .into();
+        let news: BTreeMap<String, Shape> =
+            [("form1[0].Page1[0].merged[0]".to_string(), sh(new_x))].into();
+        let ol: BTreeMap<String, String> = [
+            ("form1[0].Page1[0].a[0]".to_string(), line.to_string()),
+            ("form1[0].Page1[0].b[0]".to_string(), line.to_string()),
+        ]
+        .into();
+        let nl: BTreeMap<String, String> =
+            [("form1[0].Page1[0].merged[0]".to_string(), line.to_string())].into();
+        port(&[], &census, &olds, &news, &ol, &nl)
+    }
+
+    /// ★★★ **B1 — a MERGED box must refuse both claimants, and the plant is the real Schedule A change.**
+    ///
+    /// TY2024 line 16 had three write-in description boxes (`f1_30` x=331.8, `f1_31` and `f1_32` both
+    /// x=115.2); TY2025 merged them into one 24pt-tall `f1_28` at x=122.4. The two x=115.2 entries both
+    /// land on it within the 12pt tolerance, and the renderer would emit the same TOML key twice — which
+    /// TOML either rejects or resolves last-wins, silently keeping one reason and dropping the other.
+    ///
+    /// ★★ The assertion is a REFUSAL of BOTH, not a note and not a survivor. A checker that kept the
+    /// first claimant would be choosing which of two approved reasons accounts for a box on a form nobody
+    /// has read, and it would pass a test that only asserted "no duplicate keys".
+    #[test]
+    fn a_merged_box_refuses_every_claimant_rather_than_picking_one() {
+        let p = two_onto_one((115.2, 115.2), 122.4, "16");
+        assert!(
+            p.census.is_empty() && p.emitted.is_empty(),
+            "a merged box was carried anyway: {:?}",
+            p.census
+        );
+        assert_eq!(
+            p.refused.len(),
+            2,
+            "both claimants must be refused: {:?}",
+            p.refused
+        );
+        for r in &p.refused {
+            assert_eq!(
+                r.class,
+                Why::TwoPriorCellsOneNewWidget,
+                "a merged box must be refused AS a merge, not as something else: {r:?}"
+            );
+        }
+        // ★ And the control: the same two entries in genuinely DIFFERENT columns still both carry, so the
+        //   check above is not passing by refusing everything.
+        let far = two_onto_one((115.2, 331.8), 122.4, "16");
+        assert_eq!(
+            far.census.len(),
+            1,
+            "only the near entry should resolve; the far one is 209pt away: {:?}",
+            far.census
+        );
+    }
+
+    /// ★★★ **B1 — the column tolerance must have a CEILING, or it is not a tolerance.**
+    ///
+    /// A window that admits everything is the same instrument as no window at all, and it reads as
+    /// deliberate in the source. This plants a widget just outside 12pt and asserts a refusal, so raising
+    /// `OTHER_COLUMN_TOLERANCE_PT` to swallow a hard case reds here.
+    #[test]
+    fn a_column_that_moved_further_than_the_window_is_refused() {
+        let near = one(
+            "line19c",
+            None,
+            shape(1, "other(335)", None, &[]),
+            shape(1, "other(338)", None, &[]),
+            "19c",
+            "19c",
+        );
+        assert_eq!(
+            near.emitted.len(),
+            1,
+            "a 3.6pt drift is inside the measured 7.2pt maximum and must carry: {:?}",
+            near.refused
+        );
+        let far = one(
+            "line19c",
+            None,
+            shape(1, "other(335)", None, &[]),
+            shape(1, "other(360)", None, &[]),
+            "19c",
+            "19c",
+        );
+        assert!(
+            far.emitted.is_empty(),
+            "a 25pt jump is nearly the 35.2pt gap between two DISTINCT columns and must not carry"
+        );
+        assert_eq!(far.refused[0].class, Why::LabelRenumberedOrGone);
+    }
+
+    /// ★★★ **B1 — a census entry claiming a REGULATION must never be read as a line number.**
+    ///
+    /// Schedule 1's committed census carries `line = "1.1411-10(g)"`. The first design synthesised a
+    /// dotted key (`census.1.1411-10(g)`) and reused the cell path's `key.split('.')` label extraction —
+    /// which yields `1`, and would have carried a §1.1411-10(g) census entry onto **line 1 of the new
+    /// form**, attaching an approved reason to the wrong box. [`CensusEntry::label`] takes the first
+    /// whitespace token instead, so the claim stays `1.1411-10(g)` and refuses.
+    #[test]
+    fn a_regulation_cite_is_never_carried_as_line_one() {
+        assert_eq!(
+            CensusEntry {
+                fqn: String::new(),
+                line: "1.1411-10(g)".into(),
+                rest: String::new(),
+            }
+            .label(),
+            "1.1411-10(g)",
+            "the label is the whole first token — splitting on '.' yields \"1\""
+        );
+        let census = vec![CensusEntry {
+            fqn: "form1[0].Page1[0].reg[0]".into(),
+            line: "1.1411-10(g)".into(),
+            rest: r#"{ line = "1.1411-10(g)", rule = "unmodeled", reason = "planted" }"#.into(),
+        }];
+        let olds: BTreeMap<String, Shape> = [(
+            "form1[0].Page1[0].reg[0]".to_string(),
+            shape(1, "AMOUNT", None, &[]),
+        )]
+        .into();
+        // The new revision prints a line "1" in that column — the box the bug would have chosen.
+        let news: BTreeMap<String, Shape> = [(
+            "form1[0].Page1[0].line1[0]".to_string(),
+            shape(1, "AMOUNT", None, &[]),
+        )]
+        .into();
+        let ol: BTreeMap<String, String> = [(
+            "form1[0].Page1[0].reg[0]".to_string(),
+            "1.1411-10(g)".to_string(),
+        )]
+        .into();
+        let nl: BTreeMap<String, String> =
+            [("form1[0].Page1[0].line1[0]".to_string(), "1".to_string())].into();
+        let p = port(&[], &census, &olds, &news, &ol, &nl);
+        assert!(
+            p.census.is_empty(),
+            "a regulation cite was carried onto {:?}",
+            p.census
+        );
+        assert_eq!(p.refused[0].class, Why::LabelRenumberedOrGone);
+    }
+
+    /// ★★★ **B1 — `census_of` reads the `[census]` table and nothing else.**
+    ///
+    /// The parser is scoped by table because `[census]` is the only one of the 22 committed maps' tables
+    /// whose keys are quoted FQNs. This plants an FQN-keyed line under a DIFFERENT table and asserts it is
+    /// not swept up — the failure mode being a future table of that shape silently becoming census
+    /// decisions, which are the entries that say "this widget encodes nothing".
+    #[test]
+    fn census_of_reads_only_the_census_table() {
+        let text = r#"
+line1 = "topmostSubform[0].Page1[0].f1_01[0]"
+
+[somewhere_else]
+"topmostSubform[0].Page1[0].decoy[0]" = { line = "99", rule = "unmodeled", reason = "planted" }
+
+[census]
+"topmostSubform[0].Page1[0].real[0]" = { line = "8n", rule = "unmodeled", reason = "kept" }
+
+[after]
+"topmostSubform[0].Page1[0].after[0]" = { line = "98", rule = "unmodeled", reason = "planted" }
+"#;
+        let got = census_of(text);
+        assert_eq!(
+            got.iter().map(|e| e.line.as_str()).collect::<Vec<_>>(),
+            ["8n"],
+            "only the [census] table's entries are census decisions: {got:?}"
+        );
+        assert_eq!(
+            got[0].rest,
+            r#"{ line = "8n", rule = "unmodeled", reason = "kept" }"#
+        );
     }
 
     /// ★★★ **B1 — each of the four traps the hand port actually hit, planted.**
@@ -1115,7 +1687,7 @@ mod tests {
             "topmostSubform[0].Page1[0].old[0]".to_string(),
             "2a".to_string(),
         );
-        let p = port(&prior, &olds, &news, &ol, &nl);
+        let p = port(&prior, &[], &olds, &news, &ol, &nl);
         assert!(
             p.emitted.is_empty(),
             "two candidates must be refused, not picked from: {:?}",
