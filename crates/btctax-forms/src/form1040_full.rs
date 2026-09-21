@@ -242,15 +242,44 @@ pub fn fill_form_1040_full_with_map(
         (need(&map.line14, "line14", y)?, Some(lines.line14)),
         (need(&map.line15, "line15", y)?, Some(lines.line15)),
     ];
-    for (ord, (cell, value)) in p1.iter().enumerate() {
-        push_money_opt(
-            &mut writes,
-            &mut placements,
-            cell,
-            *value,
-            COL_AMOUNT,
-            Some((GRP_P1_AMOUNT, ord as u32)),
-        );
+    // ★★★ **THE DESCENT GROUP IS DERIVED FROM THE WIDGET'S PAGE, not from which array a cell sits in.**
+    //
+    //     These arrays are in PRINTED ORDER, which is revision-stable; which of them falls on which
+    //     PAGE is not. TY2024 prints lines 1z-15 on page 1 and 16 onward on page 2. **TY2025 moved the
+    //     page break**: 11a ends page 1, and 11b/12e/13a/14/15 open page 2. Hardcoding the group to the
+    //     array made the oracle compare a page-1 y with a page-2 y and report
+    //     *"ordinal-y descent broken: f1_75[0] (y 36.0) is not strictly above f2_02[0] (y 690.0)"* —
+    //     which is not a mis-map, it is two pages.
+    //
+    // ★★ A page-2 y is not comparable with a page-1 y (see the group constants), so the PAGE decides the
+    //    group and the ordinal counts within it. A revision that moves the page break again needs no
+    //    edit here, which is the point: the page is a fact about the widget, and the widget is on file.
+    let mut ord_p1 = 0u32;
+    let mut spill_p2: Vec<&(&MoneyCell, Option<Usd>)> = Vec::new();
+    for entry in &p1 {
+        // ★ A `MoneyCell` is a single field or a dollars+cents PAIR; both members of a pair are on
+        //   one page, so the first field decides.
+        // ★★ `cells::page_of` is ZERO-INDEXED — 0 is page 1, 1 is page 2. Comparing it against 1
+        //    inverted every cell on the first attempt, which the descent oracle reported immediately.
+        const PAGE_1: usize = 0;
+        let page = entry
+            .0
+            .fields()
+            .first()
+            .map_or(PAGE_1, |f| crate::cells::page_of(f));
+        if page == PAGE_1 {
+            push_money_opt(
+                &mut writes,
+                &mut placements,
+                entry.0,
+                entry.1,
+                COL_AMOUNT,
+                Some((GRP_P1_AMOUNT, ord_p1)),
+            );
+            ord_p1 += 1;
+        } else {
+            spill_p2.push(entry);
+        }
     }
     // Line 2a — tax-exempt interest, the SUBLINE column, one printed row ABOVE 3a (so ordinal 0).
     push_money(
@@ -331,6 +360,19 @@ pub fn fill_form_1040_full_with_map(
         (need(&map.line32, "line32", y)?, Some(lines.line32)),
         (need(&map.line33, "line33", y)?, Some(lines.line33)),
     ];
+    // ★ The spill-over from the page-1 array comes FIRST in the page-2 group: on TY2025 those are lines
+    //   11b-15, which the form prints above line 16. Ordinals are printed order within the page.
+    for (ord, entry) in spill_p2.iter().enumerate() {
+        push_money_opt(
+            &mut writes,
+            &mut placements,
+            entry.0,
+            entry.1,
+            COL_AMOUNT,
+            Some((GRP_P2_AMOUNT, ord as u32)),
+        );
+    }
+    let spilled = spill_p2.len() as u32;
     for (ord, (cell, value)) in p2_amount.iter().enumerate() {
         push_money_opt(
             &mut writes,
@@ -338,7 +380,7 @@ pub fn fill_form_1040_full_with_map(
             cell,
             *value,
             COL_AMOUNT,
-            Some((GRP_P2_AMOUNT, ord as u32)),
+            Some((GRP_P2_AMOUNT, spilled + ord as u32)),
         );
     }
     // ★★★ §G-24 — LINES 34 AND 37 ARE MUTUALLY EXCLUSIVE, AND THE FORM SAYS BLANK, NOT ZERO.

@@ -112,24 +112,26 @@ line8 = "topmostSubform[0].Page1[0].f1_72[0]"
 line9 = "topmostSubform[0].Page1[0].f1_73[0]"
 # 10 "Adjustments to income from Schedule 1, line 26"
 line10 = "topmostSubform[0].Page1[0].f1_74[0]"
-# ★★★ **line11 / line12 / line13 are DELIBERATELY ABSENT, and this is the port's remaining blocker.**
+# ★★★ **11a / 12e / 13a — SPELLED AS THIS REVISION PRINTS THEM.**
 #
-#     TY2025 renumbered them: AGI prints at **11a**, the deduction at **12e**, the QBI deduction at
-#     **13a**. `Form1040Map` has fields named `line11`, `line12`, `line13`, and this repo requires a map
-#     key to BE the printed label — `label_reader::every_mapped_line_lands_on_its_own_printed_label`
-#     refuses the mismatch in its own words: *"a filled value would print on the WRONG LINE of a signed
-#     return"*. It is right, and it is why these three cannot simply be pointed at the new widgets:
+#     TY2025 renumbered these three: AGI prints at **11a**, the deduction at **12e**, the §199A
+#     deduction at **13a**. A map key must BE the printed label —
+#     `label_reader::every_mapped_line_lands_on_its_own_printed_label` refuses a mismatch in its own
+#     words, *"a filled value would print on the WRONG LINE of a signed return"* — so they are spelled
+#     here the way this form prints them, and `Form1040Map` carries `#[serde(alias)]` for each. The
+#     alias records the equivalence in ONE place; the TY2024 map keeps `line11`/`line12`/`line13`,
+#     which is what ITS form prints.
 #
-#         line11 -> f1_75[0]  but the form prints "11a" beside that box
-#         line12 -> f2_02[0]  but the form prints "12e"
-#         line13 -> f2_03[0]  but the form prints "13a"
-#
-#     So the TY2025 line set needs keys `line11a`, `line12e`, `line13a`, which `Form1040Map` does not
-#     have. That is the `Form6251Map` / `Form6251ObbbaMap` situation exactly — one form, two line sets,
-#     two transcription structs — and `map.rs` already records why one struct spanning both is wrong:
-#     *"would need every field optional, which is how a revision silently stops printing something."*
-#
-#     The widgets are measured and recorded above in the block comment; what is missing is the struct.
+#     ★ Not a second struct (the `Form6251Map`/`Form6251ObbbaMap` route). That split exists because
+#       OBBBA changed line 1's SHAPE — one box became two and the emitter genuinely differs. Here
+#       nothing changed but three labels, and duplicating 42 fields plus a 700-line emitter to rename
+#       three keys would leave two copies of the fill drifting apart.
+# 11a "Subtract line 10 from line 9. This is your adjusted gross income"
+line11a = "topmostSubform[0].Page1[0].f1_75[0]"
+# 12e "Standard deduction or itemized deductions (from Schedule A)"
+line12e = "topmostSubform[0].Page2[0].f2_02[0]"
+# 13a "Qualified business income deduction from Form 8995 or Form 8995-A"
+line13a = "topmostSubform[0].Page2[0].f2_03[0]"
 # 14 "Add lines 12e, 13a, and 13b"
 line14 = "topmostSubform[0].Page2[0].f2_05[0]"
 # 15 "Subtract line 14 from line 11b"
@@ -174,6 +176,30 @@ line34 = "topmostSubform[0].Page2[0].f2_30[0]"
 line35a = "topmostSubform[0].Page2[0].f2_31[0]"
 # 37 "Subtract line 33 from line 24"
 line37 = "topmostSubform[0].Page2[0].f2_35[0]"
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════
+# FILING STATUS — ported 2026-09-21.
+#
+# ★★★ **THE ON-STATE ORDER IS NOT TY2024's, and copying it would tick the WRONG STATUS.** All five are
+#     kids of one radio field, so the on-state is what selects; TY2024 numbers them
+#     single=1 hoh=2 mfj=3 mfs=4 qss=5, and TY2025 numbers them **single=1 mfj=2 mfs=3 hoh=4 qss=5**
+#     because the grouping changed from row-major to column-major. A wrong on-state here does not print
+#     a wrong figure — it files under a different filing status, which changes the standard deduction,
+#     every bracket and every phase-out on the return.
+#
+# ★★★ Each is read off the printed row, left column then right (`f1040--2025.txt:28-30`):
+#       y=578  "Single"                     | "Head of household (HOH)"
+#       y=566  "Married filing jointly …"   | "Qualifying surviving spouse (QSS)"
+#       y=554  "Married filing separately (MFS). Enter spouse's SSN above"
+#     The left column is `Checkbox_ReadOrder[0].c1_8[0..2]` (x 97.6) carrying on-states 1,2,3 top-down;
+#     the right is `c1_8[0..1]` (x 349.6) carrying 4,5. Every on-state below is one the widget itself
+#     declares — `every_ty2025_header_cell_…` style verification, not a transcription of TY2024's.
+[filing_status]
+single = { field = "topmostSubform[0].Page1[0].Checkbox_ReadOrder[0].c1_8[0]", on = "1" }
+mfj    = { field = "topmostSubform[0].Page1[0].Checkbox_ReadOrder[0].c1_8[1]", on = "2" }
+mfs    = { field = "topmostSubform[0].Page1[0].Checkbox_ReadOrder[0].c1_8[2]", on = "3" }
+hoh    = { field = "topmostSubform[0].Page1[0].c1_8[0]",                       on = "4" }
+qss    = { field = "topmostSubform[0].Page1[0].c1_8[1]",                       on = "5" }
 
 [dependents_grid]
 more_than_four_dependents = { field = "topmostSubform[0].Page1[0].Dependents_ReadOrder[0].c1_11[0]", on = "1" }

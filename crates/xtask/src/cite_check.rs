@@ -1343,7 +1343,7 @@ mod doc_figures {
         // ★ 38 since the TY2025 money-line transcription. The three still missing are `line11`,
         //   `line12` and `line13`: TY2025 prints them at 11a/12e/13a and a map key must BE the
         //   printed label, which `Form1040Map` cannot express — see the map's own note.
-        assert_eq!(y25.len(), 38, "TY2025 money-line cells: {y25:?}");
+        assert_eq!(y25.len(), 41, "TY2025 money-line cells: {y25:?}");
         // ★ `line6d` is deliberately NOT here: it is a CHECKBOX, and `map_money_line_cells`
         //   discriminates on the value shape so a checkbox never counts as a money line.
         assert!(
@@ -1353,9 +1353,18 @@ mod doc_figures {
 
         // ★ TY2025 is a strict SUBSET, so the gap is a clean difference with no double-count. That is
         //   what makes "34" meaningful rather than an artefact of two independent counts.
-        assert!(
-            y25.is_subset(&y24),
-            "TY2025 holds a cell TY2024 does not, so the gap is not a simple difference: {:?}",
+        // ★★★ TY2025 is NO LONGER a subset, and the difference is exactly the three lines that
+        //     revision RENUMBERED: it spells them `line11a`/`line12e`/`line13a` because a map key must
+        //     BE the printed label, and `Form1040Map` carries a `#[serde(alias)]` for each so both maps
+        //     deserialize into one field. Asserting the difference by NAME is what keeps a fourth
+        //     divergence from hiding inside a count.
+        assert_eq!(
+            &y25 - &y24,
+            ["line11a", "line12e", "line13a"]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+            "TY2025's extra cells must be exactly the three renumbered lines: {:?}",
             &y25 - &y24
         );
         let gap = &y24 - &y25;
@@ -1367,14 +1376,15 @@ mod doc_figures {
         //     `line13a`, so those three need a second transcription struct — the
         //     `Form6251Map`/`Form6251ObbbaMap` situation. Every other TY2024 money cell now has a
         //     verified TY2025 counterpart.
-        assert_eq!(gap.len(), 3, "absent TY2025 cells: {gap:?}");
+        // ★ And the reverse: TY2024's three spellings are absent from TY2025, for the same reason.
+        //   Both directions asserted by NAME, so the pair can only be the renaming and never a loss.
         assert_eq!(
             gap,
             ["line11", "line12", "line13"]
                 .into_iter()
                 .map(String::from)
                 .collect(),
-            "the gap must be exactly the three renumbered lines, not any three"
+            "the gap must be exactly the three renumbered lines, not any three: {gap:?}"
         );
 
         // ★★★ **INVERTED 2026-09-20.** It used to assert the six retirement cells were ABSENT from both

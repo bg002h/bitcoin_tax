@@ -1630,57 +1630,115 @@ fn the_ty2025_line_6d_cell_is_the_labelled_widget_with_a_declared_on_state() {
     );
 }
 
-/// ★★★ **FR-260 — THE HEADER BLOCKER IS GONE; THE TICK NOW WAITS ON THE MONEY-LINE SET.**
+/// ★★★ **FR-260 CLOSED — THE TY2025 LINE 6d TICK, READ BACK OFF A FILLED PDF.**
 ///
-/// The TY2025 identity block is mapped (29 cells, each resolved from the form's own printed caption), so
-/// `push_header_block` no longer refuses and the `/MaxLen 2` trap that blocked the first attempt is
-/// closed. Driving the fill next reports, from the emitter itself:
+/// This is the assertion FR-260 was opened for, and it took the whole TY2025 port to reach: the identity
+/// block (29 cells), the filing status (5, whose on-state order is NOT TY2024's), the money lines (35,
+/// three of them spelled `11a`/`12e`/`13a` as this revision prints them), and a descent grouping derived
+/// from each widget's PAGE because TY2025 moved the page break.
 ///
-/// > `Geometry("the TY2025 Form 1040 map has no \`line1a\` — the full-return fill needs it")`
+/// ★★★ **Nothing here is hand-set.** The filer answers that they are MFS and lived apart all year;
+/// `mfs_lived_apart_disclosure` returns `CheckboxOnLine6d` for this revision; the printed flag follows;
+/// the emitter writes `c1_42[0]`. A map-only check cannot reach the last two hops, and the trap that
+/// blocked the first attempt — TY2024's `taxpayer_ssn` FQN existing on this template as a `/MaxLen 2`
+/// cell — is closed by the port rather than worked around.
 ///
-/// ★★★ **And this one is a TRANSCRIPTION, not a mapping.** TY2025 RENUMBERED the middle of the form:
-/// AGI is **line 11a** (*"Subtract line 10 from line 9. This is your adjusted gross income"*,
-/// `f1040--2025.txt:86`) where TY2024 has line 11, and the deduction block became 12a-12e. So the 33
-/// missing cells cannot be ported by name from TY2024 — the line SET differs, which is why the two maps
-/// already declare different `line_set` values (`f1040/2024` vs `f1040/2025`).
-///
-/// This test pins the gap and **demands its own retirement**: map the money lines and it reds, telling
-/// you to write the tick. Measured rather than asserted from a list, so the numbers cannot go stale.
+/// ★★ Still `fill_form_1040_full_with_map` rather than `fill_full_return`: `full_return_for(2025)` is
+/// `None` and `YEAR.toml` says `status = "preparing"`, so a whole PACKET cannot be assembled for TY2025.
+/// The 1040 PAGE fills, which is what FR-260 asked to see.
 #[test]
-fn the_ty2025_map_still_lacks_the_money_lines_the_full_return_fill_needs() {
-    let cells = |year: i32| -> BTreeSet<String> {
-        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040, year)
-            .unwrap()
-            .lines()
-            .filter_map(|l| l.split_once('='))
-            .map(|(k, _)| k.trim().to_string())
-            .filter(|k| {
-                k.strip_prefix("line")
-                    .is_some_and(|r| r.chars().next().is_some_and(|c| c.is_ascii_digit()))
-            })
-            .collect()
-    };
-    let (ty24, ty25) = (cells(2024), cells(2025));
-    let missing: Vec<&String> = ty24.difference(&ty25).collect();
-    assert!(
-        ty24.len() >= 40,
-        "only {} TY2024 money cells found — if the map layout changed, this gate is measuring nothing",
-        ty24.len()
+fn the_ty2025_line_6d_box_is_ticked_in_a_filled_pdf() {
+    let map: btctax_forms::testonly::Form1040Map = toml::from_str(
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040, 2025).unwrap(),
+    )
+    .expect("the TY2025 1040 map parses");
+    assert_eq!(
+        map.line6d.as_ref().map(|c| c.field.as_str()),
+        Some("topmostSubform[0].Page1[0].c1_42[0]"),
+        "6d must still be the widget `label_reader` joins to that label"
     );
-    assert!(
-        !missing.is_empty(),
-        "★ The TY2025 map now declares every money line TY2024 does. FR-260's end-to-end 6d tick is \
-         therefore writable: drive `fill_form_1040_full_with_map` on a computed MFS-lived-apart \
-         household and read `checkbox_on` back off `c1_42[0]`. DELETE this test in the same commit — \
-         its only purpose was to keep that from being forgotten. ★★ And re-read the line SET first: \
-         TY2025 renumbered AGI to 11a and the deduction block to 12a-12e, so a cell ported by NAME from \
-         TY2024 is pointing at a different line."
+
+    let (ri, state) = mfs_lived_apart_with_benefits();
+    let ar = absolute_for_year(&ri, &state, 2025);
+    assert_eq!(
+        ar.mfs_lived_apart_disclosure,
+        Some(btctax_core::tax::ss_benefits_worksheet::MfsLivedApartDisclosure::CheckboxOnLine6d),
+        "the TY2025 revision discloses by checkbox, so the flag below must come out true by itself"
     );
+    let printed = btctax_core::tax::packet::assemble_printed_return(
+        &ri,
+        &state,
+        &BTreeMap::new(),
+        &ar,
+        &ty2025_table(),
+        2025,
+        &[],
+        btctax_core::InformationReturnRegime::NONE,
+    )
+    .expect("the fixture carries a well-formed SSN");
     assert!(
-        ty25.contains("line6d"),
-        "the six retirement cells plus 6d are the TY2025 money cells that DO exist — if 6d has gone, \
-         this test is describing a map that no longer exists"
+        printed.forms.f1040.line6d_mfs_lived_apart,
+        "the printed flag must be true by COMPUTATION on this household, not by assignment"
     );
+
+    let bytes = btctax_forms::testonly::fill_form_1040_full_with_map(
+        &printed.forms.f1040,
+        &printed.header,
+        printed.filing_status,
+        &map,
+    )
+    .expect("the TY2025 1040 page fills");
+
+    let filled = btctax_forms::testonly::load(&bytes).expect("the filled form loads");
+    let idx = btctax_forms::testonly::index(
+        &btctax_forms::testonly::collect_fields(&filled).expect("fields"),
+    );
+    assert_eq!(
+        btctax_forms::testonly::checkbox_on(&filled, idx["topmostSubform[0].Page1[0].c1_42[0]"].id)
+            .as_deref(),
+        Some("1"),
+        "line 6d must be CHECKED in the filled TY2025 PDF"
+    );
+
+    // ★★ Three more read-backs, because a ticked box on an otherwise-wrong page proves little.
+    //    The SSN lands in the nine-character cell (the trap that blocked the first attempt); the MFS
+    //    filing-status radio carries THIS revision's on-state `3`, not TY2024's `4`; and 6b holds the
+    //    §86 figure computed for this household.
+    let ssn =
+        btctax_forms::testonly::text_value(&filled, idx["topmostSubform[0].Page1[0].f1_16[0]"].id);
+    assert_eq!(
+        ssn.as_deref().map(str::len),
+        Some(9),
+        "the taxpayer SSN must be nine digits in f1_16 — got {ssn:?}"
+    );
+    assert_eq!(
+        btctax_forms::testonly::checkbox_on(
+            &filled,
+            idx["topmostSubform[0].Page1[0].Checkbox_ReadOrder[0].c1_8[2]"].id
+        )
+        .as_deref(),
+        Some("3"),
+        "★ MFS is on-state 3 on the TY2025 form. TY2024 numbers MFS 4, and copying that order would \
+         file this return under a different filing status — every bracket and phase-out with it."
+    );
+    // ★★★ 6a and 6b as the PAIR, and this household lands on the STOP branch: MFS filing separately
+    //     but living apart all year gets the §86(c)(1)(A) base amount of $25,000, half of its $30,000 of
+    //     benefits is $15,000, and 15,000 is below 25,000 — so the worksheet stops and NONE of the
+    //     benefits are taxable. 6b therefore prints the `-0-` the worksheet instructs, which IS the
+    //     filer's testimony, beside a 6a carrying the full benefit. A blank 6b would be a return that
+    //     never ran the worksheet, and those are different facts on identical-looking pixels.
+    //     ★ My first expectation here was 20,400 — copied from the TY2024 KAT, whose household has
+    //       24,000 of benefits AND 31,000 of other income. Wrong household, right arithmetic.
+    for (what, fqn, want) in [
+        ("6a", "topmostSubform[0].Page1[0].f1_68[0]", "30000"),
+        ("6b", "topmostSubform[0].Page1[0].f1_69[0]", "0"),
+    ] {
+        assert_eq!(
+            btctax_forms::testonly::text_value(&filled, idx[fqn].id).as_deref(),
+            Some(want),
+            "{what} must read {want} on the filled TY2025 page"
+        );
+    }
 }
 
 /// ★★★ **EVERY TY2025 HEADER CELL IS A REAL WIDGET OF THE RIGHT SHAPE — because nothing FILLS the
@@ -1835,20 +1893,15 @@ fn a_map_declaring_both_dependents_blocks_or_neither_is_refused() {
 
     // ★ And the baseline still fails for the MONEY lines, not the dependents block — which is what makes
     //   the assertion above about the dependents guard rather than about any old error.
-    // ★ Named by CLASS, not by one line: the money-line transcription moved this from `line1a` to
-    //   `line11`, and pinning whichever line happens to be missing first makes this assertion a
-    //   maintenance tax on unrelated work. What it must establish is that the baseline fails for a
-    //   MISSING CELL and not for the dependents block — otherwise the NEITHER assertion above proves
-    //   nothing about the dependents guard.
+    // ★★★ And the unmutated map FILLS — which is what makes the NEITHER assertion above about the
+    //     dependents guard rather than about whatever happened to be missing first. Until the TY2025
+    //     money lines and identity block were ported this could only be stated as "fails for some other
+    //     reason"; it can now be stated as success.
     let baseline = fill(&base);
     assert!(
-        baseline.contains("map has no `line"),
-        "the unmutated TY2025 map must fail on a missing money line, not on the dependents block: \
-         {baseline}"
-    );
-    assert!(
-        !baseline.contains("NEITHER"),
-        "…and specifically NOT on the dependents block: {baseline}"
+        baseline.is_empty(),
+        "the unmutated TY2025 map must FILL now that the identity block, filing status and money lines \
+         are ported: {baseline}"
     );
 }
 

@@ -1502,14 +1502,53 @@ pub struct Form1040Map {
     #[serde(default)]
     pub line10: Option<MoneyCell>,
     /// L11 — AGI.
-    #[serde(default)]
+    /// ★★★ **ALIAS `line11a` — the TY2025 revision prints this line at 11a.**
+    ///
+    /// A map key must BE the printed label: `label_reader::every_mapped_line_lands_on_its_own_printed_label`
+    /// refuses a mismatch because *"a filled value would print on the WRONG LINE of a signed return"*.
+    /// TY2024 prints AGI at **11** and TY2025 at **11a**, so the two maps spell the same
+    /// FIELD with each revision's own label and this alias records the equivalence in one place.
+    ///
+    /// ★★ Why an alias rather than a second struct (the `Form6251Map`/`Form6251ObbbaMap` route): that
+    /// split exists because the OBBBA revision changed line 1's SHAPE — one box became two, so the
+    /// emitter genuinely differs. Here nothing changed but three labels; duplicating 42 fields and a
+    /// 700-line emitter to rename three keys would put two copies of the fill in drift-range of each
+    /// other, which is a larger risk than the one it removes. The label gate still holds each map to
+    /// ITS OWN form, so a TY2024 map spelling `line11a` is refused: that widget prints `11`.
+    #[serde(default, alias = "line11a")]
     pub line11: Option<MoneyCell>,
     /// L12 — the deduction claimed. **★ `f1_57` on the 2024 form is L12; on the 2025 form the same
     /// field name is L1z** (SPEC §7.4). Per-(form, year) maps exist for exactly this.
-    #[serde(default)]
+    /// ★★★ **ALIAS `line12e` — the TY2025 revision prints this line at 12e.**
+    ///
+    /// A map key must BE the printed label: `label_reader::every_mapped_line_lands_on_its_own_printed_label`
+    /// refuses a mismatch because *"a filled value would print on the WRONG LINE of a signed return"*.
+    /// TY2024 prints the standard or itemized deduction at **12** and TY2025 at **12e**, so the two maps spell the same
+    /// FIELD with each revision's own label and this alias records the equivalence in one place.
+    ///
+    /// ★★ Why an alias rather than a second struct (the `Form6251Map`/`Form6251ObbbaMap` route): that
+    /// split exists because the OBBBA revision changed line 1's SHAPE — one box became two, so the
+    /// emitter genuinely differs. Here nothing changed but three labels; duplicating 42 fields and a
+    /// 700-line emitter to rename three keys would put two copies of the fill in drift-range of each
+    /// other, which is a larger risk than the one it removes. The label gate still holds each map to
+    /// ITS OWN form, so a TY2024 map spelling `line12e` is refused: that widget prints `12`.
+    #[serde(default, alias = "line12e")]
     pub line12: Option<MoneyCell>,
     /// L13 — Form 8995's printed L15 (QBI).
-    #[serde(default)]
+    /// ★★★ **ALIAS `line13a` — the TY2025 revision prints this line at 13a.**
+    ///
+    /// A map key must BE the printed label: `label_reader::every_mapped_line_lands_on_its_own_printed_label`
+    /// refuses a mismatch because *"a filled value would print on the WRONG LINE of a signed return"*.
+    /// TY2024 prints the §199A deduction at **13** and TY2025 at **13a**, so the two maps spell the same
+    /// FIELD with each revision's own label and this alias records the equivalence in one place.
+    ///
+    /// ★★ Why an alias rather than a second struct (the `Form6251Map`/`Form6251ObbbaMap` route): that
+    /// split exists because the OBBBA revision changed line 1's SHAPE — one box became two, so the
+    /// emitter genuinely differs. Here nothing changed but three labels; duplicating 42 fields and a
+    /// 700-line emitter to rename three keys would put two copies of the fill in drift-range of each
+    /// other, which is a larger risk than the one it removes. The label gate still holds each map to
+    /// ITS OWN form, so a TY2024 map spelling `line13a` is refused: that widget prints `13`.
+    #[serde(default, alias = "line13a")]
     pub line13: Option<MoneyCell>,
     /// L14 — 12 + 13.
     #[serde(default)]

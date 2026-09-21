@@ -9979,7 +9979,7 @@ honest claim about the sentinel: not *"every `Option` is `Some"`* but *"every KE
 that publishes it"*. A general check of THAT still needs the type, which serde does not expose without a
 schema crate; this pins the one instance where a whole block hangs on one row.
 
-### FR-260 — STILL OPEN, now with the OBSTACLE MEASURED and a trap pinned (Minor, owner: the phase that makes TY2025 fillable)
+### FR-260 — ✅ CLOSED 2026-09-21 — the TY2025 line 6d tick is read back off a filled PDF
 
 The MFS lived-apart disclosure is now decided per revision, printed on TY2025 (`c1_42[0]`, on-state
 `1`) and hand-marked on TY2024. What is NOT asserted is the tick appearing in a **filled** PDF, because
@@ -10269,4 +10269,43 @@ are now floored, plus the shared-key count: *a comparison with an empty operand 
 is no check.*
 
 Register: `(2025, "f1040")` 135 → 104, `UNCENSUSED_FIELDS` 249 → 218.
+
+**2026-09-21 — CLOSED. The tick reads `c1_42[0]` back off a filled TY2025 page.** It took the whole port,
+and each stage was blocked by something the previous stage could not see:
+
+| stage | what it needed |
+|---|---|
+| identity block | 29 cells; TY2024's `taxpayer_ssn` FQN exists here as a `/MaxLen 2` cell |
+| filing status | 5 radios whose **on-state order is not TY2024's** — single=1 **mfj=2 mfs=3 hoh=4** qss=5 |
+| money lines | 35 cells; three spelled `11a`/`12e`/`13a`, the rest keyed as printed |
+| descent groups | derived from each widget's PAGE, because **TY2025 moved the page break** |
+
+★★★ **THE THREE RENUMBERED LINES took `#[serde(alias)]`, not a second struct.** A map key must BE the
+printed label, so the TY2025 file spells `line11a`/`line12e`/`line13a` and `Form1040Map` carries an alias
+for each — the equivalence recorded in one place, with the TY2024 map keeping its own form's spelling.
+The `Form6251Map`/`Form6251ObbbaMap` split exists because OBBBA changed line 1's SHAPE (one box became
+two) so the emitter genuinely differs; here nothing changed but three labels, and duplicating 42 fields
+plus a 700-line emitter to rename three keys would leave two copies of the fill drifting apart. The label
+gate still holds each map to ITS OWN form, so a TY2024 map spelling `line11a` is refused.
+
+★★★ **THE PAGE BREAK MOVED, and the emitter's descent grouping was TY2024 data.** TY2024 prints AGI and
+the deduction both on page 1; TY2025 ends page 1 at 11a and opens page 2 with 11b/12e/13a/14/15. The
+hardcoded group made the geometry oracle compare a page-1 y with a page-2 y —
+*"ordinal-y descent broken: f1_75[0] (y 36.0) is not strictly above f2_02[0] (y 690.0)"* — which is not a
+mis-map, it is two pages. The group now comes from `cells::page_of`, so a revision that moves the break
+again needs no edit. ★ `page_of` is ZERO-indexed and my first attempt compared it against 1, inverting
+every cell; the oracle said so immediately.
+
+★ **Four plants, four reds:** the MFS radio given TY2024's on-state 4 (which would file the return under a
+different filing status, and every bracket with it); `11a` spelled `line11`; the descent group hardcoded
+back to page 1; and 6d pointed at 6c's widget, the §86(e) lump-sum election.
+
+★ **And the tick asserts four read-backs, not one** — a ticked box on an otherwise-wrong page proves
+little: 6d checked, the SSN nine digits in `f1_16`, the MFS radio on-state `3`, and the 6a/6b pair. That
+last one caught my own arithmetic: I expected 6b = 20,400, copied from the TY2024 KAT whose household has
+24,000 of benefits AND 31,000 of other income. This household is MFS-lived-apart with 30,000 of benefits
+and nothing else, so half of them (15,000) is below the $25,000 base, the worksheet STOPS, and 6b prints
+the instructed `-0-` beside a 6a carrying the full 30,000.
+
+Register: `(2025, "f1040")` 104 → 96, `UNCENSUSED_FIELDS` 218 → 210.
 
