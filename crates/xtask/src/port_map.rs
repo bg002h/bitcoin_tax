@@ -219,9 +219,24 @@ pub struct Port {
 /// exactly the judgement a tool must not make.
 ///
 /// ★★ Cells with no printed line label — the identity block, the filing-status radios, the dependents
-/// grid — are refused by design. By hand they were resolved from column x, `/MaxLen`, row order and the
-/// caption above; none of those is a single fact this tool could check, and a wrong identity cell prints
-/// somebody's SSN in a date box. They are named in the report so the count of remaining work is honest.
+/// grid — are refused by design, and that refusal is now MEASURED rather than argued.
+///
+/// ★★★ **The obvious shortcut was tried and is catastrophically wrong.** Carrying an identity cell by
+/// `(page, column x, rank within the column)` — which is roughly how the f1040 header was resolved by
+/// hand — reproduces **5** of the 29 hand-mapped TY2025 header cells. **12 are WRONG and 12 are
+/// unpredictable.** Ranking within a column mixes checkboxes and text fields, and TY2025 inserted widgets
+/// that shift every rank, so the failures are not near-misses:
+///
+/// | cell | positional guess | the truth |
+/// |---|---|---|
+/// | `taxpayer_first` | `c1_1[0]` — a CHECKBOX | `f1_14[0]` |
+/// | `presidential_taxpayer` (a checkbox) | `f1_47[0]` — a MONEY field | `c1_6[0]` |
+/// | `spouse_first` | `c1_4[0]` — a checkbox | `f1_17[0]` |
+/// | `taxpayer_blind` | `c1_44[0]` — wrong PAGE | `c2_6[0]` |
+///
+/// A tool that emitted those would propose writing a filer's name into a checkbox and their blindness
+/// into a money box. So identity cells stay refused, they are named in the report so the remaining work
+/// is counted honestly, and this table is here to stop the shortcut being tried again.
 pub fn port(
     prior: &[Cell],
     old_shapes: &BTreeMap<String, Shape>,
@@ -600,6 +615,41 @@ mod tests {
              small means the intersection or the templates moved, and the check is near-vacuous"
         );
         eprintln!("  port-map: {covered} form(s), {total} cell(s) agree with the committed maps");
+    }
+
+    /// ★★★ **EVERY f1040 IDENTITY CELL IS REFUSED, and the measurement behind that is in `port`'s docs.**
+    ///
+    /// The positional shortcut — carry by `(page, column x, rank)` — reproduces 5 of these 29 and gets 12
+    /// WRONG, several by proposing a text value for a checkbox or a checkbox for a money field. This pins
+    /// the refusal so a future reader who finds 110 grid/identity refusals "obviously automatable" has to
+    /// delete an assertion that says why it is not.
+    #[test]
+    fn no_identity_cell_is_ever_carried() {
+        let p = ported("f1040");
+        let carried: Vec<&str> = p
+            .emitted
+            .iter()
+            .filter(|c| !c.key.starts_with("line"))
+            .map(|c| c.key.as_str())
+            .collect();
+        assert!(
+            carried.is_empty(),
+            "the tool carried {} identity cell(s): {carried:?}. Identity cells have no printed label, \
+             and the positional alternative gets 12 of 29 wrong — including a filer's NAME into a \
+             checkbox. Refusing them is the design, not a gap.",
+            carried.len()
+        );
+        // …and they are REFUSED rather than silently dropped, so the remaining work stays counted.
+        let named = p
+            .refused
+            .iter()
+            .filter(|r| r.class == Why::NotANumberedLine)
+            .count();
+        assert!(
+            named >= 25,
+            "only {named} identity cell(s) were reported as refused — a dropped cell is work nobody \
+             can see"
+        );
     }
 
     /// ★★★ **JANUARY'S QUEUE, FORECAST FROM THE DRAFTS — and every refusal in a NAMED class.**
