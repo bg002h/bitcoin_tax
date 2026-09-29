@@ -163,7 +163,11 @@ ALLOWED_EIN_REVIEW_ARTIFACT='^(90-0000001|91-0000002|55-5555555|99-1000000)$'
 #                  Forms W-2 and W-3 and archived verbatim as public text under
 #                  design/forms/extract/iw2w3--2024/2025/2026.txt (interview T2, hashes
 #                  in design/forms/MANIFEST.json); an all-zero prefix is not an issued EIN
-ALLOWED_EIN='^(11-1111111|22-2222222|33-3333333|44-4444444|12-3456789|98-7654321|99-1234567|56-1234567|99-9999999|10-1010101|88-8888888|77-7777777|66-6666666|00-0000000)$'
+#   36-3314600   — payer EIN printed in the IRS's OWN Pub 575 sample Form 1099-R, archived
+#                  verbatim as public text: legal/primary-sources/irs-publications/Pub575_Pension_and_Annuity_Income.pdf
+#                  (sha256 in design/forms/MANIFEST.json, url irs.gov/pub/irs-pdf/p575.pdf) and
+#                  its extract legal/text/irs-publications/Pub575_Pension_and_Annuity_Income.txt [archive I-10, 3807e48d]
+ALLOWED_EIN='^(11-1111111|22-2222222|33-3333333|44-4444444|12-3456789|98-7654321|99-1234567|56-1234567|99-9999999|10-1010101|88-8888888|77-7777777|66-6666666|00-0000000|36-3314600)$'
 
 ALLOWED="$ALLOWED_SSN_IMPOSSIBLE|$ALLOWED_SSN_LEGACY|$ALLOWED_SSN_UNPUSHED_HISTORY|$ALLOWED_EIN|$ALLOWED_EIN_REVIEW_ARTIFACT"
 
